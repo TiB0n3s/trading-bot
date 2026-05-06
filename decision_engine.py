@@ -54,6 +54,16 @@ Apply to buy signals:
 - Falling momentum is a caution flag — lean confidence lower
 - Flat momentum is neutral — no momentum-based adjustment
 
+MARKET BIAS GUIDANCE:
+account_state may contain a "market_bias" field with the value "buy" when same-day pre-market research flagged the symbol positively (favorable news, analyst upgrade, strong pre-market move). The bias is only injected when positive — its absence is informationally neutral, not negative.
+
+Apply to buy signals:
+- market_bias "buy" combined with bullish/confirmed trend: highest-conviction signal — prefer approval, confidence "high", position_size_pct 2.5
+- market_bias "buy" combined with bullish/developing trend: confidence "high", position_size_pct up to 2.5
+- market_bias "buy" combined with neutral trend: still treat as cautious — positive bias alone does NOT justify approval
+- market_bias absent: defer entirely to trend table and momentum guidance, make no bias-based adjustment
+- NEVER use market_bias "buy" to override a bearish trend rejection — bearish always rejects buys regardless of any other positive signal
+
 Always respond with this exact JSON format:
 {
     "approved": true or false,

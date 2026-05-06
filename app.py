@@ -132,7 +132,8 @@ _last_order: dict = {}     # {(symbol, action): datetime in ET} — reset on res
 _last_sell: dict = {}      # {symbol: (datetime in ET, price)} — last successful sell, for churn prevention
 _trend_table: dict = {}    # {symbol: {direction, strength, consecutive_count, last_signal, last_time}}
 _signal_history: dict = {} # {symbol: [action, ...]} most recent first, max 10 — internal
-_market_bias: dict = {}    # {symbol: {bias, reason, confidence}} — populated from market_context.json on startup
+_market_bias: dict = {}    # {symbol: {bias, reason, confidence}} — populated from market_context.json
+_market_context_mtime: float = 0  # last seen mtime of market_context.json, used for lazy refresh
 
 def _compute_trend(recent_actions: list) -> dict:
     if not recent_actions:
@@ -178,17 +179,24 @@ def _build_trend_table():
 _build_trend_table()
 
 def _load_market_context():
-    """Load same-day pre-market research into _market_bias if available."""
+    """Load same-day pre-market research into _market_bias.
+    Lazy-refreshes when market_context.json mtime changes so the bot picks up
+    each day's cron output without a service restart."""
+    global _market_context_mtime
     path = Path(__file__).parent / "market_context.json"
     if not path.exists():
-        logger.info("No market_context.json found — market bias check disabled")
         return
     try:
+        current_mtime = path.stat().st_mtime
+        if current_mtime <= _market_context_mtime:
+            return
+        _market_context_mtime = current_mtime
         ctx = json.loads(path.read_text())
         market_date = ctx.get("market_date")
         today = datetime.now(pytz.timezone("America/New_York")).date().isoformat()
+        _market_bias.clear()
         if market_date != today:
-            logger.warning(f"market_context.json is stale (market_date={market_date}, today={today}) — skipping load")
+            logger.warning(f"market_context.json is stale (market_date={market_date}, today={today}) — cleared market bias")
             return
         symbols = ctx.get("symbols") or {}
         for sym, entry in symbols.items():
@@ -283,6 +291,7 @@ def get_momentum(symbol, price):
         return None
 
 def process_signal(data):
+    _load_market_context()  # lazy refresh — reloads when market_context.json mtime changes
     action = data.get("action", "").lower()
     symbol = data.get("symbol", "")
     price = data.get("price", 0)

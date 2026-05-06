@@ -37,12 +37,13 @@ The systemd service loads this via `EnvironmentFile=/etc/trading-bot.env`. Cron 
 */2 * * * *   fill_poller.py                  — polls Alpaca for order fill updates, writes to trades.db
 0 16 * * 1-5  daily_summary.py                — end-of-day report at 4 PM CDT, appends to daily_summary.log
 5 16 * * 5    daily_summary.py --week         — weekly rollup every Friday at 4:05 PM CDT, appends to daily_summary.log
+0 8 * * 1-5   pre_market_research.py          — pre-market web-search research at 8 AM CDT, writes market_context.json (read by `_load_market_context` on bot startup)
 ```
 Server timezone is `America/Chicago (CDT, -0500)`. Cron uses local time.
 
 ## Architecture
 
-Six files, each with a single responsibility:
+Seven files in regular use plus one one-shot migration script, each with a single responsibility:
 
 **`app.py`** — Flask server (gunicorn, 3 workers). Exposes `POST /webhook?secret=<token>` and `GET /health`. On startup, each gunicorn worker runs in order:
 1. **`_init_db()`** — creates `trades.db` if missing.
@@ -72,6 +73,7 @@ Dispatches `process_signal()` in a background thread. `process_signal` runs chec
 6. **4% per-symbol exposure cap** — buy signals only. If `existing_position` is already in scope (reused from the ghost-sell fetch, no extra API call) and `qty * current_price / balance >= 4.0%`, rejects before Claude is called. Uses `account_state["balance"]` (cash balance) as the denominator, not `portfolio_value`, matching the hard rule intent.
 7. **Trend gate** — buy signals only. Blocks buys on symbols whose trend `direction` is `neutral` or `bearish`, but only once the symbol has *established history*. Uses `len(_signal_history[symbol]) > 1` as the established-vs-new test: since the trend table is updated at the top of `process_signal` (so every symbol always has an entry by the time pre-checks run), the history length is the reliable signal — length 1 means the just-inserted current signal is the only entry, length 2+ means real prior history. Brand-new symbols like GOOGL/GLD/IWM pass through on their first buy. This is a hard block — previously neutral/bearish buys would reach Claude and be filtered only by the post-Claude confidence gate, costing an API call per rejection. Now they're rejected pre-Claude with a clear audit line showing direction, strength, and consecutive_count.
 8. **Momentum check** — buy signals only, fail-open. `get_momentum(symbol, price)` fetches the last 5 one-minute bars via `api.get_bars(symbol, '1Min', start=now-10min, feed='iex')` — `feed='iex'` is mandatory because the paper account's data subscription rejects recent SIP queries with `"subscription does not permit querying recent SIP data"`. Computes `momentum_pct = (last_close - first_close) / first_close * 100`, tags `direction` as `rising`/`falling`/`flat` using a ±0.1% threshold, and returns a dict `{direction, momentum_pct, price_vs_bars, bar_count, last_close}`. The dict is injected into `account_state["momentum"]` so Claude can reason about short-term price action alongside the longer trend table. Additionally injects `account_state["signal_confidence_hint"]`: `"high"` when direction is `rising`, `"low"` when direction is `falling` and `momentum_pct < -0.15%`; flat momentum produces no hint. The hint is consumed by `decision_engine.py`'s prompt (MOMENTUM GUIDANCE section) as a starting confidence before trend rules apply. Wrapped in try/except so a bars-fetch failure logs a WARNING and returns None — momentum data never blocks trading; Claude evaluates on trend alone if momentum is unavailable.
+9. **Market bias gate** — buy signals only. Reads `_market_bias`, a module-level dict populated at startup by `_load_market_context()` from `market_context.json` (only loaded if `market_date` matches today in ET). Each entry is `{bias, reason, confidence}`. If the symbol's bias is `"avoid"`, the buy is rejected pre-Claude with the research reason and confidence in the WARNING log line. If `"buy"`, injects `account_state["market_bias"] = "buy"` so Claude elevates confidence/sizing per the `MARKET BIAS GUIDANCE` section in `decision_engine.py`. `"neutral"` or absent entries pass through unchanged — the gate only acts on positive and negative biases, not on the absence of data. **Caveat:** the bias dict is loaded once at module import (i.e. at gunicorn worker startup), so `pre_market_research.py` running at 8:00 AM CDT only takes effect after the next service restart. If you keep the service running across days, restart it manually after the cron completes (or add a daily restart cron).
 
 Before calling Claude, `account_state["trend_table"] = _trend_table` is injected so Claude receives the full trend picture for all symbols.
 
@@ -112,6 +114,8 @@ python daily_summary.py --week        # current/most recent week
 python daily_summary.py --week 2026-04-28  # week containing that date
 ```
 
+**`pre_market_research.py`** — Standalone pre-market research script. Single Claude call to `claude-sonnet-4-6` with the `web_search_20260209` server tool (`max_uses=10`, 120-second per-chunk idle timeout) covering all 15 approved symbols in one shot. Uses `client.messages.stream()` rather than `messages.create()` because web-search calls can take 30–60+ seconds server-side and the streaming SSE connection avoids socket-timeout drops on long calls. Output JSON has `{market_date, macro_sentiment, macro_summary, symbols: {<sym>: {bias, reason, confidence}}}`; `bias` is `"buy"` / `"avoid"` / `"neutral"` per a fixed rubric in the prompt (earnings today / downgrade / negative news / pre-market down >1% → avoid; pre-market strength + upgrade + sector tailwind → buy). Sources `ANTHROPIC_API_KEY` from `/etc/trading-bot.env` if not already in env so the script runs cleanly under cron. Writes `market_context.json` next to itself; on completion prints a 15-row table (Symbol / Bias / Conf / Reason). Cron job runs it at 08:00 CDT Mon–Fri; output is consumed by `app.py`'s `_load_market_context()` at the next bot startup.
+
 ## Data Flow
 
 ```
@@ -142,6 +146,7 @@ Configured at `/etc/logrotate.d/trading-bot`. Runs automatically via system cron
 | `fill_stream.log` | Real-time fill events from the websocket stream |
 | `fill_poller.log` | Output of each fill_poller.py cron run (fallback) |
 | `daily_summary.log` | Appended end-of-day reports |
+| `pre_market_research.log` | Output of each 8 AM CDT `pre_market_research.py` cron run (logger output + the 15-row summary table) |
 
 ## Known Issues
 

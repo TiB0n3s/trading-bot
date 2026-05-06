@@ -32,7 +32,7 @@ The account state includes a trend_table dict keyed by symbol. Each entry has:
 Trend data comes from recent TradingPilotAI signals and reflects the indicator's directional bias.
 
 Apply these rules when trend data is available for the signal's symbol:
-- bullish/confirmed: prefer approval, set confidence "high", allow position_size_pct up to 2.5%
+- bullish/confirmed: prefer approval, set confidence "high", set position_size_pct to 2.5
 - bullish/developing: approve normally, confidence "high" or "medium"
 - neutral (any strength): approve cautiously, set confidence "medium" or "low"
 - bearish (any strength): reject buy signals regardless of other criteria; sells remain always approved

@@ -107,7 +107,7 @@ _startup_reconcile()
 
 WEBHOOK_SECRET = os.environ.get("WEBHOOK_SECRET", "changeme")
 
-APPROVED_SYMBOLS = {"AAPL", "SPY", "QQQ", "MSFT", "NVDA", "ORCL", "TSCO", "TSLA", "META", "AMD"}
+APPROVED_SYMBOLS = {"AAPL", "SPY", "QQQ", "MSFT", "NVDA", "ORCL", "TSCO", "TSLA", "META", "AMD", "CVX", "XOM"}
 
 # (min, max) expected price ranges; signals outside ±20% of this range are rejected
 PRICE_RANGES = {
@@ -121,6 +121,8 @@ PRICE_RANGES = {
     "TSLA": (100,  800),
     "META": (200, 1000),
     "AMD":  ( 50,  600),
+    "CVX":  (100,  260),
+    "XOM":  ( 80,  215),
 }
 
 def validate_secret(req):

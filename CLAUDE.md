@@ -48,7 +48,16 @@ Six files, each with a single responsibility:
 1. **`_init_db()`** — creates `trades.db` if missing.
 2. **`_startup_reconcile()`** — checks that `ANTHROPIC_API_KEY`, `ALPACA_API_KEY`, and `ALPACA_SECRET_KEY` are set (logs an error for each missing key); fetches live Alpaca positions and compares against symbols with a net open position in `trades.db` (FIFO-matched filled orders); logs a WARNING for any symbol Alpaca holds but DB doesn't track and vice versa; closes with a summary line: `"Startup reconciliation: X positions in Alpaca, Y tracked in DB, Z discrepancies"`. Appears 3× in logs (once per worker) — that's expected. Wrapped in outer try/except so a reconciliation failure never prevents the bot from starting.
 
-Webhook validates: secret, JSON parseable, action in `[buy/sell]`, symbol in `APPROVED_SYMBOLS`, price numeric and positive, price within ±20% of per-symbol `PRICE_RANGES`. Dispatches `process_signal()` in a background thread. `process_signal` runs three hard pre-checks before calling Claude (all three cost zero API fees):
+Webhook validates: secret, JSON parseable, action in `[buy/sell]`, symbol in `APPROVED_SYMBOLS`, price numeric and positive, price within ±20% of per-symbol `PRICE_RANGES`. Current symbols and ranges:
+
+| Symbol | Price range | Symbol | Price range |
+|--------|-------------|--------|-------------|
+| AAPL | 150–500 | TSLA | 100–800 |
+| SPY | 400–700 | META | 200–1000 |
+| QQQ | 400–900 | AMD | 50–600 |
+| MSFT | 200–600 | CVX | 100–260 |
+| NVDA | 80–600 | XOM | 80–215 |
+| ORCL | 80–300 | TSCO | 20–80 | Dispatches `process_signal()` in a background thread. `process_signal` runs three hard pre-checks before calling Claude (all three cost zero API fees):
 1. **Ghost sell filter** — skips sell signals with no open Alpaca position.
 2. **Market hours** — rejects if outside 9:45–15:45 ET or if it's a weekend; uses `pytz.timezone("America/New_York")` for automatic DST handling.
 3. **Circuit breaker** — rejects if `daily_pnl_pct < -3.0%`.

@@ -20,7 +20,7 @@ HARD RULES:
 - Daily loss limit: reject all if down 3% today
 - Only trade 9:45 AM to 3:45 PM Eastern Time
 - Max 5 open positions at any time (this limit applies ONLY to opening new positions; sell/close signals must always be approved regardless of current position count)
-- Approved symbols only: AAPL, SPY, QQQ, MSFT, NVDA, ORCL, TSCO, TSLA, META, AMD
+- Approved symbols only: AAPL, SPY, QQQ, MSFT, NVDA, ORCL, TSCO, TSLA, META, AMD, CVX, XOM
 - Signal source must be TradingPilotAI
 
 Always respond with this exact JSON format:

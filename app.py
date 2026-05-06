@@ -337,7 +337,7 @@ def status():
             }
             for p in sorted(positions, key=lambda x: -float(x.market_value))
         ]
-        result["position_count"] = f"{len(positions)}/5"
+        result["position_count"] = f"{len(positions)}/8"
     except Exception as e:
         logger.error(f"/status positions error: {e}")
 

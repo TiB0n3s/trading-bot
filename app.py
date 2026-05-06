@@ -129,6 +129,7 @@ PRICE_RANGES = {
 }
 
 _last_order: dict = {}     # {(symbol, action): datetime in ET} — reset on restart
+_last_sell: dict = {}      # {symbol: (datetime in ET, price)} — last successful sell, for churn prevention
 _trend_table: dict = {}    # {symbol: {direction, strength, consecutive_count, last_signal, last_time}}
 _signal_history: dict = {} # {symbol: [action, ...]} most recent first, max 10 — internal
 
@@ -266,6 +267,28 @@ def process_signal(data):
         )
         return
 
+    # Sell→buy churn prevention: block buys that follow a recent sell on the same symbol
+    if action == "buy":
+        last_sell = _last_sell.get(symbol)
+        if last_sell:
+            last_sell_time, last_sell_price = last_sell
+            elapsed_s = (now_et - last_sell_time).total_seconds()
+            if elapsed_s < 30 * 60:
+                mins_remaining = int(30 * 60 - elapsed_s) // 60
+                logger.warning(
+                    f"Sell→buy churn block for {symbol}: sold at {last_sell_time.strftime('%H:%M')} ET "
+                    f"(${last_sell_price:.2f}), {mins_remaining}m remaining in 30-min window — skipping Claude"
+                )
+                return
+            if last_sell_price > 0:
+                price_diff_pct = abs(price - last_sell_price) / last_sell_price * 100
+                if price_diff_pct < 0.5:
+                    logger.warning(
+                        f"Sell→buy churn block for {symbol}: signal price ${price:.2f} within "
+                        f"{price_diff_pct:.2f}% of last sell price ${last_sell_price:.2f} — skipping Claude"
+                    )
+                    return
+
     # Hard pre-check: 4% per-symbol exposure cap (buy signals only)
     if action == "buy" and existing_position:
         balance = account_state.get("balance", 0)
@@ -303,6 +326,8 @@ def process_signal(data):
         if order_result:
             logger.info(f"ORDER PLACED: {order_result}")
             _last_order[cooldown_key] = now_et
+            if action == "sell":
+                _last_sell[symbol] = (now_et, price)
         else:
             logger.error(f"Order placement failed for {symbol}")
     else:

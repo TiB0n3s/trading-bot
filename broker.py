@@ -51,11 +51,14 @@ def place_order(symbol, action, position_size_pct, stop_loss_pct, take_profit_pc
         if side == "sell":
             try:
                 existing = api.get_position(symbol)
-                qty = abs(int(float(existing.qty)))
-                logger.info(f"Sell order - closing full position of {qty} shares of {symbol} at {current_price} | balance: {balance}")
+                qty = int(float(existing.qty))
             except Exception as e:
-                logger.error(f"No position found to sell for {symbol}: {e}")
+                logger.error(f"Failed to fetch position for {symbol}: {e}")
                 return None
+            if qty <= 0:
+                logger.error(f"Refusing sell for {symbol}: position qty={qty} is {'short' if qty < 0 else 'zero'}, not a long to close")
+                return None
+            logger.info(f"Sell order - closing full position of {qty} shares of {symbol} at {current_price} | balance: {balance}")
             try:
                 open_orders = api.list_orders(status="open", symbols=[symbol])
                 for o in open_orders:
@@ -63,7 +66,7 @@ def place_order(symbol, action, position_size_pct, stop_loss_pct, take_profit_pc
                     logger.info(f"Cancelled open order {o.id} ({o.side} {o.qty} {symbol} type={o.order_type}) before sell")
                 time.sleep(1)
                 refreshed = api.get_position(symbol)
-                available_qty = abs(int(float(refreshed.qty)))
+                available_qty = int(float(refreshed.qty))
                 if available_qty != qty:
                     logger.error(f"Qty mismatch after cancel for {symbol}: held={qty} available={available_qty} - aborting sell")
                     return None

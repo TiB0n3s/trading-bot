@@ -62,18 +62,23 @@ Webhook validates: secret, JSON parseable, action in `[buy/sell]`, symbol in `AP
 Dispatches `process_signal()` in a background thread. `process_signal` runs checks in this order:
 
 **Pre-Claude checks (zero API cost):**
-1. **Ghost sell filter** — skips sell signals with no open Alpaca position.
-2. **Market hours** — rejects if outside 9:45–15:45 ET or if it's a weekend; uses `pytz.timezone("America/New_York")` for automatic DST handling.
-3. **Circuit breaker** — rejects if `daily_pnl_pct < -3.0%`.
-4. **Cooldown** — rejects if the same `(symbol, action)` pair had a successful order within the last 15 minutes. Tracked in module-level `_last_order` dict (resets on restart). Sells and buys have independent cooldown keys, so a buy cooldown never blocks a sell on the same symbol.
+1. **Trend table update** — prepends the incoming `action` to `_signal_history[symbol]` (capped at 10), recomputes `_trend_table[symbol]`, keeping it current before any decision is made.
+2. **Ghost sell filter** — skips sell signals with no open Alpaca position.
+3. **Market hours** — rejects if outside 9:45–15:45 ET or if it's a weekend; uses `pytz.timezone("America/New_York")` for automatic DST handling.
+4. **Circuit breaker** — rejects if `daily_pnl_pct < -3.0%`.
+5. **Cooldown** — rejects if the same `(symbol, action)` pair had a successful order within the last 15 minutes. Tracked in module-level `_last_order` dict (resets on restart). Sells and buys have independent cooldown keys, so a buy cooldown never blocks a sell on the same symbol.
+
+Before calling Claude, `account_state["trend_table"] = _trend_table` is injected so Claude receives the full trend picture for all symbols.
 
 **Post-Claude check:**
 
-5. **Confidence gate** — if action is `buy` and Claude returns `confidence: "low"`, the order is skipped without calling `place_order`. `log_trade` is still called so the DB records the decision (visible as `approved=1`, `confidence=low`, `order_id=NULL`). Sells bypass this check entirely.
+6. **Confidence gate** — if action is `buy` and Claude returns `confidence: "low"`, the order is skipped without calling `place_order`. `log_trade` is still called so the DB records the decision (visible as `approved=1`, `confidence=low`, `order_id=NULL`). Sells bypass this check entirely.
 
 After the pipeline completes, `log_trade` writes to both `signals.log` (pipe-delimited audit line) and `trades.db` (SQLite insert), wrapped in try/except so DB failures never interrupt trading.
 
-**`decision_engine.py`** — Calls `claude-haiku-4-5-20251001` to evaluate a signal against account state. Logs account context (balance, positions, count) at DEBUG before the API call. Returns a JSON approval decision with `position_size_pct`, `stop_loss_pct`, `take_profit_pct`, `confidence`. Defaults to `approved: false` on any error. On `JSONDecodeError`, logs the raw Claude response before falling back. Hard rules enforced via prompt: 2% max position size per order, 4% max total exposure per symbol (`qty * current_price / balance`), max 5 open positions (new opens only — sells always approved), symbol whitelist, source must be `TradingPilotAI`. Note: the 9:45–15:45 ET window and the -3% daily loss circuit breaker are now enforced in `process_signal` before Claude is called — Claude's prompt rules for these are a secondary backstop only.
+**Trend table** (`_trend_table`, `_signal_history`) — module-level dicts, reset on restart and pre-populated from `trades.db` history by `_build_trend_table()` at startup. Each symbol entry: `direction` ("bullish"/"bearish"/"neutral"), `strength` ("confirmed" ≥5 consecutive / "developing" 3-4 / "weak" <3), `consecutive_count`, `last_signal`, `last_time`. Claude uses trend data to: prefer buys on bullish/confirmed symbols (high confidence, up to 2.5% position size), approve bullish/developing normally, treat neutral cautiously (medium/low confidence), and reject buy signals on bearish symbols regardless of other criteria.
+
+**`decision_engine.py`** — Calls `claude-haiku-4-5-20251001` to evaluate a signal against account state. Logs account context (balance, positions, count) at DEBUG before the API call. Returns a JSON approval decision with `position_size_pct`, `stop_loss_pct`, `take_profit_pct`, `confidence`. Defaults to `approved: false` on any error. On `JSONDecodeError`, logs the raw Claude response before falling back. Hard rules enforced via prompt: 2% max position size per order (2.5% allowed for bullish/confirmed trend), 4% max total exposure per symbol (`qty * current_price / balance`), max 8 open positions (new opens only — sells always approved), symbol whitelist, source must be `TradingPilotAI`. Trend table guidance: bullish/confirmed → high confidence + up to 2.5% sizing; bullish/developing → normal approval; neutral → cautious (medium/low confidence); bearish → reject buys. Note: the 9:45–15:45 ET window and the -3% daily loss circuit breaker are enforced in `process_signal` before Claude is called — Claude's prompt rules for these are a secondary backstop only.
 
 `get_mock_account_state()` (name retained for compatibility) now returns live data: balance and portfolio value from Alpaca, open positions and unrealized P&L from `api.list_positions()`, and realized P&L from FIFO-matched filled buy/sell pairs in `trades.db` for the current day. `daily_pnl` and `daily_pnl_pct` are computed from `unrealized + realized` against start-of-day portfolio value. Each data source is independently wrapped in try/except — any failure falls back to 0.0 without blocking the pipeline. `process_signal` in `app.py` calls only `get_mock_account_state()` and `get_position(symbol)`; redundant separate calls to `get_account()` and `api.list_positions()` were removed.
 

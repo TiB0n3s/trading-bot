@@ -263,6 +263,20 @@ def process_signal(data):
         )
         return
 
+    # Hard pre-check: 4% per-symbol exposure cap (buy signals only)
+    if action == "buy" and existing_position:
+        balance = account_state.get("balance", 0)
+        position_value = existing_position["qty"] * existing_position["current_price"]
+        if balance > 0:
+            exposure_pct = position_value / balance * 100
+            if exposure_pct >= 4.0:
+                logger.warning(
+                    f"Exposure cap reached for {symbol} BUY: "
+                    f"current position ${position_value:.2f} = {exposure_pct:.2f}% of balance "
+                    f"(limit: 4.0%) — skipping Claude"
+                )
+                return
+
     account_state["trend_table"] = _trend_table
     decision = evaluate_signal(data, account_state)
     order_result = None

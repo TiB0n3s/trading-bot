@@ -57,10 +57,20 @@ Webhook validates: secret, JSON parseable, action in `[buy/sell]`, symbol in `AP
 | QQQ | 400–900 | AMD | 50–600 |
 | MSFT | 200–600 | CVX | 100–260 |
 | NVDA | 80–600 | XOM | 80–215 |
-| ORCL | 80–300 | TSCO | 20–80 | Dispatches `process_signal()` in a background thread. `process_signal` runs three hard pre-checks before calling Claude (all three cost zero API fees):
+| ORCL | 80–300 | TSCO | 20–80 |
+
+Dispatches `process_signal()` in a background thread. `process_signal` runs checks in this order:
+
+**Pre-Claude checks (zero API cost):**
 1. **Ghost sell filter** — skips sell signals with no open Alpaca position.
 2. **Market hours** — rejects if outside 9:45–15:45 ET or if it's a weekend; uses `pytz.timezone("America/New_York")` for automatic DST handling.
 3. **Circuit breaker** — rejects if `daily_pnl_pct < -3.0%`.
+4. **Cooldown** — rejects if the same `(symbol, action)` pair had a successful order within the last 15 minutes. Tracked in module-level `_last_order` dict (resets on restart). Sells and buys have independent cooldown keys, so a buy cooldown never blocks a sell on the same symbol.
+
+**Post-Claude check:**
+
+5. **Confidence gate** — if action is `buy` and Claude returns `confidence: "low"`, the order is skipped without calling `place_order`. `log_trade` is still called so the DB records the decision (visible as `approved=1`, `confidence=low`, `order_id=NULL`). Sells bypass this check entirely.
+
 After the pipeline completes, `log_trade` writes to both `signals.log` (pipe-delimited audit line) and `trades.db` (SQLite insert), wrapped in try/except so DB failures never interrupt trading.
 
 **`decision_engine.py`** — Calls `claude-haiku-4-5-20251001` to evaluate a signal against account state. Logs account context (balance, positions, count) at DEBUG before the API call. Returns a JSON approval decision with `position_size_pct`, `stop_loss_pct`, `take_profit_pct`, `confidence`. Defaults to `approved: false` on any error. On `JSONDecodeError`, logs the raw Claude response before falling back. Hard rules enforced via prompt: 2% max position size per order, 4% max total exposure per symbol (`qty * current_price / balance`), max 5 open positions (new opens only — sells always approved), symbol whitelist, source must be `TradingPilotAI`. Note: the 9:45–15:45 ET window and the -3% daily loss circuit breaker are now enforced in `process_signal` before Claude is called — Claude's prompt rules for these are a secondary backstop only.

@@ -132,6 +132,7 @@ _last_order: dict = {}     # {(symbol, action): datetime in ET} — reset on res
 _last_sell: dict = {}      # {symbol: (datetime in ET, price)} — last successful sell, for churn prevention
 _trend_table: dict = {}    # {symbol: {direction, strength, consecutive_count, last_signal, last_time}}
 _signal_history: dict = {} # {symbol: [action, ...]} most recent first, max 10 — internal
+_market_bias: dict = {}    # {symbol: {bias, reason, confidence}} — populated from market_context.json on startup
 
 def _compute_trend(recent_actions: list) -> dict:
     if not recent_actions:
@@ -175,6 +176,40 @@ def _build_trend_table():
         logger.error(f"_build_trend_table failed: {e}")
 
 _build_trend_table()
+
+def _load_market_context():
+    """Load same-day pre-market research into _market_bias if available."""
+    path = Path(__file__).parent / "market_context.json"
+    if not path.exists():
+        logger.info("No market_context.json found — market bias check disabled")
+        return
+    try:
+        ctx = json.loads(path.read_text())
+        market_date = ctx.get("market_date")
+        today = datetime.now(pytz.timezone("America/New_York")).date().isoformat()
+        if market_date != today:
+            logger.warning(f"market_context.json is stale (market_date={market_date}, today={today}) — skipping load")
+            return
+        symbols = ctx.get("symbols") or {}
+        for sym, entry in symbols.items():
+            if isinstance(entry, dict) and entry.get("bias") in ("buy", "avoid", "neutral"):
+                _market_bias[sym] = {
+                    "bias": entry["bias"],
+                    "reason": entry.get("reason", ""),
+                    "confidence": entry.get("confidence", ""),
+                }
+        avoid_count = sum(1 for v in _market_bias.values() if v["bias"] == "avoid")
+        buy_count = sum(1 for v in _market_bias.values() if v["bias"] == "buy")
+        neutral_count = sum(1 for v in _market_bias.values() if v["bias"] == "neutral")
+        macro = ctx.get("macro_sentiment", "unknown")
+        logger.info(
+            f"Market bias loaded for {len(_market_bias)} symbols "
+            f"(buy={buy_count}, avoid={avoid_count}, neutral={neutral_count}, macro={macro})"
+        )
+    except Exception as e:
+        logger.error(f"_load_market_context failed: {e}")
+
+_load_market_context()
 
 def validate_secret(req):
     secret = req.args.get("secret", "")
@@ -345,6 +380,20 @@ def process_signal(data):
                 f"consecutive_count={trend.get('consecutive_count')} — skipping Claude"
             )
             return
+
+    # Market bias gate: block buy if pre-market research flagged 'avoid'; inject 'buy' bias for Claude
+    if action == "buy":
+        bias_entry = _market_bias.get(symbol)
+        if bias_entry:
+            bias = bias_entry["bias"]
+            if bias == "avoid":
+                logger.warning(
+                    f"Market bias gate blocked {symbol} BUY: pre-market research flagged 'avoid' "
+                    f"(confidence={bias_entry.get('confidence','')}) — reason: {bias_entry.get('reason','')}"
+                )
+                return
+            if bias == "buy":
+                account_state["market_bias"] = "buy"
 
     # Momentum check (buy signals only, fail-open — never blocks trading)
     if action == "buy":

@@ -125,7 +125,52 @@ PRICE_RANGES = {
     "XOM":  ( 80,  215),
 }
 
-_last_order: dict = {}  # {(symbol, action): datetime in ET} — reset on restart
+_last_order: dict = {}     # {(symbol, action): datetime in ET} — reset on restart
+_trend_table: dict = {}    # {symbol: {direction, strength, consecutive_count, last_signal, last_time}}
+_signal_history: dict = {} # {symbol: [action, ...]} most recent first, max 10 — internal
+
+def _compute_trend(recent_actions: list) -> dict:
+    if not recent_actions:
+        return {"direction": "neutral", "strength": "weak", "consecutive_count": 0, "last_signal": None}
+    first = recent_actions[0]
+    count = 0
+    for a in recent_actions:
+        if a == first:
+            count += 1
+        else:
+            break
+    direction = ("bullish" if first == "buy" else "bearish") if count >= 3 else "neutral"
+    strength = "confirmed" if count >= 5 else "developing" if count >= 3 else "weak"
+    return {"direction": direction, "strength": strength, "consecutive_count": count, "last_signal": first}
+
+def _build_trend_table():
+    try:
+        con = sqlite3.connect(DB_PATH)
+        rows = con.execute("""
+            SELECT symbol, action, timestamp FROM (
+                SELECT symbol, action, timestamp,
+                       ROW_NUMBER() OVER (PARTITION BY symbol ORDER BY timestamp DESC) AS rn
+                FROM trades
+                WHERE symbol IS NOT NULL AND action IS NOT NULL
+            ) WHERE rn <= 10
+            ORDER BY symbol, timestamp DESC
+        """).fetchall()
+        con.close()
+        history = {}
+        last_time = {}
+        for sym, act, ts in rows:
+            history.setdefault(sym, []).append(act)
+            last_time.setdefault(sym, ts)
+        for sym, actions in history.items():
+            _signal_history[sym] = actions
+            entry = _compute_trend(actions)
+            entry["last_time"] = last_time[sym]
+            _trend_table[sym] = entry
+        logger.info(f"Trend table built for {len(_trend_table)} symbols")
+    except Exception as e:
+        logger.error(f"_build_trend_table failed: {e}")
+
+_build_trend_table()
 
 def validate_secret(req):
     secret = req.args.get("secret", "")
@@ -175,6 +220,12 @@ def process_signal(data):
     logger.info(f"Processing {action.upper()} signal for {symbol} at {price}")
     account_state = get_mock_account_state()
 
+    # Update trend table with this incoming signal before any pre-checks
+    _now_ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    _signal_history.setdefault(symbol, []).insert(0, action)
+    _signal_history[symbol] = _signal_history[symbol][:10]
+    _trend_table[symbol] = {**_compute_trend(_signal_history[symbol]), "last_time": _now_ts}
+
     # Hard pre-check 1: market hours (9:45–15:45 ET, weekdays only)
     now_et = datetime.now(pytz.timezone("America/New_York"))
     if now_et.weekday() >= 5:
@@ -212,6 +263,7 @@ def process_signal(data):
         )
         return
 
+    account_state["trend_table"] = _trend_table
     decision = evaluate_signal(data, account_state)
     order_result = None
 

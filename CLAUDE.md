@@ -58,6 +58,8 @@ Webhook validates: secret, JSON parseable, action in `[buy/sell]`, symbol in `AP
 | MSFT | 200–600 | CVX | 100–260 |
 | NVDA | 80–600 | XOM | 80–215 |
 | ORCL | 80–300 | TSCO | 20–80 |
+| GOOGL | 250–550 | GLD | 250–550 |
+| IWM | 180–350 | | |
 
 Dispatches `process_signal()` in a background thread. `process_signal` runs checks in this order:
 

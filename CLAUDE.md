@@ -67,6 +67,7 @@ Dispatches `process_signal()` in a background thread. `process_signal` runs chec
 3. **Market hours** — rejects if outside 9:45–15:45 ET or if it's a weekend; uses `pytz.timezone("America/New_York")` for automatic DST handling.
 4. **Circuit breaker** — rejects if `daily_pnl_pct < -3.0%`.
 5. **Cooldown** — rejects if the same `(symbol, action)` pair had a successful order within the last 15 minutes. Tracked in module-level `_last_order` dict (resets on restart). Sells and buys have independent cooldown keys, so a buy cooldown never blocks a sell on the same symbol.
+6. **4% per-symbol exposure cap** — buy signals only. If `existing_position` is already in scope (reused from the ghost-sell fetch, no extra API call) and `qty * current_price / balance >= 4.0%`, rejects before Claude is called. Uses `account_state["balance"]` (cash balance) as the denominator, not `portfolio_value`, matching the hard rule intent.
 
 Before calling Claude, `account_state["trend_table"] = _trend_table` is injected so Claude receives the full trend picture for all symbols.
 
@@ -83,7 +84,7 @@ After the pipeline completes, `log_trade` writes to both `signals.log` (pipe-del
 `get_mock_account_state()` (name retained for compatibility) now returns live data: balance and portfolio value from Alpaca, open positions and unrealized P&L from `api.list_positions()`, and realized P&L from FIFO-matched filled buy/sell pairs in `trades.db` for the current day. `daily_pnl` and `daily_pnl_pct` are computed from `unrealized + realized` against start-of-day portfolio value. Each data source is independently wrapped in try/except — any failure falls back to 0.0 without blocking the pipeline. `process_signal` in `app.py` calls only `get_mock_account_state()` and `get_position(symbol)`; redundant separate calls to `get_account()` and `api.list_positions()` were removed.
 
 **`broker.py`** — Alpaca paper trading wrapper (`https://paper-api.alpaca.markets`). `place_order()` flow:
-- **Sell path:** fetches position qty → cancels all open bracket orders for the symbol → sleeps 1s → re-fetches position to confirm qty matches before proceeding → submits market sell. Returns `None` if no position, cancel fails, or qty mismatches.
+- **Sell path:** fetches position qty (sign preserved — no `abs()`) → rejects with `"Refusing sell ... is short/zero, not a long to close"` if `qty <= 0` → cancels all open bracket orders for the symbol → sleeps 1s → re-fetches position to confirm qty matches before proceeding → submits market sell. Returns `None` if position fetch fails (logged as `"Failed to fetch position"` to distinguish API errors from a 404), qty is non-positive, cancel fails, or qty mismatches. The qty-sign guard prevents the sell path from deepening an existing short — historically a sell with no underlying long would open a short at Alpaca, which then polluted account state until the bracket expired (see ghost-sell incident on QQQ 2026-05-04).
 - **Buy path:** calculates `qty = int(balance * position_size_pct/100 / current_price)` → submits bracket order with stop-loss and take-profit legs. Returns `None` if qty < 1.
 - All `return None` paths have a preceding `logger.error` identifying the failure.
 
@@ -142,7 +143,7 @@ Configured at `/etc/logrotate.d/trading-bot`. Runs automatically via system cron
 
 1. **AAPL is over the 4% per-symbol exposure limit** — 18 shares × ~$283 ≈ $5,093 (~5.8% of balance), built up before the rule was added. Further AAPL buys will be rejected by Claude but the existing position is not automatically reduced. Current open positions as of 2026-05-06 morning: AAPL (5.8%), MSFT (3.3%), AMD (2.4%), ORCL (1.7%), META (1.4%) — 5 positions total. QQQ and TSLA closed overnight via end-of-day bracket order expiry/cancellation. TSCO `PRICE_RANGES` updated from `(100, 400)` to `(20, 80)` after stock was found trading ~$33 — signals were being incorrectly rejected by the price sanity check.
 
-2. **Ghost sell signals from TradingPilotAI** — META and MSFT continuously receive sell signals for positions that don't exist. The `process_signal` pre-check now drops these before Claude is called, but the root cause is on the TradingPilotAI alert configuration side (likely alerts firing on every bar after an exit condition rather than once).
+2. **Ghost sell signals from TradingPilotAI** — META and MSFT continuously receive sell signals for positions that don't exist. The `process_signal` pre-check drops these before Claude is called, and `broker.py` now has a second layer of defense (rejects sells when qty is short or zero) so a regression in the pre-check can no longer create a phantom short. Root cause is still on the TradingPilotAI alert configuration side (likely alerts firing on every bar after an exit condition rather than once).
 
 3. **`stop_loss` / `take_profit` in the order result are prices, not percentages** — for sell orders these are both set to `current_price` (meaningless) because Claude returns `0.0` for these fields on sell approvals.
 

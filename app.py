@@ -220,7 +220,7 @@ def log_trade(signal, decision, order):
 def get_momentum(symbol, price):
     try:
         start = (datetime.now(timezone.utc) - timedelta(minutes=10)).isoformat()
-        bars = list(api.get_bars(symbol, '1Min', start=start))
+        bars = list(api.get_bars(symbol, '1Min', start=start, feed='iex'))
         if len(bars) < 2:
             return None
         bars = bars[-5:]

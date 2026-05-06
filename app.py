@@ -125,6 +125,8 @@ PRICE_RANGES = {
     "XOM":  ( 80,  215),
 }
 
+_last_order: dict = {}  # {(symbol, action): datetime in ET} — reset on restart
+
 def validate_secret(req):
     secret = req.args.get("secret", "")
     if secret != WEBHOOK_SECRET:
@@ -198,8 +200,27 @@ def process_signal(data):
     existing_position = get_position(symbol)
     if existing_position:
         account_state["current_symbol_position"] = existing_position
+
+    # Cooldown check: skip if same symbol+action had a successful order within 15 min
+    cooldown_key = (symbol, action)
+    last = _last_order.get(cooldown_key)
+    if last and (now_et - last).total_seconds() < 15 * 60:
+        mins_remaining = int(15 * 60 - (now_et - last).total_seconds()) // 60
+        logger.warning(
+            f"Cooldown active for {symbol} {action.upper()}: last order at {last.strftime('%H:%M')} ET, "
+            f"{mins_remaining}m remaining — skipping Claude"
+        )
+        return
+
     decision = evaluate_signal(data, account_state)
     order_result = None
+
+    # Confidence gate: reject low-confidence buy signals without placing an order
+    if action == "buy" and decision.get("confidence") == "low":
+        logger.warning(f"Low confidence BUY rejected for {symbol}: skipping order placement")
+        log_trade(data, decision, None)
+        return
+
     if decision.get("approved"):
         approved_reason = decision.get("reason")
         logger.info(f"APPROVED: {symbol} {action.upper()} - {approved_reason}")
@@ -212,6 +233,7 @@ def process_signal(data):
         )
         if order_result:
             logger.info(f"ORDER PLACED: {order_result}")
+            _last_order[cooldown_key] = now_et
         else:
             logger.error(f"Order placement failed for {symbol}")
     else:

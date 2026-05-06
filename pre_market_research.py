@@ -25,7 +25,7 @@ TIMEOUT_SECONDS = 120.0
 WEB_SEARCH_TOOL = {
     "type": "web_search_20260209",
     "name": "web_search",
-    "max_uses": 10,
+    "max_uses": 3,
 }
 
 logging.basicConfig(
@@ -96,7 +96,11 @@ Confidence:
 
 For ETFs (SPY, QQQ, GLD, IWM), use sector or index-level news and pre-market index moves rather than company-specific items.
 
-Search efficiently. You have a budget of 10 web searches total. Prefer searches that cover many symbols at once — e.g. "pre-market movers today", "analyst rating changes today", "earnings calendar {today}" — over one-search-per-symbol.
+Search efficiently. You have a hard budget of 3 web searches total — DO NOT search per-symbol. Use exactly these 3 broad searches to cover all 15 symbols:
+1. "pre-market movers today" — gives pre-market direction and magnitude for the most active names
+2. "earnings calendar today" — identifies which symbols report today (drives the "avoid" rule)
+3. "analyst upgrades downgrades today" — recent rating changes that affect bias
+Synthesize the per-symbol output by attributing what each search reveals. For symbols not mentioned in any search result, default to bias "neutral" with confidence "low" and a reason like "no significant pre-market signals found".
 
 Return ONLY this JSON schema. All 15 symbols must be present in the "symbols" object:
 {{
@@ -141,7 +145,7 @@ def main():
     try:
         with client.messages.stream(
             model=MODEL,
-            max_tokens=8192,
+            max_tokens=2048,
             system=system,
             tools=[WEB_SEARCH_TOOL],
             messages=[{"role": "user", "content": user_prompt}],

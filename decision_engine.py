@@ -41,6 +41,19 @@ For sell signals, always set take_profit_pct to 0.0 and stop_loss_pct to 0.0 (th
 
 If no trend data exists for the symbol, treat it as neutral.
 
+MOMENTUM GUIDANCE:
+account_state may contain a "momentum" dict for buy signals with:
+  direction: "rising", "falling", or "flat"
+  momentum_pct: percent change across the last 5 one-minute bars
+  price_vs_bars: percent difference between the signal price and the most recent bar close
+  last_close: most recent bar close price
+account_state may also contain a "signal_confidence_hint" of "high" or "low" — when present, use this as your starting confidence before applying trend rules. Trend rules can still override (e.g. bearish trend always rejects buys regardless of momentum).
+
+Apply to buy signals:
+- Rising momentum confirms the signal — favor approval, lean confidence higher
+- Falling momentum is a caution flag — lean confidence lower
+- Flat momentum is neutral — no momentum-based adjustment
+
 Always respond with this exact JSON format:
 {
     "approved": true or false,

@@ -217,6 +217,36 @@ def log_trade(signal, decision, order):
     except Exception as e:
         logger.error(f"DB write failed for {signal.get('symbol')}: {e}")
 
+def get_momentum(symbol, price):
+    try:
+        start = (datetime.now(timezone.utc) - timedelta(minutes=10)).isoformat()
+        bars = list(api.get_bars(symbol, '1Min', start=start))
+        if len(bars) < 2:
+            return None
+        bars = bars[-5:]
+        first_close = float(bars[0].c)
+        last_close = float(bars[-1].c)
+        if first_close <= 0 or last_close <= 0:
+            return None
+        momentum_pct = (last_close - first_close) / first_close * 100
+        price_vs_bars = (price - last_close) / last_close * 100 if last_close > 0 else 0.0
+        if momentum_pct > 0.1:
+            direction = "rising"
+        elif momentum_pct < -0.1:
+            direction = "falling"
+        else:
+            direction = "flat"
+        return {
+            "direction": direction,
+            "momentum_pct": round(momentum_pct, 3),
+            "price_vs_bars": round(price_vs_bars, 3),
+            "bar_count": len(bars),
+            "last_close": round(last_close, 4),
+        }
+    except Exception as e:
+        logger.warning(f"get_momentum failed for {symbol}: {e}")
+        return None
+
 def process_signal(data):
     action = data.get("action", "").lower()
     symbol = data.get("symbol", "")
@@ -302,6 +332,25 @@ def process_signal(data):
                     f"(limit: 4.0%) — skipping Claude"
                 )
                 return
+
+    # Momentum check (buy signals only, fail-open — never blocks trading)
+    if action == "buy":
+        momentum = get_momentum(symbol, price)
+        if momentum:
+            account_state["momentum"] = momentum
+            if momentum["direction"] == "falling" and momentum["momentum_pct"] < -0.15:
+                account_state["signal_confidence_hint"] = "low"
+                logger.warning(
+                    f"Momentum caution for {symbol} BUY: direction={momentum['direction']} "
+                    f"momentum_pct={momentum['momentum_pct']}% last_close={momentum['last_close']} "
+                    f"— downgrading confidence hint to low"
+                )
+            elif momentum["direction"] == "rising":
+                account_state["signal_confidence_hint"] = "high"
+                logger.info(
+                    f"Momentum confirms {symbol} BUY: direction={momentum['direction']} "
+                    f"momentum_pct={momentum['momentum_pct']}% — confidence hint set to high"
+                )
 
     account_state["trend_table"] = _trend_table
     decision = evaluate_signal(data, account_state)

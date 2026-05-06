@@ -107,7 +107,7 @@ _startup_reconcile()
 
 WEBHOOK_SECRET = os.environ.get("WEBHOOK_SECRET", "changeme")
 
-APPROVED_SYMBOLS = {"AAPL", "SPY", "QQQ", "MSFT", "NVDA", "ORCL", "TSCO", "TSLA", "META", "AMD", "CVX", "XOM", "GOOGL"}
+APPROVED_SYMBOLS = {"AAPL", "SPY", "QQQ", "MSFT", "NVDA", "ORCL", "TSCO", "TSLA", "META", "AMD", "CVX", "XOM", "GOOGL", "GLD", "IWM"}
 
 # (min, max) expected price ranges; signals outside ±20% of this range are rejected
 PRICE_RANGES = {
@@ -124,6 +124,8 @@ PRICE_RANGES = {
     "CVX":  (100,  260),
     "XOM":  ( 80,  215),
     "GOOGL": (250, 550),
+    "GLD":   (250, 550),
+    "IWM":   (180, 350),
 }
 
 _last_order: dict = {}     # {(symbol, action): datetime in ET} — reset on restart

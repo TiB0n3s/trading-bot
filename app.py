@@ -333,6 +333,19 @@ def process_signal(data):
                 )
                 return
 
+    # Trend gate: block buy signals on symbols with established neutral/bearish trend
+    # (new symbols with no prior history pass through — block only applies once history exists)
+    if action == "buy":
+        history = _signal_history.get(symbol, [])
+        trend = _trend_table.get(symbol)
+        if len(history) > 1 and trend and trend.get("direction") in ("neutral", "bearish"):
+            logger.warning(
+                f"Trend gate blocked {symbol} BUY: direction={trend.get('direction')} "
+                f"strength={trend.get('strength')} "
+                f"consecutive_count={trend.get('consecutive_count')} — skipping Claude"
+            )
+            return
+
     # Momentum check (buy signals only, fail-open — never blocks trading)
     if action == "buy":
         momentum = get_momentum(symbol, price)

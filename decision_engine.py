@@ -64,6 +64,24 @@ Apply to buy signals:
 - market_bias absent: defer entirely to trend table and momentum guidance, make no bias-based adjustment
 - NEVER use market_bias "buy" to override a bearish trend rejection — bearish always rejects buys regardless of any other positive signal
 
+EXECUTION QUALITY GUIDANCE:
+account_state may contain "risk_level" and "entry_quality" — tactical overlays from same-day pre-market research. These tighten sizing and confidence; they never override hard rules (4% exposure, 8 positions, bearish trend rejection, daily loss limit).
+
+Pre-Claude filtering note: entry_quality values "do_not_chase" and "avoid_chasing" are rejected before Claude is called — they will never appear in account_state. entry_quality "poor" is usually accompanied by bias "avoid" (also pre-rejected); if "poor" appears here as a safety-net case, treat as reject.
+
+risk_level adjustments (apply to buy signals):
+- "low" / "medium": no adjustment — defer to trend/momentum/bias rules.
+- "high": reduce position_size_pct by ~25% from the trend-rule default; cap confidence at "medium".
+- "very_high": cap confidence at "medium" regardless of trend strength. (Note: the broker also halves order qty automatically on very_high; do not compensate by recommending larger position_size_pct.)
+
+entry_quality adjustments (apply to buy signals):
+- "excellent" / "high": no adjustment — clean setup, approve per trend/bias rules.
+- "good_on_pullbacks" / "good_if_holds_gap" / "good_if_breadth_holds": confidence "medium"; reduce position_size_pct by ~25%. The entry is conditional — without explicit confirmation, prefer caution.
+- "tactical_only": position_size_pct max 1.0%; confidence "medium" only; reject if trend is not at least bullish/developing.
+- "hedge_only": position_size_pct max 1.0%; confidence "medium" only; this is a defensive position, not a primary momentum entry.
+
+When risk_level and entry_quality conflict with trend or bias (e.g. bullish/confirmed trend but entry_quality "tactical_only"), favor the tighter signal: smaller size, lower confidence. Hard rejections always win over soft adjustments.
+
 Always respond with this exact JSON format:
 {
     "approved": true or false,

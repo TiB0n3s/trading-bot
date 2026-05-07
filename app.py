@@ -205,6 +205,8 @@ def _load_market_context():
                     "bias": entry["bias"],
                     "reason": entry.get("reason", ""),
                     "confidence": entry.get("confidence", ""),
+                    "risk_level": entry.get("risk_level"),
+                    "entry_quality": entry.get("entry_quality"),
                 }
         avoid_count = sum(1 for v in _market_bias.values() if v["bias"] == "avoid")
         buy_count = sum(1 for v in _market_bias.values() if v["bias"] == "buy")
@@ -260,6 +262,27 @@ def log_trade(signal, decision, order):
     except Exception as e:
         logger.error(f"DB write failed for {signal.get('symbol')}: {e}")
 
+def log_rejection(symbol, action, category, reason, price=None):
+    """Persist a pre-Claude rejection to trades.db so daily_summary can count it.
+
+    Caller is responsible for the human-readable logger.warning line; this helper
+    only writes the DB row. The rejection_reason column stores '<category>: <reason>'
+    so daily_summary.py can group by category prefix without parsing free-form text.
+    """
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    full_reason = f"{category}: {reason}"
+    try:
+        con = sqlite3.connect(DB_PATH)
+        con.execute(
+            "INSERT INTO trades (timestamp, symbol, action, signal_price, approved, rejection_reason) "
+            "VALUES (?, ?, ?, ?, 0, ?)",
+            (timestamp, symbol, action, price, full_reason),
+        )
+        con.commit()
+        con.close()
+    except Exception as e:
+        logger.error(f"log_rejection DB write failed for {symbol}: {e}")
+
 def get_momentum(symbol, price):
     try:
         start = (datetime.now(timezone.utc) - timedelta(minutes=10)).isoformat()
@@ -308,16 +331,19 @@ def process_signal(data):
     now_et = datetime.now(pytz.timezone("America/New_York"))
     if now_et.weekday() >= 5:
         logger.warning(f"Market hours check failed for {symbol} {action.upper()}: weekend ({now_et.strftime('%A')})")
+        log_rejection(symbol, action, "market_hours", f"weekend ({now_et.strftime('%A')})", price=price)
         return
     t = now_et.hour * 60 + now_et.minute
     if not (9 * 60 + 45 <= t < 15 * 60 + 45):
         logger.warning(f"Market hours check failed for {symbol} {action.upper()}: {now_et.strftime('%H:%M')} ET is outside 09:45–15:45 window")
+        log_rejection(symbol, action, "market_hours", f"{now_et.strftime('%H:%M')} ET outside 09:45–15:45 window", price=price)
         return
 
     # Hard pre-check 2: circuit breaker (-3% daily loss limit)
     daily_pnl_pct = account_state.get("daily_pnl_pct", 0.0)
     if daily_pnl_pct < -3.0:
         logger.error(f"Circuit breaker triggered for {symbol} {action.upper()}: daily P&L is {daily_pnl_pct:.2f}% (limit: -3.0%)")
+        log_rejection(symbol, action, "circuit_breaker", f"daily P&L {daily_pnl_pct:.2f}% < -3.0%", price=price)
         return
 
     if action == "sell":
@@ -325,6 +351,7 @@ def process_signal(data):
             api.get_position(symbol)
         except Exception:
             logger.warning(f"Skipping SELL signal for {symbol} — no open position in Alpaca")
+            log_rejection(symbol, action, "ghost_sell", "no open Alpaca position", price=price)
             return
     existing_position = get_position(symbol)
     if existing_position:
@@ -339,6 +366,7 @@ def process_signal(data):
             f"Cooldown active for {symbol} {action.upper()}: last order at {last.strftime('%H:%M')} ET, "
             f"{mins_remaining}m remaining — skipping Claude"
         )
+        log_rejection(symbol, action, "cooldown", f"{mins_remaining}m remaining (last order {last.strftime('%H:%M')} ET)", price=price)
         return
 
     # Sell→buy churn prevention: block buys that follow a recent sell on the same symbol
@@ -353,6 +381,7 @@ def process_signal(data):
                     f"Sell→buy churn block for {symbol}: sold at {last_sell_time.strftime('%H:%M')} ET "
                     f"(${last_sell_price:.2f}), {mins_remaining}m remaining in 30-min window — skipping Claude"
                 )
+                log_rejection(symbol, action, "churn_window", f"sold at ${last_sell_price:.2f}, {mins_remaining}m remaining in 30-min window", price=price)
                 return
             if last_sell_price > 0:
                 price_diff_pct = abs(price - last_sell_price) / last_sell_price * 100
@@ -361,6 +390,7 @@ def process_signal(data):
                         f"Sell→buy churn block for {symbol}: signal price ${price:.2f} within "
                         f"{price_diff_pct:.2f}% of last sell price ${last_sell_price:.2f} — skipping Claude"
                     )
+                    log_rejection(symbol, action, "churn_price", f"signal ${price:.2f} within {price_diff_pct:.2f}% of last sell ${last_sell_price:.2f}", price=price)
                     return
 
     # Hard pre-check: 4% per-symbol exposure cap (buy signals only)
@@ -375,6 +405,7 @@ def process_signal(data):
                     f"current position ${position_value:.2f} = {exposure_pct:.2f}% of balance "
                     f"(limit: 4.0%) — skipping Claude"
                 )
+                log_rejection(symbol, action, "exposure_cap", f"position ${position_value:.2f} = {exposure_pct:.2f}% of balance (limit 4.0%)", price=price)
                 return
 
     # Trend gate: block buy signals on symbols with established neutral/bearish trend
@@ -388,6 +419,7 @@ def process_signal(data):
                 f"strength={trend.get('strength')} "
                 f"consecutive_count={trend.get('consecutive_count')} — skipping Claude"
             )
+            log_rejection(symbol, action, "trend_gate", f"direction={trend.get('direction')} strength={trend.get('strength')} count={trend.get('consecutive_count')}", price=price)
             return
 
     # Market bias gate: block buy if pre-market research flagged 'avoid'; inject 'buy' bias for Claude
@@ -400,9 +432,30 @@ def process_signal(data):
                     f"Market bias gate blocked {symbol} BUY: pre-market research flagged 'avoid' "
                     f"(confidence={bias_entry.get('confidence','')}) — reason: {bias_entry.get('reason','')}"
                 )
+                log_rejection(symbol, action, "market_bias_avoid", f"confidence={bias_entry.get('confidence','')} reason={bias_entry.get('reason','')}", price=price)
                 return
             if bias == "buy":
                 account_state["market_bias"] = "buy"
+            # Pass quality fields through to Claude regardless of bias direction
+            if bias_entry.get("risk_level"):
+                account_state["risk_level"] = bias_entry["risk_level"]
+            if bias_entry.get("entry_quality"):
+                account_state["entry_quality"] = bias_entry["entry_quality"]
+
+    # Chase prevention gate: hard reject buy signals flagged 'do_not_chase' or 'avoid_chasing'
+    # in the pre-market brief — typically extended/parabolic names where fundamentals are
+    # strong but the entry is tactically poor (e.g. AMD post-earnings gap, NVDA after a run).
+    if action == "buy":
+        bias_entry = _market_bias.get(symbol)
+        if bias_entry:
+            eq = bias_entry.get("entry_quality")
+            if eq in ("do_not_chase", "avoid_chasing"):
+                logger.warning(
+                    f"Chase prevention gate blocked {symbol} BUY: entry_quality={eq}, "
+                    f"risk_level={bias_entry.get('risk_level') or '-'} — skipping Claude"
+                )
+                log_rejection(symbol, action, "chase_prevention", f"entry_quality={eq} risk_level={bias_entry.get('risk_level') or '-'}", price=price)
+                return
 
     # Momentum check (buy signals only, fail-open — never blocks trading)
     if action == "buy":
@@ -441,7 +494,8 @@ def process_signal(data):
             action=action,
             position_size_pct=decision.get("position_size_pct", 1.0),
             stop_loss_pct=decision.get("stop_loss_pct", 0.5),
-            take_profit_pct=decision.get("take_profit_pct", 1.5)
+            take_profit_pct=decision.get("take_profit_pct", 1.5),
+            risk_level=account_state.get("risk_level"),
         )
         if order_result:
             logger.info(f"ORDER PLACED: {order_result}")

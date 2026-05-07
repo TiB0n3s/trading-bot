@@ -4,6 +4,15 @@ Parse a manually-pasted market brief (e.g. from Claude in Chrome) into
 market_context.json — the same shape pre_market_research.py produces, so the
 bot's _load_market_context() picks it up unchanged.
 
+Two input formats are accepted:
+  1. JSON brief with structured per-symbol fields (preferred — most reliable):
+     {"macro_summary": {...}, "symbols": [{"symbol": "AAPL", "trading_bias":
+     "neutral", "fundamental_score": "bullish", "reason": "...", ...}, ...]}
+  2. Free-text/table brief: regex-extracts bias keywords adjacent to ticker
+     symbols (best-effort heuristic for prose or dense table dumps).
+The format is auto-detected: input starting with `{` or `[` goes through the
+JSON path; everything else goes through the regex path.
+
 Output schema:
 {
   "market_date":      "YYYY-MM-DD",
@@ -143,6 +152,8 @@ def extract_symbol_entry(text, symbol):
             "reason": cleaned or "no detail provided",
             "confidence": "medium",
             "fundamental_score": fundamental_score,
+            "risk_level": None,
+            "entry_quality": None,
         }
     return None
 
@@ -190,6 +201,81 @@ def extract_macro_summary(text):
     return "no macro summary provided"
 
 
+def parse_json_brief(text):
+    """Parse a structured-JSON brief into the script's standard output shape.
+
+    Returns (symbols_out, parsed_count, macro_sentiment, macro_summary).
+    Validates bias and fundamental_score against the canonical vocabularies
+    and falls back to neutral/None for unknown values rather than passing
+    untrusted strings through to the bot.
+    """
+    data = json.loads(text)
+
+    macro = data.get("macro_summary") or {}
+    raw_sent = (macro.get("market_sentiment") or "").lower().replace("_", "-")
+    macro_sentiment = raw_sent if raw_sent in ("risk-on", "risk-off", "mixed", "neutral") else "neutral"
+    macro_summary_text = (
+        macro.get("marketwatch_summary")
+        or macro.get("reuters_summary")
+        or macro.get("benzinga_summary")
+        or "no macro summary provided"
+    )
+
+    by_symbol = {
+        e.get("symbol"): e
+        for e in (data.get("symbols") or [])
+        if isinstance(e, dict) and isinstance(e.get("symbol"), str)
+    }
+
+    valid_bias = ("buy", "avoid", "neutral")
+    valid_fund = ("strong_bullish", "bullish", "neutral", "bearish", "strong_bearish")
+    valid_risk = ("low", "medium", "high", "very_high")
+
+    symbols_out = {}
+    parsed_count = 0
+    for sym in SYMBOLS:
+        entry = by_symbol.get(sym)
+        if entry:
+            bias = (entry.get("trading_bias") or "neutral").lower()
+            if bias not in valid_bias:
+                bias = "neutral"
+            fund = entry.get("fundamental_score")
+            if isinstance(fund, str):
+                fund_norm = fund.lower()
+                fund = fund_norm if fund_norm in valid_fund else None
+            else:
+                fund = None
+            risk = entry.get("risk_level")
+            if isinstance(risk, str):
+                risk_norm = risk.lower()
+                risk = risk_norm if risk_norm in valid_risk else None
+            else:
+                risk = None
+            entry_quality = entry.get("entry_quality")
+            if not isinstance(entry_quality, str):
+                entry_quality = None
+            symbols_out[sym] = {
+                "bias": bias,
+                "reason": entry.get("reason") or "no detail provided",
+                "confidence": "medium",
+                "fundamental_score": fund,
+                "risk_level": risk,
+                "entry_quality": entry_quality,
+            }
+            parsed_count += 1
+        else:
+            symbols_out[sym] = {
+                "bias": "neutral",
+                "reason": "no signals found",
+                "confidence": "low",
+                "fundamental_score": None,
+                "risk_level": None,
+                "entry_quality": None,
+            }
+
+    return symbols_out, parsed_count, macro_sentiment, macro_summary_text
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__.strip().splitlines()[0])
     parser.add_argument('input', nargs='?', help='Path to text file (omit to read stdin)')
@@ -215,34 +301,53 @@ def main():
     else:
         market_date = next_trading_day(date.today()).isoformat()
 
-    symbols_out = {}
-    parsed_count = 0
-    for sym in SYMBOLS:
-        entry = extract_symbol_entry(text, sym)
-        if entry:
-            symbols_out[sym] = entry
-            parsed_count += 1
-        else:
-            symbols_out[sym] = {
-                "bias": "neutral",
-                "reason": "no signals found",
-                "confidence": "low",
-                "fundamental_score": None,
-            }
+    # Auto-detect format: JSON if input starts with { or [, otherwise regex/text path
+    text_stripped = text.lstrip()
+    is_json = text_stripped.startswith("{") or text_stripped.startswith("[")
+
+    if is_json:
+        try:
+            symbols_out, parsed_count, macro_sentiment, macro_summary = parse_json_brief(text)
+            format_used = "json"
+        except json.JSONDecodeError as e:
+            print(f"ERROR: input looked like JSON but failed to parse: {e}", file=sys.stderr)
+            sys.exit(1)
+    else:
+        symbols_out = {}
+        parsed_count = 0
+        for sym in SYMBOLS:
+            entry = extract_symbol_entry(text, sym)
+            if entry:
+                symbols_out[sym] = entry
+                parsed_count += 1
+            else:
+                symbols_out[sym] = {
+                    "bias": "neutral",
+                    "reason": "no signals found",
+                    "confidence": "low",
+                    "fundamental_score": None,
+                    "risk_level": None,
+                    "entry_quality": None,
+                }
+        macro_sentiment = extract_macro_sentiment(text)
+        macro_summary = extract_macro_summary(text)
+        format_used = "table"
 
     output = {
         "market_date": market_date,
         "generated_at": datetime.now().isoformat(timespec='seconds'),
-        "macro_sentiment": extract_macro_sentiment(text),
-        "macro_summary": extract_macro_summary(text),
+        "macro_sentiment": macro_sentiment,
+        "macro_summary": macro_summary,
         "symbols": symbols_out,
         "source": "manual_chrome_analysis",
+        "format": format_used,
     }
 
     OUTPUT_FILE.write_text(json.dumps(output, indent=2))
 
     print("=== Manual market brief parsed ===")
     print(f"  Market date     : {market_date}")
+    print(f"  Format          : {format_used}")
     print(f"  Macro sentiment : {output['macro_sentiment']}")
     print(f"  Macro summary   : {output['macro_summary'][:90]}")
     print(f"  Parsed symbols  : {parsed_count}/{len(SYMBOLS)} (rest defaulted to neutral/low)")

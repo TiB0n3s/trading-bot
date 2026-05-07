@@ -38,7 +38,7 @@ def get_position(symbol):
         logger.info(f"No position found for {symbol}: {e}")
         return None
 
-def place_order(symbol, action, position_size_pct, stop_loss_pct, take_profit_pct):
+def place_order(symbol, action, position_size_pct, stop_loss_pct, take_profit_pct, risk_level=None):
     try:
         account = get_account()
         if not account:
@@ -77,6 +77,10 @@ def place_order(symbol, action, position_size_pct, stop_loss_pct, take_profit_pc
         else:
             risk_amount = balance * (position_size_pct / 100)
             qty = int(risk_amount / current_price)
+            if risk_level == "very_high" and qty >= 2:
+                original_qty = qty
+                qty = qty // 2
+                logger.info(f"Risk multiplier applied to {symbol}: very_high risk_level — sizing halved {original_qty} → {qty}")
             logger.info(f"Buy sizing: {symbol} qty={qty} at {current_price} | risk_amount={risk_amount:.2f} balance={balance}")
             if qty < 1:
                 logger.error(f"Position size too small for {symbol} - qty rounds to 0 at price {current_price} with balance {balance}")

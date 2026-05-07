@@ -55,6 +55,29 @@ def _init_db():
             last_sell_price REAL NOT NULL
         )
     """)
+
+    # Idempotent column additions for decision-context attribution.
+    # Each new row written by log_trade / log_rejection captures the state of
+    # bias / trend / momentum / macro / cluster gates at decision time so the
+    # analytics layer can correlate outcomes with the context that produced them.
+    existing_cols = {r[1] for r in con.execute("PRAGMA table_info(trades)").fetchall()}
+    context_cols = [
+        ("macro_regime",         "TEXT"),
+        ("risk_multiplier",      "REAL"),
+        ("market_bias",          "TEXT"),
+        ("risk_level",           "TEXT"),
+        ("entry_quality",        "TEXT"),
+        ("trend_direction",      "TEXT"),
+        ("trend_strength",       "TEXT"),
+        ("momentum_direction",   "TEXT"),
+        ("momentum_pct",         "REAL"),
+        ("correlation_cluster",  "TEXT"),
+        ("cluster_exposure_pct", "REAL"),
+    ]
+    for col_name, col_type in context_cols:
+        if col_name not in existing_cols:
+            con.execute(f"ALTER TABLE trades ADD COLUMN {col_name} {col_type}")
+
     con.commit()
     con.close()
 
@@ -427,20 +450,25 @@ def validate_secret(req):
         logger.warning(f"Invalid secret from {req.remote_addr}")
         abort(401)
 
-def log_trade(signal, decision, order):
+def log_trade(signal, decision, order, account_state=None):
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     with open("signals.log", "a") as f:
         f.write(f"{timestamp} | SIGNAL: {json.dumps(signal)} | DECISION: {json.dumps(decision)} | ORDER: {json.dumps(order)}\n")
     try:
         approved = decision.get("approved", False)
         order = order or {}
+        ctx = _build_decision_context(signal.get("symbol"), signal.get("action"), account_state)
         con = sqlite3.connect(DB_PATH)
         con.execute("""
             INSERT INTO trades (
                 timestamp, symbol, action, signal_price, approved, rejection_reason,
                 confidence, position_size_pct, stop_loss_pct, take_profit_pct,
-                order_id, order_status, qty, fill_price
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                order_id, order_status, qty, fill_price,
+                macro_regime, risk_multiplier, market_bias, risk_level, entry_quality,
+                trend_direction, trend_strength, momentum_direction, momentum_pct,
+                correlation_cluster, cluster_exposure_pct
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                      ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
             timestamp,
             signal.get("symbol"),
@@ -456,27 +484,95 @@ def log_trade(signal, decision, order):
             order.get("status"),
             order.get("qty"),
             order.get("fill_price"),
+            ctx["macro_regime"], ctx["risk_multiplier"],
+            ctx["market_bias"], ctx["risk_level"], ctx["entry_quality"],
+            ctx["trend_direction"], ctx["trend_strength"],
+            ctx["momentum_direction"], ctx["momentum_pct"],
+            ctx["correlation_cluster"], ctx["cluster_exposure_pct"],
         ))
         con.commit()
         con.close()
     except Exception as e:
         logger.error(f"DB write failed for {signal.get('symbol')}: {e}")
 
-def log_rejection(symbol, action, category, reason, price=None):
+def _build_decision_context(symbol, action, account_state=None):
+    """Snapshot the decision context for a symbol/action at call time.
+
+    Returns a dict with the 11 attribution fields. Fields whose source hasn't
+    been computed yet at call time return None — that's accurate (e.g. a
+    cooldown rejection fires before momentum / macro_risk are populated, so
+    those fields are correctly NULL on that row).
+    """
+    ctx = {
+        "macro_regime":         None,
+        "risk_multiplier":      None,
+        "market_bias":          None,
+        "risk_level":           None,
+        "entry_quality":        None,
+        "trend_direction":      None,
+        "trend_strength":       None,
+        "momentum_direction":   None,
+        "momentum_pct":         None,
+        "correlation_cluster":  None,
+        "cluster_exposure_pct": None,
+    }
+    try:
+        bias_entry = _market_bias.get(symbol) or {}
+        ctx["market_bias"]   = bias_entry.get("bias")
+        ctx["risk_level"]    = bias_entry.get("risk_level")
+        ctx["entry_quality"] = bias_entry.get("entry_quality")
+        trend = _trend_table.get(symbol) or {}
+        ctx["trend_direction"] = trend.get("direction")
+        ctx["trend_strength"]  = trend.get("strength")
+        if account_state:
+            macro = account_state.get("macro_risk") or {}
+            ctx["macro_regime"]    = macro.get("macro_regime")
+            ctx["risk_multiplier"] = macro.get("risk_multiplier")
+            momentum = account_state.get("momentum") or {}
+            ctx["momentum_direction"] = momentum.get("direction")
+            ctx["momentum_pct"]       = momentum.get("momentum_pct")
+            corr = account_state.get("correlation_exposure") or []
+            if corr:
+                # If symbol is in multiple clusters, attribute to the highest-exposure one
+                primary = max(corr, key=lambda c: c.get("exposure_pct", 0) or 0)
+                ctx["correlation_cluster"]   = primary.get("cluster")
+                ctx["cluster_exposure_pct"]  = primary.get("exposure_pct")
+    except Exception as e:
+        logger.warning(f"_build_decision_context partial failure for {symbol}: {e}")
+    return ctx
+
+
+def log_rejection(symbol, action, category, reason, price=None, account_state=None):
     """Persist a pre-Claude rejection to trades.db so daily_summary can count it.
 
     Caller is responsible for the human-readable logger.warning line; this helper
     only writes the DB row. The rejection_reason column stores '<category>: <reason>'
     so daily_summary.py can group by category prefix without parsing free-form text.
+
+    `account_state` (optional) lets callers attach the live decision context —
+    macro/momentum/correlation snapshots — so the row records WHY it was rejected
+    AT THAT MOMENT, not just the gate name.
     """
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     full_reason = f"{category}: {reason}"
+    ctx = _build_decision_context(symbol, action, account_state)
     try:
         con = sqlite3.connect(DB_PATH)
         con.execute(
-            "INSERT INTO trades (timestamp, symbol, action, signal_price, approved, rejection_reason) "
-            "VALUES (?, ?, ?, ?, 0, ?)",
-            (timestamp, symbol, action, price, full_reason),
+            "INSERT INTO trades ("
+            "timestamp, symbol, action, signal_price, approved, rejection_reason, "
+            "macro_regime, risk_multiplier, market_bias, risk_level, entry_quality, "
+            "trend_direction, trend_strength, momentum_direction, momentum_pct, "
+            "correlation_cluster, cluster_exposure_pct"
+            ") VALUES (?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                timestamp, symbol, action, price, full_reason,
+                ctx["macro_regime"], ctx["risk_multiplier"],
+                ctx["market_bias"], ctx["risk_level"], ctx["entry_quality"],
+                ctx["trend_direction"], ctx["trend_strength"],
+                ctx["momentum_direction"], ctx["momentum_pct"],
+                ctx["correlation_cluster"], ctx["cluster_exposure_pct"],
+            ),
         )
         con.commit()
         con.close()
@@ -573,19 +669,19 @@ def process_signal(data):
     now_et = datetime.now(pytz.timezone("America/New_York"))
     if now_et.weekday() >= 5:
         logger.warning(f"Market hours check failed for {symbol} {action.upper()}: weekend ({now_et.strftime('%A')})")
-        log_rejection(symbol, action, "market_hours", f"weekend ({now_et.strftime('%A')})", price=price)
+        log_rejection(symbol, action, "market_hours", f"weekend ({now_et.strftime('%A')})", price=price, account_state=account_state)
         return
     t = now_et.hour * 60 + now_et.minute
     if not (9 * 60 + 45 <= t < 15 * 60 + 45):
         logger.warning(f"Market hours check failed for {symbol} {action.upper()}: {now_et.strftime('%H:%M')} ET is outside 09:45–15:45 window")
-        log_rejection(symbol, action, "market_hours", f"{now_et.strftime('%H:%M')} ET outside 09:45–15:45 window", price=price)
+        log_rejection(symbol, action, "market_hours", f"{now_et.strftime('%H:%M')} ET outside 09:45–15:45 window", price=price, account_state=account_state)
         return
 
     # Hard pre-check 2: circuit breaker (-3% daily loss limit)
     daily_pnl_pct = account_state.get("daily_pnl_pct", 0.0)
     if daily_pnl_pct < -3.0:
         logger.error(f"Circuit breaker triggered for {symbol} {action.upper()}: daily P&L is {daily_pnl_pct:.2f}% (limit: -3.0%)")
-        log_rejection(symbol, action, "circuit_breaker", f"daily P&L {daily_pnl_pct:.2f}% < -3.0%", price=price)
+        log_rejection(symbol, action, "circuit_breaker", f"daily P&L {daily_pnl_pct:.2f}% < -3.0%", price=price, account_state=account_state)
         return
 
     if action == "sell":
@@ -593,7 +689,7 @@ def process_signal(data):
             api.get_position(symbol)
         except Exception:
             logger.warning(f"Skipping SELL signal for {symbol} — no open position in Alpaca")
-            log_rejection(symbol, action, "ghost_sell", "no open Alpaca position", price=price)
+            log_rejection(symbol, action, "ghost_sell", "no open Alpaca position", price=price, account_state=account_state)
             return
     existing_position = get_position(symbol)
     if existing_position:
@@ -609,7 +705,7 @@ def process_signal(data):
             f"Cooldown active for {symbol} {action.upper()}: last order at {last.strftime('%H:%M')} ET, "
             f"{mins_remaining}m remaining — skipping Claude"
         )
-        log_rejection(symbol, action, "cooldown", f"{mins_remaining}m remaining (last order {last.strftime('%H:%M')} ET)", price=price)
+        log_rejection(symbol, action, "cooldown", f"{mins_remaining}m remaining (last order {last.strftime('%H:%M')} ET)", price=price, account_state=account_state)
         return
 
     # Sell→buy churn prevention: block buys that follow a recent sell on the same symbol
@@ -625,7 +721,7 @@ def process_signal(data):
                     f"Sell→buy churn block for {symbol}: sold at {last_sell_time.strftime('%H:%M')} ET "
                     f"(${last_sell_price:.2f}), {mins_remaining}m remaining in 30-min window — skipping Claude"
                 )
-                log_rejection(symbol, action, "churn_window", f"sold at ${last_sell_price:.2f}, {mins_remaining}m remaining in 30-min window", price=price)
+                log_rejection(symbol, action, "churn_window", f"sold at ${last_sell_price:.2f}, {mins_remaining}m remaining in 30-min window", price=price, account_state=account_state)
                 return
             if last_sell_price > 0:
                 price_diff_pct = abs(price - last_sell_price) / last_sell_price * 100
@@ -634,7 +730,7 @@ def process_signal(data):
                         f"Sell→buy churn block for {symbol}: signal price ${price:.2f} within "
                         f"{price_diff_pct:.2f}% of last sell price ${last_sell_price:.2f} — skipping Claude"
                     )
-                    log_rejection(symbol, action, "churn_price", f"signal ${price:.2f} within {price_diff_pct:.2f}% of last sell ${last_sell_price:.2f}", price=price)
+                    log_rejection(symbol, action, "churn_price", f"signal ${price:.2f} within {price_diff_pct:.2f}% of last sell ${last_sell_price:.2f}", price=price, account_state=account_state)
                     return
 
     # Hard pre-check: 4% per-symbol exposure cap (buy signals only)
@@ -649,7 +745,7 @@ def process_signal(data):
                     f"current position ${position_value:.2f} = {exposure_pct:.2f}% of balance "
                     f"(limit: 4.0%) — skipping Claude"
                 )
-                log_rejection(symbol, action, "exposure_cap", f"position ${position_value:.2f} = {exposure_pct:.2f}% of balance (limit 4.0%)", price=price)
+                log_rejection(symbol, action, "exposure_cap", f"position ${position_value:.2f} = {exposure_pct:.2f}% of balance (limit 4.0%)", price=price, account_state=account_state)
                 return
 
     # Correlation exposure cap: block buys when a correlated cluster is already full
@@ -666,7 +762,7 @@ def process_signal(data):
                 logger.warning(
                     f"Correlation cap blocked {symbol} BUY: {reason} — skipping Claude"
                 )
-                log_rejection(symbol, action, "correlation_cap", reason, price=price)
+                log_rejection(symbol, action, "correlation_cap", reason, price=price, account_state=account_state)
                 return
 
         if cluster_checks:
@@ -683,7 +779,7 @@ def process_signal(data):
                 f"strength={trend.get('strength')} "
                 f"consecutive_count={trend.get('consecutive_count')} — skipping Claude"
             )
-            log_rejection(symbol, action, "trend_gate", f"direction={trend.get('direction')} strength={trend.get('strength')} count={trend.get('consecutive_count')}", price=price)
+            log_rejection(symbol, action, "trend_gate", f"direction={trend.get('direction')} strength={trend.get('strength')} count={trend.get('consecutive_count')}", price=price, account_state=account_state)
             return
 
     # Macro-risk gate: regime-aware risk control before Claude
@@ -694,7 +790,7 @@ def process_signal(data):
         if macro_risk.get("block_new_buys"):
             reason = macro_risk.get("reason", "macro regime blocks new buys")
             logger.warning(f"Macro-risk gate blocked {symbol} BUY: {reason}")
-            log_rejection(symbol, action, "macro_risk", reason, price=price)
+            log_rejection(symbol, action, "macro_risk", reason, price=price, account_state=account_state)
             return
 
         max_new_positions = macro_risk.get("max_new_positions", 8)
@@ -702,7 +798,7 @@ def process_signal(data):
         if open_count >= max_new_positions:
             reason = f"open_position_count={open_count} >= macro max_new_positions={max_new_positions}"
             logger.warning(f"Macro-risk gate blocked {symbol} BUY: {reason}")
-            log_rejection(symbol, action, "macro_position_limit", reason, price=price)
+            log_rejection(symbol, action, "macro_position_limit", reason, price=price, account_state=account_state)
             return
 
     # Market bias gate: block buy if pre-market research flagged 'avoid'; inject 'buy' bias for Claude
@@ -715,7 +811,7 @@ def process_signal(data):
                     f"Market bias gate blocked {symbol} BUY: pre-market research flagged 'avoid' "
                     f"(confidence={bias_entry.get('confidence','')}) — reason: {bias_entry.get('reason','')}"
                 )
-                log_rejection(symbol, action, "market_bias_avoid", f"confidence={bias_entry.get('confidence','')} reason={bias_entry.get('reason','')}", price=price)
+                log_rejection(symbol, action, "market_bias_avoid", f"confidence={bias_entry.get('confidence','')} reason={bias_entry.get('reason','')}", price=price, account_state=account_state)
                 return
             if bias == "buy":
                 account_state["market_bias"] = "buy"
@@ -737,7 +833,7 @@ def process_signal(data):
                     f"Chase prevention gate blocked {symbol} BUY: entry_quality={eq}, "
                     f"risk_level={bias_entry.get('risk_level') or '-'} — skipping Claude"
                 )
-                log_rejection(symbol, action, "chase_prevention", f"entry_quality={eq} risk_level={bias_entry.get('risk_level') or '-'}", price=price)
+                log_rejection(symbol, action, "chase_prevention", f"entry_quality={eq} risk_level={bias_entry.get('risk_level') or '-'}", price=price, account_state=account_state)
                 return
 
     # Momentum check (buy signals only, fail-open — never blocks trading)
@@ -771,7 +867,7 @@ def process_signal(data):
         log_rejection(
             symbol, action, "confidence_gate",
             f"Claude returned confidence=low (reason: {decision.get('reason', '')})",
-            price=price,
+            price=price, account_state=account_state,
         )
         return
 
@@ -800,7 +896,7 @@ def process_signal(data):
     else:
         rejected_reason = decision.get("reason")
         logger.info(f"REJECTED: {symbol} {action.upper()} - {rejected_reason}")
-    log_trade(data, decision, order_result)
+    log_trade(data, decision, order_result, account_state=account_state)
 
 @app.route("/webhook", methods=["POST"])
 def webhook():

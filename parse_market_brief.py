@@ -33,6 +33,8 @@ BIAS_PATTERN = re.compile(
     re.IGNORECASE,
 )
 SENTIMENT_PATTERN = re.compile(r'\b(risk[-\s]?on|risk[-\s]?off|mixed|neutral)\b', re.IGNORECASE)
+PRIORITY_SUMMARY_PATTERN = re.compile(r'\b(risk[-\s]?on|risk[-\s]?off|bullish|bearish|sentiment)\b', re.IGNORECASE)
+GENERIC_SUMMARY_PATTERN = re.compile(r'\b(futures|sentiment|market|macro|overall|outlook|fed|cpi)\b', re.IGNORECASE)
 
 
 def next_trading_day(d):
@@ -43,20 +45,32 @@ def next_trading_day(d):
 
 
 def extract_symbol_entry(text, symbol):
+    """Find the next bias keyword that follows this symbol in the text.
+
+    Resilient to single-line tables (e.g. AAPL$287.51-0.10%BuyQ2 FY26 blowout...SPY$...)
+    by searching forward from each occurrence of `symbol` and bounding the search by
+    the next ticker, so a bias for SYMBOL never bleeds in from a neighbor's row.
+    Iterates over all occurrences of the symbol — the first occurrence with a
+    bias word in scope wins. This skips early prose mentions that don't carry a
+    decision and lands on the per-symbol table entry.
+    """
     sym_pattern = re.compile(rf'\b{re.escape(symbol)}\b')
-    for line in text.splitlines():
-        if not sym_pattern.search(line):
+    others_pattern = re.compile(
+        r'\b(' + '|'.join(re.escape(s) for s in SYMBOLS if s != symbol) + r')\b'
+    )
+    for m_sym in sym_pattern.finditer(text):
+        window = text[m_sym.end() : m_sym.end() + 1500]
+        nxt = others_pattern.search(window)
+        scope = window[: nxt.start()] if nxt else window
+        bm = BIAS_PATTERN.search(scope)
+        if not bm:
             continue
-        bias_match = BIAS_PATTERN.search(line)
-        if not bias_match:
-            continue
-        matched_word = bias_match.group(1).lower()
+        matched_word = bm.group(1).lower()
         bias = _SYNONYM_TO_CANONICAL[matched_word]
-        cleaned = line.replace('|', ' ')
-        cleaned = sym_pattern.sub('', cleaned)
-        cleaned = re.sub(rf'\b{re.escape(matched_word)}\b', '', cleaned, flags=re.IGNORECASE)
-        cleaned = re.sub(r'^\s*[\-—:|.,#*]+\s*', '', cleaned)
-        cleaned = re.sub(r'\s*[\-—:|.,]+\s*$', '', cleaned)
+        reason_raw = scope[bm.end():]
+        cleaned = reason_raw.replace('|', ' ')
+        cleaned = re.sub(r'^[\s\-—:|.,#*$%+0-9]+', '', cleaned)
+        cleaned = re.sub(r'[\s\-—:|.,]+$', '', cleaned)
         cleaned = re.sub(r'\s+', ' ', cleaned).strip()
         return {
             "bias": bias,
@@ -80,15 +94,32 @@ def extract_macro_sentiment(text):
 
 
 def extract_macro_summary(text):
-    """Pick the first non-symbol line of reasonable length that mentions market/macro/futures."""
+    """Pick a macro summary line.
+
+    Two-tier preference: lines mentioning 'risk-on/off', 'bullish/bearish', or
+    'sentiment' win immediately over generic 'market'/'macro'/'overall'/etc.
+    For paragraph-style lines longer than the cap, take just the first sentence
+    so a sentiment statement embedded in a long paragraph still qualifies.
+    The symbol-skip check is applied to the extracted snippet, not the whole
+    line — so a sentiment paragraph that mentions specific tickers later on
+    still has its lead sentence considered.
+    """
+    candidates = []
     for line in text.splitlines():
-        if any(re.search(rf'\b{s}\b', line) for s in SYMBOLS):
+        cleaned = re.sub(r'[#*_`>]', '', line).strip()
+        if not cleaned:
             continue
-        if not re.search(r'\b(futures|sentiment|market|macro|overall|outlook|fed|cpi)\b', line, re.IGNORECASE):
+        snippet = re.split(r'(?<=[.!?])\s+', cleaned, maxsplit=1)[0]
+        if any(re.search(rf'\b{s}\b', snippet) for s in SYMBOLS):
             continue
-        stripped = re.sub(r'[#*_`>]', '', line).strip()
-        if 30 <= len(stripped) <= 300:
-            return stripped
+        if not (30 <= len(snippet) <= 300):
+            continue
+        if PRIORITY_SUMMARY_PATTERN.search(snippet):
+            return snippet
+        if GENERIC_SUMMARY_PATTERN.search(snippet):
+            candidates.append(snippet)
+    if candidates:
+        return candidates[0]
     return "no macro summary provided"
 
 

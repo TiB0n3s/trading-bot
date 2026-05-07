@@ -559,23 +559,103 @@ def status():
     except Exception:
         pass
 
-    # Detailed positions
+    # Detailed positions (now with trend, market_bias, and exposure-cap signals)
+    symbols_at_cap = []
     try:
-        positions = api.list_positions()
-        result["positions"] = [
-            {
-                "symbol":       p.symbol,
-                "qty":          float(p.qty),
-                "current_price": float(p.current_price),
-                "value":        float(p.market_value),
-                "unrealized_pl": float(p.unrealized_pl),
-                "pct_of_balance": round(float(p.market_value) / balance * 100, 2) if balance else None,
-            }
-            for p in sorted(positions, key=lambda x: -float(x.market_value))
-        ]
-        result["position_count"] = f"{len(positions)}/8"
+        alpaca_positions = api.list_positions()
+        pos_list = []
+        for p in sorted(alpaca_positions, key=lambda x: -float(x.market_value)):
+            try:
+                mv = float(p.market_value)
+                pct_of_balance = round(mv / balance * 100, 2) if balance else None
+                cap_hit = bool(pct_of_balance is not None and pct_of_balance >= 4.0)
+                if cap_hit:
+                    symbols_at_cap.append(p.symbol)
+                trend = _trend_table.get(p.symbol) or {}
+                bias_entry = _market_bias.get(p.symbol) or {}
+                pos_list.append({
+                    "symbol":          p.symbol,
+                    "qty":             float(p.qty),
+                    "current_price":   float(p.current_price),
+                    "value":           mv,
+                    "unrealized_pl":   float(p.unrealized_pl),
+                    "pct_of_balance":  pct_of_balance,
+                    "trend_direction": trend.get("direction"),
+                    "trend_strength":  trend.get("strength"),
+                    "market_bias":     bias_entry.get("bias"),
+                    "exposure_cap_hit": cap_hit,
+                })
+            except Exception as e:
+                logger.warning(f"/status per-symbol error for {p.symbol}: {e}")
+        result["positions"] = pos_list
+        result["position_count"] = f"{len(alpaca_positions)}/8"
     except Exception as e:
         logger.error(f"/status positions error: {e}")
+
+    # Pre-check state — what would block / pass right now if a buy signal arrived
+    try:
+        now_et = datetime.now(pytz.timezone("America/New_York"))
+        t_min = now_et.hour * 60 + now_et.minute
+        market_hours_open = (
+            now_et.weekday() < 5
+            and (9 * 60 + 45) <= t_min < (15 * 60 + 45)
+        )
+
+        cooldowns = []
+        for (sym, action), ts in _last_order.items():
+            elapsed = (now_et - ts).total_seconds()
+            if elapsed < 15 * 60:
+                cooldowns.append({
+                    "symbol": sym,
+                    "action": action,
+                    "minutes_remaining": int((15 * 60 - elapsed) // 60),
+                })
+
+        churn = []
+        for sym, val in _last_sell.items():
+            try:
+                ts = val[0] if isinstance(val, tuple) else val
+                elapsed = (now_et - ts).total_seconds()
+                if elapsed < 30 * 60:
+                    churn.append(sym)
+            except Exception:
+                pass
+
+        trend_blocked = [
+            {"symbol": sym, "direction": t.get("direction"), "strength": t.get("strength")}
+            for sym, t in _trend_table.items()
+            if sym in APPROVED_SYMBOLS and t.get("direction") in ("neutral", "bearish")
+        ]
+
+        bias_avoid = sorted(
+            sym for sym, entry in _market_bias.items()
+            if (entry or {}).get("bias") == "avoid"
+        )
+
+        daily_pnl_pct = result.get("account", {}).get("daily_pnl_pct")
+        result["pre_check_state"] = {
+            "market_hours_open": market_hours_open,
+            "circuit_breaker_active": (daily_pnl_pct or 0) < -3.0,
+            "symbols_on_cooldown": sorted(cooldowns, key=lambda c: (c["symbol"], c["action"])),
+            "symbols_on_churn_block": sorted(churn),
+            "symbols_at_exposure_cap": sorted(symbols_at_cap),
+            "trend_gate_blocked": sorted(trend_blocked, key=lambda x: x["symbol"]),
+            "market_bias_avoided": bias_avoid,
+        }
+    except Exception as e:
+        logger.error(f"/status pre_check_state error: {e}")
+
+    # Trend snapshot for all 15 approved symbols (not just held positions)
+    try:
+        result["trend_table_summary"] = {
+            sym: (
+                {"direction": t.get("direction"), "strength": t.get("strength")}
+                if (t := _trend_table.get(sym)) else None
+            )
+            for sym in sorted(APPROVED_SYMBOLS)
+        }
+    except Exception as e:
+        logger.error(f"/status trend_table_summary error: {e}")
 
     # Today's signal counts from trades.db
     try:

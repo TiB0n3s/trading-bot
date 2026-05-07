@@ -28,9 +28,9 @@ BIAS_SYNONYMS = {
     "neutral": ["neutral", "hold", "flat", "mixed"],
 }
 _SYNONYM_TO_CANONICAL = {syn: canon for canon, syns in BIAS_SYNONYMS.items() for syn in syns}
+_BIAS_FORMS = [s for s in _SYNONYM_TO_CANONICAL] + [s.title() for s in _SYNONYM_TO_CANONICAL]
 BIAS_PATTERN = re.compile(
-    r'\b(' + '|'.join(re.escape(s) for s in _SYNONYM_TO_CANONICAL) + r')\b',
-    re.IGNORECASE,
+    r'\b(' + '|'.join(re.escape(s) for s in _BIAS_FORMS) + r')(?![a-z])',
 )
 SENTIMENT_PATTERN = re.compile(r'\b(risk[-\s]?on|risk[-\s]?off|mixed|neutral)\b', re.IGNORECASE)
 PRIORITY_SUMMARY_PATTERN = re.compile(r'\b(risk[-\s]?on|risk[-\s]?off|bullish|bearish|sentiment)\b', re.IGNORECASE)
@@ -54,9 +54,9 @@ def extract_symbol_entry(text, symbol):
     bias word in scope wins. This skips early prose mentions that don't carry a
     decision and lands on the per-symbol table entry.
     """
-    sym_pattern = re.compile(rf'\b{re.escape(symbol)}\b')
+    sym_pattern = re.compile(rf'(?<![A-Z]){re.escape(symbol)}(?![A-Z])')
     others_pattern = re.compile(
-        r'\b(' + '|'.join(re.escape(s) for s in SYMBOLS if s != symbol) + r')\b'
+        r'(?<![A-Z])(' + '|'.join(re.escape(s) for s in SYMBOLS if s != symbol) + r')(?![A-Z])'
     )
     for m_sym in sym_pattern.finditer(text):
         window = text[m_sym.end() : m_sym.end() + 1500]
@@ -64,6 +64,19 @@ def extract_symbol_entry(text, symbol):
         scope = window[: nxt.start()] if nxt else window
         bm = BIAS_PATTERN.search(scope)
         if not bm:
+            continue
+        # Heuristic: prefer table-row matches over prose-context bias mentions.
+        # A genuine table row has BOTH (A) a % sign or digit within 50 chars
+        # before the bias word — the price/percent prefix in '$194.03-0.92%Neutral'
+        # — AND (B) the bias word within 150 chars of the symbol. A long scope
+        # (>400 chars) without both signals means the symbol was just name-dropped
+        # in prose and the bias word belongs to something else nearby (e.g. ORCL
+        # mentioned in passing, then 'hawkish hold' from a Fed paragraph 280
+        # chars later).
+        pre_bias = scope[max(0, bm.start() - 50) : bm.start()]
+        has_table_signature = bool(re.search(r'[%\d]', pre_bias))
+        is_close = bm.start() < 150
+        if not (has_table_signature and is_close) and len(scope) > 400:
             continue
         matched_word = bm.group(1).lower()
         bias = _SYNONYM_TO_CANONICAL[matched_word]

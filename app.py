@@ -9,6 +9,7 @@ from pathlib import Path
 from flask import Flask, request, jsonify, abort
 from decision_engine import evaluate_signal, get_mock_account_state
 from broker import place_order, get_account, get_position, api
+from macro_risk import get_macro_risk
 
 app = Flask(__name__)
 
@@ -127,6 +128,23 @@ WEBHOOK_SECRET = os.environ.get("WEBHOOK_SECRET", "changeme")
 
 APPROVED_SYMBOLS = {"AAPL", "SPY", "QQQ", "MSFT", "NVDA", "ORCL", "TSCO", "TSLA", "META", "AMD", "CVX", "XOM", "GOOGL", "GLD", "IWM"}
 
+# Correlation clusters and per-cluster exposure caps (% of cash balance).
+# A new buy is blocked if the cluster's combined market value would exceed
+# the limit. Symbols can appear in multiple clusters (e.g. QQQ is both
+# mega_cap_tech and broad_index) — exposure to such a symbol counts against
+# every cluster it belongs to.
+CORRELATION_CLUSTERS = {
+    "mega_cap_tech": {"AAPL", "MSFT", "NVDA", "META", "GOOGL", "AMD", "QQQ"},
+    "broad_index": {"SPY", "QQQ", "IWM"},
+    "energy": {"CVX", "XOM"},
+}
+
+CLUSTER_EXPOSURE_LIMITS = {
+    "mega_cap_tech": 15.0,
+    "broad_index": 12.0,
+    "energy": 8.0,
+}
+
 # (min, max) expected price ranges; signals outside ±20% of this range are rejected
 PRICE_RANGES = {
     "AAPL": (150,  500),
@@ -175,7 +193,12 @@ def _build_trend_table():
                 SELECT symbol, action, timestamp,
                        ROW_NUMBER() OVER (PARTITION BY symbol ORDER BY timestamp DESC) AS rn
                 FROM trades
-                WHERE symbol IS NOT NULL AND action IS NOT NULL
+                WHERE symbol IS NOT NULL
+                  AND action IS NOT NULL
+                  AND (
+                      approved = 1
+                      OR rejection_reason LIKE 'confidence_gate:%'
+                  )
             ) WHERE rn <= 10
             ORDER BY symbol, timestamp DESC
         """).fetchall()
@@ -460,6 +483,46 @@ def log_rejection(symbol, action, category, reason, price=None):
     except Exception as e:
         logger.error(f"log_rejection DB write failed for {symbol}: {e}")
 
+def _cluster_exposure(symbol, balance):
+    """Return cluster exposure info for the symbol across current Alpaca positions."""
+    if not balance:
+        return []
+
+    results = []
+    try:
+        positions = api.list_positions()
+        position_values = {
+            p.symbol: float(p.market_value)
+            for p in positions
+        }
+
+        for cluster_name, members in CORRELATION_CLUSTERS.items():
+            if symbol not in members:
+                continue
+
+            cluster_value = sum(
+                value for sym, value in position_values.items()
+                if sym in members
+            )
+
+            exposure_pct = cluster_value / balance * 100
+            limit_pct = CLUSTER_EXPOSURE_LIMITS.get(cluster_name, 100.0)
+
+            results.append({
+                "cluster": cluster_name,
+                "members": sorted(members),
+                "current_value": round(cluster_value, 2),
+                "exposure_pct": round(exposure_pct, 2),
+                "limit_pct": limit_pct,
+                "limit_hit": exposure_pct >= limit_pct,
+            })
+
+    except Exception as e:
+        logger.error(f"_cluster_exposure failed for {symbol}: {e}")
+
+    return results
+
+
 def get_momentum(symbol, price):
     try:
         start = (datetime.now(timezone.utc) - timedelta(minutes=10)).isoformat()
@@ -589,6 +652,26 @@ def process_signal(data):
                 log_rejection(symbol, action, "exposure_cap", f"position ${position_value:.2f} = {exposure_pct:.2f}% of balance (limit 4.0%)", price=price)
                 return
 
+    # Correlation exposure cap: block buys when a correlated cluster is already full
+    if action == "buy":
+        balance = account_state.get("balance", 0)
+        cluster_checks = _cluster_exposure(symbol, balance)
+
+        for check in cluster_checks:
+            if check.get("limit_hit"):
+                reason = (
+                    f"{check['cluster']} exposure {check['exposure_pct']:.2f}% "
+                    f">= limit {check['limit_pct']:.2f}%"
+                )
+                logger.warning(
+                    f"Correlation cap blocked {symbol} BUY: {reason} — skipping Claude"
+                )
+                log_rejection(symbol, action, "correlation_cap", reason, price=price)
+                return
+
+        if cluster_checks:
+            account_state["correlation_exposure"] = cluster_checks
+
     # Trend gate: block buy signals on symbols with established neutral/bearish trend
     # (new symbols with no prior history pass through — block only applies once history exists)
     if action == "buy":
@@ -601,6 +684,25 @@ def process_signal(data):
                 f"consecutive_count={trend.get('consecutive_count')} — skipping Claude"
             )
             log_rejection(symbol, action, "trend_gate", f"direction={trend.get('direction')} strength={trend.get('strength')} count={trend.get('consecutive_count')}", price=price)
+            return
+
+    # Macro-risk gate: regime-aware risk control before Claude
+    macro_risk = get_macro_risk(Path(__file__).parent)
+    account_state["macro_risk"] = macro_risk
+
+    if action == "buy":
+        if macro_risk.get("block_new_buys"):
+            reason = macro_risk.get("reason", "macro regime blocks new buys")
+            logger.warning(f"Macro-risk gate blocked {symbol} BUY: {reason}")
+            log_rejection(symbol, action, "macro_risk", reason, price=price)
+            return
+
+        max_new_positions = macro_risk.get("max_new_positions", 8)
+        open_count = account_state.get("open_position_count", 0)
+        if open_count >= max_new_positions:
+            reason = f"open_position_count={open_count} >= macro max_new_positions={max_new_positions}"
+            logger.warning(f"Macro-risk gate blocked {symbol} BUY: {reason}")
+            log_rejection(symbol, action, "macro_position_limit", reason, price=price)
             return
 
     # Market bias gate: block buy if pre-market research flagged 'avoid'; inject 'buy' bias for Claude
@@ -676,10 +778,12 @@ def process_signal(data):
     if decision.get("approved"):
         approved_reason = decision.get("reason")
         logger.info(f"APPROVED: {symbol} {action.upper()} - {approved_reason}")
+        risk_multiplier = float(account_state.get("macro_risk", {}).get("risk_multiplier", 1.0))
+        adjusted_position_size_pct = decision.get("position_size_pct", 1.0) * risk_multiplier
         order_result = place_order(
             symbol=symbol,
             action=action,
-            position_size_pct=decision.get("position_size_pct", 1.0),
+            position_size_pct=adjusted_position_size_pct,
             stop_loss_pct=decision.get("stop_loss_pct", 0.5),
             take_profit_pct=decision.get("take_profit_pct", 1.5),
             risk_level=account_state.get("risk_level"),
@@ -779,6 +883,12 @@ def status():
     except Exception:
         pass
 
+    # Macro risk regime
+    try:
+        result["macro_risk"] = get_macro_risk(Path(__file__).parent)
+    except Exception as e:
+        logger.error(f"/status macro_risk error: {e}")
+
     # Account summary + daily P&L (via get_mock_account_state)
     try:
         state = get_mock_account_state()
@@ -834,6 +944,38 @@ def status():
         result["position_count"] = f"{len(alpaca_positions)}/8"
     except Exception as e:
         logger.error(f"/status positions error: {e}")
+
+    # Correlation exposure per cluster (mega_cap_tech / broad_index / energy)
+    try:
+        cluster_status = {}
+        for cluster_name, members in CORRELATION_CLUSTERS.items():
+            value = 0.0
+            held = []
+            for p in api.list_positions():
+                if p.symbol in members:
+                    mv = float(p.market_value)
+                    value += mv
+                    held.append({
+                        "symbol": p.symbol,
+                        "value": round(mv, 2),
+                    })
+
+            exposure_pct = round(value / balance * 100, 2) if balance else None
+            limit_pct = CLUSTER_EXPOSURE_LIMITS.get(cluster_name)
+            cluster_status[cluster_name] = {
+                "members": sorted(members),
+                "held": sorted(held, key=lambda x: -x["value"]),
+                "value": round(value, 2),
+                "exposure_pct": exposure_pct,
+                "limit_pct": limit_pct,
+                "limit_hit": bool(
+                    exposure_pct is not None and limit_pct is not None and exposure_pct >= limit_pct
+                ),
+            }
+
+        result["correlation_exposure"] = cluster_status
+    except Exception as e:
+        logger.error(f"/status correlation_exposure error: {e}")
 
     # Pre-check state — what would block / pass right now if a buy signal arrived
     try:

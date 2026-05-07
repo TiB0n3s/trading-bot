@@ -43,7 +43,7 @@ Server timezone is `America/Chicago (CDT, -0500)`. Cron uses local time.
 
 ## Architecture
 
-Seven files in regular use plus one one-shot migration script, each with a single responsibility:
+Seven files, each with a single responsibility:
 
 **`app.py`** — Flask server (gunicorn, 3 workers). Exposes `POST /webhook?secret=<token>` and `GET /health`. On startup, each gunicorn worker runs in order:
 1. **`_init_db()`** — creates `trades.db` if missing.
@@ -93,8 +93,6 @@ After the pipeline completes, `log_trade` writes to both `signals.log` (pipe-del
 - **Sell path:** fetches position qty (sign preserved — no `abs()`) → rejects with `"Refusing sell ... is short/zero, not a long to close"` if `qty <= 0` → cancels all open bracket orders for the symbol → sleeps 1s → re-fetches position to confirm qty matches before proceeding → submits market sell. Returns `None` if position fetch fails (logged as `"Failed to fetch position"` to distinguish API errors from a 404), qty is non-positive, cancel fails, or qty mismatches. The qty-sign guard prevents the sell path from deepening an existing short — historically a sell with no underlying long would open a short at Alpaca, which then polluted account state until the bracket expired (see ghost-sell incident on QQQ 2026-05-04).
 - **Buy path:** calculates `qty = int(balance * position_size_pct/100 / current_price)` → submits bracket order with stop-loss and take-profit legs. Returns `None` if qty < 1.
 - All `return None` paths have a preceding `logger.error` identifying the failure.
-
-**`migrate_to_db.py`** — One-time script. Parsed 204 entries from `signals.log` into `trades.db`. Safe to re-run (uses `CREATE TABLE IF NOT EXISTS` + appends). 3 early-format lines from May 2 were skipped.
 
 **`fill_stream.py`** — Standalone async process managed by `fill-stream.service`. Connects to `wss://paper-api.alpaca.markets/stream/` via `alpaca_trade_api.Stream` and subscribes to `trade_updates`. On `fill` or `partial_fill` events, updates `order_status` and `fill_price` in `trades.db` in real time using the `order_id`. Non-fill events (canceled, expired, etc.) are logged but don't touch the DB. Reconnects automatically after 30 seconds on any error by recreating the `Stream` object. Logs to `fill_stream.log`.
 

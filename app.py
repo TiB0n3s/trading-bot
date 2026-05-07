@@ -42,7 +42,7 @@ def _init_db():
 _init_db()
 
 logging.basicConfig(
-    level=logging.DEBUG,
+    level=os.environ.get("LOG_LEVEL", "INFO").upper(),
     format="%(asctime)s - %(levelname)s - %(message)s",
     handlers=[
         logging.FileHandler("trading_bot.log"),

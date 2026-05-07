@@ -4,6 +4,29 @@ Parse a manually-pasted market brief (e.g. from Claude in Chrome) into
 market_context.json — the same shape pre_market_research.py produces, so the
 bot's _load_market_context() picks it up unchanged.
 
+Output schema:
+{
+  "market_date":      "YYYY-MM-DD",
+  "generated_at":     ISO timestamp,
+  "macro_sentiment":  "risk-on" | "risk-off" | "mixed" | "neutral",
+  "macro_summary":    "<one-sentence>",
+  "symbols": {
+    "AAPL": {
+      "bias":              "buy" | "avoid" | "neutral",
+      "reason":            "<brief reason or 'no signals found'>",
+      "confidence":        "high" | "medium" | "low",
+      "fundamental_score": "strong_bullish" | "bullish" | "neutral" |
+                           "bearish" | "strong_bearish" | null,
+    },
+    ... one entry per approved symbol
+  },
+  "source": "manual_chrome_analysis"
+}
+
+The bot's _load_market_context() consumes bias / reason / confidence today.
+fundamental_score is added for downstream wiring (e.g. a future fundamental gate
+or an extra account_state injection for Claude).
+
 Usage:
     python parse_market_brief.py                          # read stdin
     python parse_market_brief.py path/to/brief.txt        # read file
@@ -31,6 +54,24 @@ _SYNONYM_TO_CANONICAL = {syn: canon for canon, syns in BIAS_SYNONYMS.items() for
 _BIAS_FORMS = [s for s in _SYNONYM_TO_CANONICAL] + [s.title() for s in _SYNONYM_TO_CANONICAL]
 BIAS_PATTERN = re.compile(
     r'\b(' + '|'.join(re.escape(s) for s in _BIAS_FORMS) + r')(?![a-z])',
+)
+
+FUNDAMENTAL_SYNONYMS = {
+    "strong_bullish": ["strong_bullish", "strong bullish"],
+    "bullish":        ["bullish"],
+    "neutral":        ["neutral"],
+    "bearish":        ["bearish"],
+    "strong_bearish": ["strong_bearish", "strong bearish"],
+}
+_FUNDAMENTAL_TO_CANONICAL = {syn: canon for canon, syns in FUNDAMENTAL_SYNONYMS.items() for syn in syns}
+# Build pattern forms (lowercase + Title), longest first so 'strong bullish' beats 'bullish'
+_FUNDAMENTAL_FORMS = []
+for syn in _FUNDAMENTAL_TO_CANONICAL:
+    _FUNDAMENTAL_FORMS.append(syn)
+    _FUNDAMENTAL_FORMS.append(syn.title())
+_FUNDAMENTAL_FORMS = sorted(set(_FUNDAMENTAL_FORMS), key=len, reverse=True)
+FUNDAMENTAL_PATTERN = re.compile(
+    r'(' + '|'.join(re.escape(s) for s in _FUNDAMENTAL_FORMS) + r')(?![a-z])',
 )
 SENTIMENT_PATTERN = re.compile(r'\b(risk[-\s]?on|risk[-\s]?off|mixed|neutral)\b', re.IGNORECASE)
 PRIORITY_SUMMARY_PATTERN = re.compile(r'\b(risk[-\s]?on|risk[-\s]?off|bullish|bearish|sentiment)\b', re.IGNORECASE)
@@ -80,7 +121,19 @@ def extract_symbol_entry(text, symbol):
             continue
         matched_word = bm.group(1).lower()
         bias = _SYNONYM_TO_CANONICAL[matched_word]
-        reason_raw = scope[bm.end():]
+
+        # Search the rest of the scope for a fundamental overlay keyword
+        fund_match = FUNDAMENTAL_PATTERN.search(scope, bm.end())
+        fundamental_score = None
+        reason_start = bm.end()
+        if fund_match:
+            fundamental_score = _FUNDAMENTAL_TO_CANONICAL.get(fund_match.group(1).lower())
+            # If the fundamental column is right next to the bias column, strip it
+            # from the reason so the reason doesn't lead with "Bullish..."
+            if fundamental_score and fund_match.start() - bm.end() < 3:
+                reason_start = fund_match.end()
+
+        reason_raw = scope[reason_start:]
         cleaned = reason_raw.replace('|', ' ')
         cleaned = re.sub(r'^[\s\-—:|.,#*$%+0-9]+', '', cleaned)
         cleaned = re.sub(r'[\s\-—:|.,]+$', '', cleaned)
@@ -89,6 +142,7 @@ def extract_symbol_entry(text, symbol):
             "bias": bias,
             "reason": cleaned or "no detail provided",
             "confidence": "medium",
+            "fundamental_score": fundamental_score,
         }
     return None
 
@@ -173,6 +227,7 @@ def main():
                 "bias": "neutral",
                 "reason": "no signals found",
                 "confidence": "low",
+                "fundamental_score": None,
             }
 
     output = {
@@ -193,12 +248,13 @@ def main():
     print(f"  Parsed symbols  : {parsed_count}/{len(SYMBOLS)} (rest defaulted to neutral/low)")
     print(f"  Output          : {OUTPUT_FILE}")
     print()
-    print(f"  {'Symbol':<7} {'Bias':<8} {'Conf':<7}  Reason")
-    print(f"  {'-'*7} {'-'*8} {'-'*7}  {'-'*60}")
+    print(f"  {'Symbol':<7} {'Bias':<8} {'Conf':<7} {'Fundamental':<15}  Reason")
+    print(f"  {'-'*7} {'-'*8} {'-'*7} {'-'*15}  {'-'*55}")
     for sym in SYMBOLS:
         e = symbols_out[sym]
-        reason = (e['reason'] or '')[:60]
-        print(f"  {sym:<7} {e['bias']:<8} {e['confidence']:<7}  {reason}")
+        reason = (e['reason'] or '')[:55]
+        fund = e.get('fundamental_score') or '-'
+        print(f"  {sym:<7} {e['bias']:<8} {e['confidence']:<7} {fund:<15}  {reason}")
 
 
 if __name__ == "__main__":

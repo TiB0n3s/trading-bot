@@ -36,6 +36,24 @@ def _init_db():
             fill_price        REAL
         )
     """)
+    # Operational state tables — persisted across restarts and shared between
+    # gunicorn workers (Stage A: schema + startup hydration; Stage B will add
+    # the write-through paths so cooldowns / recent_sells stay in sync at runtime).
+    con.execute("""
+        CREATE TABLE IF NOT EXISTS cooldowns (
+            symbol          TEXT NOT NULL,
+            action          TEXT NOT NULL,
+            last_order_time TEXT NOT NULL,
+            PRIMARY KEY (symbol, action)
+        )
+    """)
+    con.execute("""
+        CREATE TABLE IF NOT EXISTS recent_sells (
+            symbol          TEXT PRIMARY KEY,
+            last_sell_time  TEXT NOT NULL,
+            last_sell_price REAL NOT NULL
+        )
+    """)
     con.commit()
     con.close()
 
@@ -177,6 +195,165 @@ def _build_trend_table():
         logger.error(f"_build_trend_table failed: {e}")
 
 _build_trend_table()
+
+def _hydrate_cooldowns():
+    """Load active cooldowns from the cooldowns table into _last_order.
+
+    Filters out entries older than the 15-min window (those are already expired
+    and irrelevant). On startup this restores cooldown state across restarts and
+    — once Stage B writes are in place — across gunicorn workers.
+    """
+    try:
+        et = pytz.timezone("America/New_York")
+        now_et = datetime.now(et)
+        con = sqlite3.connect(DB_PATH)
+        rows = con.execute("SELECT symbol, action, last_order_time FROM cooldowns").fetchall()
+        con.close()
+        loaded = 0
+        for symbol, action, ts_str in rows:
+            try:
+                ts = datetime.fromisoformat(ts_str)
+                if ts.tzinfo is None:
+                    ts = et.localize(ts)
+                if (now_et - ts).total_seconds() < 15 * 60:
+                    _last_order[(symbol, action)] = ts
+                    loaded += 1
+            except Exception as e:
+                logger.warning(f"_hydrate_cooldowns: skipping {symbol}/{action}: {e}")
+        logger.info(f"Hydrated {loaded} active cooldowns from cooldowns table (of {len(rows)} total)")
+    except Exception as e:
+        logger.error(f"_hydrate_cooldowns failed: {e}")
+
+_hydrate_cooldowns()
+
+def _hydrate_recent_sells():
+    """Load recent-sell state from the recent_sells table into _last_sell.
+
+    Filters to entries within the 30-min churn window. Restores churn-prevention
+    state across restarts and (Stage B) across workers.
+    """
+    try:
+        et = pytz.timezone("America/New_York")
+        now_et = datetime.now(et)
+        con = sqlite3.connect(DB_PATH)
+        rows = con.execute("SELECT symbol, last_sell_time, last_sell_price FROM recent_sells").fetchall()
+        con.close()
+        loaded = 0
+        for symbol, ts_str, price in rows:
+            try:
+                ts = datetime.fromisoformat(ts_str)
+                if ts.tzinfo is None:
+                    ts = et.localize(ts)
+                if (now_et - ts).total_seconds() < 30 * 60:
+                    _last_sell[symbol] = (ts, price)
+                    loaded += 1
+            except Exception as e:
+                logger.warning(f"_hydrate_recent_sells: skipping {symbol}: {e}")
+        logger.info(f"Hydrated {loaded} recent sells from recent_sells table (of {len(rows)} total)")
+    except Exception as e:
+        logger.error(f"_hydrate_recent_sells failed: {e}")
+
+_hydrate_recent_sells()
+
+
+def _read_cooldown(symbol, action):
+    """Return last_order_time as a tz-aware datetime for (symbol, action), or None.
+    DB-backed read so all gunicorn workers see the same cooldown state."""
+    try:
+        et = pytz.timezone("America/New_York")
+        con = sqlite3.connect(DB_PATH)
+        row = con.execute(
+            "SELECT last_order_time FROM cooldowns WHERE symbol = ? AND action = ?",
+            (symbol, action),
+        ).fetchone()
+        con.close()
+        if not row:
+            return None
+        ts = datetime.fromisoformat(row[0])
+        if ts.tzinfo is None:
+            ts = et.localize(ts)
+        return ts
+    except Exception as e:
+        logger.error(f"_read_cooldown failed for {symbol}/{action}: {e}")
+        return None
+
+
+def _read_recent_sell(symbol):
+    """Return (timestamp, price) for the last sell on `symbol`, or None.
+    DB-backed read so all workers see the same churn-prevention state."""
+    try:
+        et = pytz.timezone("America/New_York")
+        con = sqlite3.connect(DB_PATH)
+        row = con.execute(
+            "SELECT last_sell_time, last_sell_price FROM recent_sells WHERE symbol = ?",
+            (symbol,),
+        ).fetchone()
+        con.close()
+        if not row:
+            return None
+        ts = datetime.fromisoformat(row[0])
+        if ts.tzinfo is None:
+            ts = et.localize(ts)
+        return (ts, row[1])
+    except Exception as e:
+        logger.error(f"_read_recent_sell failed for {symbol}: {e}")
+        return None
+
+
+def _write_cooldown(symbol, action, ts):
+    """Persist a cooldown entry. INSERT OR REPLACE so the same (symbol, action)
+    pair is overwritten on subsequent orders."""
+    try:
+        con = sqlite3.connect(DB_PATH)
+        con.execute(
+            "INSERT OR REPLACE INTO cooldowns (symbol, action, last_order_time) VALUES (?, ?, ?)",
+            (symbol, action, ts.isoformat()),
+        )
+        con.commit()
+        con.close()
+    except Exception as e:
+        logger.error(f"_write_cooldown failed for {symbol}/{action}: {e}")
+
+
+def _write_recent_sell(symbol, ts, price):
+    """Persist a recent-sell entry. INSERT OR REPLACE so the symbol's prior
+    sell (if any) is overwritten by the new one."""
+    try:
+        con = sqlite3.connect(DB_PATH)
+        con.execute(
+            "INSERT OR REPLACE INTO recent_sells (symbol, last_sell_time, last_sell_price) VALUES (?, ?, ?)",
+            (symbol, ts.isoformat(), price),
+        )
+        con.commit()
+        con.close()
+    except Exception as e:
+        logger.error(f"_write_recent_sell failed for {symbol}: {e}")
+
+
+def _refresh_signal_history(symbol):
+    """Re-read the last 10 signals for `symbol` from trades.db into _signal_history.
+
+    Filters out hard-rule rejections (cooldown / churn / exposure / trend gate /
+    market bias / chase prevention / market hours / circuit breaker / ghost sell)
+    so trend computation reflects only signals that reached or could have reached
+    the order layer. Confidence-gate rejections ARE included because they
+    represent a legitimate signal that Claude evaluated — the bot filtered them
+    on output quality, not on input validity.
+    """
+    try:
+        con = sqlite3.connect(DB_PATH)
+        rows = con.execute(
+            "SELECT action FROM trades "
+            "WHERE symbol = ? AND action IS NOT NULL "
+            "AND (approved = 1 OR rejection_reason LIKE 'confidence_gate:%') "
+            "ORDER BY timestamp DESC LIMIT 10",
+            (symbol,),
+        ).fetchall()
+        con.close()
+        _signal_history[symbol] = [r[0] for r in rows]
+    except Exception as e:
+        logger.warning(f"_refresh_signal_history failed for {symbol}: {e}")
+
 
 def _load_market_context():
     """Load same-day pre-market research into _market_bias.
@@ -322,7 +499,9 @@ def process_signal(data):
     account_state = get_mock_account_state()
 
     # Update trend table with this incoming signal before any pre-checks
+    # (Stage C: refresh from trades.db first so all workers see the same history)
     _now_ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    _refresh_signal_history(symbol)
     _signal_history.setdefault(symbol, []).insert(0, action)
     _signal_history[symbol] = _signal_history[symbol][:10]
     _trend_table[symbol] = {**_compute_trend(_signal_history[symbol]), "last_time": _now_ts}
@@ -358,8 +537,9 @@ def process_signal(data):
         account_state["current_symbol_position"] = existing_position
 
     # Cooldown check: skip if same symbol+action had a successful order within 15 min
+    # (Stage B: DB-backed read so all workers see the same cooldown state)
     cooldown_key = (symbol, action)
-    last = _last_order.get(cooldown_key)
+    last = _read_cooldown(symbol, action)
     if last and (now_et - last).total_seconds() < 15 * 60:
         mins_remaining = int(15 * 60 - (now_et - last).total_seconds()) // 60
         logger.warning(
@@ -370,8 +550,9 @@ def process_signal(data):
         return
 
     # Sell→buy churn prevention: block buys that follow a recent sell on the same symbol
+    # (Stage B: DB-backed read so all workers see the same recent-sell state)
     if action == "buy":
-        last_sell = _last_sell.get(symbol)
+        last_sell = _read_recent_sell(symbol)
         if last_sell:
             last_sell_time, last_sell_price = last_sell
             elapsed_s = (now_et - last_sell_time).total_seconds()
@@ -480,10 +661,16 @@ def process_signal(data):
     decision = evaluate_signal(data, account_state)
     order_result = None
 
-    # Confidence gate: reject low-confidence buy signals without placing an order
+    # Confidence gate: reject low-confidence buy signals without placing an order.
+    # Persisted via log_rejection (Stage 5 categorization) so signal_history can
+    # distinguish "Claude evaluated but bot filtered" from hard-rule rejections.
     if action == "buy" and decision.get("confidence") == "low":
         logger.warning(f"Low confidence BUY rejected for {symbol}: skipping order placement")
-        log_trade(data, decision, None)
+        log_rejection(
+            symbol, action, "confidence_gate",
+            f"Claude returned confidence=low (reason: {decision.get('reason', '')})",
+            price=price,
+        )
         return
 
     if decision.get("approved"):
@@ -500,8 +687,10 @@ def process_signal(data):
         if order_result:
             logger.info(f"ORDER PLACED: {order_result}")
             _last_order[cooldown_key] = now_et
+            _write_cooldown(symbol, action, now_et)
             if action == "sell":
                 _last_sell[symbol] = (now_et, price)
+                _write_recent_sell(symbol, now_et, price)
         else:
             logger.error(f"Order placement failed for {symbol}")
     else:
@@ -655,25 +844,43 @@ def status():
             and (9 * 60 + 45) <= t_min < (15 * 60 + 45)
         )
 
+        # Stage B: read cooldowns and recent_sells from DB tables so the
+        # snapshot reflects state across all gunicorn workers (the in-memory
+        # dicts only hold this worker's view).
+        et = pytz.timezone("America/New_York")
         cooldowns = []
-        for (sym, action), ts in _last_order.items():
-            elapsed = (now_et - ts).total_seconds()
-            if elapsed < 15 * 60:
-                cooldowns.append({
-                    "symbol": sym,
-                    "action": action,
-                    "minutes_remaining": int((15 * 60 - elapsed) // 60),
-                })
-
         churn = []
-        for sym, val in _last_sell.items():
-            try:
-                ts = val[0] if isinstance(val, tuple) else val
-                elapsed = (now_et - ts).total_seconds()
-                if elapsed < 30 * 60:
-                    churn.append(sym)
-            except Exception:
-                pass
+        try:
+            con = sqlite3.connect(DB_PATH)
+            cd_rows = con.execute("SELECT symbol, action, last_order_time FROM cooldowns").fetchall()
+            cs_rows = con.execute("SELECT symbol, last_sell_time FROM recent_sells").fetchall()
+            con.close()
+            for sym, act, ts_str in cd_rows:
+                try:
+                    ts = datetime.fromisoformat(ts_str)
+                    if ts.tzinfo is None:
+                        ts = et.localize(ts)
+                    elapsed = (now_et - ts).total_seconds()
+                    if elapsed < 15 * 60:
+                        cooldowns.append({
+                            "symbol": sym,
+                            "action": act,
+                            "minutes_remaining": int((15 * 60 - elapsed) // 60),
+                        })
+                except Exception:
+                    pass
+            for sym, ts_str in cs_rows:
+                try:
+                    ts = datetime.fromisoformat(ts_str)
+                    if ts.tzinfo is None:
+                        ts = et.localize(ts)
+                    elapsed = (now_et - ts).total_seconds()
+                    if elapsed < 30 * 60:
+                        churn.append(sym)
+                except Exception:
+                    pass
+        except Exception as e:
+            logger.error(f"/status DB read for pre_check_state failed: {e}")
 
         trend_blocked = [
             {"symbol": sym, "direction": t.get("direction"), "strength": t.get("strength")}

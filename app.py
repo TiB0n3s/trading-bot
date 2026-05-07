@@ -605,5 +605,89 @@ def status():
     return jsonify(result), 200
 
 
+@app.route("/positions", methods=["GET"])
+def positions():
+    validate_secret(request)
+    result = {"timestamp": datetime.now().isoformat()}
+
+    balance = 0.0
+    daily_pnl_pct = None
+    try:
+        state = get_mock_account_state()
+        balance = float(state.get("balance") or 0)
+        daily_pnl_pct = state.get("daily_pnl_pct")
+    except Exception as e:
+        logger.error(f"/positions account state error: {e}")
+
+    def _cooldown_active(symbol):
+        try:
+            now_et = datetime.now(pytz.timezone("America/New_York"))
+            for (sym, _action), ts in _last_order.items():
+                if sym == symbol and (now_et - ts).total_seconds() < 15 * 60:
+                    return True
+        except Exception:
+            pass
+        return False
+
+    positions_list = []
+    total_unrealized = 0.0
+    try:
+        for p in api.list_positions():
+            try:
+                qty = float(p.qty)
+                avg_entry = float(p.avg_entry_price)
+                current = float(p.current_price)
+                market_value = float(p.market_value)
+                unrealized_pl = float(p.unrealized_pl)
+                unrealized_pl_pct = float(p.unrealized_plpc) * 100
+                exposure_pct = (market_value / balance * 100) if balance else None
+                trend = _trend_table.get(p.symbol) or {}
+                bias_entry = _market_bias.get(p.symbol) or {}
+                positions_list.append({
+                    "symbol": p.symbol,
+                    "qty": qty,
+                    "avg_entry_price": round(avg_entry, 4),
+                    "current_price": round(current, 4),
+                    "market_value": round(market_value, 2),
+                    "unrealized_pl": round(unrealized_pl, 2),
+                    "unrealized_pl_pct": round(unrealized_pl_pct, 3),
+                    "exposure_pct": round(exposure_pct, 2) if exposure_pct is not None else None,
+                    "exposure_cap_hit": bool(exposure_pct is not None and exposure_pct >= 4.0),
+                    "trend_direction": trend.get("direction"),
+                    "trend_strength": trend.get("strength"),
+                    "market_bias": bias_entry.get("bias"),
+                    "cooldown_active": _cooldown_active(p.symbol),
+                })
+                total_unrealized += unrealized_pl
+            except Exception as e:
+                logger.warning(f"/positions per-symbol error for {p.symbol}: {e}")
+    except Exception as e:
+        logger.error(f"/positions list_positions error: {e}")
+
+    market_context_date = None
+    macro_sentiment = None
+    try:
+        _load_market_context()  # opportunistic lazy refresh
+        ctx_path = Path(__file__).parent / "market_context.json"
+        if ctx_path.exists():
+            ctx = json.loads(ctx_path.read_text())
+            market_context_date = ctx.get("market_date")
+            macro_sentiment = ctx.get("macro_sentiment")
+    except Exception as e:
+        logger.error(f"/positions market_context read error: {e}")
+
+    result["summary"] = {
+        "total_positions": len(positions_list),
+        "max_positions": 8,
+        "total_unrealized_pl": round(total_unrealized, 2),
+        "account_balance": balance,
+        "daily_pnl_pct": daily_pnl_pct,
+        "market_context_date": market_context_date,
+        "macro_sentiment": macro_sentiment,
+    }
+    result["positions"] = sorted(positions_list, key=lambda x: -(x.get("market_value") or 0))
+    return jsonify(result), 200
+
+
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000, debug=False)

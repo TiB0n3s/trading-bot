@@ -52,7 +52,10 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 OUTPUT_FILE = SCRIPT_DIR / "market_context.json"
 
 SYMBOLS = ["AAPL", "SPY", "QQQ", "MSFT", "NVDA", "ORCL", "TSCO", "TSLA",
-           "META", "AMD", "CVX", "XOM", "GOOGL", "GLD", "IWM"]
+           "META", "AMD", "CVX", "XOM", "GOOGL", "GLD", "IWM",
+           "AVGO", "CRDO", "GEV", "BE", "CAT", "VRT",
+           "RKLB", "RTX", "LMT", "HWM",
+           "VRTX", "MRNA", "CRSP"]
 
 BIAS_SYNONYMS = {
     "buy":     ["buy", "bullish", "long", "positive"],
@@ -212,23 +215,60 @@ def parse_json_brief(text):
     data = json.loads(text)
 
     macro = data.get("macro_summary") or {}
-    raw_sent = (macro.get("market_sentiment") or "").lower().replace("_", "-")
-    macro_sentiment = raw_sent if raw_sent in ("risk-on", "risk-off", "mixed", "neutral") else "neutral"
-    macro_summary_text = (
-        macro.get("marketwatch_summary")
-        or macro.get("reuters_summary")
-        or macro.get("benzinga_summary")
-        or "no macro summary provided"
-    )
 
-    by_symbol = {
-        e.get("symbol"): e
-        for e in (data.get("symbols") or [])
-        if isinstance(e, dict) and isinstance(e.get("symbol"), str)
-    }
+    # macro_sentiment: try top-level first (newer brief format), then nested
+    # macro_summary.market_sentiment (older format). Normalize "risk_on_selective"
+    # and similar prefixed variants to the four canonical buckets.
+    raw_sent = (
+        data.get("macro_sentiment")
+        or (macro.get("market_sentiment") if isinstance(macro, dict) else None)
+        or ""
+    )
+    raw_sent = str(raw_sent).lower().replace("_", "-").strip()
+    if raw_sent.startswith("risk-on"):
+        macro_sentiment = "risk-on"
+    elif raw_sent.startswith("risk-off"):
+        macro_sentiment = "risk-off"
+    elif raw_sent in ("risk-on", "risk-off", "mixed", "neutral"):
+        macro_sentiment = raw_sent
+    else:
+        macro_sentiment = "neutral"
+
+    # macro_summary text: prefer explicit summary fields, fall back to dominant_themes,
+    # then to a synthesized one-liner from tone fields, finally to a default.
+    macro_summary_text = "no macro summary provided"
+    if isinstance(macro, dict):
+        if macro.get("marketwatch_summary"):
+            macro_summary_text = macro["marketwatch_summary"]
+        elif macro.get("reuters_summary"):
+            macro_summary_text = macro["reuters_summary"]
+        elif macro.get("benzinga_summary"):
+            macro_summary_text = macro["benzinga_summary"]
+        elif macro.get("summary"):
+            macro_summary_text = macro["summary"]
+        elif isinstance(macro.get("dominant_themes"), list) and macro["dominant_themes"]:
+            macro_summary_text = "; ".join(str(t) for t in macro["dominant_themes"][:3])
+        elif macro.get("spy_tone") or macro.get("qqq_tone"):
+            spy = macro.get("spy_tone", "?")
+            qqq = macro.get("qqq_tone", "?")
+            macro_summary_text = f"SPY tone: {spy}, QQQ tone: {qqq}"
+
+    # symbols: accept either dict-keyed-by-symbol (newer) or list-of-objects (older)
+    raw_symbols = data.get("symbols")
+    by_symbol = {}
+    if isinstance(raw_symbols, dict):
+        for sym, entry in raw_symbols.items():
+            if isinstance(entry, dict) and isinstance(sym, str):
+                by_symbol[sym] = entry
+    elif isinstance(raw_symbols, list):
+        for e in raw_symbols:
+            if isinstance(e, dict) and isinstance(e.get("symbol"), str):
+                by_symbol[e["symbol"]] = e
 
     valid_bias = ("buy", "avoid", "neutral")
     valid_fund = ("strong_bullish", "bullish", "neutral", "bearish", "strong_bearish")
+    # Accept "normal" as a synonym for "medium" — newer briefs use "normal" as the
+    # default-risk label whereas older ones used "medium".
     valid_risk = ("low", "medium", "high", "very_high")
 
     symbols_out = {}
@@ -236,7 +276,8 @@ def parse_json_brief(text):
     for sym in SYMBOLS:
         entry = by_symbol.get(sym)
         if entry:
-            bias = (entry.get("trading_bias") or "neutral").lower()
+            # Newer briefs use "bias" directly; older format used "trading_bias"
+            bias = (entry.get("bias") or entry.get("trading_bias") or "neutral").lower()
             if bias not in valid_bias:
                 bias = "neutral"
             fund = entry.get("fundamental_score")
@@ -248,6 +289,8 @@ def parse_json_brief(text):
             risk = entry.get("risk_level")
             if isinstance(risk, str):
                 risk_norm = risk.lower()
+                if risk_norm == "normal":
+                    risk_norm = "medium"
                 risk = risk_norm if risk_norm in valid_risk else None
             else:
                 risk = None
@@ -342,6 +385,17 @@ def main():
         "source": "manual_chrome_analysis",
         "format": format_used,
     }
+
+    # Preserve top-level explicit macro overrides from JSON briefs so macro_risk.py
+    # can honor them (max_new_positions, risk_multiplier, block_new_buys, macro_regime).
+    if format_used == "json":
+        try:
+            raw = json.loads(text)
+            for field in ("macro_regime", "risk_multiplier", "max_new_positions", "block_new_buys"):
+                if field in raw:
+                    output[field] = raw[field]
+        except Exception:
+            pass
 
     OUTPUT_FILE.write_text(json.dumps(output, indent=2))
 

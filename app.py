@@ -502,12 +502,11 @@ def _read_cooldown(symbol, action):
     DB-backed read so all gunicorn workers see the same cooldown state."""
     try:
         et = pytz.timezone("America/New_York")
-        con = sqlite3.connect(DB_PATH)
-        row = con.execute(
-            "SELECT last_order_time FROM cooldowns WHERE symbol = ? AND action = ?",
-            (symbol, action),
-        ).fetchone()
-        con.close()
+        with get_connection(DB_PATH) as con:
+            row = con.execute(
+                "SELECT last_order_time FROM cooldowns WHERE symbol = ? AND action = ?",
+                (symbol, action),
+            ).fetchone()
         if not row:
             return None
         ts = datetime.fromisoformat(row[0])
@@ -524,12 +523,11 @@ def _read_recent_sell(symbol):
     DB-backed read so all workers see the same churn-prevention state."""
     try:
         et = pytz.timezone("America/New_York")
-        con = sqlite3.connect(DB_PATH)
-        row = con.execute(
-            "SELECT last_sell_time, last_sell_price FROM recent_sells WHERE symbol = ?",
-            (symbol,),
-        ).fetchone()
-        con.close()
+        with get_connection(DB_PATH) as con:
+            row = con.execute(
+                "SELECT last_sell_time, last_sell_price FROM recent_sells WHERE symbol = ?",
+                (symbol,),
+            ).fetchone()
         if not row:
             return None
         ts = datetime.fromisoformat(row[0])
@@ -545,13 +543,11 @@ def _write_cooldown(symbol, action, ts):
     """Persist a cooldown entry. INSERT OR REPLACE so the same (symbol, action)
     pair is overwritten on subsequent orders."""
     try:
-        con = sqlite3.connect(DB_PATH)
-        con.execute(
-            "INSERT OR REPLACE INTO cooldowns (symbol, action, last_order_time) VALUES (?, ?, ?)",
-            (symbol, action, ts.isoformat()),
-        )
-        con.commit()
-        con.close()
+        with get_connection(DB_PATH) as con:
+            con.execute(
+                "INSERT OR REPLACE INTO cooldowns (symbol, action, last_order_time) VALUES (?, ?, ?)",
+                (symbol, action, ts.isoformat()),
+            )
     except Exception as e:
         logger.error(f"_write_cooldown failed for {symbol}/{action}: {e}")
 
@@ -560,13 +556,11 @@ def _write_recent_sell(symbol, ts, price):
     """Persist a recent-sell entry. INSERT OR REPLACE so the symbol's prior
     sell (if any) is overwritten by the new one."""
     try:
-        con = sqlite3.connect(DB_PATH)
-        con.execute(
-            "INSERT OR REPLACE INTO recent_sells (symbol, last_sell_time, last_sell_price) VALUES (?, ?, ?)",
-            (symbol, ts.isoformat(), price),
-        )
-        con.commit()
-        con.close()
+        with get_connection(DB_PATH) as con:
+            con.execute(
+                "INSERT OR REPLACE INTO recent_sells (symbol, last_sell_time, last_sell_price) VALUES (?, ?, ?)",
+                (symbol, ts.isoformat(), price),
+            )
     except Exception as e:
         logger.error(f"_write_recent_sell failed for {symbol}: {e}")
 

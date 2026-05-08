@@ -7,3 +7,5 @@ __pycache__/
 market_context.json
 fundamental_analysis.json
 *.log.*
+*.log.* git add .gitignore app.py git commit -m Update to trend tables and restart reconciliation git push
+*.log.*

@@ -908,6 +908,33 @@ def process_signal(data):
 
     account_state["trend_table"] = _trend_table
     decision = evaluate_signal(data, account_state)
+
+    # Safety normalization: if Claude approves but the reason says to defer/wait,
+    # force rejection. Prevents contradictory outputs like approved=true with
+    # "recommend deferring until momentum turns rising".
+    reason_text = str(decision.get("reason", "")).lower()
+    defer_phrases = (
+        "defer",
+        "wait",
+        "hold off",
+        "lacks sufficient conviction",
+        "not enough conviction",
+        "until momentum",
+        "momentum turns rising",
+    )
+
+    if action == "buy" and decision.get("approved") and any(p in reason_text for p in defer_phrases):
+        logger.warning(
+            f"Decision consistency guard flipped {symbol} BUY to rejected: "
+            f"approved=true but reason indicated deferral"
+        )
+        decision["approved"] = False
+        decision["confidence"] = "low"
+        decision["position_size_pct"] = 0
+        decision["reason"] = (
+            "Rejected by consistency guard: Claude reason indicated deferral/wait despite approved=true."
+        )
+
     order_result = None
 
     # Confidence gate: reject low-confidence buy signals without placing an order.

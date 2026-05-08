@@ -10,6 +10,7 @@ from flask import Flask, request, jsonify, abort
 from decision_engine import evaluate_signal, get_mock_account_state
 from broker import place_order, get_account, get_position, api
 from macro_risk import get_macro_risk
+from db import get_connection
 from config import (
     APPROVED_SYMBOLS,
     PRICE_RANGES,
@@ -131,22 +132,21 @@ def _startup_reconcile():
         # 3. Query DB for symbols with a net open position (more filled buys than sells)
         db_symbols = set()
         try:
-            con = sqlite3.connect(DB_PATH)
-            rows = con.execute("""
-                SELECT symbol,
-                    SUM(CASE
-                            WHEN action = 'buy'  THEN COALESCE(qty, 0)
-                            WHEN action = 'sell' THEN -COALESCE(qty, 0)
-                            ELSE 0
-                        END) AS net_qty
-                FROM trades
-                WHERE order_id IS NOT NULL
-                  AND order_status IN ('filled', 'partially_filled')
-                GROUP BY symbol
-                HAVING net_qty > 0
-            """).fetchall()
-            con.close()
-            db_symbols = {row[0] for row in rows if row[0]}
+            with get_connection(DB_PATH) as con:
+                rows = con.execute("""
+                    SELECT symbol,
+                        SUM(CASE
+                                WHEN LOWER(action) = 'buy'  THEN COALESCE(qty, 0)
+                                WHEN LOWER(action) = 'sell' THEN -COALESCE(qty, 0)
+                                ELSE 0
+                            END) AS net_qty
+                    FROM trades
+                    WHERE order_id IS NOT NULL
+                      AND order_status IN ('filled', 'partially_filled')
+                    GROUP BY symbol
+                    HAVING net_qty > 0
+                """).fetchall()
+            db_symbols = {row["symbol"] for row in rows if row["symbol"]}
         except Exception as e:
             logger.error(f"Startup reconciliation: failed to query trades.db: {e}")
 

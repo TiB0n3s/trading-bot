@@ -248,6 +248,7 @@ def main():
     # These scripts are read-only/reporting. They can be a little verbose.
     checks.append(run_cmd("Daily Summary", [sys.executable, "daily_summary.py", target_date]))
     checks.append(run_cmd("Filter Report", [sys.executable, "filter_report.py", "--date", target_date]))
+    checks.append(run_cmd("Position Review", [sys.executable, "position_review.py"]))
     checks.append(run_cmd("Drawdown Report", [sys.executable, "drawdown_report.py", target_date]))
     checks.append(run_cmd("Analytics Report", [sys.executable, "analytics_report.py", "--date", target_date]))
 

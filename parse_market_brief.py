@@ -397,6 +397,15 @@ def main():
         except Exception:
             pass
 
+    # Safety backup: preserve the previous live market_context.json before overwriting it.
+    # This protects against accidental smoke-test or malformed brief runs replacing
+    # the active market bias file during a live session.
+    if OUTPUT_FILE.exists():
+        backup_path = OUTPUT_FILE.with_name(
+            f"{OUTPUT_FILE.name}.bak.{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+        )
+        backup_path.write_text(OUTPUT_FILE.read_text())
+
     OUTPUT_FILE.write_text(json.dumps(output, indent=2))
 
     print("=== Manual market brief parsed ===")

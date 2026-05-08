@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
-import sqlite3
 from collections import defaultdict, deque
 from datetime import datetime
 from pathlib import Path
 
-DB_PATH = Path(__file__).parent / "trades.db"
+from db import DB_PATH, get_connection
 
 
 def parse_ts(value):
@@ -14,8 +13,7 @@ def parse_ts(value):
 
 
 def load_filled_trades():
-    con = sqlite3.connect(DB_PATH)
-    con.row_factory = sqlite3.Row
+    con = get_connection(DB_PATH)
 
     rows = con.execute("""
         SELECT *
@@ -111,7 +109,7 @@ def match_trades():
 
 
 def init_matched_trades_table():
-    con = sqlite3.connect(DB_PATH)
+    con = get_connection(DB_PATH)
     con.execute("""
         CREATE TABLE IF NOT EXISTS matched_trades (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -146,7 +144,7 @@ def rebuild_matched_trades():
     matched, open_lots = match_trades()
     init_matched_trades_table()
 
-    con = sqlite3.connect(DB_PATH)
+    con = get_connection(DB_PATH)
     con.execute("DELETE FROM matched_trades")
 
     for t in matched:

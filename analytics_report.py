@@ -22,9 +22,9 @@ import sys
 from collections import defaultdict, deque
 from datetime import date, timedelta
 from pathlib import Path
+from db import DB_PATH, get_connection
 
 SCRIPT_DIR = Path(__file__).resolve().parent
-DB_PATH = SCRIPT_DIR / "trades.db"
 
 # Order in which to display rejection categories.
 PRIORITY_CATEGORIES = [
@@ -460,8 +460,7 @@ def main():
 
     header, clause, params = _resolve_range(args)
 
-    con = sqlite3.connect(DB_PATH)
-    con.row_factory = sqlite3.Row
+    con = get_connection(DB_PATH)
 
     print(f"\n{'=' * 60}")
     print(f"  Trading Bot Analytics Report — {header}")

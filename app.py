@@ -735,9 +735,11 @@ def process_signal(data):
         return
 
     # Hard pre-check 2: circuit breaker (-3% daily loss limit)
+    # Applies to BUY signals only. SELL signals must remain allowed so the bot
+    # can reduce exposure and close risk during drawdowns.
     daily_pnl_pct = account_state.get("daily_pnl_pct", 0.0)
-    if daily_pnl_pct < -3.0:
-        logger.error(f"Circuit breaker triggered for {symbol} {action.upper()}: daily P&L is {daily_pnl_pct:.2f}% (limit: -3.0%)")
+    if action == "buy" and daily_pnl_pct < -3.0:
+        logger.error(f"Circuit breaker triggered for {symbol} BUY: daily P&L is {daily_pnl_pct:.2f}% (limit: -3.0%)")
         log_rejection(symbol, action, "circuit_breaker", f"daily P&L {daily_pnl_pct:.2f}% < -3.0%", price=price, account_state=account_state)
         return
 

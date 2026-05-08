@@ -10,3 +10,4 @@ fundamental_analysis.json
 *.log.* git add .gitignore app.py git commit -m Update to trend tables and restart reconciliation git push
 *.log.*
 *.log.*
+*.log.*

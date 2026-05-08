@@ -60,12 +60,14 @@ def _render(rows, matched, header):
     # don't have a recognizable prefix fall through to substring matching.
     PREFIX_BUCKETS = {
         "market_hours":         "Outside trading hours",
+        "duplicate_webhook":    "Duplicate webhook",
         "circuit_breaker":      "Daily loss limit",
         "ghost_sell":           "Ghost sell (no Alpaca position)",
         "cooldown":             "Cooldown active",
         "churn_window":         "Sell→buy churn (time)",
         "churn_price":          "Sell→buy churn (price)",
         "exposure_cap":         "Per-symbol exposure cap (4%)",
+        "daily_symbol_buy_limit": "Daily symbol buy limit",
         "correlation_cap":      "Cluster exposure cap",
         "trend_gate":           "Trend gate (neutral/bearish)",
         "macro_risk":           "Macro risk (capital preservation)",

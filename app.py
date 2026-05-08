@@ -56,6 +56,16 @@ def _init_db():
         )
     """)
 
+    con.execute("""
+        CREATE TABLE IF NOT EXISTS recent_webhooks (
+            dedupe_key      TEXT PRIMARY KEY,
+            symbol          TEXT NOT NULL,
+            action          TEXT NOT NULL,
+            signal_price    REAL,
+            first_seen      TEXT NOT NULL
+        )
+    """)
+
     # Idempotent column additions for decision-context attribution.
     # Each new row written by log_trade / log_rejection captures the state of
     # bias / trend / momentum / macro / cluster gates at decision time so the
@@ -115,8 +125,11 @@ def _startup_reconcile():
             con = sqlite3.connect(DB_PATH)
             rows = con.execute("""
                 SELECT symbol,
-                    SUM(CASE WHEN action = 'buy' THEN COALESCE(qty, 0)
-                             ELSE -COALESCE(qty, 0) END) AS net_qty
+                    SUM(CASE
+                            WHEN action = 'buy'  THEN COALESCE(qty, 0)
+                            WHEN action = 'sell' THEN -COALESCE(qty, 0)
+                            ELSE 0
+                        END) AS net_qty
                 FROM trades
                 WHERE order_id IS NOT NULL
                   AND order_status IN ('filled', 'partially_filled')
@@ -148,6 +161,9 @@ def _startup_reconcile():
 _startup_reconcile()
 
 WEBHOOK_SECRET = os.environ.get("WEBHOOK_SECRET", "changeme")
+EXECUTION_MODE = os.environ.get("EXECUTION_MODE", "live").lower().strip()
+if EXECUTION_MODE not in ("live", "dry_run"):
+    EXECUTION_MODE = "live"
 
 APPROVED_SYMBOLS = {
     "AAPL", "SPY", "QQQ", "MSFT", "NVDA", "ORCL", "TSCO", "TSLA",
@@ -179,6 +195,91 @@ CLUSTER_EXPOSURE_LIMITS = {
     "biotech":        8.0,
     "industrials":   12.0,
 }
+
+MAX_BUYS_PER_SYMBOL_PER_DAY = 2
+WEBHOOK_DEDUPE_SECONDS = 60
+
+def _webhook_dedupe_key(symbol, action, price):
+    """Build a loose duplicate key for near-identical TradingView alerts.
+
+    Price is rounded to 2 decimals so tiny floating-point formatting differences
+    do not bypass dedupe.
+    """
+    try:
+        price_key = f"{float(price):.2f}"
+    except Exception:
+        price_key = str(price)
+    return f"{symbol}:{action}:{price_key}"
+
+
+def _is_duplicate_webhook(symbol, action, price):
+    """Return True if the same symbol/action/rounded-price arrived recently.
+
+    DB-backed so all gunicorn workers share dedupe state.
+    """
+    try:
+        et = pytz.timezone("America/New_York")
+        now_et = datetime.now(et)
+        cutoff = now_et - timedelta(seconds=WEBHOOK_DEDUPE_SECONDS)
+        key = _webhook_dedupe_key(symbol, action, price)
+
+        con = sqlite3.connect(DB_PATH)
+
+        # Opportunistic cleanup of old dedupe rows.
+        con.execute(
+            "DELETE FROM recent_webhooks WHERE first_seen < ?",
+            (cutoff.isoformat(),),
+        )
+
+        row = con.execute(
+            "SELECT first_seen FROM recent_webhooks WHERE dedupe_key = ?",
+            (key,),
+        ).fetchone()
+
+        if row:
+            con.commit()
+            con.close()
+            return True
+
+        con.execute(
+            "INSERT OR REPLACE INTO recent_webhooks "
+            "(dedupe_key, symbol, action, signal_price, first_seen) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (key, symbol, action, float(price), now_et.isoformat()),
+        )
+        con.commit()
+        con.close()
+        return False
+
+    except Exception as e:
+        logger.error(f"_is_duplicate_webhook failed for {symbol}/{action}: {e}")
+        return False
+
+
+def _successful_buys_today(symbol):
+    """Count successful BUY orders for this symbol today.
+
+    Uses trades.db so the count is shared across all gunicorn workers.
+    Counts rows that have an order_id because those represent submitted orders,
+    including pending/filled states.
+    """
+    try:
+        today = datetime.now(pytz.timezone("America/New_York")).strftime("%Y-%m-%d")
+        con = sqlite3.connect(DB_PATH)
+        row = con.execute("""
+            SELECT COUNT(*)
+            FROM trades
+            WHERE symbol = ?
+              AND LOWER(action) = 'buy'
+              AND approved = 1
+              AND order_id IS NOT NULL
+              AND timestamp LIKE ?
+        """, (symbol, f"{today}%")).fetchone()
+        con.close()
+        return int(row[0] or 0)
+    except Exception as e:
+        logger.error(f"_successful_buys_today failed for {symbol}: {e}")
+        return 0
 
 # (min, max) expected price ranges; signals outside ±20% of this range are rejected
 PRICE_RANGES = {
@@ -710,6 +811,24 @@ def process_signal(data):
     logger.info(f"Processing {action.upper()} signal for {symbol} at {price}")
     account_state = get_mock_account_state()
 
+    # Webhook duplicate protection: reject near-identical TradingView alerts
+    # received within a short window. This is separate from order cooldowns,
+    # which only start after a successful order.
+    if _is_duplicate_webhook(symbol, action, price):
+        logger.warning(
+            f"Duplicate webhook blocked for {symbol} {action.upper()} at {price}: "
+            f"same symbol/action/rounded-price within {WEBHOOK_DEDUPE_SECONDS}s"
+        )
+        log_rejection(
+            symbol,
+            action,
+            "duplicate_webhook",
+            f"same symbol/action/rounded-price within {WEBHOOK_DEDUPE_SECONDS}s",
+            price=price,
+            account_state=account_state,
+        )
+        return
+
     # Update trend table with this incoming signal before any pre-checks
     # (Stage C: refresh from trades.db first so all workers see the same history)
     _now_ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -717,7 +836,7 @@ def process_signal(data):
     _signal_history.setdefault(symbol, []).insert(0, action)
     _signal_history[symbol] = _signal_history[symbol][:10]
     _trend_table[symbol] = {**_compute_trend(_signal_history[symbol]), "last_time": _now_ts}
-    logger.info(
+    logger.debug(
         f"Trend history update for {symbol}: history={_signal_history[symbol]} "
         f"trend={_trend_table[symbol]}"
     )
@@ -792,6 +911,25 @@ def process_signal(data):
                     log_rejection(symbol, action, "churn_price", f"signal ${price:.2f} within {price_diff_pct:.2f}% of last sell ${last_sell_price:.2f}", price=price, account_state=account_state)
                     return
 
+    # Daily symbol buy limit: prevent repeated same-symbol accumulation from alert storms.
+    # Allows initial entry plus one add by default.
+    if action == "buy":
+        buys_today = _successful_buys_today(symbol)
+        if buys_today >= MAX_BUYS_PER_SYMBOL_PER_DAY:
+            logger.warning(
+                f"Daily symbol buy limit blocked {symbol} BUY: "
+                f"successful_buys_today={buys_today} >= limit={MAX_BUYS_PER_SYMBOL_PER_DAY} — skipping Claude"
+            )
+            log_rejection(
+                symbol,
+                action,
+                "daily_symbol_buy_limit",
+                f"successful_buys_today={buys_today} >= limit={MAX_BUYS_PER_SYMBOL_PER_DAY}",
+                price=price,
+                account_state=account_state,
+            )
+            return
+
     # Hard pre-check: 4% per-symbol exposure cap (buy signals only)
     if action == "buy" and existing_position:
         balance = account_state.get("balance", 0)
@@ -827,18 +965,28 @@ def process_signal(data):
         if cluster_checks:
             account_state["correlation_exposure"] = cluster_checks
 
-    # Trend gate: block buy signals on symbols with established neutral/bearish trend
-    # (new symbols with no prior history pass through — block only applies once history exists)
+    # Trend confirmation gate: require 3 consecutive BUY alerts before allowing BUY signals through.
+    # This reduces one-off TradingView/TradingPilotAI noise. SELL signals bypass this gate.
     if action == "buy":
         history = _signal_history.get(symbol, [])
-        trend = _trend_table.get(symbol)
-        if len(history) > 1 and trend and trend.get("direction") in ("neutral", "bearish"):
+        trend = _trend_table.get(symbol) or {}
+        direction = trend.get("direction")
+        strength = trend.get("strength")
+        consecutive_count = int(trend.get("consecutive_count") or 0)
+
+        if direction != "bullish" or consecutive_count < 3:
             logger.warning(
-                f"Trend gate blocked {symbol} BUY: direction={trend.get('direction')} "
-                f"strength={trend.get('strength')} "
-                f"consecutive_count={trend.get('consecutive_count')} — skipping Claude"
+                f"Trend confirmation blocked {symbol} BUY: requires 3 consecutive BUY alerts; "
+                f"direction={direction} strength={strength} consecutive_count={consecutive_count} — skipping Claude"
             )
-            log_rejection(symbol, action, "trend_gate", f"direction={trend.get('direction')} strength={trend.get('strength')} count={trend.get('consecutive_count')}", price=price, account_state=account_state)
+            log_rejection(
+                symbol,
+                action,
+                "trend_confirmation",
+                f"requires 3 consecutive BUY alerts; direction={direction} strength={strength} count={consecutive_count}",
+                price=price,
+                account_state=account_state,
+            )
             return
 
     # Macro-risk gate: regime-aware risk control before Claude
@@ -914,6 +1062,29 @@ def process_signal(data):
                     f"momentum_pct={momentum['momentum_pct']}% — confidence hint set to high"
                 )
 
+    # Add-on momentum gate: for existing positions with high/very_high risk,
+    # require rising short-term momentum before adding more exposure.
+    # This prevents adding to already-held high-risk names when momentum is flat/falling.
+    if action == "buy" and existing_position:
+        risk_level = account_state.get("risk_level")
+        momentum = account_state.get("momentum") or {}
+        momentum_direction = momentum.get("direction")
+
+        if risk_level in ("high", "very_high") and momentum_direction != "rising":
+            logger.warning(
+                f"Add-on momentum gate blocked {symbol} BUY: existing position present, "
+                f"risk_level={risk_level}, momentum_direction={momentum_direction or 'unknown'} — skipping Claude"
+            )
+            log_rejection(
+                symbol,
+                action,
+                "addon_momentum_gate",
+                f"existing position with risk_level={risk_level} and momentum_direction={momentum_direction or 'unknown'}",
+                price=price,
+                account_state=account_state,
+            )
+            return
+
     account_state["trend_table"] = _trend_table
     decision = evaluate_signal(data, account_state)
 
@@ -962,21 +1133,41 @@ def process_signal(data):
         logger.info(f"APPROVED: {symbol} {action.upper()} - {approved_reason}")
         risk_multiplier = float(account_state.get("macro_risk", {}).get("risk_multiplier", 1.0))
         adjusted_position_size_pct = decision.get("position_size_pct", 1.0) * risk_multiplier
-        order_result = place_order(
-            symbol=symbol,
-            action=action,
-            position_size_pct=adjusted_position_size_pct,
-            stop_loss_pct=decision.get("stop_loss_pct", 0.5),
-            take_profit_pct=decision.get("take_profit_pct", 1.5),
-            risk_level=account_state.get("risk_level"),
-        )
+
+        if EXECUTION_MODE == "dry_run":
+            logger.warning(
+                f"DRY RUN: order not submitted for {symbol} {action.upper()} "
+                f"position_size_pct={adjusted_position_size_pct:.3f}"
+            )
+            order_result = {
+                "order_id": f"dry_run_{symbol}_{action}_{datetime.now().strftime('%Y%m%d_%H%M%S')}",
+                "symbol": symbol,
+                "side": action,
+                "qty": 0,
+                "stop_loss": None,
+                "take_profit": None,
+                "status": "dry_run",
+            }
+        else:
+            order_result = place_order(
+                symbol=symbol,
+                action=action,
+                position_size_pct=adjusted_position_size_pct,
+                stop_loss_pct=decision.get("stop_loss_pct", 0.5),
+                take_profit_pct=decision.get("take_profit_pct", 1.5),
+                risk_level=account_state.get("risk_level"),
+            )
+
         if order_result:
-            logger.info(f"ORDER PLACED: {order_result}")
-            _last_order[cooldown_key] = now_et
-            _write_cooldown(symbol, action, now_et)
-            if action == "sell":
-                _last_sell[symbol] = (now_et, price)
-                _write_recent_sell(symbol, now_et, price)
+            if EXECUTION_MODE == "dry_run":
+                logger.info(f"DRY RUN ORDER RECORDED: {order_result}")
+            else:
+                logger.info(f"ORDER PLACED: {order_result}")
+                _last_order[cooldown_key] = now_et
+                _write_cooldown(symbol, action, now_et)
+                if action == "sell":
+                    _last_sell[symbol] = (now_et, price)
+                    _write_recent_sell(symbol, now_et, price)
         else:
             logger.error(f"Order placement failed for {symbol}")
     else:
@@ -1048,7 +1239,10 @@ def _market_session():
 
 @app.route("/status", methods=["GET"])
 def status():
-    result = {"timestamp": datetime.now().isoformat()}
+    result = {
+        "timestamp": datetime.now().isoformat(),
+        "execution_mode": EXECUTION_MODE,
+    }
 
     # Uptime
     try:
@@ -1351,6 +1545,170 @@ def positions():
         "macro_sentiment": macro_sentiment,
     }
     result["positions"] = sorted(positions_list, key=lambda x: -(x.get("market_value") or 0))
+    return jsonify(result), 200
+
+
+@app.route("/debug/symbol/<symbol>", methods=["GET"])
+def debug_symbol(symbol):
+    validate_secret(request)
+
+    symbol = symbol.upper()
+    if symbol not in APPROVED_SYMBOLS:
+        return jsonify({
+            "error": "symbol not approved",
+            "symbol": symbol,
+            "approved_symbols": sorted(APPROVED_SYMBOLS),
+        }), 400
+
+    _load_market_context()
+
+    now_et = datetime.now(pytz.timezone("America/New_York"))
+    t_min = now_et.hour * 60 + now_et.minute
+    market_hours_open = (
+        now_et.weekday() < 5
+        and (9 * 60 + 30) <= t_min < (16 * 60)
+    )
+
+    result = {
+        "symbol": symbol,
+        "timestamp": datetime.now().isoformat(),
+        "now_et": now_et.strftime("%Y-%m-%d %H:%M:%S %Z"),
+        "market_hours_open": market_hours_open,
+    }
+
+    # Account / circuit breaker
+    try:
+        state = get_mock_account_state()
+        result["account"] = {
+            "balance": state.get("balance"),
+            "portfolio_value": state.get("portfolio_value"),
+            "daily_pnl": state.get("daily_pnl"),
+            "daily_pnl_pct": state.get("daily_pnl_pct"),
+            "circuit_breaker_active_for_buys": (state.get("daily_pnl_pct") or 0) < -3.0,
+            "open_position_count": state.get("open_position_count"),
+        }
+    except Exception as e:
+        result["account_error"] = str(e)
+        state = {}
+
+    # Alpaca live position
+    try:
+        pos = get_position(symbol)
+        result["alpaca_position"] = pos
+        result["has_live_position"] = bool(pos)
+    except Exception as e:
+        result["alpaca_position_error"] = str(e)
+
+    # Trend table
+    try:
+        _refresh_signal_history(symbol)
+        history = _signal_history.get(symbol, [])
+        trend = _compute_trend(history)
+        result["signal_history"] = history
+        result["trend"] = trend
+    except Exception as e:
+        result["trend_error"] = str(e)
+
+    # Market context
+    try:
+        result["market_bias"] = _market_bias.get(symbol)
+    except Exception as e:
+        result["market_bias_error"] = str(e)
+
+    # Successful buys today
+    try:
+        result["successful_buys_today"] = _successful_buys_today(symbol)
+        result["max_buys_per_symbol_per_day"] = MAX_BUYS_PER_SYMBOL_PER_DAY
+        result["daily_symbol_buy_limit_hit"] = (
+            result["successful_buys_today"] >= MAX_BUYS_PER_SYMBOL_PER_DAY
+        )
+    except Exception as e:
+        result["successful_buys_today_error"] = str(e)
+
+    # Cooldowns
+    try:
+        cooldowns = {}
+        for action in ("buy", "sell"):
+            last = _read_cooldown(symbol, action)
+            if last:
+                elapsed = (now_et - last).total_seconds()
+                active = elapsed < 15 * 60
+                cooldowns[action] = {
+                    "last_order_time": last.isoformat(),
+                    "active": active,
+                    "minutes_remaining": int((15 * 60 - elapsed) // 60) if active else 0,
+                }
+            else:
+                cooldowns[action] = None
+        result["cooldowns"] = cooldowns
+    except Exception as e:
+        result["cooldown_error"] = str(e)
+
+    # Recent sell / churn
+    try:
+        last_sell = _read_recent_sell(symbol)
+        if last_sell:
+            ts, sell_price = last_sell
+            elapsed = (now_et - ts).total_seconds()
+            result["recent_sell"] = {
+                "last_sell_time": ts.isoformat(),
+                "last_sell_price": sell_price,
+                "within_30min_churn_window": elapsed < 30 * 60,
+                "minutes_remaining": int((30 * 60 - elapsed) // 60) if elapsed < 30 * 60 else 0,
+            }
+        else:
+            result["recent_sell"] = None
+    except Exception as e:
+        result["recent_sell_error"] = str(e)
+
+    # Cluster exposure
+    try:
+        balance = float(state.get("balance") or 0)
+        result["correlation_exposure"] = _cluster_exposure(symbol, balance)
+    except Exception as e:
+        result["correlation_exposure_error"] = str(e)
+
+    # Macro risk
+    try:
+        result["macro_risk"] = get_macro_risk(Path(__file__).parent)
+    except Exception as e:
+        result["macro_risk_error"] = str(e)
+
+    # High-level buy block reasons
+    buy_blocks = []
+
+    if not market_hours_open:
+        buy_blocks.append("market_hours")
+
+    acct = result.get("account") or {}
+    if acct.get("circuit_breaker_active_for_buys"):
+        buy_blocks.append("circuit_breaker")
+
+    trend = result.get("trend") or {}
+    if trend.get("direction") != "bullish" or int(trend.get("consecutive_count") or 0) < 3:
+        buy_blocks.append("trend_confirmation")
+
+    bias = result.get("market_bias") or {}
+    if bias.get("bias") == "avoid":
+        buy_blocks.append("market_bias_avoid")
+
+    if bias.get("entry_quality") in ("do_not_chase", "avoid_chasing"):
+        buy_blocks.append("chase_prevention")
+
+    if result.get("daily_symbol_buy_limit_hit"):
+        buy_blocks.append("daily_symbol_buy_limit")
+
+    macro = result.get("macro_risk") or {}
+    if macro.get("block_new_buys"):
+        buy_blocks.append("macro_risk")
+
+    for c in result.get("correlation_exposure") or []:
+        if c.get("limit_hit"):
+            buy_blocks.append(f"correlation_cap:{c.get('cluster')}")
+
+    result["would_block_buy_because"] = buy_blocks
+    result["buy_would_pass_known_prechecks"] = len(buy_blocks) == 0
+
     return jsonify(result), 200
 
 

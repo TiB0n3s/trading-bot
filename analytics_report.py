@@ -29,12 +29,14 @@ DB_PATH = SCRIPT_DIR / "trades.db"
 # Order in which to display rejection categories.
 PRIORITY_CATEGORIES = [
     "market_hours",
+    "duplicate_webhook",
     "circuit_breaker",
     "ghost_sell",
     "cooldown",
     "churn_window",
     "churn_price",
     "exposure_cap",
+    "daily_symbol_buy_limit",
     "correlation_cap",
     "trend_gate",
     "macro_risk",

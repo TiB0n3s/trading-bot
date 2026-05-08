@@ -149,7 +149,13 @@ _startup_reconcile()
 
 WEBHOOK_SECRET = os.environ.get("WEBHOOK_SECRET", "changeme")
 
-APPROVED_SYMBOLS = {"AAPL", "SPY", "QQQ", "MSFT", "NVDA", "ORCL", "TSCO", "TSLA", "META", "AMD", "CVX", "XOM", "GOOGL", "GLD", "IWM"}
+APPROVED_SYMBOLS = {
+    "AAPL", "SPY", "QQQ", "MSFT", "NVDA", "ORCL", "TSCO", "TSLA",
+    "META", "AMD", "CVX", "XOM", "GOOGL", "GLD", "IWM",
+    "AVGO", "CRDO", "GEV", "BE", "CAT", "VRT",
+    "RKLB", "RTX", "LMT", "HWM",
+    "VRTX", "MRNA", "CRSP",
+}
 
 # Correlation clusters and per-cluster exposure caps (% of cash balance).
 # A new buy is blocked if the cluster's combined market value would exceed
@@ -158,14 +164,20 @@ APPROVED_SYMBOLS = {"AAPL", "SPY", "QQQ", "MSFT", "NVDA", "ORCL", "TSCO", "TSLA"
 # every cluster it belongs to.
 CORRELATION_CLUSTERS = {
     "mega_cap_tech": {"AAPL", "MSFT", "NVDA", "META", "GOOGL", "AMD", "QQQ"},
-    "broad_index": {"SPY", "QQQ", "IWM"},
-    "energy": {"CVX", "XOM"},
+    "broad_index":   {"SPY", "QQQ", "IWM"},
+    "energy":        {"CVX", "XOM"},
+    "defense":       {"RTX", "LMT", "HWM", "RKLB"},
+    "biotech":       {"VRTX", "MRNA", "CRSP"},
+    "industrials":   {"CAT", "VRT", "GEV", "BE", "AVGO", "CRDO"},
 }
 
 CLUSTER_EXPOSURE_LIMITS = {
     "mega_cap_tech": 15.0,
-    "broad_index": 12.0,
-    "energy": 8.0,
+    "broad_index":   12.0,
+    "energy":         8.0,
+    "defense":       10.0,
+    "biotech":        8.0,
+    "industrials":   12.0,
 }
 
 # (min, max) expected price ranges; signals outside ±20% of this range are rejected
@@ -185,6 +197,19 @@ PRICE_RANGES = {
     "GOOGL": (250, 550),
     "GLD":   (250, 550),
     "IWM":   (180, 350),
+    "AVGO":  (200, 700),
+    "CRDO":  ( 80, 350),
+    "GEV":   (500, 1800),
+    "BE":    (100, 500),
+    "CAT":   (400, 1500),
+    "VRT":   (150, 600),
+    "RKLB":  ( 30, 180),
+    "RTX":   ( 80, 300),
+    "LMT":   (250, 800),
+    "HWM":   (100, 450),
+    "VRTX":  (200, 700),
+    "MRNA":  ( 20, 120),
+    "CRSP":  ( 20, 130),
 }
 
 _last_order: dict = {}     # {(symbol, action): datetime in ET} — reset on restart

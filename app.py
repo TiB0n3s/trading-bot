@@ -10,6 +10,15 @@ from flask import Flask, request, jsonify, abort
 from decision_engine import evaluate_signal, get_mock_account_state
 from broker import place_order, get_account, get_position, api
 from macro_risk import get_macro_risk
+from config import (
+    APPROVED_SYMBOLS,
+    PRICE_RANGES,
+    MARKET_OPEN_MINUTES,
+    MARKET_CLOSE_MINUTES,
+    DAILY_LOSS_LIMIT_PCT,
+    MAX_BUYS_PER_SYMBOL_PER_DAY,
+    WEBHOOK_DEDUPE_SECONDS,
+)
 
 app = Flask(__name__)
 
@@ -165,14 +174,6 @@ EXECUTION_MODE = os.environ.get("EXECUTION_MODE", "live").lower().strip()
 if EXECUTION_MODE not in ("live", "dry_run"):
     EXECUTION_MODE = "live"
 
-APPROVED_SYMBOLS = {
-    "AAPL", "SPY", "QQQ", "MSFT", "NVDA", "ORCL", "TSCO", "TSLA",
-    "META", "AMD", "CVX", "XOM", "GOOGL", "GLD", "IWM",
-    "AVGO", "CRDO", "GEV", "BE", "CAT", "VRT",
-    "RKLB", "RTX", "LMT", "HWM",
-    "VRTX", "MRNA", "CRSP",
-}
-
 # Correlation clusters and per-cluster exposure caps (% of cash balance).
 # A new buy is blocked if the cluster's combined market value would exceed
 # the limit. Symbols can appear in multiple clusters (e.g. QQQ is both
@@ -195,9 +196,6 @@ CLUSTER_EXPOSURE_LIMITS = {
     "biotech":        8.0,
     "industrials":   12.0,
 }
-
-MAX_BUYS_PER_SYMBOL_PER_DAY = 2
-WEBHOOK_DEDUPE_SECONDS = 60
 
 def _webhook_dedupe_key(symbol, action, price):
     """Build a loose duplicate key for near-identical TradingView alerts.
@@ -280,38 +278,6 @@ def _successful_buys_today(symbol):
     except Exception as e:
         logger.error(f"_successful_buys_today failed for {symbol}: {e}")
         return 0
-
-# (min, max) expected price ranges; signals outside ±20% of this range are rejected
-PRICE_RANGES = {
-    "AAPL": (150,  500),
-    "SPY":  (400,  700),
-    "QQQ":  (400,  900),
-    "MSFT": (200,  600),
-    "NVDA": ( 80,  600),
-    "ORCL": ( 80,  300),
-    "TSCO": ( 20,  80),
-    "TSLA": (100,  800),
-    "META": (200, 1000),
-    "AMD":  ( 50,  600),
-    "CVX":  (100,  260),
-    "XOM":  ( 80,  215),
-    "GOOGL": (250, 550),
-    "GLD":   (250, 550),
-    "IWM":   (180, 350),
-    "AVGO":  (200, 700),
-    "CRDO":  ( 80, 350),
-    "GEV":   (500, 1800),
-    "BE":    (100, 500),
-    "CAT":   (400, 1500),
-    "VRT":   (150, 600),
-    "RKLB":  ( 30, 180),
-    "RTX":   ( 80, 300),
-    "LMT":   (250, 800),
-    "HWM":   (100, 450),
-    "VRTX":  (200, 700),
-    "MRNA":  ( 20, 120),
-    "CRSP":  ( 20, 130),
-}
 
 _last_order: dict = {}     # {(symbol, action): datetime in ET} — reset on restart
 _last_sell: dict = {}      # {symbol: (datetime in ET, price)} — last successful sell, for churn prevention
@@ -848,7 +814,7 @@ def process_signal(data):
         log_rejection(symbol, action, "market_hours", f"weekend ({now_et.strftime('%A')})", price=price, account_state=account_state)
         return
     t = now_et.hour * 60 + now_et.minute
-    if not (9 * 60 + 30 <= t < 16 * 60):
+    if not (MARKET_OPEN_MINUTES <= t < MARKET_CLOSE_MINUTES):
         logger.warning(f"Market hours check failed for {symbol} {action.upper()}: {now_et.strftime('%H:%M')} ET is outside 09:30–16:00 window")
         log_rejection(symbol, action, "market_hours", f"{now_et.strftime('%H:%M')} ET outside 09:30–16:00 window", price=price, account_state=account_state)
         return
@@ -857,7 +823,7 @@ def process_signal(data):
     # Applies to BUY signals only. SELL signals must remain allowed so the bot
     # can reduce exposure and close risk during drawdowns.
     daily_pnl_pct = account_state.get("daily_pnl_pct", 0.0)
-    if action == "buy" and daily_pnl_pct < -3.0:
+    if action == "buy" and daily_pnl_pct < DAILY_LOSS_LIMIT_PCT:
         logger.error(f"Circuit breaker triggered for {symbol} BUY: daily P&L is {daily_pnl_pct:.2f}% (limit: -3.0%)")
         log_rejection(symbol, action, "circuit_breaker", f"daily P&L {daily_pnl_pct:.2f}% < -3.0%", price=price, account_state=account_state)
         return
@@ -1359,7 +1325,7 @@ def status():
         t_min = now_et.hour * 60 + now_et.minute
         market_hours_open = (
             now_et.weekday() < 5
-            and (9 * 60 + 30) <= t_min < (16 * 60)
+            and MARKET_OPEN_MINUTES <= t_min < MARKET_CLOSE_MINUTES
         )
 
         # Stage B: read cooldowns and recent_sells from DB tables so the
@@ -1414,7 +1380,7 @@ def status():
         daily_pnl_pct = result.get("account", {}).get("daily_pnl_pct")
         result["pre_check_state"] = {
             "market_hours_open": market_hours_open,
-            "circuit_breaker_active": (daily_pnl_pct or 0) < -3.0,
+            "circuit_breaker_active": (daily_pnl_pct or 0) < DAILY_LOSS_LIMIT_PCT,
             "symbols_on_cooldown": sorted(cooldowns, key=lambda c: (c["symbol"], c["action"])),
             "symbols_on_churn_block": sorted(churn),
             "symbols_at_exposure_cap": sorted(symbols_at_cap),
@@ -1566,7 +1532,7 @@ def debug_symbol(symbol):
     t_min = now_et.hour * 60 + now_et.minute
     market_hours_open = (
         now_et.weekday() < 5
-        and (9 * 60 + 30) <= t_min < (16 * 60)
+        and MARKET_OPEN_MINUTES <= t_min < MARKET_CLOSE_MINUTES
     )
 
     result = {
@@ -1584,7 +1550,7 @@ def debug_symbol(symbol):
             "portfolio_value": state.get("portfolio_value"),
             "daily_pnl": state.get("daily_pnl"),
             "daily_pnl_pct": state.get("daily_pnl_pct"),
-            "circuit_breaker_active_for_buys": (state.get("daily_pnl_pct") or 0) < -3.0,
+            "circuit_breaker_active_for_buys": (state.get("daily_pnl_pct") or 0) < DAILY_LOSS_LIMIT_PCT,
             "open_position_count": state.get("open_position_count"),
         }
     except Exception as e:

@@ -7,9 +7,9 @@ Usage:
   python3 post_session_check.py 2026-05-08
 """
 
-import sqlite3
 import subprocess
 import sys
+import sqlite3
 from collections import defaultdict
 from datetime import date
 from pathlib import Path
@@ -18,7 +18,7 @@ from broker import api
 from trade_matcher import rebuild_matched_trades
 
 BASE_DIR = Path(__file__).resolve().parent
-DB_PATH = BASE_DIR / "trades.db"
+from db import DB_PATH, get_connection
 
 
 def ok(msg):
@@ -58,9 +58,7 @@ def run_cmd(label, cmd):
 
 
 def db_connect():
-    con = sqlite3.connect(DB_PATH)
-    con.row_factory = sqlite3.Row
-    return con
+    return get_connection(DB_PATH)
 
 
 def check_missing_fills(target_date):

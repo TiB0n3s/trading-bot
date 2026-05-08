@@ -47,15 +47,12 @@ import re
 import sys
 from datetime import date, datetime, timedelta
 from pathlib import Path
+from config import APPROVED_SYMBOLS
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 OUTPUT_FILE = SCRIPT_DIR / "market_context.json"
 
-SYMBOLS = ["AAPL", "SPY", "QQQ", "MSFT", "NVDA", "ORCL", "TSCO", "TSLA",
-           "META", "AMD", "CVX", "XOM", "GOOGL", "GLD", "IWM",
-           "AVGO", "CRDO", "GEV", "BE", "CAT", "VRT",
-           "RKLB", "RTX", "LMT", "HWM",
-           "VRTX", "MRNA", "CRSP"]
+SYMBOLS = sorted(APPROVED_SYMBOLS)
 
 BIAS_SYNONYMS = {
     "buy":     ["buy", "bullish", "long", "positive"],

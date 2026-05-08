@@ -263,17 +263,16 @@ def _successful_buys_today(symbol):
     """
     try:
         today = datetime.now(pytz.timezone("America/New_York")).strftime("%Y-%m-%d")
-        con = sqlite3.connect(DB_PATH)
-        row = con.execute("""
-            SELECT COUNT(*)
-            FROM trades
-            WHERE symbol = ?
-              AND LOWER(action) = 'buy'
-              AND approved = 1
-              AND order_id IS NOT NULL
-              AND timestamp LIKE ?
-        """, (symbol, f"{today}%")).fetchone()
-        con.close()
+        with get_connection(DB_PATH) as con:
+            row = con.execute("""
+                SELECT COUNT(*)
+                FROM trades
+                WHERE symbol = ?
+                  AND LOWER(action) = 'buy'
+                  AND approved = 1
+                  AND order_id IS NOT NULL
+                  AND timestamp LIKE ?
+            """, (symbol, f"{today}%")).fetchone()
         return int(row[0] or 0)
     except Exception as e:
         logger.error(f"_successful_buys_today failed for {symbol}: {e}")
@@ -576,17 +575,17 @@ def _refresh_signal_history(symbol):
     on output quality, not on input validity.
     """
     try:
-        con = sqlite3.connect(DB_PATH)
-        rows = con.execute(
-            "SELECT action FROM trades "
-            "WHERE symbol = ? AND action IS NOT NULL "
-            "AND (approved = 1 "
-            "OR rejection_reason LIKE 'confidence_gate:%' "
-            "OR rejection_reason LIKE 'trend_gate:%') "
-            "ORDER BY timestamp DESC LIMIT 10",
-            (symbol,),
-        ).fetchall()
-        con.close()
+        with get_connection(DB_PATH) as con:
+            rows = con.execute(
+                "SELECT action FROM trades "
+                "WHERE symbol = ? AND action IS NOT NULL "
+                "AND (approved = 1 "
+                "OR rejection_reason LIKE 'confidence_gate:%' "
+                "OR rejection_reason LIKE 'trend_gate:%' "
+                "OR rejection_reason LIKE 'trend_confirmation:%') "
+                "ORDER BY timestamp DESC LIMIT 10",
+                (symbol,),
+            ).fetchall()
         _signal_history[symbol] = [r[0] for r in rows]
     except Exception as e:
         logger.warning(f"_refresh_signal_history failed for {symbol}: {e}")

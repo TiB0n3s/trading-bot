@@ -11,12 +11,11 @@ Usage:
 """
 
 import argparse
-import sqlite3
 from collections import defaultdict
 from datetime import date, timedelta
 from pathlib import Path
 
-DB_PATH = Path(__file__).parent / "trades.db"
+from db import DB_PATH, get_connection
 
 KNOWN_LABELS = {
     "market_hours": "Outside trading hours",
@@ -86,8 +85,7 @@ def main():
         symbol_clause = "AND symbol = ?"
         params.append(args.symbol.upper())
 
-    con = sqlite3.connect(DB_PATH)
-    con.row_factory = sqlite3.Row
+    con = get_connection(DB_PATH)
 
     rows = con.execute(f"""
         SELECT id, timestamp, symbol, action, approved, rejection_reason,

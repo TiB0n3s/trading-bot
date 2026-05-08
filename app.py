@@ -221,32 +221,27 @@ def _is_duplicate_webhook(symbol, action, price):
         cutoff = now_et - timedelta(seconds=WEBHOOK_DEDUPE_SECONDS)
         key = _webhook_dedupe_key(symbol, action, price)
 
-        con = sqlite3.connect(DB_PATH)
+        with get_connection(DB_PATH) as con:
+            # Opportunistic cleanup of old dedupe rows.
+            con.execute(
+                "DELETE FROM recent_webhooks WHERE first_seen < ?",
+                (cutoff.isoformat(),),
+            )
 
-        # Opportunistic cleanup of old dedupe rows.
-        con.execute(
-            "DELETE FROM recent_webhooks WHERE first_seen < ?",
-            (cutoff.isoformat(),),
-        )
+            row = con.execute(
+                "SELECT first_seen FROM recent_webhooks WHERE dedupe_key = ?",
+                (key,),
+            ).fetchone()
 
-        row = con.execute(
-            "SELECT first_seen FROM recent_webhooks WHERE dedupe_key = ?",
-            (key,),
-        ).fetchone()
+            if row:
+                return True
 
-        if row:
-            con.commit()
-            con.close()
-            return True
-
-        con.execute(
-            "INSERT OR REPLACE INTO recent_webhooks "
-            "(dedupe_key, symbol, action, signal_price, first_seen) "
-            "VALUES (?, ?, ?, ?, ?)",
-            (key, symbol, action, float(price), now_et.isoformat()),
-        )
-        con.commit()
-        con.close()
+            con.execute(
+                "INSERT OR REPLACE INTO recent_webhooks "
+                "(dedupe_key, symbol, action, signal_price, first_seen) "
+                "VALUES (?, ?, ?, ?, ?)",
+                (key, symbol, action, float(price), now_et.isoformat()),
+            )
         return False
 
     except Exception as e:
@@ -446,9 +441,8 @@ def _hydrate_cooldowns():
     try:
         et = pytz.timezone("America/New_York")
         now_et = datetime.now(et)
-        con = sqlite3.connect(DB_PATH)
-        rows = con.execute("SELECT symbol, action, last_order_time FROM cooldowns").fetchall()
-        con.close()
+        with get_connection(DB_PATH) as con:
+            rows = con.execute("SELECT symbol, action, last_order_time FROM cooldowns").fetchall()
         loaded = 0
         for symbol, action, ts_str in rows:
             try:
@@ -475,9 +469,8 @@ def _hydrate_recent_sells():
     try:
         et = pytz.timezone("America/New_York")
         now_et = datetime.now(et)
-        con = sqlite3.connect(DB_PATH)
-        rows = con.execute("SELECT symbol, last_sell_time, last_sell_price FROM recent_sells").fetchall()
-        con.close()
+        with get_connection(DB_PATH) as con:
+            rows = con.execute("SELECT symbol, last_sell_time, last_sell_price FROM recent_sells").fetchall()
         loaded = 0
         for symbol, ts_str, price in rows:
             try:
@@ -773,25 +766,23 @@ def _open_entry_context(symbol):
     /positions diagnostics.
     """
     try:
-        con = sqlite3.connect(DB_PATH)
-        con.row_factory = sqlite3.Row
-        rows = con.execute("""
-            SELECT id, timestamp, symbol, action, qty, fill_price, signal_price,
-                   order_status, order_id,
-                   market_bias, risk_level, entry_quality,
-                   trend_direction, trend_strength,
-                   momentum_direction, momentum_pct,
-                   macro_regime, risk_multiplier,
-                   correlation_cluster, cluster_exposure_pct
-            FROM trades
-            WHERE symbol = ?
-              AND order_id IS NOT NULL
-              AND order_status IN ('filled', 'partially_filled')
-              AND LOWER(action) IN ('buy', 'sell')
-              AND qty IS NOT NULL
-            ORDER BY timestamp ASC, id ASC
-        """, (symbol,)).fetchall()
-        con.close()
+        with get_connection(DB_PATH) as con:
+            rows = con.execute("""
+                SELECT id, timestamp, symbol, action, qty, fill_price, signal_price,
+                       order_status, order_id,
+                       market_bias, risk_level, entry_quality,
+                       trend_direction, trend_strength,
+                       momentum_direction, momentum_pct,
+                       macro_regime, risk_multiplier,
+                       correlation_cluster, cluster_exposure_pct
+                FROM trades
+                WHERE symbol = ?
+                  AND order_id IS NOT NULL
+                  AND order_status IN ('filled', 'partially_filled')
+                  AND LOWER(action) IN ('buy', 'sell')
+                  AND qty IS NOT NULL
+                ORDER BY timestamp ASC, id ASC
+            """, (symbol,)).fetchall()
 
         lots = []
 

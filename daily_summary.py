@@ -1,4 +1,3 @@
-import sqlite3
 import sys
 from collections import defaultdict
 from datetime import date, timedelta
@@ -6,7 +5,7 @@ from pathlib import Path
 
 from trade_matcher import rebuild_matched_trades
 
-DB_PATH = Path(__file__).parent / "trades.db"
+from db import DB_PATH, get_connection
 LOG_PATH = Path(__file__).parent / "daily_summary.log"
 
 # claude-haiku-4-5-20251001 pricing (per million tokens)
@@ -212,8 +211,7 @@ def _refresh_matched():
 def run(target_date: str = None):
     target_date = target_date or str(date.today())
     _refresh_matched()
-    con = sqlite3.connect(DB_PATH)
-    con.row_factory = sqlite3.Row
+    con = get_connection(DB_PATH)
     rows = con.execute(
         "SELECT * FROM trades WHERE timestamp LIKE ?", (f"{target_date}%",)
     ).fetchall()
@@ -238,8 +236,7 @@ def run_week(target_date: str = None):
     end_excl = (friday + timedelta(days=1)).isoformat()
 
     _refresh_matched()
-    con = sqlite3.connect(DB_PATH)
-    con.row_factory = sqlite3.Row
+    con = get_connection(DB_PATH)
     rows = con.execute(
         "SELECT * FROM trades WHERE timestamp >= ? AND timestamp < ?",
         (monday.isoformat(), end_excl),

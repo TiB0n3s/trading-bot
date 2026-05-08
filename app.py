@@ -234,34 +234,60 @@ def _compute_trend(recent_actions: list) -> dict:
     return {"direction": direction, "strength": strength, "consecutive_count": count, "last_signal": first}
 
 def _build_trend_table():
+    """Build trend table for every approved symbol.
+
+    Initializes all APPROVED_SYMBOLS as neutral/weak, then overlays recent
+    signal history from trades.db where available. This ensures /status and
+    trend-gate logic can see all approved symbols, not only symbols with DB history.
+    """
     try:
+        # Start with every approved symbol so the table is complete.
+        for sym in APPROVED_SYMBOLS:
+            _signal_history.setdefault(sym, [])
+            _trend_table[sym] = {
+                "direction": "neutral",
+                "strength": "weak",
+                "consecutive_count": 0,
+                "last_signal": None,
+                "last_time": None,
+            }
+
+        approved = sorted(APPROVED_SYMBOLS)
+        placeholders = ",".join("?" for _ in approved)
+
         con = sqlite3.connect(DB_PATH)
-        rows = con.execute("""
+        rows = con.execute(f"""
             SELECT symbol, action, timestamp FROM (
                 SELECT symbol, action, timestamp,
                        ROW_NUMBER() OVER (PARTITION BY symbol ORDER BY timestamp DESC) AS rn
                 FROM trades
                 WHERE symbol IS NOT NULL
                   AND action IS NOT NULL
-                  AND (
-                      approved = 1
-                      OR rejection_reason LIKE 'confidence_gate:%'
-                  )
+                  AND symbol IN ({placeholders})
             ) WHERE rn <= 10
             ORDER BY symbol, timestamp DESC
-        """).fetchall()
+        """, approved).fetchall()
         con.close()
+
         history = {}
         last_time = {}
+
         for sym, act, ts in rows:
+            if sym not in APPROVED_SYMBOLS:
+                continue
             history.setdefault(sym, []).append(act)
             last_time.setdefault(sym, ts)
-        for sym, actions in history.items():
-            _signal_history[sym] = actions
+
+        for sym in APPROVED_SYMBOLS:
+            actions = history.get(sym, [])
+            _signal_history[sym] = actions[:10]
             entry = _compute_trend(actions)
-            entry["last_time"] = last_time[sym]
+            entry["last_time"] = last_time.get(sym)
             _trend_table[sym] = entry
-        logger.info(f"Trend table built for {len(_trend_table)} symbols")
+
+        logger.info(
+            f"Trend table built for {len(_trend_table)}/{len(APPROVED_SYMBOLS)} approved symbols"
+        )
     except Exception as e:
         logger.error(f"_build_trend_table failed: {e}")
 
@@ -697,9 +723,9 @@ def process_signal(data):
         log_rejection(symbol, action, "market_hours", f"weekend ({now_et.strftime('%A')})", price=price, account_state=account_state)
         return
     t = now_et.hour * 60 + now_et.minute
-    if not (9 * 60 + 45 <= t < 15 * 60 + 45):
-        logger.warning(f"Market hours check failed for {symbol} {action.upper()}: {now_et.strftime('%H:%M')} ET is outside 09:45–15:45 window")
-        log_rejection(symbol, action, "market_hours", f"{now_et.strftime('%H:%M')} ET outside 09:45–15:45 window", price=price, account_state=account_state)
+    if not (9 * 60 + 30 <= t < 16 * 60):
+        logger.warning(f"Market hours check failed for {symbol} {action.upper()}: {now_et.strftime('%H:%M')} ET is outside 09:30–16:00 window")
+        log_rejection(symbol, action, "market_hours", f"{now_et.strftime('%H:%M')} ET outside 09:30–16:00 window", price=price, account_state=account_state)
         return
 
     # Hard pre-check 2: circuit breaker (-3% daily loss limit)
@@ -1104,7 +1130,7 @@ def status():
         t_min = now_et.hour * 60 + now_et.minute
         market_hours_open = (
             now_et.weekday() < 5
-            and (9 * 60 + 45) <= t_min < (15 * 60 + 45)
+            and (9 * 60 + 30) <= t_min < (16 * 60)
         )
 
         # Stage B: read cooldowns and recent_sells from DB tables so the

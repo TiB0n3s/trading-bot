@@ -6,3 +6,4 @@ __pycache__/
 .env
 market_context.json
 fundamental_analysis.json
+*.log.*

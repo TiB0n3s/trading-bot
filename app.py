@@ -442,7 +442,9 @@ def _refresh_signal_history(symbol):
         rows = con.execute(
             "SELECT action FROM trades "
             "WHERE symbol = ? AND action IS NOT NULL "
-            "AND (approved = 1 OR rejection_reason LIKE 'confidence_gate:%') "
+            "AND (approved = 1 "
+            "OR rejection_reason LIKE 'confidence_gate:%' "
+            "OR rejection_reason LIKE 'trend_gate:%') "
             "ORDER BY timestamp DESC LIMIT 10",
             (symbol,),
         ).fetchall()
@@ -715,6 +717,10 @@ def process_signal(data):
     _signal_history.setdefault(symbol, []).insert(0, action)
     _signal_history[symbol] = _signal_history[symbol][:10]
     _trend_table[symbol] = {**_compute_trend(_signal_history[symbol]), "last_time": _now_ts}
+    logger.info(
+        f"Trend history update for {symbol}: history={_signal_history[symbol]} "
+        f"trend={_trend_table[symbol]}"
+    )
 
     # Hard pre-check 1: market hours (9:45–15:45 ET, weekdays only)
     now_et = datetime.now(pytz.timezone("America/New_York"))

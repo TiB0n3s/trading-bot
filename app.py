@@ -776,6 +776,101 @@ def log_rejection(symbol, action, category, reason, price=None, account_state=No
     except Exception as e:
         logger.error(f"log_rejection DB write failed for {symbol}: {e}")
 
+def _open_entry_context(symbol):
+    """Return the oldest currently-open buy lot context for a symbol.
+
+    Uses FIFO-style netting from trades.db to identify open buy lots, then returns
+    the oldest remaining open lot's decision context. Read-only helper for
+    /positions diagnostics.
+    """
+    try:
+        con = sqlite3.connect(DB_PATH)
+        con.row_factory = sqlite3.Row
+        rows = con.execute("""
+            SELECT id, timestamp, symbol, action, qty, fill_price, signal_price,
+                   order_status, order_id,
+                   market_bias, risk_level, entry_quality,
+                   trend_direction, trend_strength,
+                   momentum_direction, momentum_pct,
+                   macro_regime, risk_multiplier,
+                   correlation_cluster, cluster_exposure_pct
+            FROM trades
+            WHERE symbol = ?
+              AND order_id IS NOT NULL
+              AND order_status IN ('filled', 'partially_filled')
+              AND LOWER(action) IN ('buy', 'sell')
+              AND qty IS NOT NULL
+            ORDER BY timestamp ASC, id ASC
+        """, (symbol,)).fetchall()
+        con.close()
+
+        lots = []
+
+        for r in rows:
+            qty = float(r["qty"] or 0)
+            if qty <= 0:
+                continue
+
+            action = (r["action"] or "").lower()
+
+            if action == "buy":
+                lots.append({
+                    "remaining_qty": qty,
+                    "row": r,
+                })
+                continue
+
+            if action == "sell":
+                remaining = qty
+                while remaining > 0 and lots:
+                    lot = lots[0]
+                    matched = min(remaining, lot["remaining_qty"])
+                    lot["remaining_qty"] -= matched
+                    remaining -= matched
+                    if lot["remaining_qty"] <= 0:
+                        lots.pop(0)
+
+        open_lots = [lot for lot in lots if lot["remaining_qty"] > 0]
+        if not open_lots:
+            return None
+
+        lot = open_lots[0]
+        r = lot["row"]
+
+        entry_ts = r["timestamp"]
+        holding_minutes = None
+        try:
+            dt = datetime.fromisoformat(str(entry_ts).replace("Z", "+00:00"))
+            if dt.tzinfo is None:
+                dt = pytz.timezone("America/New_York").localize(dt)
+            holding_minutes = round((datetime.now(dt.tzinfo) - dt).total_seconds() / 60, 2)
+        except Exception:
+            pass
+
+        return {
+            "entry_timestamp": entry_ts,
+            "open_lot_qty": lot["remaining_qty"],
+            "entry_fill_price": r["fill_price"],
+            "entry_signal_price": r["signal_price"],
+            "holding_minutes": holding_minutes,
+            "entry_market_bias": r["market_bias"],
+            "entry_risk_level": r["risk_level"],
+            "entry_quality": r["entry_quality"],
+            "entry_trend_direction": r["trend_direction"],
+            "entry_trend_strength": r["trend_strength"],
+            "entry_momentum_direction": r["momentum_direction"],
+            "entry_momentum_pct": r["momentum_pct"],
+            "entry_macro_regime": r["macro_regime"],
+            "entry_risk_multiplier": r["risk_multiplier"],
+            "entry_correlation_cluster": r["correlation_cluster"],
+            "entry_cluster_exposure_pct": r["cluster_exposure_pct"],
+        }
+
+    except Exception as e:
+        logger.error(f"_open_entry_context failed for {symbol}: {e}")
+        return None
+
+
 def _cluster_exposure(symbol, balance):
     """Return cluster exposure info for the symbol across current Alpaca positions."""
     if not balance:
@@ -1561,6 +1656,8 @@ def positions():
                 exposure_pct = (market_value / balance * 100) if balance else None
                 trend = _trend_table.get(p.symbol) or {}
                 bias_entry = _market_bias.get(p.symbol) or {}
+                entry_ctx = _open_entry_context(p.symbol) or {}
+
                 positions_list.append({
                     "symbol": p.symbol,
                     "qty": qty,
@@ -1575,6 +1672,24 @@ def positions():
                     "trend_strength": trend.get("strength"),
                     "market_bias": bias_entry.get("bias"),
                     "cooldown_active": _cooldown_active(p.symbol),
+
+                    # Entry-side context from the oldest currently-open FIFO lot.
+                    "entry_timestamp": entry_ctx.get("entry_timestamp"),
+                    "open_lot_qty": entry_ctx.get("open_lot_qty"),
+                    "entry_fill_price": entry_ctx.get("entry_fill_price"),
+                    "entry_signal_price": entry_ctx.get("entry_signal_price"),
+                    "holding_minutes": entry_ctx.get("holding_minutes"),
+                    "entry_market_bias": entry_ctx.get("entry_market_bias"),
+                    "entry_risk_level": entry_ctx.get("entry_risk_level"),
+                    "entry_quality": entry_ctx.get("entry_quality"),
+                    "entry_trend_direction": entry_ctx.get("entry_trend_direction"),
+                    "entry_trend_strength": entry_ctx.get("entry_trend_strength"),
+                    "entry_momentum_direction": entry_ctx.get("entry_momentum_direction"),
+                    "entry_momentum_pct": entry_ctx.get("entry_momentum_pct"),
+                    "entry_macro_regime": entry_ctx.get("entry_macro_regime"),
+                    "entry_risk_multiplier": entry_ctx.get("entry_risk_multiplier"),
+                    "entry_correlation_cluster": entry_ctx.get("entry_correlation_cluster"),
+                    "entry_cluster_exposure_pct": entry_ctx.get("entry_cluster_exposure_pct"),
                 })
                 total_unrealized += unrealized_pl
             except Exception as e:

@@ -648,40 +648,38 @@ def log_trade(signal, decision, order, account_state=None):
         approved = decision.get("approved", False)
         order = order or {}
         ctx = _build_decision_context(signal.get("symbol"), signal.get("action"), account_state)
-        con = sqlite3.connect(DB_PATH)
-        con.execute("""
-            INSERT INTO trades (
-                timestamp, symbol, action, signal_price, approved, rejection_reason,
-                confidence, position_size_pct, stop_loss_pct, take_profit_pct,
-                order_id, order_status, qty, fill_price,
-                macro_regime, risk_multiplier, market_bias, risk_level, entry_quality,
-                trend_direction, trend_strength, momentum_direction, momentum_pct,
-                correlation_cluster, cluster_exposure_pct
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-                      ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """, (
-            timestamp,
-            signal.get("symbol"),
-            signal.get("action"),
-            signal.get("price"),
-            1 if approved else 0,
-            None if approved else decision.get("reason"),
-            decision.get("confidence"),
-            decision.get("position_size_pct"),
-            decision.get("stop_loss_pct"),
-            decision.get("take_profit_pct"),
-            order.get("order_id"),
-            order.get("status"),
-            order.get("qty"),
-            order.get("fill_price"),
-            ctx["macro_regime"], ctx["risk_multiplier"],
-            ctx["market_bias"], ctx["risk_level"], ctx["entry_quality"],
-            ctx["trend_direction"], ctx["trend_strength"],
-            ctx["momentum_direction"], ctx["momentum_pct"],
-            ctx["correlation_cluster"], ctx["cluster_exposure_pct"],
-        ))
-        con.commit()
-        con.close()
+        with get_connection(DB_PATH) as con:
+            con.execute("""
+                INSERT INTO trades (
+                    timestamp, symbol, action, signal_price, approved, rejection_reason,
+                    confidence, position_size_pct, stop_loss_pct, take_profit_pct,
+                    order_id, order_status, qty, fill_price,
+                    macro_regime, risk_multiplier, market_bias, risk_level, entry_quality,
+                    trend_direction, trend_strength, momentum_direction, momentum_pct,
+                    correlation_cluster, cluster_exposure_pct
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                          ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                timestamp,
+                signal.get("symbol"),
+                signal.get("action"),
+                signal.get("price"),
+                1 if approved else 0,
+                None if approved else decision.get("reason"),
+                decision.get("confidence"),
+                decision.get("position_size_pct"),
+                decision.get("stop_loss_pct"),
+                decision.get("take_profit_pct"),
+                order.get("order_id"),
+                order.get("status"),
+                order.get("qty"),
+                order.get("fill_price"),
+                ctx["macro_regime"], ctx["risk_multiplier"],
+                ctx["market_bias"], ctx["risk_level"], ctx["entry_quality"],
+                ctx["trend_direction"], ctx["trend_strength"],
+                ctx["momentum_direction"], ctx["momentum_pct"],
+                ctx["correlation_cluster"], ctx["cluster_exposure_pct"],
+            ))
     except Exception as e:
         logger.error(f"DB write failed for {signal.get('symbol')}: {e}")
 
@@ -747,25 +745,23 @@ def log_rejection(symbol, action, category, reason, price=None, account_state=No
     full_reason = f"{category}: {reason}"
     ctx = _build_decision_context(symbol, action, account_state)
     try:
-        con = sqlite3.connect(DB_PATH)
-        con.execute(
-            "INSERT INTO trades ("
-            "timestamp, symbol, action, signal_price, approved, rejection_reason, "
-            "macro_regime, risk_multiplier, market_bias, risk_level, entry_quality, "
-            "trend_direction, trend_strength, momentum_direction, momentum_pct, "
-            "correlation_cluster, cluster_exposure_pct"
-            ") VALUES (?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            (
-                timestamp, symbol, action, price, full_reason,
-                ctx["macro_regime"], ctx["risk_multiplier"],
-                ctx["market_bias"], ctx["risk_level"], ctx["entry_quality"],
-                ctx["trend_direction"], ctx["trend_strength"],
-                ctx["momentum_direction"], ctx["momentum_pct"],
-                ctx["correlation_cluster"], ctx["cluster_exposure_pct"],
-            ),
-        )
-        con.commit()
-        con.close()
+        with get_connection(DB_PATH) as con:
+            con.execute(
+                "INSERT INTO trades ("
+                "timestamp, symbol, action, signal_price, approved, rejection_reason, "
+                "macro_regime, risk_multiplier, market_bias, risk_level, entry_quality, "
+                "trend_direction, trend_strength, momentum_direction, momentum_pct, "
+                "correlation_cluster, cluster_exposure_pct"
+                ") VALUES (?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    timestamp, symbol, action, price, full_reason,
+                    ctx["macro_regime"], ctx["risk_multiplier"],
+                    ctx["market_bias"], ctx["risk_level"], ctx["entry_quality"],
+                    ctx["trend_direction"], ctx["trend_strength"],
+                    ctx["momentum_direction"], ctx["momentum_pct"],
+                    ctx["correlation_cluster"], ctx["cluster_exposure_pct"],
+                ),
+            )
     except Exception as e:
         logger.error(f"log_rejection DB write failed for {symbol}: {e}")
 

@@ -7,7 +7,6 @@ Usage:
   python3 drawdown_report.py 2026-05-08
 """
 
-import sqlite3
 import sys
 from collections import defaultdict
 from datetime import date
@@ -17,7 +16,7 @@ from broker import api
 from trade_matcher import rebuild_matched_trades
 
 BASE_DIR = Path(__file__).resolve().parent
-DB_PATH = BASE_DIR / "trades.db"
+from db import DB_PATH, get_connection
 
 
 def money(v):
@@ -42,8 +41,7 @@ def main():
     except Exception as e:
         print(f"[WARN] matched_trades rebuild failed: {e}")
 
-    con = sqlite3.connect(DB_PATH)
-    con.row_factory = sqlite3.Row
+    con = get_connection(DB_PATH)
 
     matched = con.execute("""
         SELECT symbol, qty, entry_price, exit_price, realized_pnl, realized_pnl_pct,

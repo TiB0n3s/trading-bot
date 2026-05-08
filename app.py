@@ -27,79 +27,76 @@ DB_PATH = Path(__file__).parent / "trades.db"
 _START_TIME = datetime.now(timezone.utc)
 
 def _init_db():
-    con = sqlite3.connect(DB_PATH)
-    con.execute("""
-        CREATE TABLE IF NOT EXISTS trades (
-            id                INTEGER PRIMARY KEY AUTOINCREMENT,
-            timestamp         TEXT NOT NULL,
-            symbol            TEXT,
-            action            TEXT,
-            signal_price      REAL,
-            approved          INTEGER,
-            rejection_reason  TEXT,
-            confidence        TEXT,
-            position_size_pct REAL,
-            stop_loss_pct     REAL,
-            take_profit_pct   REAL,
-            order_id          TEXT,
-            order_status      TEXT,
-            qty               INTEGER,
-            fill_price        REAL
-        )
-    """)
-    # Operational state tables — persisted across restarts and shared between
-    # gunicorn workers (Stage A: schema + startup hydration; Stage B will add
-    # the write-through paths so cooldowns / recent_sells stay in sync at runtime).
-    con.execute("""
-        CREATE TABLE IF NOT EXISTS cooldowns (
-            symbol          TEXT NOT NULL,
-            action          TEXT NOT NULL,
-            last_order_time TEXT NOT NULL,
-            PRIMARY KEY (symbol, action)
-        )
-    """)
-    con.execute("""
-        CREATE TABLE IF NOT EXISTS recent_sells (
-            symbol          TEXT PRIMARY KEY,
-            last_sell_time  TEXT NOT NULL,
-            last_sell_price REAL NOT NULL
-        )
-    """)
+    with get_connection(DB_PATH) as con:
+        con.execute("""
+            CREATE TABLE IF NOT EXISTS trades (
+                id                INTEGER PRIMARY KEY AUTOINCREMENT,
+                timestamp         TEXT NOT NULL,
+                symbol            TEXT,
+                action            TEXT,
+                signal_price      REAL,
+                approved          INTEGER,
+                rejection_reason  TEXT,
+                confidence        TEXT,
+                position_size_pct REAL,
+                stop_loss_pct     REAL,
+                take_profit_pct   REAL,
+                order_id          TEXT,
+                order_status      TEXT,
+                qty               INTEGER,
+                fill_price        REAL
+            )
+        """)
+        # Operational state tables — persisted across restarts and shared between
+        # gunicorn workers (Stage A: schema + startup hydration; Stage B will add
+        # the write-through paths so cooldowns / recent_sells stay in sync at runtime).
+        con.execute("""
+            CREATE TABLE IF NOT EXISTS cooldowns (
+                symbol          TEXT NOT NULL,
+                action          TEXT NOT NULL,
+                last_order_time TEXT NOT NULL,
+                PRIMARY KEY (symbol, action)
+            )
+        """)
+        con.execute("""
+            CREATE TABLE IF NOT EXISTS recent_sells (
+                symbol          TEXT PRIMARY KEY,
+                last_sell_time  TEXT NOT NULL,
+                last_sell_price REAL NOT NULL
+            )
+        """)
 
-    con.execute("""
-        CREATE TABLE IF NOT EXISTS recent_webhooks (
-            dedupe_key      TEXT PRIMARY KEY,
-            symbol          TEXT NOT NULL,
-            action          TEXT NOT NULL,
-            signal_price    REAL,
-            first_seen      TEXT NOT NULL
-        )
-    """)
+        con.execute("""
+            CREATE TABLE IF NOT EXISTS recent_webhooks (
+                dedupe_key      TEXT PRIMARY KEY,
+                symbol          TEXT NOT NULL,
+                action          TEXT NOT NULL,
+                signal_price    REAL,
+                first_seen      TEXT NOT NULL
+            )
+        """)
 
-    # Idempotent column additions for decision-context attribution.
-    # Each new row written by log_trade / log_rejection captures the state of
-    # bias / trend / momentum / macro / cluster gates at decision time so the
-    # analytics layer can correlate outcomes with the context that produced them.
-    existing_cols = {r[1] for r in con.execute("PRAGMA table_info(trades)").fetchall()}
-    context_cols = [
-        ("macro_regime",         "TEXT"),
-        ("risk_multiplier",      "REAL"),
-        ("market_bias",          "TEXT"),
-        ("risk_level",           "TEXT"),
-        ("entry_quality",        "TEXT"),
-        ("trend_direction",      "TEXT"),
-        ("trend_strength",       "TEXT"),
-        ("momentum_direction",   "TEXT"),
-        ("momentum_pct",         "REAL"),
-        ("correlation_cluster",  "TEXT"),
-        ("cluster_exposure_pct", "REAL"),
-    ]
-    for col_name, col_type in context_cols:
-        if col_name not in existing_cols:
-            con.execute(f"ALTER TABLE trades ADD COLUMN {col_name} {col_type}")
-
-    con.commit()
-    con.close()
+        # Idempotent column additions for decision-context attribution.
+        # Each new row written by log_trade / log_rejection captures the state of
+        # bias / trend / momentum / macro / cluster gates at decision time so the
+        # analytics layer can correlate outcomes with the context that produced them.
+        existing_cols = {r[1] for r in con.execute("PRAGMA table_info(trades)").fetchall()}
+        context_cols = [
+            ("macro_regime",         "TEXT"),
+            ("risk_multiplier",      "REAL"),
+            ("market_bias",          "TEXT"),
+            ("risk_level",           "TEXT"),
+            ("entry_quality",        "TEXT"),
+            ("trend_direction",      "TEXT"),
+            ("trend_strength",       "TEXT"),
+            ("momentum_direction",   "TEXT"),
+            ("momentum_pct",         "REAL"),
+            ("correlation_cluster",  "TEXT"),
+            ("cluster_exposure_pct", "REAL"),
+        ]
+        for col_name, col_type in context_cols:
+            if col_name not in existing_cols:
+                con.execute(f"ALTER TABLE trades ADD COLUMN {col_name} {col_type}")
 
 _init_db()
 
@@ -393,19 +390,18 @@ def _build_trend_table():
         approved = sorted(APPROVED_SYMBOLS)
         placeholders = ",".join("?" for _ in approved)
 
-        con = sqlite3.connect(DB_PATH)
-        rows = con.execute(f"""
-            SELECT symbol, action, timestamp FROM (
-                SELECT symbol, action, timestamp,
-                       ROW_NUMBER() OVER (PARTITION BY symbol ORDER BY timestamp DESC) AS rn
-                FROM trades
-                WHERE symbol IS NOT NULL
-                  AND action IS NOT NULL
-                  AND symbol IN ({placeholders})
-            ) WHERE rn <= 10
-            ORDER BY symbol, timestamp DESC
-        """, approved).fetchall()
-        con.close()
+        with get_connection(DB_PATH) as con:
+            rows = con.execute(f"""
+                SELECT symbol, action, timestamp FROM (
+                    SELECT symbol, action, timestamp,
+                           ROW_NUMBER() OVER (PARTITION BY symbol ORDER BY timestamp DESC) AS rn
+                    FROM trades
+                    WHERE symbol IS NOT NULL
+                      AND action IS NOT NULL
+                      AND symbol IN ({placeholders})
+                ) WHERE rn <= 10
+                ORDER BY symbol, timestamp DESC
+            """, approved).fetchall()
 
         history = {}
         last_time = {}
@@ -1503,10 +1499,9 @@ def status():
         cooldowns = []
         churn = []
         try:
-            con = sqlite3.connect(DB_PATH)
-            cd_rows = con.execute("SELECT symbol, action, last_order_time FROM cooldowns").fetchall()
-            cs_rows = con.execute("SELECT symbol, last_sell_time FROM recent_sells").fetchall()
-            con.close()
+            with get_connection(DB_PATH) as con:
+                cd_rows = con.execute("SELECT symbol, action, last_order_time FROM cooldowns").fetchall()
+                cs_rows = con.execute("SELECT symbol, last_sell_time FROM recent_sells").fetchall()
             for sym, act, ts_str in cd_rows:
                 try:
                     ts = datetime.fromisoformat(ts_str)
@@ -1573,18 +1568,17 @@ def status():
     # Today's signal counts from trades.db
     try:
         today = datetime.now().strftime("%Y-%m-%d")
-        con = sqlite3.connect(DB_PATH)
-        counts = con.execute("""
-            SELECT
-                COUNT(*)                                          AS total,
-                SUM(approved)                                     AS approved,
-                SUM(1 - approved)                                 AS rejected,
-                SUM(CASE WHEN order_id IS NOT NULL THEN 1 END)    AS orders_placed,
-                SUM(CASE WHEN approved=1 AND order_id IS NULL
-                         THEN 1 END)                              AS null_orders
-            FROM trades WHERE timestamp LIKE ?
-        """, (f"{today}%",)).fetchone()
-        con.close()
+        with get_connection(DB_PATH) as con:
+            counts = con.execute("""
+                SELECT
+                    COUNT(*)                                          AS total,
+                    SUM(approved)                                     AS approved,
+                    SUM(1 - approved)                                 AS rejected,
+                    SUM(CASE WHEN order_id IS NOT NULL THEN 1 END)    AS orders_placed,
+                    SUM(CASE WHEN approved=1 AND order_id IS NULL
+                             THEN 1 END)                              AS null_orders
+                FROM trades WHERE timestamp LIKE ?
+            """, (f"{today}%",)).fetchone()
         result["today_signals"] = {
             "total":         counts[0],
             "approved":      counts[1] or 0,

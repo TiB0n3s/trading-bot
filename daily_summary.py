@@ -61,6 +61,7 @@ def _render(rows, matched, header):
     PREFIX_BUCKETS = {
         "market_hours":         "Outside trading hours",
         "duplicate_webhook":    "Duplicate webhook",
+        "symbol_override":      "Symbol override",
         "circuit_breaker":      "Daily loss limit",
         "ghost_sell":           "Ghost sell (no Alpaca position)",
         "cooldown":             "Cooldown active",

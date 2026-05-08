@@ -21,6 +21,7 @@ DB_PATH = Path(__file__).parent / "trades.db"
 KNOWN_LABELS = {
     "market_hours": "Outside trading hours",
     "duplicate_webhook": "Duplicate webhook",
+    "symbol_override": "Symbol override",
     "circuit_breaker": "Daily loss circuit breaker",
     "ghost_sell": "Ghost sell",
     "cooldown": "Cooldown",

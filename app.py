@@ -285,6 +285,83 @@ _trend_table: dict = {}    # {symbol: {direction, strength, consecutive_count, l
 _signal_history: dict = {} # {symbol: [action, ...]} most recent first, max 10 — internal
 _market_bias: dict = {}    # {symbol: {bias, reason, confidence}} — populated from market_context.json
 _market_context_mtime: float = 0  # last seen mtime of market_context.json, used for lazy refresh
+_symbol_overrides: dict = {}
+_symbol_overrides_mtime: float = 0
+
+
+def _load_symbol_overrides():
+    """Lazy-load symbol_overrides.json.
+
+    Allows quick operator control without code changes:
+      - disabled_symbols: block both BUY and SELL
+      - buy_disabled: block BUY only
+      - sell_only: block BUY only, allow SELL
+    """
+    global _symbol_overrides_mtime, _symbol_overrides
+
+    path = Path(__file__).parent / "symbol_overrides.json"
+    default = {
+        "disabled_symbols": [],
+        "buy_disabled": [],
+        "sell_only": [],
+        "notes": {},
+    }
+
+    if not path.exists():
+        _symbol_overrides = default
+        return
+
+    try:
+        current_mtime = path.stat().st_mtime
+        if current_mtime <= _symbol_overrides_mtime:
+            return
+
+        raw = json.loads(path.read_text())
+
+        _symbol_overrides = {
+            "disabled_symbols": [s.upper() for s in raw.get("disabled_symbols", [])],
+            "buy_disabled": [s.upper() for s in raw.get("buy_disabled", [])],
+            "sell_only": [s.upper() for s in raw.get("sell_only", [])],
+            "notes": raw.get("notes", {}) if isinstance(raw.get("notes", {}), dict) else {},
+        }
+        _symbol_overrides_mtime = current_mtime
+
+        logger.info(
+            "Symbol overrides loaded: "
+            f"disabled={len(_symbol_overrides['disabled_symbols'])}, "
+            f"buy_disabled={len(_symbol_overrides['buy_disabled'])}, "
+            f"sell_only={len(_symbol_overrides['sell_only'])}"
+        )
+
+    except Exception as e:
+        logger.error(f"_load_symbol_overrides failed: {e}")
+        _symbol_overrides = default
+
+
+def _symbol_override_block(symbol, action):
+    """Return a reason string if a symbol override blocks this signal, else None."""
+    _load_symbol_overrides()
+
+    disabled = set(_symbol_overrides.get("disabled_symbols", []))
+    buy_disabled = set(_symbol_overrides.get("buy_disabled", []))
+    sell_only = set(_symbol_overrides.get("sell_only", []))
+    notes = _symbol_overrides.get("notes", {}) or {}
+
+    note = notes.get(symbol) or ""
+
+    if symbol in disabled:
+        return f"symbol disabled by operator override" + (f" — {note}" if note else "")
+
+    if action == "buy" and symbol in buy_disabled:
+        return f"BUY disabled by operator override" + (f" — {note}" if note else "")
+
+    if action == "buy" and symbol in sell_only:
+        return f"symbol in sell_only mode by operator override" + (f" — {note}" if note else "")
+
+    return None
+
+
+_load_symbol_overrides()
 
 def _compute_trend(recent_actions: list) -> dict:
     if not recent_actions:
@@ -790,6 +867,22 @@ def process_signal(data):
             action,
             "duplicate_webhook",
             f"same symbol/action/rounded-price within {WEBHOOK_DEDUPE_SECONDS}s",
+            price=price,
+            account_state=account_state,
+        )
+        return
+
+    # Operator symbol overrides: quick no-code control during live sessions.
+    override_reason = _symbol_override_block(symbol, action)
+    if override_reason:
+        logger.warning(
+            f"Symbol override blocked {symbol} {action.upper()}: {override_reason}"
+        )
+        log_rejection(
+            symbol,
+            action,
+            "symbol_override",
+            override_reason,
             price=price,
             account_state=account_state,
         )
@@ -1642,6 +1735,10 @@ def debug_symbol(symbol):
 
     # High-level buy block reasons
     buy_blocks = []
+
+    override_reason = _symbol_override_block(symbol, "buy")
+    if override_reason:
+        buy_blocks.append("symbol_override")
 
     if not market_hours_open:
         buy_blocks.append("market_hours")

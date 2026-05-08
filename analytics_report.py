@@ -30,6 +30,7 @@ DB_PATH = SCRIPT_DIR / "trades.db"
 PRIORITY_CATEGORIES = [
     "market_hours",
     "duplicate_webhook",
+    "symbol_override",
     "circuit_breaker",
     "ghost_sell",
     "cooldown",

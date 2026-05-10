@@ -11,3 +11,9 @@ fundamental_analysis.json
 *.log.*
 *.log.*
 *.log.*
+
+# Editor swap files
+*.swp
+.*.swp
+*.swo
+.*.swo

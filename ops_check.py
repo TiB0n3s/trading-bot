@@ -6,6 +6,7 @@ Usage:
   python3 ops_check.py morning
   python3 ops_check.py positions
   python3 ops_check.py alignment
+  python3 ops_check.py adaptive
   python3 ops_check.py filters
   python3 ops_check.py drawdown
   python3 ops_check.py post
@@ -25,6 +26,7 @@ COMMANDS = {
     "morning": ["morning_check.py"],
     "positions": ["position_review.py"],
     "alignment": ["market_alignment_report.py"],
+    "adaptive": ["adaptive_confirmation_report.py"],
     "filters": ["filter_report.py", "--date"],
     "drawdown": ["drawdown_report.py"],
     "post": ["post_session_check.py"],
@@ -63,6 +65,7 @@ def main():
         checks.append(run("Morning Check", ["morning_check.py"]))
         checks.append(run("Position Review", ["position_review.py"]))
         checks.append(run("Market Alignment Report", ["market_alignment_report.py"]))
+        checks.append(run("Adaptive Confirmation Report", ["adaptive_confirmation_report.py"]))
         checks.append(run("Filter Report", ["filter_report.py", "--date", target_date]))
         checks.append(run("Drawdown Report", ["drawdown_report.py", target_date]))
         checks.append(run("Post-Session Check", ["post_session_check.py", target_date]))

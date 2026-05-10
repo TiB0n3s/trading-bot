@@ -52,3 +52,50 @@ PRICE_RANGES = {
     "MRNA":  ( 20, 120),
     "CRSP":  ( 20, 130),
 }
+
+# Market-alignment mapping used for macro/trend context.
+# This is observe-only at first; app.py can use it for /debug/symbol before it becomes a gate.
+SYMBOL_MARKET_ALIGNMENT = {
+    # Broad index / ETFs
+    "SPY":   {"cluster": "broad_index", "benchmark": "SPY"},
+    "QQQ":   {"cluster": "mega_cap_tech", "benchmark": "QQQ"},
+    "IWM":   {"cluster": "small_caps", "benchmark": "IWM"},
+    "GLD":   {"cluster": "gold_hedge", "benchmark": "GLD"},
+
+    # Mega-cap tech / AI leadership
+    "AAPL":  {"cluster": "mega_cap_tech", "benchmark": "QQQ"},
+    "MSFT":  {"cluster": "mega_cap_tech", "benchmark": "QQQ"},
+    "NVDA":  {"cluster": "semiconductors", "benchmark": "QQQ"},
+    "AMD":   {"cluster": "semiconductors", "benchmark": "QQQ"},
+    "AVGO":  {"cluster": "semiconductors", "benchmark": "QQQ"},
+    "META":  {"cluster": "mega_cap_tech", "benchmark": "QQQ"},
+    "GOOGL": {"cluster": "mega_cap_tech", "benchmark": "QQQ"},
+    "ORCL":  {"cluster": "enterprise_software", "benchmark": "QQQ"},
+
+    # Retail / consumer
+    "TSCO":  {"cluster": "consumer_retail", "benchmark": "SPY"},
+    "TSLA":  {"cluster": "high_beta_growth", "benchmark": "QQQ"},
+
+    # Energy
+    "CVX":   {"cluster": "energy", "benchmark": "SPY"},
+    "XOM":   {"cluster": "energy", "benchmark": "SPY"},
+
+    # AI infrastructure / power / industrial
+    "CRDO":  {"cluster": "ai_infrastructure", "benchmark": "QQQ"},
+    "GEV":   {"cluster": "ai_power", "benchmark": "SPY"},
+    "BE":    {"cluster": "ai_power", "benchmark": "SPY"},
+    "CAT":   {"cluster": "industrials", "benchmark": "SPY"},
+    "VRT":   {"cluster": "ai_infrastructure", "benchmark": "QQQ"},
+
+    # Defense / aerospace
+    "RKLB":  {"cluster": "space_defense", "benchmark": "SPY"},
+    "RTX":   {"cluster": "defense", "benchmark": "SPY"},
+    "LMT":   {"cluster": "defense", "benchmark": "SPY"},
+    "HWM":   {"cluster": "defense_industrial", "benchmark": "SPY"},
+
+    # Biotech
+    "VRTX":  {"cluster": "biotech_quality", "benchmark": "SPY"},
+    "MRNA":  {"cluster": "biotech_speculative", "benchmark": "IWM"},
+    "CRSP":  {"cluster": "biotech_speculative", "benchmark": "IWM"},
+}
+

@@ -19,6 +19,7 @@ from config import (
     DAILY_LOSS_LIMIT_PCT,
     MAX_BUYS_PER_SYMBOL_PER_DAY,
     WEBHOOK_DEDUPE_SECONDS,
+    SYMBOL_MARKET_ALIGNMENT,
 )
 
 app = Flask(__name__)
@@ -845,6 +846,88 @@ def _open_entry_context(symbol):
     except Exception as e:
         logger.error(f"_open_entry_context failed for {symbol}: {e}")
         return None
+
+
+def _symbol_market_alignment(symbol):
+    """Return observe-only market/benchmark alignment for a symbol.
+
+    This does not block trades. It gives /debug/symbol visibility into whether
+    a symbol's BUY signals are aligned with its benchmark/index context.
+    """
+    try:
+        symbol = symbol.upper()
+        mapping = SYMBOL_MARKET_ALIGNMENT.get(symbol, {
+            "cluster": "unknown",
+            "benchmark": "SPY",
+        })
+
+        cluster = mapping.get("cluster", "unknown")
+        benchmark = mapping.get("benchmark", "SPY")
+
+        # Ensure market bias and trend state are fresh enough for diagnostics.
+        _load_market_context()
+        if benchmark not in _trend_table:
+            _refresh_signal_history(benchmark)
+            _trend_table[benchmark] = _compute_trend(_signal_history.get(benchmark, []))
+
+        symbol_bias_entry = _market_bias.get(symbol) or {}
+        benchmark_bias_entry = _market_bias.get(benchmark) or {}
+        benchmark_trend = _trend_table.get(benchmark) or {}
+
+        symbol_bias = symbol_bias_entry.get("bias")
+        benchmark_bias = benchmark_bias_entry.get("bias")
+        benchmark_direction = benchmark_trend.get("direction")
+        benchmark_strength = benchmark_trend.get("strength")
+
+        aligned = True
+        reasons = []
+
+        if symbol_bias == "avoid":
+            aligned = False
+            reasons.append(f"{symbol} market_bias is avoid")
+
+        if benchmark_bias == "avoid":
+            aligned = False
+            reasons.append(f"benchmark {benchmark} market_bias is avoid")
+
+        if benchmark_direction == "bearish":
+            aligned = False
+            reasons.append(f"benchmark {benchmark} trend is bearish")
+
+        if benchmark_direction == "neutral" and benchmark_strength == "weak":
+            # Not a hard failure yet — just a caution flag in observe-only mode.
+            reasons.append(f"benchmark {benchmark} trend is neutral/weak")
+
+        if aligned and not reasons:
+            reasons.append(
+                f"benchmark {benchmark} trend is {benchmark_direction}/{benchmark_strength} "
+                f"and symbol bias is {symbol_bias}"
+            )
+
+        return {
+            "cluster": cluster,
+            "benchmark": benchmark,
+            "benchmark_trend": {
+                "direction": benchmark_direction,
+                "strength": benchmark_strength,
+                "consecutive_count": benchmark_trend.get("consecutive_count"),
+            },
+            "benchmark_bias": benchmark_bias,
+            "symbol_bias": symbol_bias,
+            "symbol_risk_level": symbol_bias_entry.get("risk_level"),
+            "symbol_entry_quality": symbol_bias_entry.get("entry_quality"),
+            "aligned_for_buy": aligned,
+            "reason": "; ".join(reasons),
+        }
+
+    except Exception as e:
+        logger.error(f"_symbol_market_alignment failed for {symbol}: {e}")
+        return {
+            "cluster": "unknown",
+            "benchmark": None,
+            "aligned_for_buy": None,
+            "reason": f"alignment error: {e}",
+        }
 
 
 def _cluster_exposure(symbol, balance):
@@ -1821,6 +1904,12 @@ def debug_symbol(symbol):
         result["macro_risk"] = get_macro_risk(Path(__file__).parent)
     except Exception as e:
         result["macro_risk_error"] = str(e)
+
+    # Observe-only market alignment
+    try:
+        result["market_alignment"] = _symbol_market_alignment(symbol)
+    except Exception as e:
+        result["market_alignment_error"] = str(e)
 
     # High-level buy block reasons
     buy_blocks = []

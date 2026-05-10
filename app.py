@@ -848,6 +848,87 @@ def _open_entry_context(symbol):
         return None
 
 
+def _required_buy_confirmations(symbol, account_state=None):
+    """Return observe-only adaptive BUY confirmation requirement.
+
+    This does not change trading behavior yet. It calculates what the future
+    adaptive trend-confirmation threshold would be based on macro, bias, risk,
+    entry quality, and market alignment.
+    """
+    account_state = account_state or {}
+
+    try:
+        symbol = symbol.upper()
+        _load_market_context()
+
+        bias_entry = _market_bias.get(symbol) or {}
+        market_bias = bias_entry.get("bias")
+        risk_level = bias_entry.get("risk_level")
+        entry_quality = bias_entry.get("entry_quality")
+
+        macro_risk = account_state.get("macro_risk") or get_macro_risk(Path(__file__).parent)
+        macro_regime = macro_risk.get("macro_regime")
+
+        alignment = account_state.get("market_alignment") or _symbol_market_alignment(symbol)
+        aligned_for_buy = alignment.get("aligned_for_buy")
+
+        required = 3
+        reasons = ["base requirement is 3 BUY confirmations"]
+
+        # Best-case fast lane: only for clean setups.
+        if (
+            macro_regime == "risk_on"
+            and market_bias == "buy"
+            and entry_quality in ("excellent", "good_on_pullbacks")
+            and risk_level in ("low", "medium")
+            and aligned_for_buy is True
+        ):
+            required = 2
+            reasons.append("reduced to 2: risk_on + buy bias + high-quality entry + aligned market")
+
+        # Risk tightening.
+        if risk_level == "very_high":
+            required = max(required, 4)
+            reasons.append("raised to 4: very_high risk")
+
+        if entry_quality in ("tactical_only", "conditional"):
+            required = max(required, 3)
+            reasons.append(f"minimum 3: entry_quality={entry_quality}")
+
+        if entry_quality in ("do_not_chase", "avoid_chasing", "poor"):
+            required = max(required, 4)
+            reasons.append(f"raised to 4: entry_quality={entry_quality}")
+
+        if macro_regime in ("defensive", "capital_preservation"):
+            required = max(required, 4)
+            reasons.append(f"raised to 4: macro_regime={macro_regime}")
+
+        if aligned_for_buy is False:
+            required = max(required, 4)
+            reasons.append("raised to 4: market alignment caution")
+
+        return {
+            "required_buy_confirmations": required,
+            "current_rule_required_buy_confirmations": 3,
+            "macro_regime": macro_regime,
+            "market_bias": market_bias,
+            "risk_level": risk_level,
+            "entry_quality": entry_quality,
+            "aligned_for_buy": aligned_for_buy,
+            "observe_only": True,
+            "reason": "; ".join(reasons),
+        }
+
+    except Exception as e:
+        logger.error(f"_required_buy_confirmations failed for {symbol}: {e}")
+        return {
+            "required_buy_confirmations": 3,
+            "current_rule_required_buy_confirmations": 3,
+            "observe_only": True,
+            "reason": f"adaptive confirmation error: {e}",
+        }
+
+
 def _symbol_market_alignment(symbol):
     """Return observe-only market/benchmark alignment for a symbol.
 
@@ -1910,6 +1991,12 @@ def debug_symbol(symbol):
         result["market_alignment"] = _symbol_market_alignment(symbol)
     except Exception as e:
         result["market_alignment_error"] = str(e)
+
+    # Observe-only adaptive BUY confirmation diagnostics
+    try:
+        result["adaptive_buy_confirmation"] = _required_buy_confirmations(symbol, result)
+    except Exception as e:
+        result["adaptive_buy_confirmation_error"] = str(e)
 
     # High-level buy block reasons
     buy_blocks = []

@@ -183,6 +183,28 @@ def check_debug_endpoint():
     return True
 
 
+def check_market_alignment_report():
+    """Run observe-only market alignment report as part of morning readiness."""
+    print("\n── Market Alignment Report ───────────────────────────")
+    try:
+        result = subprocess.run(
+            [sys.executable, "market_alignment_report.py"],
+            cwd=BASE_DIR,
+            text=True,
+            timeout=60,
+        )
+        if result.returncode == 0:
+            ok("Market alignment report completed")
+            return True
+
+        warn(f"Market alignment report exited with code {result.returncode}")
+        return False
+
+    except Exception as e:
+        warn(f"Market alignment report failed: {e}")
+        return False
+
+
 def main():
     print("=" * 64)
     print("  Morning Readiness Check")
@@ -190,6 +212,7 @@ def main():
 
     checks = [
         check_market_context(),
+        check_market_alignment_report(),
         check_services(),
         check_alpaca(),
         check_debug_endpoint(),

@@ -11,6 +11,9 @@ Usage:
 
 import json
 from pathlib import Path
+from datetime import datetime
+
+import pytz
 
 from config import APPROVED_SYMBOLS, SYMBOL_MARKET_ALIGNMENT
 from app import _compute_trend
@@ -109,6 +112,31 @@ def alignment_for(symbol, ctx):
     }
 
 
+def context_freshness(ctx):
+    market_date = ctx.get("market_date")
+    today_et = datetime.now(pytz.timezone("America/New_York")).date().isoformat()
+
+    if market_date == today_et:
+        return "fresh", f"market_date matches today ({today_et})"
+
+    return "stale", f"market_date={market_date}, today={today_et}"
+
+
+def gate_readiness(rows, freshness):
+    if freshness != "fresh":
+        return "observe_only_not_ready"
+
+    weak_benchmarks = [
+        r for r in rows
+        if r.get("benchmark_trend") in ("neutral/weak", "-/weak", "None/None")
+    ]
+
+    if len(weak_benchmarks) > len(rows) // 2:
+        return "observe_only_weak_benchmark_data"
+
+    return "observe_only_ready_for_review"
+
+
 def main():
     ctx = load_market_context()
     rows = [alignment_for(sym, ctx) for sym in sorted(APPROVED_SYMBOLS)]
@@ -116,9 +144,15 @@ def main():
     print("=" * 132)
     print("  Market Alignment Report")
     print("=" * 132)
-    print(f"  market_date     : {ctx.get('market_date')}")
-    print(f"  macro_sentiment : {ctx.get('macro_sentiment')}")
-    print(f"  source          : {ctx.get('source')}")
+    freshness, freshness_reason = context_freshness(ctx)
+    readiness = gate_readiness(rows, freshness)
+
+    print(f"  market_date       : {ctx.get('market_date')}")
+    print(f"  macro_sentiment   : {ctx.get('macro_sentiment')}")
+    print(f"  source            : {ctx.get('source')}")
+    print(f"  context_freshness : {freshness} ({freshness_reason})")
+    print(f"  trend_source      : bot signal history, not live index market data")
+    print(f"  gate_readiness    : {readiness}")
     print()
 
     headers = [
@@ -159,6 +193,7 @@ def main():
     print(f"Not aligned / avoid     : {blocked_count}")
     print()
     print("Observe-only: this report does not block trades.")
+    print("Do not promote to a hard gate unless context_freshness is fresh and gate_readiness is reviewed.")
 
 
 if __name__ == "__main__":

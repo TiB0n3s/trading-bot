@@ -39,6 +39,7 @@ PRIORITY_CATEGORIES = [
     "exposure_cap",
     "daily_symbol_buy_limit",
     "correlation_cap",
+    "fundamental_score",
     "trend_gate",
     "macro_risk",
     "macro_position_limit",

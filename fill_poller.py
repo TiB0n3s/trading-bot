@@ -1,6 +1,6 @@
 import sqlite3
 import logging
-from pathlib import Path
+from db import get_connection
 from broker import api
 
 logging.basicConfig(
@@ -9,12 +9,10 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-DB_PATH = Path(__file__).parent / "trades.db"
-
 PENDING_STATUSES = ("pending_new", "new", "partially_filled")
 
 def poll_fills():
-    con = sqlite3.connect(DB_PATH)
+    con = get_connection()
     con.row_factory = sqlite3.Row
 
     rows = con.execute(

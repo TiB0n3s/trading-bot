@@ -70,6 +70,7 @@ def _render(rows, matched, header):
         "daily_symbol_buy_limit": "Daily symbol buy limit",
         "correlation_cap":      "Cluster exposure cap",
         "trend_gate":           "Trend gate (neutral/bearish)",
+        "fundamental_score":    "Fundamental score gate",
         "macro_risk":           "Macro risk (capital preservation)",
         "macro_position_limit": "Macro position limit",
         "market_bias_avoid":    "Brief flagged 'avoid'",

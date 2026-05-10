@@ -10,6 +10,7 @@ from flask import Flask, request, jsonify, abort
 from decision_engine import evaluate_signal, get_mock_account_state
 from broker import place_order, get_account, get_position, api
 from macro_risk import get_macro_risk
+from db import init_db_performance_indexes
 from db import get_connection
 from config import (
     APPROVED_SYMBOLS,
@@ -86,6 +87,7 @@ def _init_db():
             ("macro_regime",         "TEXT"),
             ("risk_multiplier",      "REAL"),
             ("market_bias",          "TEXT"),
+            ("fundamental_score",    "TEXT"),
             ("risk_level",           "TEXT"),
             ("entry_quality",        "TEXT"),
             ("trend_direction",      "TEXT"),
@@ -110,6 +112,12 @@ logging.basicConfig(
     ]
 )
 logger = logging.getLogger(__name__)
+
+try:
+    init_db_performance_indexes()
+    logger.info("DB performance indexes initialized")
+except Exception as e:
+    logger.error(f"DB performance index initialization failed: {e}")
 
 def _startup_reconcile():
     try:
@@ -608,6 +616,7 @@ def _load_market_context():
                     "bias": entry["bias"],
                     "reason": entry.get("reason", ""),
                     "confidence": entry.get("confidence", ""),
+                    "fundamental_score": entry.get("fundamental_score"),
                     "risk_level": entry.get("risk_level"),
                     "entry_quality": entry.get("entry_quality"),
                 }
@@ -644,7 +653,7 @@ def log_trade(signal, decision, order, account_state=None):
                     timestamp, symbol, action, signal_price, approved, rejection_reason,
                     confidence, position_size_pct, stop_loss_pct, take_profit_pct,
                     order_id, order_status, qty, fill_price,
-                    macro_regime, risk_multiplier, market_bias, risk_level, entry_quality,
+                    macro_regime, risk_multiplier, market_bias, fundamental_score, risk_level, entry_quality,
                     trend_direction, trend_strength, momentum_direction, momentum_pct,
                     correlation_cluster, cluster_exposure_pct
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
@@ -665,7 +674,8 @@ def log_trade(signal, decision, order, account_state=None):
                 order.get("qty"),
                 order.get("fill_price"),
                 ctx["macro_regime"], ctx["risk_multiplier"],
-                ctx["market_bias"], ctx["risk_level"], ctx["entry_quality"],
+                ctx["market_bias"], ctx["fundamental_score"],
+                ctx["risk_level"], ctx["entry_quality"],
                 ctx["trend_direction"], ctx["trend_strength"],
                 ctx["momentum_direction"], ctx["momentum_pct"],
                 ctx["correlation_cluster"], ctx["cluster_exposure_pct"],
@@ -685,6 +695,7 @@ def _build_decision_context(symbol, action, account_state=None):
         "macro_regime":         None,
         "risk_multiplier":      None,
         "market_bias":          None,
+        "fundamental_score":    None,
         "risk_level":           None,
         "entry_quality":        None,
         "trend_direction":      None,
@@ -697,6 +708,7 @@ def _build_decision_context(symbol, action, account_state=None):
     try:
         bias_entry = _market_bias.get(symbol) or {}
         ctx["market_bias"]   = bias_entry.get("bias")
+        ctx["fundamental_score"]  = bias_entry.get("fundamental_score")
         ctx["risk_level"]    = bias_entry.get("risk_level")
         ctx["entry_quality"] = bias_entry.get("entry_quality")
         trend = _trend_table.get(symbol) or {}
@@ -739,14 +751,15 @@ def log_rejection(symbol, action, category, reason, price=None, account_state=No
             con.execute(
                 "INSERT INTO trades ("
                 "timestamp, symbol, action, signal_price, approved, rejection_reason, "
-                "macro_regime, risk_multiplier, market_bias, risk_level, entry_quality, "
+                "macro_regime, risk_multiplier, market_bias, fundamental_score, risk_level, entry_quality, "
                 "trend_direction, trend_strength, momentum_direction, momentum_pct, "
                 "correlation_cluster, cluster_exposure_pct"
                 ") VALUES (?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     timestamp, symbol, action, price, full_reason,
                     ctx["macro_regime"], ctx["risk_multiplier"],
-                    ctx["market_bias"], ctx["risk_level"], ctx["entry_quality"],
+                    ctx["market_bias"], ctx["fundamental_score"],
+                    ctx["risk_level"], ctx["entry_quality"],
                     ctx["trend_direction"], ctx["trend_strength"],
                     ctx["momentum_direction"], ctx["momentum_pct"],
                     ctx["correlation_cluster"], ctx["cluster_exposure_pct"],
@@ -1301,6 +1314,25 @@ def process_signal(data):
             logger.warning(f"Macro-risk gate blocked {symbol} BUY: {reason}")
             log_rejection(symbol, action, "macro_position_limit", reason, price=price, account_state=account_state)
             return
+    # Fundamental score gate: block buys when manual/pre-market research flags weak fundamentals
+    if action == "buy":
+        bias_entry = _market_bias.get(symbol)
+        if bias_entry:
+            fundamental_score = bias_entry.get("fundamental_score")
+            if fundamental_score in ("bearish", "strong_bearish"):
+                reason = f"fundamental_score={fundamental_score}"
+                logger.warning(
+                    f"Fundamental score gate blocked {symbol} BUY: {reason} — skipping Claude"
+                )
+                log_rejection(
+                    symbol,
+                    action,
+                    "fundamental_score",
+                    reason,
+                    price=price,
+                    account_state=account_state,
+                )
+                return
 
     # Market bias gate: block buy if pre-market research flagged 'avoid'; inject 'buy' bias for Claude
     if action == "buy":
@@ -2017,8 +2049,14 @@ def debug_symbol(symbol):
         buy_blocks.append("trend_confirmation")
 
     bias = result.get("market_bias") or {}
+
     if bias.get("bias") == "avoid":
         buy_blocks.append("market_bias_avoid")
+
+    fundamental_score = bias.get("fundamental_score")
+
+    if fundamental_score in ("bearish", "strong_bearish"):
+        buy_blocks.append("fundamental_score")
 
     if bias.get("entry_quality") in ("do_not_chase", "avoid_chasing"):
         buy_blocks.append("chase_prevention")

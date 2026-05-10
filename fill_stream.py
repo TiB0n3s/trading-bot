@@ -1,7 +1,7 @@
 import json
 import logging
 import os
-import sqlite3
+from db import get_connection
 import time
 from datetime import datetime
 from pathlib import Path
@@ -21,12 +21,11 @@ logger = logging.getLogger(__name__)
 ALPACA_API_KEY  = os.environ.get("ALPACA_API_KEY", "")
 ALPACA_SECRET_KEY = os.environ.get("ALPACA_SECRET_KEY", "")
 PAPER_BASE_URL  = "https://paper-api.alpaca.markets"
-DB_PATH = Path(__file__).parent / "trades.db"
 RECONNECT_DELAY = 30
 
 
 def init_fill_events_table():
-    con = sqlite3.connect(DB_PATH)
+    con = get_connection()
     con.execute("""
         CREATE TABLE IF NOT EXISTS fill_events (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -68,7 +67,7 @@ def record_fill_event(event, order):
         except Exception:
             raw_json = str(order)
 
-        con = sqlite3.connect(DB_PATH)
+        con = get_connection()
         con.execute("""
             INSERT INTO fill_events (
                 timestamp, event, order_id, parent_order_id, client_order_id,
@@ -95,7 +94,7 @@ def record_fill_event(event, order):
 
 def update_db(order_id: str, status: str, fill_price: float | None):
     try:
-        con = sqlite3.connect(DB_PATH)
+        con = get_connection()
         cur = con.execute(
             "UPDATE trades SET order_status = ?, fill_price = ? WHERE order_id = ?",
             (status, fill_price, order_id)
@@ -120,7 +119,7 @@ def insert_synthetic_exit(order_id, symbol, side, status, filled_qty, fill_price
     try:
         action = "sell" if side == "sell" else "buy"
 
-        con = sqlite3.connect(DB_PATH)
+        con = get_connection()
         con.execute("""
             INSERT INTO trades (
                 timestamp, symbol, action, signal_price, approved, rejection_reason,

@@ -1349,6 +1349,8 @@ def process_signal(data):
             if bias == "buy":
                 account_state["market_bias"] = "buy"
             # Pass quality fields through to Claude regardless of bias direction
+            if bias_entry.get("fundamental_score"):
+                account_state["fundamental_score"] = bias_entry["fundamental_score"]
             if bias_entry.get("risk_level"):
                 account_state["risk_level"] = bias_entry["risk_level"]
             if bias_entry.get("entry_quality"):

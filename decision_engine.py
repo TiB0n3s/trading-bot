@@ -64,6 +64,14 @@ Apply to buy signals:
 - market_bias absent: defer entirely to trend table and momentum guidance, make no bias-based adjustment
 - NEVER use market_bias "buy" to override a bearish trend rejection — bearish always rejects buys regardless of any other positive signal
 
+FUNDAMENTAL SCORE GUIDANCE:
+account_state may contain "fundamental_score" from same-day market research:
+- "strong_bullish": positive context; may support high confidence only when trend and momentum also confirm.
+- "bullish": modest positive context; do not approve by itself.
+- "neutral": no fundamental edge; require trend and/or momentum confirmation.
+- "bearish" or "strong_bearish": should normally be filtered before Claude. If present, reject buy signals.
+Fundamentals never override bearish trend, weak momentum, exposure rules, risk_level, or poor entry_quality.
+
 EXECUTION QUALITY GUIDANCE:
 account_state may contain "risk_level" and "entry_quality" — tactical overlays from same-day pre-market research. These tighten sizing and confidence; they never override hard rules (4% exposure, 8 positions, bearish trend rejection, daily loss limit).
 

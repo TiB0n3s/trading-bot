@@ -158,6 +158,9 @@ def evaluate_signal(signal_data, account_state):
 
 def get_mock_account_state():
     from broker import api, get_account
+    from portfolio_state import build_account_state
+
+    return build_account_state(api=api, get_account_func=get_account)
 
     state = {
         'balance': 10000.00,

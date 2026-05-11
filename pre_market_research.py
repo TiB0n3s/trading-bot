@@ -17,15 +17,20 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 OUTPUT_FILE = SCRIPT_DIR / "market_context.json"
 ENV_FILE = Path("/etc/trading-bot.env")
 
-SYMBOLS = ["AAPL", "SPY", "QQQ", "MSFT", "NVDA", "ORCL", "TSCO", "TSLA",
-           "META", "AMD", "CVX", "XOM", "GOOGL", "GLD", "IWM"]
+SYMBOLS = [
+    "AAPL", "SPY", "QQQ", "MSFT", "NVDA", "ORCL", "TSCO", "TSLA",
+    "META", "AMD", "CVX", "XOM", "GOOGL", "GLD", "IWM",
+    "AVGO", "CRDO", "GEV", "BE", "CAT", "VRT",
+    "RKLB", "RTX", "LMT", "HWM",
+    "VRTX", "MRNA", "CRSP",
+]
 
 MODEL = "claude-sonnet-4-6"
 TIMEOUT_SECONDS = 120.0
 WEB_SEARCH_TOOL = {
     "type": "web_search_20260209",
     "name": "web_search",
-    "max_uses": 3,
+    "max_uses": 6,
 }
 
 logging.basicConfig(
@@ -81,8 +86,7 @@ def build_prompt(today: str) -> str:
     symbols_csv = ", ".join(SYMBOLS)
     return f"""Respond with JSON only. No preamble, no explanation, no markdown fences.
 
-Today is {today}. Use web_search to research US pre-market activity and assign a trading bias for today's session for each of these 15 tickers:
-{symbols_csv}
+Today is {today}. Use web_search to research US pre-market activity and assign a trading bias for today's session for each of these {len(SYMBOLS)} tickers:
 
 Bias rules — apply consistently:
 - "avoid":   earnings reported today, recent analyst downgrade, major negative news, pre-market down more than 1%, debt or credit warning
@@ -96,33 +100,26 @@ Confidence:
 
 For ETFs (SPY, QQQ, GLD, IWM), use sector or index-level news and pre-market index moves rather than company-specific items.
 
-Search efficiently. You have a hard budget of 3 web searches total — DO NOT search per-symbol. Use exactly these 3 broad searches to cover all 15 symbols:
+Search efficiently. You have a hard budget of 6 web searches total — DO NOT search per-symbol. Use exactly these 3 broad searches to cover all symbols:
 1. "pre-market movers today" — gives pre-market direction and magnitude for the most active names
 2. "earnings calendar today" — identifies which symbols report today (drives the "avoid" rule)
 3. "analyst upgrades downgrades today" — recent rating changes that affect bias
 Synthesize the per-symbol output by attributing what each search reveals. For symbols not mentioned in any search result, default to bias "neutral" with confidence "low" and a reason like "no significant pre-market signals found".
 
-Return ONLY this JSON schema. All 15 symbols must be present in the "symbols" object:
+Return ONLY this JSON schema. All requested symbols must be present in the "symbols" object:
 {{
   "market_date": "{today}",
   "macro_sentiment": "risk-on | risk-off | mixed | neutral",
   "macro_summary": "one sentence on overall market context for today",
   "symbols": {{
-    "AAPL":  {{"bias": "buy | avoid | neutral", "reason": "one sentence", "confidence": "high | medium | low"}},
-    "SPY":   {{...}},
-    "QQQ":   {{...}},
-    "MSFT":  {{...}},
-    "NVDA":  {{...}},
-    "ORCL":  {{...}},
-    "TSCO":  {{...}},
-    "TSLA":  {{...}},
-    "META":  {{...}},
-    "AMD":   {{...}},
-    "CVX":   {{...}},
-    "XOM":   {{...}},
-    "GOOGL": {{...}},
-    "GLD":   {{...}},
-    "IWM":   {{...}}
+    "AAPL": {{
+      "bias": "buy | avoid | neutral",
+      "reason": "one sentence",
+      "confidence": "high | medium | low",
+      "fundamental_score": "strong_bullish | bullish | neutral | bearish | strong_bearish | null",
+      "risk_level": "low | medium | high | very_high | null",
+      "entry_quality": "excellent | good_on_pullbacks | good_if_holds_gap | good_if_breadth_holds | tactical_only | hedge_only | do_not_chase | avoid_chasing | conditional | null"
+    }}
   }}
 }}"""
 

@@ -23,7 +23,7 @@ def is_market_hours(now: datetime | None = None) -> bool:
 
     Bot trading window:
     - Weekdays only
-    - 9:45 AM through 3:45 PM Eastern
+    - 9:30 AM through 4:00 PM Eastern
     """
     now = now or now_et()
 
@@ -36,7 +36,7 @@ def is_market_hours(now: datetime | None = None) -> bool:
         return False
 
     minutes = now.hour * 60 + now.minute
-    return (9 * 60 + 45) <= minutes < (15 * 60 + 45)
+    return (9 * 60 + 30) <= minutes < (16 * 60)
 
 
 def market_session(now: datetime | None = None) -> str:

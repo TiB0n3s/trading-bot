@@ -13,17 +13,13 @@ import sys
 from datetime import date, datetime
 from pathlib import Path
 
+from symbols_config import APPROVED_SYMBOLS_LIST
+
 SCRIPT_DIR = Path(__file__).resolve().parent
 OUTPUT_FILE = SCRIPT_DIR / "market_context.json"
 ENV_FILE = Path("/etc/trading-bot.env")
 
-SYMBOLS = [
-    "AAPL", "SPY", "QQQ", "MSFT", "NVDA", "ORCL", "TSCO", "TSLA",
-    "META", "AMD", "CVX", "XOM", "GOOGL", "GLD", "IWM",
-    "AVGO", "CRDO", "GEV", "BE", "CAT", "VRT",
-    "RKLB", "RTX", "LMT", "HWM",
-    "VRTX", "MRNA", "CRSP",
-]
+SYMBOLS = APPROVED_SYMBOLS_LIST
 
 MODEL = "claude-sonnet-4-6"
 TIMEOUT_SECONDS = 120.0

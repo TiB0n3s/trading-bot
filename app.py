@@ -11,12 +11,16 @@ from flask import Flask, request, jsonify, abort
 from decision_engine import evaluate_signal, get_mock_account_state
 from broker import place_order, get_account, get_position, api
 from macro_risk import get_macro_risk
+from symbols_config import (
+    APPROVED_SYMBOLS,
+    CORRELATION_CLUSTERS,
+    CLUSTER_EXPOSURE_LIMITS,
+    PRICE_RANGES,
+)
 from market_time import now_et, is_market_hours, market_session
 from db import init_db_performance_indexes
 from db import get_connection
 from config import (
-    APPROVED_SYMBOLS,
-    PRICE_RANGES,
     MARKET_OPEN_MINUTES,
     MARKET_CLOSE_MINUTES,
     DAILY_LOSS_LIMIT_PCT,
@@ -219,6 +223,14 @@ def _startup_reconcile():
 _startup_reconcile()
 
 WEBHOOK_SECRET = os.environ.get("WEBHOOK_SECRET", "changeme")
+
+_last_order: dict = {}
+_last_sell: dict = {}
+_trend_table: dict = {}
+_signal_history: dict = {}
+_market_bias: dict = {}
+_market_context_mtime: float = 0
+
 VALID_EXECUTION_MODES = {"paper", "cash_safe", "cash_full", "dry_run"}
 
 EXECUTION_MODE = os.environ.get("EXECUTION_MODE", "paper").lower().strip()
@@ -283,23 +295,7 @@ def public_runtime_config():
 # the limit. Symbols can appear in multiple clusters (e.g. QQQ is both
 # mega_cap_tech and broad_index) — exposure to such a symbol counts against
 # every cluster it belongs to.
-CORRELATION_CLUSTERS = {
-    "mega_cap_tech": {"AAPL", "MSFT", "NVDA", "META", "GOOGL", "AMD", "QQQ"},
-    "broad_index":   {"SPY", "QQQ", "IWM"},
-    "energy":        {"CVX", "XOM"},
-    "defense":       {"RTX", "LMT", "HWM", "RKLB"},
-    "biotech":       {"VRTX", "MRNA", "CRSP"},
-    "industrials":   {"CAT", "VRT", "GEV", "BE", "AVGO", "CRDO"},
-}
 
-CLUSTER_EXPOSURE_LIMITS = {
-    "mega_cap_tech": 15.0,
-    "broad_index":   12.0,
-    "energy":         8.0,
-    "defense":       10.0,
-    "biotech":        8.0,
-    "industrials":   12.0,
-}
 
 def _webhook_dedupe_key(symbol, action, price):
     """Build a loose duplicate key for near-identical TradingView alerts.

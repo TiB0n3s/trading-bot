@@ -2,6 +2,7 @@ import os
 import json
 import logging
 from anthropic import Anthropic
+from symbols_config import APPROVED_SYMBOLS_CSV
 from pnl import get_daily_realized_pnl
 
 logger = logging.getLogger(__name__)
@@ -123,6 +124,11 @@ Always respond with this exact JSON format:
     "confidence": "high"
 }
 '''
+
+TRADING_RULES = TRADING_RULES.replace(
+    'AAPL, SPY, QQQ, MSFT, NVDA, ORCL, TSCO, TSLA, META, AMD, CVX, XOM, GOOGL, GLD, IWM, AVGO, CRDO, GEV, BE, CAT, VRT, RKLB, RTX, LMT, HWM, VRTX, MRNA, CRSP',
+    APPROVED_SYMBOLS_CSV,
+)
 
 def evaluate_signal(signal_data, account_state):
     try:

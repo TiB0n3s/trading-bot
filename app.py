@@ -86,9 +86,30 @@ def _init_db():
                 signal_price REAL,
                 source TEXT,
                 payload_json TEXT,
-                status TEXT DEFAULT 'received'
+                status TEXT DEFAULT 'received',
+                queued_at TEXT,
+                started_at TEXT,
+                finished_at TEXT,
+                order_id TEXT,
+                client_order_id TEXT,
+                failure_reason TEXT
             )
         """)
+
+        existing_webhook_cols = {
+        r[1] for r in con.execute("PRAGMA table_info(webhook_events)").fetchall()
+    }
+    webhook_context_cols = [
+        ("queued_at", "TEXT"),
+        ("started_at", "TEXT"),
+        ("finished_at", "TEXT"),
+        ("order_id", "TEXT"),
+        ("client_order_id", "TEXT"),
+        ("failure_reason", "TEXT"),
+    ]
+    for col_name, col_type in webhook_context_cols:
+        if col_name not in existing_webhook_cols:
+            con.execute(f"ALTER TABLE webhook_events ADD COLUMN {col_name} {col_type}")
 
         con.execute("""
             CREATE TABLE IF NOT EXISTS recent_webhooks (
@@ -797,12 +818,56 @@ def _record_webhook_event(dedupe_key, data):
         return True
 
 
-def _mark_webhook_event_status(dedupe_key, status):
+def _mark_webhook_event_status(
+    dedupe_key,
+    status,
+    order_id=None,
+    client_order_id=None,
+    failure_reason=None,
+):
     try:
+        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+        time_column = None
+        if status == "queued":
+            time_column = "queued_at"
+        elif status in ("processing", "started"):
+            time_column = "started_at"
+        elif status in (
+            "processed",
+            "rejected",
+            "submitted",
+            "submit_failed",
+            "duplicate_ignored",
+            "error",
+        ):
+            time_column = "finished_at"
+
+        assignments = ["status = ?"]
+        params = [status]
+
+        if time_column:
+            assignments.append(f"{time_column} = ?")
+            params.append(now)
+
+        if order_id is not None:
+            assignments.append("order_id = ?")
+            params.append(order_id)
+
+        if client_order_id is not None:
+            assignments.append("client_order_id = ?")
+            params.append(client_order_id)
+
+        if failure_reason is not None:
+            assignments.append("failure_reason = ?")
+            params.append(str(failure_reason)[:500])
+
+        params.append(dedupe_key)
+
         con = sqlite3.connect(DB_PATH)
         con.execute(
-            "UPDATE webhook_events SET status = ? WHERE dedupe_key = ?",
-            (status, dedupe_key),
+            f"UPDATE webhook_events SET {', '.join(assignments)} WHERE dedupe_key = ?",
+            params,
         )
         con.commit()
         con.close()
@@ -1533,6 +1598,26 @@ def _pre_order_safety_check(symbol, action, signal_price, account_state):
 
 def process_signal(data):
     dedupe_key = data.get("_dedupe_key")
+    if dedupe_key:
+        if order_result:
+                _mark_webhook_event_status(
+                dedupe_key,
+                "submitted",
+                order_id=order_result.get("order_id"),
+                client_order_id=order_result.get("client_order_id"),
+            )
+        elif decision.get("approved"):
+            _mark_webhook_event_status(
+                dedupe_key,
+                "submit_failed",
+                failure_reason="decision approved but broker returned no order_result",
+            )
+        else:
+            _mark_webhook_event_status(
+                dedupe_key,
+                "rejected",
+                failure_reason=decision.get("reason"),
+            )
     _load_market_context()  # lazy refresh — reloads when market_context.json mtime changes
     action = data.get("action", "").lower()
     symbol = data.get("symbol", "")
@@ -2154,9 +2239,15 @@ def webhook():
     data["_dedupe_key"] = dedupe_key
         
     try:
+        _mark_webhook_event_status(dedupe_key, "queued")
         _signal_executor.submit(process_signal, data)
     except Exception as e:
         logger.error(f"Failed to submit signal to executor for {symbol} {action.upper()}: {e}")
+        _mark_webhook_event_status(
+            dedupe_key,
+            "error",
+            failure_reason=f"failed to queue signal: {e}",
+        )
         return jsonify({
             "status": "error",
             "reason": "failed to queue signal",

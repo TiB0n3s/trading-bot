@@ -2,7 +2,7 @@ import os
 import json
 import sqlite3
 import logging
-import threading
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone, timedelta
 import pytz
 from pathlib import Path
@@ -28,6 +28,12 @@ app = Flask(__name__)
 
 DB_PATH = Path(__file__).parent / "trades.db"
 _START_TIME = datetime.now(timezone.utc)
+
+SIGNAL_WORKER_COUNT = int(os.environ.get("SIGNAL_WORKER_COUNT", "3"))
+_signal_executor = ThreadPoolExecutor(
+    max_workers=SIGNAL_WORKER_COUNT,
+    thread_name_prefix="signal-worker",
+)
 
 def _init_db():
     with get_connection(DB_PATH) as con:
@@ -1623,10 +1629,27 @@ def webhook():
     if not (low * 0.8 <= price <= high * 1.2):
         logger.warning(f"Price sanity check failed for {symbol}: {price} outside [{low * 0.8:.2f}, {high * 1.2:.2f}]")
         abort(400)
-    thread = threading.Thread(target=process_signal, args=(data,))
-    thread.daemon = True
-    thread.start()
-    return jsonify({"status": "received", "symbol": symbol, "action": action, "price": price, "timestamp": datetime.now().isoformat()}), 200
+    try:
+        _signal_executor.submit(process_signal, data)
+    except Exception as e:
+        logger.error(f"Failed to submit signal to executor for {symbol} {action.upper()}: {e}")
+        return jsonify({
+            "status": "error",
+            "reason": "failed to queue signal",
+            "symbol": symbol,
+            "action": action,
+            "price": price,
+            "timestamp": datetime.now().isoformat(),
+        }), 503
+
+    return jsonify({
+        "status": "received",
+        "queued": True,
+        "symbol": symbol,
+        "action": action,
+        "price": price,
+        "timestamp": datetime.now().isoformat(),
+    }), 200
 
 @app.route("/health", methods=["GET"])
 def health():

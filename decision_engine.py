@@ -1,11 +1,8 @@
 import os
 import json
-import sqlite3
 import logging
-from collections import defaultdict
-from datetime import date
-from pathlib import Path
 from anthropic import Anthropic
+from pnl import get_daily_realized_pnl
 
 logger = logging.getLogger(__name__)
 client = Anthropic()
@@ -187,42 +184,11 @@ def get_mock_account_state():
     except Exception as e:
         logger.error(f"get_mock_account_state: failed to fetch positions: {e}")
 
-    # Realized P&L from today's filled trades in trades.db (FIFO matching)
+    # Realized P&L from canonical confirmed-fill helper.
+    # Never falls back to signal_price.
     realized_pnl = 0.0
     try:
-        db_path = Path(__file__).parent / "trades.db"
-        today = date.today().isoformat()
-        con = sqlite3.connect(db_path)
-        con.row_factory = sqlite3.Row
-        rows = con.execute(
-            "SELECT action, symbol, qty, fill_price, signal_price FROM trades "
-            "WHERE timestamp LIKE ? AND order_id IS NOT NULL",
-            (f"{today}%",)
-        ).fetchall()
-        con.close()
-
-        sym_buys  = defaultdict(list)
-        sym_sells = defaultdict(list)
-        for r in rows:
-            price = r['fill_price'] if r['fill_price'] is not None else r['signal_price']
-            entry = {'qty': r['qty'] or 0, 'price': price or 0.0}
-            if r['action'] == 'buy':
-                sym_buys[r['symbol']].append(entry)
-            else:
-                sym_sells[r['symbol']].append(entry)
-
-        for sym, sells in sym_sells.items():
-            buys = list(sym_buys[sym])
-            for sell in sells:
-                remaining = sell['qty']
-                while remaining > 0 and buys:
-                    buy = buys[0]
-                    matched = min(remaining, buy['qty'])
-                    realized_pnl += (sell['price'] - buy['price']) * matched
-                    buy['qty'] -= matched
-                    remaining  -= matched
-                    if buy['qty'] == 0:
-                        buys.pop(0)
+        realized_pnl = get_daily_realized_pnl()
     except Exception as e:
         logger.error(f"get_mock_account_state: failed to compute realized P&L: {e}")
 

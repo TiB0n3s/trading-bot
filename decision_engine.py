@@ -54,6 +54,23 @@ Apply to buy signals:
 - Falling momentum is a caution flag — lean confidence lower
 - Flat momentum is neutral — no momentum-based adjustment
 
+PRE-MARKET ALIGNMENT GUIDANCE:
+account_state["momentum"] may include:
+  premarket_bias: "buy", "avoid", or "neutral"
+  premarket_alignment: "confirmed", "contradicted", "mixed", "neutral",
+                       "avoid_confirmed", "tape_strength_against_avoid",
+                       "bullish_intraday_shift", or "bearish_intraday_shift"
+  momentum_5m_pct: short-term 1-minute-bar momentum
+  momentum_15m_pct: broader intraday 1-minute-bar momentum
+  action_hint: advisory interpretation
+
+Apply to buy signals:
+- premarket_alignment "confirmed": live 1-minute tape confirms the pre-market thesis; favor approval when trend_table is bullish.
+- premarket_alignment "contradicted": live 1-minute tape is moving against the pre-market buy thesis; reduce confidence to low unless trend_table is bullish/confirmed.
+- premarket_alignment "mixed": use caution; prefer smaller sizing and medium confidence.
+- bullish_intraday_shift on a neutral pre-market symbol is not enough by itself; require bullish trend_table confirmation.
+- Never override hard gates or bearish trend using intraday alignment.
+
 MARKET BIAS GUIDANCE:
 account_state may contain a "market_bias" field with the value "buy" when same-day pre-market research flagged the symbol positively (favorable news, analyst upgrade, strong pre-market move). The bias is only injected when positive — its absence is informationally neutral, not negative.
 

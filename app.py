@@ -1064,32 +1064,84 @@ def _cluster_exposure(symbol, balance):
     return results
 
 
-def get_momentum(symbol, price):
+def get_momentum(symbol, price, premarket_bias=None):
     try:
-        start = (datetime.now(timezone.utc) - timedelta(minutes=10)).isoformat()
+        start = (datetime.now(timezone.utc) - timedelta(minutes=20)).isoformat()
         bars = list(api.get_bars(symbol, '1Min', start=start, feed='iex'))
+
         if len(bars) < 2:
             return None
-        bars = bars[-5:]
+
+        bars = bars[-15:]
+
         first_close = float(bars[0].c)
         last_close = float(bars[-1].c)
+
         if first_close <= 0 or last_close <= 0:
             return None
-        momentum_pct = (last_close - first_close) / first_close * 100
+
+        # Existing short-term momentum, similar to your current behavior
+        recent_bars = bars[-5:] if len(bars) >= 5 else bars
+        short_first = float(recent_bars[0].c)
+        short_last = float(recent_bars[-1].c)
+
+        momentum_5m_pct = (short_last - short_first) / short_first * 100
+        momentum_15m_pct = (last_close - first_close) / first_close * 100
         price_vs_bars = (price - last_close) / last_close * 100 if last_close > 0 else 0.0
-        if momentum_pct > 0.1:
+
+        if momentum_5m_pct > 0.1:
             direction = "rising"
-        elif momentum_pct < -0.1:
+        elif momentum_5m_pct < -0.1:
             direction = "falling"
         else:
             direction = "flat"
+
+        alignment = "neutral"
+        action_hint = "normal"
+
+        if premarket_bias == "buy":
+            if momentum_5m_pct > 0.10 and momentum_15m_pct > 0.15:
+                alignment = "confirmed"
+                action_hint = "favor_approval"
+            elif momentum_5m_pct < -0.15 and momentum_15m_pct < -0.25:
+                alignment = "contradicted"
+                action_hint = "downgrade_or_reject"
+            else:
+                alignment = "mixed"
+                action_hint = "caution"
+
+        elif premarket_bias == "avoid":
+            if momentum_5m_pct > 0.20 and momentum_15m_pct > 0.30:
+                alignment = "tape_strength_against_avoid"
+                action_hint = "still_respect_avoid_gate"
+            else:
+                alignment = "avoid_confirmed"
+                action_hint = "avoid"
+
+        elif premarket_bias == "neutral":
+            if momentum_5m_pct > 0.15 and momentum_15m_pct > 0.25:
+                alignment = "bullish_intraday_shift"
+                action_hint = "watch_only_unless_trend_confirms"
+            elif momentum_5m_pct < -0.15 and momentum_15m_pct < -0.25:
+                alignment = "bearish_intraday_shift"
+                action_hint = "caution"
+            else:
+                alignment = "neutral"
+                action_hint = "normal"
+
         return {
             "direction": direction,
-            "momentum_pct": round(momentum_pct, 3),
+            "momentum_pct": round(momentum_5m_pct, 3),   # preserve existing field name
+            "momentum_5m_pct": round(momentum_5m_pct, 3),
+            "momentum_15m_pct": round(momentum_15m_pct, 3),
             "price_vs_bars": round(price_vs_bars, 3),
             "bar_count": len(bars),
             "last_close": round(last_close, 4),
+            "premarket_bias": premarket_bias,
+            "premarket_alignment": alignment,
+            "action_hint": action_hint,
         }
+
     except Exception as e:
         logger.warning(f"get_momentum failed for {symbol}: {e}")
         return None
@@ -1373,22 +1425,49 @@ def process_signal(data):
 
     # Momentum check (buy signals only, fail-open — never blocks trading)
     if action == "buy":
-        momentum = get_momentum(symbol, price)
+        bias_entry = _market_bias.get(symbol) or {}
+        premarket_bias = bias_entry.get("bias")
+        momentum = get_momentum(symbol, price, premarket_bias=premarket_bias)
         if momentum:
             account_state["momentum"] = momentum
-            if momentum["direction"] == "falling" and momentum["momentum_pct"] < -0.15:
-                account_state["signal_confidence_hint"] = "low"
-                logger.warning(
-                    f"Momentum caution for {symbol} BUY: direction={momentum['direction']} "
-                    f"momentum_pct={momentum['momentum_pct']}% last_close={momentum['last_close']} "
-                    f"— downgrading confidence hint to low"
-                )
-            elif momentum["direction"] == "rising":
-                account_state["signal_confidence_hint"] = "high"
-                logger.info(
-                    f"Momentum confirms {symbol} BUY: direction={momentum['direction']} "
-                    f"momentum_pct={momentum['momentum_pct']}% — confidence hint set to high"
-                )
+
+            alignment = momentum.get("premarket_alignment")
+            action_hint = momentum.get("action_hint")
+
+        if alignment == "contradicted":
+            account_state["signal_confidence_hint"] = "low"
+            logger.warning(
+                f"Pre-market alignment contradicted for {symbol} BUY: "
+                f"bias={momentum.get('premarket_bias')} "
+                f"5m={momentum.get('momentum_5m_pct')}% "
+                f"15m={momentum.get('momentum_15m_pct')}% "
+                f"hint={action_hint} — confidence hint set to low"
+            )
+
+        elif alignment == "confirmed":
+            account_state["signal_confidence_hint"] = "high"
+            logger.info(
+                f"Pre-market alignment confirmed for {symbol} BUY: "
+                f"bias={momentum.get('premarket_bias')} "
+                f"5m={momentum.get('momentum_5m_pct')}% "
+                f"15m={momentum.get('momentum_15m_pct')}% "
+                f"hint={action_hint} — confidence hint set to high"
+            )
+
+        elif momentum["direction"] == "falling" and momentum["momentum_pct"] < -0.15:
+            account_state["signal_confidence_hint"] = "low"
+            logger.warning(
+                f"Momentum caution for {symbol} BUY: direction={momentum['direction']} "
+                f"momentum_pct={momentum['momentum_pct']}% last_close={momentum['last_close']} "
+                f"— downgrading confidence hint to low"
+            )
+
+        elif momentum["direction"] == "rising":
+            account_state["signal_confidence_hint"] = "high"
+            logger.info(
+                f"Momentum confirms {symbol} BUY: direction={momentum['direction']} "
+                f"momentum_pct={momentum['momentum_pct']}% — confidence hint set to high"
+            )
 
     # Add-on momentum gate: for existing positions with high/very_high risk,
     # require rising short-term momentum before adding more exposure.

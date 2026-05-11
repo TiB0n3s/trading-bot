@@ -106,6 +106,26 @@ def update_db(order_id: str, status: str, fill_price: float | None):
         logger.error(f"DB update failed for order {order_id}: {e}")
         return 0
 
+def trade_order_exists(order_id: str) -> bool:
+    """Return True if trades already contains this order_id.
+
+    Used to make synthetic bracket-exit insertion idempotent when Alpaca
+    reconnects or replays a fill event.
+    """
+    if not order_id:
+        return False
+
+    try:
+        con = get_connection()
+        row = con.execute(
+            "SELECT id FROM trades WHERE order_id = ? LIMIT 1",
+            (order_id,),
+        ).fetchone()
+        con.close()
+        return row is not None
+    except Exception as e:
+        logger.error(f"trade_order_exists failed for order {order_id}: {e}")
+        return False
 
 def insert_synthetic_exit(order_id, symbol, side, status, filled_qty, fill_price, parent_order_id=None):
     """Insert a synthetic trade row when a fill event has no matching order_id
@@ -118,6 +138,13 @@ def insert_synthetic_exit(order_id, symbol, side, status, filled_qty, fill_price
     """
     try:
         action = "sell" if side == "sell" else "buy"
+
+        if trade_order_exists(order_id):
+            logger.info(
+                f"BRACKET EXIT synthetic row skipped: order already recorded "
+                f"{symbol} {side.upper()} order={order_id}"
+            )
+            return True
 
         con = get_connection()
         con.execute("""

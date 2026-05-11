@@ -183,9 +183,62 @@ def _startup_reconcile():
 _startup_reconcile()
 
 WEBHOOK_SECRET = os.environ.get("WEBHOOK_SECRET", "changeme")
-EXECUTION_MODE = os.environ.get("EXECUTION_MODE", "live").lower().strip()
-if EXECUTION_MODE not in ("live", "dry_run"):
-    EXECUTION_MODE = "live"
+VALID_EXECUTION_MODES = {"paper", "cash_safe", "cash_full", "dry_run"}
+
+EXECUTION_MODE = os.environ.get("EXECUTION_MODE", "paper").lower().strip()
+if EXECUTION_MODE not in VALID_EXECUTION_MODES:
+    EXECUTION_MODE = "paper"
+
+LIVE_TRADING_ENABLED = os.environ.get("LIVE_TRADING_ENABLED", "false").lower().strip() in (
+    "1", "true", "yes", "on"
+)
+
+CASH_SAFE_SYMBOLS = {
+    s.strip().upper()
+    for s in os.environ.get("CASH_SAFE_SYMBOLS", "SPY,QQQ,AAPL,MSFT,NVDA").split(",")
+    if s.strip()
+}
+
+CASH_SAFE_MAX_OPEN_POSITIONS = int(os.environ.get("CASH_SAFE_MAX_OPEN_POSITIONS", "3"))
+CASH_SAFE_MAX_NEW_BUYS_PER_SYMBOL_PER_DAY = int(
+    os.environ.get("CASH_SAFE_MAX_NEW_BUYS_PER_SYMBOL_PER_DAY", "1")
+)
+
+MAX_LIVE_ORDER_DOLLARS = float(os.environ.get("MAX_LIVE_ORDER_DOLLARS", "500"))
+CASH_SAFE_MAX_ORDER_DOLLARS = float(os.environ.get("CASH_SAFE_MAX_ORDER_DOLLARS", "500"))
+SIGNAL_TTL_SECONDS = int(os.environ.get("SIGNAL_TTL_SECONDS", "90"))
+MAX_SIGNAL_PRICE_DRIFT_PCT = float(os.environ.get("MAX_SIGNAL_PRICE_DRIFT_PCT", "0.35"))
+MAX_BID_ASK_SPREAD_PCT = float(os.environ.get("MAX_BID_ASK_SPREAD_PCT", "0.10"))
+
+def is_cash_mode():
+    return EXECUTION_MODE in ("cash_safe", "cash_full")
+
+
+def is_cash_safe_mode():
+    return EXECUTION_MODE == "cash_safe"
+
+
+def public_runtime_config():
+    return {
+        "execution_mode": EXECUTION_MODE,
+        "live_trading_enabled": LIVE_TRADING_ENABLED,
+        "cash_mode": is_cash_mode(),
+        "cash_safe_mode": is_cash_safe_mode(),
+        "cash_safe_symbols": sorted(CASH_SAFE_SYMBOLS) if is_cash_safe_mode() else None,
+        "cash_safe_max_open_positions": (
+            CASH_SAFE_MAX_OPEN_POSITIONS if is_cash_safe_mode() else None
+        ),
+        "cash_safe_max_new_buys_per_symbol_per_day": (
+            CASH_SAFE_MAX_NEW_BUYS_PER_SYMBOL_PER_DAY if is_cash_safe_mode() else None
+        ),
+        "max_live_order_dollars": MAX_LIVE_ORDER_DOLLARS if is_cash_mode() else None,
+        "cash_safe_max_order_dollars": (
+            CASH_SAFE_MAX_ORDER_DOLLARS if is_cash_safe_mode() else None
+        ),
+        "signal_ttl_seconds": SIGNAL_TTL_SECONDS,
+        "max_signal_price_drift_pct": MAX_SIGNAL_PRICE_DRIFT_PCT,
+        "max_bid_ask_spread_pct": MAX_BID_ASK_SPREAD_PCT,
+    }
 
 # Correlation clusters and per-cluster exposure caps (% of cash balance).
 # A new buy is blocked if the cluster's combined market value would exceed
@@ -1198,6 +1251,139 @@ def get_momentum(symbol, price, premarket_bias=None):
     except Exception as e:
         logger.warning(f"get_momentum failed for {symbol}: {e}")
         return None
+def _parse_signal_timestamp(data):
+    """Best-effort parse of an optional TradingView/client timestamp.
+
+    Supported keys:
+      - timestamp
+      - time
+      - alert_time
+      - alert_timestamp
+
+    If no timestamp is present, return None so legacy alerts continue to work.
+    """
+    raw = (
+        data.get("timestamp")
+        or data.get("time")
+        or data.get("alert_time")
+        or data.get("alert_timestamp")
+    )
+    if not raw:
+        return None
+
+    try:
+        if isinstance(raw, (int, float)):
+            # Treat very large values as milliseconds.
+            ts = float(raw) / 1000 if float(raw) > 10_000_000_000 else float(raw)
+            return datetime.fromtimestamp(ts, tz=timezone.utc)
+
+        raw_s = str(raw).strip()
+        if raw_s.isdigit():
+            ts = float(raw_s) / 1000 if len(raw_s) > 10 else float(raw_s)
+            return datetime.fromtimestamp(ts, tz=timezone.utc)
+
+        # Accept ISO strings with either "+00:00" or "Z".
+        parsed = datetime.fromisoformat(raw_s.replace("Z", "+00:00"))
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        return parsed.astimezone(timezone.utc)
+    except Exception as e:
+        logger.warning(f"Unable to parse signal timestamp {raw!r}: {e}")
+        return None
+
+
+def _is_signal_stale(data):
+    """Return (is_stale, age_seconds, reason). Missing timestamps are allowed."""
+    ts = _parse_signal_timestamp(data)
+    if ts is None:
+        return False, None, "no timestamp provided"
+
+    now = datetime.now(timezone.utc)
+    age_seconds = (now - ts).total_seconds()
+
+    if age_seconds < -30:
+        return True, age_seconds, f"signal timestamp is {abs(age_seconds):.1f}s in the future"
+
+    if age_seconds > SIGNAL_TTL_SECONDS:
+        return True, age_seconds, f"signal age {age_seconds:.1f}s exceeds TTL {SIGNAL_TTL_SECONDS}s"
+
+    return False, age_seconds, f"signal age {age_seconds:.1f}s within TTL"
+
+def _pre_order_safety_check(symbol, action, signal_price, account_state):
+    """Final broker-adjacent safety check immediately before order placement.
+
+    Returns (ok: bool, reason: str).
+    """
+    if action != "buy":
+        return True, "sell signal bypasses buy-side second-look checks"
+
+    try:
+        latest_trade = api.get_latest_trade(symbol)
+        latest_price = float(latest_trade.price)
+    except Exception as e:
+        return False, f"failed to fetch latest trade for second-look check: {e}"
+
+    try:
+        signal_price_f = float(signal_price)
+    except (TypeError, ValueError):
+        return False, f"invalid signal_price for second-look check: {signal_price!r}"
+
+    if signal_price_f <= 0 or latest_price <= 0:
+        return False, f"invalid price values signal={signal_price_f} latest={latest_price}"
+
+    drift_pct = abs(latest_price - signal_price_f) / signal_price_f * 100
+    if drift_pct > MAX_SIGNAL_PRICE_DRIFT_PCT:
+        return (
+            False,
+            f"latest price drift {drift_pct:.3f}% exceeds max {MAX_SIGNAL_PRICE_DRIFT_PCT:.3f}% "
+            f"(signal={signal_price_f:.4f}, latest={latest_price:.4f})",
+        )
+
+    # Open-order duplicate protection.
+    try:
+        open_orders = api.list_orders(status="open", symbols=[symbol])
+        if open_orders:
+            return False, f"open broker order already exists for {symbol}"
+    except Exception as e:
+        return False, f"failed to check open orders for {symbol}: {e}"
+
+    # Bid/ask spread check. Fail-open only if quote retrieval is unsupported;
+    # fail-closed if quote data is malformed.
+    try:
+        quote = api.get_latest_quote(symbol)
+        bid = float(getattr(quote, "bid_price", 0) or 0)
+        ask = float(getattr(quote, "ask_price", 0) or 0)
+
+        if bid <= 0 or ask <= 0 or ask < bid:
+            return False, f"invalid quote bid={bid} ask={ask}"
+
+        mid = (bid + ask) / 2
+        spread_pct = (ask - bid) / mid * 100 if mid > 0 else 999
+        if spread_pct > MAX_BID_ASK_SPREAD_PCT:
+            return (
+                False,
+                f"bid/ask spread {spread_pct:.3f}% exceeds max {MAX_BID_ASK_SPREAD_PCT:.3f}% "
+                f"(bid={bid:.4f}, ask={ask:.4f})",
+            )
+
+        account_state["second_look"] = {
+            "latest_price": round(latest_price, 4),
+            "price_drift_pct": round(drift_pct, 4),
+            "bid": round(bid, 4),
+            "ask": round(ask, 4),
+            "spread_pct": round(spread_pct, 4),
+        }
+    except AttributeError as e:
+        logger.warning(f"Second-look quote check unsupported for {symbol}: {e}")
+        account_state["second_look"] = {
+            "latest_price": round(latest_price, 4),
+            "price_drift_pct": round(drift_pct, 4),
+            "quote_check": "unsupported",
+        }
+    except Exception as e:
+        return False, f"failed quote/spread second-look check for {symbol}: {e}"
+
+    return True, "second-look checks passed"
 
 def process_signal(data):
     _load_market_context()  # lazy refresh — reloads when market_context.json mtime changes
@@ -1206,6 +1392,90 @@ def process_signal(data):
     price = data.get("price", 0)
     logger.info(f"Processing {action.upper()} signal for {symbol} at {price}")
     account_state = get_mock_account_state()
+    is_stale, age_seconds, stale_reason = _is_signal_stale(data)
+    if is_stale:
+        logger.warning(
+            f"Stale signal blocked for {symbol} {action.upper()}: {stale_reason}"
+        )
+        log_rejection(
+            symbol,
+            action,
+            "stale_signal",
+            stale_reason,
+            price=price,
+            account_state=account_state,
+        )
+        return
+
+    if age_seconds is not None:
+        account_state["signal_age_seconds"] = round(age_seconds, 2)
+
+    if action == "buy" and is_cash_safe_mode():
+        if symbol not in CASH_SAFE_SYMBOLS:
+            reason = f"{symbol} not allowed in cash_safe symbols {sorted(CASH_SAFE_SYMBOLS)}"
+            logger.warning(f"Cash-safe gate blocked {symbol} BUY: {reason}")
+            log_rejection(
+                symbol,
+                action,
+                "cash_safe_symbol",
+                reason,
+                price=price,
+                account_state=account_state,
+            )
+            return
+
+        open_count = account_state.get("open_position_count", 0)
+        if open_count >= CASH_SAFE_MAX_OPEN_POSITIONS:
+            reason = (
+                f"open_position_count={open_count} >= cash_safe max "
+                f"{CASH_SAFE_MAX_OPEN_POSITIONS}"
+            )
+            logger.warning(f"Cash-safe gate blocked {symbol} BUY: {reason}")
+            log_rejection(
+                symbol,
+                action,
+                "cash_safe_position_limit",
+                reason,
+                price=price,
+                account_state=account_state,
+            )
+            return
+
+        try:
+            today = datetime.now().strftime("%Y-%m-%d")
+            con = sqlite3.connect(DB_PATH)
+            row = con.execute(
+                """
+                SELECT COUNT(*) FROM trades
+                WHERE timestamp LIKE ?
+                  AND symbol = ?
+                  AND action = 'buy'
+                  AND approved = 1
+                  AND order_id IS NOT NULL
+                """,
+                (f"{today}%", symbol),
+            ).fetchone()
+            con.close()
+            buys_today = int(row[0] or 0)
+        except Exception as e:
+            logger.error(f"Cash-safe daily buy check failed for {symbol}: {e}")
+            buys_today = 999
+
+        if buys_today >= CASH_SAFE_MAX_NEW_BUYS_PER_SYMBOL_PER_DAY:
+            reason = (
+                f"buys_today={buys_today} >= cash_safe per-symbol daily max "
+                f"{CASH_SAFE_MAX_NEW_BUYS_PER_SYMBOL_PER_DAY}"
+            )
+            logger.warning(f"Cash-safe gate blocked {symbol} BUY: {reason}")
+            log_rejection(
+                symbol,
+                action,
+                "cash_safe_daily_symbol_limit",
+                reason,
+                price=price,
+                account_state=account_state,
+            )
+            return
 
     # Webhook duplicate protection: reject near-identical TradingView alerts
     # received within a short window. This is separate from order cooldowns,
@@ -1584,6 +1854,22 @@ def process_signal(data):
     # Confidence gate: reject low-confidence buy signals without placing an order.
     # Persisted via log_rejection (Stage 5 categorization) so signal_history can
     # distinguish "Claude evaluated but bot filtered" from hard-rule rejections.
+    if action == "buy" and is_cash_safe_mode() and decision.get("confidence") != "high":
+        logger.warning(
+            f"Cash-safe confidence gate rejected {symbol} BUY: "
+            f"confidence={decision.get('confidence')}"
+        )
+        log_rejection(
+            symbol,
+            action,
+            "cash_safe_confidence",
+            f"cash_safe requires confidence=high; got {decision.get('confidence')} "
+            f"(reason: {decision.get('reason', '')})",
+            price=price,
+            account_state=account_state,
+        )
+        return
+
     if action == "buy" and decision.get("confidence") == "low":
         logger.warning(f"Low confidence BUY rejected for {symbol}: skipping order placement")
         log_rejection(
@@ -1614,6 +1900,26 @@ def process_signal(data):
                 "status": "dry_run",
             }
         else:
+            ok, second_look_reason = _pre_order_safety_check(
+                symbol=symbol,
+                action=action,
+                signal_price=price,
+                account_state=account_state,
+            )
+            if not ok:
+                logger.warning(
+                    f"Second-look safety check blocked {symbol} {action.upper()}: "
+                    f"{second_look_reason}"
+                )
+                log_rejection(
+                    symbol,
+                    action,
+                    "second_look",
+                    second_look_reason,
+                    price=price,
+                    account_state=account_state,
+                )
+                return
             order_result = place_order(
                 symbol=symbol,
                 action=action,
@@ -1715,6 +2021,7 @@ def status():
     result = {
         "timestamp": datetime.now().isoformat(),
         "execution_mode": EXECUTION_MODE,
+        "runtime_config": public_runtime_config(),
     }
 
     # Uptime

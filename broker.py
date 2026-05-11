@@ -2,12 +2,19 @@ import os
 import time
 import logging
 import alpaca_trade_api as tradeapi
+from runtime_config import (
+    EXECUTION_MODE,
+    LIVE_TRADING_ENABLED,
+    get_alpaca_base_url,
+    is_cash_mode,
+    max_order_dollars,
+)
 
 logger = logging.getLogger(__name__)
 
 ALPACA_API_KEY = os.environ.get("ALPACA_API_KEY", "")
 ALPACA_SECRET_KEY = os.environ.get("ALPACA_SECRET_KEY", "")
-ALPACA_BASE_URL = "https://paper-api.alpaca.markets"
+ALPACA_BASE_URL = get_alpaca_base_url()
 
 api = tradeapi.REST(ALPACA_API_KEY, ALPACA_SECRET_KEY, ALPACA_BASE_URL)
 
@@ -40,6 +47,12 @@ def get_position(symbol):
 
 def place_order(symbol, action, position_size_pct, stop_loss_pct, take_profit_pct, risk_level=None):
     try:
+        if is_cash_mode() and not LIVE_TRADING_ENABLED:
+            logger.error(
+                f"LIVE GUARD: refusing {action.upper()} {symbol} because "
+                f"EXECUTION_MODE={EXECUTION_MODE} but LIVE_TRADING_ENABLED is false"
+            )
+            return None        
         account = get_account()
         if not account:
             logger.error("Cannot place order - account unavailable")
@@ -85,6 +98,16 @@ def place_order(symbol, action, position_size_pct, stop_loss_pct, take_profit_pc
             if qty < 1:
                 logger.error(f"Position size too small for {symbol} - qty rounds to 0 at price {current_price} with balance {balance}")
                 return None
+            if is_cash_mode():
+                order_notional = qty * current_price
+                cap = max_order_dollars()
+                if order_notional > cap:
+                    logger.error(
+                        f"LIVE GUARD: refusing BUY {symbol}; notional ${order_notional:.2f} "
+                        f"exceeds max_order_dollars ${cap:.2f} "
+                        f"(EXECUTION_MODE={EXECUTION_MODE})"
+                    )
+                    return None
         if side == "buy":
             stop_price = round(current_price * (1 - stop_loss_pct / 100), 2)
             take_price = round(current_price * (1 + take_profit_pct / 100), 2)

@@ -10,6 +10,7 @@ from flask import Flask, request, jsonify, abort
 from decision_engine import evaluate_signal, get_mock_account_state
 from broker import place_order, get_account, get_position, api
 from macro_risk import get_macro_risk
+from market_time import now_et, is_market_hours, market_session
 from db import init_db_performance_indexes
 from db import get_connection
 from config import (
@@ -1201,15 +1202,20 @@ def process_signal(data):
     )
 
     # Hard pre-check 1: market hours (9:45–15:45 ET, weekdays only)
-    now_et = datetime.now(pytz.timezone("America/New_York"))
-    if now_et.weekday() >= 5:
-        logger.warning(f"Market hours check failed for {symbol} {action.upper()}: weekend ({now_et.strftime('%A')})")
-        log_rejection(symbol, action, "market_hours", f"weekend ({now_et.strftime('%A')})", price=price, account_state=account_state)
-        return
-    t = now_et.hour * 60 + now_et.minute
-    if not (MARKET_OPEN_MINUTES <= t < MARKET_CLOSE_MINUTES):
-        logger.warning(f"Market hours check failed for {symbol} {action.upper()}: {now_et.strftime('%H:%M')} ET is outside 09:30–16:00 window")
-        log_rejection(symbol, action, "market_hours", f"{now_et.strftime('%H:%M')} ET outside 09:30–16:00 window", price=price, account_state=account_state)
+    current_et = now_et()
+    if not is_market_hours(current_et):
+        if current_et.weekday() >= 5:
+            reason = f"weekend ({current_et.strftime('%A')})"
+        else:
+            reason = f"{current_et.strftime('%H:%M')} ET outside 09:45–15:45 window"
+
+        logger.warning(
+            f"Market hours check failed for {symbol} {action.upper()}: {reason}"
+        )
+        log_rejection(
+            symbol, action, "market_hours", reason,
+            price=price, account_state=account_state
+        )
         return
 
     # Hard pre-check 2: circuit breaker (-3% daily loss limit)
@@ -1236,8 +1242,8 @@ def process_signal(data):
     # (Stage B: DB-backed read so all workers see the same cooldown state)
     cooldown_key = (symbol, action)
     last = _read_cooldown(symbol, action)
-    if last and (now_et - last).total_seconds() < 15 * 60:
-        mins_remaining = int(15 * 60 - (now_et - last).total_seconds()) // 60
+    if last and (current_et - last).total_seconds() < 15 * 60:
+        mins_remaining = int(15 * 60 - (current_et - last).total_seconds()) // 60
         logger.warning(
             f"Cooldown active for {symbol} {action.upper()}: last order at {last.strftime('%H:%M')} ET, "
             f"{mins_remaining}m remaining — skipping Claude"
@@ -1251,7 +1257,7 @@ def process_signal(data):
         last_sell = _read_recent_sell(symbol)
         if last_sell:
             last_sell_time, last_sell_price = last_sell
-            elapsed_s = (now_et - last_sell_time).total_seconds()
+            elapsed_s = (current_et - last_sell_time).total_seconds()
             if elapsed_s < 30 * 60:
                 mins_remaining = int(30 * 60 - elapsed_s) // 60
                 logger.warning(
@@ -1570,11 +1576,11 @@ def process_signal(data):
                 logger.info(f"DRY RUN ORDER RECORDED: {order_result}")
             else:
                 logger.info(f"ORDER PLACED: {order_result}")
-                _last_order[cooldown_key] = now_et
-                _write_cooldown(symbol, action, now_et)
+                _last_order[cooldown_key] = current_et
+                _write_cooldown(symbol, action, current_et)
                 if action == "sell":
-                    _last_sell[symbol] = (now_et, price)
-                    _write_recent_sell(symbol, now_et, price)
+                    _last_sell[symbol] = (current_et, price)
+                    _write_recent_sell(symbol, current_et, price)
         else:
             logger.error(f"Order placement failed for {symbol}")
     else:
@@ -1632,16 +1638,7 @@ def health():
     }), 200
 
 def _market_session():
-    ET = timezone(timedelta(hours=-4))  # EDT (UTC-4), adjust to -5 in winter
-    now = datetime.now(ET)
-    t = now.hour * 60 + now.minute
-    if t < 9 * 60 + 30:
-        return "pre-market"
-    if t < 16 * 60:
-        return "open"
-    if t < 20 * 60:
-        return "after-hours"
-    return "closed"
+    return market_session()
 
 
 @app.route("/status", methods=["GET"])

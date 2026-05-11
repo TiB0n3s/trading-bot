@@ -76,6 +76,20 @@ def _init_db():
         """)
 
         con.execute("""
+            CREATE TABLE IF NOT EXISTS webhook_events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                dedupe_key TEXT UNIQUE NOT NULL,
+                received_at TEXT NOT NULL,
+                symbol TEXT,
+                action TEXT,
+                signal_price REAL,
+                source TEXT,
+                payload_json TEXT,
+                status TEXT DEFAULT 'received'
+            )
+        """)
+
+        con.execute("""
             CREATE TABLE IF NOT EXISTS recent_webhooks (
                 dedupe_key      TEXT PRIMARY KEY,
                 symbol          TEXT NOT NULL,
@@ -209,6 +223,7 @@ CASH_SAFE_MAX_ORDER_DOLLARS = float(os.environ.get("CASH_SAFE_MAX_ORDER_DOLLARS"
 SIGNAL_TTL_SECONDS = int(os.environ.get("SIGNAL_TTL_SECONDS", "90"))
 MAX_SIGNAL_PRICE_DRIFT_PCT = float(os.environ.get("MAX_SIGNAL_PRICE_DRIFT_PCT", "0.35"))
 MAX_BID_ASK_SPREAD_PCT = float(os.environ.get("MAX_BID_ASK_SPREAD_PCT", "0.10"))
+WEBHOOK_DEDUPE_WINDOW_SECONDS = int(os.environ.get("WEBHOOK_DEDUPE_WINDOW_SECONDS", "300"))
 
 def is_cash_mode():
     return EXECUTION_MODE in ("cash_safe", "cash_full")
@@ -235,6 +250,7 @@ def public_runtime_config():
         "cash_safe_max_order_dollars": (
             CASH_SAFE_MAX_ORDER_DOLLARS if is_cash_safe_mode() else None
         ),
+        "webhook_dedupe_window_seconds": WEBHOOK_DEDUPE_WINDOW_SECONDS,
         "signal_ttl_seconds": SIGNAL_TTL_SECONDS,
         "max_signal_price_drift_pct": MAX_SIGNAL_PRICE_DRIFT_PCT,
         "max_bid_ask_spread_pct": MAX_BID_ASK_SPREAD_PCT,
@@ -692,6 +708,105 @@ def _load_market_context():
         logger.error(f"_load_market_context failed: {e}")
 
 _load_market_context()
+
+def _make_dedupe_key(data):
+    """Create a stable dedupe key for repeated webhook deliveries.
+
+    Prefer explicit alert IDs when TradingView provides them; otherwise fall back
+    to a deterministic hash of the normalized signal fields.
+    """
+    import hashlib
+
+    explicit = (
+        data.get("alert_id")
+        or data.get("id")
+        or data.get("uuid")
+        or data.get("webhook_id")
+    )
+    if explicit:
+        return f"explicit:{str(explicit).strip()}"
+
+    normalized = {
+        "symbol": str(data.get("symbol", "")).upper(),
+        "action": str(data.get("action", "")).lower(),
+        "price": str(data.get("price", "")),
+        "source": str(data.get("source", "")),
+        "timestamp": str(
+            data.get("timestamp")
+            or data.get("time")
+            or data.get("alert_time")
+            or data.get("alert_timestamp")
+            or ""
+        ),
+    }
+
+    raw = json.dumps(normalized, sort_keys=True, separators=(",", ":"))
+    return "hash:" + hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+
+def _record_webhook_event(dedupe_key, data):
+    """Persist webhook receipt.
+
+    Returns True if this is a new event, False if it is a duplicate inside the
+    active dedupe table.
+    """
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    try:
+        con = sqlite3.connect(DB_PATH)
+        con.execute(
+            """
+            DELETE FROM webhook_events
+            WHERE received_at < datetime('now', ?)
+            """,
+            (f"-{WEBHOOK_DEDUPE_WINDOW_SECONDS} seconds",),
+        )
+        con.execute(
+            """
+            INSERT INTO webhook_events (
+                dedupe_key, received_at, symbol, action, signal_price, source,
+                payload_json, status
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, 'received')
+            """,
+            (
+                dedupe_key,
+                timestamp,
+                str(data.get("symbol", "")).upper(),
+                str(data.get("action", "")).lower(),
+                data.get("price"),
+                data.get("source"),
+                json.dumps(data, sort_keys=True),
+            ),
+        )
+        con.commit()
+        con.close()
+        return True
+    except sqlite3.IntegrityError:
+        try:
+            con.close()
+        except Exception:
+            pass
+        return False
+    except Exception as e:
+        logger.error(f"Webhook dedupe persistence failed: {e}")
+        try:
+            con.close()
+        except Exception:
+            pass
+        # Fail open so a DB hiccup does not drop a legitimate sell/risk-reducing signal.
+        return True
+
+
+def _mark_webhook_event_status(dedupe_key, status):
+    try:
+        con = sqlite3.connect(DB_PATH)
+        con.execute(
+            "UPDATE webhook_events SET status = ? WHERE dedupe_key = ?",
+            (status, dedupe_key),
+        )
+        con.commit()
+        con.close()
+    except Exception as e:
+        logger.warning(f"Failed to update webhook event status for {dedupe_key}: {e}")
 
 def validate_secret(req):
     secret = req.args.get("secret", "")
@@ -1386,6 +1501,7 @@ def _pre_order_safety_check(symbol, action, signal_price, account_state):
     return True, "second-look checks passed"
 
 def process_signal(data):
+    dedupe_key = data.get("_dedupe_key")
     _load_market_context()  # lazy refresh — reloads when market_context.json mtime changes
     action = data.get("action", "").lower()
     symbol = data.get("symbol", "")
@@ -1945,6 +2061,8 @@ def process_signal(data):
         rejected_reason = decision.get("reason")
         logger.info(f"REJECTED: {symbol} {action.upper()} - {rejected_reason}")
     log_trade(data, decision, order_result, account_state=account_state)
+    if dedupe_key:
+        _mark_webhook_event_status(dedupe_key, "processed")
 
 @app.route("/webhook", methods=["POST"])
 def webhook():
@@ -1981,6 +2099,25 @@ def webhook():
     if not (low * 0.8 <= price <= high * 1.2):
         logger.warning(f"Price sanity check failed for {symbol}: {price} outside [{low * 0.8:.2f}, {high * 1.2:.2f}]")
         abort(400)
+
+    dedupe_key = _make_dedupe_key(data)
+    is_new_event = _record_webhook_event(dedupe_key, data)
+
+    if not is_new_event:
+        logger.warning(
+            f"Duplicate webhook ignored: symbol={symbol} action={action} "
+            f"price={price} dedupe_key={dedupe_key[:24]}..."
+        )
+        return jsonify({
+            "status": "duplicate_ignored",
+            "symbol": symbol,
+            "action": action,
+            "price": price,
+            "timestamp": datetime.now().isoformat(),
+        }), 200
+
+    data["_dedupe_key"] = dedupe_key
+        
     try:
         _signal_executor.submit(process_signal, data)
     except Exception as e:

@@ -2,6 +2,7 @@ import os
 import json
 import sqlite3
 import logging
+import hashlib
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone, timedelta
 import pytz
@@ -1424,6 +1425,36 @@ def _is_signal_stale(data):
 
     return False, age_seconds, f"signal age {age_seconds:.1f}s within TTL"
 
+def _make_client_order_id(symbol, action, data):
+    """Create a stable Alpaca client_order_id for idempotent broker submission.
+
+    Alpaca client_order_id has a length limit, so keep this compact.
+    """
+    dedupe_key = str(data.get("_dedupe_key") or "")
+    timestamp_hint = str(
+        data.get("timestamp")
+        or data.get("time")
+        or data.get("alert_time")
+        or data.get("alert_timestamp")
+        or datetime.now(timezone.utc).isoformat()
+    )
+
+    raw = json.dumps(
+        {
+            "symbol": symbol,
+            "action": action,
+            "price": data.get("price"),
+            "source": data.get("source"),
+            "dedupe_key": dedupe_key,
+            "timestamp": timestamp_hint,
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+
+    digest = hashlib.sha256(raw.encode("utf-8")).hexdigest()[:16]
+    return f"tb-{symbol.lower()}-{action.lower()}-{digest}"
+
 def _pre_order_safety_check(symbol, action, signal_price, account_state):
     """Final broker-adjacent safety check immediately before order placement.
 
@@ -2036,6 +2067,9 @@ def process_signal(data):
                     account_state=account_state,
                 )
                 return
+
+            client_order_id = _make_client_order_id(symbol, action, data)
+
             order_result = place_order(
                 symbol=symbol,
                 action=action,
@@ -2043,6 +2077,7 @@ def process_signal(data):
                 stop_loss_pct=decision.get("stop_loss_pct", 0.5),
                 take_profit_pct=decision.get("take_profit_pct", 1.5),
                 risk_level=account_state.get("risk_level"),
+                client_order_id=client_order_id,
             )
 
         if order_result:

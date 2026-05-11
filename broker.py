@@ -45,7 +45,7 @@ def get_position(symbol):
         logger.info(f"No position found for {symbol}: {e}")
         return None
 
-def place_order(symbol, action, position_size_pct, stop_loss_pct, take_profit_pct, risk_level=None):
+def place_order(symbol, action, position_size_pct, stop_loss_pct, take_profit_pct, risk_level=None, client_order_id=None):
     try:
         if is_cash_mode() and not LIVE_TRADING_ENABLED:
             logger.error(
@@ -124,7 +124,8 @@ def place_order(symbol, action, position_size_pct, stop_loss_pct, take_profit_pc
                 time_in_force="day",
                 order_class="bracket",
                 stop_loss={"stop_price": stop_price},
-                take_profit={"limit_price": take_price}
+                take_profit={"limit_price": take_price},
+                client_order_id=client_order_id,
             )
         else:
             order = api.submit_order(
@@ -132,11 +133,13 @@ def place_order(symbol, action, position_size_pct, stop_loss_pct, take_profit_pc
                 qty=qty,
                 side=side,
                 type="market",
-                time_in_force="day"
+                time_in_force="day",
+                client_order_id=client_order_id,
             )
         logger.info(f"Order placed: {side.upper()} {qty} shares of {symbol} | Stop: {stop_price} | Target: {take_price}")
         return {
             "order_id": order.id,
+            "client_order_id": getattr(order, "client_order_id", client_order_id),
             "symbol": symbol,
             "side": side,
             "qty": qty,

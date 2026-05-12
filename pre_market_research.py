@@ -102,7 +102,7 @@ Search efficiently. You have a hard budget of 6 web searches total — DO NOT se
 3. "analyst upgrades downgrades today" — recent rating changes that affect bias
 Synthesize the per-symbol output by attributing what each search reveals. For symbols not mentioned in any search result, default to bias "neutral" with confidence "low" and a reason like "no significant pre-market signals found".
 
-Return ONLY this JSON schema. All requested symbols must be present in the "symbols" object:
+Return ONLY this JSON schema. All {len(SYMBOLS)} symbols must be present in the "symbols" object:
 {{
   "market_date": "{today}",
   "macro_sentiment": "risk-on | risk-off | mixed | neutral",

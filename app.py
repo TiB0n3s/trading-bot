@@ -8,6 +8,7 @@ from datetime import datetime, timezone, timedelta
 import pytz
 from setup_policy import evaluate_setup_policy
 from pathlib import Path
+from live_features import build_snapshot
 from flask import Flask, request, jsonify, abort
 from decision_engine import evaluate_signal, get_mock_account_state
 from broker import place_order, get_account, get_position, api
@@ -111,6 +112,7 @@ def _init_db():
         ("order_id", "TEXT"),
         ("client_order_id", "TEXT"),
         ("failure_reason", "TEXT"),
+
     ]
     for col_name, col_type in webhook_context_cols:
         if col_name not in existing_webhook_cols:
@@ -144,6 +146,11 @@ def _init_db():
             ("momentum_pct",         "REAL"),
             ("correlation_cluster",  "TEXT"),
             ("cluster_exposure_pct", "REAL"),
+            ("setup_label",          "TEXT"),
+            ("setup_policy_action",  "TEXT"),
+            ("setup_policy_reason",  "TEXT"),
+            ("setup_confidence_adjustment", "REAL"),
+            ("setup_size_multiplier", "REAL"),
         ]
         for col_name, col_type in context_cols:
             if col_name not in existing_cols:
@@ -243,23 +250,65 @@ def _observe_setup_policy(setup_label: str | None) -> dict:
 
     return policy
 
-setup_policy = _observe_setup_policy(setup_label)
+def _build_setup_observation(symbol, action, price, account_state):
+    """
+    Observe-only setup snapshot + setup policy evaluation.
 
-logger.info(
-    "Setup policy observe-only: "
-    f"symbol={symbol} "
-    f"setup_label={setup_label} "
-    f"policy_action={setup_policy.get('setup_policy_action')} "
-    f"confidence_adjustment={setup_policy.get('setup_confidence_adjustment')} "
-    f"size_multiplier={setup_policy.get('setup_size_multiplier')} "
-    f"reason={setup_policy.get('reason')}"
-)
+    Returns a dict with setup fields. Fail-open: never blocks trading here.
+    """
+    if action != "buy":
+        return {
+            "setup_label": None,
+            "setup_policy_action": "not_applicable",
+            "setup_policy_reason": "setup_policy:not_applicable:sell",
+            "setup_confidence_adjustment": 0,
+            "setup_size_multiplier": 1.0,
+            "setup_score": None,
+            "setup_confidence": None,
+            "setup_key": None,
+            "setup_rationale": None,
+        }
 
-decision_context["setup_label"] = setup_label
-decision_context["setup_policy_action"] = setup_policy.get("setup_policy_action")
-decision_context["setup_policy_reason"] = setup_policy.get("reason")
-decision_context["setup_confidence_adjustment"] = setup_policy.get("setup_confidence_adjustment")
-decision_context["setup_size_multiplier"] = setup_policy.get("setup_size_multiplier")
+    try:
+        snapshot = build_snapshot(symbol)
+        setup_label = snapshot.get("setup_label")
+        setup_policy = _observe_setup_policy(setup_label)
+
+        logger.info(
+            "Setup policy observe-only: "
+            f"symbol={symbol} "
+            f"setup_label={setup_label} "
+            f"policy_action={setup_policy.get('setup_policy_action')} "
+            f"confidence_adjustment={setup_policy.get('setup_confidence_adjustment')} "
+            f"size_multiplier={setup_policy.get('setup_size_multiplier')} "
+            f"reason={setup_policy.get('reason')}"
+        )
+
+        return {
+            "setup_label": setup_label,
+            "setup_policy_action": setup_policy.get("setup_policy_action"),
+            "setup_policy_reason": setup_policy.get("reason"),
+            "setup_confidence_adjustment": setup_policy.get("setup_confidence_adjustment"),
+            "setup_size_multiplier": setup_policy.get("setup_size_multiplier"),
+            "setup_score": snapshot.get("setup_score"),
+            "setup_confidence": snapshot.get("setup_confidence"),
+            "setup_key": snapshot.get("setup_key"),
+            "setup_rationale": snapshot.get("setup_rationale"),
+        }
+
+    except Exception as e:
+        logger.warning(f"setup observe-only snapshot failed for {symbol}: {e}")
+        return {
+            "setup_label": None,
+            "setup_policy_action": "error",
+            "setup_policy_reason": f"setup_policy:error:{e}",
+            "setup_confidence_adjustment": 0,
+            "setup_size_multiplier": 1.0,
+            "setup_score": None,
+            "setup_confidence": None,
+            "setup_key": None,
+            "setup_rationale": None,
+        }
 
 WEBHOOK_SECRET = os.environ.get("WEBHOOK_SECRET", "changeme")
 
@@ -933,6 +982,7 @@ def log_trade(signal, decision, order, account_state=None):
             signal.get("action"),
             account_state,
         )
+        setup_obs = (account_state or {}).get("setup_observation") or {}
 
         columns = [
             "timestamp",
@@ -960,6 +1010,11 @@ def log_trade(signal, decision, order, account_state=None):
             "momentum_pct",
             "correlation_cluster",
             "cluster_exposure_pct",
+            "setup_label",
+            "setup_policy_action",
+            "setup_policy_reason",
+            "setup_confidence_adjustment",
+            "setup_size_multiplier",
         ]
 
         values = [
@@ -988,6 +1043,11 @@ def log_trade(signal, decision, order, account_state=None):
             ctx["momentum_pct"],
             ctx["correlation_cluster"],
             ctx["cluster_exposure_pct"],
+            setup_obs.get("setup_label"),
+            setup_obs.get("setup_policy_action"),
+            setup_obs.get("setup_policy_reason"),
+            setup_obs.get("setup_confidence_adjustment"),
+            setup_obs.get("setup_size_multiplier"),
         ]
 
         placeholders = ", ".join(["?"] * len(values))
@@ -1053,43 +1113,66 @@ def _build_decision_context(symbol, action, account_state=None):
         logger.warning(f"_build_decision_context partial failure for {symbol}: {e}")
     return ctx
 
-decision_context["setup_label"] = setup_label
-decision_context["setup_policy_action"] = setup_policy.get("setup_policy_action")
-decision_context["setup_policy_reason"] = setup_policy.get("reason")
-decision_context["setup_confidence_adjustment"] = setup_policy.get("setup_confidence_adjustment")
-decision_context["setup_size_multiplier"] = setup_policy.get("setup_size_multiplier")
-
 def log_rejection(symbol, action, category, reason, price=None, account_state=None):
-    """Persist a pre-Claude rejection to trades.db so daily_summary can count it.
-
-    Caller is responsible for the human-readable logger.warning line; this helper
-    only writes the DB row. The rejection_reason column stores '<category>: <reason>'
-    so daily_summary.py can group by category prefix without parsing free-form text.
-
-    `account_state` (optional) lets callers attach the live decision context —
-    macro/momentum/correlation snapshots — so the row records WHY it was rejected
-    AT THAT MOMENT, not just the gate name.
-    """
+    """Persist a pre-Claude rejection to trades.db so daily_summary can count it."""
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     full_reason = f"{category}: {reason}"
     ctx = _build_decision_context(symbol, action, account_state)
+    setup_obs = (account_state or {}).get("setup_observation") or {}
+
     try:
         with get_connection(DB_PATH) as con:
             con.execute(
-                "INSERT INTO trades ("
-                "timestamp, symbol, action, signal_price, approved, rejection_reason, "
-                "macro_regime, risk_multiplier, market_bias, fundamental_score, risk_level, entry_quality, "
-                "trend_direction, trend_strength, momentum_direction, momentum_pct, "
-                "correlation_cluster, cluster_exposure_pct"
-                ") VALUES (?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                """
+                INSERT INTO trades (
+                    timestamp,
+                    symbol,
+                    action,
+                    signal_price,
+                    approved,
+                    rejection_reason,
+                    macro_regime,
+                    risk_multiplier,
+                    market_bias,
+                    fundamental_score,
+                    risk_level,
+                    entry_quality,
+                    trend_direction,
+                    trend_strength,
+                    momentum_direction,
+                    momentum_pct,
+                    correlation_cluster,
+                    cluster_exposure_pct,
+                    setup_label,
+                    setup_policy_action,
+                    setup_policy_reason,
+                    setup_confidence_adjustment,
+                    setup_size_multiplier
+                ) VALUES (?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
                 (
-                    timestamp, symbol, action, price, full_reason,
-                    ctx["macro_regime"], ctx["risk_multiplier"],
-                    ctx["market_bias"], ctx["fundamental_score"],
-                    ctx["risk_level"], ctx["entry_quality"],
-                    ctx["trend_direction"], ctx["trend_strength"],
-                    ctx["momentum_direction"], ctx["momentum_pct"],
-                    ctx["correlation_cluster"], ctx["cluster_exposure_pct"],
+                    timestamp,
+                    symbol,
+                    action,
+                    price,
+                    full_reason,
+                    ctx["macro_regime"],
+                    ctx["risk_multiplier"],
+                    ctx["market_bias"],
+                    ctx["fundamental_score"],
+                    ctx["risk_level"],
+                    ctx["entry_quality"],
+                    ctx["trend_direction"],
+                    ctx["trend_strength"],
+                    ctx["momentum_direction"],
+                    ctx["momentum_pct"],
+                    ctx["correlation_cluster"],
+                    ctx["cluster_exposure_pct"],
+                    setup_obs.get("setup_label"),
+                    setup_obs.get("setup_policy_action"),
+                    setup_obs.get("setup_policy_reason"),
+                    setup_obs.get("setup_confidence_adjustment"),
+                    setup_obs.get("setup_size_multiplier"),
                 ),
             )
     except Exception as e:
@@ -1638,32 +1721,33 @@ def _pre_order_safety_check(symbol, action, signal_price, account_state):
 
 def process_signal(data):
     dedupe_key = data.get("_dedupe_key")
-    if dedupe_key:
-        if order_result:
-                _mark_webhook_event_status(
-                dedupe_key,
-                "submitted",
-                order_id=order_result.get("order_id"),
-                client_order_id=order_result.get("client_order_id"),
-            )
-        elif decision.get("approved"):
-            _mark_webhook_event_status(
-                dedupe_key,
-                "submit_failed",
-                failure_reason="decision approved but broker returned no order_result",
-            )
-        else:
-            _mark_webhook_event_status(
-                dedupe_key,
-                "rejected",
-                failure_reason=decision.get("reason"),
-            )
-    _load_market_context()  # lazy refresh — reloads when market_context.json mtime changes
+    ...
+    _load_market_context()
     action = data.get("action", "").lower()
     symbol = data.get("symbol", "")
     price = data.get("price", 0)
     logger.info(f"Processing {action.upper()} signal for {symbol} at {price}")
+
     account_state = get_mock_account_state()
+
+    setup_obs = _build_setup_observation(symbol, action, price, account_state)
+    account_state["setup_observation"] = setup_obs
+
+    if action == "buy" and setup_obs.get("setup_policy_action") == "block":
+        reason = setup_obs.get("setup_policy_reason") or "setup_policy:block"
+        logger.warning(
+            f"Setup policy blocked {symbol} BUY: {reason}"
+        )
+        log_rejection(
+            symbol,
+            action,
+            "setup_policy",
+            reason,
+            price=price,
+            account_state=account_state,
+        )
+        return
+
     is_stale, age_seconds, stale_reason = _is_signal_stale(data)
     if is_stale:
         logger.warning(

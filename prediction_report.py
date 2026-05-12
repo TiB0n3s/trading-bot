@@ -153,6 +153,57 @@ def load_rows(
 
     return rows
 
+def load_trade_rows(
+    symbol: str | None = None,
+    session: str | None = None,
+    target_date: str | None = None,
+    last_n_days: int | None = None,
+):
+    clauses = []
+    params: list = []
+
+    if symbol:
+        clauses.append("symbol = ?")
+        params.append(symbol.upper())
+
+    if target_date:
+        clauses.append("timestamp LIKE ?")
+        params.append(f"{target_date}%")
+    elif last_n_days is not None:
+        start_date = (date.today() - timedelta(days=last_n_days - 1)).isoformat()
+        clauses.append("substr(timestamp, 1, 10) >= ?")
+        params.append(start_date)
+
+    if session:
+        clauses.append("1 = 1")
+
+    where_sql = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+
+    with get_connection(DB_PATH) as con:
+        rows = con.execute(
+            f"""
+            SELECT
+                id,
+                timestamp,
+                symbol,
+                action,
+                approved,
+                rejection_reason,
+                confidence,
+                market_bias,
+                trend_direction,
+                trend_strength,
+                setup_label,
+                setup_policy_action,
+                setup_policy_reason
+            FROM trades
+            {where_sql}
+            ORDER BY timestamp ASC
+            """,
+            params,
+        ).fetchall()
+
+    return rows
 
 def summarize_rows(rows) -> dict:
     ret5 = [r["ret_fwd_5m"] for r in rows if r["ret_fwd_5m"] is not None]
@@ -197,6 +248,49 @@ def grouped_summary(rows, key_fn, min_samples: int = 1, horizon: str = "15m"):
         key=lambda x: (
             x[horizon_avg_key] is not None,
             x[horizon_avg_key] if x[horizon_avg_key] is not None else -999,
+            x["count"],
+        ),
+        reverse=True,
+    )
+    return out
+
+def summarize_trade_rows(rows):
+    if not rows:
+        return {
+            "count": 0,
+            "approved_count": 0,
+            "rejected_count": 0,
+            "approval_rate": None,
+        }
+
+    approved_count = sum(1 for r in rows if int(r["approved"] or 0) == 1)
+    rejected_count = len(rows) - approved_count
+
+    return {
+        "count": len(rows),
+        "approved_count": approved_count,
+        "rejected_count": rejected_count,
+        "approval_rate": (approved_count / len(rows) * 100.0) if rows else None,
+    }
+
+
+def grouped_trade_summary(rows, key_fn, min_samples: int = 1):
+    groups = defaultdict(list)
+    for row in rows:
+        groups[key_fn(row)].append(row)
+
+    out = []
+    for key, group_rows in groups.items():
+        if len(group_rows) < min_samples:
+            continue
+        summary = summarize_trade_rows(group_rows)
+        summary["group"] = key
+        out.append(summary)
+
+    out.sort(
+        key=lambda x: (
+            x["approval_rate"] is not None,
+            x["approval_rate"] if x["approval_rate"] is not None else -999,
             x["count"],
         ),
         reverse=True,
@@ -279,22 +373,27 @@ def print_leaderboard(
     print()
     print("* low sample size (<5)")
 
+def print_trade_table(title: str, rows: list[dict], limit: int) -> None:
+    print_section(title)
+
+    if not rows:
+        print("No rows.")
+        return
+
     headers = [
         "Group",
         "Count",
-        f"Avg{horizon_label}",
-        f"Win{horizon_label}",
-        "Avg30",
-        "MaxUp15",
-        "MaxDn15",
+        "Approved",
+        "Rejected",
+        "Approval%",
     ]
-    widths = [54, 7, 10, 8, 10, 10, 10]
+    widths = [54, 7, 9, 9, 10]
     fmt = " ".join(f"{{:<{w}}}" for w in widths)
 
     print(fmt.format(*headers))
     print(fmt.format(*["-" * w for w in widths]))
 
-    for row in ranked[:limit]:
+    for row in rows[:limit]:
         count = row.get("count", 0)
         group_label = f"{row.get('group')} {sample_flag(count)}".rstrip()
 
@@ -302,11 +401,9 @@ def print_leaderboard(
             fmt.format(
                 short(group_label, 54),
                 count,
-                pct(row.get(horizon_avg_key)),
-                f"{row[horizon_win_key]:.1f}%" if row.get(horizon_win_key) is not None else "-",
-                pct(row.get("avg_ret_30m")),
-                pct(row.get("avg_max_up_15m")),
-                pct(row.get("avg_max_down_15m")),
+                row.get("approved_count", 0),
+                row.get("rejected_count", 0),
+                f"{row['approval_rate']:.1f}%" if row.get("approval_rate") is not None else "-",
             )
         )
 
@@ -405,6 +502,15 @@ def main() -> int:
     elif args.date:
         target_date = args.date
 
+    trade_rows = load_trade_rows(
+        symbol=args.symbol,
+        session=args.session,
+        target_date=target_date,
+        last_n_days=args.last_n_days,
+    )
+
+    buy_trade_rows = [r for r in trade_rows if (r["action"] or "").lower() == "buy"]
+
     rows = load_rows(
         symbol=args.symbol,
         horizon=args.horizon,
@@ -418,6 +524,10 @@ def main() -> int:
         return 0
 
     overall = summarize_rows(rows)
+
+    live_overall = summarize_trade_rows(trade_rows)
+
+    live_buy_overall = summarize_trade_rows(buy_trade_rows)
 
     print("=" * 96)
     print("  Prediction Report — observe-only")
@@ -434,6 +544,22 @@ def main() -> int:
     print(f"Required horizon   : {args.horizon}")
     print(f"Min group samples  : {args.min_samples}")
     print(f"Labeled samples    : {overall['count']}")
+    print(f"Live trade rows    : {live_overall['count']}")
+    print(f"Live approvals     : {live_overall['approved_count']}")
+    print(f"Live rejections    : {live_overall['rejected_count']}")
+    print(
+        f"Live approval rate : {live_overall['approval_rate']:.1f}%"
+        if live_overall["approval_rate"] is not None
+        else "Live approval rate : -"
+    )
+    print(f"Live BUY rows      : {live_buy_overall['count']}")
+    print(f"Live BUY approvals : {live_buy_overall['approved_count']}")
+    print(f"Live BUY rejects   : {live_buy_overall['rejected_count']}")
+    print(
+        f"Live BUY appr rate : {live_buy_overall['approval_rate']:.1f}%"
+        if live_buy_overall["approval_rate"] is not None
+        else "Live BUY appr rate : -"
+    )
     print(f"Avg ret 5m         : {pct(overall['avg_ret_5m'])}")
     print(f"Avg ret 15m        : {pct(overall['avg_ret_15m'])}")
     print(f"Avg ret 30m        : {pct(overall['avg_ret_30m'])}")
@@ -498,6 +624,60 @@ def main() -> int:
         min_samples=args.min_samples,
         horizon=args.horizon,
     )
+    trades_by_setup_label = grouped_trade_summary(
+        trade_rows,
+        lambda r: r["setup_label"] or "unknown",
+        min_samples=args.min_samples,
+    )
+    trades_by_setup_policy = grouped_trade_summary(
+        trade_rows,
+        lambda r: r["setup_policy_action"] or "unknown",
+        min_samples=args.min_samples,
+    )
+    trades_by_rejection_category = grouped_trade_summary(
+        trade_rows,
+        lambda r: (
+            (r["rejection_reason"] or "approved").split(":", 1)[0]
+            if int(r["approved"] or 0) == 0
+            else "approved"
+        ),
+        min_samples=args.min_samples,
+    )
+    buy_trades_by_setup_label = grouped_trade_summary(
+        buy_trade_rows,
+        lambda r: r["setup_label"] or "unknown",
+        min_samples=args.min_samples,
+    )
+    buy_trades_by_setup_policy = grouped_trade_summary(
+        buy_trade_rows,
+        lambda r: r["setup_policy_action"] or "unknown",
+        min_samples=args.min_samples,
+    )
+    buy_trades_by_rejection_category = grouped_trade_summary(
+        buy_trade_rows,
+        lambda r: (
+            (r["rejection_reason"] or "approved").split(":", 1)[0]
+            if int(r["approved"] or 0) == 0
+            else "approved"
+        ),
+        min_samples=args.min_samples,
+    )
+    setup_policy_block_rows = [
+        r for r in buy_trade_rows
+        if (r["rejection_reason"] or "").startswith("setup_policy:")
+    ]
+
+    buy_blocks_by_setup_label = grouped_trade_summary(
+        setup_policy_block_rows,
+        lambda r: r["setup_label"] or "unknown",
+        min_samples=1,
+    )
+
+    buy_blocks_by_policy_reason = grouped_trade_summary(
+        setup_policy_block_rows,
+        lambda r: r["setup_policy_reason"] or "unknown",
+        min_samples=1,
+    )
     by_trend = grouped_summary(
         rows,
         lambda r: f"{r['trend_direction']}/{r['trend_strength']}"
@@ -535,6 +715,14 @@ def main() -> int:
     print_table("By Trend + VWAP", by_trend_vwap, args.limit, args.horizon)
     print_table("By Trend + VWAP + RS", by_trend_vwap_rs, args.limit, args.horizon)
     print_table("By Setup Label", by_setup_label, args.limit, args.horizon)
+    print_trade_table("Live Trades by Setup Label", trades_by_setup_label, args.limit)
+    print_trade_table("Live Trades by Setup Policy Action", trades_by_setup_policy, args.limit)
+    print_trade_table("Live Trades by Rejection Category", trades_by_rejection_category, args.limit)
+    print_trade_table("Live BUYs by Setup Label", buy_trades_by_setup_label, args.limit)
+    print_trade_table("Live BUYs by Setup Policy Action", buy_trades_by_setup_policy, args.limit)
+    print_trade_table("Live BUYs by Rejection Category", buy_trades_by_rejection_category, args.limit)
+    print_trade_table("Setup Policy Blocks by Setup Label", buy_blocks_by_setup_label, args.limit)
+    print_trade_table("Setup Policy Blocks by Policy Reason", buy_blocks_by_policy_reason, args.limit)
     print_leaderboard(
         "Top Combined Setups (Trend + VWAP + RS)",
         by_trend_vwap_rs,

@@ -6,6 +6,7 @@ import hashlib
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone, timedelta
 import pytz
+from setup_policy import evaluate_setup_policy
 from pathlib import Path
 from flask import Flask, request, jsonify, abort
 from decision_engine import evaluate_signal, get_mock_account_state
@@ -221,6 +222,44 @@ def _startup_reconcile():
         logger.error(f"Startup reconciliation failed unexpectedly: {e}")
 
 _startup_reconcile()
+
+def _observe_setup_policy(setup_label: str | None) -> dict:
+    """
+    Observe-only setup policy evaluation.
+
+    This computes what setup_policy.py *would* do, but does not change approval,
+    confidence, or position sizing yet.
+    """
+    try:
+        policy = evaluate_setup_policy(setup_label)
+    except Exception as e:
+        logger.warning(f"setup policy evaluation failed for label={setup_label!r}: {e}")
+        return {
+            "setup_policy_action": "error",
+            "setup_confidence_adjustment": 0,
+            "setup_size_multiplier": 1.0,
+            "reason": "setup_policy:error",
+        }
+
+    return policy
+
+setup_policy = _observe_setup_policy(setup_label)
+
+logger.info(
+    "Setup policy observe-only: "
+    f"symbol={symbol} "
+    f"setup_label={setup_label} "
+    f"policy_action={setup_policy.get('setup_policy_action')} "
+    f"confidence_adjustment={setup_policy.get('setup_confidence_adjustment')} "
+    f"size_multiplier={setup_policy.get('setup_size_multiplier')} "
+    f"reason={setup_policy.get('reason')}"
+)
+
+decision_context["setup_label"] = setup_label
+decision_context["setup_policy_action"] = setup_policy.get("setup_policy_action")
+decision_context["setup_policy_reason"] = setup_policy.get("reason")
+decision_context["setup_confidence_adjustment"] = setup_policy.get("setup_confidence_adjustment")
+decision_context["setup_size_multiplier"] = setup_policy.get("setup_size_multiplier")
 
 WEBHOOK_SECRET = os.environ.get("WEBHOOK_SECRET", "changeme")
 
@@ -1014,6 +1053,11 @@ def _build_decision_context(symbol, action, account_state=None):
         logger.warning(f"_build_decision_context partial failure for {symbol}: {e}")
     return ctx
 
+decision_context["setup_label"] = setup_label
+decision_context["setup_policy_action"] = setup_policy.get("setup_policy_action")
+decision_context["setup_policy_reason"] = setup_policy.get("reason")
+decision_context["setup_confidence_adjustment"] = setup_policy.get("setup_confidence_adjustment")
+decision_context["setup_size_multiplier"] = setup_policy.get("setup_size_multiplier")
 
 def log_rejection(symbol, action, category, reason, price=None, account_state=None):
     """Persist a pre-Claude rejection to trades.db so daily_summary can count it.

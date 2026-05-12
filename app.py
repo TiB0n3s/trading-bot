@@ -6,6 +6,7 @@ import hashlib
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone, timedelta
 import pytz
+import time
 from setup_policy import evaluate_setup_policy
 from pathlib import Path
 from live_features import build_snapshot
@@ -21,7 +22,14 @@ from symbols_config import (
 )
 from market_time import now_et, is_market_hours, market_session
 from db import init_db_performance_indexes
-from db import get_connection
+from db import (
+    DB_PATH,
+    get_connection,
+    ensure_recent_favorable_setups_table,
+    upsert_recent_favorable_setup,
+    get_recent_favorable_setup,
+    prune_recent_favorable_setups,
+)
 from config import (
     MARKET_OPEN_MINUTES,
     MARKET_CLOSE_MINUTES,
@@ -30,6 +38,9 @@ from config import (
     WEBHOOK_DEDUPE_SECONDS,
     SYMBOL_MARKET_ALIGNMENT,
 )
+EXECUTION_MODE = os.getenv("EXECUTION_MODE", "paper").strip().lower()
+IS_PAPER_MODE = EXECUTION_MODE == "paper"
+IS_CASH_MODE = EXECUTION_MODE == "cash"
 
 app = Flask(__name__)
 
@@ -144,6 +155,9 @@ def _init_db():
             ("trend_strength",       "TEXT"),
             ("momentum_direction",   "TEXT"),
             ("momentum_pct",         "REAL"),
+            ("prediction_score", "REAL"),
+            ("prediction_decision", "TEXT"),
+            ("prediction_reason", "TEXT"),
             ("correlation_cluster",  "TEXT"),
             ("cluster_exposure_pct", "REAL"),
             ("setup_label",          "TEXT"),
@@ -157,6 +171,11 @@ def _init_db():
                 con.execute(f"ALTER TABLE trades ADD COLUMN {col_name} {col_type}")
 
 _init_db()
+
+RECENT_FAVORABLE_SETUP_TTL_MINUTES = 15
+
+ensure_recent_favorable_setups_table()
+prune_recent_favorable_setups(RECENT_FAVORABLE_SETUP_TTL_MINUTES)
 
 logging.basicConfig(
     level=os.environ.get("LOG_LEVEL", "INFO").upper(),
@@ -309,6 +328,175 @@ def _build_setup_observation(symbol, action, price, account_state):
             "setup_key": None,
             "setup_rationale": None,
         }
+
+def _is_favorable_setup_label(setup_label: str | None) -> bool:
+    return setup_label in {
+        "confirmed_near_vwap_recovery",
+        "near_vwap_weak_strength_followthrough",
+        "oversold_weak_bounce_watch",
+        "above_vwap_strength_continuation",
+    }
+
+
+def _remember_favorable_setup(symbol: str, setup_obs: dict | None) -> None:
+    if not symbol or not setup_obs:
+        return
+
+    setup_label = setup_obs.get("setup_label")
+    setup_policy_action = setup_obs.get("setup_policy_action")
+
+    if setup_policy_action == "boost" or _is_favorable_setup_label(setup_label):
+        upsert_recent_favorable_setup(
+            symbol=symbol,
+            observed_at=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            setup_label=setup_label,
+            setup_policy_action=setup_policy_action,
+        )
+
+
+def _get_recent_favorable_setup(symbol: str) -> dict | None:
+    row = get_recent_favorable_setup(
+        symbol=symbol,
+        ttl_minutes=RECENT_FAVORABLE_SETUP_TTL_MINUTES,
+    )
+    if not row:
+        return None
+
+    observed_at_raw = row["observed_at"]
+    try:
+        observed_at = datetime.strptime(observed_at_raw, "%Y-%m-%d %H:%M:%S")
+        age_minutes = round((datetime.now() - observed_at).total_seconds() / 60.0, 2)
+    except Exception:
+        age_minutes = None
+
+    return {
+        "setup_label": row["setup_label"],
+        "setup_policy_action": row["setup_policy_action"],
+        "observed_at": observed_at_raw,
+        "age_minutes": age_minutes,
+    }
+
+def evaluate_prediction_gate(
+    *,
+    trend_direction,
+    trend_strength,
+    market_bias,
+    setup_label,
+    setup_policy_action,
+    momentum_direction,
+    momentum_pct,
+    consecutive_buy_count,
+    recent_favorable_setup=None,
+):
+    score = 0
+    reasons = []
+
+    if trend_direction == "bullish":
+        score += 2
+        reasons.append("bullish_trend")
+    elif trend_direction == "neutral":
+        score += 0
+    else:
+        score -= 2
+        reasons.append("non_bullish_trend")
+
+    if trend_strength == "confirmed":
+        score += 2
+        reasons.append("confirmed_trend")
+    elif trend_strength == "developing":
+        score += 1
+        reasons.append("developing_trend")
+    else:
+        score -= 1
+        reasons.append("weak_trend")
+
+    if market_bias == "buy":
+        score += 2
+        reasons.append("market_bias_buy")
+    elif market_bias == "neutral":
+        score += 0
+    elif market_bias == "avoid":
+        score -= 3
+        reasons.append("market_bias_avoid")
+
+    if setup_policy_action == "boost":
+        score += 2
+        reasons.append("setup_policy_boost")
+    elif setup_policy_action == "neutral":
+        score += 0
+    elif setup_policy_action == "block":
+        score -= 4
+        reasons.append("setup_policy_block")
+
+    if setup_label in {
+        "confirmed_near_vwap_recovery",
+        "near_vwap_weak_strength_followthrough",
+        "oversold_weak_bounce_watch",
+    }:
+        score += 1
+        reasons.append("favorable_setup_label")
+    elif setup_label in {
+        "avoid_stretched_above_vwap_strength",
+        "avoid_far_below_vwap_chase",
+        "avoid_below_vwap_weak_drift",
+    }:
+        score -= 3
+        reasons.append("avoid_setup_label")
+
+    if recent_favorable_setup:
+        recent_label = recent_favorable_setup.get("setup_label")
+        recent_action = recent_favorable_setup.get("setup_policy_action")
+
+        if recent_action == "boost":
+            score += 1
+            reasons.append("recent_boost_memory")
+
+        if _is_favorable_setup_label(recent_label):
+            score += 1
+            reasons.append("recent_favorable_setup_memory")
+
+    if momentum_direction == "rising":
+        score += 1
+        reasons.append("rising_momentum")
+    elif momentum_direction == "falling":
+        score -= 1
+        reasons.append("falling_momentum")
+
+    try:
+        momentum_value = float(momentum_pct) if momentum_pct is not None else None
+    except (TypeError, ValueError):
+        momentum_value = None
+
+    if momentum_value is not None:
+        if momentum_value > 0.15:
+            score += 1
+            reasons.append("positive_momentum_pct")
+        elif momentum_value < -0.15:
+            score -= 1
+            reasons.append("negative_momentum_pct")
+
+    if consecutive_buy_count >= 3:
+        score += 2
+        reasons.append("three_plus_consecutive_buys")
+    elif consecutive_buy_count == 2:
+        score += 1
+        reasons.append("two_consecutive_buys")
+    elif consecutive_buy_count <= 0:
+        score -= 1
+        reasons.append("no_consecutive_buy_confirmation")
+
+    if score >= 6:
+        decision = "pass"
+    elif score >= 4:
+        decision = "watch"
+    else:
+        decision = "block"
+
+    return {
+        "prediction_score": score,
+        "prediction_decision": decision,
+        "prediction_reason": ",".join(reasons),
+    }
 
 WEBHOOK_SECRET = os.environ.get("WEBHOOK_SECRET", "changeme")
 
@@ -984,6 +1172,8 @@ def log_trade(signal, decision, order, account_state=None):
         )
         setup_obs = (account_state or {}).get("setup_observation") or {}
 
+        prediction_gate = (account_state or {}).get("prediction_gate") or {}
+
         columns = [
             "timestamp",
             "symbol",
@@ -1006,6 +1196,9 @@ def log_trade(signal, decision, order, account_state=None):
             "entry_quality",
             "trend_direction",
             "trend_strength",
+            "prediction_score",
+            "prediction_decision",
+            "prediction_reason",
             "momentum_direction",
             "momentum_pct",
             "correlation_cluster",
@@ -1043,6 +1236,9 @@ def log_trade(signal, decision, order, account_state=None):
             ctx["momentum_pct"],
             ctx["correlation_cluster"],
             ctx["cluster_exposure_pct"],
+            prediction_gate.get("prediction_score"),
+            prediction_gate.get("prediction_decision"),
+            prediction_gate.get("prediction_reason"),
             setup_obs.get("setup_label"),
             setup_obs.get("setup_policy_action"),
             setup_obs.get("setup_policy_reason"),
@@ -1119,7 +1315,8 @@ def log_rejection(symbol, action, category, reason, price=None, account_state=No
     full_reason = f"{category}: {reason}"
     ctx = _build_decision_context(symbol, action, account_state)
     setup_obs = (account_state or {}).get("setup_observation") or {}
-
+    
+    prediction_gate = (account_state or {}).get("prediction_gate") or {}
     try:
         with get_connection(DB_PATH) as con:
             con.execute(
@@ -1141,6 +1338,9 @@ def log_rejection(symbol, action, category, reason, price=None, account_state=No
                     trend_strength,
                     momentum_direction,
                     momentum_pct,
+                    prediction_score,
+                    prediction_decision,
+                    prediction_reason,
                     correlation_cluster,
                     cluster_exposure_pct,
                     setup_label,
@@ -1168,6 +1368,9 @@ def log_rejection(symbol, action, category, reason, price=None, account_state=No
                     ctx["momentum_pct"],
                     ctx["correlation_cluster"],
                     ctx["cluster_exposure_pct"],
+                    prediction_gate.get("prediction_score"),
+                    prediction_gate.get("prediction_decision"),
+                    prediction_gate.get("prediction_reason"),
                     setup_obs.get("setup_label"),
                     setup_obs.get("setup_policy_action"),
                     setup_obs.get("setup_policy_reason"),
@@ -1643,6 +1846,139 @@ def _make_client_order_id(symbol, action, data):
     digest = hashlib.sha256(raw.encode("utf-8")).hexdigest()[:16]
     return f"tb-{symbol.lower()}-{action.lower()}-{digest}"
 
+def _safe_float(value):
+    try:
+        if value is None:
+            return None
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _compute_spread_pct(bid, ask):
+    bid_f = _safe_float(bid)
+    ask_f = _safe_float(ask)
+
+    if bid_f is None or ask_f is None:
+        return None
+    if bid_f <= 0 or ask_f <= 0:
+        return None
+    if ask_f <= bid_f:
+        return 0.0
+
+    mid = (bid_f + ask_f) / 2.0
+    if mid <= 0:
+        return None
+
+    return ((ask_f - bid_f) / mid) * 100.0
+
+
+def _fetch_quote_snapshot(symbol):
+    """
+    Return a normalized quote snapshot.
+
+    Adapt the body to your existing quote source if needed.
+    Expected output keys:
+      - bid
+      - ask
+      - spread_pct
+    """
+    quote = api.get_latest_quote(symbol)
+
+    bid = getattr(quote, "bid_price", None)
+    ask = getattr(quote, "ask_price", None)
+
+    return {
+        "bid": _safe_float(bid),
+        "ask": _safe_float(ask),
+        "spread_pct": _compute_spread_pct(bid, ask),
+    }
+
+
+def _validate_spread_with_retry(
+    symbol,
+    max_spread_pct=0.10,
+    suspect_spread_pct=2.00,
+    retry_count=3,
+    retry_delay_sec=0.35,
+):
+    """
+    Returns:
+      {
+        "ok": bool,
+        "reason": str | None,
+        "bid": float | None,
+        "ask": float | None,
+        "spread_pct": float | None,
+        "attempts": int,
+        "suspect_quote": bool,
+      }
+    """
+    last = {
+        "bid": None,
+        "ask": None,
+        "spread_pct": None,
+        "attempts": 0,
+        "suspect_quote": False,
+        "ok": False,
+        "reason": "second_look: quote unavailable",
+    }
+
+    total_attempts = max(1, retry_count)
+
+    for attempt in range(1, total_attempts + 1):
+        snap = _fetch_quote_snapshot(symbol)
+        spread_pct = snap["spread_pct"]
+
+        last.update(
+            {
+                "bid": snap["bid"],
+                "ask": snap["ask"],
+                "spread_pct": spread_pct,
+                "attempts": attempt,
+            }
+        )
+
+        if spread_pct is None:
+            if attempt < total_attempts:
+                time.sleep(retry_delay_sec)
+                continue
+            last["reason"] = "second_look: quote unavailable"
+            return last
+
+        if spread_pct <= max_spread_pct:
+            last["ok"] = True
+            last["reason"] = None
+            return last
+
+        if spread_pct > suspect_spread_pct:
+            last["suspect_quote"] = True
+            if attempt < total_attempts:
+                logger.warning(
+                    f"Second-look suspect quote for {symbol}: "
+                    f"spread {spread_pct:.3f}% on attempt {attempt}/{total_attempts} "
+                    f"(bid={snap['bid']:.4f}, ask={snap['ask']:.4f}) — retrying"
+                )
+                time.sleep(retry_delay_sec)
+                continue
+
+            last["reason"] = (
+                f"second_look: suspect quote persisted after {attempt} attempts; "
+                f"bid/ask spread {spread_pct:.3f}% exceeds suspect threshold "
+                f"{suspect_spread_pct:.3f}% "
+                f"(bid={snap['bid']:.4f}, ask={snap['ask']:.4f})"
+            )
+            return last
+
+        last["reason"] = (
+            f"second_look: bid/ask spread {spread_pct:.3f}% exceeds max "
+            f"{max_spread_pct:.3f}% "
+            f"(bid={snap['bid']:.4f}, ask={snap['ask']:.4f})"
+        )
+        return last
+
+    return last
+
 def _pre_order_safety_check(symbol, action, signal_price, account_state):
     """Final broker-adjacent safety check immediately before order placement.
 
@@ -1681,32 +2017,39 @@ def _pre_order_safety_check(symbol, action, signal_price, account_state):
     except Exception as e:
         return False, f"failed to check open orders for {symbol}: {e}"
 
-    # Bid/ask spread check. Fail-open only if quote retrieval is unsupported;
-    # fail-closed if quote data is malformed.
+        # Bid/ask spread check. Fail-open only if quote retrieval is unsupported.
+    # For obviously broken quote snapshots, retry a few times before rejecting.
     try:
-        quote = api.get_latest_quote(symbol)
-        bid = float(getattr(quote, "bid_price", 0) or 0)
-        ask = float(getattr(quote, "ask_price", 0) or 0)
+        spread_check = _validate_spread_with_retry(
+            symbol,
+            max_spread_pct=MAX_BID_ASK_SPREAD_PCT,
+            suspect_spread_pct=2.00,
+            retry_count=3,
+            retry_delay_sec=0.35,
+        )
 
-        if bid <= 0 or ask <= 0 or ask < bid:
-            return False, f"invalid quote bid={bid} ask={ask}"
-
-        mid = (bid + ask) / 2
-        spread_pct = (ask - bid) / mid * 100 if mid > 0 else 999
-        if spread_pct > MAX_BID_ASK_SPREAD_PCT:
-            return (
-                False,
-                f"bid/ask spread {spread_pct:.3f}% exceeds max {MAX_BID_ASK_SPREAD_PCT:.3f}% "
-                f"(bid={bid:.4f}, ask={ask:.4f})",
-            )
+        if not spread_check["ok"]:
+            account_state["second_look"] = {
+                "latest_price": round(latest_price, 4),
+                "price_drift_pct": round(drift_pct, 4),
+                "bid": round(spread_check["bid"], 4) if spread_check["bid"] is not None else None,
+                "ask": round(spread_check["ask"], 4) if spread_check["ask"] is not None else None,
+                "spread_pct": round(spread_check["spread_pct"], 4) if spread_check["spread_pct"] is not None else None,
+                "attempts": spread_check["attempts"],
+                "suspect_quote": spread_check["suspect_quote"],
+            }
+            return False, spread_check["reason"].replace("second_look: ", "", 1)
 
         account_state["second_look"] = {
             "latest_price": round(latest_price, 4),
             "price_drift_pct": round(drift_pct, 4),
-            "bid": round(bid, 4),
-            "ask": round(ask, 4),
-            "spread_pct": round(spread_pct, 4),
+            "bid": round(spread_check["bid"], 4),
+            "ask": round(spread_check["ask"], 4),
+            "spread_pct": round(spread_check["spread_pct"], 4),
+            "attempts": spread_check["attempts"],
+            "suspect_quote": spread_check["suspect_quote"],
         }
+
     except AttributeError as e:
         logger.warning(f"Second-look quote check unsupported for {symbol}: {e}")
         account_state["second_look"] = {
@@ -1729,9 +2072,33 @@ def process_signal(data):
     logger.info(f"Processing {action.upper()} signal for {symbol} at {price}")
 
     account_state = get_mock_account_state()
+    account_state["execution_mode"] = EXECUTION_MODE
 
     setup_obs = _build_setup_observation(symbol, action, price, account_state)
     account_state["setup_observation"] = setup_obs
+
+    if action == "buy":
+        _remember_favorable_setup(symbol, setup_obs)
+        recent_favorable_setup = _get_recent_favorable_setup(symbol)
+        if recent_favorable_setup:
+            account_state["recent_favorable_setup"] = {
+                "setup_label": recent_favorable_setup.get("setup_label"),
+                "setup_policy_action": recent_favorable_setup.get("setup_policy_action"),
+                "age_minutes": recent_favorable_setup.get("age_minutes"),
+            }
+
+    if action == "buy":
+        _remember_favorable_setup(symbol, setup_obs)
+        recent_favorable_setup = _get_recent_favorable_setup(symbol)
+        if recent_favorable_setup:
+            account_state["recent_favorable_setup"] = {
+                "setup_label": recent_favorable_setup.get("setup_label"),
+                "setup_policy_action": recent_favorable_setup.get("setup_policy_action"),
+                "age_minutes": round(
+                    (datetime.now() - recent_favorable_setup["timestamp"]).total_seconds() / 60.0,
+                    2,
+                ),
+            }
 
     if action == "buy" and setup_obs.get("setup_policy_action") == "block":
         reason = setup_obs.get("setup_policy_reason") or "setup_policy:block"
@@ -2017,16 +2384,50 @@ def process_signal(data):
         strength = trend.get("strength")
         consecutive_count = int(trend.get("consecutive_count") or 0)
 
-        if direction != "bullish" or consecutive_count < 3:
+        prediction_gate = evaluate_prediction_gate(
+            trend_direction=direction,
+            trend_strength=strength,
+            market_bias=market_bias,
+            setup_label=setup_obs.get("setup_label"),
+            setup_policy_action=setup_obs.get("setup_policy_action"),
+            momentum_direction=ctx.get("momentum_direction"),
+            momentum_pct=ctx.get("momentum_pct"),
+            consecutive_buy_count=consecutive_count,
+            recent_favorable_setup=(account_state or {}).get("recent_favorable_setup"),
+        )
+
+        account_state["prediction_gate"] = prediction_gate
+
+        logger.info(
+            f"Prediction gate for {symbol} BUY: "
+            f"score={prediction_gate['prediction_score']} "
+            f"decision={prediction_gate['prediction_decision']} "
+            f"reason={prediction_gate['prediction_reason']}"
+        )
+
+        prediction_decision = prediction_gate["prediction_decision"]
+
+        should_block_prediction = (
+            prediction_decision == "block"
+            or (IS_CASH_MODE and prediction_decision == "watch")
+        )
+
+        if should_block_prediction:
             logger.warning(
-                f"Trend confirmation blocked {symbol} BUY: requires 3 consecutive BUY alerts; "
-                f"direction={direction} strength={strength} consecutive_count={consecutive_count} — skipping Claude"
+                f"Prediction gate blocked {symbol} BUY: "
+                f"mode={EXECUTION_MODE} "
+                f"score={prediction_gate['prediction_score']} "
+                f"decision={prediction_decision} "
+                f"reason={prediction_gate['prediction_reason']} — skipping Claude"
             )
             log_rejection(
                 symbol,
                 action,
-                "trend_confirmation",
-                f"requires 3 consecutive BUY alerts; direction={direction} strength={strength} count={consecutive_count}",
+                "prediction_gate",
+                f"mode={EXECUTION_MODE} "
+                f"score={prediction_gate['prediction_score']} "
+                f"decision={prediction_decision} "
+                f"reason={prediction_gate['prediction_reason']}",
                 price=price,
                 account_state=account_state,
             )
@@ -2886,9 +3287,12 @@ def debug_symbol(symbol):
         buy_blocks.append("circuit_breaker")
 
     trend = result.get("trend") or {}
-    if trend.get("direction") != "bullish" or int(trend.get("consecutive_count") or 0) < 3:
-        buy_blocks.append("trend_confirmation")
+    prediction_gate = (account_state or {}).get("prediction_gate") or {}
 
+    if prediction_gate.get("prediction_decision") == "block":
+        buy_blocks.append(
+            f"prediction_gate:{prediction_gate.get('prediction_score')}:{prediction_gate.get('prediction_reason')}"
+    )
     bias = result.get("market_bias") or {}
 
     if bias.get("bias") == "avoid":

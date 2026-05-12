@@ -87,6 +87,14 @@ account_state may contain "fundamental_score" from same-day market research:
 - "bearish" or "strong_bearish": should normally be filtered before Claude. If present, reject buy signals.
 Fundamentals never override bearish trend, weak momentum, exposure rules, risk_level, or poor entry_quality.
 
+execution_mode may be "paper" or "cash".
+
+- In paper mode, favor trend participation when trend, setup, and prediction evidence are supportive.
+  Conditional entry_quality states should usually reduce size/confidence rather than force rejection.
+
+- In cash mode, be stricter with conditional entry_quality states and prefer stronger confirmation before approval.
+
+
 EXECUTION QUALITY GUIDANCE:
 account_state may contain "risk_level" and "entry_quality" — tactical overlays from same-day pre-market research. These tighten sizing and confidence; they never override hard rules (4% exposure, 8 positions, bearish trend rejection, daily loss limit).
 
@@ -99,11 +107,24 @@ risk_level adjustments (apply to buy signals):
 
 entry_quality adjustments (apply to buy signals):
 - "excellent" / "high": no adjustment — clean setup, approve per trend/bias rules.
-- "good_on_pullbacks" / "good_if_holds_gap" / "good_if_breadth_holds": confidence "medium"; reduce position_size_pct by ~25%. The entry is conditional — without explicit confirmation, prefer caution.
-- "tactical_only": position_size_pct max 1.0%; confidence "medium" only; reject if trend is not at least bullish/developing.
-- "hedge_only": position_size_pct max 1.0%; confidence "medium" only; this is a defensive position, not a primary momentum entry.
 
-When risk_level and entry_quality conflict with trend or bias (e.g. bullish/confirmed trend but entry_quality "tactical_only"), favor the tighter signal: smaller size, lower confidence. Hard rejections always win over soft adjustments.
+- "good_on_pullbacks" / "good_if_holds_gap" / "good_if_breadth_holds":
+  These are conditional entries, but in paper mode they are not automatic rejections.
+  If trend, setup, market_bias, and prediction evidence are supportive, approval is allowed.
+  Set confidence to at most "medium" and reduce position_size_pct by about 25%.
+  Describe the entry as conditional or less ideal, but do not require explicit pullback/gap/breadth confirmation unless the broader evidence is weak.
+
+- "tactical_only":
+  position_size_pct max 1.0%; confidence "medium" only.
+  More restrictive than the good_* states.
+  Reject if trend is not at least bullish/developing or if setup/prediction evidence is weak.
+
+- "hedge_only":
+  position_size_pct max 1.0%; confidence "medium" only; this is a defensive position, not a primary momentum entry.
+
+When risk_level and entry_quality conflict with trend or bias, favor the tighter signal by reducing size and confidence.
+For paper mode, conditional entry_quality states should usually reduce size/confidence rather than force rejection when trend/setup/prediction evidence is supportive.
+Hard rejections still win over soft adjustments.
 
 
 DECISION CONSISTENCY RULES:

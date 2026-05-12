@@ -28,6 +28,80 @@ def get_connection(db_path: Path | str = DB_PATH) -> sqlite3.Connection:
 
     return con
 
+def ensure_recent_favorable_setups_table() -> None:
+    with get_connection(DB_PATH) as con:
+        con.execute(
+            """
+            CREATE TABLE IF NOT EXISTS recent_favorable_setups (
+                symbol TEXT PRIMARY KEY,
+                observed_at TEXT NOT NULL,
+                setup_label TEXT,
+                setup_policy_action TEXT
+            )
+            """
+        )
+        con.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_recent_favorable_setups_observed_at
+            ON recent_favorable_setups(observed_at)
+            """
+        )
+
+
+def upsert_recent_favorable_setup(
+    symbol: str,
+    observed_at: str,
+    setup_label: str | None,
+    setup_policy_action: str | None,
+) -> None:
+    ensure_recent_favorable_setups_table()
+    with get_connection(DB_PATH) as con:
+        con.execute(
+            """
+            INSERT INTO recent_favorable_setups (
+                symbol,
+                observed_at,
+                setup_label,
+                setup_policy_action
+            ) VALUES (?, ?, ?, ?)
+            ON CONFLICT(symbol) DO UPDATE SET
+                observed_at = excluded.observed_at,
+                setup_label = excluded.setup_label,
+                setup_policy_action = excluded.setup_policy_action
+            """,
+            (symbol, observed_at, setup_label, setup_policy_action),
+        )
+
+
+def get_recent_favorable_setup(symbol: str, ttl_minutes: int = 15):
+    ensure_recent_favorable_setups_table()
+    with get_connection(DB_PATH) as con:
+        row = con.execute(
+            """
+            SELECT
+                symbol,
+                observed_at,
+                setup_label,
+                setup_policy_action
+            FROM recent_favorable_setups
+            WHERE symbol = ?
+              AND observed_at >= datetime('now', ?)
+            """,
+            (symbol, f"-{ttl_minutes} minutes"),
+        ).fetchone()
+    return row
+
+
+def prune_recent_favorable_setups(ttl_minutes: int = 15) -> None:
+    ensure_recent_favorable_setups_table()
+    with get_connection(DB_PATH) as con:
+        con.execute(
+            """
+            DELETE FROM recent_favorable_setups
+            WHERE observed_at < datetime('now', ?)
+            """,
+            (f"-{ttl_minutes} minutes",),
+        )
 
 def init_prediction_tables(db_path: Path | str = DB_PATH) -> None:
     """Create observe-only prediction tables and indexes."""

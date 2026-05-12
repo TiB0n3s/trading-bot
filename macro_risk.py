@@ -1,10 +1,12 @@
 import json
 from pathlib import Path
 
+from config import MAX_OPEN_POSITIONS
+
 DEFAULT_MACRO_RISK = {
     "macro_regime": "normal",
     "risk_multiplier": 1.0,
-    "max_new_positions": 8,
+    "max_new_positions": MAX_OPEN_POSITIONS,
     "block_new_buys": False,
     "reason": "Default normal regime",
 }
@@ -25,7 +27,7 @@ def get_macro_risk(base_dir: Path | None = None):
             **DEFAULT_MACRO_RISK,
             "macro_regime": "unknown",
             "risk_multiplier": 0.75,
-            "max_new_positions": 6,
+            "max_new_positions": 8,
             "reason": "market_context.json missing; using caution defaults",
         }
 
@@ -51,7 +53,7 @@ def get_macro_risk(base_dir: Path | None = None):
             policy = {
                 "macro_regime": regime,
                 "risk_multiplier": 0.75,
-                "max_new_positions": 6,
+                "max_new_positions": 8,
                 "block_new_buys": False,
                 "reason": "Macro context caution/mixed",
             }
@@ -59,7 +61,7 @@ def get_macro_risk(base_dir: Path | None = None):
             policy = {
                 "macro_regime": regime,
                 "risk_multiplier": 0.50,
-                "max_new_positions": 4,
+                "max_new_positions": 5,
                 "block_new_buys": False,
                 "reason": "Macro context defensive/risk-off",
             }
@@ -75,7 +77,7 @@ def get_macro_risk(base_dir: Path | None = None):
             policy = {
                 "macro_regime": regime,
                 "risk_multiplier": 0.75,
-                "max_new_positions": 6,
+                "max_new_positions": 8,
                 "block_new_buys": False,
                 "reason": f"Unknown macro regime '{regime}'; using caution defaults",
             }
@@ -103,6 +105,6 @@ def get_macro_risk(base_dir: Path | None = None):
             **DEFAULT_MACRO_RISK,
             "macro_regime": "error",
             "risk_multiplier": 0.75,
-            "max_new_positions": 6,
+            "max_new_positions": 8,
             "reason": f"Failed to parse market_context.json: {e}",
         }

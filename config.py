@@ -12,6 +12,7 @@ MARKET_CLOSE_MINUTES = 16 * 60
 
 DAILY_LOSS_LIMIT_PCT = -3.0
 MAX_BUYS_PER_SYMBOL_PER_DAY = 2
+MAX_OPEN_POSITIONS = 12
 WEBHOOK_DEDUPE_SECONDS = 60
 
 # Market-alignment mapping used for macro/trend context.

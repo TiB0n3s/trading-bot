@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """
 Targeted tests for trend computation.
 
@@ -25,6 +24,7 @@ def test_empty_history():
     assert_equal(t["direction"], "neutral", "empty direction")
     assert_equal(t["strength"], "weak", "empty strength")
     assert_equal(t["consecutive_count"], 0, "empty count")
+    assert_equal(t["flip_event"], "none", "empty flip_event")
 
 
 def test_single_buy_is_neutral_weak():
@@ -32,13 +32,26 @@ def test_single_buy_is_neutral_weak():
     assert_equal(t["direction"], "neutral", "single buy direction")
     assert_equal(t["strength"], "weak", "single buy strength")
     assert_equal(t["consecutive_count"], 1, "single buy count")
+    assert_equal(t["flip_event"], "none", "single buy flip_event")
 
 
-def test_two_buys_is_neutral_weak():
+def test_two_buys_is_bullish_weak():
     t = _compute_trend(["buy", "buy"])
-    assert_equal(t["direction"], "neutral", "two buys direction")
+    assert_equal(t["direction"], "bullish", "two buys direction")
     assert_equal(t["strength"], "weak", "two buys strength")
     assert_equal(t["consecutive_count"], 2, "two buys count")
+    assert_equal(t["last_signal"], "buy", "two buys last_signal")
+    assert_equal(t["flip_event"], "none", "two buys flip_event")
+
+
+def test_two_buys_after_sells_is_buy_flip():
+    t = _compute_trend(["buy", "buy", "sell", "sell"])
+    assert_equal(t["direction"], "bullish", "buy flip direction")
+    assert_equal(t["strength"], "weak", "buy flip strength")
+    assert_equal(t["consecutive_count"], 2, "buy flip count")
+    assert_equal(t["last_signal"], "buy", "buy flip last_signal")
+    assert_equal(t["flip_event"], "buy_flip", "buy flip event")
+    assert_equal(t["previous_opposite_count"], 2, "buy flip previous opposite count")
 
 
 def test_three_buys_is_bullish_developing():
@@ -46,6 +59,7 @@ def test_three_buys_is_bullish_developing():
     assert_equal(t["direction"], "bullish", "three buys direction")
     assert_equal(t["strength"], "developing", "three buys strength")
     assert_equal(t["consecutive_count"], 3, "three buys count")
+    assert_equal(t["confirmed_entry"], True, "three buys confirmed entry")
 
 
 def test_five_buys_is_bullish_confirmed():
@@ -53,6 +67,7 @@ def test_five_buys_is_bullish_confirmed():
     assert_equal(t["direction"], "bullish", "five buys direction")
     assert_equal(t["strength"], "confirmed", "five buys strength")
     assert_equal(t["consecutive_count"], 5, "five buys count")
+    assert_equal(t["confirmed_entry"], True, "five buys confirmed entry")
 
 
 def test_sell_resets_buy_streak():
@@ -61,6 +76,7 @@ def test_sell_resets_buy_streak():
     assert_equal(t["strength"], "weak", "sell reset strength")
     assert_equal(t["consecutive_count"], 1, "sell reset count")
     assert_equal(t["last_signal"], "sell", "sell reset last_signal")
+    assert_equal(t["flip_event"], "none", "sell reset flip_event")
 
 
 def test_three_sells_is_bearish_developing():
@@ -68,13 +84,15 @@ def test_three_sells_is_bearish_developing():
     assert_equal(t["direction"], "bearish", "three sells direction")
     assert_equal(t["strength"], "developing", "three sells strength")
     assert_equal(t["consecutive_count"], 3, "three sells count")
+    assert_equal(t["confirmed_exit"], True, "three sells confirmed exit")
 
 
 def main():
     tests = [
         test_empty_history,
         test_single_buy_is_neutral_weak,
-        test_two_buys_is_neutral_weak,
+        test_two_buys_is_bullish_weak,
+        test_two_buys_after_sells_is_buy_flip,
         test_three_buys_is_bullish_developing,
         test_five_buys_is_bullish_confirmed,
         test_sell_resets_buy_streak,

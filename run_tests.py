@@ -14,6 +14,7 @@ ROOT = Path(__file__).resolve().parent
 
 TESTS = [
     "tests/test_trend.py",
+    "tests/test_fast_lane.py",
     "tests/test_trade_matcher.py",
 ]
 

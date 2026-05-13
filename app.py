@@ -11,6 +11,7 @@ from setup_policy import evaluate_setup_policy
 from pathlib import Path
 from live_features import build_snapshot
 from flask import Flask, request, jsonify, abort
+from indicator_state import compute_indicator_state, is_fast_lane_buy_flip
 from decision_engine import evaluate_signal, get_mock_account_state
 from broker import place_order, get_account, get_position, api
 from macro_risk import get_macro_risk
@@ -700,18 +701,24 @@ def _symbol_override_block(symbol, action):
 _load_symbol_overrides()
 
 def _compute_trend(recent_actions: list) -> dict:
-    if not recent_actions:
-        return {"direction": "neutral", "strength": "weak", "consecutive_count": 0, "last_signal": None}
-    first = recent_actions[0]
-    count = 0
-    for a in recent_actions:
-        if a == first:
-            count += 1
-        else:
-            break
-    direction = ("bullish" if first == "buy" else "bearish") if count >= 3 else "neutral"
-    strength = "confirmed" if count >= 5 else "developing" if count >= 3 else "weak"
-    return {"direction": direction, "strength": strength, "consecutive_count": count, "last_signal": first}
+    state = compute_indicator_state(
+        recent_actions,
+        buy_flip_min=2,
+        sell_flip_min=2,
+        confirmed_min=3,
+    )
+    return {
+        "direction": state["direction"],
+        "strength": state["strength"],
+        "consecutive_count": state["consecutive_count"],
+        "last_signal": state["last_signal"],
+        "flip_event": state["flip_event"],
+        "confirmed_entry": state["confirmed_entry"],
+        "confirmed_exit": state["confirmed_exit"],
+        "bullish_candidate": state["bullish_candidate"],
+        "bearish_candidate": state["bearish_candidate"],
+        "previous_opposite_count": state["previous_opposite_count"],
+    }
 
 def _build_trend_table():
     """Build trend table for every approved symbol.
@@ -2354,14 +2361,45 @@ def process_signal(data):
         if cluster_checks:
             account_state["correlation_exposure"] = cluster_checks
 
-    # Trend confirmation gate: require 3 consecutive BUY alerts before allowing BUY signals through.
-    # This reduces one-off TradingView/TradingPilotAI noise. SELL signals bypass this gate.
+    # Trend confirmation gate: require bullish BUY-state confirmation before allowing BUY signals through.
+    # Uses the indicator-state engine plus adaptive confirmation thresholds. SELL signals bypass this gate.
     if action == "buy":
-        history = _signal_history.get(symbol, [])
         trend = _trend_table.get(symbol) or {}
         direction = trend.get("direction")
         strength = trend.get("strength")
         consecutive_count = int(trend.get("consecutive_count") or 0)
+        flip_event = trend.get("flip_event")
+        last_signal = trend.get("last_signal")
+
+        adaptive_confirmation = _required_buy_confirmations(symbol, account_state)
+        required_buy_confirmations = int(
+            adaptive_confirmation.get("required_buy_confirmations") or 3
+        )
+        account_state["adaptive_buy_confirmation"] = adaptive_confirmation
+
+        if direction != "bullish" or last_signal != "buy":
+            reason = (
+                f"direction={direction} "
+                f"last_signal={last_signal} "
+                f"required={required_buy_confirmations}"
+            )
+            if _reject_current_signal("trend_confirmation", reason):
+                return
+
+        fast_lane_buy_flip = is_fast_lane_buy_flip(
+            trend,
+            required_buy_confirmations=required_buy_confirmations,
+        )
+
+        if not fast_lane_buy_flip and consecutive_count < required_buy_confirmations:
+            reason = (
+                f"consecutive_buy_count={consecutive_count} "
+                f"< required={required_buy_confirmations} "
+                f"strength={strength} "
+                f"flip_event={flip_event}"
+            )
+            if _reject_current_signal("trend_confirmation", reason):
+                return
 
     # Macro-risk gate: regime-aware risk control before Claude
     macro_risk = get_macro_risk(Path(__file__).parent)

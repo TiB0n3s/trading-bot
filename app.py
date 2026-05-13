@@ -2006,17 +2006,48 @@ def _pre_order_safety_check(symbol, action, signal_price, account_state):
             retry_delay_sec=0.35,
         )
 
-        if not spread_check["ok"]:
-            account_state["second_look"] = {
-                "latest_price": round(latest_price, 4),
-                "price_drift_pct": round(drift_pct, 4),
-                "bid": round(spread_check["bid"], 4) if spread_check["bid"] is not None else None,
-                "ask": round(spread_check["ask"], 4) if spread_check["ask"] is not None else None,
-                "spread_pct": round(spread_check["spread_pct"], 4) if spread_check["spread_pct"] is not None else None,
-                "attempts": spread_check["attempts"],
-                "suspect_quote": spread_check["suspect_quote"],
-            }
-            return False, spread_check["reason"].replace("second_look: ", "", 1)
+        if not spread_check.get("ok"):
+            bid = spread_check.get("bid")
+            ask = spread_check.get("ask")
+            spread_pct = spread_check.get("spread_pct")
+            reason = spread_check.get("reason", "spread check failed")
+
+            try:
+                bid_f = float(bid) if bid is not None else None
+                ask_f = float(ask) if ask is not None else None
+            except (TypeError, ValueError):
+                bid_f = None
+                ask_f = None
+
+            # Buy-side stale-bid exception:
+            # If the bid is stale/way below market but the ask is close to the
+            # signal and latest trade, allow the order to continue.
+            if action == "buy" and ask_f and ask_f > 0:
+                ask_vs_signal_pct = abs(ask_f - signal_price_f) / signal_price_f * 100
+                ask_vs_latest_pct = abs(ask_f - latest_price) / latest_price * 100
+
+                if (
+                    spread_pct is not None
+                    and spread_pct > 2.0
+                    and ask_vs_signal_pct <= MAX_SIGNAL_PRICE_DRIFT_PCT
+                    and ask_vs_latest_pct <= MAX_SIGNAL_PRICE_DRIFT_PCT
+                ):
+                    logger.warning(
+                        f"Second-look stale-bid exception for {symbol} BUY: "
+                        f"spread={spread_pct:.3f}% but ask is sane "
+                        f"(bid={bid_f if bid_f is not None else 'n/a'}, "
+                        f"ask={ask_f:.4f}, "
+                        f"signal={signal_price_f:.4f}, latest={latest_price:.4f}, "
+                        f"ask_vs_signal={ask_vs_signal_pct:.3f}%, "
+                        f"ask_vs_latest={ask_vs_latest_pct:.3f}%)"
+                    )
+                else:
+                    return False, reason
+            else:
+                return False, reason
+
+    except Exception as e:
+        return True, f"spread check unavailable; fail-open: {e}"
 
         account_state["second_look"] = {
             "latest_price": round(latest_price, 4),

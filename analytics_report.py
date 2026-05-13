@@ -29,6 +29,7 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 # Order in which to display rejection categories.
 PRIORITY_CATEGORIES = [
     "market_hours",
+    "stale_signal",
     "duplicate_webhook",
     "symbol_override",
     "circuit_breaker",
@@ -41,15 +42,24 @@ PRIORITY_CATEGORIES = [
     "correlation_cap",
     "fundamental_score",
     "trend_gate",
+    "trend_confirmation",
     "macro_risk",
     "macro_position_limit",
     "market_bias_avoid",
+    "soft_avoid_prediction_gate",
+    "live_bias_downgrade",
     "chase_prevention",
+    "setup_policy",
     "addon_momentum_gate",
     "prediction_gate",
     "confidence_gate",
-    "claude_rejection",  # bucket for pre-Stage-5 Claude verdicts and any
-                         # rejection_reason whose prefix isn't a known category
+    "second_look",
+    "cash_safe_symbol",
+    "cash_safe_position_limit",
+    "cash_safe_daily_symbol_limit",
+    "cash_safe_confidence",
+    "order_path_exception",
+    "claude_rejection",
 ]
 # Anything not in this set whose rejection_reason starts with "<word>:" gets
 # bucketed under "claude_rejection" rather than being exploded as its own

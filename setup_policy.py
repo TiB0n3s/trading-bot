@@ -28,7 +28,6 @@ NEUTRAL_LABELS = {
     "balanced_transition_state",
     "unclassified_transition",
     "late_strength_near_vwap_risk",
-    "above_vwap_strength_continuation",
     "far_below_vwap_weakness",
     "stable_near_vwap_strength",
 }

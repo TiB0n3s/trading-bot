@@ -27,6 +27,7 @@ COMMANDS = {
     "positions": ["position_review.py"],
     "alignment": ["market_alignment_report.py"],
     "adaptive": ["adaptive_confirmation_report.py"],
+    "blocked": ["blocked_signal_outcome_report.py", "--date"],
     "filters": ["filter_report.py", "--date"],
     "drawdown": ["drawdown_report.py"],
     "post": ["post_session_check.py"],
@@ -67,6 +68,7 @@ def main():
         checks.append(run("Market Alignment Report", ["market_alignment_report.py"]))
         checks.append(run("Adaptive Confirmation Report", ["adaptive_confirmation_report.py"]))
         checks.append(run("Filter Report", ["filter_report.py", "--date", target_date]))
+        checks.append(run("Blocked Signal Outcome Report", ["blocked_signal_outcome_report.py", "--date", target_date]))
         checks.append(run("Drawdown Report", ["drawdown_report.py", target_date]))
         checks.append(run("Post-Session Check", ["post_session_check.py", target_date]))
 
@@ -89,6 +91,8 @@ def main():
 
     if command == "filters":
         args = ["filter_report.py", "--date", target_date]
+    elif command == "blocked":
+        args = ["blocked_signal_outcome_report.py", "--date", target_date]
     elif command in ("drawdown", "post"):
         args = args + [target_date]
 

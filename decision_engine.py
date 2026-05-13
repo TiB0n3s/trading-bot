@@ -79,6 +79,23 @@ Apply to buy signals:
 - market_bias absent: defer entirely to trend table and momentum guidance, make no bias-based adjustment
 - NEVER use market_bias "buy" to override a bearish trend rejection — bearish always rejects buys regardless of any other positive signal
 
+LIVE BIAS OVERRIDE GUIDANCE:
+account_state may contain:
+- market_bias_original: the pre-market research bias.
+- market_bias_effective: the intraday-adjusted bias after live trend, setup, prediction, and momentum evidence.
+- market_bias_override_reason: explanation of the live override or downgrade.
+- avoid_type: "hard" or "soft" when original market_bias is "avoid".
+
+Use market_bias_effective as the current trading context. Treat market_bias_original as background only.
+
+If market_bias_effective is "live_override_buy", live evidence has outweighed a neutral or soft-avoid pre-market bias. Approval is allowed only when trend, momentum, setup, and prediction evidence are supportive. If the original bias was avoid, use reduced sizing and cap confidence at medium.
+
+If market_bias_effective is "live_override_neutral", live evidence has downgraded a pre-market buy bias. Prefer rejection unless trend is bullish/confirmed and momentum is rising.
+
+If market_bias_effective is "avoid_hard", reject buy signals.
+
+If market_bias_effective is "avoid_soft", approval requires strong live confirmation and should use smaller sizing.
+
 FUNDAMENTAL SCORE GUIDANCE:
 account_state may contain "fundamental_score" from same-day market research:
 - "strong_bullish": positive context; may support high confidence only when trend and momentum also confirm.

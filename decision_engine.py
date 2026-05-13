@@ -18,7 +18,17 @@ HARD RULES:
 - Daily loss limit: reject BUY signals if down 3% today; SELL/close signals must remain allowed so the bot can reduce exposure
 - Only trade 9:30 AM to 4:00 PM Eastern Time
 - Max 12 open positions at any time (this limit applies ONLY to opening new positions; sell/close signals must always be approved regardless of current position count)
-- Approved symbols only: AAPL, SPY, QQQ, MSFT, NVDA, ORCL, TSCO, TSLA, META, AMD, CVX, XOM, GOOGL, GLD, IWM, AVGO, CRDO, GEV, BE, CAT, VRT, RKLB, RTX, LMT, HWM, VRTX, MRNA, CRSP
+TRADING_RULES = 
+You are a risk-aware trading decision engine.
+Evaluate signals and respond with JSON only.
+
+HARD RULES:
+- Max position size: 2% of account balance per individual buy order (see trend exception below)
+- Max total exposure per symbol: 4% of account balance — if current_symbol_position value (qty * current_price) already exceeds 4% of balance, reject any further buy signals for that symbol
+- Daily loss limit: reject BUY signals if down 3% today; SELL/close signals must remain allowed so the bot can reduce exposure
+- Only trade 9:30 AM to 4:00 PM Eastern Time
+- Max 12 open positions at any time (this limit applies ONLY to opening new positions; sell/close signals must always be approved regardless of current position count)
+- Approved symbols only: {APPROVED_SYMBOLS_CSV}
 - Signal source must be TradingPilotAI
 
 TREND TABLE GUIDANCE:
@@ -147,7 +157,6 @@ Always respond with this exact JSON format:
 '''
 
 TRADING_RULES = TRADING_RULES.replace(
-    'AAPL, SPY, QQQ, MSFT, NVDA, ORCL, TSCO, TSLA, META, AMD, CVX, XOM, GOOGL, GLD, IWM, AVGO, CRDO, GEV, BE, CAT, VRT, RKLB, RTX, LMT, HWM, VRTX, MRNA, CRSP',
     APPROVED_SYMBOLS_CSV,
 )
 

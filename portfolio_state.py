@@ -3,6 +3,7 @@ import sqlite3
 from collections import defaultdict
 from datetime import date
 from pathlib import Path
+from pnl import get_daily_realized_pnl
 
 logger = logging.getLogger(__name__)
 
@@ -64,66 +65,7 @@ def get_open_positions(api):
 
 
 def get_realized_pnl_today(db_path=DB_PATH, target_date=None):
-    """Compute realized P&L from today's filled trades using FIFO.
-
-    Uses confirmed fill_price only; does not fall back to signal_price.
-    """
-    realized_pnl = 0.0
-    target_date = target_date or date.today().isoformat()
-
-    try:
-        con = sqlite3.connect(db_path)
-        con.row_factory = sqlite3.Row
-        rows = con.execute(
-            """
-            SELECT action, symbol, qty, fill_price, timestamp
-            FROM trades
-            WHERE timestamp LIKE ?
-              AND approved = 1
-              AND action IN ('buy', 'sell')
-              AND qty IS NOT NULL
-              AND fill_price IS NOT NULL
-              AND order_status IN ('filled', 'partially_filled')
-            ORDER BY timestamp ASC, id ASC
-            """,
-            (f"{target_date}%",),
-        ).fetchall()
-        con.close()
-
-        open_lots = defaultdict(list)
-
-        for r in rows:
-            symbol = r["symbol"]
-            action = r["action"]
-            qty = float(r["qty"] or 0)
-            price = float(r["fill_price"] or 0)
-
-            if not symbol or qty <= 0 or price <= 0:
-                continue
-
-            if action == "buy":
-                open_lots[symbol].append({"qty": qty, "price": price})
-                continue
-
-            if action == "sell":
-                remaining = qty
-                lots = open_lots[symbol]
-
-                while remaining > 0 and lots:
-                    lot = lots[0]
-                    matched = min(remaining, lot["qty"])
-                    realized_pnl += (price - lot["price"]) * matched
-
-                    lot["qty"] -= matched
-                    remaining -= matched
-
-                    if lot["qty"] <= 0:
-                        lots.pop(0)
-
-    except Exception as e:
-        logger.error(f"portfolio_state: failed to compute realized P&L: {e}")
-
-    return round(realized_pnl, 2)
+    return get_daily_realized_pnl(target_date=target_date)
 
 
 def build_account_state(api, get_account_func, db_path=DB_PATH):

@@ -1,7 +1,7 @@
 import os
 
 
-VALID_EXECUTION_MODES = {"paper", "cash_safe", "cash_full"}
+VALID_EXECUTION_MODES = {"paper", "cash_safe", "cash_full", "dry_run"}
 
 EXECUTION_MODE = os.getenv("EXECUTION_MODE", "paper").strip().lower()
 if EXECUTION_MODE not in VALID_EXECUTION_MODES:

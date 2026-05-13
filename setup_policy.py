@@ -1,8 +1,8 @@
-#!/usr/bin/env python3
+# Setup label scores should stay aligned with decision_thresholds.py score bands.
 from __future__ import annotations
 
 from typing import Any
-
+from decision_thresholds import SETUP_POLICY_DEFAULTS
 
 HARD_AVOID_LABELS = {
     "avoid_stretched_above_vwap_strength",
@@ -13,6 +13,7 @@ HARD_AVOID_LABELS = {
 FAVORABLE_LABELS = {
     "confirmed_near_vwap_recovery",
     "near_vwap_weak_strength_followthrough",
+    "above_vwap_strength_continuation",
 }
 
 WATCH_LABELS = {
@@ -39,30 +40,40 @@ def evaluate_setup_policy(setup_label: str | None) -> dict[str, Any]:
     if label in HARD_AVOID_LABELS:
         return {
             "setup_policy_action": "block",
-            "setup_confidence_adjustment": -20,
-            "setup_size_multiplier": 0.0,
+            "setup_confidence_adjustment": SETUP_POLICY_DEFAULTS["block_confidence_adjustment"],
+            "setup_size_multiplier": SETUP_POLICY_DEFAULTS["block_size_multiplier"],
             "reason": f"setup_policy:block:{label}",
         }
 
     if label in FAVORABLE_LABELS:
         return {
-            "setup_policy_action": "boost",
-            "setup_confidence_adjustment": 10,
-            "setup_size_multiplier": 1.10,
-            "reason": f"setup_policy:boost:{label}",
+                "setup_policy_action": "boost",
+                "setup_confidence_adjustment": SETUP_POLICY_DEFAULTS["boost_confidence_adjustment"],
+                "setup_size_multiplier": SETUP_POLICY_DEFAULTS["boost_size_multiplier"],
+                "reason": f"setup_policy:boost:{label}",
         }
 
     if label in WATCH_LABELS:
         return {
-            "setup_policy_action": "allow",
+                "setup_policy_action": "allow",
+                "setup_confidence_adjustment": 0,
+                "setup_size_multiplier": SETUP_POLICY_DEFAULTS["neutral_size_multiplier"],
+                "reason": f"setup_policy:allow:{label}",
+        }
+
+    known_labels = HARD_AVOID_LABELS | FAVORABLE_LABELS | WATCH_LABELS | NEUTRAL_LABELS
+
+    if label and label not in known_labels:
+        return {
+            "setup_policy_action": "neutral",
             "setup_confidence_adjustment": 0,
-            "setup_size_multiplier": 1.0,
-            "reason": f"setup_policy:allow:{label}",
+            "setup_size_multiplier": SETUP_POLICY_DEFAULTS["neutral_size_multiplier"],
+            "reason": f"setup_policy:neutral:unknown_label:{label}",
         }
 
     return {
         "setup_policy_action": "neutral",
         "setup_confidence_adjustment": 0,
-        "setup_size_multiplier": 1.0,
+        "setup_size_multiplier": SETUP_POLICY_DEFAULTS["neutral_size_multiplier"],
         "reason": f"setup_policy:neutral:{label or 'unknown'}",
     }

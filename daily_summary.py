@@ -58,35 +58,6 @@ def grouped_trade_summary(rows, key_fn, min_samples: int = 1):
     )
     return out
 
-
-def print_trade_table(p, title: str, rows: list[dict], limit: int = 10):
-    p()
-    p("── " + title + " " + "─" * max(1, 70 - len(title)))
-
-    if not rows:
-        p("No rows.")
-        return
-
-    headers = ["Group", "Count", "Approved", "Rejected", "Approval%"]
-    widths = [42, 7, 9, 9, 10]
-    fmt = " ".join(f"{{:<{w}}}" for w in widths)
-
-    p(fmt.format(*headers))
-    p(fmt.format(*["-" * w for w in widths]))
-
-    for row in rows[:limit]:
-        p(
-            fmt.format(
-                str(row.get("group", ""))[:42],
-                row.get("count", 0),
-                row.get("approved_count", 0),
-                row.get("rejected_count", 0),
-                f"{row['approval_rate']:.1f}%"
-                if row.get("approval_rate") is not None
-                else "-",
-            )
-        )
-
 def _query_matched(con, extra_where, params):
     """Fetch matched_trades for a date predicate on exit_timestamp.
 
@@ -159,7 +130,7 @@ def _grouped_trade_summary(rows, key_fn, min_samples: int = 1):
         if len(group_rows) < min_samples:
             continue
 
-        summary = _summarize_trade_rows(group_rows)
+        summary = summarize_trade_rows(group_rows)
         summary["group"] = key
         out.append(summary)
 

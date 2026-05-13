@@ -14,6 +14,19 @@ from flask import Flask, request, jsonify, abort
 from decision_engine import evaluate_signal, get_mock_account_state
 from broker import place_order, get_account, get_position, api
 from macro_risk import get_macro_risk
+from decision_thresholds import PREDICTION_GATE_THRESHOLDS
+from runtime_config import (
+    EXECUTION_MODE,
+    LIVE_TRADING_ENABLED,
+    CASH_SAFE_SYMBOLS,
+    CASH_SAFE_MAX_OPEN_POSITIONS,
+    CASH_SAFE_MAX_NEW_BUYS_PER_SYMBOL_PER_DAY,
+    MAX_LIVE_ORDER_DOLLARS,
+    CASH_SAFE_MAX_ORDER_DOLLARS,
+    is_cash_mode,
+    is_cash_safe_mode,
+    public_runtime_config,
+)
 from symbols_config import (
     APPROVED_SYMBOLS,
     CORRELATION_CLUSTERS,
@@ -40,13 +53,14 @@ from config import (
 )
 EXECUTION_MODE = os.getenv("EXECUTION_MODE", "paper").strip().lower()
 IS_PAPER_MODE = EXECUTION_MODE == "paper"
-IS_CASH_MODE = EXECUTION_MODE == "cash"
 
 app = Flask(__name__)
 
 DB_PATH = Path(__file__).parent / "trades.db"
 _START_TIME = datetime.now(timezone.utc)
-
+ENFORCE_SETUP_POLICY_BLOCKS = True
+ENFORCE_PREDICTION_BLOCKS = True
+ENFORCE_PREDICTION_WATCH_IN_CASH = True
 SIGNAL_WORKER_COUNT = int(os.environ.get("SIGNAL_WORKER_COUNT", "3"))
 _signal_executor = ThreadPoolExecutor(
     max_workers=SIGNAL_WORKER_COUNT,
@@ -485,9 +499,9 @@ def evaluate_prediction_gate(
         score -= 1
         reasons.append("no_consecutive_buy_confirmation")
 
-    if score >= 6:
+    if score >= PREDICTION_GATE_THRESHOLDS["pass_min_score"]:
         decision = "pass"
-    elif score >= 4:
+    elif score >= PREDICTION_GATE_THRESHOLDS["watch_min_score"]:
         decision = "watch"
     else:
         decision = "block"
@@ -507,71 +521,23 @@ _signal_history: dict = {}
 _market_bias: dict = {}
 _market_context_mtime: float = 0
 
-VALID_EXECUTION_MODES = {"paper", "cash_safe", "cash_full", "dry_run"}
+def _reject_current_signal(category, reason, level="warning"):
+    if level == "error":
+        logger.error(f"{category} blocked {symbol} {action.upper()}: {reason}")
+    elif level == "info":
+        logger.info(f"{category} blocked {symbol} {action.upper()}: {reason}")
+    else:
+        logger.warning(f"{category} blocked {symbol} {action.upper()}: {reason}")
 
-EXECUTION_MODE = os.environ.get("EXECUTION_MODE", "paper").lower().strip()
-if EXECUTION_MODE not in VALID_EXECUTION_MODES:
-    EXECUTION_MODE = "paper"
-
-LIVE_TRADING_ENABLED = os.environ.get("LIVE_TRADING_ENABLED", "false").lower().strip() in (
-    "1", "true", "yes", "on"
-)
-
-CASH_SAFE_SYMBOLS = {
-    s.strip().upper()
-    for s in os.environ.get("CASH_SAFE_SYMBOLS", "SPY,QQQ,AAPL,MSFT,NVDA").split(",")
-    if s.strip()
-}
-
-CASH_SAFE_MAX_OPEN_POSITIONS = int(os.environ.get("CASH_SAFE_MAX_OPEN_POSITIONS", "3"))
-CASH_SAFE_MAX_NEW_BUYS_PER_SYMBOL_PER_DAY = int(
-    os.environ.get("CASH_SAFE_MAX_NEW_BUYS_PER_SYMBOL_PER_DAY", "1")
-)
-
-MAX_LIVE_ORDER_DOLLARS = float(os.environ.get("MAX_LIVE_ORDER_DOLLARS", "500"))
-CASH_SAFE_MAX_ORDER_DOLLARS = float(os.environ.get("CASH_SAFE_MAX_ORDER_DOLLARS", "500"))
-SIGNAL_TTL_SECONDS = int(os.environ.get("SIGNAL_TTL_SECONDS", "90"))
-MAX_SIGNAL_PRICE_DRIFT_PCT = float(os.environ.get("MAX_SIGNAL_PRICE_DRIFT_PCT", "0.35"))
-MAX_BID_ASK_SPREAD_PCT = float(os.environ.get("MAX_BID_ASK_SPREAD_PCT", "0.10"))
-WEBHOOK_DEDUPE_WINDOW_SECONDS = int(os.environ.get("WEBHOOK_DEDUPE_WINDOW_SECONDS", "300"))
-
-def is_cash_mode():
-    return EXECUTION_MODE in ("cash_safe", "cash_full")
-
-
-def is_cash_safe_mode():
-    return EXECUTION_MODE == "cash_safe"
-
-
-def public_runtime_config():
-    return {
-        "execution_mode": EXECUTION_MODE,
-        "live_trading_enabled": LIVE_TRADING_ENABLED,
-        "cash_mode": is_cash_mode(),
-        "cash_safe_mode": is_cash_safe_mode(),
-        "cash_safe_symbols": sorted(CASH_SAFE_SYMBOLS) if is_cash_safe_mode() else None,
-        "cash_safe_max_open_positions": (
-            CASH_SAFE_MAX_OPEN_POSITIONS if is_cash_safe_mode() else None
-        ),
-        "cash_safe_max_new_buys_per_symbol_per_day": (
-            CASH_SAFE_MAX_NEW_BUYS_PER_SYMBOL_PER_DAY if is_cash_safe_mode() else None
-        ),
-        "max_live_order_dollars": MAX_LIVE_ORDER_DOLLARS if is_cash_mode() else None,
-        "cash_safe_max_order_dollars": (
-            CASH_SAFE_MAX_ORDER_DOLLARS if is_cash_safe_mode() else None
-        ),
-        "webhook_dedupe_window_seconds": WEBHOOK_DEDUPE_WINDOW_SECONDS,
-        "signal_ttl_seconds": SIGNAL_TTL_SECONDS,
-        "max_signal_price_drift_pct": MAX_SIGNAL_PRICE_DRIFT_PCT,
-        "max_bid_ask_spread_pct": MAX_BID_ASK_SPREAD_PCT,
-    }
-
-# Correlation clusters and per-cluster exposure caps (% of cash balance).
-# A new buy is blocked if the cluster's combined market value would exceed
-# the limit. Symbols can appear in multiple clusters (e.g. QQQ is both
-# mega_cap_tech and broad_index) — exposure to such a symbol counts against
-# every cluster it belongs to.
-
+    log_rejection(
+        symbol,
+        action,
+        category,
+        reason,
+        price=price,
+        account_state=account_state,
+    )
+    return True
 
 def _webhook_dedupe_key(symbol, action, price):
     """Build a loose duplicate key for near-identical TradingView alerts.
@@ -1052,7 +1018,7 @@ def _record_webhook_event(dedupe_key, data):
             DELETE FROM webhook_events
             WHERE received_at < datetime('now', ?)
             """,
-            (f"-{WEBHOOK_DEDUPE_WINDOW_SECONDS} seconds",),
+            (f"-{WEBHOOK_DEDUPE_SECONDS} seconds",),
         )
         con.execute(
             """
@@ -2074,47 +2040,6 @@ def process_signal(data):
     account_state = get_mock_account_state()
     account_state["execution_mode"] = EXECUTION_MODE
 
-    setup_obs = _build_setup_observation(symbol, action, price, account_state)
-    account_state["setup_observation"] = setup_obs
-
-    if action == "buy":
-        _remember_favorable_setup(symbol, setup_obs)
-        recent_favorable_setup = _get_recent_favorable_setup(symbol)
-        if recent_favorable_setup:
-            account_state["recent_favorable_setup"] = {
-                "setup_label": recent_favorable_setup.get("setup_label"),
-                "setup_policy_action": recent_favorable_setup.get("setup_policy_action"),
-                "age_minutes": recent_favorable_setup.get("age_minutes"),
-            }
-
-    if action == "buy":
-        _remember_favorable_setup(symbol, setup_obs)
-        recent_favorable_setup = _get_recent_favorable_setup(symbol)
-        if recent_favorable_setup:
-            account_state["recent_favorable_setup"] = {
-                "setup_label": recent_favorable_setup.get("setup_label"),
-                "setup_policy_action": recent_favorable_setup.get("setup_policy_action"),
-                "age_minutes": round(
-                    (datetime.now() - recent_favorable_setup["timestamp"]).total_seconds() / 60.0,
-                    2,
-                ),
-            }
-
-    if action == "buy" and setup_obs.get("setup_policy_action") == "block":
-        reason = setup_obs.get("setup_policy_reason") or "setup_policy:block"
-        logger.warning(
-            f"Setup policy blocked {symbol} BUY: {reason}"
-        )
-        log_rejection(
-            symbol,
-            action,
-            "setup_policy",
-            reason,
-            price=price,
-            account_state=account_state,
-        )
-        return
-
     is_stale, age_seconds, stale_reason = _is_signal_stale(data)
     if is_stale:
         logger.warning(
@@ -2132,6 +2057,28 @@ def process_signal(data):
 
     if age_seconds is not None:
         account_state["signal_age_seconds"] = round(age_seconds, 2)
+
+    setup_obs = _build_setup_observation(symbol, action, price, account_state)
+    account_state["setup_observation"] = setup_obs
+
+    if action == "buy":
+        _remember_favorable_setup(symbol, setup_obs)
+        recent_favorable_setup = _get_recent_favorable_setup(symbol)
+        if recent_favorable_setup:
+            account_state["recent_favorable_setup"] = {
+                "setup_label": recent_favorable_setup.get("setup_label"),
+                "setup_policy_action": recent_favorable_setup.get("setup_policy_action"),
+                "age_minutes": recent_favorable_setup.get("age_minutes"),
+            }
+
+    if (
+        action == "buy"
+        and ENFORCE_SETUP_POLICY_BLOCKS
+        and setup_obs.get("setup_policy_action") == "block"
+    ):
+        reason = setup_obs.get("setup_policy_reason") or "setup_policy:block"
+        if _reject_current_signal("setup_policy", reason):
+            return
 
     if action == "buy" and is_cash_safe_mode():
         if symbol not in CASH_SAFE_SYMBOLS:
@@ -2246,22 +2193,12 @@ def process_signal(data):
         f"trend={_trend_table[symbol]}"
     )
 
-    # Hard pre-check 1: market hours (9:45–15:45 ET, weekdays only)
+    # Hard pre-check 1: market hours (9:30–16:00 ET, weekdays only)
     current_et = now_et()
-    if not is_market_hours(current_et):
-        if current_et.weekday() >= 5:
-            reason = f"weekend ({current_et.strftime('%A')})"
-        else:
-            reason = f"{current_et.strftime('%H:%M')} ET outside 09:45–15:45 window"
-
-        logger.warning(
-            f"Market hours check failed for {symbol} {action.upper()}: {reason}"
-        )
-        log_rejection(
-            symbol, action, "market_hours", reason,
-            price=price, account_state=account_state
-        )
-        return
+    if action == "buy" and daily_pnl_pct < DAILY_LOSS_LIMIT_PCT:
+        reason = f"daily P&L {daily_pnl_pct:.2f}% < -3.0%"
+        if _reject_current_signal("circuit_breaker", reason, level="error"):
+            return
 
     # Hard pre-check 2: circuit breaker (-3% daily loss limit)
     # Applies to BUY signals only. SELL signals must remain allowed so the bot
@@ -2276,9 +2213,8 @@ def process_signal(data):
         try:
             api.get_position(symbol)
         except Exception:
-            logger.warning(f"Skipping SELL signal for {symbol} — no open position in Alpaca")
-            log_rejection(symbol, action, "ghost_sell", "no open Alpaca position", price=price, account_state=account_state)
-            return
+            if _reject_current_signal("ghost_sell", "no open Alpaca position"):
+                return
     existing_position = get_position(symbol)
     if existing_position:
         account_state["current_symbol_position"] = existing_position
@@ -2289,12 +2225,9 @@ def process_signal(data):
     last = _read_cooldown(symbol, action)
     if last and (current_et - last).total_seconds() < 15 * 60:
         mins_remaining = int(15 * 60 - (current_et - last).total_seconds()) // 60
-        logger.warning(
-            f"Cooldown active for {symbol} {action.upper()}: last order at {last.strftime('%H:%M')} ET, "
-            f"{mins_remaining}m remaining — skipping Claude"
-        )
-        log_rejection(symbol, action, "cooldown", f"{mins_remaining}m remaining (last order {last.strftime('%H:%M')} ET)", price=price, account_state=account_state)
-        return
+        reason = f"{mins_remaining}m remaining (last order {last.strftime('%H:%M')} ET)"
+        if _reject_current_signal("cooldown", reason):
+            return
 
     # Sell→buy churn prevention: block buys that follow a recent sell on the same symbol
     # (Stage B: DB-backed read so all workers see the same recent-sell state)
@@ -2305,40 +2238,24 @@ def process_signal(data):
             elapsed_s = (current_et - last_sell_time).total_seconds()
             if elapsed_s < 30 * 60:
                 mins_remaining = int(30 * 60 - elapsed_s) // 60
-                logger.warning(
-                    f"Sell→buy churn block for {symbol}: sold at {last_sell_time.strftime('%H:%M')} ET "
-                    f"(${last_sell_price:.2f}), {mins_remaining}m remaining in 30-min window — skipping Claude"
-                )
-                log_rejection(symbol, action, "churn_window", f"sold at ${last_sell_price:.2f}, {mins_remaining}m remaining in 30-min window", price=price, account_state=account_state)
-                return
+                reason = f"sold at ${last_sell_price:.2f}, {mins_remaining}m remaining in 30-min window"
+                if _reject_current_signal("churn_window", reason):
+                    return
             if last_sell_price > 0:
                 price_diff_pct = abs(price - last_sell_price) / last_sell_price * 100
                 if price_diff_pct < 0.5:
-                    logger.warning(
-                        f"Sell→buy churn block for {symbol}: signal price ${price:.2f} within "
-                        f"{price_diff_pct:.2f}% of last sell price ${last_sell_price:.2f} — skipping Claude"
-                    )
-                    log_rejection(symbol, action, "churn_price", f"signal ${price:.2f} within {price_diff_pct:.2f}% of last sell ${last_sell_price:.2f}", price=price, account_state=account_state)
-                    return
+                    reason = f"signal ${price:.2f} within {price_diff_pct:.2f}% of last sell ${last_sell_price:.2f}"
+                    if _reject_current_signal("churn_price", reason):
+                        return
 
     # Daily symbol buy limit: prevent repeated same-symbol accumulation from alert storms.
     # Allows initial entry plus one add by default.
     if action == "buy":
         buys_today = _successful_buys_today(symbol)
         if buys_today >= MAX_BUYS_PER_SYMBOL_PER_DAY:
-            logger.warning(
-                f"Daily symbol buy limit blocked {symbol} BUY: "
-                f"successful_buys_today={buys_today} >= limit={MAX_BUYS_PER_SYMBOL_PER_DAY} — skipping Claude"
-            )
-            log_rejection(
-                symbol,
-                action,
-                "daily_symbol_buy_limit",
-                f"successful_buys_today={buys_today} >= limit={MAX_BUYS_PER_SYMBOL_PER_DAY}",
-                price=price,
-                account_state=account_state,
-            )
-            return
+            reason = f"successful_buys_today={buys_today} >= limit={MAX_BUYS_PER_SYMBOL_PER_DAY}"
+            if _reject_current_signal("daily_symbol_buy_limit", reason):
+                return
 
     # Hard pre-check: 4% per-symbol exposure cap (buy signals only)
     if action == "buy" and existing_position:
@@ -2347,13 +2264,9 @@ def process_signal(data):
         if balance > 0:
             exposure_pct = position_value / balance * 100
             if exposure_pct >= 4.0:
-                logger.warning(
-                    f"Exposure cap reached for {symbol} BUY: "
-                    f"current position ${position_value:.2f} = {exposure_pct:.2f}% of balance "
-                    f"(limit: 4.0%) — skipping Claude"
-                )
-                log_rejection(symbol, action, "exposure_cap", f"position ${position_value:.2f} = {exposure_pct:.2f}% of balance (limit 4.0%)", price=price, account_state=account_state)
-                return
+                reason = f"position ${position_value:.2f} = {exposure_pct:.2f}% of balance (limit 4.0%)"
+                if _reject_current_signal("exposure_cap", reason):
+                    return
 
     # Correlation exposure cap: block buys when a correlated cluster is already full
     if action == "buy":
@@ -2366,11 +2279,8 @@ def process_signal(data):
                     f"{check['cluster']} exposure {check['exposure_pct']:.2f}% "
                     f">= limit {check['limit_pct']:.2f}%"
                 )
-                logger.warning(
-                    f"Correlation cap blocked {symbol} BUY: {reason} — skipping Claude"
-                )
-                log_rejection(symbol, action, "correlation_cap", reason, price=price, account_state=account_state)
-                return
+                if _reject_current_signal("correlation_cap", reason):
+                    return
 
         if cluster_checks:
             account_state["correlation_exposure"] = cluster_checks
@@ -2408,8 +2318,12 @@ def process_signal(data):
         prediction_decision = prediction_gate["prediction_decision"]
 
         should_block_prediction = (
-            prediction_decision == "block"
-            or (IS_CASH_MODE and prediction_decision == "watch")
+            (ENFORCE_PREDICTION_BLOCKS and prediction_decision == "block")
+            or (
+                ENFORCE_PREDICTION_WATCH_IN_CASH
+                and is_cash_mode()
+                and prediction_decision == "watch"
+            )
         )
 
         if should_block_prediction:
@@ -2440,77 +2354,58 @@ def process_signal(data):
     if action == "buy":
         if macro_risk.get("block_new_buys"):
             reason = macro_risk.get("reason", "macro regime blocks new buys")
-            logger.warning(f"Macro-risk gate blocked {symbol} BUY: {reason}")
-            log_rejection(symbol, action, "macro_risk", reason, price=price, account_state=account_state)
-            return
+            if _reject_current_signal("macro_risk", reason):
+                return
 
         max_new_positions = macro_risk.get("max_new_positions", 8)
         open_count = account_state.get("open_position_count", 0)
         if open_count >= max_new_positions:
             reason = f"open_position_count={open_count} >= macro max_new_positions={max_new_positions}"
-            logger.warning(f"Macro-risk gate blocked {symbol} BUY: {reason}")
-            log_rejection(symbol, action, "macro_position_limit", reason, price=price, account_state=account_state)
-            return
+            if _reject_current_signal("macro_position_limit", reason):
+                return
+
     # Fundamental score gate: block buys when manual/pre-market research flags weak fundamentals
+    bias_entry = _market_bias.get(symbol) or {}
+
     if action == "buy":
-        bias_entry = _market_bias.get(symbol)
         if bias_entry:
             fundamental_score = bias_entry.get("fundamental_score")
             if fundamental_score in ("bearish", "strong_bearish"):
                 reason = f"fundamental_score={fundamental_score}"
-                logger.warning(
-                    f"Fundamental score gate blocked {symbol} BUY: {reason} — skipping Claude"
-                )
-                log_rejection(
-                    symbol,
-                    action,
-                    "fundamental_score",
-                    reason,
-                    price=price,
-                    account_state=account_state,
-                )
-                return
+                if _reject_current_signal("fundamental_score", reason):
+                    return
 
-    # Market bias gate: block buy if pre-market research flagged 'avoid'; inject 'buy' bias for Claude
-    if action == "buy":
-        bias_entry = _market_bias.get(symbol)
-        if bias_entry:
-            bias = bias_entry["bias"]
-            if bias == "avoid":
-                logger.warning(
-                    f"Market bias gate blocked {symbol} BUY: pre-market research flagged 'avoid' "
-                    f"(confidence={bias_entry.get('confidence','')}) — reason: {bias_entry.get('reason','')}"
-                )
-                log_rejection(symbol, action, "market_bias_avoid", f"confidence={bias_entry.get('confidence','')} reason={bias_entry.get('reason','')}", price=price, account_state=account_state)
-                return
-            if bias == "buy":
-                account_state["market_bias"] = "buy"
-            # Pass quality fields through to Claude regardless of bias direction
-            if bias_entry.get("fundamental_score"):
-                account_state["fundamental_score"] = bias_entry["fundamental_score"]
-            if bias_entry.get("risk_level"):
-                account_state["risk_level"] = bias_entry["risk_level"]
-            if bias_entry.get("entry_quality"):
-                account_state["entry_quality"] = bias_entry["entry_quality"]
+        # Market bias gate: block buy if pre-market research flagged 'avoid'; inject 'buy' bias for Claude
+        if action == "buy":
+            if bias_entry:
+                bias = bias_entry["bias"]
+                if bias == "avoid":
+                    reason = f"confidence={bias_entry.get('confidence','')} reason={bias_entry.get('reason','')}"
+                    if _reject_current_signal("market_bias_avoid", reason):
+                        return
+                if bias == "buy":
+                    account_state["market_bias"] = "buy"
+                if bias_entry.get("fundamental_score"):
+                    account_state["fundamental_score"] = bias_entry["fundamental_score"]
+                if bias_entry.get("risk_level"):
+                    account_state["risk_level"] = bias_entry["risk_level"]
+                if bias_entry.get("entry_quality"):
+                    account_state["entry_quality"] = bias_entry["entry_quality"]
 
-    # Chase prevention gate: hard reject buy signals flagged 'do_not_chase' or 'avoid_chasing'
-    # in the pre-market brief — typically extended/parabolic names where fundamentals are
-    # strong but the entry is tactically poor (e.g. AMD post-earnings gap, NVDA after a run).
-    if action == "buy":
-        bias_entry = _market_bias.get(symbol)
-        if bias_entry:
-            eq = bias_entry.get("entry_quality")
-            if eq in ("do_not_chase", "avoid_chasing"):
-                logger.warning(
-                    f"Chase prevention gate blocked {symbol} BUY: entry_quality={eq}, "
-                    f"risk_level={bias_entry.get('risk_level') or '-'} — skipping Claude"
-                )
-                log_rejection(symbol, action, "chase_prevention", f"entry_quality={eq} risk_level={bias_entry.get('risk_level') or '-'}", price=price, account_state=account_state)
-                return
+        # Chase prevention gate
+        if action == "buy":
+            if bias_entry:
+                eq = bias_entry.get("entry_quality")
+                if eq in ("do_not_chase", "avoid_chasing"):
+                    reason = f"entry_quality={eq} risk_level={bias_entry.get('risk_level') or '-'}"
+                    if _reject_current_signal("chase_prevention", reason):
+                        return
 
     # Momentum check (buy signals only, fail-open — never blocks trading)
+    alignment = None
+    action_hint = None
+
     if action == "buy":
-        bias_entry = _market_bias.get(symbol) or {}
         premarket_bias = bias_entry.get("bias")
         momentum = get_momentum(symbol, price, premarket_bias=premarket_bias)
         if momentum:
@@ -2519,40 +2414,40 @@ def process_signal(data):
             alignment = momentum.get("premarket_alignment")
             action_hint = momentum.get("action_hint")
 
-        if alignment == "contradicted":
-            account_state["signal_confidence_hint"] = "low"
-            logger.warning(
-                f"Pre-market alignment contradicted for {symbol} BUY: "
-                f"bias={momentum.get('premarket_bias')} "
-                f"5m={momentum.get('momentum_5m_pct')}% "
-                f"15m={momentum.get('momentum_15m_pct')}% "
-                f"hint={action_hint} — confidence hint set to low"
-            )
+            if alignment == "contradicted":
+                account_state["signal_confidence_hint"] = "low"
+                logger.warning(
+                    f"Pre-market alignment contradicted for {symbol} BUY: "
+                    f"bias={momentum.get('premarket_bias')} "
+                    f"5m={momentum.get('momentum_5m_pct')}% "
+                    f"15m={momentum.get('momentum_15m_pct')}% "
+                    f"hint={action_hint} — confidence hint set to low"
+                )
 
-        elif alignment == "confirmed":
-            account_state["signal_confidence_hint"] = "high"
-            logger.info(
-                f"Pre-market alignment confirmed for {symbol} BUY: "
-                f"bias={momentum.get('premarket_bias')} "
-                f"5m={momentum.get('momentum_5m_pct')}% "
-                f"15m={momentum.get('momentum_15m_pct')}% "
-                f"hint={action_hint} — confidence hint set to high"
-            )
+            elif alignment == "confirmed":
+                account_state["signal_confidence_hint"] = "high"
+                logger.info(
+                    f"Pre-market alignment confirmed for {symbol} BUY: "
+                    f"bias={momentum.get('premarket_bias')} "
+                    f"5m={momentum.get('momentum_5m_pct')}% "
+                    f"15m={momentum.get('momentum_15m_pct')}% "
+                    f"hint={action_hint} — confidence hint set to high"
+                )
 
-        elif momentum["direction"] == "falling" and momentum["momentum_pct"] < -0.15:
-            account_state["signal_confidence_hint"] = "low"
-            logger.warning(
-                f"Momentum caution for {symbol} BUY: direction={momentum['direction']} "
-                f"momentum_pct={momentum['momentum_pct']}% last_close={momentum['last_close']} "
-                f"— downgrading confidence hint to low"
-            )
+            elif momentum["direction"] == "falling" and momentum["momentum_pct"] < -0.15:
+                account_state["signal_confidence_hint"] = "low"
+                logger.warning(
+                    f"Momentum caution for {symbol} BUY: direction={momentum['direction']} "
+                    f"momentum_pct={momentum['momentum_pct']}% last_close={momentum['last_close']} "
+                    f"— downgrading confidence hint to low"
+                )
 
-        elif momentum["direction"] == "rising":
-            account_state["signal_confidence_hint"] = "high"
-            logger.info(
-                f"Momentum confirms {symbol} BUY: direction={momentum['direction']} "
-                f"momentum_pct={momentum['momentum_pct']}% — confidence hint set to high"
-            )
+            elif momentum["direction"] == "rising":
+                account_state["signal_confidence_hint"] = "high"
+                logger.info(
+                    f"Momentum confirms {symbol} BUY: direction={momentum['direction']} "
+                    f"momentum_pct={momentum['momentum_pct']}% — confidence hint set to high"
+                )
 
     # Add-on momentum gate: for existing positions with high/very_high risk,
     # require rising short-term momentum before adding more exposure.
@@ -2563,19 +2458,12 @@ def process_signal(data):
         momentum_direction = momentum.get("direction")
 
         if risk_level in ("high", "very_high") and momentum_direction != "rising":
-            logger.warning(
-                f"Add-on momentum gate blocked {symbol} BUY: existing position present, "
-                f"risk_level={risk_level}, momentum_direction={momentum_direction or 'unknown'} — skipping Claude"
+            reason = (
+                f"existing position with risk_level={risk_level} "
+                f"and momentum_direction={momentum_direction or 'unknown'}"
             )
-            log_rejection(
-                symbol,
-                action,
-                "addon_momentum_gate",
-                f"existing position with risk_level={risk_level} and momentum_direction={momentum_direction or 'unknown'}",
-                price=price,
-                account_state=account_state,
-            )
-            return
+            if _reject_current_signal("addon_momentum_gate", reason):
+                return
 
     account_state["trend_table"] = _trend_table
     decision = evaluate_signal(data, account_state)
@@ -2923,12 +2811,8 @@ def status():
 
     # Pre-check state — what would block / pass right now if a buy signal arrived
     try:
-        now_et = datetime.now(pytz.timezone("America/New_York"))
-        t_min = now_et.hour * 60 + now_et.minute
-        market_hours_open = (
-            now_et.weekday() < 5
-            and MARKET_OPEN_MINUTES <= t_min < MARKET_CLOSE_MINUTES
-        )
+        now_et_value = now_et()
+        market_hours_open = is_market_hours(now_et_value)
 
         # Stage B: read cooldowns and recent_sells from DB tables so the
         # snapshot reflects state across all gunicorn workers (the in-memory
@@ -3046,7 +2930,8 @@ def positions():
 
     def _cooldown_active(symbol):
         try:
-            now_et = datetime.now(pytz.timezone("America/New_York"))
+            now_et_value = now_et()
+            market_hours_open = is_market_hours(now_et_value)
             for (sym, _action), ts in _last_order.items():
                 if sym == symbol and (now_et - ts).total_seconds() < 15 * 60:
                     return True
@@ -3148,13 +3033,9 @@ def debug_symbol(symbol):
 
     _load_market_context()
 
-    now_et = datetime.now(pytz.timezone("America/New_York"))
-    t_min = now_et.hour * 60 + now_et.minute
-    market_hours_open = (
-        now_et.weekday() < 5
-        and MARKET_OPEN_MINUTES <= t_min < MARKET_CLOSE_MINUTES
-    )
-
+    now_et_value = now_et()
+    market_hours_open = is_market_hours(now_et_value)
+    
     result = {
         "symbol": symbol,
         "timestamp": datetime.now().isoformat(),

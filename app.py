@@ -2553,71 +2553,129 @@ def process_signal(data):
         return
 
     if decision.get("approved"):
-        approved_reason = decision.get("reason")
-        logger.info(f"APPROVED: {symbol} {action.upper()} - {approved_reason}")
-        risk_multiplier = float(account_state.get("macro_risk", {}).get("risk_multiplier", 1.0))
-        adjusted_position_size_pct = decision.get("position_size_pct", 1.0) * risk_multiplier
+        try:
+            approved_reason = decision.get("reason")
+            logger.info(f"APPROVED: {symbol} {action.upper()} - {approved_reason}")
 
-        if EXECUTION_MODE == "dry_run":
-            logger.warning(
-                f"DRY RUN: order not submitted for {symbol} {action.upper()} "
-                f"position_size_pct={adjusted_position_size_pct:.3f}"
+            risk_multiplier = float(account_state.get("macro_risk", {}).get("risk_multiplier", 1.0))
+            adjusted_position_size_pct = decision.get("position_size_pct", 1.0) * risk_multiplier
+
+            logger.info(
+                f"ORDER PATH START: {symbol} {action.upper()} "
+                f"exec_mode={EXECUTION_MODE} "
+                f"position_size_pct={decision.get('position_size_pct')} "
+                f"risk_multiplier={risk_multiplier} "
+                f"adjusted_position_size_pct={adjusted_position_size_pct:.3f}"
             )
-            order_result = {
-                "order_id": f"dry_run_{symbol}_{action}_{datetime.now().strftime('%Y%m%d_%H%M%S')}",
-                "symbol": symbol,
-                "side": action,
-                "qty": 0,
-                "stop_loss": None,
-                "take_profit": None,
-                "status": "dry_run",
-            }
-        else:
-            ok, second_look_reason = _pre_order_safety_check(
-                symbol=symbol,
-                action=action,
-                signal_price=price,
-                account_state=account_state,
-            )
-            if not ok:
+
+            if EXECUTION_MODE == "dry_run":
                 logger.warning(
-                    f"Second-look safety check blocked {symbol} {action.upper()}: "
-                    f"{second_look_reason}"
+                    f"DRY RUN: order not submitted for {symbol} {action.upper()} "
+                    f"position_size_pct={adjusted_position_size_pct:.3f}"
                 )
-                log_rejection(
-                    symbol,
-                    action,
-                    "second_look",
-                    second_look_reason,
-                    price=price,
+                order_result = {
+                    "order_id": f"dry_run_{symbol}_{action}_{datetime.now().strftime('%Y%m%d_%H%M%S')}",
+                    "symbol": symbol,
+                    "side": action,
+                    "qty": 0,
+                    "stop_loss": None,
+                    "take_profit": None,
+                    "status": "dry_run",
+                }
+            else:
+                logger.info(f"SECOND LOOK START: {symbol} {action.upper()}")
+                ok, second_look_reason = _pre_order_safety_check(
+                    symbol=symbol,
+                    action=action,
+                    signal_price=price,
                     account_state=account_state,
                 )
-                return
+                logger.info(
+                    f"SECOND LOOK RESULT: {symbol} {action.upper()} "
+                    f"ok={ok} reason={second_look_reason}"
+                )
 
-            client_order_id = _make_client_order_id(symbol, action, data)
+                if not ok:
+                    logger.warning(
+                        f"Second-look safety check blocked {symbol} {action.upper()}: "
+                        f"{second_look_reason}"
+                    )
+                    log_rejection(
+                        symbol,
+                        action,
+                        "second_look",
+                        second_look_reason,
+                        price=price,
+                        account_state=account_state,
+                    )
+                    if dedupe_key:
+                        _mark_webhook_event_status(
+                            dedupe_key,
+                            "rejected",
+                            failure_reason=f"second_look: {second_look_reason}",
+                        )
+                    return
 
-            order_result = place_order(
-                symbol=symbol,
-                action=action,
-                position_size_pct=adjusted_position_size_pct,
-                stop_loss_pct=decision.get("stop_loss_pct", 0.5),
-                take_profit_pct=decision.get("take_profit_pct", 1.5),
-                risk_level=account_state.get("risk_level"),
-                client_order_id=client_order_id,
-            )
+                client_order_id = _make_client_order_id(symbol, action, data)
+                logger.info(
+                    f"BROKER SUBMIT START: {symbol} {action.upper()} "
+                    f"client_order_id={client_order_id}"
+                )
 
-        if order_result:
-            if EXECUTION_MODE == "dry_run":
-                logger.info(f"DRY RUN ORDER RECORDED: {order_result}")
+                order_result = place_order(
+                    symbol=symbol,
+                    action=action,
+                    position_size_pct=adjusted_position_size_pct,
+                    stop_loss_pct=decision.get("stop_loss_pct", 0.5),
+                    take_profit_pct=decision.get("take_profit_pct", 1.5),
+                    risk_level=account_state.get("risk_level"),
+                    client_order_id=client_order_id,
+                )
+
+                logger.info(
+                    f"BROKER SUBMIT RESULT: {symbol} {action.upper()} "
+                    f"order_result={order_result}"
+                )
+
+            if order_result:
+                if EXECUTION_MODE == "dry_run":
+                    logger.info(f"DRY RUN ORDER RECORDED: {order_result}")
+                else:
+                    logger.info(f"ORDER PLACED: {order_result}")
+                    _last_order[cooldown_key] = current_et
+                    _write_cooldown(symbol, action, current_et)
+                    if action == "sell":
+                        _last_sell[symbol] = (current_et, price)
+                        _write_recent_sell(symbol, current_et, price)
             else:
-                logger.info(f"ORDER PLACED: {order_result}")
-                _last_order[cooldown_key] = current_et
-                _write_cooldown(symbol, action, current_et)
-                if action == "sell":
-                    _last_sell[symbol] = (current_et, price)
-                    _write_recent_sell(symbol, current_et, price)
-        else:
-            logger.error(f"Order placement failed for {symbol}")
+                logger.error(f"Order placement failed for {symbol}")
+                if dedupe_key:
+                    _mark_webhook_event_status(
+                        dedupe_key,
+                        "submit_failed",
+                        failure_reason="broker returned no order_result",
+                    )
+
+        except Exception as e:
+            logger.exception(
+                f"APPROVED ORDER PATH CRASHED for {symbol} {action.upper()}: {e}"
+            )
+            log_rejection(
+                symbol,
+                action,
+                "order_path_exception",
+                str(e),
+                price=price,
+                account_state=account_state,
+            )
+            if dedupe_key:
+                _mark_webhook_event_status(
+                    dedupe_key,
+                    "error",
+                    failure_reason=f"order_path_exception: {e}",
+                )
+            return
+
     else:
         rejected_reason = decision.get("reason")
         logger.info(f"REJECTED: {symbol} {action.upper()} - {rejected_reason}")

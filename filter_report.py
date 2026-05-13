@@ -34,6 +34,7 @@ KNOWN_LABELS = {
     "macro_risk": "Macro risk",
     "macro_position_limit": "Macro position limit",
     "market_bias_avoid": "Market bias avoid",
+    "soft_avoid_prediction_gate": "Soft avoid prediction gate",
     "chase_prevention": "Chase prevention",
     "addon_momentum_gate": "Add-on momentum gate",
     "prediction_gate": "Prediction gate",

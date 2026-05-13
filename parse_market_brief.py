@@ -295,6 +295,20 @@ def parse_json_brief(text):
             entry_quality = entry.get("entry_quality")
             if not isinstance(entry_quality, str):
                 entry_quality = None
+
+            avoid_type = entry.get("avoid_type")
+            if isinstance(avoid_type, str):
+                avoid_type = avoid_type.lower().strip()
+                if avoid_type not in ("hard", "soft"):
+                    avoid_type = None
+            else:
+                avoid_type = None
+
+            # Conservative default: an avoid remains hard unless the brief
+            # explicitly marks it soft.
+            if bias == "avoid" and avoid_type is None:
+                avoid_type = "hard"
+
             symbols_out[sym] = {
                 "bias": bias,
                 "reason": entry.get("reason") or "no detail provided",
@@ -302,6 +316,7 @@ def parse_json_brief(text):
                 "fundamental_score": fund,
                 "risk_level": risk,
                 "entry_quality": entry_quality,
+                "avoid_type": avoid_type,
             }
             parsed_count += 1
         else:
@@ -312,6 +327,7 @@ def parse_json_brief(text):
                 "fundamental_score": None,
                 "risk_level": None,
                 "entry_quality": None,
+                "avoid_type": None,
             }
 
     return symbols_out, parsed_count, macro_sentiment, macro_summary_text
@@ -369,6 +385,7 @@ def main():
                     "fundamental_score": None,
                     "risk_level": None,
                     "entry_quality": None,
+                    "avoid_type": None,
                 }
         macro_sentiment = extract_macro_sentiment(text)
         macro_summary = extract_macro_summary(text)

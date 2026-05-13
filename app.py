@@ -955,6 +955,7 @@ def _load_market_context():
                     "fundamental_score": entry.get("fundamental_score"),
                     "risk_level": entry.get("risk_level"),
                     "entry_quality": entry.get("entry_quality"),
+                    "avoid_type": entry.get("avoid_type"),
                 }
         avoid_count = sum(1 for v in _market_bias.values() if v["bias"] == "avoid")
         buy_count = sum(1 for v in _market_bias.values() if v["bias"] == "buy")
@@ -1950,6 +1951,12 @@ def _validate_spread_with_retry(
 
     return last
 
+
+# Second-look safety thresholds.
+# These are env-tunable so paper/live behavior can be adjusted without code edits.
+MAX_SIGNAL_PRICE_DRIFT_PCT = float(os.environ.get("MAX_SIGNAL_PRICE_DRIFT_PCT", "0.35"))
+MAX_BID_ASK_SPREAD_PCT = float(os.environ.get("MAX_BID_ASK_SPREAD_PCT", "0.10"))
+
 def _pre_order_safety_check(symbol, action, signal_price, account_state):
     """Final broker-adjacent safety check immediately before order placement.
 
@@ -2358,9 +2365,20 @@ def process_signal(data):
             if bias_entry:
                 bias = bias_entry["bias"]
                 if bias == "avoid":
-                    reason = f"confidence={bias_entry.get('confidence','')} reason={bias_entry.get('reason','')}"
-                    if _reject_current_signal("market_bias_avoid", reason):
-                        return
+                    avoid_type = (bias_entry.get("avoid_type") or "hard").lower()
+                    reason = (
+                        f"avoid_type={avoid_type} "
+                        f"confidence={bias_entry.get('confidence','')} "
+                        f"reason={bias_entry.get('reason','')}"
+                    )
+
+                    if avoid_type != "soft":
+                        if _reject_current_signal("market_bias_avoid", reason):
+                            return
+
+                    account_state["market_bias"] = "avoid"
+                    account_state["avoid_type"] = "soft"
+                    account_state["soft_avoid_reason"] = bias_entry.get("reason", "")
                 if bias == "buy":
                     account_state["market_bias"] = "buy"
                 if bias_entry.get("fundamental_score"):
@@ -2473,6 +2491,25 @@ def process_signal(data):
         )
 
         prediction_decision = prediction_gate.get("prediction_decision")
+
+        if (
+            bias_entry.get("bias") == "avoid"
+            and (bias_entry.get("avoid_type") or "hard").lower() == "soft"
+        ):
+            prediction_score = int(prediction_gate.get("prediction_score") or 0)
+            if prediction_decision != "pass" or prediction_score < 8:
+                reason = (
+                    f"soft_avoid requires prediction pass score>=8; "
+                    f"score={prediction_score} decision={prediction_decision} "
+                    f"context_reason={bias_entry.get('reason','')}"
+                )
+                if _reject_current_signal("soft_avoid_prediction_gate", reason):
+                    return
+
+            logger.info(
+                f"Soft avoid overridden by prediction gate for {symbol} BUY: "
+                f"score={prediction_score} reason={prediction_gate.get('prediction_reason')}"
+            )
 
         should_block_prediction = (
             (ENFORCE_PREDICTION_BLOCKS and prediction_decision == "block")
@@ -2739,7 +2776,7 @@ def webhook():
         
     try:
         data["_dedupe_key"] = dedupe_key
-        
+
         _mark_webhook_event_status(dedupe_key, "queued")
         _signal_executor.submit(process_signal, data)
     except Exception as e:

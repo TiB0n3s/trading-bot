@@ -94,6 +94,12 @@ Confidence:
 - "medium": one or two supporting datapoints
 - "low":    sparse data or conflicting signals
 
+Avoid type rules:
+- Set avoid_type="hard" for earnings today, analyst downgrade, major negative news, bearish/strong_bearish fundamentals, debt/credit warning, or severe gap-down risk.
+- Set avoid_type="soft" when the symbol is avoid only because price action is weak, pre-market action needs repair, confirmation is missing, or a pullback/hold condition is preferred.
+- Set avoid_type=null when bias is buy or neutral.
+
+
 For ETFs (SPY, QQQ, GLD, IWM), use sector or index-level news and pre-market index moves rather than company-specific items.
 
 Search efficiently. You have a hard budget of 6 web searches total — DO NOT search per-symbol. Use exactly these 3 broad searches to cover all symbols:
@@ -114,7 +120,8 @@ Return ONLY this JSON schema. All {len(SYMBOLS)} symbols must be present in the 
       "confidence": "high | medium | low",
       "fundamental_score": "strong_bullish | bullish | neutral | bearish | strong_bearish | null",
       "risk_level": "low | medium | high | very_high | null",
-      "entry_quality": "excellent | good_on_pullbacks | good_if_holds_gap | good_if_breadth_holds | tactical_only | hedge_only | do_not_chase | avoid_chasing | conditional | null"
+      "entry_quality": "excellent | good_on_pullbacks | good_if_holds_gap | good_if_breadth_holds | tactical_only | hedge_only | do_not_chase | avoid_chasing | conditional | null",
+      "avoid_type": "hard | soft | null"
     }}
   }}
 }}"""

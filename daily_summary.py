@@ -269,6 +269,7 @@ def _render(rows, matched, header, trade_rows=None):
         "macro_risk":           "Macro risk (capital preservation)",
         "macro_position_limit": "Macro position limit",
         "market_bias_avoid":    "Brief flagged 'avoid'",
+        "soft_avoid_prediction_gate": "Soft avoid prediction gate",
         "chase_prevention":     "Chase prevention (do_not_chase)",
         "confidence_gate":      "Low confidence (Claude)",
         "entry_quality":        "Entry quality / pullback requirement",

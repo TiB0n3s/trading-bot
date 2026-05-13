@@ -2,6 +2,7 @@ import json
 import logging
 import os
 from db import get_connection
+from runtime_config import get_alpaca_base_url
 import time
 from datetime import datetime
 from pathlib import Path
@@ -20,6 +21,7 @@ logger = logging.getLogger(__name__)
 
 ALPACA_API_KEY  = os.environ.get("ALPACA_API_KEY", "")
 ALPACA_SECRET_KEY = os.environ.get("ALPACA_SECRET_KEY", "")
+ALPACA_BASE_URL = get_alpaca_base_url()
 PAPER_BASE_URL  = "https://paper-api.alpaca.markets"
 RECONNECT_DELAY = 30
 
@@ -232,12 +234,13 @@ async def trade_update_handler(data):
     except Exception as e:
         logger.error(f"Error in trade_update_handler: {e} | raw data: {data}")
 
+logger.info(f"Starting Alpaca trade update stream: base_url={ALPACA_BASE_URL}")
 
 def run_stream():
     stream = Stream(
         ALPACA_API_KEY,
         ALPACA_SECRET_KEY,
-        base_url=PAPER_BASE_URL,
+        base_url=ALPACA_BASE_URL,
         data_feed="iex",
     )
     stream.subscribe_trade_updates(trade_update_handler)

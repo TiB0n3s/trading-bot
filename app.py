@@ -167,6 +167,8 @@ def _init_db():
             ("macro_regime",         "TEXT"),
             ("risk_multiplier",      "REAL"),
             ("market_bias",          "TEXT"),
+            ("market_bias_effective", "TEXT"),
+            ("market_bias_override_reason", "TEXT"),
             ("fundamental_score",    "TEXT"),
             ("risk_level",           "TEXT"),
             ("entry_quality",        "TEXT"),
@@ -1167,6 +1169,8 @@ def log_trade(signal, decision, order, account_state=None):
             "macro_regime",
             "risk_multiplier",
             "market_bias",
+            "market_bias_effective",
+            "market_bias_override_reason",
             "fundamental_score",
             "risk_level",
             "entry_quality",
@@ -1204,6 +1208,8 @@ def log_trade(signal, decision, order, account_state=None):
             ctx["macro_regime"],
             ctx["risk_multiplier"],
             ctx["market_bias"],
+            ctx["market_bias_effective"],
+            ctx["market_bias_override_reason"],
             ctx["fundamental_score"],
             ctx["risk_level"],
             ctx["entry_quality"],
@@ -1239,49 +1245,58 @@ def log_trade(signal, decision, order, account_state=None):
 def _build_decision_context(symbol, action, account_state=None):
     """Snapshot the decision context for a symbol/action at call time.
 
-    Returns a dict with the 11 attribution fields. Fields whose source hasn't
-    been computed yet at call time return None — that's accurate (e.g. a
-    cooldown rejection fires before momentum / macro_risk are populated, so
-    those fields are correctly NULL on that row).
+    Returns attribution fields. Fields whose source hasn't been computed yet
+    at call time return None — that's accurate for early pre-check rejections.
     """
     ctx = {
-        "macro_regime":         None,
-        "risk_multiplier":      None,
-        "market_bias":          None,
-        "fundamental_score":    None,
-        "risk_level":           None,
-        "entry_quality":        None,
-        "trend_direction":      None,
-        "trend_strength":       None,
-        "momentum_direction":   None,
-        "momentum_pct":         None,
-        "correlation_cluster":  None,
+        "macro_regime": None,
+        "risk_multiplier": None,
+        "market_bias": None,
+        "market_bias_effective": None,
+        "market_bias_override_reason": None,
+        "fundamental_score": None,
+        "risk_level": None,
+        "entry_quality": None,
+        "trend_direction": None,
+        "trend_strength": None,
+        "momentum_direction": None,
+        "momentum_pct": None,
+        "correlation_cluster": None,
         "cluster_exposure_pct": None,
     }
+
     try:
         bias_entry = _market_bias.get(symbol) or {}
-        ctx["market_bias"]   = bias_entry.get("bias")
-        ctx["fundamental_score"]  = bias_entry.get("fundamental_score")
-        ctx["risk_level"]    = bias_entry.get("risk_level")
+        ctx["market_bias"] = bias_entry.get("bias")
+        ctx["fundamental_score"] = bias_entry.get("fundamental_score")
+        ctx["risk_level"] = bias_entry.get("risk_level")
         ctx["entry_quality"] = bias_entry.get("entry_quality")
+
         trend = _trend_table.get(symbol) or {}
         ctx["trend_direction"] = trend.get("direction")
-        ctx["trend_strength"]  = trend.get("strength")
+        ctx["trend_strength"] = trend.get("strength")
+
         if account_state:
             macro = account_state.get("macro_risk") or {}
-            ctx["macro_regime"]    = macro.get("macro_regime")
+            ctx["macro_regime"] = macro.get("macro_regime")
             ctx["risk_multiplier"] = macro.get("risk_multiplier")
+            ctx["market_bias_effective"] = account_state.get("market_bias_effective")
+            ctx["market_bias_override_reason"] = account_state.get("market_bias_override_reason")
+
             momentum = account_state.get("momentum") or {}
             ctx["momentum_direction"] = momentum.get("direction")
-            ctx["momentum_pct"]       = momentum.get("momentum_pct")
+            ctx["momentum_pct"] = momentum.get("momentum_pct")
+
             corr = account_state.get("correlation_exposure") or []
             if corr:
-                # If symbol is in multiple clusters, attribute to the highest-exposure one
+                # If symbol is in multiple clusters, attribute to the highest-exposure one.
                 primary = max(corr, key=lambda c: c.get("exposure_pct", 0) or 0)
-                ctx["correlation_cluster"]   = primary.get("cluster")
-                ctx["cluster_exposure_pct"]  = primary.get("exposure_pct")
+                ctx["correlation_cluster"] = primary.get("cluster")
+                ctx["cluster_exposure_pct"] = primary.get("exposure_pct")
+
     except Exception as e:
         logger.warning(f"_build_decision_context partial failure for {symbol}: {e}")
+
     return ctx
 
 def log_rejection(symbol, action, category, reason, price=None, account_state=None):
@@ -1302,6 +1317,8 @@ def log_rejection(symbol, action, category, reason, price=None, account_state=No
         "macro_regime",
         "risk_multiplier",
         "market_bias",
+        "market_bias_effective",
+        "market_bias_override_reason",
         "fundamental_score",
         "risk_level",
         "entry_quality",
@@ -1331,6 +1348,8 @@ def log_rejection(symbol, action, category, reason, price=None, account_state=No
         ctx["macro_regime"],
         ctx["risk_multiplier"],
         ctx["market_bias"],
+        ctx["market_bias_effective"],
+        ctx["market_bias_override_reason"],
         ctx["fundamental_score"],
         ctx["risk_level"],
         ctx["entry_quality"],
@@ -1624,6 +1643,158 @@ def _symbol_market_alignment(symbol):
             "reason": f"alignment error: {e}",
         }
 
+def _live_bias_override(symbol, bias_entry, trend, setup_obs, prediction_gate, momentum):
+    """
+    Convert pre-market bias into an effective intraday bias using live evidence.
+
+    This helper does not override hard risk controls. It only decides whether
+    a pre-market bias should remain active, soften, or be downgraded/upgraded
+    based on trend, setup, prediction score, and momentum.
+    """
+    bias_entry = bias_entry or {}
+    trend = trend or {}
+    setup_obs = setup_obs or {}
+    prediction_gate = prediction_gate or {}
+    momentum = momentum or {}
+
+    bias = bias_entry.get("bias")
+    avoid_type = (bias_entry.get("avoid_type") or "").lower()
+    fundamental_score = bias_entry.get("fundamental_score")
+    entry_quality = bias_entry.get("entry_quality")
+
+    trend_direction = trend.get("direction")
+    trend_strength = trend.get("strength")
+    consecutive_count = int(trend.get("consecutive_count") or 0)
+    last_signal = trend.get("last_signal")
+
+    setup_action = setup_obs.get("setup_policy_action")
+    setup_label = setup_obs.get("setup_label")
+
+    prediction_score = int(prediction_gate.get("prediction_score") or 0)
+    prediction_decision = prediction_gate.get("prediction_decision")
+
+    momentum_direction = momentum.get("direction")
+
+    # Hard avoid remains hard. This includes missing avoid_type, because
+    # parse_market_brief.py conservatively defaults avoid to hard unless
+    # the brief explicitly marks it soft.
+    if bias == "avoid" and avoid_type != "soft":
+        return {
+            "effective_bias": "avoid_hard",
+            "allow_buy": False,
+            "confidence_adjustment": -30,
+            "reason": "hard pre-market avoid remains active",
+        }
+
+    # Weak fundamentals should not be overridden by live tape alone.
+    if fundamental_score in ("bearish", "strong_bearish"):
+        return {
+            "effective_bias": "avoid_hard",
+            "allow_buy": False,
+            "confidence_adjustment": -30,
+            "reason": f"fundamental_score={fundamental_score} remains hard block",
+        }
+
+    # Poor/chase entry-quality remains a hard no. The existing chase gate should
+    # normally catch this too; this keeps attribution consistent.
+    if entry_quality in ("do_not_chase", "avoid_chasing", "poor"):
+        return {
+            "effective_bias": "avoid_hard",
+            "allow_buy": False,
+            "confidence_adjustment": -30,
+            "reason": f"entry_quality={entry_quality} remains hard block",
+        }
+
+    live_positive = (
+        trend_direction == "bullish"
+        and last_signal == "buy"
+        and consecutive_count >= 3
+        and momentum_direction == "rising"
+        and prediction_decision == "pass"
+        and prediction_score >= 6
+        and setup_action in ("boost", "allow", "neutral")
+    )
+
+    live_strong_positive = (
+        live_positive
+        and trend_strength in ("developing", "confirmed")
+        and prediction_score >= 8
+        and setup_action in ("boost", "allow")
+    )
+
+    live_negative = (
+        trend_direction == "bearish"
+        or momentum_direction == "falling"
+        or prediction_decision == "block"
+        or setup_action == "block"
+    )
+
+    if bias == "avoid" and avoid_type == "soft":
+        if live_strong_positive:
+            return {
+                "effective_bias": "live_override_buy",
+                "allow_buy": True,
+                "confidence_adjustment": -5,
+                "reason": (
+                    "soft avoid overridden by live confirmation: "
+                    f"trend={trend_direction}/{trend_strength}, "
+                    f"count={consecutive_count}, "
+                    f"setup={setup_label}, "
+                    f"setup_action={setup_action}, "
+                    f"prediction_score={prediction_score}, "
+                    f"momentum={momentum_direction}"
+                ),
+            }
+
+        return {
+            "effective_bias": "avoid_soft",
+            "allow_buy": False,
+            "confidence_adjustment": -15,
+            "reason": (
+                "soft avoid still active; requires stronger live confirmation: "
+                f"trend={trend_direction}/{trend_strength}, "
+                f"count={consecutive_count}, "
+                f"setup_action={setup_action}, "
+                f"prediction_score={prediction_score}, "
+                f"prediction_decision={prediction_decision}, "
+                f"momentum={momentum_direction}"
+            ),
+        }
+
+    if bias == "buy" and live_negative:
+        return {
+            "effective_bias": "live_override_neutral",
+            "allow_buy": False,
+            "confidence_adjustment": -20,
+            "reason": (
+                "pre-market buy downgraded by live evidence: "
+                f"trend={trend_direction}/{trend_strength}, "
+                f"setup_action={setup_action}, "
+                f"prediction_decision={prediction_decision}, "
+                f"momentum={momentum_direction}"
+            ),
+        }
+
+    if bias == "neutral" and live_strong_positive:
+        return {
+            "effective_bias": "live_override_buy",
+            "allow_buy": True,
+            "confidence_adjustment": 5,
+            "reason": (
+                "neutral pre-market bias upgraded by strong live evidence: "
+                f"trend={trend_direction}/{trend_strength}, "
+                f"setup={setup_label}, "
+                f"prediction_score={prediction_score}, "
+                f"momentum={momentum_direction}"
+            ),
+        }
+
+    return {
+        "effective_bias": bias or "neutral",
+        "allow_buy": bias != "avoid",
+        "confidence_adjustment": 0,
+        "reason": "pre-market bias unchanged by live evidence",
+    }
 
 def _cluster_exposure(symbol, balance):
     """Return cluster exposure info for the symbol across current Alpaca positions."""
@@ -2499,33 +2670,24 @@ def process_signal(data):
                 if _reject_current_signal("fundamental_score", reason):
                     return
 
-        # Market bias gate: block buy if pre-market research flagged 'avoid'; inject 'buy' bias for Claude
-        if action == "buy":
-            if bias_entry:
-                bias = bias_entry["bias"]
-                if bias == "avoid":
-                    avoid_type = (bias_entry.get("avoid_type") or "hard").lower()
-                    reason = (
-                        f"avoid_type={avoid_type} "
-                        f"confidence={bias_entry.get('confidence','')} "
-                        f"reason={bias_entry.get('reason','')}"
-                    )
+        # Market-bias context injection.
+        #
+        # Do not block on market_bias here. Live evidence from momentum,
+        # prediction scoring, setup policy, and indicator state is evaluated
+        # below before the effective intraday bias is enforced.
+        if action == "buy" and bias_entry:
+            bias = bias_entry.get("bias")
+            account_state["market_bias_original"] = bias
+            account_state["market_bias"] = bias
+            account_state["avoid_type"] = bias_entry.get("avoid_type")
+            account_state["soft_avoid_reason"] = bias_entry.get("reason", "")
 
-                    if avoid_type != "soft":
-                        if _reject_current_signal("market_bias_avoid", reason):
-                            return
-
-                    account_state["market_bias"] = "avoid"
-                    account_state["avoid_type"] = "soft"
-                    account_state["soft_avoid_reason"] = bias_entry.get("reason", "")
-                if bias == "buy":
-                    account_state["market_bias"] = "buy"
-                if bias_entry.get("fundamental_score"):
-                    account_state["fundamental_score"] = bias_entry["fundamental_score"]
-                if bias_entry.get("risk_level"):
-                    account_state["risk_level"] = bias_entry["risk_level"]
-                if bias_entry.get("entry_quality"):
-                    account_state["entry_quality"] = bias_entry["entry_quality"]
+            if bias_entry.get("fundamental_score"):
+                account_state["fundamental_score"] = bias_entry["fundamental_score"]
+            if bias_entry.get("risk_level"):
+                account_state["risk_level"] = bias_entry["risk_level"]
+            if bias_entry.get("entry_quality"):
+                account_state["entry_quality"] = bias_entry["entry_quality"]
 
         # Chase prevention gate
         if action == "buy":
@@ -2631,23 +2793,53 @@ def process_signal(data):
 
         prediction_decision = prediction_gate.get("prediction_decision")
 
-        if (
-            bias_entry.get("bias") == "avoid"
-            and (bias_entry.get("avoid_type") or "hard").lower() == "soft"
-        ):
-            prediction_score = int(prediction_gate.get("prediction_score") or 0)
-            if prediction_decision != "pass" or prediction_score < 8:
-                reason = (
-                    f"soft_avoid requires prediction pass score>=8; "
-                    f"score={prediction_score} decision={prediction_decision} "
-                    f"context_reason={bias_entry.get('reason','')}"
-                )
-                if _reject_current_signal("soft_avoid_prediction_gate", reason):
-                    return
+        bias_override = _live_bias_override(
+            symbol=symbol,
+            bias_entry=bias_entry,
+            trend=trend,
+            setup_obs=setup_obs,
+            prediction_gate=prediction_gate,
+            momentum=momentum,
+        )
 
+        account_state["market_bias_effective"] = bias_override.get("effective_bias")
+        account_state["market_bias_override_reason"] = bias_override.get("reason")
+
+        effective_bias = bias_override.get("effective_bias")
+        allow_buy_from_bias = bool(bias_override.get("allow_buy"))
+
+        if effective_bias == "avoid_hard":
+            reason = (
+                f"effective_bias={effective_bias} "
+                f"confidence={bias_entry.get('confidence','')} "
+                f"reason={bias_override.get('reason')}; "
+                f"context_reason={bias_entry.get('reason','')}"
+            )
+            if _reject_current_signal("market_bias_avoid", reason):
+                return
+
+        if effective_bias == "avoid_soft" and not allow_buy_from_bias:
+            reason = (
+                f"effective_bias={effective_bias}; "
+                f"{bias_override.get('reason')}; "
+                f"context_reason={bias_entry.get('reason','')}"
+            )
+            if _reject_current_signal("soft_avoid_prediction_gate", reason):
+                return
+
+        if effective_bias == "live_override_neutral" and not allow_buy_from_bias:
+            reason = (
+                f"effective_bias={effective_bias}; "
+                f"{bias_override.get('reason')}; "
+                f"context_reason={bias_entry.get('reason','')}"
+            )
+            if _reject_current_signal("live_bias_downgrade", reason):
+                return
+
+        if effective_bias == "live_override_buy":
             logger.info(
-                f"Soft avoid overridden by prediction gate for {symbol} BUY: "
-                f"score={prediction_score} reason={prediction_gate.get('prediction_reason')}"
+                f"Live evidence overrode pre-market bias for {symbol} BUY: "
+                f"{bias_override.get('reason')}"
             )
 
         should_block_prediction = (

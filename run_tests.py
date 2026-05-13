@@ -17,6 +17,7 @@ TESTS = [
     "tests/test_fast_lane.py",
     "tests/test_fast_lane_sell.py",
     "tests/test_trade_matcher.py",
+    "tests/test_live_bias_override.py",
 ]
 
 

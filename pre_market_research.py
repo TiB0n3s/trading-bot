@@ -99,6 +99,7 @@ Avoid type rules:
 - Set avoid_type="soft" when the symbol is avoid only because price action is weak, pre-market action needs repair, confirmation is missing, or a pullback/hold condition is preferred.
 - Set avoid_type=null when bias is buy or neutral.
 
+Soft avoid means the bot may allow a trade later only if live intraday trend, momentum, setup quality, and prediction score strongly confirm reversal or continuation.
 
 For ETFs (SPY, QQQ, GLD, IWM), use sector or index-level news and pre-market index moves rather than company-specific items.
 

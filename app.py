@@ -791,8 +791,7 @@ def _hydrate_cooldowns():
     — once Stage B writes are in place — across gunicorn workers.
     """
     try:
-        et = pytz.timezone("America/New_York")
-        now_et = datetime.now(et)
+        current_et = now_et()
         with get_connection(DB_PATH) as con:
             rows = con.execute("SELECT symbol, action, last_order_time FROM cooldowns").fetchall()
         loaded = 0
@@ -801,7 +800,7 @@ def _hydrate_cooldowns():
                 ts = datetime.fromisoformat(ts_str)
                 if ts.tzinfo is None:
                     ts = et.localize(ts)
-                if (now_et - ts).total_seconds() < 15 * 60:
+                if (current_et - ts).total_seconds() < 15 * 60:
                     _last_order[(symbol, action)] = ts
                     loaded += 1
             except Exception as e:
@@ -819,8 +818,7 @@ def _hydrate_recent_sells():
     state across restarts and (Stage B) across workers.
     """
     try:
-        et = pytz.timezone("America/New_York")
-        now_et = datetime.now(et)
+        current_et = now_et()
         with get_connection(DB_PATH) as con:
             rows = con.execute("SELECT symbol, last_sell_time, last_sell_price FROM recent_sells").fetchall()
         loaded = 0
@@ -829,7 +827,7 @@ def _hydrate_recent_sells():
                 ts = datetime.fromisoformat(ts_str)
                 if ts.tzinfo is None:
                     ts = et.localize(ts)
-                if (now_et - ts).total_seconds() < 30 * 60:
+                if (current_et - ts).total_seconds() < 30 * 60:
                     _last_sell[symbol] = (ts, price)
                     loaded += 1
             except Exception as e:
@@ -3094,7 +3092,7 @@ def status():
                     ts = datetime.fromisoformat(ts_str)
                     if ts.tzinfo is None:
                         ts = et.localize(ts)
-                    elapsed = (now_et - ts).total_seconds()
+                    elapsed = (now_et_value - ts).total_seconds()
                     if elapsed < 15 * 60:
                         cooldowns.append({
                             "symbol": sym,
@@ -3108,7 +3106,7 @@ def status():
                     ts = datetime.fromisoformat(ts_str)
                     if ts.tzinfo is None:
                         ts = et.localize(ts)
-                    elapsed = (now_et - ts).total_seconds()
+                    elapsed = (now_et_value - ts).total_seconds()
                     if elapsed < 30 * 60:
                         churn.append(sym)
                 except Exception:
@@ -3142,13 +3140,33 @@ def status():
 
     # Trend snapshot for all 15 approved symbols (not just held positions)
     try:
-        result["trend_table_summary"] = {
-            sym: (
-                {"direction": t.get("direction"), "strength": t.get("strength")}
-                if (t := _trend_table.get(sym)) else None
-            )
-            for sym in sorted(APPROVED_SYMBOLS)
-        }
+        result["trend_table_summary"] = {}
+        for sym in sorted(APPROVED_SYMBOLS):
+            t = _trend_table.get(sym)
+            if not t:
+                result["trend_table_summary"][sym] = None
+                continue
+
+            buy_confirmation = _required_buy_confirmations(sym, result.get("account") or {})
+            sell_confirmation = _required_sell_confirmations(sym, result.get("account") or {})
+
+            result["trend_table_summary"][sym] = {
+                "direction": t.get("direction"),
+                "strength": t.get("strength"),
+                "consecutive_count": t.get("consecutive_count"),
+                "last_signal": t.get("last_signal"),
+                "flip_event": t.get("flip_event"),
+                "required_buy_confirmations": buy_confirmation.get("required_buy_confirmations"),
+                "required_sell_confirmations": sell_confirmation.get("required_sell_confirmations"),
+                "fast_lane_buy_flip": is_fast_lane_buy_flip(
+                    t,
+                    required_buy_confirmations=buy_confirmation.get("required_buy_confirmations") or 3,
+                ),
+                "fast_lane_sell_flip": is_fast_lane_sell_flip(
+                    t,
+                    required_sell_confirmations=sell_confirmation.get("required_sell_confirmations") or 2,
+                ),
+            }
     except Exception as e:
         logger.error(f"/status trend_table_summary error: {e}")
 
@@ -3198,7 +3216,7 @@ def positions():
             now_et_value = now_et()
             market_hours_open = is_market_hours(now_et_value)
             for (sym, _action), ts in _last_order.items():
-                if sym == symbol and (now_et - ts).total_seconds() < 15 * 60:
+                if sym == symbol and (now_et_value - ts).total_seconds() < 15 * 60:
                     return True
         except Exception:
             pass
@@ -3304,7 +3322,7 @@ def debug_symbol(symbol):
     result = {
         "symbol": symbol,
         "timestamp": datetime.now().isoformat(),
-        "now_et": now_et.strftime("%Y-%m-%d %H:%M:%S %Z"),
+        "now_et": now_et_value.strftime("%Y-%m-%d %H:%M:%S %Z"),
         "market_hours_open": market_hours_open,
     }
 
@@ -3331,15 +3349,37 @@ def debug_symbol(symbol):
     except Exception as e:
         result["alpaca_position_error"] = str(e)
 
-    # Trend table
+    # Trend snapshot for all approved symbols
     try:
-        _refresh_signal_history(symbol)
-        history = _signal_history.get(symbol, [])
-        trend = _compute_trend(history)
-        result["signal_history"] = history
-        result["trend"] = trend
+        result["trend_table_summary"] = {}
+        for sym in sorted(APPROVED_SYMBOLS):
+            t = _trend_table.get(sym)
+            if not t:
+                result["trend_table_summary"][sym] = None
+                continue
+
+            buy_confirmation = _required_buy_confirmations(sym, result.get("account") or {})
+            sell_confirmation = _required_sell_confirmations(sym, result.get("account") or {})
+
+            result["trend_table_summary"][sym] = {
+                "direction": t.get("direction"),
+                "strength": t.get("strength"),
+                "consecutive_count": t.get("consecutive_count"),
+                "last_signal": t.get("last_signal"),
+                "flip_event": t.get("flip_event"),
+                "required_buy_confirmations": buy_confirmation.get("required_buy_confirmations"),
+                "required_sell_confirmations": sell_confirmation.get("required_sell_confirmations"),
+                "fast_lane_buy_flip": is_fast_lane_buy_flip(
+                    t,
+                    required_buy_confirmations=buy_confirmation.get("required_buy_confirmations") or 3,
+                ),
+                "fast_lane_sell_flip": is_fast_lane_sell_flip(
+                    t,
+                    required_sell_confirmations=sell_confirmation.get("required_sell_confirmations") or 2,
+                ),
+            }
     except Exception as e:
-        result["trend_error"] = str(e)
+        logger.error(f"/status trend_table_summary error: {e}")
 
     # Market context
     try:
@@ -3363,7 +3403,7 @@ def debug_symbol(symbol):
         for action in ("buy", "sell"):
             last = _read_cooldown(symbol, action)
             if last:
-                elapsed = (now_et - last).total_seconds()
+                elapsed = (now_et_value - last).total_seconds()
                 active = elapsed < 15 * 60
                 cooldowns[action] = {
                     "last_order_time": last.isoformat(),
@@ -3381,7 +3421,7 @@ def debug_symbol(symbol):
         last_sell = _read_recent_sell(symbol)
         if last_sell:
             ts, sell_price = last_sell
-            elapsed = (now_et - ts).total_seconds()
+            elapsed = (now_et_value - ts).total_seconds()
             result["recent_sell"] = {
                 "last_sell_time": ts.isoformat(),
                 "last_sell_price": sell_price,
@@ -3433,7 +3473,7 @@ def debug_symbol(symbol):
         buy_blocks.append("circuit_breaker")
 
     trend = result.get("trend") or {}
-    prediction_gate = (account_state or {}).get("prediction_gate") or {}
+    prediction_gate = (state or {}).get("prediction_gate") or {}
 
     if prediction_gate.get("prediction_decision") == "block":
         buy_blocks.append(

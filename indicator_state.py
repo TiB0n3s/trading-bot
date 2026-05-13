@@ -76,12 +76,12 @@ def compute_indicator_state(
 
     buy_flip = (
         current_action == "buy"
-        and consecutive_count >= buy_flip_min
+        and consecutive_count == buy_flip_min
         and previous_opposite_count >= 1
     )
     sell_flip = (
         current_action == "sell"
-        and consecutive_count >= sell_flip_min
+        and consecutive_count == sell_flip_min
         and previous_opposite_count >= 1
     )
 

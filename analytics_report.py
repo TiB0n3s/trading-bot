@@ -45,6 +45,8 @@ PRIORITY_CATEGORIES = [
     "macro_position_limit",
     "market_bias_avoid",
     "chase_prevention",
+    "addon_momentum_gate",
+    "prediction_gate",
     "confidence_gate",
     "claude_rejection",  # bucket for pre-Stage-5 Claude verdicts and any
                          # rejection_reason whose prefix isn't a known category

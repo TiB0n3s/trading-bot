@@ -191,6 +191,8 @@ def _bucket_rejection_reason(reason: str | None) -> str:
         "macro_position_limit":   "Macro position limit",
         "market_bias_avoid":      "Brief flagged 'avoid'",
         "chase_prevention":       "Chase prevention (do_not_chase)",
+        "addon_momentum_gate":    "Add-on momentum gate",
+        "prediction_gate":       "Prediction gate",
         "confidence_gate":        "Low confidence (Claude)",
         "entry_quality":          "Entry quality / pullback requirement",
         "second_look":            "Second-look market check",

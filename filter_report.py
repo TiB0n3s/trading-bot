@@ -36,6 +36,7 @@ KNOWN_LABELS = {
     "market_bias_avoid": "Market bias avoid",
     "chase_prevention": "Chase prevention",
     "addon_momentum_gate": "Add-on momentum gate",
+    "prediction_gate": "Prediction gate",
     "confidence_gate": "Low confidence gate",
 }
 

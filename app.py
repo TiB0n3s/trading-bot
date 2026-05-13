@@ -1137,7 +1137,6 @@ def log_trade(signal, decision, order, account_state=None):
             account_state,
         )
         setup_obs = (account_state or {}).get("setup_observation") or {}
-
         prediction_gate = (account_state or {}).get("prediction_gate") or {}
 
         columns = [
@@ -1158,15 +1157,16 @@ def log_trade(signal, decision, order, account_state=None):
             "macro_regime",
             "risk_multiplier",
             "market_bias",
+            "fundamental_score",
             "risk_level",
             "entry_quality",
             "trend_direction",
             "trend_strength",
+            "momentum_direction",
+            "momentum_pct",
             "prediction_score",
             "prediction_decision",
             "prediction_reason",
-            "momentum_direction",
-            "momentum_pct",
             "correlation_cluster",
             "cluster_exposure_pct",
             "setup_label",
@@ -1194,17 +1194,18 @@ def log_trade(signal, decision, order, account_state=None):
             ctx["macro_regime"],
             ctx["risk_multiplier"],
             ctx["market_bias"],
+            ctx["fundamental_score"],
             ctx["risk_level"],
             ctx["entry_quality"],
             ctx["trend_direction"],
             ctx["trend_strength"],
             ctx["momentum_direction"],
             ctx["momentum_pct"],
-            ctx["correlation_cluster"],
-            ctx["cluster_exposure_pct"],
             prediction_gate.get("prediction_score"),
             prediction_gate.get("prediction_decision"),
             prediction_gate.get("prediction_reason"),
+            ctx["correlation_cluster"],
+            ctx["cluster_exposure_pct"],
             setup_obs.get("setup_label"),
             setup_obs.get("setup_policy_action"),
             setup_obs.get("setup_policy_reason"),
@@ -1220,11 +1221,9 @@ def log_trade(signal, decision, order, account_state=None):
                 f"INSERT INTO trades ({col_sql}) VALUES ({placeholders})",
                 values,
             )
-            con.commit()
 
     except Exception as e:
         logger.error(f"DB write failed for {signal.get('symbol')}: {e}")
-
 
 
 def _build_decision_context(symbol, action, account_state=None):
@@ -1276,73 +1275,79 @@ def _build_decision_context(symbol, action, account_state=None):
     return ctx
 
 def log_rejection(symbol, action, category, reason, price=None, account_state=None):
-    """Persist a pre-Claude rejection to trades.db so daily_summary can count it."""
+    """Persist a pre-Claude rejection to trades.db so reports can count it."""
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     full_reason = f"{category}: {reason}"
     ctx = _build_decision_context(symbol, action, account_state)
     setup_obs = (account_state or {}).get("setup_observation") or {}
-    
     prediction_gate = (account_state or {}).get("prediction_gate") or {}
+
+    columns = [
+        "timestamp",
+        "symbol",
+        "action",
+        "signal_price",
+        "approved",
+        "rejection_reason",
+        "macro_regime",
+        "risk_multiplier",
+        "market_bias",
+        "fundamental_score",
+        "risk_level",
+        "entry_quality",
+        "trend_direction",
+        "trend_strength",
+        "momentum_direction",
+        "momentum_pct",
+        "prediction_score",
+        "prediction_decision",
+        "prediction_reason",
+        "correlation_cluster",
+        "cluster_exposure_pct",
+        "setup_label",
+        "setup_policy_action",
+        "setup_policy_reason",
+        "setup_confidence_adjustment",
+        "setup_size_multiplier",
+    ]
+
+    values = [
+        timestamp,
+        symbol,
+        action,
+        price,
+        0,
+        full_reason,
+        ctx["macro_regime"],
+        ctx["risk_multiplier"],
+        ctx["market_bias"],
+        ctx["fundamental_score"],
+        ctx["risk_level"],
+        ctx["entry_quality"],
+        ctx["trend_direction"],
+        ctx["trend_strength"],
+        ctx["momentum_direction"],
+        ctx["momentum_pct"],
+        prediction_gate.get("prediction_score"),
+        prediction_gate.get("prediction_decision"),
+        prediction_gate.get("prediction_reason"),
+        ctx["correlation_cluster"],
+        ctx["cluster_exposure_pct"],
+        setup_obs.get("setup_label"),
+        setup_obs.get("setup_policy_action"),
+        setup_obs.get("setup_policy_reason"),
+        setup_obs.get("setup_confidence_adjustment"),
+        setup_obs.get("setup_size_multiplier"),
+    ]
+
+    placeholders = ", ".join(["?"] * len(values))
+    col_sql = ", ".join(columns)
+
     try:
         with get_connection(DB_PATH) as con:
             con.execute(
-                """
-                INSERT INTO trades (
-                    timestamp,
-                    symbol,
-                    action,
-                    signal_price,
-                    approved,
-                    rejection_reason,
-                    macro_regime,
-                    risk_multiplier,
-                    market_bias,
-                    fundamental_score,
-                    risk_level,
-                    entry_quality,
-                    trend_direction,
-                    trend_strength,
-                    momentum_direction,
-                    momentum_pct,
-                    prediction_score,
-                    prediction_decision,
-                    prediction_reason,
-                    correlation_cluster,
-                    cluster_exposure_pct,
-                    setup_label,
-                    setup_policy_action,
-                    setup_policy_reason,
-                    setup_confidence_adjustment,
-                    setup_size_multiplier
-                ) VALUES (?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    timestamp,
-                    symbol,
-                    action,
-                    price,
-                    full_reason,
-                    ctx["macro_regime"],
-                    ctx["risk_multiplier"],
-                    ctx["market_bias"],
-                    ctx["fundamental_score"],
-                    ctx["risk_level"],
-                    ctx["entry_quality"],
-                    ctx["trend_direction"],
-                    ctx["trend_strength"],
-                    ctx["momentum_direction"],
-                    ctx["momentum_pct"],
-                    ctx["correlation_cluster"],
-                    ctx["cluster_exposure_pct"],
-                    prediction_gate.get("prediction_score"),
-                    prediction_gate.get("prediction_decision"),
-                    prediction_gate.get("prediction_reason"),
-                    setup_obs.get("setup_label"),
-                    setup_obs.get("setup_policy_action"),
-                    setup_obs.get("setup_policy_reason"),
-                    setup_obs.get("setup_confidence_adjustment"),
-                    setup_obs.get("setup_size_multiplier"),
-                ),
+                f"INSERT INTO trades ({col_sql}) VALUES ({placeholders})",
+                values,
             )
     except Exception as e:
         logger.error(f"log_rejection DB write failed for {symbol}: {e}")
@@ -2193,11 +2198,11 @@ def process_signal(data):
         f"trend={_trend_table[symbol]}"
     )
 
-    # Hard pre-check 1: market hours (9:30–16:00 ET, weekdays only)
+    # Hard pre-check: market hours
     current_et = now_et()
-    if action == "buy" and daily_pnl_pct < DAILY_LOSS_LIMIT_PCT:
-        reason = f"daily P&L {daily_pnl_pct:.2f}% < -3.0%"
-        if _reject_current_signal("circuit_breaker", reason, level="error"):
+    if not is_market_hours(current_et):
+        reason = f"outside market hours: {current_et.strftime('%Y-%m-%d %H:%M:%S %Z')}"
+        if _reject_current_signal("market_hours", reason, level="info"):
             return
 
     # Hard pre-check 2: circuit breaker (-3% daily loss limit)

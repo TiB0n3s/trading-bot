@@ -96,6 +96,13 @@ Pre-checks fire in this order:
 
 Before calling Claude, `account_state["trend_table"] = _trend_table` is injected so Claude receives the full trend picture for all symbols.
 
+The live decision path now also includes setup observation and prediction gating:
+- `live_features.py` builds feature snapshots
+- `setup_engine.py` classifies setups
+- `setup_policy.py` maps setup labels to block/boost/allow/neutral actions
+- `app.py` enforces setup-policy and prediction-gate behavior through explicit flags
+- `label_features.py` and `prediction_report.py` remain offline evaluation/tuning tools
+
 ### Post-Claude check
 
 15. **Confidence gate** — buys only. If Claude returns `confidence: "low"`, the order is skipped. Recorded via `log_rejection()` with category `confidence_gate` (Stage 5 refactor: previously used `log_trade` with `approved=1` which conflated bot-rejected with Claude-approved). Sells bypass this entirely.

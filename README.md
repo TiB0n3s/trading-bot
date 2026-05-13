@@ -69,16 +69,16 @@ trades.db (SQLite) ← fill_stream.py (websocket, real-time fills + synthetic br
 | Max position size | 2% per order (2.5% for bullish/confirmed trend) |
 | Max symbol exposure | 4% of account balance (hard pre-check) |
 | Daily loss limit | 3% (hard circuit breaker) |
-| Trading hours | 9:45 AM – 3:45 PM Eastern |
+| Trading hours | 9:30 AM – 4:00 PM Eastern |
 | Cooldown | 15 minutes per (symbol, action) pair |
 | Churn prevention | 30-minute window + 0.5% minimum price improvement |
 | Cluster cap | Limits concentration in mega_cap_tech / broad_index / energy |
 
 ---
 
-## Approved Symbols (15)
+## Approved Symbols (33)
 
-`AAPL` `SPY` `QQQ` `MSFT` `NVDA` `ORCL` `TSCO` `TSLA` `META` `AMD` `CVX` `XOM` `GOOGL` `GLD` `IWM`
+`AAPL` `SPY` `QQQ` `MSFT` `NVDA` `ORCL` `TSCO` `TSLA` `META` `AMD` `CVX` `XOM` `GOOGL` `GLD` `IWM` `AVGO` `CRDO` `GEV` `BE` `CAT` `VRT` `RKLB` `RTX` `LMT` `HWM` `VRTX` `MRNA` `CRSP` `V` `MA` `LLY` `LIN` `GE`
 
 ---
 
@@ -100,7 +100,7 @@ trades.db (SQLite) ← fill_stream.py (websocket, real-time fills + synthetic br
 | `backfill_missing_fills.py` | One-off — queries Alpaca for NULL fill_price rows |
 | `trades.db` | SQLite — trades, matched_trades, cooldowns, recent_sells, fill_events tables |
 | `market_context.json` | Daily per-symbol bias/risk_level/entry_quality — loaded lazily by app.py (gitignored) |
-
+| The bot also maintains an observe-and-tune pipeline around `live_features.py`, `label_features.py`, `setup_engine.py`, `setup_policy.py`, and `prediction_report.py` to improve setup/prediction gating over time.
 ---
 
 ## Database Schema Highlights

@@ -11,7 +11,11 @@ from setup_policy import evaluate_setup_policy
 from pathlib import Path
 from live_features import build_snapshot
 from flask import Flask, request, jsonify, abort
-from indicator_state import compute_indicator_state, is_fast_lane_buy_flip
+from indicator_state import (
+    compute_indicator_state,
+    is_fast_lane_buy_flip,
+    is_fast_lane_sell_flip,
+)
 from decision_engine import evaluate_signal, get_mock_account_state
 from broker import place_order, get_account, get_position, api
 from macro_risk import get_macro_risk
@@ -1533,6 +1537,13 @@ def _required_buy_confirmations(symbol, account_state=None):
             "reason": f"adaptive confirmation error: {e}",
         }
 
+def _required_sell_confirmations(symbol, account_state=None):
+    return {
+        "required_sell_confirmations": 2,
+        "current_rule_required_sell_confirmations": 2,
+        "observe_only": False,
+        "reason": "base requirement is 2 SELL confirmations",
+    }
 
 def _symbol_market_alignment(symbol):
     """Return observe-only market/benchmark alignment for a symbol.
@@ -2361,14 +2372,12 @@ def process_signal(data):
         if cluster_checks:
             account_state["correlation_exposure"] = cluster_checks
 
-    # Trend confirmation gate: require bullish BUY-state confirmation before allowing BUY signals through.
-    # Uses the indicator-state engine plus adaptive confirmation thresholds. SELL signals bypass this gate.
+    # Trend confirmation gate: require confirmed indicator-state transitions before allowing signals through.
     if action == "buy":
         trend = _trend_table.get(symbol) or {}
         direction = trend.get("direction")
         strength = trend.get("strength")
         consecutive_count = int(trend.get("consecutive_count") or 0)
-        flip_event = trend.get("flip_event")
         last_signal = trend.get("last_signal")
 
         adaptive_confirmation = _required_buy_confirmations(symbol, account_state)
@@ -2390,17 +2399,55 @@ def process_signal(data):
             trend,
             required_buy_confirmations=required_buy_confirmations,
         )
+        account_state["fast_lane_buy_flip"] = fast_lane_buy_flip
 
         if not fast_lane_buy_flip and consecutive_count < required_buy_confirmations:
             reason = (
                 f"consecutive_buy_count={consecutive_count} "
                 f"< required={required_buy_confirmations} "
                 f"strength={strength} "
-                f"flip_event={flip_event}"
+                f"flip_event={trend.get('flip_event')}"
             )
             if _reject_current_signal("trend_confirmation", reason):
                 return
 
+    if action == "sell":
+        trend = _trend_table.get(symbol) or {}
+        direction = trend.get("direction")
+        strength = trend.get("strength")
+        consecutive_count = int(trend.get("consecutive_count") or 0)
+        last_signal = trend.get("last_signal")
+
+        sell_confirmation = _required_sell_confirmations(symbol, account_state)
+        required_sell_confirmations = int(
+            sell_confirmation.get("required_sell_confirmations") or 2
+        )
+        account_state["sell_confirmation"] = sell_confirmation
+
+        if direction != "bearish" or last_signal != "sell":
+            reason = (
+                f"direction={direction} "
+                f"last_signal={last_signal} "
+                f"required={required_sell_confirmations}"
+            )
+            if _reject_current_signal("trend_confirmation", reason):
+                return
+
+        fast_lane_sell_flip = is_fast_lane_sell_flip(
+            trend,
+            required_sell_confirmations=required_sell_confirmations,
+        )
+        account_state["fast_lane_sell_flip"] = fast_lane_sell_flip
+
+        if not fast_lane_sell_flip and consecutive_count < required_sell_confirmations:
+            reason = (
+                f"consecutive_sell_count={consecutive_count} "
+                f"< required={required_sell_confirmations} "
+                f"strength={strength} "
+                f"flip_event={trend.get('flip_event')}"
+            )
+            if _reject_current_signal("trend_confirmation", reason):
+                return
     # Macro-risk gate: regime-aware risk control before Claude
     macro_risk = get_macro_risk(Path(__file__).parent)
     account_state["macro_risk"] = macro_risk

@@ -125,3 +125,12 @@ def is_fast_lane_buy_flip(trend: dict, required_buy_confirmations: int) -> bool:
         and trend.get("flip_event") == "buy_flip"
         and int(trend.get("consecutive_count") or 0) >= 2
     )
+
+def is_fast_lane_sell_flip(trend: dict, required_sell_confirmations: int) -> bool:
+    return (
+        int(required_sell_confirmations) == 2
+        and trend.get("direction") == "bearish"
+        and trend.get("last_signal") == "sell"
+        and trend.get("flip_event") == "sell_flip"
+        and int(trend.get("consecutive_count") or 0) >= 2
+    )

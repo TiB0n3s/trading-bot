@@ -2370,6 +2370,23 @@ def process_signal(data):
         if cluster_checks:
             account_state["correlation_exposure"] = cluster_checks
 
+    # Macro-risk gate: regime-aware risk control before Claude
+    macro_risk = get_macro_risk(Path(__file__).parent)
+    account_state["macro_risk"] = macro_risk
+
+    if action == "buy":
+        if macro_risk.get("block_new_buys"):
+            reason = macro_risk.get("reason", "macro regime blocks new buys")
+            if _reject_current_signal("macro_risk", reason):
+                return
+
+        max_new_positions = macro_risk.get("max_new_positions", 8)
+        open_count = account_state.get("open_position_count", 0)
+        if open_count >= max_new_positions:
+            reason = f"open_position_count={open_count} >= macro max_new_positions={max_new_positions}"
+            if _reject_current_signal("macro_position_limit", reason):
+                return
+
     # Trend confirmation gate: require confirmed indicator-state transitions before allowing signals through.
     if action == "buy":
         trend = _trend_table.get(symbol) or {}
@@ -2469,22 +2486,6 @@ def process_signal(data):
                 f"flip_event={trend.get('flip_event')}"
             )
             if _reject_current_signal("trend_confirmation", reason):
-                return
-    # Macro-risk gate: regime-aware risk control before Claude
-    macro_risk = get_macro_risk(Path(__file__).parent)
-    account_state["macro_risk"] = macro_risk
-
-    if action == "buy":
-        if macro_risk.get("block_new_buys"):
-            reason = macro_risk.get("reason", "macro regime blocks new buys")
-            if _reject_current_signal("macro_risk", reason):
-                return
-
-        max_new_positions = macro_risk.get("max_new_positions", 8)
-        open_count = account_state.get("open_position_count", 0)
-        if open_count >= max_new_positions:
-            reason = f"open_position_count={open_count} >= macro max_new_positions={max_new_positions}"
-            if _reject_current_signal("macro_position_limit", reason):
                 return
 
     # Fundamental score gate: block buys when manual/pre-market research flags weak fundamentals

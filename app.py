@@ -2401,6 +2401,18 @@ def process_signal(data):
         )
         account_state["fast_lane_buy_flip"] = fast_lane_buy_flip
 
+        logger.info(
+            f"Trend confirmation BUY for {symbol}: "
+            f"required={required_buy_confirmations} "
+            f"count={consecutive_count} "
+            f"direction={direction} "
+            f"strength={strength} "
+            f"last_signal={last_signal} "
+            f"flip_event={trend.get('flip_event')} "
+            f"fast_lane_buy_flip={fast_lane_buy_flip} "
+            f"adaptive_reason={adaptive_confirmation.get('reason')}"
+        )
+
         if not fast_lane_buy_flip and consecutive_count < required_buy_confirmations:
             reason = (
                 f"consecutive_buy_count={consecutive_count} "
@@ -2438,6 +2450,18 @@ def process_signal(data):
             required_sell_confirmations=required_sell_confirmations,
         )
         account_state["fast_lane_sell_flip"] = fast_lane_sell_flip
+
+        logger.info(
+            f"Trend confirmation SELL for {symbol}: "
+            f"required={required_sell_confirmations} "
+            f"count={consecutive_count} "
+            f"direction={direction} "
+            f"strength={strength} "
+            f"last_signal={last_signal} "
+            f"flip_event={trend.get('flip_event')} "
+            f"fast_lane_sell_flip={fast_lane_sell_flip} "
+            f"sell_reason={sell_confirmation.get('reason')}"
+        )
 
         if not fast_lane_sell_flip and consecutive_count < required_sell_confirmations:
             reason = (

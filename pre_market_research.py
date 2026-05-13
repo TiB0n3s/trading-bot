@@ -138,7 +138,7 @@ def main():
     try:
         with client.messages.stream(
             model=MODEL,
-            max_tokens=2048,
+            max_tokens=4000,
             system=system,
             tools=[WEB_SEARCH_TOOL],
             messages=[{"role": "user", "content": user_prompt}],

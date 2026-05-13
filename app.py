@@ -2045,6 +2045,32 @@ def process_signal(data):
     account_state = get_mock_account_state()
     account_state["execution_mode"] = EXECUTION_MODE
 
+    def _reject_current_signal(category, reason, level="warning"):
+        if level == "error":
+            logger.error(f"{category} blocked {symbol} {action.upper()}: {reason}")
+        elif level == "info":
+            logger.info(f"{category} blocked {symbol} {action.upper()}: {reason}")
+        else:
+            logger.warning(f"{category} blocked {symbol} {action.upper()}: {reason}")
+
+        log_rejection(
+            symbol,
+            action,
+            category,
+            reason,
+            price=price,
+            account_state=account_state,
+        )
+
+        if dedupe_key:
+            _mark_webhook_event_status(
+                dedupe_key,
+                "rejected",
+                failure_reason=f"{category}: {reason}",
+            )
+
+        return True
+
     is_stale, age_seconds, stale_reason = _is_signal_stale(data)
     if is_stale:
         logger.warning(
@@ -2299,59 +2325,6 @@ def process_signal(data):
         strength = trend.get("strength")
         consecutive_count = int(trend.get("consecutive_count") or 0)
 
-        prediction_gate = evaluate_prediction_gate(
-            trend_direction=direction,
-            trend_strength=strength,
-            market_bias=market_bias,
-            setup_label=setup_obs.get("setup_label"),
-            setup_policy_action=setup_obs.get("setup_policy_action"),
-            momentum_direction=ctx.get("momentum_direction"),
-            momentum_pct=ctx.get("momentum_pct"),
-            consecutive_buy_count=consecutive_count,
-            recent_favorable_setup=(account_state or {}).get("recent_favorable_setup"),
-        )
-
-        account_state["prediction_gate"] = prediction_gate
-
-        logger.info(
-            f"Prediction gate for {symbol} BUY: "
-            f"score={prediction_gate['prediction_score']} "
-            f"decision={prediction_gate['prediction_decision']} "
-            f"reason={prediction_gate['prediction_reason']}"
-        )
-
-        prediction_decision = prediction_gate["prediction_decision"]
-
-        should_block_prediction = (
-            (ENFORCE_PREDICTION_BLOCKS and prediction_decision == "block")
-            or (
-                ENFORCE_PREDICTION_WATCH_IN_CASH
-                and is_cash_mode()
-                and prediction_decision == "watch"
-            )
-        )
-
-        if should_block_prediction:
-            logger.warning(
-                f"Prediction gate blocked {symbol} BUY: "
-                f"mode={EXECUTION_MODE} "
-                f"score={prediction_gate['prediction_score']} "
-                f"decision={prediction_decision} "
-                f"reason={prediction_gate['prediction_reason']} — skipping Claude"
-            )
-            log_rejection(
-                symbol,
-                action,
-                "prediction_gate",
-                f"mode={EXECUTION_MODE} "
-                f"score={prediction_gate['prediction_score']} "
-                f"decision={prediction_decision} "
-                f"reason={prediction_gate['prediction_reason']}",
-                price=price,
-                account_state=account_state,
-            )
-            return
-
     # Macro-risk gate: regime-aware risk control before Claude
     macro_risk = get_macro_risk(Path(__file__).parent)
     account_state["macro_risk"] = macro_risk
@@ -2468,6 +2441,56 @@ def process_signal(data):
                 f"and momentum_direction={momentum_direction or 'unknown'}"
             )
             if _reject_current_signal("addon_momentum_gate", reason):
+                return
+
+    # Prediction gate: score buy quality after macro, bias, setup, and momentum are populated.
+    if action == "buy":
+        trend = _trend_table.get(symbol) or {}
+        bias_entry = _market_bias.get(symbol) or {}
+        setup_obs = account_state.get("setup_observation") or {}
+        momentum = account_state.get("momentum") or {}
+        recent_favorable_setup = account_state.get("recent_favorable_setup")
+
+        prediction_gate = evaluate_prediction_gate(
+            trend_direction=trend.get("direction"),
+            trend_strength=trend.get("strength"),
+            market_bias=bias_entry.get("bias"),
+            setup_label=setup_obs.get("setup_label"),
+            setup_policy_action=setup_obs.get("setup_policy_action"),
+            momentum_direction=momentum.get("direction"),
+            momentum_pct=momentum.get("momentum_pct"),
+            consecutive_buy_count=trend.get("consecutive_count") or 0,
+            recent_favorable_setup=recent_favorable_setup,
+        )
+
+        account_state["prediction_gate"] = prediction_gate
+
+        logger.info(
+            f"Prediction gate for {symbol} BUY: "
+            f"score={prediction_gate.get('prediction_score')} "
+            f"decision={prediction_gate.get('prediction_decision')} "
+            f"reason={prediction_gate.get('prediction_reason')}"
+        )
+
+        prediction_decision = prediction_gate.get("prediction_decision")
+
+        should_block_prediction = (
+            (ENFORCE_PREDICTION_BLOCKS and prediction_decision == "block")
+            or (
+                ENFORCE_PREDICTION_WATCH_IN_CASH
+                and is_cash_mode()
+                and prediction_decision == "watch"
+            )
+        )
+
+        if should_block_prediction:
+            reason = (
+                f"mode={EXECUTION_MODE} "
+                f"score={prediction_gate.get('prediction_score')} "
+                f"decision={prediction_decision} "
+                f"reason={prediction_gate.get('prediction_reason')}"
+            )
+            if _reject_current_signal("prediction_gate", reason):
                 return
 
     account_state["trend_table"] = _trend_table
@@ -2657,6 +2680,8 @@ def webhook():
     data["_dedupe_key"] = dedupe_key
         
     try:
+        data["_dedupe_key"] = dedupe_key
+        
         _mark_webhook_event_status(dedupe_key, "queued")
         _signal_executor.submit(process_signal, data)
     except Exception as e:

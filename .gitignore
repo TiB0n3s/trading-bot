@@ -15,3 +15,11 @@ market_context.json
 *.log.*
 *.gz
 session_momentum.log*
+position_momentum_monitor.log*
+
+# Runtime logs / rotated logs
+*.log
+*.log.*
+*.gz
+session_momentum.log*
+position_momentum_monitor.log*

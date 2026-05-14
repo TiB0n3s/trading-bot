@@ -29,6 +29,7 @@ COMMANDS = {
     "adaptive": ["adaptive_confirmation_report.py"],
     "blocked": ["blocked_signal_outcome_report.py", "--date"],
     "session": ["session_momentum.py", "--all"],
+    "position-momentum": ["position_momentum_monitor.py"],
     "filters": ["filter_report.py", "--date"],
     "drawdown": ["drawdown_report.py"],
     "post": ["post_session_check.py"],
@@ -68,6 +69,7 @@ def main():
         checks.append(run("Position Review", ["position_review.py"]))
         checks.append(run("Market Alignment Report", ["market_alignment_report.py"]))
         checks.append(run("Session Momentum Refresh", ["session_momentum.py", "--all"]))
+        checks.append(run("Position Momentum Monitor", ["position_momentum_monitor.py"]))
         checks.append(run("Adaptive Confirmation Report", ["adaptive_confirmation_report.py"]))
         checks.append(run("Filter Report", ["filter_report.py", "--date", target_date]))
         checks.append(run("Blocked Signal Outcome Report", ["blocked_signal_outcome_report.py", "--date", target_date]))

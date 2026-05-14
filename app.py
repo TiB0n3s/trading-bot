@@ -2976,25 +2976,6 @@ def process_signal(data):
 
         prediction_decision = prediction_gate.get("prediction_decision")
 
-        session_gate = _evaluate_session_momentum_gate(
-            session_momentum=account_state.get("session_momentum") or {},
-            prediction_gate=prediction_gate,
-            setup_obs=setup_obs,
-            trend=trend,
-        )
-        account_state["session_momentum_gate"] = session_gate
-
-        if session_gate.get("would_block"):
-            reason = session_gate.get("reason", "session momentum gate")
-            if ENFORCE_SESSION_MOMENTUM_GATE:
-                if _reject_current_signal("session_momentum_gate", reason):
-                    return
-            else:
-                logger.info(
-                    f"Session momentum gate observe-only for {symbol} BUY: "
-                    f"{session_gate.get('severity')} {reason}"
-                )
-
         bias_override = _live_bias_override(
             symbol=symbol,
             bias_entry=bias_entry,
@@ -3062,6 +3043,25 @@ def process_signal(data):
             )
             if _reject_current_signal("prediction_gate", reason):
                 return
+
+        session_gate = _evaluate_session_momentum_gate(
+            session_momentum=account_state.get("session_momentum") or {},
+            prediction_gate=prediction_gate,
+            setup_obs=setup_obs,
+            trend=trend,
+        )
+        account_state["session_momentum_gate"] = session_gate
+
+        if session_gate.get("would_block"):
+            reason = session_gate.get("reason", "session momentum gate")
+            if ENFORCE_SESSION_MOMENTUM_GATE:
+                if _reject_current_signal("session_momentum_gate", reason):
+                    return
+            else:
+                logger.info(
+                    f"Session momentum gate observe-only for {symbol} BUY: "
+                    f"{session_gate.get('severity')} {reason}"
+                )
 
     account_state["trend_table"] = _trend_table
     decision = evaluate_signal(data, account_state)

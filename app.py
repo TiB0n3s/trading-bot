@@ -336,7 +336,7 @@ def _build_setup_observation(symbol, action, price, account_state):
         setup_policy = _observe_setup_policy(setup_label)
 
         logger.info(
-            "Setup policy observe-only: "
+            "Setup policy evaluated: "
             f"symbol={symbol} "
             f"setup_label={setup_label} "
             f"policy_action={setup_policy.get('setup_policy_action')} "

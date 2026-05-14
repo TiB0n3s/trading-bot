@@ -52,6 +52,22 @@ Apply to buy signals:
 - Falling momentum is a caution flag — lean confidence lower
 - Flat momentum is neutral — no momentum-based adjustment
 
+SESSION MOMENTUM GUIDANCE:
+account_state may contain "session_momentum", a session-aware intraday state produced from recent 1-minute bars. It may include:
+  trend_label: "strong_uptrend", "developing_uptrend", "reversal_attempt", "rangebound", "fading", "downtrend", or "insufficient_data"
+  trend_score: numeric score; higher is stronger intraday momentum, lower is weaker
+  session_return_pct: percent move from the first available intraday bar to latest price
+  momentum_5m_pct, momentum_15m_pct, momentum_30m_pct: short/intermediate intraday returns
+  distance_from_vwap_pct: percent distance from intraday VWAP
+  reason: compact explanation of the classification
+
+Use session_momentum as supporting context, not a hard rule.
+- strong_uptrend or developing_uptrend supports buy approval only when trend_table, setup, prediction, and risk gates also support the trade.
+- reversal_attempt is cautiously positive but requires confirmation from trend_table and prediction score.
+- rangebound is neutral.
+- fading or downtrend should reduce confidence and favor rejection unless this is a defensive/hedge-only trade.
+- insufficient_data should be ignored.
+
 PRE-MARKET ALIGNMENT GUIDANCE:
 account_state["momentum"] may include:
   premarket_bias: "buy", "avoid", or "neutral"

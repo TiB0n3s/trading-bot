@@ -9,3 +9,8 @@ trades.db*
 market_context.json
 .env
 *.env
+
+# Runtime logs / rotated logs
+*.log
+*.log.*
+*.gz

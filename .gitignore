@@ -14,3 +14,4 @@ market_context.json
 *.log
 *.log.*
 *.gz
+session_momentum.log*

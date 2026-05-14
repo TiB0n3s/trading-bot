@@ -3349,6 +3349,58 @@ def health():
 def _market_session():
     return market_session()
 
+def _session_momentum_summary():
+    """Return counts of latest session momentum labels across all tracked symbols."""
+    try:
+        with get_connection(DB_PATH) as con:
+            rows = con.execute(
+                """
+                SELECT trend_label, COUNT(*) AS n
+                FROM session_momentum
+                GROUP BY trend_label
+                ORDER BY n DESC
+                """
+            ).fetchall()
+
+        return {
+            (r["trend_label"] or "unknown"): r["n"]
+            for r in rows
+        }
+    except Exception as e:
+        logger.warning(f"session momentum summary unavailable: {e}")
+        return {}
+
+
+def _session_momentum_snapshot(limit=40):
+    """Return latest session momentum rows for status/debug visibility."""
+    try:
+        with get_connection(DB_PATH) as con:
+            rows = con.execute(
+                """
+                SELECT symbol, updated_at, trend_label, trend_score,
+                       session_return_pct, momentum_5m_pct,
+                       momentum_15m_pct, momentum_30m_pct,
+                       distance_from_vwap_pct, reason
+                FROM session_momentum
+                ORDER BY symbol
+                LIMIT ?
+                """,
+                (limit,),
+            ).fetchall()
+
+        return [dict(r) for r in rows]
+    except Exception as e:
+        logger.warning(f"session momentum snapshot unavailable: {e}")
+        return []
+
+def _latest_session_momentum_for_symbol(symbol):
+    """Return latest session momentum for one symbol."""
+    try:
+        row = get_latest_session_momentum(symbol)
+        return dict(row) if row else None
+    except Exception as e:
+        logger.warning(f"session momentum unavailable for {symbol}: {e}")
+        return None
 
 @app.route("/status", methods=["GET"])
 def status():
@@ -3357,7 +3409,10 @@ def status():
         "execution_mode": EXECUTION_MODE,
         "runtime_config": public_runtime_config(),
     }
-
+    result["session_momentum_gate_enabled"] = ENFORCE_SESSION_MOMENTUM_GATE
+    result["session_momentum_summary"] = _session_momentum_summary()
+    result["session_momentum"] = _session_momentum_snapshot()
+    
     # Uptime
     try:
         elapsed = datetime.now(timezone.utc) - _START_TIME
@@ -3426,6 +3481,7 @@ def status():
                     "trend_direction": trend.get("direction"),
                     "trend_strength":  trend.get("strength"),
                     "market_bias":     bias_entry.get("bias"),
+                    "session_momentum": _latest_session_momentum_for_symbol(p.symbol),
                     "exposure_cap_hit": cap_hit,
                 })
             except Exception as e:

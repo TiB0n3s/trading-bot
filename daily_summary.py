@@ -304,6 +304,31 @@ def _render(rows, matched, header, trade_rows=None):
     for bucket, cnt in sorted(reason_counts.items(), key=lambda x: -x[1]):
         p(f"    {cnt:>4}  {bucket}")
 
+    # Session momentum gate summary
+    session_gate_rejected = [
+        r for r in rejected
+        if str(r["rejection_reason"] or "").startswith("session_momentum_gate:")
+    ]
+
+    p(f"\n── SESSION MOMENTUM GATE ─────────────────────────────────")
+    if not session_gate_rejected:
+        p("  No session momentum gate rejections.")
+    else:
+        label_counts = defaultdict(int)
+        symbol_counts = defaultdict(int)
+
+        for r in session_gate_rejected:
+            label_counts[r["session_trend_label"] or "unknown"] += 1
+            symbol_counts[r["symbol"] or "unknown"] += 1
+
+        p("  By session label:")
+        for label, cnt in sorted(label_counts.items(), key=lambda x: -x[1]):
+            p(f"    {cnt:>4}  {label}")
+
+        p("  By symbol:")
+        for sym, cnt in sorted(symbol_counts.items(), key=lambda x: -x[1])[:10]:
+            p(f"    {cnt:>4}  {sym}")
+
     # ── 2. Orders placed vs null by symbol ───────────────────────
     p(f"\n── ORDERS BY SYMBOL ─────────────────────────────────────")
     sym_data = defaultdict(lambda: {"approved": 0, "with_order": 0, "null_order": 0})

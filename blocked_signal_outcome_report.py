@@ -102,6 +102,14 @@ def main():
             trend_strength,
             momentum_direction,
             momentum_pct,
+            session_trend_label,
+            session_trend_score,
+            session_return_pct,
+            session_momentum_5m_pct,
+            session_momentum_15m_pct,
+            session_momentum_30m_pct,
+            session_distance_from_vwap_pct,
+            session_momentum_reason,
             prediction_score,
             prediction_decision,
             prediction_reason,
@@ -196,6 +204,38 @@ def main():
     for bias, n in original_biases.most_common(15):
         print(f"  {n:>5}  {bias}")
 
+    print_section("Top session momentum labels")
+    session_labels = Counter(r["session_trend_label"] or "unknown" for r in rows)
+    for label, n in session_labels.most_common(15):
+        print(f"  {n:>5}  {label}")
+
+    print_section("Session momentum gate rows")
+    session_gate_rows = [
+        r for r in rows
+        if category(r["rejection_reason"]) == "session_momentum_gate"
+    ]
+    if not session_gate_rows:
+        print("  No session_momentum_gate rows in this range.")
+    else:
+        print(
+            f"  {'ID':>5} {'Time':<19} {'Sym':<6} {'Label':<12} "
+            f"{'Score':>5} {'Sess%':>8} {'5m%':>8} {'15m%':>8} {'30m%':>8} Reason"
+        )
+        print(
+            f"  {'-'*5} {'-'*19} {'-'*6} {'-'*12} "
+            f"{'-'*5} {'-'*8} {'-'*8} {'-'*8} {'-'*8} {'-'*30}"
+        )
+        for r in session_gate_rows[: args.limit]:
+            print(
+                f"  {r['id']:>5} {r['timestamp']:<19} {r['symbol']:<6} "
+                f"{(r['session_trend_label'] or '-'):<12} "
+                f"{str(r['session_trend_score'] or '-'):>5} "
+                f"{str(r['session_return_pct'] or '-'):>8} "
+                f"{str(r['session_momentum_5m_pct'] or '-'):>8} "
+                f"{str(r['session_momentum_15m_pct'] or '-'):>8} "
+                f"{str(r['session_momentum_30m_pct'] or '-'):>8} "
+                f"{short(r['rejection_reason'], 70)}"
+            )
 
     print_section("Recent blocked BUY samples")
     print(

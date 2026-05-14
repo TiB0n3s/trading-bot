@@ -40,6 +40,7 @@ KNOWN_LABELS = {
     "setup_policy": "Entry quality / setup policy",
     "chase_prevention": "Chase prevention",
     "addon_momentum_gate": "Add-on momentum gate",
+    "session_momentum_gate": "Session momentum gate",
     "prediction_gate": "Prediction gate",
     "confidence_gate": "Low confidence gate",
     "second_look": "Second-look market check",

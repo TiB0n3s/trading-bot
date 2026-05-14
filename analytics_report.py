@@ -51,6 +51,7 @@ PRIORITY_CATEGORIES = [
     "chase_prevention",
     "setup_policy",
     "addon_momentum_gate",
+    "session_momentum_gate",
     "prediction_gate",
     "confidence_gate",
     "second_look",

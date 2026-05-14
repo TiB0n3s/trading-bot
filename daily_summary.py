@@ -197,6 +197,7 @@ def _bucket_rejection_reason(reason: str | None) -> str:
         "chase_prevention": "Chase prevention",
         "setup_policy": "Entry quality / setup policy",
         "addon_momentum_gate": "Add-on momentum gate",
+        "session_momentum_gate": "Session momentum gate",
         "prediction_gate": "Prediction gate",
         "confidence_gate": "Low confidence (Claude)",
         "entry_quality": "Entry quality / pullback requirement",

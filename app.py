@@ -16,6 +16,10 @@ from indicator_state import (
     is_fast_lane_buy_flip,
     is_fast_lane_sell_flip,
 )
+from session_momentum import (
+    init_session_momentum_table,
+    get_latest_session_momentum,
+)
 from decision_engine import evaluate_signal, get_mock_account_state
 from broker import place_order, get_account, get_position, api
 from macro_risk import get_macro_risk
@@ -66,6 +70,10 @@ _START_TIME = datetime.now(timezone.utc)
 ENFORCE_SETUP_POLICY_BLOCKS = True
 ENFORCE_PREDICTION_BLOCKS = True
 ENFORCE_PREDICTION_WATCH_IN_CASH = True
+ENFORCE_SESSION_MOMENTUM_GATE = os.getenv(
+    "ENFORCE_SESSION_MOMENTUM_GATE",
+    "false"
+).strip().lower() in ("1", "true", "yes", "on")
 SIGNAL_WORKER_COUNT = int(os.environ.get("SIGNAL_WORKER_COUNT", "3"))
 _signal_executor = ThreadPoolExecutor(
     max_workers=SIGNAL_WORKER_COUNT,
@@ -175,6 +183,14 @@ def _init_db():
             ("trend_direction",      "TEXT"),
             ("trend_strength",       "TEXT"),
             ("momentum_direction",   "TEXT"),
+            ("session_trend_label", "TEXT"),
+            ("session_trend_score", "REAL"),
+            ("session_return_pct", "REAL"),
+            ("session_momentum_5m_pct", "REAL"),
+            ("session_momentum_15m_pct", "REAL"),
+            ("session_momentum_30m_pct", "REAL"),
+            ("session_distance_from_vwap_pct", "REAL"),
+            ("session_momentum_reason", "TEXT"),
             ("momentum_pct",         "REAL"),
             ("prediction_score", "REAL"),
             ("prediction_decision", "TEXT"),
@@ -197,6 +213,11 @@ RECENT_FAVORABLE_SETUP_TTL_MINUTES = 15
 
 ensure_recent_favorable_setups_table()
 prune_recent_favorable_setups(RECENT_FAVORABLE_SETUP_TTL_MINUTES)
+
+try:
+    init_session_momentum_table()
+except Exception as e:
+    logger.error(f"Session momentum table initialization failed: {e}")
 
 logging.basicConfig(
     level=os.environ.get("LOG_LEVEL", "INFO").upper(),
@@ -1178,6 +1199,14 @@ def log_trade(signal, decision, order, account_state=None):
             "trend_strength",
             "momentum_direction",
             "momentum_pct",
+            "session_trend_label",
+            "session_trend_score",
+            "session_return_pct",
+            "session_momentum_5m_pct",
+            "session_momentum_15m_pct",
+            "session_momentum_30m_pct",
+            "session_distance_from_vwap_pct",
+            "session_momentum_reason",
             "prediction_score",
             "prediction_decision",
             "prediction_reason",
@@ -1217,6 +1246,14 @@ def log_trade(signal, decision, order, account_state=None):
             ctx["trend_strength"],
             ctx["momentum_direction"],
             ctx["momentum_pct"],
+            ctx["session_trend_label"],
+            ctx["session_trend_score"],
+            ctx["session_return_pct"],
+            ctx["session_momentum_5m_pct"],
+            ctx["session_momentum_15m_pct"],
+            ctx["session_momentum_30m_pct"],
+            ctx["session_distance_from_vwap_pct"],
+            ctx["session_momentum_reason"],
             prediction_gate.get("prediction_score"),
             prediction_gate.get("prediction_decision"),
             prediction_gate.get("prediction_reason"),
@@ -1261,6 +1298,14 @@ def _build_decision_context(symbol, action, account_state=None):
         "trend_strength": None,
         "momentum_direction": None,
         "momentum_pct": None,
+        "session_trend_label": None,
+        "session_trend_score": None,
+        "session_return_pct": None,
+        "session_momentum_5m_pct": None,
+        "session_momentum_15m_pct": None,
+        "session_momentum_30m_pct": None,
+        "session_distance_from_vwap_pct": None,
+        "session_momentum_reason": None,
         "correlation_cluster": None,
         "cluster_exposure_pct": None,
     }
@@ -1286,6 +1331,16 @@ def _build_decision_context(symbol, action, account_state=None):
             momentum = account_state.get("momentum") or {}
             ctx["momentum_direction"] = momentum.get("direction")
             ctx["momentum_pct"] = momentum.get("momentum_pct")
+
+            session_momentum = account_state.get("session_momentum") or {}
+            ctx["session_trend_label"] = session_momentum.get("trend_label")
+            ctx["session_trend_score"] = session_momentum.get("trend_score")
+            ctx["session_return_pct"] = session_momentum.get("session_return_pct")
+            ctx["session_momentum_5m_pct"] = session_momentum.get("momentum_5m_pct")
+            ctx["session_momentum_15m_pct"] = session_momentum.get("momentum_15m_pct")
+            ctx["session_momentum_30m_pct"] = session_momentum.get("momentum_30m_pct")
+            ctx["session_distance_from_vwap_pct"] = session_momentum.get("distance_from_vwap_pct")
+            ctx["session_momentum_reason"] = session_momentum.get("reason")
 
             corr = account_state.get("correlation_exposure") or []
             if corr:
@@ -1326,6 +1381,14 @@ def log_rejection(symbol, action, category, reason, price=None, account_state=No
         "trend_strength",
         "momentum_direction",
         "momentum_pct",
+        "session_trend_label",
+        "session_trend_score",
+        "session_return_pct",
+        "session_momentum_5m_pct",
+        "session_momentum_15m_pct",
+        "session_momentum_30m_pct",
+        "session_distance_from_vwap_pct",
+        "session_momentum_reason",
         "prediction_score",
         "prediction_decision",
         "prediction_reason",
@@ -1357,6 +1420,14 @@ def log_rejection(symbol, action, category, reason, price=None, account_state=No
         ctx["trend_strength"],
         ctx["momentum_direction"],
         ctx["momentum_pct"],
+        ctx["session_trend_label"],
+        ctx["session_trend_score"],
+        ctx["session_return_pct"],
+        ctx["session_momentum_5m_pct"],
+        ctx["session_momentum_15m_pct"],
+        ctx["session_momentum_30m_pct"],
+        ctx["session_distance_from_vwap_pct"],
+        ctx["session_momentum_reason"],
         prediction_gate.get("prediction_score"),
         prediction_gate.get("prediction_decision"),
         prediction_gate.get("prediction_reason"),
@@ -1794,6 +1865,85 @@ def _live_bias_override(symbol, bias_entry, trend, setup_obs, prediction_gate, m
         "allow_buy": bias != "avoid",
         "confidence_adjustment": 0,
         "reason": "pre-market bias unchanged by live evidence",
+    }
+
+def _session_momentum_is_fresh(session_momentum, max_age_minutes=5):
+    """Return True when session momentum exists and was refreshed recently."""
+    if not session_momentum:
+        return False
+
+    updated_at = session_momentum.get("updated_at")
+    if not updated_at:
+        return False
+
+    try:
+        ts = datetime.strptime(updated_at, "%Y-%m-%d %H:%M:%S")
+        age = datetime.now() - ts
+        return age.total_seconds() <= max_age_minutes * 60
+    except Exception:
+        return False
+
+def _evaluate_session_momentum_gate(session_momentum, prediction_gate, setup_obs, trend):
+    """
+    Return a session-momentum gate decision for BUY signals.
+
+    Observe/enforce behavior is controlled elsewhere by ENFORCE_SESSION_MOMENTUM_GATE.
+    """
+    session_momentum = session_momentum or {}
+    prediction_gate = prediction_gate or {}
+    setup_obs = setup_obs or {}
+    trend = trend or {}
+
+    session_label = session_momentum.get("trend_label")
+    session_score = int(session_momentum.get("trend_score") or 0)
+    prediction_score = int(prediction_gate.get("prediction_score") or 0)
+    setup_action = setup_obs.get("setup_policy_action")
+    trend_direction = trend.get("direction")
+    trend_strength = trend.get("strength")
+
+    session_hard_negative = session_label == "downtrend" or session_score <= -5
+    session_soft_negative = session_label == "fading" or session_score <= -2
+
+    # Hard-negative session tape blocks unless the setup is explicitly boosted.
+    if session_hard_negative and setup_action != "boost":
+        return {
+            "would_block": True,
+            "severity": "hard_negative",
+            "reason": (
+                f"session_label={session_label} score={session_score} "
+                f"setup_action={setup_action} prediction_score={prediction_score}"
+            ),
+        }
+
+    # Soft-negative session tape blocks weak/medium setups, but allows very strong
+    # prediction or confirmed+boost setups to continue.
+    if (
+        session_soft_negative
+        and prediction_score < 8
+        and not (
+            trend_direction == "bullish"
+            and trend_strength == "confirmed"
+            and setup_action == "boost"
+        )
+    ):
+        return {
+            "would_block": True,
+            "severity": "soft_negative",
+            "reason": (
+                f"session_label={session_label} score={session_score} "
+                f"prediction_score={prediction_score} trend={trend_direction}/{trend_strength} "
+                f"setup_action={setup_action}"
+            ),
+        }
+
+    return {
+        "would_block": False,
+        "severity": "pass",
+        "reason": (
+            f"session_label={session_label} score={session_score} "
+            f"prediction_score={prediction_score} trend={trend_direction}/{trend_strength} "
+            f"setup_action={setup_action}"
+        ),
     }
 
 def _cluster_exposure(symbol, balance):
@@ -2698,6 +2848,39 @@ def process_signal(data):
                     if _reject_current_signal("chase_prevention", reason):
                         return
 
+    # Session-aware momentum context, observe-only.
+    # This reads the latest state produced by session_momentum.py.
+    # It does not fetch bars or block trading here.
+    try:
+        session_momentum = get_latest_session_momentum(symbol)
+
+        if session_momentum and _session_momentum_is_fresh(session_momentum):
+            account_state["session_momentum"] = session_momentum
+            logger.info(
+                f"Session momentum for {symbol}: "
+                f"label={session_momentum.get('trend_label')} "
+                f"score={session_momentum.get('trend_score')} "
+                f"session_return={session_momentum.get('session_return_pct')} "
+                f"5m={session_momentum.get('momentum_5m_pct')} "
+                f"15m={session_momentum.get('momentum_15m_pct')} "
+                f"30m={session_momentum.get('momentum_30m_pct')} "
+                f"vwap_dist={session_momentum.get('distance_from_vwap_pct')}"
+            )
+        else:
+            account_state["session_momentum"] = {
+                "trend_label": "insufficient_data",
+                "trend_score": 0,
+                "reason": "missing or stale session momentum",
+            }
+            logger.info(f"Session momentum unavailable/stale for {symbol}; using insufficient_data")
+    except Exception as e:
+        account_state["session_momentum"] = {
+            "trend_label": "insufficient_data",
+            "trend_score": 0,
+            "reason": f"session momentum read error: {e}",
+        }
+        logger.warning(f"Session momentum unavailable for {symbol}: {e}")
+
     # Momentum check (buy signals only, fail-open — never blocks trading)
     alignment = None
     action_hint = None
@@ -2792,6 +2975,25 @@ def process_signal(data):
         )
 
         prediction_decision = prediction_gate.get("prediction_decision")
+
+        session_gate = _evaluate_session_momentum_gate(
+            session_momentum=account_state.get("session_momentum") or {},
+            prediction_gate=prediction_gate,
+            setup_obs=setup_obs,
+            trend=trend,
+        )
+        account_state["session_momentum_gate"] = session_gate
+
+        if session_gate.get("would_block"):
+            reason = session_gate.get("reason", "session momentum gate")
+            if ENFORCE_SESSION_MOMENTUM_GATE:
+                if _reject_current_signal("session_momentum_gate", reason):
+                    return
+            else:
+                logger.info(
+                    f"Session momentum gate observe-only for {symbol} BUY: "
+                    f"{session_gate.get('severity')} {reason}"
+                )
 
         bias_override = _live_bias_override(
             symbol=symbol,

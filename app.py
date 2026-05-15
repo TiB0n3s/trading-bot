@@ -3064,6 +3064,25 @@ def process_signal(data):
                 )
 
     account_state["trend_table"] = _trend_table
+
+    final_setup_obs = account_state.get("setup_observation") or {}
+    final_prediction_gate = account_state.get("prediction_gate") or {}
+    final_session_momentum = account_state.get("session_momentum") or {}
+    final_session_gate = account_state.get("session_momentum_gate") or {}
+
+    logger.info(
+        f"Decision context for {symbol} {action.upper()}: "
+        f"setup={final_setup_obs.get('setup_label')}/"
+        f"{final_setup_obs.get('setup_policy_action')} "
+        f"prediction={final_prediction_gate.get('prediction_score')}/"
+        f"{final_prediction_gate.get('prediction_decision')} "
+        f"session={final_session_momentum.get('trend_label')}/"
+        f"{final_session_momentum.get('trend_score')} "
+        f"session_gate={final_session_gate.get('severity')}/"
+        f"{final_session_gate.get('would_block')} "
+        f"effective_bias={account_state.get('market_bias_effective')}"
+    )
+
     decision = evaluate_signal(data, account_state)
 
     # Safety normalization: if Claude approves but the reason says to defer/wait,

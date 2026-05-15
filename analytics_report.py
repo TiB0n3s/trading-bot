@@ -229,6 +229,39 @@ def _fifo_match(con, clause, params):
                 open_lots[symbol].popleft()
     return matches
 
+def _render_session_momentum_attribution(con, clause, params):
+    _section("SESSION MOMENTUM ATTRIBUTION")
+
+    rows = con.execute(f"""
+        SELECT
+            COALESCE(session_trend_label, 'unknown') AS label,
+            COUNT(*) AS total,
+            SUM(CASE WHEN approved = 1 THEN 1 ELSE 0 END) AS approved,
+            SUM(CASE WHEN approved = 0 THEN 1 ELSE 0 END) AS rejected
+        FROM trades
+        WHERE LOWER(action) = 'buy'
+          {clause}
+        GROUP BY COALESCE(session_trend_label, 'unknown')
+        ORDER BY total DESC
+    """, params).fetchall()
+
+    if not rows:
+        print("  (no buy signals in range)")
+        return
+
+    print(f"  {'Label':<22} {'Total':>6} {'Approved':>9} {'Rejected':>9} {'Approval%':>9}")
+    print(f"  {'-'*22} {'-'*6} {'-'*9} {'-'*9} {'-'*9}")
+
+    for r in rows:
+        total = r["total"] or 0
+        approved = r["approved"] or 0
+        rejected = r["rejected"] or 0
+        approval_rate = (approved / total * 100) if total else 0.0
+
+        print(
+            f"  {(r['label'] or 'unknown'):<22} "
+            f"{total:>6} {approved:>9} {rejected:>9} {approval_rate:>8.1f}%"
+        )
 
 def _render_performance(matches):
     _section("PERFORMANCE")
@@ -483,6 +516,7 @@ def main():
     _render_execution(con, clause, params)
     _render_filters(con, clause, params)
     matches = _fifo_match(con, clause, params)
+    _render_session_momentum_attribution(con, clause, params)
     _render_performance(matches)
     _render_per_symbol(matches)
     _render_matched_attribution(con, clause, params)

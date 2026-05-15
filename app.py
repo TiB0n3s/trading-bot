@@ -336,7 +336,7 @@ def _build_setup_observation(symbol, action, price, account_state):
         setup_policy = _observe_setup_policy(setup_label)
 
         logger.info(
-            "Setup policy observe-only: "
+            "Setup policy evaluated: "
             f"symbol={symbol} "
             f"setup_label={setup_label} "
             f"policy_action={setup_policy.get('setup_policy_action')} "
@@ -2976,25 +2976,6 @@ def process_signal(data):
 
         prediction_decision = prediction_gate.get("prediction_decision")
 
-        session_gate = _evaluate_session_momentum_gate(
-            session_momentum=account_state.get("session_momentum") or {},
-            prediction_gate=prediction_gate,
-            setup_obs=setup_obs,
-            trend=trend,
-        )
-        account_state["session_momentum_gate"] = session_gate
-
-        if session_gate.get("would_block"):
-            reason = session_gate.get("reason", "session momentum gate")
-            if ENFORCE_SESSION_MOMENTUM_GATE:
-                if _reject_current_signal("session_momentum_gate", reason):
-                    return
-            else:
-                logger.info(
-                    f"Session momentum gate observe-only for {symbol} BUY: "
-                    f"{session_gate.get('severity')} {reason}"
-                )
-
         bias_override = _live_bias_override(
             symbol=symbol,
             bias_entry=bias_entry,
@@ -3062,6 +3043,25 @@ def process_signal(data):
             )
             if _reject_current_signal("prediction_gate", reason):
                 return
+
+        session_gate = _evaluate_session_momentum_gate(
+            session_momentum=account_state.get("session_momentum") or {},
+            prediction_gate=prediction_gate,
+            setup_obs=setup_obs,
+            trend=trend,
+        )
+        account_state["session_momentum_gate"] = session_gate
+
+        if session_gate.get("would_block"):
+            reason = session_gate.get("reason", "session momentum gate")
+            if ENFORCE_SESSION_MOMENTUM_GATE:
+                if _reject_current_signal("session_momentum_gate", reason):
+                    return
+            else:
+                logger.info(
+                    f"Session momentum gate observe-only for {symbol} BUY: "
+                    f"{session_gate.get('severity')} {reason}"
+                )
 
     account_state["trend_table"] = _trend_table
     decision = evaluate_signal(data, account_state)
@@ -3349,6 +3349,58 @@ def health():
 def _market_session():
     return market_session()
 
+def _session_momentum_summary():
+    """Return counts of latest session momentum labels across all tracked symbols."""
+    try:
+        with get_connection(DB_PATH) as con:
+            rows = con.execute(
+                """
+                SELECT trend_label, COUNT(*) AS n
+                FROM session_momentum
+                GROUP BY trend_label
+                ORDER BY n DESC
+                """
+            ).fetchall()
+
+        return {
+            (r["trend_label"] or "unknown"): r["n"]
+            for r in rows
+        }
+    except Exception as e:
+        logger.warning(f"session momentum summary unavailable: {e}")
+        return {}
+
+
+def _session_momentum_snapshot(limit=40):
+    """Return latest session momentum rows for status/debug visibility."""
+    try:
+        with get_connection(DB_PATH) as con:
+            rows = con.execute(
+                """
+                SELECT symbol, updated_at, trend_label, trend_score,
+                       session_return_pct, momentum_5m_pct,
+                       momentum_15m_pct, momentum_30m_pct,
+                       distance_from_vwap_pct, reason
+                FROM session_momentum
+                ORDER BY symbol
+                LIMIT ?
+                """,
+                (limit,),
+            ).fetchall()
+
+        return [dict(r) for r in rows]
+    except Exception as e:
+        logger.warning(f"session momentum snapshot unavailable: {e}")
+        return []
+
+def _latest_session_momentum_for_symbol(symbol):
+    """Return latest session momentum for one symbol."""
+    try:
+        row = get_latest_session_momentum(symbol)
+        return dict(row) if row else None
+    except Exception as e:
+        logger.warning(f"session momentum unavailable for {symbol}: {e}")
+        return None
 
 @app.route("/status", methods=["GET"])
 def status():
@@ -3357,7 +3409,10 @@ def status():
         "execution_mode": EXECUTION_MODE,
         "runtime_config": public_runtime_config(),
     }
-
+    result["session_momentum_gate_enabled"] = ENFORCE_SESSION_MOMENTUM_GATE
+    result["session_momentum_summary"] = _session_momentum_summary()
+    result["session_momentum"] = _session_momentum_snapshot()
+    
     # Uptime
     try:
         elapsed = datetime.now(timezone.utc) - _START_TIME
@@ -3426,6 +3481,7 @@ def status():
                     "trend_direction": trend.get("direction"),
                     "trend_strength":  trend.get("strength"),
                     "market_bias":     bias_entry.get("bias"),
+                    "session_momentum": _latest_session_momentum_for_symbol(p.symbol),
                     "exposure_cap_hit": cap_hit,
                 })
             except Exception as e:

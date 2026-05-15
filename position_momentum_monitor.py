@@ -337,7 +337,7 @@ def maybe_execute_auto_sell(position, decision, market_open: bool) -> dict[str, 
         )
         return None
 
-        too_recent, hold_reason = recently_bought(symbol)
+    too_recent, hold_reason = recently_bought(symbol)
     if too_recent:
         logger.warning(
             f"POSITION MOMENTUM AUTO-SELL skipped for {symbol}: {hold_reason}"

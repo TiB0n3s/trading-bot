@@ -84,6 +84,22 @@ FUNDAMENTAL_PATTERN = re.compile(
     r'(' + '|'.join(re.escape(s) for s in _FUNDAMENTAL_FORMS) + r')(?![a-z])',
 )
 SENTIMENT_PATTERN = re.compile(r'\b(risk[-\s]?on|risk[-\s]?off|mixed|neutral)\b', re.IGNORECASE)
+# Canonical entry_quality values recognized by decision_engine.py.
+# Non-canonical values from external briefs are mapped here before storage.
+ENTRY_QUALITY_CANONICAL = {
+    "ideal", "tactical_only", "conditional", "hedge_only",
+    "do_not_chase", "avoid_chasing", "poor",
+}
+ENTRY_QUALITY_MAP = {
+    "good_on_pullbacks": "tactical_only",
+    "good_if_holds_gap": "conditional",
+    "good":              "ideal",
+    "excellent":         "ideal",
+    "high":              "ideal",
+    "low":               "poor",
+    "avoid":             "do_not_chase",
+}
+
 PRIORITY_SUMMARY_PATTERN = re.compile(r'\b(risk[-\s]?on|risk[-\s]?off|bullish|bearish|sentiment)\b', re.IGNORECASE)
 GENERIC_SUMMARY_PATTERN = re.compile(r'\b(futures|sentiment|market|macro|overall|outlook|fed|cpi)\b', re.IGNORECASE)
 
@@ -235,7 +251,9 @@ def parse_json_brief(text):
     # macro_summary text: prefer explicit summary fields, fall back to dominant_themes,
     # then to a synthesized one-liner from tone fields, finally to a default.
     macro_summary_text = "no macro summary provided"
-    if isinstance(macro, dict):
+    if isinstance(macro, str) and macro.strip():
+        macro_summary_text = macro.strip()
+    elif isinstance(macro, dict):
         if macro.get("marketwatch_summary"):
             macro_summary_text = macro["marketwatch_summary"]
         elif macro.get("reuters_summary"):
@@ -250,7 +268,6 @@ def parse_json_brief(text):
             spy = macro.get("spy_tone", "?")
             qqq = macro.get("qqq_tone", "?")
             macro_summary_text = f"SPY tone: {spy}, QQQ tone: {qqq}"
-
     # symbols: accept either dict-keyed-by-symbol (newer) or list-of-objects (older)
     raw_symbols = data.get("symbols")
     by_symbol = {}
@@ -293,7 +310,15 @@ def parse_json_brief(text):
             else:
                 risk = None
             entry_quality = entry.get("entry_quality")
-            if not isinstance(entry_quality, str):
+            if isinstance(entry_quality, str):
+                eq = entry_quality.lower().strip()
+                if eq in ENTRY_QUALITY_CANONICAL:
+                    entry_quality = eq
+                elif eq in ENTRY_QUALITY_MAP:
+                    entry_quality = ENTRY_QUALITY_MAP[eq]
+                else:
+                    entry_quality = None
+            else:
                 entry_quality = None
 
             avoid_type = entry.get("avoid_type")
@@ -309,10 +334,13 @@ def parse_json_brief(text):
             if bias == "avoid" and avoid_type is None:
                 avoid_type = "hard"
 
+            raw_conf = (entry.get("confidence") or "medium").lower()
+            confidence = raw_conf if raw_conf in ("high", "medium", "low") else "medium"
+
             symbols_out[sym] = {
                 "bias": bias,
                 "reason": entry.get("reason") or "no detail provided",
-                "confidence": "medium",
+                "confidence": confidence,
                 "fundamental_score": fund,
                 "risk_level": risk,
                 "entry_quality": entry_quality,

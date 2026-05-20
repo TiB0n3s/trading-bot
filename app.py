@@ -2486,6 +2486,41 @@ def process_signal(data):
         if _reject_current_signal("setup_policy", reason):
             return
 
+    # Late rollover entry gate:
+    # Blocks GEV-style late buys where price has already run, is extended
+    # above VWAP, and intermediate session momentum is rolling over.
+    #
+    # Example blocked pattern:
+    # setup_label=late_strength_near_vwap_risk
+    # session_return_pct > 1.5
+    # session_distance_from_vwap_pct > 1.0
+    # session_momentum_15m_pct < 0
+    # session_momentum_30m_pct < 0
+    if action == "buy":
+        setup_label = setup_obs.get("setup_label") or ""
+
+        session_return_pct = float(account_state.get("session_return_pct") or 0)
+        session_vwap_dist_pct = float(account_state.get("session_distance_from_vwap_pct") or 0)
+        session_m15_pct = float(account_state.get("session_momentum_15m_pct") or 0)
+        session_m30_pct = float(account_state.get("session_momentum_30m_pct") or 0)
+
+        if (
+            setup_label == "late_strength_near_vwap_risk"
+            and session_return_pct > 1.5
+            and session_vwap_dist_pct > 1.0
+            and session_m15_pct < 0
+            and session_m30_pct < 0
+        ):
+            reason = (
+                f"late rollover entry blocked: setup_label={setup_label}, "
+                f"session_return={session_return_pct:.3f}%, "
+                f"vwap_dist={session_vwap_dist_pct:.3f}%, "
+                f"15m={session_m15_pct:.3f}%, "
+                f"30m={session_m30_pct:.3f}%"
+            )
+            if _reject_current_signal("late_rollover_entry", reason):
+                return
+
     if action == "buy" and is_cash_safe_mode():
         if symbol not in CASH_SAFE_SYMBOLS:
             reason = f"{symbol} not allowed in cash_safe symbols {sorted(CASH_SAFE_SYMBOLS)}"

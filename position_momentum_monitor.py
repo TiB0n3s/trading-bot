@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import logging
 import os
+import math
 from datetime import datetime, timedelta
 from typing import Any
 from pathlib import Path
@@ -151,6 +152,8 @@ def evaluate_position_momentum(position: Any, session: dict[str, Any] | None) ->
             "symbol": symbol,
             "action": "sell_candidate",
             "severity": "hard_negative",
+            "label": label,
+            "score": score,
             "reason": (
                 f"label={label} score={score} session={session_return}% "
                 f"5m={m5}% 15m={m15}% 30m={m30}% "
@@ -159,8 +162,65 @@ def evaluate_position_momentum(position: Any, session: dict[str, Any] | None) ->
             ),
         }
 
+
+
+    # Live profit-protection sell:
+    # If a position has meaningful unrealized profit and momentum rolls over,
+    # promote it to a sell_candidate so the auto-sell gate can protect gains.
+    negative_windows = sum(1 for value in (m5, m15, m30) if value < 0)
+
+    # Tiered live profit-protection sell:
+    # The more profit is available, the less score deterioration we require
+    # before allowing the position momentum monitor to protect gains.
+    profit_tier_1_pct = float(os.getenv("POSITION_MOMENTUM_PROFIT_TIER_1_PCT", "0.75"))
+    profit_tier_1_score = float(os.getenv("POSITION_MOMENTUM_PROFIT_TIER_1_SCORE", "-4"))
+
+    profit_tier_2_pct = float(os.getenv("POSITION_MOMENTUM_PROFIT_TIER_2_PCT", "1.50"))
+    profit_tier_2_score = float(os.getenv("POSITION_MOMENTUM_PROFIT_TIER_2_SCORE", "-2"))
+
+    profit_tier_3_pct = float(os.getenv("POSITION_MOMENTUM_PROFIT_TIER_3_PCT", "3.00"))
+
+    profit_protection_tier = None
+
+    if (
+        unrealized_plpc >= profit_tier_3_pct
+        and negative_windows >= 2
+    ):
+        profit_protection_tier = "tier_3_large_profit_rollover"
+
+    elif (
+        unrealized_plpc >= profit_tier_2_pct
+        and score <= profit_tier_2_score
+        and negative_windows >= 2
+    ):
+        profit_protection_tier = "tier_2_profit_rollover"
+
+    elif (
+        unrealized_plpc >= profit_tier_1_pct
+        and score <= profit_tier_1_score
+        and negative_windows >= 2
+    ):
+        profit_protection_tier = "tier_1_profit_rollover"
+
+    if profit_protection_tier:
+        return {
+            "symbol": symbol,
+            "action": "sell_candidate",
+            "severity": "profit_protection",
+            "label": label,
+            "score": score,
+            "reason": (
+                f"profit protection {profit_protection_tier}: label={label} score={score} "
+                f"negative_windows={negative_windows} session={session_return}% "
+                f"5m={m5}% 15m={m15}% 30m={m30}% "
+                f"vwap_dist={vwap_dist}% unrealized_pl=${unrealized_pl:.2f} "
+                f"unrealized_plpc={unrealized_plpc:.2f}%"
+            ),
+        }
+
     # Watch candidate:
     # Fading session with weak intermediate momentum and below VWAP.
+    # This is visibility only. It does not auto-sell because action is "watch".
     if (
         (label == "fading" or score <= -3)
         and m15 < 0
@@ -171,6 +231,8 @@ def evaluate_position_momentum(position: Any, session: dict[str, Any] | None) ->
             "symbol": symbol,
             "action": "watch",
             "severity": "soft_negative",
+            "label": label,
+            "score": score,
             "reason": (
                 f"label={label} score={score} session={session_return}% "
                 f"5m={m5}% 15m={m15}% 30m={m30}% "
@@ -183,9 +245,13 @@ def evaluate_position_momentum(position: Any, session: dict[str, Any] | None) ->
         "symbol": symbol,
         "action": "hold",
         "severity": "pass",
+        "label": label,
+        "score": score,
         "reason": (
             f"label={label} score={score} session={session_return}% "
-            f"5m={m5}% 15m={m15}% 30m={m30}% vwap_dist={vwap_dist}%"
+            f"5m={m5}% 15m={m15}% 30m={m30}% "
+            f"vwap_dist={vwap_dist}% unrealized_pl=${unrealized_pl:.2f} "
+            f"unrealized_plpc={unrealized_plpc:.2f}%"
         ),
     }
 
@@ -368,7 +434,7 @@ def maybe_execute_auto_sell(position, decision, market_open: bool) -> dict[str, 
     #   1) profit is worth protecting and momentum has rolled over, or
     #   2) loss is large enough and breakdown is severe.
     profit_protect_min_pct = float(os.getenv("POSITION_MOMENTUM_PROFIT_PROTECT_MIN_PCT", "0.75"))
-    profit_protect_score = float(os.getenv("POSITION_MOMENTUM_PROFIT_PROTECT_SCORE", "-4"))
+    profit_protect_score = float(os.getenv("POSITION_MOMENTUM_PROFIT_PROTECT_SCORE", "-2"))
     hard_exit_max_loss_pct = float(os.getenv("POSITION_MOMENTUM_HARD_EXIT_MAX_LOSS_PCT", "-1.00"))
     hard_exit_score = float(os.getenv("POSITION_MOMENTUM_HARD_EXIT_SCORE", "-6"))
 
@@ -377,9 +443,10 @@ def maybe_execute_auto_sell(position, decision, market_open: bool) -> dict[str, 
         decision.get("trend_score", decision.get("score", 0))
     )
 
+    severity = decision.get("severity")
+
     profit_protection_exit = (
-        unrealized_plpc >= profit_protect_min_pct
-        and trend_score <= profit_protect_score
+        severity == "profit_protection"
     )
 
     hard_risk_exit = (
@@ -407,9 +474,18 @@ def maybe_execute_auto_sell(position, decision, market_open: bool) -> dict[str, 
 
     client_order_id = build_client_order_id(symbol)
 
+    severity = decision.get("severity")
+    position_qty = int(qty)
+
+    if severity == "profit_protection":
+        sell_qty = max(1, math.ceil(position_qty * 0.5))
+    else:
+        sell_qty = position_qty
+
     logger.warning(
         f"POSITION MOMENTUM AUTO-SELL submitting {symbol}: "
-        f"{decision.get('reason')} client_order_id={client_order_id}"
+        f"{decision.get('reason')} client_order_id={client_order_id} "
+        f"sell_qty={sell_qty}/{position_qty}"
     )
 
     order = place_order(
@@ -420,6 +496,7 @@ def maybe_execute_auto_sell(position, decision, market_open: bool) -> dict[str, 
         take_profit_pct=0,
         risk_level=None,
         client_order_id=client_order_id,
+        qty_override=sell_qty,
     )
 
     if order:

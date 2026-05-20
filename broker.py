@@ -45,7 +45,7 @@ def get_position(symbol):
         logger.info(f"No position found for {symbol}: {e}")
         return None
 
-def place_order(symbol, action, position_size_pct, stop_loss_pct, take_profit_pct, risk_level=None, client_order_id=None):
+def place_order(symbol, action, position_size_pct, stop_loss_pct, take_profit_pct, risk_level=None, client_order_id=None, qty_override=None):
     try:
         if is_cash_mode() and not LIVE_TRADING_ENABLED:
             logger.error(
@@ -64,26 +64,52 @@ def place_order(symbol, action, position_size_pct, stop_loss_pct, take_profit_pc
         if side == "sell":
             try:
                 existing = api.get_position(symbol)
-                qty = int(float(existing.qty))
+                position_qty = int(float(existing.qty))
+
+                if qty_override is not None:
+                    qty = min(int(qty_override), position_qty)
+                else:
+                    qty = position_qty
+
             except Exception as e:
                 logger.error(f"Failed to fetch position for {symbol}: {e}")
                 return None
+
             if qty <= 0:
                 logger.error(f"Refusing sell for {symbol}: position qty={qty} is {'short' if qty < 0 else 'zero'}, not a long to close")
                 return None
-            logger.info(f"Sell order - closing full position of {qty} shares of {symbol} at {current_price} | balance: {balance}")
+
+            if qty < position_qty:
+                logger.info(
+                    f"Sell order - closing partial position of {qty}/{position_qty} shares of {symbol} "
+                    f"at {current_price} | balance: {balance}"
+                )
+            else:
+                logger.info(
+                    f"Sell order - closing full position of {qty} shares of {symbol} "
+                    f"at {current_price} | balance: {balance}"
+                )
             try:
                 open_orders = api.list_orders(status="open", symbols=[symbol])
                 for o in open_orders:
                     api.cancel_order(o.id)
                     logger.info(f"Cancelled open order {o.id} ({o.side} {o.qty} {symbol} type={o.order_type}) before sell")
                 time.sleep(1)
+                
                 refreshed = api.get_position(symbol)
                 available_qty = int(float(refreshed.qty))
-                if available_qty != qty:
-                    logger.error(f"Qty mismatch after cancel for {symbol}: held={qty} available={available_qty} - aborting sell")
+
+                if available_qty < qty:
+                    logger.error(
+                        f"Qty mismatch after cancel for {symbol}: requested_sell={qty} "
+                        f"available={available_qty} - aborting sell"
+                    )
                     return None
-                logger.info(f"Position confirmed after cancel: {symbol} qty={available_qty} available")
+
+                logger.info(
+                    f"Position confirmed after cancel: {symbol} requested_sell={qty} "
+                    f"available={available_qty}"
+                )
             except Exception as e:
                 logger.error(f"Failed to cancel open orders for {symbol}: {e}")
                 return None

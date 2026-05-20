@@ -344,6 +344,65 @@ def maybe_execute_auto_sell(position, decision, market_open: bool) -> dict[str, 
         )
         return None
 
+        # Profit/risk gate:
+    # Do not auto-sell small red positions or tiny green positions.
+    # Allow auto-sell only when profit is worth taking or loss is large enough
+    # to justify risk control.
+    min_profit_to_auto_sell_pct = float(os.getenv("POSITION_MOMENTUM_MIN_PROFIT_SELL_PCT", "0.50"))
+    max_loss_to_auto_sell_pct = float(os.getenv("POSITION_MOMENTUM_MAX_LOSS_SELL_PCT", "-1.00"))
+
+    unrealized_plpc = _to_float(getattr(position, "unrealized_plpc", 0)) * 100
+
+    if max_loss_to_auto_sell_pct < unrealized_plpc < min_profit_to_auto_sell_pct:
+        logger.warning(
+            f"POSITION MOMENTUM AUTO-SELL blocked for {symbol}: "
+            f"unrealized_plpc={unrealized_plpc:.2f}% is between "
+            f"risk/profit thresholds {max_loss_to_auto_sell_pct:.2f}% and "
+            f"{min_profit_to_auto_sell_pct:.2f}% | {decision.get('reason')}"
+        )
+        return None
+
+        # Profit-protection / hard-risk gate:
+    # Do not auto-sell just because momentum is weak.
+    # Auto-sell is allowed only when:
+    #   1) profit is worth protecting and momentum has rolled over, or
+    #   2) loss is large enough and breakdown is severe.
+    profit_protect_min_pct = float(os.getenv("POSITION_MOMENTUM_PROFIT_PROTECT_MIN_PCT", "0.75"))
+    profit_protect_score = float(os.getenv("POSITION_MOMENTUM_PROFIT_PROTECT_SCORE", "-4"))
+    hard_exit_max_loss_pct = float(os.getenv("POSITION_MOMENTUM_HARD_EXIT_MAX_LOSS_PCT", "-1.00"))
+    hard_exit_score = float(os.getenv("POSITION_MOMENTUM_HARD_EXIT_SCORE", "-6"))
+
+    unrealized_plpc = _to_float(getattr(position, "unrealized_plpc", 0)) * 100
+    trend_score = _to_float(decision.get("score", 0))
+
+    profit_protection_exit = (
+        unrealized_plpc >= profit_protect_min_pct
+        and trend_score <= profit_protect_score
+    )
+
+    hard_risk_exit = (
+        unrealized_plpc <= hard_exit_max_loss_pct
+        and trend_score <= hard_exit_score
+    )
+
+    if not (profit_protection_exit or hard_risk_exit):
+        logger.warning(
+            f"POSITION MOMENTUM AUTO-SELL blocked for {symbol}: "
+            f"unrealized_plpc={unrealized_plpc:.2f}%, "
+            f"trend_score={trend_score:.1f}, "
+            f"profit_exit={profit_protection_exit}, "
+            f"hard_risk_exit={hard_risk_exit} | {decision.get('reason')}"
+        )
+        return None
+
+    logger.warning(
+        f"POSITION MOMENTUM AUTO-SELL allowed for {symbol}: "
+        f"unrealized_plpc={unrealized_plpc:.2f}%, "
+        f"trend_score={trend_score:.1f}, "
+        f"profit_exit={profit_protection_exit}, "
+        f"hard_risk_exit={hard_risk_exit}"
+    )
+
     client_order_id = build_client_order_id(symbol)
 
     logger.warning(

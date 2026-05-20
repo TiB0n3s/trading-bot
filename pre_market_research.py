@@ -181,6 +181,45 @@ def main():
         logger.error(f"Response missing 'symbols' key: {result}")
         sys.exit(2)
 
+    # Normalize Claude output to exactly the bot-approved symbol universe.
+    # This prevents broad web-search results from injecting extra tickers and
+    # ensures every approved symbol has a safe default if Claude omits it.
+    raw_symbols = result.get("symbols") or {}
+    normalized_symbols = {}
+
+    for sym in SYMBOLS:
+        entry = raw_symbols.get(sym) or {}
+
+        bias = str(entry.get("bias", "neutral")).lower()
+        if bias not in ("buy", "avoid", "neutral"):
+            bias = "neutral"
+
+        confidence = str(entry.get("confidence", "low")).lower()
+        if confidence not in ("high", "medium", "low"):
+            confidence = "low"
+
+        normalized_symbols[sym] = {
+            "bias": bias,
+            "reason": entry.get("reason") or "no significant pre-market signals found",
+            "confidence": confidence,
+            "fundamental_score": entry.get("fundamental_score"),
+            "risk_level": entry.get("risk_level"),
+            "entry_quality": entry.get("entry_quality"),
+            "avoid_type": entry.get("avoid_type"),
+        }
+
+    extras = sorted(set(raw_symbols) - set(SYMBOLS))
+    missing = sorted(set(SYMBOLS) - set(raw_symbols))
+
+    if extras:
+        logger.warning(f"Ignoring non-approved market_context symbols: {extras}")
+    if missing:
+        logger.warning(f"Defaulted missing approved symbols to neutral/low: {missing}")
+
+    result["symbols"] = normalized_symbols
+    result["source"] = result.get("source") or "pre_market_research"
+    result["format"] = result.get("format") or "normalized_approved_symbols"
+
     try:
         OUTPUT_FILE.write_text(json.dumps(result, indent=2))
         logger.info(f"Wrote {OUTPUT_FILE}")

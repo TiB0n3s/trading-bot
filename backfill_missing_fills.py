@@ -56,6 +56,7 @@ def find_missing_rows():
           AND qty IS NOT NULL
           AND fill_price IS NULL
           AND order_id IS NOT NULL
+          AND order_id NOT LIKE 'reconcile_%'
         ORDER BY timestamp ASC
     """).fetchall()
     con.close()

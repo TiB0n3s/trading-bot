@@ -3172,8 +3172,17 @@ def process_signal(data):
         f"effective_bias={account_state.get('market_bias_effective')}"
     )
 
-    decision = evaluate_signal(data, account_state)
+    # Claude-safe account state:
+    # Keep observe-only diagnostics in /status, DB context, and reports,
+    # but do not send them to Claude where they can behave like live gates.
+    claude_account_state = dict(account_state)
+    claude_account_state.pop("adaptive_buy_confirmation", None)
+    claude_account_state.pop("adaptive_buy_confirmation_error", None)
+    claude_account_state.pop("market_alignment", None)
+    claude_account_state.pop("market_alignment_error", None)
 
+    decision = evaluate_signal(data, claude_account_state)
+    
     # Safety normalization: if Claude approves but the reason says to defer/wait,
     # force rejection. Prevents contradictory outputs like approved=true with
     # "recommend deferring until momentum turns rising".

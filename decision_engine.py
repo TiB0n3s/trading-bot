@@ -186,6 +186,15 @@ TRADING_RULES = TRADING_RULES.replace(
 
 def evaluate_signal(signal_data, account_state):
     try:
+        account_state = dict(account_state or {})
+
+        # Do not let observe-only diagnostics influence Claude decisions.
+        # These are for reporting/debugging only, not live approval gating.
+        account_state.pop("adaptive_buy_confirmation", None)
+        account_state.pop("adaptive_buy_confirmation_error", None)
+        account_state.pop("market_alignment", None)
+        account_state.pop("market_alignment_error", None)
+
         logger.debug(
             f"Account context for evaluation — balance: {account_state.get('balance')}, "
             f"open_positions: {account_state.get('open_positions')}, "

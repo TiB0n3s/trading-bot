@@ -373,7 +373,9 @@ def maybe_execute_auto_sell(position, decision, market_open: bool) -> dict[str, 
     hard_exit_score = float(os.getenv("POSITION_MOMENTUM_HARD_EXIT_SCORE", "-6"))
 
     unrealized_plpc = _to_float(getattr(position, "unrealized_plpc", 0)) * 100
-    trend_score = _to_float(decision.get("score", 0))
+    trend_score = _to_float(
+        decision.get("trend_score", decision.get("score", 0))
+    )
 
     profit_protection_exit = (
         unrealized_plpc >= profit_protect_min_pct

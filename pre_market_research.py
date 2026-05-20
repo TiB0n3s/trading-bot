@@ -1,15 +1,23 @@
 #!/usr/bin/env python3
 """
-Pre-market research — single Claude Sonnet 4.6 call with web_search.
+Pre-market research — batched Claude Sonnet web_search.
 
-Researches all approved symbols in one shot and produces a per-symbol trading
-bias (buy / avoid / neutral) plus a macro sentiment line. Writes the result to
-market_context.json next to this file.
+Researches all approved symbols in batches and produces a per-symbol trading
+bias (buy / avoid / neutral) plus macro sentiment. Writes market_context.json
+next to this file.
+
+Safety goals:
+- Output exactly the bot-approved symbol universe.
+- Never include non-approved symbols in market_context.json.
+- Default any omitted approved symbol to neutral/low.
+- Keep one normalized schema consumed by app.py.
 """
+
 import json
 import logging
 import os
 import sys
+from collections import Counter
 from datetime import date, datetime
 from pathlib import Path
 
@@ -21,13 +29,35 @@ ENV_FILE = Path("/etc/trading-bot.env")
 
 SYMBOLS = APPROVED_SYMBOLS_LIST
 
-MODEL = "claude-sonnet-4-6"
-TIMEOUT_SECONDS = 120.0
+MODEL = os.getenv("PRE_MARKET_MODEL", "claude-sonnet-4-6")
+TIMEOUT_SECONDS = float(os.getenv("PRE_MARKET_TIMEOUT_SECONDS", "180"))
+BATCH_SIZE = int(os.getenv("PRE_MARKET_BATCH_SIZE", "8"))
+WEB_SEARCH_MAX_USES = int(os.getenv("PRE_MARKET_WEB_SEARCH_MAX_USES", "4"))
+
 WEB_SEARCH_TOOL = {
     "type": "web_search_20260209",
     "name": "web_search",
-    "max_uses": 6,
+    "max_uses": WEB_SEARCH_MAX_USES,
 }
+
+VALID_BIAS = {"buy", "avoid", "neutral"}
+VALID_CONFIDENCE = {"high", "medium", "low"}
+VALID_FUNDAMENTAL = {
+    "strong_bullish", "bullish", "neutral", "bearish", "strong_bearish"
+}
+VALID_RISK = {"low", "medium", "high", "very_high"}
+VALID_ENTRY_QUALITY = {
+    "excellent",
+    "good_on_pullbacks",
+    "good_if_holds_gap",
+    "good_if_breadth_holds",
+    "tactical_only",
+    "hedge_only",
+    "do_not_chase",
+    "avoid_chasing",
+    "conditional",
+}
+VALID_AVOID_TYPE = {"hard", "soft"}
 
 logging.basicConfig(
     level=logging.INFO,
@@ -39,9 +69,11 @@ logger = logging.getLogger("pre_market_research")
 def _load_env_if_needed():
     if os.environ.get("ANTHROPIC_API_KEY"):
         return
+
     if not ENV_FILE.exists():
         logger.error(f"ANTHROPIC_API_KEY not set and {ENV_FILE} not found")
         sys.exit(1)
+
     try:
         for line in ENV_FILE.read_text().splitlines():
             line = line.strip()
@@ -61,6 +93,11 @@ from anthropic import Anthropic, APITimeoutError  # noqa: E402
 client = Anthropic()
 
 
+def _chunks(items, size):
+    for i in range(0, len(items), size):
+        yield items[i : i + size]
+
+
 def _extract_final_text(message) -> str:
     parts = []
     for block in message.content:
@@ -78,38 +115,97 @@ def _parse_json_response(raw: str) -> dict:
     return json.loads(cleaned)
 
 
-def build_prompt(today: str) -> str:
-    symbols_csv = ", ".join(SYMBOLS)
+def _clean_enum(value, valid_values, default=None):
+    if value is None:
+        return default
+    normalized = str(value).lower().strip().replace(" ", "_").replace("-", "_")
+    return normalized if normalized in valid_values else default
+
+
+def _normalize_symbol_entry(entry: dict | None) -> dict:
+    entry = entry or {}
+
+    bias = _clean_enum(entry.get("bias"), VALID_BIAS, "neutral")
+    confidence = _clean_enum(entry.get("confidence"), VALID_CONFIDENCE, "low")
+    fundamental_score = _clean_enum(entry.get("fundamental_score"), VALID_FUNDAMENTAL, None)
+    risk_level = _clean_enum(entry.get("risk_level"), VALID_RISK, None)
+    entry_quality = _clean_enum(entry.get("entry_quality"), VALID_ENTRY_QUALITY, None)
+    avoid_type = _clean_enum(entry.get("avoid_type"), VALID_AVOID_TYPE, None)
+
+    if bias != "avoid":
+        avoid_type = None
+
+    return {
+        "bias": bias,
+        "reason": entry.get("reason") or "no significant pre-market signals found",
+        "confidence": confidence,
+        "fundamental_score": fundamental_score,
+        "risk_level": risk_level,
+        "entry_quality": entry_quality,
+        "avoid_type": avoid_type,
+    }
+
+
+def build_prompt(today: str, batch_symbols: list[str], batch_num: int, total_batches: int) -> str:
+    batch_csv = ", ".join(batch_symbols)
+    approved_csv = ", ".join(SYMBOLS)
+
     return f"""Respond with JSON only. No preamble, no explanation, no markdown fences.
 
-Today is {today}. Use web_search to research US pre-market activity and assign a trading bias for today's session for each of these {len(SYMBOLS)} tickers:
+Today is {today}. This is batch {batch_num} of {total_batches} for my approved trading-bot universe.
+
+Approved universe:
+{approved_csv}
+
+For THIS batch only, research these symbols:
+{batch_csv}
 
 Bias rules — apply consistently:
-- "avoid":   earnings reported today, recent analyst downgrade, major negative news, pre-market down more than 1%, debt or credit warning
-- "buy":     strong pre-market move up, recent analyst upgrade, positive earnings beat, clear sector tailwind
-- "neutral": no significant news, flat pre-market, mixed signals
+- "avoid": earnings reported today, recent analyst downgrade, major negative news, pre-market down more than 1%, debt or credit warning, severe gap-down risk, or very poor tactical entry.
+- "buy": strong pre-market move up, recent analyst upgrade, positive earnings beat, strong guidance, clear sector tailwind, or market-leading relative strength.
+- "neutral": no significant news, flat pre-market, mixed signals, or insufficient edge.
 
 Confidence:
-- "high":   clear directional signal with multiple supporting datapoints
-- "medium": one or two supporting datapoints
-- "low":    sparse data or conflicting signals
+- "high": clear directional signal with multiple supporting datapoints.
+- "medium": one or two supporting datapoints.
+- "low": sparse data or conflicting signals.
 
-Avoid type rules:
-- Set avoid_type="hard" for earnings today, analyst downgrade, major negative news, bearish/strong_bearish fundamentals, debt/credit warning, or severe gap-down risk.
-- Set avoid_type="soft" when the symbol is avoid only because price action is weak, pre-market action needs repair, confirmation is missing, or a pullback/hold condition is preferred.
-- Set avoid_type=null when bias is buy or neutral.
+Fundamental score:
+- "strong_bullish": major positive earnings/guidance/news or very strong institutional/analyst support.
+- "bullish": positive but not decisive.
+- "neutral": no fundamental edge.
+- "bearish": negative but not catastrophic.
+- "strong_bearish": major negative earnings/guidance/news/downgrade/credit issue.
 
-Soft avoid means the bot may allow a trade later only if live intraday trend, momentum, setup quality, and prediction score strongly confirm reversal or continuation.
+Risk level:
+- "low": broad ETF or stable liquid large-cap with clean context.
+- "medium": normal liquid large-cap/ETF risk.
+- "high": high beta, event risk, choppy tape, or tactical-only setup.
+- "very_high": earnings today, extreme volatility, speculative biotech/space/high-beta names, or chasing risk.
 
-For ETFs (SPY, QQQ, GLD, IWM), use sector or index-level news and pre-market index moves rather than company-specific items.
+Entry quality:
+Use one of:
+excellent, good_on_pullbacks, good_if_holds_gap, good_if_breadth_holds,
+tactical_only, hedge_only, do_not_chase, avoid_chasing, conditional, null.
 
-Search efficiently. You have a hard budget of 6 web searches total — DO NOT search per-symbol. Use exactly these 3 broad searches to cover all symbols:
-1. "pre-market movers today" — gives pre-market direction and magnitude for the most active names
-2. "earnings calendar today" — identifies which symbols report today (drives the "avoid" rule)
-3. "analyst upgrades downgrades today" — recent rating changes that affect bias
-Synthesize the per-symbol output by attributing what each search reveals. For symbols not mentioned in any search result, default to bias "neutral" with confidence "low" and a reason like "no significant pre-market signals found".
+Avoid type:
+- avoid_type="hard" for earnings-day hard avoid, analyst downgrade, major negative news, bearish/strong_bearish fundamentals, debt/credit warning, or severe gap-down risk.
+- avoid_type="soft" for weak price action, stretched/chasing risk, needs confirmation, or tactical pullback-only setup.
+- avoid_type=null when bias is buy or neutral.
 
-Return ONLY this JSON schema. All {len(SYMBOLS)} symbols must be present in the "symbols" object:
+For ETFs (SPY, QQQ, GLD, IWM), use index/sector/futures/pre-market context rather than company-specific news.
+
+Use web_search efficiently for this batch. Prioritize:
+1. earnings/guidance and earnings calendar,
+2. analyst upgrades/downgrades/price target changes,
+3. pre-market price action and volume,
+4. company-specific news,
+5. sector/macro context.
+
+For symbols not mentioned in reliable current results, include them anyway with bias="neutral", confidence="low", and reason="no significant pre-market signals found".
+
+Return ONLY this JSON schema. Every symbol in THIS batch must be present in the symbols object. Do not include symbols outside this batch.
+
 {{
   "market_date": "{today}",
   "macro_sentiment": "risk-on | risk-off | mixed | neutral",
@@ -128,19 +224,17 @@ Return ONLY this JSON schema. All {len(SYMBOLS)} symbols must be present in the 
 }}"""
 
 
-def main():
-    started = datetime.now()
-    today = date.today().isoformat()
-
+def call_claude_for_batch(today: str, batch_symbols: list[str], batch_num: int, total_batches: int) -> dict:
     system = (
-        "You are a market research assistant. Use web_search to gather current information. "
-        "Respond ONLY with valid JSON matching the requested schema."
+        "You are a market research assistant for a risk-aware trading bot. "
+        "Use web_search for current information. Respond ONLY with valid JSON."
     )
-    user_prompt = build_prompt(today)
+    user_prompt = build_prompt(today, batch_symbols, batch_num, total_batches)
 
     logger.info(
-        f"Calling {MODEL} with web_search "
-        f"(max_uses={WEB_SEARCH_TOOL['max_uses']}, timeout={TIMEOUT_SECONDS:.0f}s) ..."
+        f"Calling {MODEL} for batch {batch_num}/{total_batches}: "
+        f"{', '.join(batch_symbols)} "
+        f"(max_uses={WEB_SEARCH_TOOL['max_uses']}, timeout={TIMEOUT_SECONDS:.0f}s)"
     )
 
     try:
@@ -157,68 +251,106 @@ def main():
                 streamed_chars += len(chunk)
             message = stream.get_final_message()
     except APITimeoutError:
-        logger.error(
-            f"Claude stream idle timeout (no chunks for {TIMEOUT_SECONDS:.0f}s) — exiting"
-        )
-        sys.exit(2)
+        logger.error(f"Claude timeout on batch {batch_num}/{total_batches}")
+        raise
     except Exception as e:
-        logger.error(f"Claude call failed: {e}")
-        sys.exit(2)
+        logger.error(f"Claude call failed on batch {batch_num}/{total_batches}: {e}")
+        raise
 
     raw = _extract_final_text(message)
     logger.info(
-        f"Stream complete: {streamed_chars} text chars streamed, "
-        f"{len(raw)} final chars, stop_reason={message.stop_reason}"
+        f"Batch {batch_num}/{total_batches} complete: "
+        f"{streamed_chars} streamed chars, {len(raw)} final chars, "
+        f"stop_reason={message.stop_reason}"
     )
 
-    try:
-        result = _parse_json_response(raw)
-    except json.JSONDecodeError as e:
-        logger.error(f"JSON parse failed: {e} | raw[:500]={raw[:500]!r}")
-        sys.exit(2)
+    return _parse_json_response(raw)
 
-    if "symbols" not in result:
-        logger.error(f"Response missing 'symbols' key: {result}")
-        sys.exit(2)
 
-    # Normalize Claude output to exactly the bot-approved symbol universe.
-    # This prevents broad web-search results from injecting extra tickers and
-    # ensures every approved symbol has a safe default if Claude omits it.
-    raw_symbols = result.get("symbols") or {}
-    normalized_symbols = {}
+def choose_macro_sentiment(batch_results: list[dict]) -> str:
+    values = []
+    for result in batch_results:
+        raw = str(result.get("macro_sentiment", "")).lower().strip().replace("_", "-")
+        if raw in ("risk-on", "risk-off", "mixed", "neutral"):
+            values.append(raw)
 
+    if not values:
+        return "neutral"
+
+    # If any batch sees risk-off, respect that caution. Otherwise use majority.
+    if "risk-off" in values:
+        return "risk-off"
+
+    counts = Counter(values)
+    return counts.most_common(1)[0][0]
+
+
+def main():
+    started = datetime.now()
+    today = date.today().isoformat()
+
+    batches = list(_chunks(SYMBOLS, BATCH_SIZE))
+    total_batches = len(batches)
+
+    merged_symbols: dict[str, dict] = {}
+    batch_results: list[dict] = []
+    batch_errors: list[str] = []
+
+    for idx, batch_symbols in enumerate(batches, start=1):
+        try:
+            result = call_claude_for_batch(today, batch_symbols, idx, total_batches)
+            batch_results.append(result)
+
+            raw_symbols = result.get("symbols") or {}
+            extras = sorted(set(raw_symbols) - set(batch_symbols))
+            missing = sorted(set(batch_symbols) - set(raw_symbols))
+
+            if extras:
+                logger.warning(f"Batch {idx}: ignoring symbols outside batch: {extras}")
+            if missing:
+                logger.warning(f"Batch {idx}: defaulting missing symbols: {missing}")
+
+            for sym in batch_symbols:
+                merged_symbols[sym] = _normalize_symbol_entry(raw_symbols.get(sym))
+
+        except Exception as e:
+            msg = f"batch {idx}/{total_batches} failed for {batch_symbols}: {e}"
+            logger.error(msg)
+            batch_errors.append(msg)
+
+            # Fail safe for this batch instead of leaving symbols absent.
+            for sym in batch_symbols:
+                merged_symbols[sym] = _normalize_symbol_entry(None)
+
+    macro_sentiment = choose_macro_sentiment(batch_results)
+    macro_summaries = [
+        str(r.get("macro_summary", "")).strip()
+        for r in batch_results
+        if str(r.get("macro_summary", "")).strip()
+    ]
+
+    if macro_summaries:
+        macro_summary = " | ".join(macro_summaries[:3])
+    else:
+        macro_summary = "No macro summary available; using neutral defaults for missing context."
+
+    # Final hard normalization to exactly approved universe.
+    final_symbols = {}
     for sym in SYMBOLS:
-        entry = raw_symbols.get(sym) or {}
+        final_symbols[sym] = _normalize_symbol_entry(merged_symbols.get(sym))
 
-        bias = str(entry.get("bias", "neutral")).lower()
-        if bias not in ("buy", "avoid", "neutral"):
-            bias = "neutral"
-
-        confidence = str(entry.get("confidence", "low")).lower()
-        if confidence not in ("high", "medium", "low"):
-            confidence = "low"
-
-        normalized_symbols[sym] = {
-            "bias": bias,
-            "reason": entry.get("reason") or "no significant pre-market signals found",
-            "confidence": confidence,
-            "fundamental_score": entry.get("fundamental_score"),
-            "risk_level": entry.get("risk_level"),
-            "entry_quality": entry.get("entry_quality"),
-            "avoid_type": entry.get("avoid_type"),
-        }
-
-    extras = sorted(set(raw_symbols) - set(SYMBOLS))
-    missing = sorted(set(SYMBOLS) - set(raw_symbols))
-
-    if extras:
-        logger.warning(f"Ignoring non-approved market_context symbols: {extras}")
-    if missing:
-        logger.warning(f"Defaulted missing approved symbols to neutral/low: {missing}")
-
-    result["symbols"] = normalized_symbols
-    result["source"] = result.get("source") or "pre_market_research"
-    result["format"] = result.get("format") or "normalized_approved_symbols"
+    result = {
+        "market_date": today,
+        "generated_at": datetime.now().isoformat(),
+        "macro_sentiment": macro_sentiment,
+        "macro_summary": macro_summary[:1000],
+        "symbols": final_symbols,
+        "source": "pre_market_research",
+        "format": "batched_normalized_approved_symbols",
+        "batch_count": total_batches,
+        "batch_size": BATCH_SIZE,
+        "batch_errors": batch_errors,
+    }
 
     try:
         OUTPUT_FILE.write_text(json.dumps(result, indent=2))
@@ -229,29 +361,35 @@ def main():
 
     elapsed = (datetime.now() - started).total_seconds()
     syms = result.get("symbols", {})
-    macro = result.get("macro_sentiment", "unknown")
-    summary = result.get("macro_summary", "")
-    missing = [s for s in SYMBOLS if s not in syms]
+    bias_counts = Counter((entry or {}).get("bias", "missing") for entry in syms.values())
 
     print()
     print("=== Pre-market research complete ===")
-    print(f"  Date    : {today}")
-    print(f"  Elapsed : {elapsed:.1f}s")
-    print(f"  Macro   : {macro}")
-    print(f"  Summary : {summary}")
-    if missing:
-        print(f"  Missing : {missing}")
+    print(f"  Date        : {today}")
+    print(f"  Elapsed     : {elapsed:.1f}s")
+    print(f"  Batches     : {total_batches}")
+    print(f"  Batch errors: {len(batch_errors)}")
+    print(f"  Macro       : {macro_sentiment}")
+    print(f"  Bias counts : {dict(bias_counts)}")
+    print(f"  Summary     : {macro_summary[:220]}")
     print()
-    print(f"  {'Symbol':<7} {'Bias':<8} {'Conf':<7}  Reason")
-    print(f"  {'-'*7} {'-'*8} {'-'*7}  {'-'*60}")
+    print(f"  {'Symbol':<7} {'Bias':<8} {'Conf':<7} {'Risk':<10} {'Entry':<22} Reason")
+    print(f"  {'-'*7} {'-'*8} {'-'*7} {'-'*10} {'-'*22} {'-'*60}")
     for sym in SYMBOLS:
         s = syms.get(sym, {})
-        bias = s.get("bias", "-")
-        conf = s.get("confidence", "-")
-        reason = (s.get("reason") or "")[:70]
-        print(f"  {sym:<7} {bias:<8} {conf:<7}  {reason}")
+        print(
+            f"  {sym:<7} "
+            f"{s.get('bias', '-'):<8} "
+            f"{s.get('confidence', '-'):<7} "
+            f"{str(s.get('risk_level') or '-'):<10} "
+            f"{str(s.get('entry_quality') or '-'):<22} "
+            f"{(s.get('reason') or '')[:70]}"
+        )
     print()
-    print(f"  Output  : {OUTPUT_FILE}")
+    print(f"  Output      : {OUTPUT_FILE}")
+
+    if batch_errors:
+        logger.warning("One or more research batches failed; output contains safe neutral defaults.")
 
 
 if __name__ == "__main__":

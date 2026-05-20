@@ -2408,6 +2408,47 @@ def _pre_order_safety_check(symbol, action, signal_price, account_state):
 
     return True, "second-look checks passed"
 
+def _get_weakest_position_context(account_state):
+    """
+    Observe-only helper.
+
+    Finds the weakest currently held position using available account_state
+    position data. This does not trade. It only enriches macro position limit
+    rejection reasons so we can evaluate future replacement logic.
+    """
+    positions = account_state.get("open_positions") or account_state.get("positions") or []
+
+    weakest = None
+
+    for p in positions:
+        try:
+            symbol = p.get("symbol")
+            unrealized_plpc = float(
+                p.get("unrealized_plpc")
+                or p.get("unrealized_pl_pct")
+                or p.get("unrealized_plpc_pct")
+                or 0
+            )
+            market_value = float(p.get("market_value") or 0)
+
+            # Lower score is worse. We heavily penalize red positions.
+            weakness_score = unrealized_plpc
+
+            item = {
+                "symbol": symbol,
+                "unrealized_plpc": unrealized_plpc,
+                "market_value": market_value,
+                "weakness_score": weakness_score,
+            }
+
+            if weakest is None or weakness_score < weakest["weakness_score"]:
+                weakest = item
+
+        except Exception:
+            continue
+
+    return weakest
+
 def process_signal(data):
     dedupe_key = data.get("_dedupe_key")
     ...
@@ -2482,9 +2523,46 @@ def process_signal(data):
         and ENFORCE_SETUP_POLICY_BLOCKS
         and setup_obs.get("setup_policy_action") == "block"
     ):
+        setup_label = setup_obs.get("setup_label") or ""
         reason = setup_obs.get("setup_policy_reason") or "setup_policy:block"
-        if _reject_current_signal("setup_policy", reason):
-            return
+
+        session_label = account_state.get("session_trend_label")
+        session_score = float(account_state.get("session_trend_score") or 0)
+        session_m5 = float(account_state.get("session_momentum_5m_pct") or 0)
+        session_m15 = float(account_state.get("session_momentum_15m_pct") or 0)
+        session_m30 = float(account_state.get("session_momentum_30m_pct") or 0)
+        session_vwap = float(account_state.get("session_distance_from_vwap_pct") or 0)
+
+        stretched_but_confirmed = (
+            setup_label == "avoid_stretched_above_vwap_strength"
+            and session_label == "strong_uptrend"
+            and session_score >= 6
+            and session_m5 > 0
+            and session_m15 > 0
+            and session_m30 > 0
+            and session_vwap <= 1.75
+        )
+
+        if stretched_but_confirmed:
+            account_state["setup_policy_override"] = {
+                "from": "block",
+                "to": "allow_reduced_size",
+                "reason": (
+                    f"stretched setup allowed reduced-size due to confirmed session strength: "
+                    f"label={session_label} score={session_score} "
+                    f"5m={session_m5:.3f}% 15m={session_m15:.3f}% "
+                    f"30m={session_m30:.3f}% vwap={session_vwap:.3f}%"
+                ),
+            }
+            account_state["max_position_size_pct_override"] = 0.75
+
+            logger.warning(
+                f"Setup policy override for {symbol}: "
+                f"{account_state['setup_policy_override']['reason']}"
+            )
+        else:
+            if _reject_current_signal("setup_policy", reason):
+                return
 
     # Late rollover entry gate:
     # Blocks GEV-style late buys where price has already run, is extended
@@ -2793,7 +2871,30 @@ def process_signal(data):
         max_new_positions = macro_risk.get("max_new_positions", 8)
         open_count = account_state.get("open_position_count", 0)
         if open_count >= max_new_positions:
-            reason = f"open_position_count={open_count} >= macro max_new_positions={max_new_positions}"
+            candidate_session_score = account_state.get("session_trend_score")
+            candidate_session_label = account_state.get("session_trend_label")
+            candidate_return = account_state.get("session_return_pct")
+            candidate_vwap = account_state.get("session_distance_from_vwap_pct")
+
+            weakest = _get_weakest_position_context(account_state)
+
+            if weakest:
+                replacement_hint = "observe_only"
+                reason = (
+                    f"open_position_count={open_count} >= macro max_new_positions={max_new_positions}; "
+                    f"candidate={symbol} session={candidate_session_label}/{candidate_session_score} "
+                    f"return={candidate_return}% vwap_dist={candidate_vwap}%; "
+                    f"weakest_holding={weakest.get('symbol')} "
+                    f"plpc={weakest.get('unrealized_plpc'):.2f}% "
+                    f"replacement_hint={replacement_hint}"
+                )
+            else:
+                reason = (
+                    f"open_position_count={open_count} >= macro max_new_positions={max_new_positions}; "
+                    f"candidate={symbol} session={candidate_session_label}/{candidate_session_score} "
+                    f"return={candidate_return}% vwap_dist={candidate_vwap}%; "
+                    f"weakest_holding=unknown"
+                )
             if _reject_current_signal("macro_position_limit", reason):
                 return
 
@@ -3182,7 +3283,7 @@ def process_signal(data):
     claude_account_state.pop("market_alignment_error", None)
 
     decision = evaluate_signal(data, claude_account_state)
-    
+
     # Safety normalization: if Claude approves but the reason says to defer/wait,
     # force rejection. Prevents contradictory outputs like approved=true with
     # "recommend deferring until momentum turns rising".
@@ -3308,6 +3409,23 @@ def process_signal(data):
                     f"BROKER SUBMIT START: {symbol} {action.upper()} "
                     f"client_order_id={client_order_id}"
                 )
+
+                if action == "buy" and decision.get("approved"):
+                    max_size_override = account_state.get("max_position_size_pct_override")
+                    if max_size_override is not None:
+                        try:
+                            original_size = float(decision.get("position_size_pct") or 0)
+                            capped_size = min(original_size, float(max_size_override))
+
+                            if capped_size < original_size:
+                                logger.warning(
+                                    f"Position size capped for {symbol}: "
+                                    f"{original_size:.2f}% -> {capped_size:.2f}% "
+                                    f"due to setup_policy_override"
+                                )
+                                decision["position_size_pct"] = capped_size
+                        except Exception as e:
+                            logger.warning(f"Failed to apply size override for {symbol}: {e}")
 
                 order_result = place_order(
                     symbol=symbol,

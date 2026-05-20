@@ -177,6 +177,7 @@ def _bucket_rejection_reason(reason: str | None) -> str:
         "market_hours": "Outside trading hours",
         "stale_signal": "Stale signal",
         "duplicate_webhook": "Duplicate webhook",
+        "stale_signal":         "Stale signal",
         "symbol_override": "Symbol override",
         "circuit_breaker": "Daily loss limit",
         "ghost_sell": "Ghost sell (no Alpaca position)",
@@ -294,15 +295,52 @@ def _render(rows, matched, header, trade_rows=None):
     for r in rejected:
         bucket = _bucket_rejection_reason(r["rejection_reason"])
         reason_counts[bucket] += 1
-        
-    p(f"\n  Rejection breakdown:")
-    reason_counts = defaultdict(int)
-    for r in rejected:
-        bucket = _bucket_rejection_reason(r["rejection_reason"])
-        reason_counts[bucket] += 1
 
+    p(f"\n  Rejection breakdown:")
     for bucket, cnt in sorted(reason_counts.items(), key=lambda x: -x[1]):
         p(f"    {cnt:>4}  {bucket}")
+
+    # ── 1b. Actionable signal overview ─────────────────────────────
+    # This removes expected/no-op noise so the live trading quality is easier
+    # to evaluate. It does not change trading behavior.
+    NON_ACTIONABLE_BUCKETS = {
+        "Ghost sell (no Alpaca position)",
+        "Outside trading hours",
+        "Duplicate webhook",
+        "Stale signal",
+    }
+
+    actionable_rows = []
+    excluded_noise_counts = defaultdict(int)
+
+    for r in rows:
+        if r["approved"]:
+            actionable_rows.append(r)
+            continue
+
+        bucket = _bucket_rejection_reason(r["rejection_reason"])
+        if bucket in NON_ACTIONABLE_BUCKETS:
+            excluded_noise_counts[bucket] += 1
+        else:
+            actionable_rows.append(r)
+
+    actionable_total = len(actionable_rows)
+    actionable_approved = [r for r in actionable_rows if r["approved"]]
+    actionable_rejected = [r for r in actionable_rows if not r["approved"]]
+    actionable_apr_rate = (
+        100 * len(actionable_approved) / actionable_total
+        if actionable_total else 0
+    )
+
+    p(f"\n── ACTIONABLE SIGNALS ───────────────────────────────────")
+    p(f"  Total actionable : {actionable_total}")
+    p(f"  Approved         : {len(actionable_approved)}  ({actionable_apr_rate:.1f}%)")
+    p(f"  Rejected         : {len(actionable_rejected)}  ({100-actionable_apr_rate:.1f}%)")
+
+    if excluded_noise_counts:
+        p(f"\n  Excluded noise:")
+        for bucket, cnt in sorted(excluded_noise_counts.items(), key=lambda x: -x[1]):
+            p(f"    {cnt:>4}  {bucket}")
 
     # Session momentum gate summary
     session_gate_rejected = [

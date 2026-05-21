@@ -22,6 +22,7 @@ from broker import get_account
 
 BASE_DIR = Path(__file__).resolve().parent
 MARKET_CONTEXT = BASE_DIR / "market_context.json"
+ROLLING_MOMENTUM = BASE_DIR / "rolling_momentum.json"
 
 SERVICES = [
     "trading-bot",
@@ -118,6 +119,46 @@ def check_market_context():
     return market_date == today_et and not missing
 
 
+def check_rolling_momentum():
+    print("\n── Rolling Momentum Context ─────────────────────────")
+
+    if not ROLLING_MOMENTUM.exists():
+        warn("rolling_momentum.json not found; observe-only context unavailable")
+        return True
+
+    try:
+        data = json.loads(ROLLING_MOMENTUM.read_text())
+    except Exception as e:
+        warn(f"rolling_momentum.json could not be parsed: {e}")
+        return True
+
+    symbols = data.get("symbols") or {}
+    missing = sorted(APPROVED_SYMBOLS - set(symbols))
+    errors = [
+        sym for sym, entry in symbols.items()
+        if isinstance(entry, dict) and entry.get("error")
+    ]
+
+    print(f"generated_at  : {data.get('generated_at')}")
+    print(f"market_time_et: {data.get('market_time_et')}")
+    print(f"mode          : {data.get('mode')}")
+    print(f"symbols       : {len(symbols)}/{len(APPROVED_SYMBOLS)}")
+    print(f"errors        : {len(errors)}")
+
+    if missing:
+        warn(f"rolling momentum missing symbols: {missing}")
+    else:
+        ok("rolling momentum contains all approved symbols")
+
+    if errors:
+        warn(f"rolling momentum symbol errors: {errors[:10]}")
+    else:
+        ok("rolling momentum has no symbol errors")
+
+    # Observe-only: do not fail morning readiness on this yet.
+    return True
+
+
 def check_services():
     print("\n── Services ───────────────────────────────────────────")
     all_ok = True
@@ -212,6 +253,7 @@ def main():
 
     checks = [
         check_market_context(),
+        check_rolling_momentum(),
         check_market_alignment_report(),
         check_services(),
         check_alpaca(),

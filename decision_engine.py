@@ -39,6 +39,23 @@ For sell signals, always set take_profit_pct to 0.0 and stop_loss_pct to 0.0 (th
 
 If no trend data exists for the symbol, treat it as neutral.
 
+ROLLING MOMENTUM GUIDANCE:
+account_state may contain a "rolling_momentum" dict from an observe-only 5-market-day / extended-hours context layer with:
+  trend_context: "strong_bullish_continuation", "bullish_continuation", "mixed_or_neutral", "bearish_pressure", "bearish_continuation", or "unknown"
+  continuation_score: numeric score, positive = bullish continuity, negative = bearish continuity
+  five_day_return_pct, prior_day_return_pct, overnight_gap_pct, premarket_return_pct, current_session_return_pct, current_price_vs_prior_close_pct
+  special_labels: possible labels such as "gap_up_chase_risk", "pullback_in_uptrend", "premarket_reversal_attempt", "after_hours_warning", "premarket_confirmation", "overnight_contradiction"
+  fresh: true/false and age_minutes
+
+Apply to buy signals:
+- Treat rolling_momentum as advisory context only; it never overrides hard pre-checks.
+- If fresh and trend_context is bullish_continuation or strong_bullish_continuation, it may support higher confidence when trend_table and live momentum also confirm.
+- If fresh and trend_context is bearish_pressure or bearish_continuation, reduce confidence and prefer rejection unless live trend_table is bullish/confirmed with strong momentum.
+- If special_labels includes "gap_up_chase_risk", avoid chasing; reduce confidence/size or reject if entry_quality is not excellent.
+- If special_labels includes "pullback_in_uptrend", treat weakness as potentially tactical, but require bullish trend confirmation.
+- If special_labels includes "overnight_contradiction" or "after_hours_warning", reduce confidence.
+- If rolling_momentum is stale or absent, ignore it.
+
 MOMENTUM GUIDANCE:
 account_state may contain a "momentum" dict for buy signals with:
   direction: "rising", "falling", or "flat"

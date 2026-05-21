@@ -23,6 +23,7 @@ from session_momentum import (
 from decision_engine import evaluate_signal, get_mock_account_state
 from broker import place_order, get_account, get_position, api
 from macro_risk import get_macro_risk
+from rolling_context import rolling_summary, rolling_symbol_context
 from decision_thresholds import PREDICTION_GATE_THRESHOLDS
 from runtime_config import (
     EXECUTION_MODE,
@@ -2459,6 +2460,15 @@ def process_signal(data):
     logger.info(f"Processing {action.upper()} signal for {symbol} at {price}")
 
     account_state = get_mock_account_state()
+
+    # Observe-only rolling multi-day / extended-hours context.
+    # This is advisory data for Claude and diagnostics; it does not hard-block trades.
+    try:
+        rolling_ctx = rolling_symbol_context(symbol)
+        if rolling_ctx:
+            account_state["rolling_momentum"] = rolling_ctx
+    except Exception as e:
+        logger.warning(f"rolling_momentum context unavailable for {symbol}: {e}")
     account_state["execution_mode"] = EXECUTION_MODE
 
     def _reject_current_signal(category, reason, level="warning"):
@@ -3669,6 +3679,12 @@ def status():
     except Exception as e:
         logger.error(f"/status macro_risk error: {e}")
 
+    # Observe-only rolling multi-day momentum context
+    try:
+        result["rolling_momentum"] = rolling_summary()
+    except Exception as e:
+        logger.error(f"/status rolling_momentum error: {e}")
+
     # Account summary + daily P&L (via get_mock_account_state)
     try:
         state = get_mock_account_state()
@@ -4131,6 +4147,12 @@ def debug_symbol(symbol):
         result["macro_risk"] = get_macro_risk(Path(__file__).parent)
     except Exception as e:
         result["macro_risk_error"] = str(e)
+
+    # Observe-only rolling multi-day momentum context
+    try:
+        result["rolling_momentum"] = rolling_symbol_context(symbol)
+    except Exception as e:
+        result["rolling_momentum_error"] = str(e)
 
     # Observe-only market alignment
     try:

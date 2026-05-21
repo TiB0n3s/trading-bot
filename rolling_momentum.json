@@ -1,13 +1,13 @@
 {
-  "generated_at": "2026-05-21T08:04:11.005891",
-  "market_time_et": "2026-05-21T09:04:11.005895-04:00",
+  "generated_at": "2026-05-21T08:11:51.095271",
+  "market_time_et": "2026-05-21T09:11:51.095280-04:00",
   "source": "rolling_momentum.py",
   "mode": "observe_only",
   "symbols_count": 33,
   "symbols": {
     "AAPL": {
       "symbol": "AAPL",
-      "generated_at": "2026-05-21T08:03:58.225754",
+      "generated_at": "2026-05-21T08:11:32.948219",
       "latest_price": 301.44,
       "latest_bar_time_et": "2026-05-21T09:01:00-04:00",
       "data_feed": "iex",
@@ -50,9 +50,9 @@
     },
     "SPY": {
       "symbol": "SPY",
-      "generated_at": "2026-05-21T08:03:58.547672",
-      "latest_price": 738.44,
-      "latest_bar_time_et": "2026-05-21T09:01:00-04:00",
+      "generated_at": "2026-05-21T08:11:33.284331",
+      "latest_price": 738.97,
+      "latest_bar_time_et": "2026-05-21T09:05:00-04:00",
       "data_feed": "iex",
       "lookback_calendar_days": 10,
       "market_days_found": 8,
@@ -70,19 +70,19 @@
         "open": 739.44,
         "high": 739.44,
         "low": 738.17,
-        "close": 738.44,
-        "bar_count": 6,
-        "volume": 918.0
+        "close": 738.97,
+        "bar_count": 8,
+        "volume": 1028.0
       },
       "today_regular": null,
       "today_postmarket": null,
       "five_day_return_pct": -0.315,
       "prior_day_return_pct": 0.778,
       "prior_postmarket_return_pct": -0.061,
-      "overnight_gap_pct": -0.387,
-      "premarket_return_pct": -0.387,
+      "overnight_gap_pct": -0.316,
+      "premarket_return_pct": -0.316,
       "current_session_return_pct": null,
-      "current_price_vs_prior_close_pct": -0.387,
+      "current_price_vs_prior_close_pct": -0.316,
       "trend_context": "bearish_pressure",
       "continuation_score": -1,
       "reasons": [
@@ -96,7 +96,7 @@
     },
     "QQQ": {
       "symbol": "QQQ",
-      "generated_at": "2026-05-21T08:03:58.893929",
+      "generated_at": "2026-05-21T08:11:33.626171",
       "latest_price": 709.29,
       "latest_bar_time_et": "2026-05-21T08:55:00-04:00",
       "data_feed": "iex",
@@ -142,9 +142,9 @@
     },
     "MSFT": {
       "symbol": "MSFT",
-      "generated_at": "2026-05-21T08:03:59.238176",
-      "latest_price": 424.77,
-      "latest_bar_time_et": "2026-05-21T09:02:00-04:00",
+      "generated_at": "2026-05-21T08:11:34.004277",
+      "latest_price": 429.22,
+      "latest_bar_time_et": "2026-05-21T09:06:00-04:00",
       "data_feed": "iex",
       "lookback_calendar_days": 10,
       "market_days_found": 8,
@@ -162,19 +162,19 @@
         "open": 418.36,
         "high": 431.88,
         "low": 418.36,
-        "close": 424.77,
-        "bar_count": 4,
-        "volume": 2199.0
+        "close": 429.22,
+        "bar_count": 5,
+        "volume": 2384.0
       },
       "today_regular": null,
       "today_postmarket": null,
       "five_day_return_pct": 4.042,
       "prior_day_return_pct": 1.677,
       "prior_postmarket_return_pct": -0.273,
-      "overnight_gap_pct": 0.876,
-      "premarket_return_pct": 0.876,
+      "overnight_gap_pct": 1.933,
+      "premarket_return_pct": 1.933,
       "current_session_return_pct": null,
-      "current_price_vs_prior_close_pct": 0.876,
+      "current_price_vs_prior_close_pct": 1.933,
       "trend_context": "strong_bullish_continuation",
       "continuation_score": 5,
       "reasons": [
@@ -184,14 +184,15 @@
         "above_prior_close"
       ],
       "special_labels": [
+        "gap_up_chase_risk",
         "premarket_confirmation"
       ]
     },
     "NVDA": {
       "symbol": "NVDA",
-      "generated_at": "2026-05-21T08:03:59.606553",
-      "latest_price": 221.03,
-      "latest_bar_time_et": "2026-05-21T09:01:00-04:00",
+      "generated_at": "2026-05-21T08:11:34.395056",
+      "latest_price": 221.24,
+      "latest_bar_time_et": "2026-05-21T09:09:00-04:00",
       "data_feed": "iex",
       "lookback_calendar_days": 10,
       "market_days_found": 8,
@@ -208,20 +209,20 @@
       "today_premarket": {
         "open": 222.62,
         "high": 222.98,
-        "low": 221.03,
-        "close": 221.03,
-        "bar_count": 13,
-        "volume": 6897.0
+        "low": 220.91,
+        "close": 221.24,
+        "bar_count": 16,
+        "volume": 8883.0
       },
       "today_regular": null,
       "today_postmarket": null,
       "five_day_return_pct": -2.721,
       "prior_day_return_pct": 0.137,
       "prior_postmarket_return_pct": -0.703,
-      "overnight_gap_pct": -1.096,
-      "premarket_return_pct": -1.096,
+      "overnight_gap_pct": -1.002,
+      "premarket_return_pct": -1.002,
       "current_session_return_pct": null,
-      "current_price_vs_prior_close_pct": -1.096,
+      "current_price_vs_prior_close_pct": -1.002,
       "trend_context": "bearish_continuation",
       "continuation_score": -4,
       "reasons": [
@@ -235,7 +236,7 @@
     },
     "ORCL": {
       "symbol": "ORCL",
-      "generated_at": "2026-05-21T08:03:59.912968",
+      "generated_at": "2026-05-21T08:11:34.711733",
       "latest_price": 187.89,
       "latest_bar_time_et": "2026-05-20T16:09:00-04:00",
       "data_feed": "iex",
@@ -270,7 +271,7 @@
     },
     "TSCO": {
       "symbol": "TSCO",
-      "generated_at": "2026-05-21T08:04:00.247674",
+      "generated_at": "2026-05-21T08:11:35.047998",
       "latest_price": 31.675,
       "latest_bar_time_et": "2026-05-20T15:59:00-04:00",
       "data_feed": "iex",
@@ -306,9 +307,9 @@
     },
     "TSLA": {
       "symbol": "TSLA",
-      "generated_at": "2026-05-21T08:04:00.590695",
-      "latest_price": 422.28,
-      "latest_bar_time_et": "2026-05-21T08:43:00-04:00",
+      "generated_at": "2026-05-21T08:11:35.378841",
+      "latest_price": 422.67,
+      "latest_bar_time_et": "2026-05-21T09:05:00-04:00",
       "data_feed": "iex",
       "lookback_calendar_days": 10,
       "market_days_found": 8,
@@ -324,21 +325,21 @@
       "today": "2026-05-21",
       "today_premarket": {
         "open": 422.49,
-        "high": 422.49,
+        "high": 422.67,
         "low": 422.28,
-        "close": 422.28,
-        "bar_count": 2,
-        "volume": 120.0
+        "close": 422.67,
+        "bar_count": 3,
+        "volume": 240.0
       },
       "today_regular": null,
       "today_postmarket": null,
       "five_day_return_pct": -6.511,
       "prior_day_return_pct": 2.331,
       "prior_postmarket_return_pct": -0.584,
-      "overnight_gap_pct": 1.221,
-      "premarket_return_pct": 1.221,
+      "overnight_gap_pct": 1.315,
+      "premarket_return_pct": 1.315,
       "current_session_return_pct": null,
-      "current_price_vs_prior_close_pct": 1.221,
+      "current_price_vs_prior_close_pct": 1.315,
       "trend_context": "mixed_or_neutral",
       "continuation_score": 1,
       "reasons": [
@@ -355,7 +356,7 @@
     },
     "META": {
       "symbol": "META",
-      "generated_at": "2026-05-21T08:04:00.913333",
+      "generated_at": "2026-05-21T08:11:35.734116",
       "latest_price": 604.98,
       "latest_bar_time_et": "2026-05-20T15:59:00-04:00",
       "data_feed": "iex",
@@ -390,9 +391,9 @@
     },
     "AMD": {
       "symbol": "AMD",
-      "generated_at": "2026-05-21T08:04:01.236273",
-      "latest_price": 435.91,
-      "latest_bar_time_et": "2026-05-21T09:03:00-04:00",
+      "generated_at": "2026-05-21T08:11:36.035905",
+      "latest_price": 436.19,
+      "latest_bar_time_et": "2026-05-21T09:07:00-04:00",
       "data_feed": "iex",
       "lookback_calendar_days": 10,
       "market_days_found": 8,
@@ -410,19 +411,19 @@
         "open": 437.01,
         "high": 437.01,
         "low": 434.34,
-        "close": 435.91,
-        "bar_count": 6,
-        "volume": 1315.0
+        "close": 436.19,
+        "bar_count": 7,
+        "volume": 1415.0
       },
       "today_regular": null,
       "today_postmarket": null,
       "five_day_return_pct": 1.448,
       "prior_day_return_pct": 4.414,
       "prior_postmarket_return_pct": -0.02,
-      "overnight_gap_pct": -2.601,
-      "premarket_return_pct": -2.601,
+      "overnight_gap_pct": -2.538,
+      "premarket_return_pct": -2.538,
       "current_session_return_pct": null,
-      "current_price_vs_prior_close_pct": -2.601,
+      "current_price_vs_prior_close_pct": -2.538,
       "trend_context": "bearish_pressure",
       "continuation_score": -1,
       "reasons": [
@@ -436,7 +437,7 @@
     },
     "CVX": {
       "symbol": "CVX",
-      "generated_at": "2026-05-21T08:04:01.500737",
+      "generated_at": "2026-05-21T08:11:36.320360",
       "latest_price": 191.355,
       "latest_bar_time_et": "2026-05-20T15:59:00-04:00",
       "data_feed": "iex",
@@ -472,7 +473,7 @@
     },
     "XOM": {
       "symbol": "XOM",
-      "generated_at": "2026-05-21T08:04:01.820237",
+      "generated_at": "2026-05-21T08:11:36.636159",
       "latest_price": 156.295,
       "latest_bar_time_et": "2026-05-20T15:59:00-04:00",
       "data_feed": "iex",
@@ -508,7 +509,7 @@
     },
     "GOOGL": {
       "symbol": "GOOGL",
-      "generated_at": "2026-05-21T08:04:02.274343",
+      "generated_at": "2026-05-21T08:11:36.950157",
       "latest_price": 388.17,
       "latest_bar_time_et": "2026-05-21T08:51:00-04:00",
       "data_feed": "iex",
@@ -550,7 +551,7 @@
     },
     "GLD": {
       "symbol": "GLD",
-      "generated_at": "2026-05-21T08:04:02.651908",
+      "generated_at": "2026-05-21T08:11:37.232831",
       "latest_price": 417.34,
       "latest_bar_time_et": "2026-05-20T15:59:00-04:00",
       "data_feed": "iex",
@@ -586,7 +587,7 @@
     },
     "IWM": {
       "symbol": "IWM",
-      "generated_at": "2026-05-21T08:04:03.044559",
+      "generated_at": "2026-05-21T08:11:37.429927",
       "latest_price": 278.09,
       "latest_bar_time_et": "2026-05-21T08:59:00-04:00",
       "data_feed": "iex",
@@ -632,7 +633,7 @@
     },
     "AVGO": {
       "symbol": "AVGO",
-      "generated_at": "2026-05-21T08:04:03.424907",
+      "generated_at": "2026-05-21T08:11:37.766916",
       "latest_price": 414.72,
       "latest_bar_time_et": "2026-05-21T09:03:00-04:00",
       "data_feed": "iex",
@@ -678,7 +679,7 @@
     },
     "CRDO": {
       "symbol": "CRDO",
-      "generated_at": "2026-05-21T08:04:03.728545",
+      "generated_at": "2026-05-21T08:11:38.020146",
       "latest_price": 182.81,
       "latest_bar_time_et": "2026-05-20T15:59:00-04:00",
       "data_feed": "iex",
@@ -714,7 +715,7 @@
     },
     "GEV": {
       "symbol": "GEV",
-      "generated_at": "2026-05-21T08:04:04.038112",
+      "generated_at": "2026-05-21T08:11:38.345740",
       "latest_price": 1025.07,
       "latest_bar_time_et": "2026-05-20T15:59:00-04:00",
       "data_feed": "iex",
@@ -749,7 +750,7 @@
     },
     "BE": {
       "symbol": "BE",
-      "generated_at": "2026-05-21T08:04:04.308836",
+      "generated_at": "2026-05-21T08:11:38.624738",
       "latest_price": 282.305,
       "latest_bar_time_et": "2026-05-20T15:59:00-04:00",
       "data_feed": "iex",
@@ -784,7 +785,7 @@
     },
     "CAT": {
       "symbol": "CAT",
-      "generated_at": "2026-05-21T08:04:04.600301",
+      "generated_at": "2026-05-21T08:11:38.874583",
       "latest_price": 872.78,
       "latest_bar_time_et": "2026-05-20T15:59:00-04:00",
       "data_feed": "iex",
@@ -819,7 +820,7 @@
     },
     "VRT": {
       "symbol": "VRT",
-      "generated_at": "2026-05-21T08:04:04.960533",
+      "generated_at": "2026-05-21T08:11:39.198077",
       "latest_price": 315.65,
       "latest_bar_time_et": "2026-05-20T15:59:00-04:00",
       "data_feed": "iex",
@@ -855,7 +856,7 @@
     },
     "RKLB": {
       "symbol": "RKLB",
-      "generated_at": "2026-05-21T08:04:05.256606",
+      "generated_at": "2026-05-21T08:11:39.476648",
       "latest_price": 124.98,
       "latest_bar_time_et": "2026-05-21T08:48:00-04:00",
       "data_feed": "iex",
@@ -902,7 +903,7 @@
     },
     "RTX": {
       "symbol": "RTX",
-      "generated_at": "2026-05-21T08:04:05.542740",
+      "generated_at": "2026-05-21T08:11:42.797379",
       "latest_price": 174.79,
       "latest_bar_time_et": "2026-05-20T15:59:00-04:00",
       "data_feed": "iex",
@@ -937,7 +938,7 @@
     },
     "LMT": {
       "symbol": "LMT",
-      "generated_at": "2026-05-21T08:04:05.738112",
+      "generated_at": "2026-05-21T08:11:42.978160",
       "latest_price": 522.6,
       "latest_bar_time_et": "2026-05-20T15:59:00-04:00",
       "data_feed": "iex",
@@ -970,7 +971,7 @@
     },
     "HWM": {
       "symbol": "HWM",
-      "generated_at": "2026-05-21T08:04:05.916390",
+      "generated_at": "2026-05-21T08:11:43.145250",
       "latest_price": 261.12,
       "latest_bar_time_et": "2026-05-20T15:59:00-04:00",
       "data_feed": "iex",
@@ -1006,7 +1007,7 @@
     },
     "VRTX": {
       "symbol": "VRTX",
-      "generated_at": "2026-05-21T08:04:06.117395",
+      "generated_at": "2026-05-21T08:11:43.324312",
       "latest_price": 430.27,
       "latest_bar_time_et": "2026-05-20T15:59:00-04:00",
       "data_feed": "iex",
@@ -1042,7 +1043,7 @@
     },
     "MRNA": {
       "symbol": "MRNA",
-      "generated_at": "2026-05-21T08:04:06.401224",
+      "generated_at": "2026-05-21T08:11:43.507500",
       "latest_price": 48.12,
       "latest_bar_time_et": "2026-05-20T15:59:00-04:00",
       "data_feed": "iex",
@@ -1078,7 +1079,7 @@
     },
     "CRSP": {
       "symbol": "CRSP",
-      "generated_at": "2026-05-21T08:04:06.506669",
+      "generated_at": "2026-05-21T08:11:43.609270",
       "latest_price": 48.555,
       "latest_bar_time_et": "2026-05-20T15:59:00-04:00",
       "data_feed": "iex",
@@ -1114,7 +1115,7 @@
     },
     "V": {
       "symbol": "V",
-      "generated_at": "2026-05-21T08:04:09.859807",
+      "generated_at": "2026-05-21T08:11:46.935827",
       "latest_price": 330.8,
       "latest_bar_time_et": "2026-05-20T15:59:00-04:00",
       "data_feed": "iex",
@@ -1149,7 +1150,7 @@
     },
     "MA": {
       "symbol": "MA",
-      "generated_at": "2026-05-21T08:04:10.155987",
+      "generated_at": "2026-05-21T08:11:47.249991",
       "latest_price": 498.19,
       "latest_bar_time_et": "2026-05-20T15:59:00-04:00",
       "data_feed": "iex",
@@ -1184,7 +1185,7 @@
     },
     "LLY": {
       "symbol": "LLY",
-      "generated_at": "2026-05-21T08:04:10.472374",
+      "generated_at": "2026-05-21T08:11:47.518338",
       "latest_price": 1018.42,
       "latest_bar_time_et": "2026-05-20T15:59:00-04:00",
       "data_feed": "iex",
@@ -1219,7 +1220,7 @@
     },
     "LIN": {
       "symbol": "LIN",
-      "generated_at": "2026-05-21T08:04:10.689971",
+      "generated_at": "2026-05-21T08:11:47.779495",
       "latest_price": 506.74,
       "latest_bar_time_et": "2026-05-20T15:59:00-04:00",
       "data_feed": "iex",
@@ -1254,7 +1255,7 @@
     },
     "GE": {
       "symbol": "GE",
-      "generated_at": "2026-05-21T08:04:11.005530",
+      "generated_at": "2026-05-21T08:11:51.094531",
       "latest_price": 300.205,
       "latest_bar_time_et": "2026-05-20T15:59:00-04:00",
       "data_feed": "iex",

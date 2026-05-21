@@ -2450,6 +2450,59 @@ def _get_weakest_position_context(account_state):
 
     return weakest
 
+def _count_second_look_blocks_today(symbol):
+    """
+    Count BUY signals for this symbol today that were rejected by second-look
+    quote-quality checks. Used to avoid chasing late entries after repeated
+    quote-quality delays.
+    """
+    today = datetime.now().strftime("%Y-%m-%d")
+
+    try:
+        with get_connection(DB_PATH) as con:
+            row = con.execute(
+                """
+                SELECT COUNT(*) AS cnt
+                FROM trades
+                WHERE timestamp LIKE ?
+                  AND symbol = ?
+                  AND action = 'buy'
+                  AND approved = 0
+                  AND rejection_reason LIKE 'second_look:%'
+                """,
+                (f"{today}%", symbol),
+            ).fetchone()
+
+        return int(row["cnt"] or 0) if row else 0
+
+    except Exception as e:
+        logger.warning(f"Failed to count second-look blocks for {symbol}: {e}")
+        return 0
+
+def _count_second_look_blocks_today(symbol):
+    today = datetime.now().strftime("%Y-%m-%d")
+
+    try:
+        with get_connection(DB_PATH) as con:
+            row = con.execute(
+                """
+                SELECT COUNT(*) AS cnt
+                FROM trades
+                WHERE timestamp LIKE ?
+                  AND symbol = ?
+                  AND action = 'buy'
+                  AND approved = 0
+                  AND rejection_reason LIKE 'second_look:%'
+                """,
+                (f"{today}%", symbol),
+            ).fetchone()
+
+        return int(row["cnt"] or 0) if row else 0
+
+    except Exception as e:
+        logger.warning(f"Failed to count second-look blocks for {symbol}: {e}")
+        return 0
+
 def process_signal(data):
     dedupe_key = data.get("_dedupe_key")
     ...
@@ -2607,6 +2660,47 @@ def process_signal(data):
                 f"30m={session_m30_pct:.3f}%"
             )
             if _reject_current_signal("late_rollover_entry", reason):
+                return
+
+    # Late-after-quote-delay gate:
+    # If repeated second-look quote-quality checks blocked earlier entries,
+    # avoid finally buying later when the clean part of the move may be gone.
+    #
+    # This targets LMT-style entries:
+    # - multiple earlier second-look spread blocks
+    # - current setup is weaker / transitional
+    # - session has already moved meaningfully
+    # - prediction is watch/neutral rather than a clean pass
+    if action == "buy":
+        second_look_blocks = _count_second_look_blocks_today(symbol)
+        setup_label = setup_obs.get("setup_label") or ""
+
+        prediction_gate = account_state.get("prediction_gate") or {}
+        prediction_decision = (
+            prediction_gate.get("prediction_decision")
+            or prediction_gate.get("decision")
+            or ""
+        )
+
+        session_score = float(account_state.get("session_trend_score") or 0)
+        session_return_pct = float(account_state.get("session_return_pct") or 0)
+
+        if (
+            second_look_blocks >= int(os.getenv("LATE_QUOTE_DELAY_MIN_BLOCKS", "3"))
+            and setup_label in {"unclassified_transition", "balanced_transition_state"}
+            and str(prediction_decision).lower() in {"watch", "neutral", "none", ""}
+            and session_return_pct >= float(os.getenv("LATE_QUOTE_DELAY_MIN_SESSION_RETURN_PCT", "0.75"))
+            and session_score <= float(os.getenv("LATE_QUOTE_DELAY_MAX_SESSION_SCORE", "5"))
+        ):
+            reason = (
+                f"late entry after repeated second-look quote blocks: "
+                f"second_look_blocks={second_look_blocks}, "
+                f"setup_label={setup_label}, "
+                f"prediction_decision={prediction_decision}, "
+                f"session_score={session_score:.1f}, "
+                f"session_return={session_return_pct:.3f}%"
+            )
+            if _reject_current_signal("late_after_quote_delay", reason):
                 return
 
     if action == "buy" and is_cash_safe_mode():

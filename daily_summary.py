@@ -196,6 +196,7 @@ def _bucket_rejection_reason(reason: str | None) -> str:
         "soft_avoid_prediction_gate": "Soft avoid prediction gate",
         "live_bias_downgrade": "Live bias downgrade",
         "chase_prevention": "Chase prevention",
+        "late_after_quote_delay": "Late after quote delay",
         "setup_policy": "Entry quality / setup policy",
         "addon_momentum_gate": "Add-on momentum gate",
         "session_momentum_gate": "Session momentum gate",
@@ -266,6 +267,7 @@ def _render(rows, matched, header, trade_rows=None):
     # don't have a recognizable prefix fall through to substring matching.
     PREFIX_BUCKETS = {
         "market_hours":         "Outside trading hours",
+        "late_after_quote_delay": "Late after quote delay",
         "duplicate_webhook":    "Duplicate webhook",
         "symbol_override":      "Symbol override",
         "circuit_breaker":      "Daily loss limit",

@@ -47,13 +47,24 @@ def load_rolling_context(max_age_minutes: int = 30) -> dict[str, Any]:
         result["error"] = f"failed to parse rolling_momentum.json: {e}"
         return result
 
-    generated_at = _parse_dt(data.get("generated_at"))
+    # Use file mtime for freshness. The JSON generated_at field may be
+    # timezone-naive because rolling_momentum.py writes datetime.now().isoformat().
+    # File mtime is timezone-safe and reflects when the context was actually written.
     age_minutes = None
-
-    if generated_at:
-        if generated_at.tzinfo is None:
-            generated_at = generated_at.replace(tzinfo=timezone.utc)
-        age_minutes = (datetime.now(timezone.utc) - generated_at.astimezone(timezone.utc)).total_seconds() / 60
+    try:
+        mtime = datetime.fromtimestamp(
+            ROLLING_MOMENTUM_FILE.stat().st_mtime,
+            tz=timezone.utc,
+        )
+        age_minutes = (datetime.now(timezone.utc) - mtime).total_seconds() / 60
+    except Exception:
+        generated_at = _parse_dt(data.get("generated_at"))
+        if generated_at:
+            if generated_at.tzinfo is None:
+                generated_at = generated_at.replace(tzinfo=timezone.utc)
+            age_minutes = (
+                datetime.now(timezone.utc) - generated_at.astimezone(timezone.utc)
+            ).total_seconds() / 60
 
     result.update({
         "available": True,

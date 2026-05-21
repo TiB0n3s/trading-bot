@@ -119,10 +119,29 @@ def evaluate_position_momentum(position: Any, session: dict[str, Any] | None) ->
 
     bar_count = int(session.get("bar_count") or 0)
     if bar_count < MIN_BARS_FOR_ACTION:
+        emergency_loss_pct = float(os.getenv("POSITION_MOMENTUM_EMERGENCY_LOSS_PCT", "-1.25"))
+
+        if unrealized_plpc <= emergency_loss_pct:
+            return {
+                "symbol": symbol,
+                "action": "sell_candidate",
+                "severity": "emergency_loss",
+                "label": session.get("trend_label") or "insufficient_data",
+                "score": int(session.get("trend_score") or 0),
+                "reason": (
+                    f"emergency loss exit: bar_count={bar_count} < {MIN_BARS_FOR_ACTION} "
+                    f"unrealized_pl=${unrealized_pl:.2f} "
+                    f"unrealized_plpc={unrealized_plpc:.2f}% "
+                    f"threshold={emergency_loss_pct:.2f}%"
+                ),
+            }
+
         return {
             "symbol": symbol,
             "action": "hold",
             "severity": "insufficient_data",
+            "label": session.get("trend_label") or "insufficient_data",
+            "score": int(session.get("trend_score") or 0),
             "reason": f"bar_count={bar_count} < {MIN_BARS_FOR_ACTION}",
         }
 
@@ -140,6 +159,47 @@ def evaluate_position_momentum(position: Any, session: dict[str, Any] | None) ->
     
     position_losing = unrealized_pl < 0 or unrealized_plpc < -0.25
     profit_giveback_risk = unrealized_plpc > 0 and m15 < -0.35 and m30 < -0.50
+    negative_windows = sum(1 for value in (m5, m15, m30) if value < 0)
+
+    # Trailing high-water profit protection:
+    # Protects positions that were meaningfully profitable earlier but are now
+    # giving back gains as momentum rolls over.
+    high_water_plpc = get_position_high_water_plpc(symbol)
+
+    if high_water_plpc is None:
+        high_water_plpc = unrealized_plpc
+    else:
+        high_water_plpc = max(high_water_plpc, unrealized_plpc)
+
+    giveback_plpc = high_water_plpc - unrealized_plpc
+
+    trailing_profit_min_pct = float(os.getenv("POSITION_MOMENTUM_TRAILING_PROFIT_MIN_PCT", "0.75"))
+    trailing_giveback_pct = float(os.getenv("POSITION_MOMENTUM_TRAILING_GIVEBACK_PCT", "0.50"))
+    trailing_current_floor_pct = float(os.getenv("POSITION_MOMENTUM_TRAILING_CURRENT_FLOOR_PCT", "-0.25"))
+
+    if (
+        high_water_plpc >= trailing_profit_min_pct
+        and giveback_plpc >= trailing_giveback_pct
+        and negative_windows >= 2
+        and unrealized_plpc >= trailing_current_floor_pct
+    ):
+        return {
+            "symbol": symbol,
+            "action": "sell_candidate",
+            "severity": "profit_protection",
+            "label": label,
+            "score": score,
+            "reason": (
+                f"profit protection trailing_giveback: label={label} score={score} "
+                f"high_water_plpc={high_water_plpc:.2f}% "
+                f"current_plpc={unrealized_plpc:.2f}% "
+                f"giveback={giveback_plpc:.2f}% "
+                f"negative_windows={negative_windows} session={session_return}% "
+                f"5m={m5}% 15m={m15}% 30m={m30}% "
+                f"vwap_dist={vwap_dist}% unrealized_pl=${unrealized_pl:.2f}"
+            ),
+        }
+
 
     if (
         (label == "downtrend" or score <= -5)
@@ -154,6 +214,11 @@ def evaluate_position_momentum(position: Any, session: dict[str, Any] | None) ->
             "severity": "hard_negative",
             "label": label,
             "score": score,
+            "momentum_5m_pct": m5,
+            "momentum_15m_pct": m15,
+            "momentum_30m_pct": m30,
+            "distance_from_vwap_pct": vwap_dist,
+            "unrealized_plpc": unrealized_plpc,
             "reason": (
                 f"label={label} score={score} session={session_return}% "
                 f"5m={m5}% 15m={m15}% 30m={m30}% "
@@ -167,8 +232,6 @@ def evaluate_position_momentum(position: Any, session: dict[str, Any] | None) ->
     # Live profit-protection sell:
     # If a position has meaningful unrealized profit and momentum rolls over,
     # promote it to a sell_candidate so the auto-sell gate can protect gains.
-    negative_windows = sum(1 for value in (m5, m15, m30) if value < 0)
-
     # Tiered live profit-protection sell:
     # The more profit is available, the less score deterioration we require
     # before allowing the position momentum monitor to protect gains.
@@ -449,18 +512,40 @@ def maybe_execute_auto_sell(position, decision, market_open: bool) -> dict[str, 
         severity == "profit_protection"
     )
 
+    emergency_loss_exit = (
+        severity == "emergency_loss"
+        and unrealized_plpc <= float(os.getenv("POSITION_MOMENTUM_EMERGENCY_LOSS_PCT", "-1.25"))
+    )
+
+    severe_breakdown_exit = (
+        severity == "hard_negative"
+        and unrealized_plpc <= float(os.getenv("POSITION_MOMENTUM_SEVERE_BREAKDOWN_LOSS_PCT", "-0.75"))
+        and trend_score <= float(os.getenv("POSITION_MOMENTUM_SEVERE_BREAKDOWN_SCORE", "-5"))
+        and _to_float(decision.get("momentum_15m_pct", decision.get("m15", 0))) < float(os.getenv("POSITION_MOMENTUM_SEVERE_BREAKDOWN_15M_PCT", "-0.50"))
+        and _to_float(decision.get("momentum_30m_pct", decision.get("m30", 0))) < float(os.getenv("POSITION_MOMENTUM_SEVERE_BREAKDOWN_30M_PCT", "-1.00"))
+        and _to_float(decision.get("distance_from_vwap_pct", decision.get("vwap_dist", 0))) < float(os.getenv("POSITION_MOMENTUM_SEVERE_BREAKDOWN_VWAP_PCT", "-0.75"))
+    )
+
     hard_risk_exit = (
-        unrealized_plpc <= hard_exit_max_loss_pct
+        severity == "hard_negative"
+        and unrealized_plpc <= hard_exit_max_loss_pct
         and trend_score <= hard_exit_score
     )
 
-    if not (profit_protection_exit or hard_risk_exit):
+    if not (
+        profit_protection_exit
+        or emergency_loss_exit
+        or hard_risk_exit
+        or severe_breakdown_exit
+    ):
         logger.warning(
             f"POSITION MOMENTUM AUTO-SELL blocked for {symbol}: "
             f"unrealized_plpc={unrealized_plpc:.2f}%, "
             f"trend_score={trend_score:.1f}, "
             f"profit_exit={profit_protection_exit}, "
-            f"hard_risk_exit={hard_risk_exit} | {decision.get('reason')}"
+            f"hard_risk_exit={hard_risk_exit}, "
+            f"emergency_loss_exit={emergency_loss_exit}, "
+            f"severe_breakdown_exit={severe_breakdown_exit} | {decision.get('reason')}"
         )
         return None
 
@@ -469,7 +554,9 @@ def maybe_execute_auto_sell(position, decision, market_open: bool) -> dict[str, 
         f"unrealized_plpc={unrealized_plpc:.2f}%, "
         f"trend_score={trend_score:.1f}, "
         f"profit_exit={profit_protection_exit}, "
-        f"hard_risk_exit={hard_risk_exit}"
+        f"hard_risk_exit={hard_risk_exit}, "
+        f"emergency_loss_exit={emergency_loss_exit}, "
+        f"severe_breakdown_exit={severe_breakdown_exit}"
     )
 
     client_order_id = build_client_order_id(symbol)
@@ -521,6 +608,36 @@ def init_position_momentum_actions_table() -> None:
             """
         )
 
+def get_position_high_water_plpc(symbol: str) -> float | None:
+    """
+    Return the best unrealized P/L percent seen today for this symbol
+    from position_momentum_checks.
+
+    This is observe/stateful only. It lets the monitor detect profit giveback
+    from a prior intraday high-water mark.
+    """
+    today = datetime.now().strftime("%Y-%m-%d")
+
+    try:
+        with get_connection(DB_PATH) as con:
+            row = con.execute(
+                """
+                SELECT MAX(unrealized_plpc) AS max_plpc
+                FROM position_momentum_checks
+                WHERE symbol = ?
+                  AND timestamp LIKE ?
+                  AND unrealized_plpc IS NOT NULL
+                """,
+                (symbol, f"{today}%"),
+            ).fetchone()
+
+        if row and row["max_plpc"] is not None:
+            return float(row["max_plpc"])
+
+    except Exception as e:
+        logger.warning(f"Failed to read high-water P/L for {symbol}: {e}")
+
+    return None
 
 def recently_auto_sold(symbol: str, cooldown_minutes: int = AUTO_SELL_COOLDOWN_MINUTES) -> bool:
     with get_connection(DB_PATH) as con:

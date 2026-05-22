@@ -42,3 +42,6 @@ rolling_momentum.json
 missed_opportunity_memory.json
 excursion_memory.json
 policy_backtest_summary.json
+
+# Generated strategy memory snapshots
+strategy_memory_history/

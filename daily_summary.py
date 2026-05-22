@@ -202,6 +202,7 @@ def _bucket_rejection_reason(reason: str | None) -> str:
         "session_momentum_gate": "Session momentum gate",
         "prediction_gate": "Prediction gate",
         "strategy_memory":      "Strategy memory gate",
+        "decision_policy":      "Decision policy gate",
         "confidence_gate": "Low confidence (Claude)",
         "entry_quality": "Entry quality / pullback requirement",
         "second_look": "Second-look market check",
@@ -596,3 +597,8 @@ if __name__ == "__main__":
         run_week(sys.argv[2] if len(sys.argv) > 2 else None)
     else:
         run(sys.argv[1] if len(sys.argv) > 1 else None)
+
+
+# Position manager exit categories:
+# - position_manager_partial_exit
+# - position_manager_full_exit

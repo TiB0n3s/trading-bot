@@ -528,3 +528,8 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+
+# Position manager exit categories:
+# - position_manager_partial_exit
+# - position_manager_full_exit

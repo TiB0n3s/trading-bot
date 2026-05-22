@@ -305,6 +305,110 @@ def evaluate_position(position, state):
     }
 
 
+def log_position_manager_exit(decision, order_result, exit_type):
+    """Persist position-manager submitted exits to trades.db.
+
+    fill_stream.py/fill_poller.py can later update order_status/fill_price
+    by order_id. This row makes the adaptive exit visible to reports and
+    learning even if the order starts as pending/submitted.
+    """
+    try:
+        order = order_result.get("order") if isinstance(order_result, dict) else None
+        order = order or {}
+
+        order_id = (
+            order.get("order_id")
+            or order.get("id")
+            or getattr(order, "id", None)
+        )
+        status = (
+            order.get("status")
+            or getattr(order, "status", None)
+            or "submitted"
+        )
+        qty = (
+            order.get("qty")
+            or getattr(order, "qty", None)
+            or decision.get("sell_qty")
+        )
+
+        reason = (
+            f"{exit_type}: "
+            f"action={decision.get('action')} "
+            f"severity={decision.get('severity')} "
+            f"reasons={'; '.join(decision.get('reasons') or [])}"
+        )
+
+        with get_connection(DB_PATH) as con:
+            con.execute("""
+                INSERT INTO trades (
+                    timestamp,
+                    symbol,
+                    action,
+                    signal_price,
+                    approved,
+                    rejection_reason,
+                    confidence,
+                    position_size_pct,
+                    stop_loss_pct,
+                    take_profit_pct,
+                    order_id,
+                    order_status,
+                    qty,
+                    fill_price,
+
+                    market_bias,
+                    market_bias_effective,
+                    trend_direction,
+                    trend_strength,
+                    momentum_direction,
+                    momentum_pct,
+                    session_trend_label,
+                    session_trend_score,
+                    prediction_score,
+                    prediction_decision,
+                    setup_label,
+                    setup_policy_action,
+                    buy_opportunity_score,
+                    buy_opportunity_recommendation
+                ) VALUES (?, ?, 'sell', ?, 1, ?, ?, 0.0, 0.0, 0.0, ?, ?, ?, NULL,
+                          ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                datetime.now(ET).strftime("%Y-%m-%d %H:%M:%S"),
+                decision.get("symbol"),
+                decision.get("current_price"),
+                reason,
+                "position_manager",
+                order_id,
+                status,
+                int(float(qty)) if qty is not None else None,
+
+                (decision.get("entry_context") or {}).get("entry_market_bias"),
+                (decision.get("entry_context") or {}).get("entry_market_bias_effective"),
+                ((decision.get("entry_context") or {}).get("entry_trend") or "/").split("/")[0],
+                ((decision.get("entry_context") or {}).get("entry_trend") or "/").split("/")[1],
+                "falling" if (
+                    (decision.get("momentum_5m_pct") is not None and decision.get("momentum_5m_pct") < 0)
+                    or (decision.get("momentum_15m_pct") is not None and decision.get("momentum_15m_pct") < 0)
+                ) else "neutral",
+                decision.get("momentum_5m_pct"),
+                (decision.get("entry_context") or {}).get("entry_session_trend_label"),
+                (decision.get("entry_context") or {}).get("entry_session_trend_score"),
+                (decision.get("entry_context") or {}).get("entry_prediction_score"),
+                (decision.get("entry_context") or {}).get("entry_prediction_decision"),
+                (decision.get("entry_context") or {}).get("entry_setup_label"),
+                (decision.get("entry_context") or {}).get("entry_setup_policy_action"),
+                (decision.get("entry_context") or {}).get("entry_buy_opportunity_score"),
+                (decision.get("entry_context") or {}).get("entry_buy_opportunity_recommendation"),
+            ))
+
+        return True
+
+    except Exception as e:
+        print(f"[WARN] Failed to log position-manager exit to trades.db: {e}")
+        return False
+
+
 def submit_exit(decision):
     """
     Live exit execution.
@@ -420,6 +524,15 @@ def main():
             if d["action"] in ("sell_partial", "sell_full"):
                 result = submit_exit(d)
                 print(f"{d['symbol']} {d['action']}: {result}")
+
+                if isinstance(result, dict) and result.get("submitted"):
+                    exit_type = (
+                        "position_manager_partial_exit"
+                        if d.get("action") == "sell_partial"
+                        else "position_manager_full_exit"
+                    )
+                    logged = log_position_manager_exit(d, result, exit_type)
+                    print(f"{d['symbol']} db_logged={logged}")
 
 
 if __name__ == "__main__":

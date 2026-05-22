@@ -34,4 +34,8 @@ echo "---- policy_backtest.py ----"
 python3 policy_backtest.py --date "$(date +%F)" --write-summary
 
 echo
+echo "---- strategy_brain_report.py ----"
+python3 strategy_brain_report.py
+
+echo
 echo "After-close learning run finished: $(date)"

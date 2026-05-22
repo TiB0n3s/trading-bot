@@ -4,10 +4,27 @@ from collections import defaultdict
 from datetime import date
 from pathlib import Path
 from pnl import get_daily_realized_pnl
+from market_time import now_et
 
 logger = logging.getLogger(__name__)
 
 DB_PATH = Path(__file__).parent / "trades.db"
+
+
+def _session_time_context():
+    """Return trading-window elapsed/remaining minutes for Claude context."""
+    try:
+        now = now_et()
+        market_open  = now.replace(hour=9,  minute=45, second=0, microsecond=0)
+        market_close = now.replace(hour=15, minute=45, second=0, microsecond=0)
+        elapsed      = max(0, round((now - market_open).total_seconds()  / 60))
+        until_close  = max(0, round((market_close - now).total_seconds() / 60))
+        return {
+            "session_elapsed_minutes": elapsed,
+            "minutes_until_close":     until_close,
+        }
+    except Exception:
+        return {"session_elapsed_minutes": None, "minutes_until_close": None}
 
 
 def get_account_snapshot(api, get_account_func):
@@ -68,6 +85,47 @@ def get_realized_pnl_today(db_path=DB_PATH, target_date=None):
     return get_daily_realized_pnl(target_date=target_date)
 
 
+def _portfolio_stress(positions, balance):
+    """Summarise portfolio-level risk state for Claude context."""
+    try:
+        if not positions:
+            return {
+                "positions_in_loss":   0,
+                "positions_in_profit": 0,
+                "largest_loss_pct":    None,
+                "largest_gain_pct":    None,
+                "portfolio_heat":      "neutral",
+            }
+        loss_pcts, gain_pcts = [], []
+        for pos in positions:
+            cost = (pos.get("avg_entry_price") or 0) * (pos.get("qty") or 0)
+            if cost <= 0:
+                continue
+            pct = round(pos.get("unrealized_pl", 0) / cost * 100, 2)
+            (loss_pcts if pct < 0 else gain_pcts).append(pct)
+        largest_loss = min(loss_pcts) if loss_pcts else None
+        largest_gain = max(gain_pcts) if gain_pcts else None
+        n_loss  = len(loss_pcts)
+        n_total = len(positions)
+        if largest_loss is not None and largest_loss < -1.5:
+            heat = "stressed"
+        elif n_total > 0 and n_loss >= n_total * 0.6:
+            heat = "elevated"
+        elif gain_pcts and not loss_pcts:
+            heat = "positive"
+        else:
+            heat = "neutral"
+        return {
+            "positions_in_loss":   n_loss,
+            "positions_in_profit": len(gain_pcts),
+            "largest_loss_pct":    largest_loss,
+            "largest_gain_pct":    largest_gain,
+            "portfolio_heat":      heat,
+        }
+    except Exception:
+        return {"portfolio_heat": "neutral"}
+
+
 def build_account_state(api, get_account_func, db_path=DB_PATH):
     """Canonical runtime account state used by app.py and decision_engine.py."""
     account = get_account_snapshot(api, get_account_func)
@@ -95,11 +153,19 @@ def build_account_state(api, get_account_func, db_path=DB_PATH):
             {
                 "symbol": p["symbol"],
                 "qty": p["qty"],
+                "avg_entry_price": p["avg_entry_price"],
+                "current_price": p["current_price"],
+                "market_value": p["market_value"],
                 "unrealized_pl": p["unrealized_pl"],
+                "unrealized_pl_pct": round(
+                    p["unrealized_pl"] / (p["avg_entry_price"] * p["qty"]) * 100, 2
+                ) if p.get("avg_entry_price") and p.get("qty") else None,
             }
             for p in positions
         ],
         "open_position_count": len(positions),
         "positions_detail": positions,
         "market_session": "regular",
+        **_session_time_context(),
+        "portfolio_stress": _portfolio_stress(positions, account.get("balance", 0)),
     }

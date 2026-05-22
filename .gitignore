@@ -11,41 +11,29 @@ market_context.json
 *.env
 
 # Runtime logs / rotated logs
-*.log
 *.log.*
 *.gz
 session_momentum.log*
 position_momentum_monitor.log*
-
-# Runtime logs / rotated logs
-*.log
-*.log.*
-*.gz
-session_momentum.log*
-position_momentum_monitor.log*
-
 # Local runtime artifacts
 *.bak*
-*.log
-*.db
 *.db-*
-__pycache__/
-*.pyc
-
 # Local generated market/runtime context
-market_context.json
 position_momentum_monitor.log
 trading_bot.log
-
-# Local runtime artifacts
-*.bak*
-*.log
-*.db
-*.db-*
-__pycache__/
-*.pyc
-
-# Local generated market/runtime context
-market_context.json
-position_momentum_monitor.log
-trading_bot.log
+# Runtime databases and SQLite sidecars
+trades.db
+# DB recovery / backup artifacts
+db_backups/
+db_recovery_*/
+db_corrupt_archive_*/
+*.corrupt.*
+# Runtime logs
+signals.log
+daily_summary.log
+fill_stream.log
+# Secrets / local env
+/etc/trading-bot.env
+# Python/runtime cache
+.pytest_cache/
+rolling_momentum.json

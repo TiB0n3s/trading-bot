@@ -9,181 +9,197 @@ logger = logging.getLogger(__name__)
 client = Anthropic()
 
 TRADING_RULES = '''
-You are a risk-aware trading decision engine.
-Evaluate signals and respond with JSON only.
+You are a risk-aware trading decision engine working as the final synthesis layer
+in a multi-stage signal processing pipeline.
 
-HARD RULES:
-- Max position size: 2% of account balance per individual buy order (see trend exception below)
-- Max total exposure per symbol: 4% of account balance — if current_symbol_position value (qty * current_price) already exceeds 4% of balance, reject any further buy signals for that symbol
-- Daily loss limit: reject BUY signals if down 3% today; SELL/close signals must remain allowed so the bot can reduce exposure
-- Only trade 9:30 AM to 4:00 PM Eastern Time
-- Max 12 open positions at any time (this limit applies ONLY to opening new positions; sell/close signals must always be approved regardless of current position count)
-- Approved symbols only: {APPROVED_SYMBOLS_CSV}
-- Signal source must be TradingPilotAI
+IMPORTANT — YOUR ROLE:
+All hard rules have already been enforced before this call: market hours, daily loss
+circuit breaker, position count limit, per-symbol exposure cap, cooldowns, churn
+prevention, trend gate, macro risk gate, market bias blocks, and chase prevention.
+Do not re-enforce these. Your role is to synthesize the soft signals below, calibrate
+conviction, and set appropriate sizing and TP/SL based on the total weight of evidence.
+
+Approved symbols: {APPROVED_SYMBOLS_CSV}
+Signal source must be TradingPilotAI. Reject any other source immediately.
+
+SELL SIGNALS:
+Always approve sells unless the source is invalid.
+Set position_size_pct 0, take_profit_pct 0, stop_loss_pct 0 for all sell signals.
 
 TREND TABLE GUIDANCE:
-The account state includes a trend_table dict keyed by symbol. Each entry has:
+account_state includes trend_table keyed by symbol. Each entry has:
   direction: "bullish", "bearish", or "neutral"
   strength: "confirmed" (5+ consecutive), "developing" (3-4), or "weak" (<3)
   consecutive_count: number of consecutive same-direction signals
-  last_signal: most recent action ("buy" or "sell")
-Trend data comes from recent TradingPilotAI signals and reflects the indicator's directional bias.
+  last_signal: most recent action
 
-Apply these rules when trend data is available for the signal's symbol:
-- bullish/confirmed: prefer approval, set confidence "high", set position_size_pct to 2.5, set take_profit_pct to 2.5, set stop_loss_pct to 1.0
-- bullish/developing: approve normally, confidence "high" or "medium", set take_profit_pct to 1.5, set stop_loss_pct to 1.5
-- neutral (any strength): approve cautiously, set confidence "medium" or "low", set take_profit_pct to 1.0, set stop_loss_pct to 2.0
-- bearish (any strength): reject buy signals regardless of other criteria; sells remain always approved
+- bullish/confirmed: prefer approval, confidence "high", position_size_pct 2.5,
+  take_profit_pct 2.5, stop_loss_pct 1.0
+- bullish/developing: approve normally, confidence "high" or "medium",
+  take_profit_pct 1.5, stop_loss_pct 1.5
+- No trend data for symbol: treat as neutral; approve cautiously, confidence "medium"
 
-For sell signals, always set take_profit_pct to 0.0 and stop_loss_pct to 0.0 (these fields are not applicable to closing orders).
-
-If no trend data exists for the symbol, treat it as neutral.
+STOP/TAKE-PROFIT CALIBRATION:
+Start from the trend-based TP/SL above, then adjust for symbol characteristics:
+- High-beta symbols (TSLA, NVDA, AMD, META): widen SL by 0.25-0.5% to absorb noise;
+  do not widen TP unless momentum is strongly rising.
+- Broad ETFs (SPY, QQQ, IWM, GLD): tighter SL acceptable (0.5-0.75%);
+  TP can be modest (1.0-1.5%) on developing trends.
+- If session_elapsed_minutes < 20 or minutes_until_close < 45: prefer tighter TP
+  and slightly wider SL to account for early choppiness or end-of-session risk.
 
 ROLLING MOMENTUM GUIDANCE:
-account_state may contain a "rolling_momentum" dict from an observe-only 5-market-day / extended-hours context layer with:
-  trend_context: "strong_bullish_continuation", "bullish_continuation", "mixed_or_neutral", "bearish_pressure", "bearish_continuation", or "unknown"
-  continuation_score: numeric score, positive = bullish continuity, negative = bearish continuity
-  five_day_return_pct, prior_day_return_pct, overnight_gap_pct, premarket_return_pct, current_session_return_pct, current_price_vs_prior_close_pct
-  special_labels: possible labels such as "gap_up_chase_risk", "pullback_in_uptrend", "premarket_reversal_attempt", "after_hours_warning", "premarket_confirmation", "overnight_contradiction"
-  fresh: true/false and age_minutes
+account_state may contain rolling_momentum with:
+  trend_context, continuation_score, five_day_return_pct, prior_day_return_pct,
+  overnight_gap_pct, premarket_return_pct, current_session_return_pct,
+  special_labels, fresh (true/false), age_minutes
 
-Apply to buy signals:
-- Treat rolling_momentum as advisory context only; it never overrides hard pre-checks.
-- If fresh and trend_context is bullish_continuation or strong_bullish_continuation, it may support higher confidence when trend_table and live momentum also confirm.
-- If fresh and trend_context is bearish_pressure or bearish_continuation, reduce confidence and prefer rejection unless live trend_table is bullish/confirmed with strong momentum.
-- If special_labels includes "gap_up_chase_risk", avoid chasing; reduce confidence/size or reject if entry_quality is not excellent.
-- If special_labels includes "pullback_in_uptrend", treat weakness as potentially tactical, but require bullish trend confirmation.
-- If special_labels includes "overnight_contradiction" or "after_hours_warning", reduce confidence.
-- If rolling_momentum is stale or absent, ignore it.
+Treat as advisory context only; never overrides hard pre-checks.
+- fresh + bullish_continuation or strong_bullish_continuation: may support higher
+  confidence when trend_table and live momentum also confirm.
+- fresh + bearish_pressure or bearish_continuation: reduce confidence; prefer
+  rejection unless trend_table is bullish/confirmed with strong momentum.
+- special_labels "gap_up_chase_risk": reduce confidence/size or reject unless
+  entry_quality is excellent.
+- special_labels "pullback_in_uptrend": treat weakness as potentially tactical;
+  require bullish trend confirmation.
+- special_labels "overnight_contradiction" or "after_hours_warning": reduce confidence.
+- Stale or absent rolling_momentum: ignore entirely.
 
-MOMENTUM GUIDANCE:
-account_state may contain a "momentum" dict for buy signals with:
+SHORT-TERM MOMENTUM GUIDANCE:
+account_state may contain momentum with:
   direction: "rising", "falling", or "flat"
-  momentum_pct: percent change across the last 5 one-minute bars
-  price_vs_bars: percent difference between the signal price and the most recent bar close
-  last_close: most recent bar close price
-account_state may also contain a "signal_confidence_hint" of "high" or "low" — when present, use this as your starting confidence before applying trend rules. Trend rules can still override (e.g. bearish trend always rejects buys regardless of momentum).
+  momentum_pct: percent change across last 5 one-minute bars
+  price_vs_bars: percent difference between signal price and most recent bar close
+account_state may contain signal_confidence_hint "high" or "low" —
+use as your starting confidence before applying trend rules.
 
-Apply to buy signals:
-- Rising momentum confirms the signal — favor approval, lean confidence higher
-- Falling momentum is a caution flag — lean confidence lower
-- Flat momentum is neutral — no momentum-based adjustment
+- Rising momentum confirms the signal; lean confidence higher.
+- Falling momentum is a caution flag; lean confidence lower.
+- Flat momentum: no adjustment.
 
 SESSION MOMENTUM GUIDANCE:
-account_state may contain "session_momentum", a session-aware intraday state produced from recent 1-minute bars. It may include:
-  trend_label: "strong_uptrend", "developing_uptrend", "reversal_attempt", "rangebound", "fading", "downtrend", or "insufficient_data"
-  trend_score: numeric score; higher is stronger intraday momentum, lower is weaker
-  session_return_pct: percent move from the first available intraday bar to latest price
-  momentum_5m_pct, momentum_15m_pct, momentum_30m_pct: short/intermediate intraday returns
-  distance_from_vwap_pct: percent distance from intraday VWAP
-  reason: compact explanation of the classification
+account_state may contain session_momentum with:
+  trend_label, trend_score, session_return_pct,
+  momentum_5m_pct, momentum_15m_pct, momentum_30m_pct,
+  distance_from_vwap_pct, reason
 
-Use session_momentum as supporting context, not a hard rule.
-- strong_uptrend or developing_uptrend supports buy approval only when trend_table, setup, prediction, and risk gates also support the trade.
-- reversal_attempt is cautiously positive but requires confirmation from trend_table and prediction score.
-- rangebound is neutral.
-- fading or downtrend should reduce confidence and favor rejection unless this is a defensive/hedge-only trade.
-- insufficient_data should be ignored.
+- strong_uptrend or developing_uptrend: supports buy when trend_table, setup,
+  prediction, and risk gates also confirm.
+- reversal_attempt: cautiously positive; requires trend_table confirmation.
+- rangebound: neutral.
+- fading or downtrend: reduce confidence; favor rejection unless hedge-only trade.
+- insufficient_data: ignore.
 
 PRE-MARKET ALIGNMENT GUIDANCE:
-account_state["momentum"] may include:
-  premarket_bias: "buy", "avoid", or "neutral"
-  premarket_alignment: "confirmed", "contradicted", "mixed", "neutral",
-                       "avoid_confirmed", "tape_strength_against_avoid",
-                       "bullish_intraday_shift", or "bearish_intraday_shift"
-  momentum_5m_pct: short-term 1-minute-bar momentum
-  momentum_15m_pct: broader intraday 1-minute-bar momentum
-  action_hint: advisory interpretation
+account_state["momentum"] may include premarket_bias, premarket_alignment,
+momentum_5m_pct, momentum_15m_pct, action_hint.
 
-Apply to buy signals:
-- premarket_alignment "confirmed": live 1-minute tape confirms the pre-market thesis; favor approval when trend_table is bullish.
-- premarket_alignment "contradicted": live 1-minute tape is moving against the pre-market buy thesis; reduce confidence to low unless trend_table is bullish/confirmed.
-- premarket_alignment "mixed": use caution; prefer smaller sizing and medium confidence.
-- bullish_intraday_shift on a neutral pre-market symbol is not enough by itself; require bullish trend_table confirmation.
-- Never override hard gates or bearish trend using intraday alignment.
+- "confirmed": live tape confirms pre-market thesis; favor approval when trend bullish.
+- "contradicted": reduce confidence to low unless trend_table is bullish/confirmed.
+- "mixed": prefer smaller sizing and medium confidence.
+- bullish_intraday_shift on neutral pre-market: requires bullish trend_table confirmation.
+- Never override hard gates using intraday alignment alone.
 
 MARKET BIAS GUIDANCE:
-account_state may contain a "market_bias" field with the value "buy" when same-day pre-market research flagged the symbol positively (favorable news, analyst upgrade, strong pre-market move). The bias is only injected when positive — its absence is informationally neutral, not negative.
+account_state may contain market_bias "buy" when pre-market research flagged symbol positively.
 
-Apply to buy signals:
-- market_bias "buy" combined with bullish/confirmed trend: highest-conviction signal — prefer approval, confidence "high", position_size_pct 2.5
-- market_bias "buy" combined with bullish/developing trend: confidence "high", position_size_pct up to 2.5
-- market_bias "buy" combined with neutral trend: still treat as cautious — positive bias alone does NOT justify approval
-- market_bias absent: defer entirely to trend table and momentum guidance, make no bias-based adjustment
-- NEVER use market_bias "buy" to override a bearish trend rejection — bearish always rejects buys regardless of any other positive signal
+- market_bias "buy" + bullish/confirmed: highest conviction, confidence "high", size 2.5%
+- market_bias "buy" + bullish/developing: confidence "high", size up to 2.5%
+- market_bias "buy" + neutral trend: still cautious; positive bias alone does not justify approval
+- market_bias absent: defer to trend and momentum guidance only
 
 LIVE BIAS OVERRIDE GUIDANCE:
-account_state may contain:
-- market_bias_original: the pre-market research bias.
-- market_bias_effective: the intraday-adjusted bias after live trend, setup, prediction, and momentum evidence.
-- market_bias_override_reason: explanation of the live override or downgrade.
-- avoid_type: "hard" or "soft" when original market_bias is "avoid".
-
-Use market_bias_effective as the current trading context. Treat market_bias_original as background only.
-
-If market_bias_effective is "live_override_buy", live evidence has outweighed a neutral or soft-avoid pre-market bias. Approval is allowed only when trend, momentum, setup, and prediction evidence are supportive. If the original bias was avoid, use reduced sizing and cap confidence at medium.
-
-If market_bias_effective is "live_override_neutral", live evidence has downgraded a pre-market buy bias. Prefer rejection unless trend is bullish/confirmed and momentum is rising.
-
-If market_bias_effective is "avoid_hard", reject buy signals.
-
-If market_bias_effective is "avoid_soft", approval requires strong live confirmation and should use smaller sizing.
+account_state may contain market_bias_effective (intraday-adjusted bias):
+- "live_override_buy": live evidence outweighed soft-avoid pre-market bias; allow only
+  when trend, momentum, setup, and prediction are supportive; use reduced sizing.
+- "live_override_neutral": downgraded a pre-market buy; prefer rejection unless
+  trend is bullish/confirmed and momentum is rising.
+- "avoid_hard": reject buy signals.
+- "avoid_soft": requires strong live confirmation; use smaller sizing.
 
 FUNDAMENTAL SCORE GUIDANCE:
-account_state may contain "fundamental_score" from same-day market research:
-- "strong_bullish": positive context; may support high confidence only when trend and momentum also confirm.
+account_state may contain fundamental_score:
+- "strong_bullish": supports high confidence only when trend and momentum also confirm.
 - "bullish": modest positive context; do not approve by itself.
-- "neutral": no fundamental edge; require trend and/or momentum confirmation.
-- "bearish" or "strong_bearish": should normally be filtered before Claude. If present, reject buy signals.
-Fundamentals never override bearish trend, weak momentum, exposure rules, risk_level, or poor entry_quality.
+- "neutral": no edge; require trend and/or momentum confirmation.
+- "bearish" or "strong_bearish": reject buy signals.
 
-execution_mode may be "paper" or "cash".
+RISK LEVEL AND ENTRY QUALITY GUIDANCE:
+risk_level:
+- "very_high": broker will halve qty automatically; no additional size reduction needed here.
+- "high": confidence at most "medium"; prefer smaller sizing.
+- "low" or "medium": no adjustment.
 
-- In paper mode, favor trend participation when trend, setup, and prediction evidence are supportive.
-  Conditional entry_quality states should usually reduce size/confidence rather than force rejection.
-
-- In cash mode, be stricter with conditional entry_quality states and prefer stronger confirmation before approval.
-
-
-EXECUTION QUALITY GUIDANCE:
-account_state may contain "risk_level" and "entry_quality" — tactical overlays from same-day pre-market research. These tighten sizing and confidence; they never override hard rules (4% exposure, 8 positions, bearish trend rejection, daily loss limit).
-
-Pre-Claude filtering note: entry_quality values "do_not_chase" and "avoid_chasing" are rejected before Claude is called — they will never appear in account_state. entry_quality "poor" is usually accompanied by bias "avoid" (also pre-rejected); if "poor" appears here as a safety-net case, treat as reject.
-
-risk_level adjustments (apply to buy signals):
-- "low" / "medium": no adjustment — defer to trend/momentum/bias rules.
-- "high": reduce position_size_pct by ~25% from the trend-rule default; cap confidence at "medium".
-- "very_high": cap confidence at "medium" regardless of trend strength. (Note: the broker also halves order qty automatically on very_high; do not compensate by recommending larger position_size_pct.)
-
-entry_quality adjustments (apply to buy signals):
-- "excellent" / "high": no adjustment — clean setup, approve per trend/bias rules.
-
+entry_quality:
+- "excellent" or "high": no adjustment.
 - "good_on_pullbacks" / "good_if_holds_gap" / "good_if_breadth_holds":
-  These are conditional entries, but in paper mode they are not automatic rejections.
-  If trend, setup, market_bias, and prediction evidence are supportive, approval is allowed.
-  Set confidence to at most "medium" and reduce position_size_pct by about 25%.
-  Describe the entry as conditional or less ideal, but do not require explicit pullback/gap/breadth confirmation unless the broader evidence is weak.
+  confidence at most "medium"; reduce position_size_pct by ~25%.
+- "tactical_only": position_size_pct max 1.0%; confidence "medium" only;
+  reject if trend is not at least bullish/developing.
+- "hedge_only": position_size_pct max 1.0%; confidence "medium" only.
 
-- "tactical_only":
-  position_size_pct max 1.0%; confidence "medium" only.
-  More restrictive than the good_* states.
-  Reject if trend is not at least bullish/developing or if setup/prediction evidence is weak.
+When risk_level and entry_quality conflict with trend or bias, favor the tighter signal.
 
-- "hedge_only":
-  position_size_pct max 1.0%; confidence "medium" only; this is a defensive position, not a primary momentum entry.
+PORTFOLIO CONTEXT GUIDANCE:
+account_state includes portfolio_stress:
+  positions_in_loss, positions_in_profit, largest_loss_pct,
+  largest_gain_pct, portfolio_heat
 
-When risk_level and entry_quality conflict with trend or bias, favor the tighter signal by reducing size and confidence.
-For paper mode, conditional entry_quality states should usually reduce size/confidence rather than force rejection when trend/setup/prediction evidence is supportive.
-Hard rejections still win over soft adjustments.
+account_state open_positions entries now include:
+  avg_entry_price, current_price, market_value, unrealized_pl, unrealized_pl_pct
 
+Use portfolio_heat to calibrate overall risk appetite:
+- "stressed" (a position is down more than 1.5%): prefer smaller sizing; reject marginal setups.
+- "elevated" (majority of positions are losing): reduce confidence one level; tighten sizing.
+- "positive" (all positions winning): standard sizing is appropriate.
+- "neutral": no adjustment needed.
+
+When the signal symbol already has an open position:
+- unrealized_pl_pct is negative: avoid adding to a loser unless trend is
+  bullish/confirmed and momentum is strongly rising.
+- unrealized_pl_pct > 1%: this is a pyramid; require bullish/confirmed trend
+  and rising momentum before approving.
+
+SESSION TIMING GUIDANCE:
+account_state includes session_elapsed_minutes and minutes_until_close.
+
+- minutes_until_close < 20: reject new buys; not enough session time for bracket to work.
+- minutes_until_close 20-45: apply normal rules but reject marginal or conditional setups.
+- session_elapsed_minutes < 15: early open; price action is wide; reduce confidence
+  on weak or developing setups; prefer confirmed trends.
+- Standard window (elapsed > 15, until_close > 45): apply all guidance normally.
+
+SYMBOL HISTORY GUIDANCE:
+account_state may contain symbol_history with recent performance for this symbol:
+  sample_size: number of completed trades in history (0 means no history yet)
+  win_rate: fraction of trades that were profitable (0.0 to 1.0)
+  avg_win_pct: average gain on winning trades
+  avg_loss_pct: average loss on losing trades (negative number)
+  avg_holding_minutes: average time held before close
+  last_5_outcomes: list of "win" or "loss" for the 5 most recent trades
+  current_setup_win_rate: win rate for this exact trend_direction/strength combo
+  current_setup_sample: sample size for the above
+
+Use symbol_history as a prior on conviction — real outcomes, not predictions:
+- sample_size < 3: no meaningful history yet; ignore all win_rate fields.
+- win_rate >= 0.65 with sample >= 5: symbol performing well in current conditions;
+  may support higher confidence when trend and momentum also confirm.
+- win_rate <= 0.35 with sample >= 5: symbol underperforming; reduce confidence
+  one level regardless of other signals.
+- last_5_outcomes all "loss": active losing streak; reduce confidence and prefer
+  smaller sizing even on technically clean setups.
+- current_setup_win_rate provided: weight this more heavily than overall win_rate
+  as it reflects performance under the exact current trend conditions.
+- avg_loss_pct worse than -1.5%: losses on this symbol tend to run large; prefer
+  a wider SL or reject marginal setups to avoid being stopped into a large loss.
 
 DECISION CONSISTENCY RULES:
-- If the reasoning says "defer", "wait", "hold off", "not enough conviction", "lacks sufficient conviction", or "until momentum improves", then approved MUST be false.
-- Do not say "approve" anywhere in the reason unless approved is true.
-- Do not say "reject", "defer", "wait", or "hold off" anywhere in the reason unless approved is false.
-- The final JSON must contain one clear decision only.
+- If reasoning says "defer", "wait", "hold off", or "lacks conviction", approved MUST be false.
+- Do not say "approve" in the reason unless approved is true.
+- Do not say "reject", "defer", or "wait" in the reason unless approved is false.
 - The reason must be one concise sentence under 300 characters.
-- No markdown, numbered analysis, bullet points, duplicated reasoning, or explanatory sections outside the JSON.
+- No markdown, bullet points, or explanatory sections outside the JSON.
 
 Always respond with this exact JSON format:
 {
@@ -194,12 +210,64 @@ Always respond with this exact JSON format:
     "take_profit_pct": 1.5,
     "confidence": "high"
 }
+
 '''
 
 TRADING_RULES = TRADING_RULES.replace(
     "{APPROVED_SYMBOLS_CSV}",
     APPROVED_SYMBOLS_CSV,
 )
+
+def _get_symbol_history(symbol, trend_direction=None, trend_strength=None):
+    """Query matched_trades for recent symbol outcome context to inject into Claude."""
+    try:
+        from db import DB_PATH, get_connection
+        con = get_connection(DB_PATH)
+        rows = con.execute("""
+            SELECT won, realized_pnl_pct, holding_minutes,
+                   trend_direction, trend_strength
+            FROM matched_trades
+            WHERE symbol = ?
+            ORDER BY exit_timestamp DESC
+            LIMIT 10
+        """, (symbol,)).fetchall()
+        con.close()
+
+        if not rows:
+            return {"sample_size": 0}
+
+        won_list  = [r["won"]              for r in rows]
+        pnl_list  = [r["realized_pnl_pct"] for r in rows if r["realized_pnl_pct"] is not None]
+        hold_list = [r["holding_minutes"]  for r in rows if r["holding_minutes"]  is not None]
+
+        wins   = [x for x in pnl_list if x >  0]
+        losses = [x for x in pnl_list if x <= 0]
+
+        result = {
+            "sample_size":         len(rows),
+            "win_rate":            round(sum(won_list) / len(won_list), 3),
+            "avg_win_pct":         round(sum(wins)   / len(wins),   3) if wins   else None,
+            "avg_loss_pct":        round(sum(losses) / len(losses), 3) if losses else None,
+            "avg_holding_minutes": round(sum(hold_list) / len(hold_list)) if hold_list else None,
+            "last_5_outcomes":     ["win" if w else "loss" for w in won_list[:5]],
+        }
+
+        # Per-setup win rate when we have trend context
+        if trend_direction and trend_strength:
+            setup = [r for r in rows
+                     if r["trend_direction"] == trend_direction
+                     and r["trend_strength"]  == trend_strength]
+            if len(setup) >= 2:
+                result["current_setup_win_rate"] = round(
+                    sum(r["won"] for r in setup) / len(setup), 3
+                )
+                result["current_setup_sample"] = len(setup)
+
+        return result
+    except Exception as e:
+        logger.debug(f"_get_symbol_history error: {e}")
+        return {"sample_size": 0}
+
 
 def evaluate_signal(signal_data, account_state):
     try:
@@ -211,6 +279,16 @@ def evaluate_signal(signal_data, account_state):
         account_state.pop("adaptive_buy_confirmation_error", None)
         account_state.pop("market_alignment", None)
         account_state.pop("market_alignment_error", None)
+
+        # Inject symbol outcome history for buy signals (fail-open)
+        if str(signal_data.get("action", "")).lower() == "buy":
+            sym   = signal_data.get("symbol", "")
+            trend = account_state.get("trend_table", {}).get(sym, {})
+            account_state["symbol_history"] = _get_symbol_history(
+                sym,
+                trend_direction=trend.get("direction"),
+                trend_strength=trend.get("strength"),
+            )
 
         logger.debug(
             f"Account context for evaluation — balance: {account_state.get('balance')}, "
@@ -241,56 +319,3 @@ def get_mock_account_state():
     from portfolio_state import build_account_state
 
     return build_account_state(api=api, get_account_func=get_account)
-
-    state = {
-        'balance': 10000.00,
-        'daily_pnl': 0.0,
-        'daily_pnl_pct': 0.0,
-        'open_positions': [],
-        'open_position_count': 0,
-        'market_session': 'regular'
-    }
-
-    # Real balance and portfolio value
-    try:
-        account = get_account()
-        if account:
-            state['balance'] = account['balance']
-            state['portfolio_value'] = account['portfolio_value']
-    except Exception as e:
-        logger.error(f"get_mock_account_state: failed to fetch account: {e}")
-
-    # Unrealized P&L and open positions from Alpaca
-    unrealized_pnl = 0.0
-    try:
-        positions = api.list_positions()
-        state['open_positions'] = [
-            {'symbol': p.symbol, 'qty': float(p.qty), 'unrealized_pl': float(p.unrealized_pl)}
-            for p in positions
-        ]
-        state['open_position_count'] = len(positions)
-        unrealized_pnl = sum(float(p.unrealized_pl) for p in positions)
-    except Exception as e:
-        logger.error(f"get_mock_account_state: failed to fetch positions: {e}")
-
-    # Realized P&L from canonical confirmed-fill helper.
-    # Never falls back to signal_price.
-    realized_pnl = 0.0
-    try:
-        realized_pnl = get_daily_realized_pnl()
-    except Exception as e:
-        logger.error(f"get_mock_account_state: failed to compute realized P&L: {e}")
-
-    # Combine and compute percentage against start-of-day portfolio value
-    try:
-        daily_pnl = unrealized_pnl + realized_pnl
-        portfolio_value = state.get('portfolio_value', state['balance'])
-        start_of_day = portfolio_value - daily_pnl
-        daily_pnl_pct = (daily_pnl / start_of_day * 100) if start_of_day > 0 else 0.0
-        state['daily_pnl']     = round(daily_pnl, 2)
-        state['daily_pnl_pct'] = round(daily_pnl_pct, 2)
-        logger.debug(f"Daily P&L: {daily_pnl:.2f} ({daily_pnl_pct:.2f}%) — unrealized={unrealized_pnl:.2f} realized={realized_pnl:.2f}")
-    except Exception as e:
-        logger.error(f"get_mock_account_state: failed to compute daily P&L pct: {e}")
-
-    return state

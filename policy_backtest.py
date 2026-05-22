@@ -24,6 +24,30 @@ from db import DB_PATH, get_connection
 BASE_DIR = Path(__file__).resolve().parent
 POLICY_BACKTEST_SUMMARY_FILE = BASE_DIR / "policy_backtest_summary.json"
 
+HARD_GATE_CATEGORIES = {
+    "macro_position_limit",
+    "trend_confirmation",
+    "affordability",
+    "second_look",
+    "cooldown",
+    "churn",
+    "exposure",
+    "market_hours",
+    "circuit_breaker",
+    "ghost_sell",
+}
+
+POLICY_RELEVANT_CATEGORIES = {
+    "decision_policy",
+    "strategy_memory",
+    "opportunity_score",
+    "prediction_gate",
+    "session_momentum_gate",
+    "setup_policy",
+    "confidence_gate",
+}
+
+
 
 def category(reason):
     if not reason:
@@ -175,6 +199,15 @@ def policy_replay(row):
         "symbol": symbol,
         "actual_approved": approved,
         "actual_rejection_category": reject_cat,
+        "rejection_scope": (
+            "approved"
+            if approved
+            else "hard_gate"
+            if reject_cat in HARD_GATE_CATEGORIES
+            else "policy_relevant"
+            if reject_cat in POLICY_RELEVANT_CATEGORIES
+            else "other"
+        ),
         "policy_decision": decision,
         "size_multiplier": size_multiplier,
         "policy_reason": "; ".join(reasons) or "policy allows",
@@ -262,6 +295,9 @@ def summarize(results):
 
     actual_approved = [r for r in results if r["actual_approved"]]
     actual_rejected = [r for r in results if not r["actual_approved"]]
+    hard_gate_rejected = [r for r in actual_rejected if r.get("rejection_scope") == "hard_gate"]
+    policy_relevant_rejected = [r for r in actual_rejected if r.get("rejection_scope") == "policy_relevant"]
+    other_rejected = [r for r in actual_rejected if r.get("rejection_scope") == "other"]
 
     policy_block = [r for r in results if r["policy_decision"] == "block"]
     policy_size_down = [r for r in results if r["policy_decision"] == "size_down"]
@@ -269,12 +305,19 @@ def summarize(results):
 
     would_block_actual_approved = [r for r in actual_approved if r["policy_decision"] == "block"]
     would_allow_actual_rejected = [r for r in actual_rejected if r["policy_decision"] == "allow"]
+    would_allow_policy_relevant_rejected = [
+        r for r in policy_relevant_rejected
+        if r["policy_decision"] == "allow"
+    ]
 
     print()
     print("── Summary ───────────────────────────────────────────")
     print(f"BUY rows analyzed              : {total}")
     print(f"Actually approved              : {len(actual_approved)}")
     print(f"Actually rejected              : {len(actual_rejected)}")
+    print(f"  hard-gate rejected           : {len(hard_gate_rejected)}")
+    print(f"  policy-relevant rejected     : {len(policy_relevant_rejected)}")
+    print(f"  other rejected               : {len(other_rejected)}")
     print()
     print(f"Policy allow                   : {len(policy_allow)}")
     print(f"Policy size_down               : {len(policy_size_down)}")
@@ -282,6 +325,7 @@ def summarize(results):
     print()
     print(f"Policy would block approved    : {len(would_block_actual_approved)}")
     print(f"Policy would allow rejected    : {len(would_allow_actual_rejected)}")
+    print(f"Policy would allow policy rejects: {len(would_allow_policy_relevant_rejected)}")
 
     by_policy = defaultdict(int)
     by_symbol_block = defaultdict(int)
@@ -367,6 +411,9 @@ def build_policy_backtest_summary(results):
     total = len(results)
     actual_approved = [r for r in results if r["actual_approved"]]
     actual_rejected = [r for r in results if not r["actual_approved"]]
+    hard_gate_rejected = [r for r in actual_rejected if r.get("rejection_scope") == "hard_gate"]
+    policy_relevant_rejected = [r for r in actual_rejected if r.get("rejection_scope") == "policy_relevant"]
+    other_rejected = [r for r in actual_rejected if r.get("rejection_scope") == "other"]
 
     policy_allow = [r for r in results if r["policy_decision"] == "allow"]
     policy_size_down = [r for r in results if r["policy_decision"] == "size_down"]
@@ -374,6 +421,10 @@ def build_policy_backtest_summary(results):
 
     would_block_approved = [r for r in actual_approved if r["policy_decision"] == "block"]
     would_allow_rejected = [r for r in actual_rejected if r["policy_decision"] == "allow"]
+    would_allow_policy_relevant_rejected = [
+        r for r in policy_relevant_rejected
+        if r["policy_decision"] == "allow"
+    ]
 
     by_symbol = defaultdict(lambda: {"total": 0, "allow": 0, "size_down": 0, "block": 0})
     by_rejection_category = defaultdict(lambda: {"total": 0, "policy_allow": 0, "policy_size_down": 0, "policy_block": 0})
@@ -389,42 +440,48 @@ def build_policy_backtest_summary(results):
             by_rejection_category[cat][f"policy_{r['policy_decision']}"] += 1
 
     approved_n = len(actual_approved)
-    rejected_n = len(actual_rejected)
+    policy_reject_n = len(policy_relevant_rejected)
     block_approved_rate = len(would_block_approved) / max(approved_n, 1)
-    allow_rejected_rate = len(would_allow_rejected) / max(rejected_n, 1)
+    allow_policy_reject_rate = (
+        len(would_allow_policy_relevant_rejected) / max(policy_reject_n, 1)
+    )
 
     if total == 0:
         recommendation = "observe"
         reason = "no rows analyzed"
-    elif approved_n < 10 and rejected_n >= 25 and allow_rejected_rate > 0.50:
+    elif approved_n < 10 and policy_reject_n < 10:
+        recommendation = "observe"
+        reason = (
+            f"sample too small for policy judgment: "
+            f"{approved_n} approved, {policy_reject_n} policy-relevant rejects"
+        )
+    elif policy_reject_n >= 10 and allow_policy_reject_rate > 0.50:
         recommendation = "policy_too_loose"
         reason = (
-            f"approved sample too small ({approved_n}), but policy would allow "
-            f"{allow_rejected_rate * 100:.1f}% of rejected buys"
+            f"policy would allow {allow_policy_reject_rate * 100:.1f}% "
+            f"of policy-relevant rejected buys"
         )
-    elif approved_n < 10:
-        recommendation = "observe"
-        reason = f"approved sample too small for strictness judgment: {approved_n} approved buys"
-    elif allow_rejected_rate > 0.50:
-        recommendation = "policy_too_loose"
-        reason = f"policy would allow {allow_rejected_rate * 100:.1f}% of actually rejected buys"
-    elif block_approved_rate > 0.30:
+    elif approved_n >= 10 and block_approved_rate > 0.30:
         recommendation = "policy_too_strict"
         reason = f"policy would block {block_approved_rate * 100:.1f}% of actually approved buys"
     else:
         recommendation = "reasonable"
-        reason = "policy replay is within rough tolerance"
+        reason = "policy replay is within tolerance after separating hard-gate rejections"
 
     return {
         "generated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         "rows_analyzed": total,
         "actual_approved": len(actual_approved),
         "actual_rejected": len(actual_rejected),
+        "hard_gate_rejected": len(hard_gate_rejected),
+        "policy_relevant_rejected": len(policy_relevant_rejected),
+        "other_rejected": len(other_rejected),
         "policy_allow": len(policy_allow),
         "policy_size_down": len(policy_size_down),
         "policy_block": len(policy_block),
         "policy_would_block_approved": len(would_block_approved),
         "policy_would_allow_rejected": len(would_allow_rejected),
+        "policy_would_allow_policy_relevant_rejected": len(would_allow_policy_relevant_rejected),
         "recommendation": recommendation,
         "reason": reason,
         "by_symbol": dict(sorted(by_symbol.items())),

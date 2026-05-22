@@ -42,12 +42,21 @@ SYMBOL_CONFIG = {
     "MRNA":  {"price_range": (20, 120),   "clusters": ["healthcare"]},
     "CRSP":  {"price_range": (20, 130),   "clusters": ["healthcare"]},
 
-    # New additions — May 2026
     "V":     {"price_range": (200, 500),  "clusters": ["payments"]},
     "MA":    {"price_range": (350, 750),  "clusters": ["payments"]},
     "LLY":   {"price_range": (500, 1400), "clusters": ["healthcare"]},
     "LIN":   {"price_range": (300, 800),  "clusters": ["industrials"]},
     "GE":    {"price_range": (180, 500),  "clusters": ["industrials", "aerospace"]},
+
+    # New additions — May 2026, batch 2
+    "ASML":  {"price_range": (900, 2200), "clusters": ["mega_cap_tech", "ai_infra"]},
+    "NFLX":  {"price_range": (50, 150),   "clusters": ["consumer_growth"]},
+    "CRM":   {"price_range": (120, 300),  "clusters": ["software_infra"]},
+    "COST":  {"price_range": (700, 1300), "clusters": ["consumer"]},
+    "KO":    {"price_range": (55, 100),   "clusters": ["consumer"]},
+    "ABBV":  {"price_range": (150, 275),  "clusters": ["healthcare"]},
+    "MRK":   {"price_range": (80, 160),   "clusters": ["healthcare"]},
+    "UNH":   {"price_range": (250, 600),  "clusters": ["healthcare"]},
 }
 
 APPROVED_SYMBOLS_LIST = list(SYMBOL_CONFIG.keys())

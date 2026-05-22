@@ -64,5 +64,15 @@ SYMBOL_MARKET_ALIGNMENT = {
     "LLY":  {"cluster": "large_cap_healthcare", "benchmark": "SPY"},
     "LIN":  {"cluster": "industrials", "benchmark": "SPY"},
     "GE":   {"cluster": "aerospace_industrials", "benchmark": "SPY"},
+
+    # New additions — May 2026, batch 2
+    "ASML": {"cluster": "semiconductors", "benchmark": "QQQ"},
+    "NFLX": {"cluster": "high_beta_growth", "benchmark": "QQQ"},
+    "CRM":  {"cluster": "enterprise_software", "benchmark": "QQQ"},
+    "COST": {"cluster": "consumer_retail", "benchmark": "SPY"},
+    "KO":   {"cluster": "consumer_staples", "benchmark": "SPY"},
+    "ABBV": {"cluster": "large_cap_healthcare", "benchmark": "SPY"},
+    "MRK":  {"cluster": "large_cap_healthcare", "benchmark": "SPY"},
+    "UNH":  {"cluster": "large_cap_healthcare", "benchmark": "SPY"},
 }
 

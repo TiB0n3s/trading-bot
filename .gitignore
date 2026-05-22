@@ -36,3 +36,16 @@ __pycache__/
 market_context.json
 position_momentum_monitor.log
 trading_bot.log
+
+# Local runtime artifacts
+*.bak*
+*.log
+*.db
+*.db-*
+__pycache__/
+*.pyc
+
+# Local generated market/runtime context
+market_context.json
+position_momentum_monitor.log
+trading_bot.log

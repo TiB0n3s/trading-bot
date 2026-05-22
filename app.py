@@ -2975,10 +2975,36 @@ def process_signal(data):
         max_new_positions = macro_risk.get("max_new_positions", 8)
         open_count = account_state.get("open_position_count", 0)
         if open_count >= max_new_positions:
-            candidate_session_score = account_state.get("session_trend_score")
-            candidate_session_label = account_state.get("session_trend_label")
-            candidate_return = account_state.get("session_return_pct")
-            candidate_vwap = account_state.get("session_distance_from_vwap_pct")
+            # Enrich observe-only macro-position-limit logging with the latest
+            # session momentum snapshot. The main session_momentum block runs
+            # later in the pipeline, but macro_position_limit rejects before that,
+            # so account_state will not have these fields yet.
+            candidate_session = None
+            try:
+                candidate_session = get_latest_session_momentum(symbol)
+                if candidate_session and not _session_momentum_is_fresh(candidate_session):
+                    candidate_session = None
+            except Exception as e:
+                logger.warning(f"macro_position_limit session lookup failed for {symbol}: {e}")
+                candidate_session = None
+
+            if candidate_session:
+                account_state["session_momentum"] = candidate_session
+
+            def _session_value(key, fallback_key=None):
+                if candidate_session and candidate_session.get(key) is not None:
+                    return candidate_session.get(key)
+                if fallback_key:
+                    return account_state.get(fallback_key)
+                return None
+
+            candidate_session_score = _session_value("trend_score", "session_trend_score")
+            candidate_session_label = _session_value("trend_label", "session_trend_label")
+            candidate_return = _session_value("session_return_pct", "session_return_pct")
+            candidate_vwap = _session_value(
+                "distance_from_vwap_pct",
+                "session_distance_from_vwap_pct",
+            )
 
             weakest = _get_weakest_position_context(account_state)
 

@@ -161,6 +161,47 @@ def evaluate_position_momentum(position: Any, session: dict[str, Any] | None) ->
     profit_giveback_risk = unrealized_plpc > 0 and m15 < -0.35 and m30 < -0.50
     negative_windows = sum(1 for value in (m5, m15, m30) if value < 0)
 
+    # Failed high-run continuation:
+    # Catches positions that were entered into a very strong intraday runner,
+    # but the bot's position is now red while the move is rolling over.
+    #
+    # Example pattern:
+    # - Symbol is still up big on the day
+    # - Our position is red
+    # - Trend score has deteriorated
+    # - 15m/30m momentum are both negative
+    failed_high_run_session_pct = float(os.getenv("POSITION_MOMENTUM_FAILED_HIGH_RUN_SESSION_PCT", "4.0"))
+    failed_high_run_loss_pct = float(os.getenv("POSITION_MOMENTUM_FAILED_HIGH_RUN_LOSS_PCT", "-0.60"))
+    failed_high_run_score = float(os.getenv("POSITION_MOMENTUM_FAILED_HIGH_RUN_SCORE", "-4"))
+    failed_high_run_15m_pct = float(os.getenv("POSITION_MOMENTUM_FAILED_HIGH_RUN_15M_PCT", "-0.50"))
+    failed_high_run_30m_pct = float(os.getenv("POSITION_MOMENTUM_FAILED_HIGH_RUN_30M_PCT", "-0.50"))
+
+    if (
+        session_return >= failed_high_run_session_pct
+        and unrealized_plpc <= failed_high_run_loss_pct
+        and score <= failed_high_run_score
+        and m15 <= failed_high_run_15m_pct
+        and m30 <= failed_high_run_30m_pct
+    ):
+        return {
+            "symbol": symbol,
+            "action": "sell_candidate",
+            "severity": "failed_continuation",
+            "label": label,
+            "score": score,
+            "momentum_5m_pct": m5,
+            "momentum_15m_pct": m15,
+            "momentum_30m_pct": m30,
+            "distance_from_vwap_pct": vwap_dist,
+            "unrealized_plpc": unrealized_plpc,
+            "reason": (
+                f"failed high-run continuation: label={label} score={score} "
+                f"session={session_return}% 5m={m5}% 15m={m15}% 30m={m30}% "
+                f"vwap_dist={vwap_dist}% unrealized_pl=${unrealized_pl:.2f} "
+                f"unrealized_plpc={unrealized_plpc:.2f}%"
+            ),
+        }
+
     # Trailing high-water profit protection:
     # Protects positions that were meaningfully profitable earlier but are now
     # giving back gains as momentum rolls over.
@@ -482,7 +523,15 @@ def maybe_execute_auto_sell(position, decision, market_open: bool) -> dict[str, 
 
     unrealized_plpc = _to_float(getattr(position, "unrealized_plpc", 0)) * 100
 
-    if max_loss_to_auto_sell_pct < unrealized_plpc < min_profit_to_auto_sell_pct:
+    is_trailing_giveback = (
+        decision.get("severity") == "profit_protection"
+        and "trailing_giveback" in str(decision.get("reason", ""))
+    )
+
+    if (
+        not is_trailing_giveback
+        and max_loss_to_auto_sell_pct < unrealized_plpc < min_profit_to_auto_sell_pct
+    ):
         logger.warning(
             f"POSITION MOMENTUM AUTO-SELL blocked for {symbol}: "
             f"unrealized_plpc={unrealized_plpc:.2f}% is between "
@@ -526,6 +575,11 @@ def maybe_execute_auto_sell(position, decision, market_open: bool) -> dict[str, 
         and _to_float(decision.get("distance_from_vwap_pct", decision.get("vwap_dist", 0))) < float(os.getenv("POSITION_MOMENTUM_SEVERE_BREAKDOWN_VWAP_PCT", "-0.75"))
     )
 
+    failed_continuation_exit = (
+        severity == "failed_continuation"
+        and unrealized_plpc <= float(os.getenv("POSITION_MOMENTUM_FAILED_HIGH_RUN_LOSS_PCT", "-0.60"))
+    )
+
     hard_risk_exit = (
         severity == "hard_negative"
         and unrealized_plpc <= hard_exit_max_loss_pct
@@ -537,6 +591,7 @@ def maybe_execute_auto_sell(position, decision, market_open: bool) -> dict[str, 
         or emergency_loss_exit
         or hard_risk_exit
         or severe_breakdown_exit
+        or failed_continuation_exit
     ):
         logger.warning(
             f"POSITION MOMENTUM AUTO-SELL blocked for {symbol}: "
@@ -545,7 +600,8 @@ def maybe_execute_auto_sell(position, decision, market_open: bool) -> dict[str, 
             f"profit_exit={profit_protection_exit}, "
             f"hard_risk_exit={hard_risk_exit}, "
             f"emergency_loss_exit={emergency_loss_exit}, "
-            f"severe_breakdown_exit={severe_breakdown_exit} | {decision.get('reason')}"
+            f"severe_breakdown_exit={severe_breakdown_exit}, "
+            f"failed_continuation_exit={failed_continuation_exit} | {decision.get('reason')}"
         )
         return None
 
@@ -556,7 +612,8 @@ def maybe_execute_auto_sell(position, decision, market_open: bool) -> dict[str, 
         f"profit_exit={profit_protection_exit}, "
         f"hard_risk_exit={hard_risk_exit}, "
         f"emergency_loss_exit={emergency_loss_exit}, "
-        f"severe_breakdown_exit={severe_breakdown_exit}"
+        f"severe_breakdown_exit={severe_breakdown_exit}, "
+        f"failed_continuation_exit={failed_continuation_exit}"
     )
 
     client_order_id = build_client_order_id(symbol)

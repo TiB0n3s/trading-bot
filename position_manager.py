@@ -37,6 +37,16 @@ LIVE_SELLS = os.getenv("POSITION_MANAGER_LIVE_SELLS", "false").lower() in ("1", 
 PARTIAL_SELL_PCT = float(os.getenv("POSITION_MANAGER_PARTIAL_SELL_PCT", "0.50"))
 MIN_PROFIT_PARTIAL_PCT = float(os.getenv("POSITION_MANAGER_MIN_PROFIT_PARTIAL_PCT", "0.75"))
 PROFIT_GIVEBACK_TRIGGER_PCT = float(os.getenv("POSITION_MANAGER_PROFIT_GIVEBACK_TRIGGER_PCT", "50"))
+
+# Breakeven/profit-lock protection:
+# Prevent winner_became_loser patterns where a trade reaches profit,
+# gives it all back, then exits red.
+BREAKEVEN_LOCK_TRIGGER_PCT = float(os.getenv("BREAKEVEN_LOCK_TRIGGER_PCT", "0.50"))
+BREAKEVEN_LOCK_FLOOR_PCT = float(os.getenv("BREAKEVEN_LOCK_FLOOR_PCT", "0.05"))
+
+# Tighter lock for lower-quality entries such as fade-risk/watch/small-buy setups.
+WEAK_SETUP_BREAKEVEN_LOCK_TRIGGER_PCT = float(os.getenv("WEAK_SETUP_BREAKEVEN_LOCK_TRIGGER_PCT", "0.35"))
+WEAK_SETUP_BREAKEVEN_LOCK_FLOOR_PCT = float(os.getenv("WEAK_SETUP_BREAKEVEN_LOCK_FLOOR_PCT", "0.02"))
 FULL_EXIT_LOSS_PCT = float(os.getenv("POSITION_MANAGER_FULL_EXIT_LOSS_PCT", "-1.25"))
 VWAP_LOSS_EXIT_PCT = float(os.getenv("POSITION_MANAGER_VWAP_LOSS_EXIT_PCT", "-0.35"))
 
@@ -205,6 +215,39 @@ def update_peak_state(state, symbol, current_price, avg_entry):
     }
 
 
+
+def is_weak_entry_context(entry_ctx):
+    """Return True when entry context deserves tighter profit protection."""
+    if not entry_ctx:
+        return False
+
+    setup_label = str(entry_ctx.get("setup_label") or "").lower()
+    prediction_decision = str(entry_ctx.get("prediction_decision") or "").lower()
+    buy_rec = str(entry_ctx.get("buy_opportunity_recommendation") or "").lower()
+    entry_quality = str(entry_ctx.get("entry_quality") or "").lower()
+
+    weak_tokens = (
+        "fade_risk",
+        "neutral_fade",
+        "drift_risk",
+        "unclassified",
+    )
+
+    if any(token in setup_label for token in weak_tokens):
+        return True
+
+    if prediction_decision in ("watch", "caution"):
+        return True
+
+    if buy_rec in ("small_buy_candidate", "watch"):
+        return True
+
+    if entry_quality in ("tactical_only", "conditional", "avoid_chasing", "do_not_chase"):
+        return True
+
+    return False
+
+
 def evaluate_position(position, state):
     symbol = position.symbol
     qty = float(position.qty)
@@ -260,6 +303,35 @@ def evaluate_position(position, state):
             sell_fraction = 1.0
             severity = "high"
             reasons.append(f"red position with falling 5m/15m momentum ({momentum_5m:.2f}%, {momentum_15m:.2f}%)")
+
+    # Full exit: breakeven/profit-lock protection.
+    # If a position has already moved favorably enough, do not allow it to
+    # round-trip back to breakeven/red, especially for weaker entry contexts.
+    weak_entry_context = is_weak_entry_context(entry_ctx)
+    breakeven_trigger = (
+        WEAK_SETUP_BREAKEVEN_LOCK_TRIGGER_PCT
+        if weak_entry_context
+        else BREAKEVEN_LOCK_TRIGGER_PCT
+    )
+    breakeven_floor = (
+        WEAK_SETUP_BREAKEVEN_LOCK_FLOOR_PCT
+        if weak_entry_context
+        else BREAKEVEN_LOCK_FLOOR_PCT
+    )
+
+    if (
+        action == "hold"
+        and peak_pl_pct >= breakeven_trigger
+        and current_pl_pct <= breakeven_floor
+    ):
+        action = "sell_full"
+        sell_fraction = 1.0
+        severity = "high"
+        reasons.append(
+            f"profit_lock_breakeven_stop: peak {peak_pl_pct:.2f}% >= "
+            f"trigger {breakeven_trigger:.2f}%, current {current_pl_pct:.2f}% <= "
+            f"floor {breakeven_floor:.2f}%, weak_entry_context={weak_entry_context}"
+        )
 
     # Partial exit: protect profit after favorable move and giveback.
     if action == "hold" and peak_pl_pct >= MIN_PROFIT_PARTIAL_PCT and giveback_pct >= PROFIT_GIVEBACK_TRIGGER_PCT:

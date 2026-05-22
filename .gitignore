@@ -23,3 +23,16 @@ position_momentum_monitor.log*
 *.gz
 session_momentum.log*
 position_momentum_monitor.log*
+
+# Local runtime artifacts
+*.bak*
+*.log
+*.db
+*.db-*
+__pycache__/
+*.pyc
+
+# Local generated market/runtime context
+market_context.json
+position_momentum_monitor.log
+trading_bot.log

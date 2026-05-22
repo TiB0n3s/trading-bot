@@ -376,15 +376,29 @@ def build_policy_backtest_summary(results):
             by_rejection_category[cat]["total"] += 1
             by_rejection_category[cat][f"policy_{r['policy_decision']}"] += 1
 
+    approved_n = len(actual_approved)
+    rejected_n = len(actual_rejected)
+    block_approved_rate = len(would_block_approved) / max(approved_n, 1)
+    allow_rejected_rate = len(would_allow_rejected) / max(rejected_n, 1)
+
     if total == 0:
         recommendation = "observe"
         reason = "no rows analyzed"
-    elif len(would_block_approved) / max(len(actual_approved), 1) > 0.30:
-        recommendation = "policy_too_strict"
-        reason = "policy would block more than 30% of actually approved buys"
-    elif len(would_allow_rejected) / max(len(actual_rejected), 1) > 0.50:
+    elif approved_n < 10 and rejected_n >= 25 and allow_rejected_rate > 0.50:
         recommendation = "policy_too_loose"
-        reason = "policy would allow more than 50% of actually rejected buys"
+        reason = (
+            f"approved sample too small ({approved_n}), but policy would allow "
+            f"{allow_rejected_rate * 100:.1f}% of rejected buys"
+        )
+    elif approved_n < 10:
+        recommendation = "observe"
+        reason = f"approved sample too small for strictness judgment: {approved_n} approved buys"
+    elif allow_rejected_rate > 0.50:
+        recommendation = "policy_too_loose"
+        reason = f"policy would allow {allow_rejected_rate * 100:.1f}% of actually rejected buys"
+    elif block_approved_rate > 0.30:
+        recommendation = "policy_too_strict"
+        reason = f"policy would block {block_approved_rate * 100:.1f}% of actually approved buys"
     else:
         recommendation = "reasonable"
         reason = "policy replay is within rough tolerance"

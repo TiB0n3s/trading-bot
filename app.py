@@ -4967,6 +4967,7 @@ def positions():
                     "market_value": round(market_value, 2),
                     "unrealized_pl": round(unrealized_pl, 2),
                     "unrealized_pl_pct": round(unrealized_pl_pct, 3),
+                    "unrealized_plpc": round(unrealized_pl_pct, 3),
                     "exposure_pct": round(exposure_pct, 2) if exposure_pct is not None else None,
                     "exposure_cap_hit": bool(exposure_pct is not None and exposure_pct >= 4.0),
                     "trend_direction": trend.get("direction"),

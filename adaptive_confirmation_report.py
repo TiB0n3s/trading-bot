@@ -9,7 +9,7 @@ Usage:
   python3 adaptive_confirmation_report.py
 """
 
-from config import APPROVED_SYMBOLS
+from config import APPROVED_SYMBOLS, ADAPTIVE_BUY_CONFIRMATION_ENABLED
 from app import (
     _load_market_context,
     _market_bias,
@@ -64,8 +64,12 @@ def main():
     print(f"  macro_regime : {macro_risk.get('macro_regime')}")
     print(f"  risk_mult    : {macro_risk.get('risk_multiplier')}")
     print()
-    print("  Current live rule still requires 3 BUY confirmations.")
-    print("  This report shows what the future adaptive rule would require.")
+    if ADAPTIVE_BUY_CONFIRMATION_ENABLED:
+        print("  Live rule: adaptive BUY confirmation is ENABLED.")
+        print("  BUY signals below the Adapt requirement will be rejected.")
+    else:
+        print("  Live rule: adaptive BUY confirmation is OBSERVE-ONLY.")
+        print("  BUY signals below the Adapt requirement will only be logged.")
     print()
 
     headers = [
@@ -120,7 +124,10 @@ def main():
     print(f"Adaptive would keep requirement  : {same}")
     print(f"Adaptive would raise requirement : {raised}")
     print()
-    print("Observe-only: this report does not change live trading behavior.")
+    if ADAPTIVE_BUY_CONFIRMATION_ENABLED:
+        print("Live mode: adaptive BUY confirmation is active.")
+    else:
+        print("Observe-only: adaptive BUY confirmation is not active until the env flag is enabled.")
 
 
 if __name__ == "__main__":

@@ -7,6 +7,7 @@ import json
 from pathlib import Path
 
 from bot_events import fetch_events
+from intelligence_freshness import get_intelligence_freshness
 
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -128,6 +129,7 @@ def get_intelligence_snapshot():
             "trades_analyzed": excursion.get("trades_analyzed"),
             "trades_with_bar_data": excursion.get("trades_with_bar_data"),
         },
+        "freshness": get_intelligence_freshness(),
         "recent_events": {
             "decision_policy_size_down": _latest_event("DECISION_POLICY_SIZE_DOWN"),
             "portfolio_rotation": _latest_event("PORTFOLIO_ROTATION"),

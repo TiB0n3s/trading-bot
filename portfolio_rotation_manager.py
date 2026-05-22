@@ -22,6 +22,7 @@ import pytz
 
 from broker import place_order
 from bot_events import log_event
+from intelligence_freshness import freshness_for_file
 
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -77,10 +78,23 @@ def evaluate_rotation(memory):
         "memory": memory,
     }
 
+    replacement_freshness = freshness_for_file("portfolio_replacement")
+    decision["replacement_freshness"] = replacement_freshness
+
     if MODE != "live_rotation":
         decision.update({
             "decision": "disabled",
             "reason": f"PORTFOLIO_REPLACEMENT_MODE={MODE}",
+        })
+        return decision
+
+    if not replacement_freshness.get("fresh"):
+        decision.update({
+            "decision": "stale_replacement_memory",
+            "reason": (
+                "portfolio replacement memory is not fresh: "
+                f"{replacement_freshness.get('status')} - {replacement_freshness.get('reason')}"
+            ),
         })
         return decision
 

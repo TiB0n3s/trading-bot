@@ -10,6 +10,7 @@ from pathlib import Path
 from datetime import datetime
 
 from bot_events import fetch_events
+from intelligence_freshness import get_intelligence_freshness
 
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -68,6 +69,17 @@ def main():
     policy = data.get("policy_backtest") or {}
     missed = data.get("missed_opportunity") or {}
     replacement = data.get("portfolio_replacement") or {}
+
+    print()
+    print("Freshness:")
+    freshness = get_intelligence_freshness()
+    for key, info in freshness.items():
+        print(
+            f"  {key:<24} {info.get('status'):<8} "
+            f"age={info.get('age_minutes')}m "
+            f"max={info.get('max_age_minutes')}m "
+            f"{info.get('reason')}"
+        )
 
     print()
     print("Brain:")

@@ -28,6 +28,7 @@ from setup_classifier import classify_setup
 from strategy_memory import memory_for_signal
 from decision_context import build_intelligence_context
 from decision_policy import evaluate_decision_policy
+from intelligence_snapshot import get_intelligence_snapshot
 from bot_events import log_event
 from rolling_context import rolling_summary, rolling_symbol_context
 from decision_thresholds import PREDICTION_GATE_THRESHOLDS
@@ -4904,6 +4905,14 @@ def status():
         }
     except Exception as e:
         logger.error(f"/status signal counts error: {e}")
+
+    try:
+        result["intelligence"] = get_intelligence_snapshot()
+    except Exception as e:
+        result["intelligence"] = {
+            "available": False,
+            "error": str(e),
+        }
 
     return jsonify(result), 200
 

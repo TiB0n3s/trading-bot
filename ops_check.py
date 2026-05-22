@@ -27,6 +27,8 @@ COMMANDS = {
     "positions": ["position_review.py"],
     "alignment": ["market_alignment_report.py"],
     "adaptive": ["adaptive_confirmation_report.py"],
+    "adaptive_impact": ["adaptive_impact_report.py"],
+    "strategy_intelligence": ["strategy_intelligence_report.py"],
     "blocked": ["blocked_signal_outcome_report.py", "--date"],
     "session": ["session_momentum.py", "--all"],
     "position-momentum": ["position_momentum_monitor.py"],
@@ -71,6 +73,7 @@ def main():
         checks.append(run("Session Momentum Refresh", ["session_momentum.py", "--all"]))
         checks.append(run("Position Momentum Monitor", ["position_momentum_monitor.py"]))
         checks.append(run("Adaptive Confirmation Report", ["adaptive_confirmation_report.py"]))
+        checks.append(run("Adaptive Impact Report", ["adaptive_impact_report.py", target_date]))
         checks.append(run("Filter Report", ["filter_report.py", "--date", target_date]))
         checks.append(run("Blocked Signal Outcome Report", ["blocked_signal_outcome_report.py", "--date", target_date]))
         checks.append(run("Drawdown Report", ["drawdown_report.py", target_date]))
@@ -97,7 +100,7 @@ def main():
         args = ["filter_report.py", "--date", target_date]
     elif command == "blocked":
         args = ["blocked_signal_outcome_report.py", "--date", target_date]
-    elif command in ("drawdown", "post"):
+    elif command in ("drawdown", "post", "adaptive_impact", "strategy_intelligence"):
         args = args + [target_date]
 
     ok = run(command.title(), args)

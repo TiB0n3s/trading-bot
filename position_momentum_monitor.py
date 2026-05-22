@@ -55,6 +55,10 @@ DB_PATH = Path(__file__).resolve().parent / "trades.db"
 POSITION_MOMENTUM_AUTO_SELL = _env_bool("POSITION_MOMENTUM_AUTO_SELL", False)
 POSITION_MOMENTUM_SELL_CANDIDATES_ONLY = _env_bool("POSITION_MOMENTUM_SELL_CANDIDATES_ONLY", True)
 
+# When enabled, extreme observe-only sell pressure can promote watch/hold
+# decisions into sell_candidate decisions.
+POSITION_MOMENTUM_USE_SELL_PRESSURE = _env_bool("POSITION_MOMENTUM_USE_SELL_PRESSURE", False)
+
 def build_api() -> REST:
     return REST(
         key_id=os.environ.get("ALPACA_API_KEY", ""),
@@ -85,6 +89,143 @@ def _is_fresh(row: dict[str, Any] | None, max_age_minutes: int = MAX_MOMENTUM_AG
         return age.total_seconds() <= max_age_minutes * 60
     except Exception:
         return False
+
+
+def evaluate_sell_pressure(
+    *,
+    label: str | None,
+    score: float,
+    m5: float,
+    m15: float,
+    m30: float,
+    vwap_dist: float,
+    session_return: float,
+    unrealized_pl: float,
+    unrealized_plpc: float,
+    high_water_plpc: float | None = None,
+) -> dict[str, Any]:
+    """
+    Observe-only sell pressure score.
+
+    This does not submit orders and does not change action by itself.
+    It converts fading/downtrend/profit-giveback/loss evidence into a readable
+    pressure score so we can later decide whether to enable partial/full exits.
+    """
+    pressure = 0
+    reasons = []
+
+    label = label or "unknown"
+    high_water = unrealized_plpc if high_water_plpc is None else max(high_water_plpc, unrealized_plpc)
+    giveback = high_water - unrealized_plpc
+    negative_windows = sum(1 for value in (m5, m15, m30) if value < 0)
+
+    if label == "downtrend":
+        pressure += 3
+        reasons.append("downtrend:+3")
+    elif label == "fading":
+        pressure += 2
+        reasons.append("fading:+2")
+    elif label == "rangebound":
+        pressure += 1
+        reasons.append("rangebound:+1")
+    elif label in ("strong_uptrend", "developing_uptrend"):
+        pressure -= 2
+        reasons.append(f"{label}:-2")
+
+    if score <= -6:
+        pressure += 3
+        reasons.append("score<=-6:+3")
+    elif score <= -4:
+        pressure += 2
+        reasons.append("score<=-4:+2")
+    elif score <= -2:
+        pressure += 1
+        reasons.append("score<=-2:+1")
+    elif score >= 5:
+        pressure -= 2
+        reasons.append("score>=5:-2")
+
+    if m15 < -0.20:
+        pressure += 2
+        reasons.append("15m_negative:+2")
+    elif m15 > 0.20:
+        pressure -= 1
+        reasons.append("15m_positive:-1")
+
+    if m30 < -0.30:
+        pressure += 2
+        reasons.append("30m_negative:+2")
+    elif m30 > 0.30:
+        pressure -= 1
+        reasons.append("30m_positive:-1")
+
+    if m5 > 0.10:
+        pressure -= 1
+        reasons.append("5m_recovering:-1")
+    elif m5 < -0.20:
+        pressure += 1
+        reasons.append("5m_falling:+1")
+
+    if vwap_dist < -0.50:
+        pressure += 2
+        reasons.append("below_vwap_deep:+2")
+    elif vwap_dist < -0.10:
+        pressure += 1
+        reasons.append("below_vwap:+1")
+    elif vwap_dist > 0.25:
+        pressure -= 1
+        reasons.append("above_vwap:-1")
+
+    if high_water >= 0.75 and giveback >= 0.50:
+        pressure += 3
+        reasons.append("profit_giveback:+3")
+    elif high_water >= 0.50 and giveback >= 0.35:
+        pressure += 2
+        reasons.append("small_profit_giveback:+2")
+
+    if unrealized_plpc <= -1.00:
+        pressure += 3
+        reasons.append("loss<=-1.00:+3")
+    elif unrealized_plpc <= -0.75:
+        pressure += 2
+        reasons.append("loss<=-0.75:+2")
+    elif unrealized_plpc <= -0.35:
+        pressure += 1
+        reasons.append("loss<=-0.35:+1")
+    elif unrealized_plpc >= 0.75:
+        pressure += 1
+        reasons.append("profit_at_risk:+1")
+
+    if negative_windows >= 3:
+        pressure += 2
+        reasons.append("three_negative_windows:+2")
+    elif negative_windows >= 2:
+        pressure += 1
+        reasons.append("two_negative_windows:+1")
+
+    if pressure >= 10:
+        recommendation = "full_sell_candidate"
+    elif pressure >= 6:
+        recommendation = "partial_sell_candidate"
+    elif pressure >= 3:
+        recommendation = "watch"
+    else:
+        recommendation = "hold"
+
+    # Dampener: avoid overreacting to tiny P/L noise.
+    # A mild fade around flat P/L should remain watch unless pressure is extreme.
+    if -0.25 < unrealized_plpc < 0.25 and pressure < 12:
+        recommendation = "watch" if pressure >= 3 else "hold"
+        reasons.append("tiny_pl_noise_dampener")
+
+    return {
+        "sell_pressure_score": pressure,
+        "sell_pressure_recommendation": recommendation,
+        "sell_pressure_reason": ",".join(reasons),
+        "high_water_plpc": round(high_water, 4),
+        "giveback_plpc": round(giveback, 4),
+        "negative_windows": negative_windows,
+    }
 
 
 def evaluate_position_momentum(position: Any, session: dict[str, Any] | None) -> dict[str, Any]:
@@ -156,10 +297,24 @@ def evaluate_position_momentum(position: Any, session: dict[str, Any] | None) ->
     # Strong sell candidate:
     # The whole session has rolled over, intermediate momentum is negative,
     # and price is below VWAP. This is intentionally conservative.
-    
+
+    high_water_plpc = get_position_high_water_plpc(symbol)
+    sell_pressure = evaluate_sell_pressure(
+        label=label,
+        score=score,
+        m5=m5,
+        m15=m15,
+        m30=m30,
+        vwap_dist=vwap_dist,
+        session_return=session_return,
+        unrealized_pl=unrealized_pl,
+        unrealized_plpc=unrealized_plpc,
+        high_water_plpc=high_water_plpc,
+    )
+
     position_losing = unrealized_pl < 0 or unrealized_plpc < -0.25
     profit_giveback_risk = unrealized_plpc > 0 and m15 < -0.35 and m30 < -0.50
-    negative_windows = sum(1 for value in (m5, m15, m30) if value < 0)
+    negative_windows = sell_pressure.get("negative_windows", 0)
 
     # Failed high-run continuation:
     # Catches positions that were entered into a very strong intraday runner,
@@ -189,6 +344,9 @@ def evaluate_position_momentum(position: Any, session: dict[str, Any] | None) ->
             "severity": "failed_continuation",
             "label": label,
             "score": score,
+            "sell_pressure_score": sell_pressure.get("sell_pressure_score"),
+            "sell_pressure_recommendation": sell_pressure.get("sell_pressure_recommendation"),
+            "sell_pressure_reason": sell_pressure.get("sell_pressure_reason"),
             "momentum_5m_pct": m5,
             "momentum_15m_pct": m15,
             "momentum_30m_pct": m30,
@@ -205,14 +363,8 @@ def evaluate_position_momentum(position: Any, session: dict[str, Any] | None) ->
     # Trailing high-water profit protection:
     # Protects positions that were meaningfully profitable earlier but are now
     # giving back gains as momentum rolls over.
-    high_water_plpc = get_position_high_water_plpc(symbol)
-
-    if high_water_plpc is None:
-        high_water_plpc = unrealized_plpc
-    else:
-        high_water_plpc = max(high_water_plpc, unrealized_plpc)
-
-    giveback_plpc = high_water_plpc - unrealized_plpc
+    high_water_plpc = sell_pressure.get("high_water_plpc", unrealized_plpc)
+    giveback_plpc = sell_pressure.get("giveback_plpc", 0.0)
 
     trailing_profit_min_pct = float(os.getenv("POSITION_MOMENTUM_TRAILING_PROFIT_MIN_PCT", "0.75"))
     trailing_giveback_pct = float(os.getenv("POSITION_MOMENTUM_TRAILING_GIVEBACK_PCT", "0.50"))
@@ -230,6 +382,9 @@ def evaluate_position_momentum(position: Any, session: dict[str, Any] | None) ->
             "severity": "profit_protection",
             "label": label,
             "score": score,
+            "sell_pressure_score": sell_pressure.get("sell_pressure_score"),
+            "sell_pressure_recommendation": sell_pressure.get("sell_pressure_recommendation"),
+            "sell_pressure_reason": sell_pressure.get("sell_pressure_reason"),
             "reason": (
                 f"profit protection trailing_giveback: label={label} score={score} "
                 f"high_water_plpc={high_water_plpc:.2f}% "
@@ -242,19 +397,32 @@ def evaluate_position_momentum(position: Any, session: dict[str, Any] | None) ->
         }
 
 
-    if (
+    hard_negative_signal = (
         (label == "downtrend" or score <= -5)
         and m15 < -0.20
         and m30 < -0.30
         and vwap_dist < -0.15
-        and (position_losing or profit_giveback_risk)
-    ):
+    )
+
+    hard_negative_loss_floor_pct = float(
+        os.getenv("POSITION_MOMENTUM_HARD_NEGATIVE_LOSS_FLOOR_PCT", "-0.50")
+    )
+
+    hard_negative_actionable = (
+        unrealized_plpc <= hard_negative_loss_floor_pct
+        or profit_giveback_risk
+    )
+
+    if hard_negative_signal and hard_negative_actionable:
         return {
             "symbol": symbol,
             "action": "sell_candidate",
             "severity": "hard_negative",
             "label": label,
             "score": score,
+            "sell_pressure_score": sell_pressure.get("sell_pressure_score"),
+            "sell_pressure_recommendation": sell_pressure.get("sell_pressure_recommendation"),
+            "sell_pressure_reason": sell_pressure.get("sell_pressure_reason"),
             "momentum_5m_pct": m5,
             "momentum_15m_pct": m15,
             "momentum_30m_pct": m30,
@@ -313,6 +481,9 @@ def evaluate_position_momentum(position: Any, session: dict[str, Any] | None) ->
             "severity": "profit_protection",
             "label": label,
             "score": score,
+            "sell_pressure_score": sell_pressure.get("sell_pressure_score"),
+            "sell_pressure_recommendation": sell_pressure.get("sell_pressure_recommendation"),
+            "sell_pressure_reason": sell_pressure.get("sell_pressure_reason"),
             "reason": (
                 f"profit protection {profit_protection_tier}: label={label} score={score} "
                 f"negative_windows={negative_windows} session={session_return}% "
@@ -337,6 +508,9 @@ def evaluate_position_momentum(position: Any, session: dict[str, Any] | None) ->
             "severity": "soft_negative",
             "label": label,
             "score": score,
+            "sell_pressure_score": sell_pressure.get("sell_pressure_score"),
+            "sell_pressure_recommendation": sell_pressure.get("sell_pressure_recommendation"),
+            "sell_pressure_reason": sell_pressure.get("sell_pressure_reason"),
             "reason": (
                 f"label={label} score={score} session={session_return}% "
                 f"5m={m5}% 15m={m15}% 30m={m30}% "
@@ -351,6 +525,9 @@ def evaluate_position_momentum(position: Any, session: dict[str, Any] | None) ->
         "severity": "pass",
         "label": label,
         "score": score,
+        "sell_pressure_score": sell_pressure.get("sell_pressure_score"),
+        "sell_pressure_recommendation": sell_pressure.get("sell_pressure_recommendation"),
+        "sell_pressure_reason": sell_pressure.get("sell_pressure_reason"),
         "reason": (
             f"label={label} score={score} session={session_return}% "
             f"5m={m5}% 15m={m15}% 30m={m30}% "
@@ -358,6 +535,49 @@ def evaluate_position_momentum(position: Any, session: dict[str, Any] | None) ->
             f"unrealized_plpc={unrealized_plpc:.2f}%"
         ),
     }
+
+def maybe_promote_sell_pressure(decision: dict[str, Any], unrealized_plpc: float) -> dict[str, Any]:
+    """
+    Optionally promote extreme sell-pressure recommendations to sell_candidate.
+
+    This keeps the scorer adaptive but controlled:
+    - only active when POSITION_MOMENTUM_USE_SELL_PRESSURE=true
+    - only promotes full_sell_candidate, not partial/watch
+    - requires meaningful unrealized loss
+    - does not override existing sell_candidate decisions
+    """
+    if not POSITION_MOMENTUM_USE_SELL_PRESSURE:
+        return decision
+
+    if decision.get("action") == "sell_candidate":
+        return decision
+
+    score = _to_float(decision.get("sell_pressure_score"), 0)
+    rec = decision.get("sell_pressure_recommendation")
+
+    min_score = float(os.getenv("POSITION_MOMENTUM_SELL_PRESSURE_FULL_SCORE", "12"))
+    max_loss = float(os.getenv("POSITION_MOMENTUM_SELL_PRESSURE_MAX_LOSS_PCT", "-0.75"))
+
+    if (
+        rec == "full_sell_candidate"
+        and score >= min_score
+        and unrealized_plpc <= max_loss
+    ):
+        promoted = dict(decision)
+        original_action = promoted.get("action")
+        original_severity = promoted.get("severity")
+        promoted["action"] = "sell_candidate"
+        promoted["severity"] = "sell_pressure_full_exit"
+        promoted["reason"] = (
+            f"sell pressure promoted {original_action}/{original_severity} to sell_candidate: "
+            f"sell_pressure={score}/{rec}, unrealized_plpc={unrealized_plpc:.2f}%, "
+            f"pressure_reason={decision.get('sell_pressure_reason')}; "
+            f"original_reason={decision.get('reason')}"
+        )
+        return promoted
+
+    return decision
+
 
 def init_position_momentum_table() -> None:
     with get_connection(DB_PATH) as con:
@@ -382,10 +602,25 @@ def init_position_momentum_table() -> None:
                 unrealized_plpc REAL,
                 auto_sell_enabled INTEGER DEFAULT 0,
                 order_submitted INTEGER DEFAULT 0,
-                order_id TEXT
+                order_id TEXT,
+                sell_pressure_score REAL,
+                sell_pressure_recommendation TEXT,
+                sell_pressure_reason TEXT
             )
             """
         )
+
+        existing_cols = {
+            row["name"]
+            for row in con.execute("PRAGMA table_info(position_momentum_checks)").fetchall()
+        }
+        for col_name, col_type in (
+            ("sell_pressure_score", "REAL"),
+            ("sell_pressure_recommendation", "TEXT"),
+            ("sell_pressure_reason", "TEXT"),
+        ):
+            if col_name not in existing_cols:
+                con.execute(f"ALTER TABLE position_momentum_checks ADD COLUMN {col_name} {col_type}")
 
 
 def log_position_momentum_check(position, session, decision, auto_sell_enabled=False, order=None) -> None:
@@ -413,8 +648,11 @@ def log_position_momentum_check(position, session, decision, auto_sell_enabled=F
                 unrealized_plpc,
                 auto_sell_enabled,
                 order_submitted,
-                order_id
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                order_id,
+                sell_pressure_score,
+                sell_pressure_recommendation,
+                sell_pressure_reason
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
@@ -435,6 +673,9 @@ def log_position_momentum_check(position, session, decision, auto_sell_enabled=F
                 1 if auto_sell_enabled else 0,
                 1 if order else 0,
                 order.get("order_id") if isinstance(order, dict) else None,
+                decision.get("sell_pressure_score"),
+                decision.get("sell_pressure_recommendation"),
+                decision.get("sell_pressure_reason"),
             ),
         )
 
@@ -774,6 +1015,10 @@ def main() -> int:
         symbol = position.symbol
         session = get_latest_session_momentum(symbol)
         decision = evaluate_position_momentum(position, session)
+        decision = maybe_promote_sell_pressure(
+            decision,
+            _to_float(getattr(position, "unrealized_plpc", 0)) * 100,
+        )
         order = maybe_execute_auto_sell(position, decision, market_open)
         rows.append((position, session, decision))
         log_position_momentum_check(
@@ -786,11 +1031,13 @@ def main() -> int:
 
     print(
         f"{'Symbol':<6} {'Action':<15} {'Severity':<16} "
-        f"{'Label':<16} {'Score':>5} {'Sess%':>8} {'15m%':>8} {'30m%':>8} {'VWAP%':>8}"
+        f"{'Label':<16} {'Score':>5} {'SPress':>6} {'SRec':<22} "
+        f"{'Sess%':>8} {'15m%':>8} {'30m%':>8} {'VWAP%':>8}"
     )
     print(
         f"{'-'*6} {'-'*15} {'-'*16} "
-        f"{'-'*16} {'-'*5} {'-'*8} {'-'*8} {'-'*8} {'-'*8}"
+        f"{'-'*16} {'-'*5} {'-'*6} {'-'*22} "
+        f"{'-'*8} {'-'*8} {'-'*8} {'-'*8}"
     )
 
     for position, session, decision in rows:
@@ -801,6 +1048,8 @@ def main() -> int:
             f"{decision['severity']:<16} "
             f"{str(session.get('trend_label') or '-'):<16} "
             f"{str(session.get('trend_score') if session.get('trend_score') is not None else '-'):>5} "
+            f"{str(decision.get('sell_pressure_score') if decision.get('sell_pressure_score') is not None else '-'):>6} "
+            f"{str(decision.get('sell_pressure_recommendation') or '-'):<22} "
             f"{str(session.get('session_return_pct') if session.get('session_return_pct') is not None else '-'):>8} "
             f"{str(session.get('momentum_15m_pct') if session.get('momentum_15m_pct') is not None else '-'):>8} "
             f"{str(session.get('momentum_30m_pct') if session.get('momentum_30m_pct') is not None else '-'):>8} "
@@ -818,7 +1067,10 @@ def main() -> int:
     print()
     print("Details:")
     for _, _, decision in rows:
-        print(f"  {decision['symbol']:<6} {decision['action']:<15} {decision['reason']}")
+        pressure = decision.get("sell_pressure_score")
+        rec = decision.get("sell_pressure_recommendation")
+        pressure_part = f" sell_pressure={pressure}/{rec}" if pressure is not None else ""
+        print(f"  {decision['symbol']:<6} {decision['action']:<15} {decision['reason']}{pressure_part}")
 
     return 0
 

@@ -60,6 +60,7 @@ from config import (
     MAX_BUYS_PER_SYMBOL_PER_DAY,
     WEBHOOK_DEDUPE_SECONDS,
     SYMBOL_MARKET_ALIGNMENT,
+    ADAPTIVE_BUY_CONFIRMATION_ENABLED,
 )
 EXECUTION_MODE = os.getenv("EXECUTION_MODE", "paper").strip().lower()
 IS_PAPER_MODE = EXECUTION_MODE == "paper"
@@ -74,6 +75,11 @@ ENFORCE_PREDICTION_WATCH_IN_CASH = True
 ENFORCE_SESSION_MOMENTUM_GATE = os.getenv(
     "ENFORCE_SESSION_MOMENTUM_GATE",
     "false"
+).strip().lower() in ("1", "true", "yes", "on")
+
+ENFORCE_ADAPTIVE_CHURN_REENTRY = os.getenv(
+    "ENFORCE_ADAPTIVE_CHURN_REENTRY",
+    "true"
 ).strip().lower() in ("1", "true", "yes", "on")
 SIGNAL_WORKER_COUNT = int(os.environ.get("SIGNAL_WORKER_COUNT", "3"))
 _signal_executor = ThreadPoolExecutor(
@@ -203,6 +209,9 @@ def _init_db():
             ("setup_policy_reason",  "TEXT"),
             ("setup_confidence_adjustment", "REAL"),
             ("setup_size_multiplier", "REAL"),
+            ("buy_opportunity_score", "REAL"),
+            ("buy_opportunity_recommendation", "TEXT"),
+            ("buy_opportunity_reason", "TEXT"),
         ]
         for col_name, col_type in context_cols:
             if col_name not in existing_cols:
@@ -418,6 +427,348 @@ def _get_recent_favorable_setup(symbol: str) -> dict | None:
         "observed_at": observed_at_raw,
         "age_minutes": age_minutes,
     }
+
+def _buy_opportunity_sizing_enabled() -> bool:
+    return os.getenv("BUY_OPPORTUNITY_SIZING_ENABLED", "false").strip().lower() in (
+        "1", "true", "yes", "on"
+    )
+
+
+def _env_float(name: str, default: float) -> float:
+    try:
+        return float(os.getenv(name, str(default)))
+    except Exception:
+        return default
+
+
+def _apply_buy_opportunity_sizing(
+    *,
+    symbol: str,
+    action: str,
+    base_position_size_pct: float,
+    risk_multiplier: float,
+    account_state: dict,
+) -> float:
+    """
+    Live adaptive BUY sizing.
+
+    This does not approve trades that would otherwise be rejected.
+    It only caps/reduces size on trades that already passed the existing gates.
+    """
+    base_position_size_pct = float(base_position_size_pct or 0)
+    risk_multiplier = float(risk_multiplier or 1.0)
+    adjusted = base_position_size_pct * risk_multiplier
+
+    if action != "buy":
+        return adjusted
+
+    buy_opp = (account_state or {}).get("buy_opportunity") or {}
+
+    if not _buy_opportunity_sizing_enabled():
+        account_state["buy_opportunity_sizing"] = {
+            "enabled": False,
+            "original_pct": adjusted,
+            "final_pct": adjusted,
+            "reason": "BUY opportunity sizing disabled",
+        }
+        return adjusted
+
+    score_raw = buy_opp.get("buy_opportunity_score")
+    rec = buy_opp.get("buy_opportunity_recommendation")
+
+    try:
+        score = float(score_raw)
+    except Exception:
+        score = None
+
+    small_cap = _env_float("BUY_OPPORTUNITY_SMALL_CAP_PCT", 1.25)
+    watch_cap = _env_float("BUY_OPPORTUNITY_WATCH_CAP_PCT", 0.75)
+    avoid_cap = _env_float("BUY_OPPORTUNITY_AVOID_CAP_PCT", 0.50)
+
+    cap = None
+    bucket = "unscored"
+
+    if rec == "strong_buy_candidate" or (score is not None and score >= 10):
+        bucket = "strong_buy_candidate"
+        cap = None
+    elif rec == "small_buy_candidate" or (score is not None and score >= 7):
+        bucket = "small_buy_candidate"
+        cap = small_cap
+    elif rec == "watch" or (score is not None and score >= 4):
+        bucket = "watch"
+        cap = watch_cap
+    elif rec == "avoid" or score is not None:
+        bucket = "avoid"
+        cap = avoid_cap
+    else:
+        # If the score is missing, do not alter size. Missing score should not
+        # silently penalize a trade while this layer is still new.
+        account_state["buy_opportunity_sizing"] = {
+            "enabled": True,
+            "bucket": bucket,
+            "score": score,
+            "recommendation": rec,
+            "original_pct": adjusted,
+            "final_pct": adjusted,
+            "reason": "BUY opportunity score missing; size unchanged",
+        }
+        return adjusted
+
+    final_pct = min(adjusted, cap) if cap is not None else adjusted
+
+    account_state["buy_opportunity_sizing"] = {
+        "enabled": True,
+        "bucket": bucket,
+        "score": score,
+        "recommendation": rec,
+        "original_pct": round(adjusted, 4),
+        "cap_pct": cap,
+        "final_pct": round(final_pct, 4),
+        "reason": (
+            f"BUY opportunity sizing bucket={bucket}, score={score}, "
+            f"rec={rec}, original={adjusted:.3f}, cap={cap}, final={final_pct:.3f}"
+        ),
+    }
+
+    logger.warning(
+        f"BUY opportunity sizing for {symbol}: "
+        f"bucket={bucket} score={score} rec={rec} "
+        f"original_pct={adjusted:.3f} cap={cap} final_pct={final_pct:.3f}"
+    )
+
+    return final_pct
+
+
+
+def evaluate_buy_opportunity(
+    *,
+    trend,
+    setup_obs,
+    bias_entry,
+    macro_risk,
+    session_momentum,
+    momentum,
+    prediction_gate=None,
+    recent_favorable_setup=None,
+    adaptive_buy_confirmation=None,
+):
+    """
+    Observe-only BUY opportunity score.
+
+    This does not approve/reject trades. It converts available evidence into an
+    explainable score so we can later use it for adaptive sizing and watch logic.
+    """
+    score = 0
+    reasons = []
+
+    trend = trend or {}
+    setup_obs = setup_obs or {}
+    bias_entry = bias_entry or {}
+    macro_risk = macro_risk or {}
+    session_momentum = session_momentum or {}
+    momentum = momentum or {}
+    prediction_gate = prediction_gate or {}
+    adaptive_buy_confirmation = adaptive_buy_confirmation or {}
+
+    trend_direction = trend.get("direction")
+    trend_strength = trend.get("strength")
+    consecutive_count = int(trend.get("consecutive_count") or 0)
+
+    if trend_direction == "bullish":
+        score += 2
+        reasons.append("bullish_trend:+2")
+    elif trend_direction == "bearish":
+        score -= 3
+        reasons.append("bearish_trend:-3")
+    else:
+        score -= 1
+        reasons.append("non_bullish_trend:-1")
+
+    if trend_strength == "confirmed":
+        score += 2
+        reasons.append("confirmed_trend:+2")
+    elif trend_strength == "developing":
+        score += 1
+        reasons.append("developing_trend:+1")
+    elif trend_strength == "weak":
+        score -= 1
+        reasons.append("weak_trend:-1")
+
+    if consecutive_count >= 4:
+        score += 2
+        reasons.append("4plus_buy_confirmations:+2")
+    elif consecutive_count >= 2:
+        score += 1
+        reasons.append("2plus_buy_confirmations:+1")
+
+    required_confirmations = int(
+        adaptive_buy_confirmation.get("required_buy_confirmations") or 3
+    )
+    if required_confirmations == 2:
+        score += 1
+        reasons.append("adaptive_fast_lane:+1")
+    elif required_confirmations >= 4:
+        score -= 1
+        reasons.append("adaptive_caution_required4:-1")
+
+    session_label = session_momentum.get("trend_label")
+    session_score = float(session_momentum.get("trend_score") or 0)
+    session_15m = float(session_momentum.get("momentum_15m_pct") or 0)
+    session_30m = float(session_momentum.get("momentum_30m_pct") or 0)
+    session_vwap = float(session_momentum.get("distance_from_vwap_pct") or 0)
+
+    if session_label == "strong_uptrend" or session_score >= 6:
+        score += 3
+        reasons.append("strong_session_momentum:+3")
+    elif session_label == "developing_uptrend" or session_score >= 3:
+        score += 2
+        reasons.append("developing_session_momentum:+2")
+    elif session_label in ("fading", "downtrend") or session_score <= -3:
+        score -= 3
+        reasons.append("negative_session_momentum:-3")
+
+    if session_15m > 0 and session_30m > 0:
+        score += 2
+        reasons.append("15m_30m_positive:+2")
+    elif session_15m < 0 and session_30m < 0:
+        score -= 2
+        reasons.append("15m_30m_negative:-2")
+
+    if session_vwap > 0.25:
+        score += 1
+        reasons.append("above_vwap:+1")
+    elif session_vwap < -0.25:
+        score -= 1
+        reasons.append("below_vwap:-1")
+
+    setup_label = setup_obs.get("setup_label")
+    setup_action = setup_obs.get("setup_policy_action")
+
+    if setup_action == "boost":
+        score += 3
+        reasons.append("setup_boost:+3")
+    elif setup_action in ("allow", "neutral"):
+        score += 1
+        reasons.append("setup_allows:+1")
+    elif setup_action == "block":
+        score -= 4
+        reasons.append("setup_block:-4")
+
+    favorable_setups = {
+        "confirmed_near_vwap_recovery",
+        "near_vwap_weak_strength_followthrough",
+        "oversold_weak_bounce_watch",
+        "above_vwap_strength_continuation",
+        "balanced_transition_state",
+    }
+
+    risky_setups = {
+        "avoid_stretched_above_vwap_strength",
+        "avoid_far_below_vwap_chase",
+        "avoid_below_vwap_weak_drift",
+        "below_vwap_neutral_drift_risk",
+        "late_strength_near_vwap_risk",
+    }
+
+    if setup_label in favorable_setups:
+        score += 2
+        reasons.append(f"favorable_setup:{setup_label}:+2")
+    elif setup_label in risky_setups:
+        score -= 2
+        reasons.append(f"risky_setup:{setup_label}:-2")
+
+    if recent_favorable_setup:
+        score += 1
+        reasons.append("recent_favorable_setup:+1")
+
+    bias = bias_entry.get("bias")
+    risk_level = bias_entry.get("risk_level")
+    entry_quality = bias_entry.get("entry_quality")
+
+    if bias == "buy":
+        score += 2
+        reasons.append("market_bias_buy:+2")
+    elif bias == "avoid":
+        score -= 4
+        reasons.append("market_bias_avoid:-4")
+
+    if risk_level == "low":
+        score += 1
+        reasons.append("low_risk:+1")
+    elif risk_level == "high":
+        score -= 1
+        reasons.append("high_risk:-1")
+    elif risk_level == "very_high":
+        score -= 3
+        reasons.append("very_high_risk:-3")
+
+    if entry_quality in ("excellent", "good_on_pullbacks", "good_if_holds_gap", "good_if_breadth_holds"):
+        score += 2
+        reasons.append(f"good_entry_quality:{entry_quality}:+2")
+    elif entry_quality in ("tactical_only", "conditional", "hedge_only"):
+        score -= 1
+        reasons.append(f"limited_entry_quality:{entry_quality}:-1")
+    elif entry_quality in ("do_not_chase", "avoid_chasing", "poor"):
+        score -= 4
+        reasons.append(f"poor_entry_quality:{entry_quality}:-4")
+
+    macro_regime = macro_risk.get("macro_regime")
+    risk_multiplier = float(macro_risk.get("risk_multiplier") or 1.0)
+
+    if macro_regime in ("risk_on", "bullish"):
+        score += 2
+        reasons.append("macro_risk_on:+2")
+    elif macro_regime in ("caution", "mixed", "neutral"):
+        score += 0
+        reasons.append(f"macro_{macro_regime}:0")
+    elif macro_regime in ("defensive", "capital_preservation"):
+        score -= 3
+        reasons.append(f"macro_{macro_regime}:-3")
+
+    if risk_multiplier < 1.0:
+        score -= 1
+        reasons.append("macro_risk_multiplier_below_1:-1")
+
+    pred_score = prediction_gate.get("prediction_score")
+    pred_decision = prediction_gate.get("prediction_decision")
+    if pred_score is not None:
+        try:
+            pred_score = int(pred_score)
+            if pred_score >= 8:
+                score += 2
+                reasons.append("prediction_score>=8:+2")
+            elif pred_score >= 6:
+                score += 1
+                reasons.append("prediction_score>=6:+1")
+            elif pred_decision == "block":
+                score -= 3
+                reasons.append("prediction_block:-3")
+        except Exception:
+            pass
+
+    raw_momentum_direction = momentum.get("direction")
+    if raw_momentum_direction == "rising":
+        score += 1
+        reasons.append("short_momentum_rising:+1")
+    elif raw_momentum_direction == "falling":
+        score -= 1
+        reasons.append("short_momentum_falling:-1")
+
+    if score >= 10:
+        recommendation = "strong_buy_candidate"
+    elif score >= 7:
+        recommendation = "small_buy_candidate"
+    elif score >= 4:
+        recommendation = "watch"
+    else:
+        recommendation = "avoid"
+
+    return {
+        "buy_opportunity_score": score,
+        "buy_opportunity_recommendation": recommendation,
+        "buy_opportunity_reason": ",".join(reasons),
+    }
+
 
 def evaluate_prediction_gate(
     *,
@@ -1218,6 +1569,9 @@ def log_trade(signal, decision, order, account_state=None):
             "setup_policy_reason",
             "setup_confidence_adjustment",
             "setup_size_multiplier",
+            "buy_opportunity_score",
+            "buy_opportunity_recommendation",
+            "buy_opportunity_reason",
         ]
 
         values = [
@@ -1265,6 +1619,9 @@ def log_trade(signal, decision, order, account_state=None):
             setup_obs.get("setup_policy_reason"),
             setup_obs.get("setup_confidence_adjustment"),
             setup_obs.get("setup_size_multiplier"),
+            (account_state or {}).get("buy_opportunity", {}).get("buy_opportunity_score"),
+            (account_state or {}).get("buy_opportunity", {}).get("buy_opportunity_recommendation"),
+            (account_state or {}).get("buy_opportunity", {}).get("buy_opportunity_reason"),
         ]
 
         placeholders = ", ".join(["?"] * len(values))
@@ -1573,16 +1930,43 @@ def _required_buy_confirmations(symbol, account_state=None):
         required = 3
         reasons = ["base requirement is 3 BUY confirmations"]
 
-        # Best-case fast lane: only for clean setups.
-        if (
-            macro_regime == "risk_on"
+        # Best-case fast lane: allow 2 BUY confirmations for clean, high-quality setups.
+        #
+        # This is intentionally narrow:
+        # - Never active in defensive/capital-preservation regimes.
+        # - Requires same-day market_bias=buy.
+        # - Requires low/medium symbol risk.
+        # - Requires clean entry quality.
+        # - Does not allow obvious benchmark/symbol avoid or bearish alignment.
+        setup_obs = account_state.get("setup_observation") or {}
+        setup_policy_action = setup_obs.get("setup_policy_action")
+        alignment_reason = str(alignment.get("reason", "")).lower()
+
+        alignment_hard_negative = (
+            "benchmark avoid" in alignment_reason
+            or "benchmark bearish" in alignment_reason
+            or "symbol avoid" in alignment_reason
+        )
+
+        # If setup observation is missing, do not automatically disqualify an otherwise
+        # clean pre-market fast-lane candidate. Missing setup data is treated as neutral,
+        # not as a block. Explicit setup_policy_action="block" still prevents fast lane.
+        setup_allows_fast_lane = setup_policy_action in (None, "", "boost", "allow", "neutral", "not_applicable")
+
+        fast_lane_eligible = (
+            macro_regime in ("risk_on", "bullish", "normal", "caution", "mixed", "neutral")
             and market_bias == "buy"
-            and entry_quality in ("excellent", "good_on_pullbacks")
+            and entry_quality in ("excellent", "good_on_pullbacks", "good_if_holds_gap", "good_if_breadth_holds")
             and risk_level in ("low", "medium")
-            and aligned_for_buy is True
-        ):
+            and setup_allows_fast_lane
+            and not alignment_hard_negative
+        )
+
+        if fast_lane_eligible:
             required = 2
-            reasons.append("reduced to 2: risk_on + buy bias + high-quality entry + aligned market")
+            reasons.append(
+                "reduced to 2: clean buy-bias setup with low/medium risk and no hard benchmark conflict"
+            )
 
         # Risk tightening.
         if risk_level == "very_high":
@@ -1602,8 +1986,18 @@ def _required_buy_confirmations(symbol, account_state=None):
             reasons.append(f"raised to 4: macro_regime={macro_regime}")
 
         if aligned_for_buy is False:
-            required = max(required, 4)
-            reasons.append("raised to 4: market alignment caution")
+            if fast_lane_eligible:
+                reasons.append("kept at 2: fast-lane setup allowed despite soft alignment caution")
+            elif (
+                risk_level in ("high", "very_high")
+                or entry_quality in ("tactical_only", "conditional", "do_not_chase", "avoid_chasing", "poor")
+                or macro_regime in ("defensive", "capital_preservation")
+            ):
+                required = max(required, 4)
+                reasons.append("raised to 4: market alignment caution plus elevated symbol/setup risk")
+            else:
+                required = max(required, 3)
+                reasons.append("kept at 3: market alignment caution without elevated symbol/setup risk")
 
         return {
             "required_buy_confirmations": required,
@@ -2479,6 +2873,82 @@ def _count_second_look_blocks_today(symbol):
         logger.warning(f"Failed to count second-look blocks for {symbol}: {e}")
         return 0
 
+def _adaptive_churn_reentry_allowed(symbol, signal_price, last_sell_price, account_state):
+    """
+    Return (allowed, reason) for a BUY near the last sell price.
+
+    Default behavior remains conservative. This only allows re-entry when live
+    evidence suggests the new signal is a legitimate continuation/recovery setup
+    rather than chop around the prior exit.
+    """
+    if not ENFORCE_ADAPTIVE_CHURN_REENTRY:
+        return False, "adaptive churn re-entry disabled"
+
+    try:
+        signal_price = float(signal_price)
+        last_sell_price = float(last_sell_price)
+    except (TypeError, ValueError):
+        return False, "invalid signal/last-sell price"
+
+    if signal_price <= 0 or last_sell_price <= 0:
+        return False, "invalid signal/last-sell price"
+
+    price_vs_last_sell_pct = (signal_price - last_sell_price) / last_sell_price * 100
+
+    # Do not re-enter below the prior sell. That is more likely churn than improvement.
+    if price_vs_last_sell_pct < 0:
+        return False, f"signal below last sell by {price_vs_last_sell_pct:.3f}%"
+
+    trend = _trend_table.get(symbol) or {}
+    trend_direction = trend.get("direction")
+    trend_strength = trend.get("strength")
+    consecutive_count = int(trend.get("consecutive_count") or 0)
+    last_signal = trend.get("last_signal")
+
+    setup_obs = (account_state or {}).get("setup_observation") or {}
+    setup_label = setup_obs.get("setup_label")
+    setup_policy_action = setup_obs.get("setup_policy_action")
+
+    recent_favorable_setup = (account_state or {}).get("recent_favorable_setup")
+
+    favorable_setup = (
+        setup_policy_action in ("boost", "allow")
+        or _is_favorable_setup_label(setup_label)
+        or bool(recent_favorable_setup)
+    )
+
+    trend_ok = (
+        trend_direction == "bullish"
+        and last_signal == "buy"
+        and consecutive_count >= 3
+        and trend_strength in ("developing", "confirmed")
+    )
+
+    if trend_ok and favorable_setup:
+        return (
+            True,
+            "adaptive churn re-entry allowed: "
+            f"price_vs_last_sell={price_vs_last_sell_pct:.3f}%, "
+            f"trend={trend_direction}/{trend_strength}, "
+            f"count={consecutive_count}, "
+            f"setup_label={setup_label}, "
+            f"setup_policy_action={setup_policy_action}, "
+            f"recent_favorable_setup={bool(recent_favorable_setup)}"
+        )
+
+    return (
+        False,
+        "adaptive churn re-entry not strong enough: "
+        f"price_vs_last_sell={price_vs_last_sell_pct:.3f}%, "
+        f"trend={trend_direction}/{trend_strength}, "
+        f"count={consecutive_count}, "
+        f"last_signal={last_signal}, "
+        f"setup_label={setup_label}, "
+        f"setup_policy_action={setup_policy_action}, "
+        f"recent_favorable_setup={bool(recent_favorable_setup)}"
+    )
+
+
 def _count_second_look_blocks_today(symbol):
     today = datetime.now().strftime("%Y-%m-%d")
 
@@ -2921,9 +3391,32 @@ def process_signal(data):
             if last_sell_price > 0:
                 price_diff_pct = abs(price - last_sell_price) / last_sell_price * 100
                 if price_diff_pct < 0.5:
-                    reason = f"signal ${price:.2f} within {price_diff_pct:.2f}% of last sell ${last_sell_price:.2f}"
-                    if _reject_current_signal("churn_price", reason):
-                        return
+                    allowed, adaptive_reason = _adaptive_churn_reentry_allowed(
+                        symbol=symbol,
+                        signal_price=price,
+                        last_sell_price=last_sell_price,
+                        account_state=account_state,
+                    )
+
+                    if allowed:
+                        account_state["adaptive_churn_reentry"] = {
+                            "allowed": True,
+                            "price_diff_pct": round(price_diff_pct, 4),
+                            "last_sell_price": last_sell_price,
+                            "reason": adaptive_reason,
+                        }
+                        logger.warning(
+                            f"Adaptive churn re-entry override for {symbol} BUY: "
+                            f"signal ${price:.2f} within {price_diff_pct:.2f}% of last sell "
+                            f"${last_sell_price:.2f}; {adaptive_reason}"
+                        )
+                    else:
+                        reason = (
+                            f"signal ${price:.2f} within {price_diff_pct:.2f}% of last sell "
+                            f"${last_sell_price:.2f}; {adaptive_reason}"
+                        )
+                        if _reject_current_signal("churn_price", reason):
+                            return
 
     # Daily symbol buy limit: prevent repeated same-symbol accumulation from alert storms.
     # Allows initial entry plus one add by default.
@@ -2961,6 +3454,41 @@ def process_signal(data):
 
         if cluster_checks:
             account_state["correlation_exposure"] = cluster_checks
+
+    # Observe-only BUY opportunity score before macro position-limit checks.
+    # This ensures macro_position_limit rejections still get scored for replacement intelligence.
+    if action == "buy" and "buy_opportunity" not in account_state:
+        try:
+            trend = _trend_table.get(symbol) or {}
+            bias_entry = _market_bias.get(symbol) or {}
+            setup_obs = account_state.get("setup_observation") or {}
+            momentum = account_state.get("momentum") or {}
+            recent_favorable_setup = account_state.get("recent_favorable_setup")
+
+            adaptive_confirmation = _required_buy_confirmations(symbol, account_state)
+            account_state["adaptive_buy_confirmation"] = adaptive_confirmation
+
+            early_buy_opportunity = evaluate_buy_opportunity(
+                trend=trend,
+                setup_obs=setup_obs,
+                bias_entry=bias_entry,
+                macro_risk=account_state.get("macro_risk") or {},
+                session_momentum=account_state.get("session_momentum") or {},
+                momentum=momentum,
+                prediction_gate={},
+                recent_favorable_setup=recent_favorable_setup,
+                adaptive_buy_confirmation=adaptive_confirmation,
+            )
+            account_state["buy_opportunity"] = early_buy_opportunity
+
+            logger.info(
+                f"BUY opportunity pre-macro for {symbol}: "
+                f"score={early_buy_opportunity.get('buy_opportunity_score')} "
+                f"recommendation={early_buy_opportunity.get('buy_opportunity_recommendation')} "
+                f"reason={early_buy_opportunity.get('buy_opportunity_reason')}"
+            )
+        except Exception as e:
+            logger.warning(f"BUY opportunity pre-macro scoring failed for {symbol}: {e}")
 
     # Macro-risk gate: regime-aware risk control before Claude
     macro_risk = get_macro_risk(Path(__file__).parent)
@@ -3025,6 +3553,51 @@ def process_signal(data):
                     f"return={candidate_return}% vwap_dist={candidate_vwap}%; "
                     f"weakest_holding=unknown"
                 )
+            # Direct observe-only BUY opportunity score for macro_position_limit rejects.
+            # This refreshes the candidate score after candidate_session is loaded,
+            # so replacement intelligence uses live session momentum.
+            if True:
+                try:
+                    trend = _trend_table.get(symbol) or {}
+                    bias_entry = _market_bias.get(symbol) or {}
+                    setup_obs = account_state.get("setup_observation") or {}
+                    momentum = account_state.get("momentum") or {}
+                    recent_favorable_setup = account_state.get("recent_favorable_setup")
+
+                    adaptive_confirmation = _required_buy_confirmations(symbol, account_state)
+                    account_state["adaptive_buy_confirmation"] = adaptive_confirmation
+
+                    macro_limit_buy_opportunity = evaluate_buy_opportunity(
+                        trend=trend,
+                        setup_obs=setup_obs,
+                        bias_entry=bias_entry,
+                        macro_risk=account_state.get("macro_risk") or {},
+                        session_momentum=account_state.get("session_momentum") or {},
+                        momentum=momentum,
+                        prediction_gate={},
+                        recent_favorable_setup=recent_favorable_setup,
+                        adaptive_buy_confirmation=adaptive_confirmation,
+                    )
+                    account_state["buy_opportunity"] = macro_limit_buy_opportunity
+
+                    macro_buy_score = macro_limit_buy_opportunity.get("buy_opportunity_score")
+                    macro_buy_rec = macro_limit_buy_opportunity.get("buy_opportunity_recommendation")
+
+                    # Add score/rec directly to rejection reason as a durable fallback for reporting.
+                    reason = (
+                        f"{reason}; buy_score={macro_buy_score}; "
+                        f"buy_rec={macro_buy_rec}"
+                    )
+
+                    logger.warning(
+                        f"BUY opportunity macro-limit for {symbol}: "
+                        f"score={macro_buy_score} "
+                        f"recommendation={macro_buy_rec} "
+                        f"reason={macro_limit_buy_opportunity.get('buy_opportunity_reason')}"
+                    )
+                except Exception as e:
+                    logger.warning(f"BUY opportunity macro-limit scoring failed for {symbol}: {e}")
+
             if _reject_current_signal("macro_position_limit", reason):
                 return
 
@@ -3075,11 +3648,17 @@ def process_signal(data):
                 f"consecutive_buy_count={consecutive_count} "
                 f"< required={required_buy_confirmations} "
                 f"strength={strength} "
-                f"flip_event={trend.get('flip_event')}"
+                f"flip_event={trend.get('flip_event')} "
+                f"adaptive_reason={adaptive_confirmation.get('reason')}"
             )
-            logger.info(
-                f"Trend confirmation BUY observe-only for {symbol}: {reason}"
-            )
+
+            if ADAPTIVE_BUY_CONFIRMATION_ENABLED:
+                if _reject_current_signal("trend_confirmation", reason):
+                    return
+            else:
+                logger.info(
+                    f"Trend confirmation BUY observe-only for {symbol}: {reason}"
+                )
 
     if action == "sell":
         trend = _trend_table.get(symbol) or {}
@@ -3296,6 +3875,26 @@ def process_signal(data):
             f"reason={prediction_gate.get('prediction_reason')}"
         )
 
+        buy_opportunity = evaluate_buy_opportunity(
+            trend=trend,
+            setup_obs=setup_obs,
+            bias_entry=bias_entry,
+            macro_risk=account_state.get("macro_risk") or {},
+            session_momentum=account_state.get("session_momentum") or {},
+            momentum=momentum,
+            prediction_gate=prediction_gate,
+            recent_favorable_setup=recent_favorable_setup,
+            adaptive_buy_confirmation=account_state.get("adaptive_buy_confirmation") or {},
+        )
+        account_state["buy_opportunity"] = buy_opportunity
+
+        logger.info(
+            f"BUY opportunity for {symbol}: "
+            f"score={buy_opportunity.get('buy_opportunity_score')} "
+            f"recommendation={buy_opportunity.get('buy_opportunity_recommendation')} "
+            f"reason={buy_opportunity.get('buy_opportunity_reason')}"
+        )
+
         prediction_decision = prediction_gate.get("prediction_decision")
 
         bias_override = _live_bias_override(
@@ -3478,7 +4077,7 @@ def process_signal(data):
             logger.info(f"APPROVED: {symbol} {action.upper()} - {approved_reason}")
 
             risk_multiplier = float(account_state.get("macro_risk", {}).get("risk_multiplier", 1.0))
-            adjusted_position_size_pct = decision.get("position_size_pct", 1.0) * risk_multiplier
+            adjusted_position_size_pct = float(decision.get("position_size_pct", 1.0) or 1.0) * risk_multiplier
 
             logger.info(
                 f"ORDER PATH START: {symbol} {action.upper()} "
@@ -3558,6 +4157,14 @@ def process_signal(data):
                                 decision["position_size_pct"] = capped_size
                         except Exception as e:
                             logger.warning(f"Failed to apply size override for {symbol}: {e}")
+
+                adjusted_position_size_pct = _apply_buy_opportunity_sizing(
+                    symbol=symbol,
+                    action=action,
+                    base_position_size_pct=decision.get("position_size_pct", 1.0),
+                    risk_multiplier=risk_multiplier,
+                    account_state=account_state,
+                )
 
                 order_result = place_order(
                     symbol=symbol,

@@ -34,11 +34,23 @@ def category(reason):
 
 
 def score_to_100(value):
+    """
+    Normalize opportunity scores to 0-100.
+
+    Current buy_opportunity_score is usually on a 0-16-ish scale.
+    Older/newer policy scores may already be 0-100.
+    """
     try:
         if value is None:
             return None
         v = float(value)
-        return v * 10 if v <= 10 else v
+
+        # Existing buy_opportunity_score range is roughly 0-16.
+        if v <= 20:
+            return v * 6.25
+
+        # Already 0-100.
+        return v
     except Exception:
         return None
 

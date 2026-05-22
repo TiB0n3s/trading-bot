@@ -23,6 +23,11 @@ from trade_matcher import rebuild_matched_trades
 BASE_DIR = Path(__file__).resolve().parent
 OUT_FILE = BASE_DIR / "strategy_memory.json"
 MEMORY_HISTORY_DIR = BASE_DIR / "strategy_memory_history"
+REPORT_MEMORY_FILES = {
+    "missed_opportunity_memory": BASE_DIR / "missed_opportunity_memory.json",
+    "excursion_memory": BASE_DIR / "excursion_memory.json",
+    "policy_backtest_summary": BASE_DIR / "policy_backtest_summary.json",
+}
 MANUAL_OVERRIDES_FILE = BASE_DIR / "manual_strategy_overrides.json"
 
 LOOKBACK_DAYS = 20
@@ -111,6 +116,32 @@ def finalize_bucket(bucket):
         "reason": reason,
     }
 
+
+
+
+def load_report_memories():
+    """Load machine-readable summaries from reports, if present."""
+    out = {}
+    for key, path in REPORT_MEMORY_FILES.items():
+        if not path.exists():
+            out[key] = {
+                "available": False,
+                "reason": f"{path.name} not found",
+            }
+            continue
+
+        try:
+            out[key] = {
+                "available": True,
+                "data": json.loads(path.read_text()),
+            }
+        except Exception as e:
+            out[key] = {
+                "available": False,
+                "reason": f"failed to parse {path.name}: {e}",
+            }
+
+    return out
 
 
 def apply_manual_overrides(memory):
@@ -399,6 +430,7 @@ def main():
             k: finalize_bucket(v)
             for k, v in sorted(by_symbol_context.items())
         },
+        "report_memories": load_report_memories(),
         "trade_count": len(rows),
     }
 

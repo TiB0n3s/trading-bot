@@ -1,18 +1,21 @@
 #!/usr/bin/env python3
 """
-Missed opportunity report.
+Missed Opportunity Report
 
-Read-only analysis of rejected BUY signals:
-- Looks at rejected BUY rows in trades.db
-- Fetches later 1-minute bars from Alpaca
-- Estimates forward return at 15/30/60 minutes
-- Estimates max favorable/adverse excursion after rejection
-- Helps determine whether filters are too strict or protective
+Read-only analysis of rejected BUY signals.
+
+For each rejected BUY signal, this script:
+- Reads the rejected signal from trades.db
+- Fetches forward 1-minute Alpaca IEX bars
+- Calculates 15m / 30m / 60m forward return
+- Calculates max favorable excursion and max adverse excursion
+- Groups results by rejection category and symbol
 
 This does not place, cancel, or modify orders.
 """
 
 import argparse
+import json
 import statistics
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
@@ -25,13 +28,14 @@ from db import DB_PATH, get_connection
 
 
 ET = pytz.timezone("America/New_York")
+BASE_DIR = Path(__file__).resolve().parent
+MISSED_MEMORY_FILE = BASE_DIR / "missed_opportunity_memory.json"
 
 
 def parse_ts(ts):
     if not ts:
         return None
 
-    # trades.db timestamps are generally local naive strings.
     dt = datetime.fromisoformat(str(ts).replace("Z", "+00:00"))
 
     if dt.tzinfo is None:
@@ -48,18 +52,13 @@ def category(reason):
     return "uncategorized"
 
 
-def pct_change(from_price, to_price):
-    if not from_price or not to_price or from_price <= 0:
+def pct_change(start_price, end_price):
+    if not start_price or not end_price or start_price <= 0:
         return None
-    return (to_price - from_price) / from_price * 100.0
+    return (end_price - start_price) / start_price * 100.0
 
 
 def fetch_forward_bars(symbol, ts_utc, minutes=75):
-    """
-    Fetch 1-minute IEX bars after a rejected signal.
-
-    Paper accounts generally support IEX feed better than SIP.
-    """
     start = ts_utc.isoformat()
     end = (ts_utc + timedelta(minutes=minutes + 5)).isoformat()
 
@@ -67,22 +66,19 @@ def fetch_forward_bars(symbol, ts_utc, minutes=75):
     out = []
 
     for b in bars:
-        try:
-            bt = b.t
-            if bt.tzinfo is None:
-                bt = bt.replace(tzinfo=timezone.utc)
-            else:
-                bt = bt.astimezone(timezone.utc)
+        bt = b.t
+        if bt.tzinfo is None:
+            bt = bt.replace(tzinfo=timezone.utc)
+        else:
+            bt = bt.astimezone(timezone.utc)
 
-            out.append({
-                "timestamp": bt,
-                "open": float(b.o),
-                "high": float(b.h),
-                "low": float(b.l),
-                "close": float(b.c),
-            })
-        except Exception:
-            continue
+        out.append({
+            "timestamp": bt,
+            "open": float(b.o),
+            "high": float(b.h),
+            "low": float(b.l),
+            "close": float(b.c),
+        })
 
     return out
 
@@ -94,37 +90,12 @@ def bar_at_or_after(bars, target_ts):
     return None
 
 
-def analyze_rejection(row):
+def analyze_row(row):
     symbol = row["symbol"]
     signal_price = float(row["signal_price"] or 0)
     ts_utc = parse_ts(row["timestamp"])
 
-    if not symbol or signal_price <= 0 or not ts_utc:
-        return None
-
-    try:
-        bars = fetch_forward_bars(symbol, ts_utc, minutes=75)
-    except Exception as e:
-        return {
-            "id": row["id"],
-            "timestamp": row["timestamp"],
-            "symbol": symbol,
-            "category": category(row["rejection_reason"]),
-            "reason": row["rejection_reason"],
-            "error": str(e),
-        }
-
-    if not bars:
-        return {
-            "id": row["id"],
-            "timestamp": row["timestamp"],
-            "symbol": symbol,
-            "category": category(row["rejection_reason"]),
-            "reason": row["rejection_reason"],
-            "error": "no forward bars returned",
-        }
-
-    result = {
+    base = {
         "id": row["id"],
         "timestamp": row["timestamp"],
         "symbol": symbol,
@@ -147,10 +118,23 @@ def analyze_rejection(row):
         "error": None,
     }
 
+    if not symbol or signal_price <= 0 or not ts_utc:
+        base["error"] = "invalid symbol, signal_price, or timestamp"
+        return base
+
+    try:
+        bars = fetch_forward_bars(symbol, ts_utc, minutes=75)
+    except Exception as e:
+        base["error"] = f"bar fetch failed: {e}"
+        return base
+
+    if not bars:
+        base["error"] = "no forward bars returned"
+        return base
+
     for mins in (15, 30, 60):
-        target = ts_utc + timedelta(minutes=mins)
-        b = bar_at_or_after(bars, target)
-        result[f"return_{mins}m_pct"] = (
+        b = bar_at_or_after(bars, ts_utc + timedelta(minutes=mins))
+        base[f"return_{mins}m_pct"] = (
             round(pct_change(signal_price, b["close"]), 3)
             if b else None
         )
@@ -158,31 +142,25 @@ def analyze_rejection(row):
     highs = [b["high"] for b in bars]
     lows = [b["low"] for b in bars]
 
-    mfe_pct = pct_change(signal_price, max(highs)) if highs else None
-    mae_pct = pct_change(signal_price, min(lows)) if lows else None
+    mfe = pct_change(signal_price, max(highs)) if highs else None
+    mae = pct_change(signal_price, min(lows)) if lows else None
 
-    result["mfe_75m_pct"] = round(mfe_pct, 3) if mfe_pct is not None else None
-    result["mae_75m_pct"] = round(mae_pct, 3) if mae_pct is not None else None
+    base["mfe_75m_pct"] = round(mfe, 3) if mfe is not None else None
+    base["mae_75m_pct"] = round(mae, 3) if mae is not None else None
 
-    # Simple classification:
-    # - missed_good: price moved meaningfully favorable after rejection
-    # - good_reject: price moved against or never offered much upside
-    # - mixed: ambiguous
-    ret_30 = result.get("return_30m_pct")
-    mfe = result.get("mfe_75m_pct")
-    mae = result.get("mae_75m_pct")
+    ret_30 = base.get("return_30m_pct")
 
-    if mfe is not None and mfe >= 0.75 and (ret_30 is not None and ret_30 > 0.25):
-        result["missed_classification"] = "missed_good_trade"
+    if mfe is not None and mfe >= 0.75 and ret_30 is not None and ret_30 > 0.25:
+        base["missed_classification"] = "missed_good_trade"
     elif mae is not None and mae <= -0.50 and (ret_30 is None or ret_30 <= 0):
-        result["missed_classification"] = "good_rejection"
+        base["missed_classification"] = "good_rejection"
     else:
-        result["missed_classification"] = "mixed_or_unclear"
+        base["missed_classification"] = "mixed_or_unclear"
 
-    return result
+    return base
 
 
-def load_rejections(target_date, symbol=None, category_filter=None, limit=100):
+def load_rejections(target_date, symbol=None, category_filter=None, limit=80):
     params = [f"{target_date}%"]
     extra = ""
 
@@ -195,7 +173,7 @@ def load_rejections(target_date, symbol=None, category_filter=None, limit=100):
         params.append(f"{category_filter}:%")
 
     with get_connection(DB_PATH) as con:
-        rows = con.execute(f"""
+        return con.execute(f"""
             SELECT
                 id,
                 timestamp,
@@ -230,11 +208,15 @@ def load_rejections(target_date, symbol=None, category_filter=None, limit=100):
             LIMIT ?
         """, params + [limit]).fetchall()
 
-    return rows
+
+def avg(values):
+    values = [v for v in values if v is not None]
+    return statistics.mean(values) if values else 0.0
 
 
 def summarize(results):
     valid = [r for r in results if r and not r.get("error")]
+    errors = [r for r in results if r and r.get("error")]
 
     by_category = defaultdict(list)
     by_symbol = defaultdict(list)
@@ -249,13 +231,15 @@ def summarize(results):
     print("── Summary ───────────────────────────────────────────")
     print(f"Analyzed rows      : {len(results)}")
     print(f"Rows with bar data : {len(valid)}")
-    print(f"Rows with errors   : {len(results) - len(valid)}")
+    print(f"Rows with errors   : {len(errors)}")
 
+    print()
+    print("Classification:")
     if by_class:
-        print()
-        print("Classification:")
         for k, n in sorted(by_class.items(), key=lambda x: -x[1]):
             print(f"  {k:<22} {n}")
+    else:
+        print("  none")
 
     print()
     print("── By rejection category ─────────────────────────────")
@@ -266,16 +250,14 @@ def summarize(results):
         print(f"  {'-'*28} {'-'*4} {'-'*9} {'-'*9} {'-'*9} {'-'*10}")
 
         for cat, rows in sorted(by_category.items(), key=lambda x: -len(x[1])):
-            r30 = [r["return_30m_pct"] for r in rows if r.get("return_30m_pct") is not None]
-            mfe = [r["mfe_75m_pct"] for r in rows if r.get("mfe_75m_pct") is not None]
-            mae = [r["mae_75m_pct"] for r in rows if r.get("mae_75m_pct") is not None]
             missed = sum(1 for r in rows if r.get("missed_classification") == "missed_good_trade")
-
-            avg30 = statistics.mean(r30) if r30 else 0.0
-            avgmfe = statistics.mean(mfe) if mfe else 0.0
-            avgmae = statistics.mean(mae) if mae else 0.0
-
-            print(f"  {cat:<28} {len(rows):>4} {avg30:>9.3f} {avgmfe:>9.3f} {avgmae:>9.3f} {missed:>10}")
+            print(
+                f"  {cat:<28} {len(rows):>4} "
+                f"{avg([r.get('return_30m_pct') for r in rows]):>9.3f} "
+                f"{avg([r.get('mfe_75m_pct') for r in rows]):>9.3f} "
+                f"{avg([r.get('mae_75m_pct') for r in rows]):>9.3f} "
+                f"{missed:>10}"
+            )
 
     print()
     print("── By symbol ─────────────────────────────────────────")
@@ -286,25 +268,19 @@ def summarize(results):
         print(f"  {'-'*8} {'-'*4} {'-'*9} {'-'*9} {'-'*9} {'-'*10}")
 
         for sym, rows in sorted(by_symbol.items(), key=lambda x: -len(x[1]))[:25]:
-            r30 = [r["return_30m_pct"] for r in rows if r.get("return_30m_pct") is not None]
-            mfe = [r["mfe_75m_pct"] for r in rows if r.get("mfe_75m_pct") is not None]
-            mae = [r["mae_75m_pct"] for r in rows if r.get("mae_75m_pct") is not None]
             missed = sum(1 for r in rows if r.get("missed_classification") == "missed_good_trade")
-
-            avg30 = statistics.mean(r30) if r30 else 0.0
-            avgmfe = statistics.mean(mfe) if mfe else 0.0
-            avgmae = statistics.mean(mae) if mae else 0.0
-
-            print(f"  {sym:<8} {len(rows):>4} {avg30:>9.3f} {avgmfe:>9.3f} {avgmae:>9.3f} {missed:>10}")
+            print(
+                f"  {sym:<8} {len(rows):>4} "
+                f"{avg([r.get('return_30m_pct') for r in rows]):>9.3f} "
+                f"{avg([r.get('mfe_75m_pct') for r in rows]):>9.3f} "
+                f"{avg([r.get('mae_75m_pct') for r in rows]):>9.3f} "
+                f"{missed:>10}"
+            )
 
 
 def print_samples(results, limit=20):
     valid = [r for r in results if r and not r.get("error")]
-    valid = sorted(
-        valid,
-        key=lambda r: (r.get("mfe_75m_pct") or 0),
-        reverse=True,
-    )
+    valid = sorted(valid, key=lambda r: (r.get("mfe_75m_pct") or 0), reverse=True)
 
     print()
     print("── Top possible missed good trades ───────────────────")
@@ -317,23 +293,90 @@ def print_samples(results, limit=20):
         f"{'30m%':>7} {'60m%':>7} {'MFE%':>7} {'MAE%':>7} "
         f"{'Class':<18} Reason"
     )
-    print(
-        f"  {'-'*19} {'-'*6} {'-'*22} "
-        f"{'-'*7} {'-'*7} {'-'*7} {'-'*7} "
-        f"{'-'*18} {'-'*40}"
-    )
 
     for r in valid[:limit]:
-        reason = (r.get("reason") or "")[:80]
         print(
             f"  {r['timestamp']:<19} {r['symbol']:<6} {r['category']:<22} "
             f"{str(r.get('return_30m_pct')):>7} "
             f"{str(r.get('return_60m_pct')):>7} "
             f"{str(r.get('mfe_75m_pct')):>7} "
             f"{str(r.get('mae_75m_pct')):>7} "
-            f"{r.get('missed_classification'):<18} {reason}"
+            f"{r.get('missed_classification'):<18} "
+            f"{(r.get('reason') or '')[:80]}"
         )
 
+
+
+def build_missed_opportunity_memory(results, target_date):
+    valid = [r for r in results if r and not r.get("error")]
+
+    by_category = defaultdict(list)
+    by_symbol = defaultdict(list)
+
+    for r in valid:
+        by_category[r["category"]].append(r)
+        by_symbol[r["symbol"]].append(r)
+
+    def bucket(rows):
+        n = len(rows)
+        missed_good = sum(1 for r in rows if r.get("missed_classification") == "missed_good_trade")
+        good_reject = sum(1 for r in rows if r.get("missed_classification") == "good_rejection")
+        avg_30m = avg([r.get("return_30m_pct") for r in rows])
+        avg_mfe = avg([r.get("mfe_75m_pct") for r in rows])
+        avg_mae = avg([r.get("mae_75m_pct") for r in rows])
+
+        missed_good_rate = (missed_good / n * 100.0) if n else 0.0
+        good_reject_rate = (good_reject / n * 100.0) if n else 0.0
+
+        if n < 3:
+            recommendation = "observe"
+            reason = f"sample too small: {n} rejected signals"
+        elif missed_good_rate >= 35 and avg_30m > 0.20:
+            recommendation = "review_too_strict"
+            reason = f"missed_good_rate={missed_good_rate:.1f}% and avg_30m={avg_30m:.3f}%"
+        elif good_reject_rate >= 50 and avg_30m <= 0:
+            recommendation = "keep_strict"
+            reason = f"good_reject_rate={good_reject_rate:.1f}% and avg_30m={avg_30m:.3f}%"
+        else:
+            recommendation = "neutral"
+            reason = f"mixed: missed_good_rate={missed_good_rate:.1f}%, good_reject_rate={good_reject_rate:.1f}%"
+
+        return {
+            "signals": n,
+            "missed_good": missed_good,
+            "good_rejection": good_reject,
+            "missed_good_rate_pct": round(missed_good_rate, 1),
+            "good_reject_rate_pct": round(good_reject_rate, 1),
+            "avg_30m_return_pct": round(avg_30m, 3),
+            "avg_mfe_75m_pct": round(avg_mfe, 3),
+            "avg_mae_75m_pct": round(avg_mae, 3),
+            "recommendation": recommendation,
+            "reason": reason,
+        }
+
+    memory = {
+        "generated_at": datetime.now(ET).strftime("%Y-%m-%d %H:%M:%S"),
+        "date": target_date,
+        "signals_analyzed": len(results),
+        "signals_with_bar_data": len(valid),
+        "category_memory": {
+            k: bucket(v)
+            for k, v in sorted(by_category.items())
+        },
+        "symbol_memory": {
+            k: bucket(v)
+            for k, v in sorted(by_symbol.items())
+        },
+    }
+
+    return memory
+
+
+def write_missed_opportunity_memory(results, target_date):
+    memory = build_missed_opportunity_memory(results, target_date)
+    MISSED_MEMORY_FILE.write_text(json.dumps(memory, indent=2, sort_keys=True))
+    print(f"Wrote {MISSED_MEMORY_FILE}")
+    return memory
 
 def main():
     parser = argparse.ArgumentParser()
@@ -342,6 +385,7 @@ def main():
     parser.add_argument("--category")
     parser.add_argument("--limit", type=int, default=80)
     parser.add_argument("--samples", type=int, default=20)
+    parser.add_argument("--write-memory", action="store_true", help="Write missed_opportunity_memory.json")
     args = parser.parse_args()
 
     print("=" * 72)
@@ -357,12 +401,13 @@ def main():
 
     print(f"Rejected BUY rows loaded: {len(rows)}")
 
-    results = []
-    for row in rows:
-        results.append(analyze_rejection(row))
+    results = [analyze_row(row) for row in rows]
 
     summarize(results)
     print_samples(results, limit=args.samples)
+
+    if args.write_memory:
+        write_missed_opportunity_memory(results, args.date)
 
     errors = [r for r in results if r and r.get("error")]
     if errors:

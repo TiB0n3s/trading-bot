@@ -13,11 +13,16 @@ This does not place, cancel, or modify orders.
 """
 
 import argparse
+import json
 import statistics
 from collections import defaultdict
-from datetime import date, timedelta
+from datetime import date, timedelta, datetime
+from pathlib import Path
 
 from db import DB_PATH, get_connection
+
+BASE_DIR = Path(__file__).resolve().parent
+POLICY_BACKTEST_SUMMARY_FILE = BASE_DIR / "policy_backtest_summary.json"
 
 
 def category(reason):
@@ -345,6 +350,68 @@ def print_samples(results, limit=25):
             )
 
 
+
+def build_policy_backtest_summary(results):
+    total = len(results)
+    actual_approved = [r for r in results if r["actual_approved"]]
+    actual_rejected = [r for r in results if not r["actual_approved"]]
+
+    policy_allow = [r for r in results if r["policy_decision"] == "allow"]
+    policy_size_down = [r for r in results if r["policy_decision"] == "size_down"]
+    policy_block = [r for r in results if r["policy_decision"] == "block"]
+
+    would_block_approved = [r for r in actual_approved if r["policy_decision"] == "block"]
+    would_allow_rejected = [r for r in actual_rejected if r["policy_decision"] == "allow"]
+
+    by_symbol = defaultdict(lambda: {"total": 0, "allow": 0, "size_down": 0, "block": 0})
+    by_rejection_category = defaultdict(lambda: {"total": 0, "policy_allow": 0, "policy_size_down": 0, "policy_block": 0})
+
+    for r in results:
+        sym = r["symbol"] or "UNKNOWN"
+        by_symbol[sym]["total"] += 1
+        by_symbol[sym][r["policy_decision"]] += 1
+
+        if not r["actual_approved"]:
+            cat = r["actual_rejection_category"]
+            by_rejection_category[cat]["total"] += 1
+            by_rejection_category[cat][f"policy_{r['policy_decision']}"] += 1
+
+    if total == 0:
+        recommendation = "observe"
+        reason = "no rows analyzed"
+    elif len(would_block_approved) / max(len(actual_approved), 1) > 0.30:
+        recommendation = "policy_too_strict"
+        reason = "policy would block more than 30% of actually approved buys"
+    elif len(would_allow_rejected) / max(len(actual_rejected), 1) > 0.50:
+        recommendation = "policy_too_loose"
+        reason = "policy would allow more than 50% of actually rejected buys"
+    else:
+        recommendation = "reasonable"
+        reason = "policy replay is within rough tolerance"
+
+    return {
+        "generated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "rows_analyzed": total,
+        "actual_approved": len(actual_approved),
+        "actual_rejected": len(actual_rejected),
+        "policy_allow": len(policy_allow),
+        "policy_size_down": len(policy_size_down),
+        "policy_block": len(policy_block),
+        "policy_would_block_approved": len(would_block_approved),
+        "policy_would_allow_rejected": len(would_allow_rejected),
+        "recommendation": recommendation,
+        "reason": reason,
+        "by_symbol": dict(sorted(by_symbol.items())),
+        "by_rejection_category": dict(sorted(by_rejection_category.items())),
+    }
+
+
+def write_policy_backtest_summary(results):
+    summary = build_policy_backtest_summary(results)
+    POLICY_BACKTEST_SUMMARY_FILE.write_text(json.dumps(summary, indent=2, sort_keys=True))
+    print(f"Wrote {POLICY_BACKTEST_SUMMARY_FILE}")
+    return summary
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--date", help="YYYY-MM-DD, default=today")
@@ -353,6 +420,7 @@ def main():
     parser.add_argument("--symbol")
     parser.add_argument("--limit", type=int, default=500)
     parser.add_argument("--samples", type=int, default=25)
+    parser.add_argument("--write-summary", action="store_true", help="Write policy_backtest_summary.json")
     args = parser.parse_args()
 
     print("=" * 72)
@@ -364,6 +432,9 @@ def main():
 
     summarize(results)
     print_samples(results, limit=args.samples)
+
+    if args.write_summary:
+        write_policy_backtest_summary(results)
 
 
 if __name__ == "__main__":

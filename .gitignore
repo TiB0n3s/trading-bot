@@ -37,3 +37,8 @@ fill_stream.log
 # Python/runtime cache
 .pytest_cache/
 rolling_momentum.json
+
+# Generated intelligence memory/report outputs
+missed_opportunity_memory.json
+excursion_memory.json
+policy_backtest_summary.json

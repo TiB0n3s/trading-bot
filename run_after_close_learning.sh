@@ -23,11 +23,15 @@ python3 strategy_learner.py
 
 echo
 echo "---- excursion_report.py ----"
-python3 excursion_report.py --date "$(date +%F)" --limit 100
+python3 excursion_report.py --date "$(date +%F)" --limit 100 --write-memory
 
 echo
 echo "---- missed_opportunity_report.py ----"
-python3 missed_opportunity_report.py --date "$(date +%F)" --limit 100
+python3 missed_opportunity_report.py --date "$(date +%F)" --limit 100 --write-memory
+
+echo
+echo "---- policy_backtest.py ----"
+python3 policy_backtest.py --date "$(date +%F)" --write-summary
 
 echo
 echo "After-close learning run finished: $(date)"

@@ -15,9 +15,11 @@ This does not place, cancel, or modify orders.
 """
 
 import argparse
+import json
 import statistics
 from collections import defaultdict
 from datetime import datetime, timezone
+from pathlib import Path
 
 import pytz
 
@@ -26,6 +28,8 @@ from db import DB_PATH, get_connection
 
 
 ET = pytz.timezone("America/New_York")
+BASE_DIR = Path(__file__).resolve().parent
+EXCURSION_MEMORY_FILE = BASE_DIR / "excursion_memory.json"
 
 
 def parse_ts(ts):
@@ -352,12 +356,92 @@ def print_trade_samples(results, limit=20):
             )
 
 
+
+def build_excursion_memory(results, target_date=None):
+    valid = [r for r in results if r and not r.get("error")]
+
+    by_symbol = defaultdict(list)
+    by_setup = defaultdict(list)
+    by_class = defaultdict(list)
+
+    for r in valid:
+        by_symbol[r["symbol"]].append(r)
+        by_setup[r.get("setup_label") or "unknown"].append(r)
+        by_class[r.get("excursion_classification") or "unknown"].append(r)
+
+    def bucket(rows):
+        n = len(rows)
+        total_pnl = sum(float(r.get("realized_pnl") or 0) for r in rows)
+        avg_mfe = avg([r.get("mfe_pct") for r in rows])
+        avg_mae = avg([r.get("mae_pct") for r in rows])
+        avg_giveback = avg([r.get("profit_giveback_pct") for r in rows])
+
+        bad_entries = sum(1 for r in rows if r.get("excursion_classification") == "bad_entry_never_worked")
+        winner_losers = sum(1 for r in rows if r.get("excursion_classification") == "winner_became_loser")
+        givebacks = sum(1 for r in rows if r.get("excursion_classification") == "profit_giveback")
+
+        if n < 2:
+            recommendation = "observe"
+            reason = f"sample too small: {n} closed trades"
+        elif bad_entries / n >= 0.5:
+            recommendation = "tighten_entries"
+            reason = f"bad_entry_rate={bad_entries / n * 100:.1f}%"
+        elif (winner_losers + givebacks) / n >= 0.5:
+            recommendation = "improve_exits"
+            reason = f"giveback_or_winner_loser_rate={(winner_losers + givebacks) / n * 100:.1f}%"
+        elif total_pnl > 0 and avg_giveback < 40:
+            recommendation = "working"
+            reason = f"positive pnl ${total_pnl:.2f} with avg_giveback={avg_giveback:.1f}%"
+        else:
+            recommendation = "neutral"
+            reason = f"mixed excursion profile, pnl=${total_pnl:.2f}"
+
+        return {
+            "trades": n,
+            "total_pnl": round(total_pnl, 2),
+            "avg_mfe_pct": round(avg_mfe, 3),
+            "avg_mae_pct": round(avg_mae, 3),
+            "avg_profit_giveback_pct": round(avg_giveback, 1),
+            "bad_entry_count": bad_entries,
+            "winner_became_loser_count": winner_losers,
+            "profit_giveback_count": givebacks,
+            "recommendation": recommendation,
+            "reason": reason,
+        }
+
+    return {
+        "generated_at": datetime.now(ET).strftime("%Y-%m-%d %H:%M:%S"),
+        "date": target_date,
+        "trades_analyzed": len(results),
+        "trades_with_bar_data": len(valid),
+        "symbol_memory": {
+            k: bucket(v)
+            for k, v in sorted(by_symbol.items())
+        },
+        "setup_memory": {
+            k: bucket(v)
+            for k, v in sorted(by_setup.items())
+        },
+        "classification_memory": {
+            k: bucket(v)
+            for k, v in sorted(by_class.items())
+        },
+    }
+
+
+def write_excursion_memory(results, target_date=None):
+    memory = build_excursion_memory(results, target_date)
+    EXCURSION_MEMORY_FILE.write_text(json.dumps(memory, indent=2, sort_keys=True))
+    print(f"Wrote {EXCURSION_MEMORY_FILE}")
+    return memory
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--date", help="Exit date YYYY-MM-DD. Default: all recent matched trades.")
     parser.add_argument("--symbol")
     parser.add_argument("--limit", type=int, default=100)
     parser.add_argument("--samples", type=int, default=15)
+    parser.add_argument("--write-memory", action="store_true", help="Write excursion_memory.json")
     args = parser.parse_args()
 
     print("=" * 72)
@@ -377,6 +461,9 @@ def main():
 
     summarize(results)
     print_trade_samples(results, limit=args.samples)
+
+    if args.write_memory:
+        write_excursion_memory(results, args.date)
 
     errors = [r for r in results if r and r.get("error")]
     if errors:

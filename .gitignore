@@ -48,3 +48,5 @@ strategy_memory_history/
 
 # Generated portfolio replacement intelligence
 portfolio_replacement_memory.json
+position_manager_state.json
+strategy_memory.json

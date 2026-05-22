@@ -3048,8 +3048,9 @@ def process_signal(data):
                 f"last_signal={last_signal} "
                 f"required={required_buy_confirmations}"
             )
-            if _reject_current_signal("trend_confirmation", reason):
-                return
+            logger.info(
+                f"Trend confirmation BUY observe-only for {symbol}: {reason}"
+            )
 
         fast_lane_buy_flip = is_fast_lane_buy_flip(
             trend,
@@ -3076,8 +3077,9 @@ def process_signal(data):
                 f"strength={strength} "
                 f"flip_event={trend.get('flip_event')}"
             )
-            if _reject_current_signal("trend_confirmation", reason):
-                return
+            logger.info(
+                f"Trend confirmation BUY observe-only for {symbol}: {reason}"
+            )
 
     if action == "sell":
         trend = _trend_table.get(symbol) or {}

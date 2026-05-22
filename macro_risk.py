@@ -6,7 +6,7 @@ from config import MAX_OPEN_POSITIONS
 DEFAULT_MACRO_RISK = {
     "macro_regime": "normal",
     "risk_multiplier": 1.0,
-    "max_new_positions": MAX_OPEN_POSITIONS,
+    "max_new_positions": 12,
     "block_new_buys": False,
     "reason": "Default normal regime",
 }
@@ -45,7 +45,7 @@ def get_macro_risk(base_dir: Path | None = None):
             policy = {
                 "macro_regime": regime,
                 "risk_multiplier": 1.0,
-                "max_new_positions": 8,
+                "max_new_positions": 12,
                 "block_new_buys": False,
                 "reason": "Macro context normal/risk-on",
             }

@@ -28,6 +28,7 @@ from setup_classifier import classify_setup
 from strategy_memory import memory_for_signal
 from decision_context import build_intelligence_context
 from decision_policy import evaluate_decision_policy
+from bot_events import log_event
 from rolling_context import rolling_summary, rolling_symbol_context
 from decision_thresholds import PREDICTION_GATE_THRESHOLDS
 from runtime_config import (
@@ -4216,6 +4217,81 @@ def process_signal(data):
             account_state=account_state,
         )
         return
+
+    # Live decision-policy size-down:
+    # This is intentionally one-way risk reduction. It can lower the max size
+    # available to Claude/broker, but it cannot increase exposure.
+    decision_policy_live_size_down = os.getenv(
+        "DECISION_POLICY_LIVE_SIZE_DOWN", "true"
+    ).strip().lower() in ("1", "true", "yes", "on")
+
+    if (
+        action == "buy"
+        and decision_policy_live_size_down
+        and decision_policy.get("decision") == "size_down"
+    ):
+        try:
+            size_multiplier = float(decision_policy.get("size_multiplier") or 1.0)
+        except Exception:
+            size_multiplier = 1.0
+
+        # Clamp multiplier so this can never increase size.
+        size_multiplier = max(0.0, min(1.0, size_multiplier))
+
+        current_limit = None
+        for key in ("max_position_size_pct", "position_size_pct"):
+            try:
+                val = claude_account_state.get(key)
+                if val is not None:
+                    current_limit = float(val)
+                    break
+            except Exception:
+                pass
+
+        if current_limit is None:
+            # Conservative default: normal max buy size in this project.
+            current_limit = 2.0
+
+        reduced_limit = round(current_limit * size_multiplier, 4)
+
+        account_state["decision_policy_size_down"] = {
+            "enabled": True,
+            "original_position_size_pct": current_limit,
+            "reduced_position_size_pct": reduced_limit,
+            "size_multiplier": size_multiplier,
+            "reason": decision_policy.get("reason"),
+        }
+        claude_account_state["decision_policy_size_down"] = account_state[
+            "decision_policy_size_down"
+        ]
+
+        # Give Claude a deterministic ceiling to respect.
+        claude_account_state["max_position_size_pct"] = reduced_limit
+        claude_account_state["decision_policy_max_position_size_pct"] = reduced_limit
+
+        logger.warning(
+            f"DECISION_POLICY_SIZE_DOWN {symbol} BUY: "
+            f"original_position_size_pct={current_limit} "
+            f"size_multiplier={size_multiplier} "
+            f"reduced_position_size_pct={reduced_limit} "
+            f"reason={decision_policy.get('reason')}"
+        )
+
+        log_event(
+            event_type="DECISION_POLICY_SIZE_DOWN",
+            symbol=symbol,
+            action=action,
+            decision="size_down",
+            severity="medium",
+            reason=decision_policy.get("reason"),
+            source="app.py",
+            payload={
+                "decision_policy": decision_policy,
+                "original_position_size_pct": current_limit,
+                "reduced_position_size_pct": reduced_limit,
+                "size_multiplier": size_multiplier,
+            },
+        )
 
     decision = evaluate_signal(data, claude_account_state)
 

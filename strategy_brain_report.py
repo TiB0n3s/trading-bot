@@ -461,6 +461,7 @@ def main():
         section_manual_overrides(manual)
         section_missed_opportunity(missed)
         section_excursion(excursion)
+        section_portfolio_replacement(replacement)
 
     section_recommendations(strategy, missed, excursion, policy)
 

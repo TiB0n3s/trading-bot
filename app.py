@@ -29,6 +29,7 @@ from strategy_memory import memory_for_signal
 from decision_context import build_intelligence_context
 from decision_policy import evaluate_decision_policy
 from intelligence_snapshot import get_intelligence_snapshot
+from position_intelligence import get_position_intelligence
 from bot_events import log_event
 from rolling_context import rolling_summary, rolling_symbol_context
 from decision_thresholds import PREDICTION_GATE_THRESHOLDS
@@ -5019,6 +5020,13 @@ def positions():
         "macro_sentiment": macro_sentiment,
     }
     result["positions"] = sorted(positions_list, key=lambda x: -(x.get("market_value") or 0))
+    try:
+        for position in result.get("positions", []):
+            symbol = position.get("symbol")
+            position["intelligence"] = get_position_intelligence(symbol)
+    except Exception as e:
+        result["position_intelligence_error"] = str(e)
+
     return jsonify(result), 200
 
 

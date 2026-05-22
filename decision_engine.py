@@ -125,6 +125,18 @@ account_state may contain fundamental_score:
 - "neutral": no edge; require trend and/or momentum confirmation.
 - "bearish" or "strong_bearish": reject buy signals.
 
+SETUP QUALITY GUIDANCE:
+account_state may contain "setup_quality" from the bot's live setup intelligence engine.
+
+For BUY signals:
+- score >= 85: premium setup; high confidence may be appropriate if trend/momentum confirm.
+- score 70-84: good setup; normal approval if other context agrees.
+- score 55-69: cautious setup; prefer medium confidence and smaller sizing.
+- score 40-54: weak/late setup; reject unless trend is bullish/confirmed, market_bias is buy, and momentum is rising.
+- score < 40 or recommendation "avoid": reject as poor setup quality.
+- If reasons mention extended, late/chasing, contradicted alignment, or falling tape, reduce confidence/sizing or reject.
+- setup_quality never overrides hard rules, bearish trend, avoid bias, exposure limits, or poor entry_quality.
+
 RISK LEVEL AND ENTRY QUALITY GUIDANCE:
 risk_level:
 - "very_high": broker will halve qty automatically; no additional size reduction needed here.
@@ -140,6 +152,29 @@ entry_quality:
 - "hedge_only": position_size_pct max 1.0%; confidence "medium" only.
 
 When risk_level and entry_quality conflict with trend or bias, favor the tighter signal.
+
+INTELLIGENCE CONTEXT GUIDANCE:
+account_state may contain "intelligence_context", a normalized trader-brain summary built from:
+- market_brief: same-day bias, effective live bias, fundamental_score, risk_level, entry_quality
+- setup: setup label and setup policy
+- live_features and label_features when available
+- rolling_momentum: short-term tape/momentum
+- session_momentum and session_momentum_gate: full-session participation and deterioration checks
+- prediction: live prediction score and decision
+- buy_opportunity and opportunity_score: deterministic opportunity-quality scoring
+- strategy_memory: learned symbol performance from recent wins/losses
+- macro: macro regime, risk multiplier, position cap context
+- summary: recommended_action, primary_supports, primary_risks, support_count, risk_count
+
+Apply to BUY signals:
+- Treat summary.recommended_action "allow" as supportive only when trend/momentum also agree.
+- Treat "caution" as a reason for medium confidence or smaller sizing.
+- Treat "size_down" as a reason to reduce position_size_pct and avoid high confidence unless evidence is exceptional.
+- Treat "block_preferred" as a strong rejection signal unless the deterministic pre-Claude gates intentionally allowed a rare exception.
+- Give more weight to primary_risks when they include falling tape, weak session momentum, avoid/soft-avoid bias, poor setup, prediction block/watch, or negative strategy_memory.
+- Give more weight to primary_supports when they include confirmed bullish trend, rising rolling momentum, supportive session momentum, buy opportunity strength, and favorable strategy_memory.
+- intelligence_context never overrides hard rules, exposure limits, bearish trend, hard avoid bias, or sell-signal approval rules.
+
 
 PORTFOLIO CONTEXT GUIDANCE:
 account_state includes portfolio_stress:

@@ -201,6 +201,7 @@ def _bucket_rejection_reason(reason: str | None) -> str:
         "addon_momentum_gate": "Add-on momentum gate",
         "session_momentum_gate": "Session momentum gate",
         "prediction_gate": "Prediction gate",
+        "strategy_memory":      "Strategy memory gate",
         "confidence_gate": "Low confidence (Claude)",
         "entry_quality": "Entry quality / pullback requirement",
         "second_look": "Second-look market check",

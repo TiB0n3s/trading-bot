@@ -42,6 +42,7 @@ KNOWN_LABELS = {
     "addon_momentum_gate": "Add-on momentum gate",
     "session_momentum_gate": "Session momentum gate",
     "prediction_gate": "Prediction gate",
+    "strategy_memory": "Strategy memory gate",
     "confidence_gate": "Low confidence gate",
     "second_look": "Second-look market check",
     "stale_signal": "Stale signal",

@@ -21,8 +21,12 @@ from session_momentum import (
     get_latest_session_momentum,
 )
 from decision_engine import evaluate_signal, get_mock_account_state
+from opportunity_score import score_buy_opportunity
 from broker import place_order, get_account, get_position, api
 from macro_risk import get_macro_risk
+from setup_classifier import classify_setup
+from strategy_memory import memory_for_signal
+from decision_context import build_intelligence_context
 from rolling_context import rolling_summary, rolling_symbol_context
 from decision_thresholds import PREDICTION_GATE_THRESHOLDS
 from runtime_config import (
@@ -4012,6 +4016,172 @@ def process_signal(data):
     claude_account_state.pop("adaptive_buy_confirmation_error", None)
     claude_account_state.pop("market_alignment", None)
     claude_account_state.pop("market_alignment_error", None)
+
+    # Pre-Claude affordability gate.
+    # Avoid spending Claude/API/order-path work on BUYs that cannot purchase
+    # at least 1 whole share after macro risk sizing. This is especially useful
+    # for high-priced symbols like ASML, COST, LLY, etc.
+    if action == "buy":
+        try:
+            balance_for_affordability = float(account_state.get("balance") or 0)
+            macro_mult_for_affordability = float(
+                account_state.get("macro_risk", {}).get("risk_multiplier", 1.0) or 1.0
+            )
+            buy_opp_for_affordability = (account_state or {}).get("buy_opportunity") or {}
+            rec_for_affordability = buy_opp_for_affordability.get("buy_opportunity_recommendation")
+            score_for_affordability = buy_opp_for_affordability.get("buy_opportunity_score")
+
+            # Match the most likely final sizing before Claude:
+            # - buy_opportunity sizing caps only reduce size; strong_buy_candidate has no cap.
+            # - if no Claude size yet, use a conservative expected base of 1.5%.
+            expected_base_pct = 1.5
+            expected_pct = expected_base_pct * macro_mult_for_affordability
+
+            if _buy_opportunity_sizing_enabled():
+                small_cap = _env_float("BUY_OPPORTUNITY_SMALL_CAP_PCT", 1.25)
+                watch_cap = _env_float("BUY_OPPORTUNITY_WATCH_CAP_PCT", 0.75)
+                avoid_cap = _env_float("BUY_OPPORTUNITY_AVOID_CAP_PCT", 0.50)
+
+                try:
+                    score_f = float(score_for_affordability)
+                except Exception:
+                    score_f = None
+
+                cap = None
+                if rec_for_affordability == "small_buy_candidate" or (score_f is not None and score_f >= 7 and score_f < 10):
+                    cap = small_cap
+                elif rec_for_affordability == "watch" or (score_f is not None and score_f >= 4 and score_f < 7):
+                    cap = watch_cap
+                elif rec_for_affordability == "avoid" or score_f is not None:
+                    cap = avoid_cap
+
+                if cap is not None:
+                    expected_pct = min(expected_pct, cap)
+
+            signal_price_f = float(price or 0)
+            estimated_buy_dollars = balance_for_affordability * expected_pct / 100.0
+            estimated_qty = int(estimated_buy_dollars / signal_price_f) if signal_price_f > 0 else 0
+
+            if balance_for_affordability > 0 and signal_price_f > 0 and estimated_qty < 1:
+                reason = (
+                    f"estimated BUY dollars ${estimated_buy_dollars:.2f} cannot buy 1 share "
+                    f"at signal price ${signal_price_f:.2f}; expected_pct={expected_pct:.3f}% "
+                    f"macro_multiplier={macro_mult_for_affordability:.3f}"
+                )
+                logger.warning(
+                    f"Affordability gate blocked {symbol} BUY before Claude: {reason}"
+                )
+                log_rejection(
+                    symbol,
+                    action,
+                    "affordability",
+                    reason,
+                    price=price,
+                    account_state=account_state,
+                )
+                return
+
+        except Exception as e:
+            logger.warning(f"Affordability gate skipped for {symbol} BUY due to error: {e}")
+
+    # Live-in-paper opportunity score gate.
+    # This is not observe-only: low-score BUY signals are rejected before Claude.
+    if action == "buy":
+        opportunity = score_buy_opportunity(symbol, data, account_state)
+        account_state["opportunity_score"] = opportunity
+        claude_account_state["opportunity_score"] = opportunity
+
+        strategy_memory = memory_for_signal(symbol, opportunity)
+        account_state["strategy_memory"] = strategy_memory
+        claude_account_state["strategy_memory"] = strategy_memory
+
+        learned_min_score = strategy_memory.get("min_setup_score")
+        if isinstance(learned_min_score, int):
+            raw_score = opportunity.get("score")
+            try:
+                score_f = float(raw_score)
+            except Exception:
+                score_f = None
+
+            # strategy_memory uses a 0-100 score scale. Some opportunity scores
+            # are 0-10, so normalize when needed.
+            normalized_score = None
+            if score_f is not None:
+                normalized_score = score_f * 10 if score_f <= 10 else score_f
+
+            logger.info(
+                f"STRATEGY_MEMORY {symbol} BUY: "
+                f"recommendation={strategy_memory.get('recommendation')} "
+                f"learned_min_score={learned_min_score} "
+                f"opportunity_score={raw_score} "
+                f"normalized_score={normalized_score} "
+                f"reason={strategy_memory.get('reason')}"
+            )
+
+            if (
+                normalized_score is not None
+                and strategy_memory.get("recommendation") in ("caution", "avoid")
+                and normalized_score < learned_min_score
+            ):
+                reason = (
+                    f"strategy memory tightened {symbol}: "
+                    f"recommendation={strategy_memory.get('recommendation')} "
+                    f"normalized_score={normalized_score:.1f} < learned_min_score={learned_min_score}; "
+                    f"{strategy_memory.get('reason')}"
+                )
+                logger.warning(
+                    f"Strategy memory gate blocked {symbol} BUY before Claude: {reason}"
+                )
+                log_rejection(
+                    symbol,
+                    action,
+                    "strategy_memory",
+                    reason,
+                    price=price,
+                    account_state=account_state,
+                )
+                return
+
+        logger.info(
+            f"Opportunity score for {symbol} BUY: "
+            f"score={opportunity.get('score')} bucket={opportunity.get('bucket')} "
+            f"decision={opportunity.get('decision')} "
+            f"size_multiplier={opportunity.get('size_multiplier')} "
+            f"reasons={opportunity.get('reason_codes')}"
+        )
+
+        if opportunity.get("decision") == "block":
+            reason = opportunity.get("summary", "opportunity score blocked setup")
+            logger.warning(
+                f"Opportunity score gate blocked {symbol} BUY before Claude: {reason}"
+            )
+            log_rejection(
+                symbol,
+                action,
+                "opportunity_score",
+                reason,
+                price=price,
+                account_state=account_state,
+            )
+            return
+
+    intelligence_context = build_intelligence_context(
+        symbol=symbol,
+        action=action,
+        account_state=account_state,
+    )
+    account_state["intelligence_context"] = intelligence_context
+    claude_account_state["intelligence_context"] = intelligence_context
+
+    summary = intelligence_context.get("summary") or {}
+    logger.info(
+        f"INTELLIGENCE_CONTEXT {symbol} {action.upper()}: "
+        f"recommended_action={summary.get('recommended_action')} "
+        f"supports={summary.get('support_count')} "
+        f"risks={summary.get('risk_count')} "
+        f"primary_supports={summary.get('primary_supports')} "
+        f"primary_risks={summary.get('primary_risks')}"
+    )
 
     decision = evaluate_signal(data, claude_account_state)
 

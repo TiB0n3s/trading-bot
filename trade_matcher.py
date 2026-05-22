@@ -1,15 +1,65 @@
 #!/usr/bin/env python3
 from collections import defaultdict, deque
 from datetime import datetime
-from pathlib import Path
 
 from db import DB_PATH, get_connection
+
+
+ENTRY_CONTEXT_FIELDS = [
+    "macro_regime",
+    "risk_multiplier",
+    "market_bias",
+    "risk_level",
+    "entry_quality",
+    "trend_direction",
+    "trend_strength",
+    "momentum_direction",
+    "momentum_pct",
+    "correlation_cluster",
+    "cluster_exposure_pct",
+
+    # Newer live intelligence fields copied from the entry-side BUY row.
+    "market_bias_effective",
+    "market_bias_override_reason",
+    "fundamental_score",
+
+    "session_trend_label",
+    "session_trend_score",
+    "session_return_pct",
+    "session_momentum_5m_pct",
+    "session_momentum_15m_pct",
+    "session_momentum_30m_pct",
+    "session_distance_from_vwap_pct",
+    "session_momentum_reason",
+
+    "prediction_score",
+    "prediction_decision",
+    "prediction_reason",
+
+    "setup_label",
+    "setup_policy_action",
+    "setup_policy_reason",
+    "setup_confidence_adjustment",
+    "setup_size_multiplier",
+
+    "buy_opportunity_score",
+    "buy_opportunity_recommendation",
+    "buy_opportunity_reason",
+]
 
 
 def parse_ts(value):
     if not value:
         return None
     return datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+
+
+def row_get(row, key, default=None):
+    """sqlite3.Row-safe getter for schemas that may be mid-migration."""
+    try:
+        return row[key]
+    except Exception:
+        return default
 
 
 def load_filled_trades():
@@ -73,7 +123,7 @@ def match_trades():
 
                 entry_row = lot["row"]
 
-                matched.append({
+                item = {
                     "symbol": symbol,
                     "entry_timestamp": lot["timestamp"],
                     "exit_timestamp": row["timestamp"],
@@ -84,20 +134,13 @@ def match_trades():
                     "realized_pnl": round(pnl, 2),
                     "realized_pnl_pct": round(pnl_pct, 3),
                     "won": 1 if pnl > 0 else 0,
+                }
 
-                    # Entry-side decision context
-                    "macro_regime": entry_row["macro_regime"],
-                    "risk_multiplier": entry_row["risk_multiplier"],
-                    "market_bias": entry_row["market_bias"],
-                    "risk_level": entry_row["risk_level"],
-                    "entry_quality": entry_row["entry_quality"],
-                    "trend_direction": entry_row["trend_direction"],
-                    "trend_strength": entry_row["trend_strength"],
-                    "momentum_direction": entry_row["momentum_direction"],
-                    "momentum_pct": entry_row["momentum_pct"],
-                    "correlation_cluster": entry_row["correlation_cluster"],
-                    "cluster_exposure_pct": entry_row["cluster_exposure_pct"],
-                })
+                # Entry-side decision/intelligence context.
+                for field in ENTRY_CONTEXT_FIELDS:
+                    item[field] = row_get(entry_row, field)
+
+                matched.append(item)
 
                 lot["qty"] -= matched_qty
                 remaining -= matched_qty
@@ -123,6 +166,7 @@ def init_matched_trades_table():
             realized_pnl REAL,
             realized_pnl_pct REAL,
             won INTEGER,
+
             macro_regime TEXT,
             risk_multiplier REAL,
             market_bias TEXT,
@@ -133,9 +177,72 @@ def init_matched_trades_table():
             momentum_direction TEXT,
             momentum_pct REAL,
             correlation_cluster TEXT,
-            cluster_exposure_pct REAL
+            cluster_exposure_pct REAL,
+
+            market_bias_effective TEXT,
+            market_bias_override_reason TEXT,
+            fundamental_score TEXT,
+
+            session_trend_label TEXT,
+            session_trend_score REAL,
+            session_return_pct REAL,
+            session_momentum_5m_pct REAL,
+            session_momentum_15m_pct REAL,
+            session_momentum_30m_pct REAL,
+            session_distance_from_vwap_pct REAL,
+            session_momentum_reason TEXT,
+
+            prediction_score REAL,
+            prediction_decision TEXT,
+            prediction_reason TEXT,
+
+            setup_label TEXT,
+            setup_policy_action TEXT,
+            setup_policy_reason TEXT,
+            setup_confidence_adjustment REAL,
+            setup_size_multiplier REAL,
+
+            buy_opportunity_score REAL,
+            buy_opportunity_recommendation TEXT,
+            buy_opportunity_reason TEXT
         )
     """)
+
+    # Idempotently add columns for existing DBs.
+    existing = {
+        row["name"]
+        for row in con.execute("PRAGMA table_info(matched_trades)").fetchall()
+    }
+
+    add_columns = {
+        "market_bias_effective": "TEXT",
+        "market_bias_override_reason": "TEXT",
+        "fundamental_score": "TEXT",
+        "session_trend_label": "TEXT",
+        "session_trend_score": "REAL",
+        "session_return_pct": "REAL",
+        "session_momentum_5m_pct": "REAL",
+        "session_momentum_15m_pct": "REAL",
+        "session_momentum_30m_pct": "REAL",
+        "session_distance_from_vwap_pct": "REAL",
+        "session_momentum_reason": "TEXT",
+        "prediction_score": "REAL",
+        "prediction_decision": "TEXT",
+        "prediction_reason": "TEXT",
+        "setup_label": "TEXT",
+        "setup_policy_action": "TEXT",
+        "setup_policy_reason": "TEXT",
+        "setup_confidence_adjustment": "REAL",
+        "setup_size_multiplier": "REAL",
+        "buy_opportunity_score": "REAL",
+        "buy_opportunity_recommendation": "TEXT",
+        "buy_opportunity_reason": "TEXT",
+    }
+
+    for name, typ in add_columns.items():
+        if name not in existing:
+            con.execute(f"ALTER TABLE matched_trades ADD COLUMN {name} {typ}")
+
     con.commit()
     con.close()
 
@@ -147,24 +254,28 @@ def rebuild_matched_trades():
     con = get_connection(DB_PATH)
     con.execute("DELETE FROM matched_trades")
 
+    columns = [
+        "symbol",
+        "entry_timestamp",
+        "exit_timestamp",
+        "holding_minutes",
+        "qty",
+        "entry_price",
+        "exit_price",
+        "realized_pnl",
+        "realized_pnl_pct",
+        "won",
+    ] + ENTRY_CONTEXT_FIELDS
+
+    placeholders = ", ".join(["?"] * len(columns))
+    col_sql = ", ".join(columns)
+
     for t in matched:
-        con.execute("""
-            INSERT INTO matched_trades (
-                symbol, entry_timestamp, exit_timestamp, holding_minutes,
-                qty, entry_price, exit_price, realized_pnl, realized_pnl_pct, won,
-                macro_regime, risk_multiplier, market_bias, risk_level, entry_quality,
-                trend_direction, trend_strength, momentum_direction, momentum_pct,
-                correlation_cluster, cluster_exposure_pct
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """, (
-            t["symbol"], t["entry_timestamp"], t["exit_timestamp"], t["holding_minutes"],
-            t["qty"], t["entry_price"], t["exit_price"], t["realized_pnl"],
-            t["realized_pnl_pct"], t["won"],
-            t["macro_regime"], t["risk_multiplier"], t["market_bias"],
-            t["risk_level"], t["entry_quality"], t["trend_direction"],
-            t["trend_strength"], t["momentum_direction"], t["momentum_pct"],
-            t["correlation_cluster"], t["cluster_exposure_pct"],
-        ))
+        values = [t.get(c) for c in columns]
+        con.execute(
+            f"INSERT INTO matched_trades ({col_sql}) VALUES ({placeholders})",
+            values,
+        )
 
     con.commit()
     con.close()
@@ -197,8 +308,12 @@ def main():
             f"{t['entry_price']} → {t['exit_price']} "
             f"PnL=${t['realized_pnl']} "
             f"hold={t['holding_minutes']}m "
-            f"trend={t['trend_direction']}/{t['trend_strength']} "
-            f"macro={t['macro_regime']}"
+            f"trend={t.get('trend_direction')}/{t.get('trend_strength')} "
+            f"setup={t.get('setup_label')}/{t.get('setup_policy_action')} "
+            f"session={t.get('session_trend_label')}/{t.get('session_trend_score')} "
+            f"prediction={t.get('prediction_score')}/{t.get('prediction_decision')} "
+            f"buy_opp={t.get('buy_opportunity_score')}/{t.get('buy_opportunity_recommendation')} "
+            f"macro={t.get('macro_regime')}"
         )
 
     print()

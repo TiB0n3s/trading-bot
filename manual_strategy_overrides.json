@@ -1,0 +1,32 @@
+{
+  "symbols": {
+    "LMT": {
+      "recommendation": "observe",
+      "min_setup_score": 55,
+      "reason": "Manual seed: currently open lot; do not infer win/loss until position closes."
+    },
+    "GE": {
+      "recommendation": "observe",
+      "min_setup_score": 55,
+      "reason": "Manual seed: currently open lot; do not infer win/loss until position closes."
+    },
+    "CRDO": {
+      "recommendation": "caution",
+      "min_setup_score": 70,
+      "reason": "Manual seed: prior logs showed quote/spread risk; require stronger setup quality before future buys."
+    },
+    "CAT": {
+      "recommendation": "caution",
+      "min_setup_score": 70,
+      "reason": "Manual seed: high share price/affordability issues; require stronger setup quality before future buys."
+    },
+    "GEV": {
+      "recommendation": "caution",
+      "min_setup_score": 70,
+      "reason": "Manual seed: high share price/affordability issues; require stronger setup quality before future buys."
+    }
+  },
+  "notes": {
+    "purpose": "Manual first-pass teaching before enough matched closed trades exist. Overrides tighten future BUY quality requirements and never increase hard risk limits."
+  }
+}

@@ -23,6 +23,7 @@ import pytz
 
 from broker import api
 from db import DB_PATH, get_connection
+from bot_events import log_event
 
 
 ET = pytz.timezone("America/New_York")
@@ -510,6 +511,17 @@ def main():
             minutes=args.minutes,
         )
         write_replacement_memory(memory)
+
+        log_event(
+            event_type="PORTFOLIO_REPLACEMENT",
+            symbol=(memory.get("strongest_candidate") or {}).get("symbol"),
+            action="review_replacement",
+            decision=memory.get("recommendation"),
+            severity="info",
+            reason=memory.get("reason"),
+            source="portfolio_replacement_report.py",
+            payload=memory,
+        )
 
 
 if __name__ == "__main__":

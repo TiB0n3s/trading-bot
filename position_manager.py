@@ -25,6 +25,7 @@ import pytz
 
 from broker import api
 from db import DB_PATH, get_connection
+from bot_events import log_event
 
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -507,6 +508,18 @@ def main():
     decisions = [evaluate_position(p, state) for p in positions]
     save_state(state)
 
+    for d in decisions:
+        log_event(
+            event_type="POSITION_MANAGER",
+            symbol=d.get("symbol"),
+            action="review_position",
+            decision=d.get("action"),
+            severity=d.get("severity"),
+            reason="; ".join(d.get("reasons") or []),
+            source="position_manager.py",
+            payload=d,
+        )
+
     if args.json:
         print(json.dumps(decisions, indent=2, sort_keys=True))
     else:
@@ -524,6 +537,17 @@ def main():
             if d["action"] in ("sell_partial", "sell_full"):
                 result = submit_exit(d)
                 print(f"{d['symbol']} {d['action']}: {result}")
+
+                log_event(
+                    event_type="POSITION_MANAGER_ORDER",
+                    symbol=d.get("symbol"),
+                    action=d.get("action"),
+                    decision="submitted" if isinstance(result, dict) and result.get("submitted") else "not_submitted",
+                    severity=d.get("severity"),
+                    reason="; ".join(d.get("reasons") or []),
+                    source="position_manager.py",
+                    payload={"decision": d, "result": result},
+                )
 
                 if isinstance(result, dict) and result.get("submitted"):
                     exit_type = (

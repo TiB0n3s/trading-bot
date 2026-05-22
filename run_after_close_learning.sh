@@ -13,6 +13,18 @@ echo "============================================================"
 echo "After-close learning run started: $(date)"
 echo "============================================================"
 
+python3 - <<'PY2'
+from bot_events import log_event
+log_event(
+    event_type="AFTER_CLOSE_LEARNING",
+    action="start",
+    decision="running",
+    severity="info",
+    reason="after-close learning started",
+    source="run_after_close_learning.sh",
+)
+PY2
+
 echo
 echo "---- trade_matcher.py ----"
 python3 trade_matcher.py
@@ -40,6 +52,19 @@ python3 portfolio_replacement_report.py --minutes 390 --top 20 --write-memory
 echo
 echo "---- strategy_brain_report.py ----"
 python3 strategy_brain_report.py
+
+
+python3 - <<'PY2'
+from bot_events import log_event
+log_event(
+    event_type="AFTER_CLOSE_LEARNING",
+    action="finish",
+    decision="completed",
+    severity="info",
+    reason="after-close learning finished",
+    source="run_after_close_learning.sh",
+)
+PY2
 
 echo
 echo "After-close learning run finished: $(date)"

@@ -153,6 +153,25 @@ entry_quality:
 
 When risk_level and entry_quality conflict with trend or bias, favor the tighter signal.
 
+PORTFOLIO REPLACEMENT GUIDANCE:
+account_state.intelligence_context may contain "portfolio_replacement", an observe-only advisory summary from recent full-portfolio BUY blocks.
+It may include:
+- open_position_count
+- weakest_holding
+- strongest_candidate
+- top_candidates
+- replacement_candidates
+- recommendation: observe_only, replacement_candidate, replace_now_candidate, or extra_slot_candidate
+- reason
+
+Apply to BUY signals:
+- This context is advisory only. Do not treat it as permission to override hard macro position limits.
+- If recommendation is observe_only, respect macro_position_limit and avoid churn.
+- If recommendation is replacement_candidate or extra_slot_candidate, mention it in reasoning, but only approve if pre-Claude gates allowed the signal.
+- Do not recommend selling an existing holding from inside Claude. Exits remain controlled by broker.py and position_manager.py.
+- Never use portfolio_replacement to override exposure caps, cooldowns, churn prevention, hard avoid bias, or market hours.
+
+
 DECISION POLICY GUIDANCE:
 account_state may contain "decision_policy", the deterministic executive policy layer.
 It summarizes learned memory, live intelligence context, prediction/opportunity quality, and session risk.

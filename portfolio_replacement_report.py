@@ -14,8 +14,10 @@ This does not place, cancel, or modify orders.
 """
 
 import argparse
+import json
 from datetime import datetime, timedelta
 from collections import defaultdict
+from pathlib import Path
 
 import pytz
 
@@ -24,6 +26,8 @@ from db import DB_PATH, get_connection
 
 
 ET = pytz.timezone("America/New_York")
+BASE_DIR = Path(__file__).resolve().parent
+PORTFOLIO_REPLACEMENT_MEMORY_FILE = BASE_DIR / "portfolio_replacement_memory.json"
 
 
 STRONG_BUY_RECS = {"strong_buy_candidate", "buy_candidate"}
@@ -312,11 +316,85 @@ def dedupe_best_by_symbol(scored_rows):
     return sorted(best.values(), key=lambda x: x["score"], reverse=True)
 
 
+
+def build_replacement_memory(positions, weakest, best, candidates, minutes):
+    """Build machine-readable portfolio replacement intelligence."""
+    top_candidates = []
+    for item in best[:20]:
+        top_candidates.append({
+            "symbol": item.get("symbol"),
+            "score": item.get("score"),
+            "decision": item.get("decision"),
+            "decision_reason": item.get("decision_reason"),
+            "approved": item.get("approved"),
+            "rejection_category": item.get("rejection_category"),
+            "buy_opportunity_score": item.get("buy_opportunity_score"),
+            "buy_opportunity_recommendation": item.get("buy_opportunity_recommendation"),
+            "session_trend_label": item.get("session_trend_label"),
+            "session_trend_score": item.get("session_trend_score"),
+            "setup_label": item.get("setup_label"),
+            "setup_policy_action": item.get("setup_policy_action"),
+            "prediction_score": item.get("prediction_score"),
+            "prediction_decision": item.get("prediction_decision"),
+            "market_bias_effective": item.get("market_bias_effective"),
+            "reasons": item.get("reasons") or [],
+        })
+
+    replacement_candidates = []
+    for item in candidates:
+        replacement_candidates.append({
+            "symbol": item.get("symbol"),
+            "score": item.get("score"),
+            "decision": item.get("decision"),
+            "decision_reason": item.get("decision_reason"),
+            "buy_opportunity_score": item.get("buy_opportunity_score"),
+            "buy_opportunity_recommendation": item.get("buy_opportunity_recommendation"),
+            "session_trend_label": item.get("session_trend_label"),
+            "setup_label": item.get("setup_label"),
+            "setup_policy_action": item.get("setup_policy_action"),
+            "prediction_score": item.get("prediction_score"),
+            "prediction_decision": item.get("prediction_decision"),
+        })
+
+    if replacement_candidates:
+        strongest = replacement_candidates[0]
+        recommendation = strongest.get("decision") or "replacement_candidate"
+        reason = strongest.get("decision_reason") or "replacement candidate found"
+    elif top_candidates:
+        strongest = top_candidates[0]
+        recommendation = "observe_only"
+        reason = strongest.get("decision_reason") or "no replacement candidate met strict criteria"
+    else:
+        strongest = None
+        recommendation = "observe_only"
+        reason = "no recent buy candidates found"
+
+    return {
+        "generated_at": datetime.now(ET).strftime("%Y-%m-%d %H:%M:%S"),
+        "lookback_minutes": minutes,
+        "open_position_count": len(positions),
+        "weakest_holding": weakest,
+        "recommendation": recommendation,
+        "reason": reason,
+        "strongest_candidate": strongest,
+        "top_candidates": top_candidates,
+        "replacement_candidates": replacement_candidates,
+        "mode": "observe_only",
+        "notes": "This memory is advisory only. It does not authorize macro override, auto-rotation, or extra position slots.",
+    }
+
+
+def write_replacement_memory(memory):
+    PORTFOLIO_REPLACEMENT_MEMORY_FILE.write_text(json.dumps(memory, indent=2, sort_keys=True))
+    print(f"Wrote {PORTFOLIO_REPLACEMENT_MEMORY_FILE}")
+    return memory
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--minutes", type=int, default=90)
     parser.add_argument("--limit", type=int, default=300)
     parser.add_argument("--top", type=int, default=15)
+    parser.add_argument("--write-memory", action="store_true", help="Write portfolio_replacement_memory.json")
     args = parser.parse_args()
 
     print("=" * 96)
@@ -422,6 +500,16 @@ def main():
                 f"score={c['score']} buy_score={c['buy_opportunity_score']} "
                 f"reason={c['decision_reason']}"
             )
+
+    if args.write_memory:
+        memory = build_replacement_memory(
+            positions=positions,
+            weakest=weakest,
+            best=best,
+            candidates=candidates,
+            minutes=args.minutes,
+        )
+        write_replacement_memory(memory)
 
 
 if __name__ == "__main__":

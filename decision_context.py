@@ -10,6 +10,8 @@ Purpose:
 
 from __future__ import annotations
 
+from portfolio_replacement_memory import load_portfolio_replacement_memory
+
 
 def _safe_dict(value):
     return value if isinstance(value, dict) else {}
@@ -106,6 +108,13 @@ def _summarize_context(ctx):
     elif mem_rec in ("caution", "avoid"):
         risks.append(f"strategy memory {mem_rec}: {strategy_memory.get('reason')}")
 
+    replacement = ctx.get("portfolio_replacement") or {}
+    repl_rec = replacement.get("recommendation")
+    if repl_rec in ("replacement_candidate", "replace_now_candidate", "extra_slot_candidate"):
+        risks.append(f"portfolio replacement advisory: {repl_rec} - {replacement.get('reason')}")
+    elif repl_rec == "observe_only":
+        supports.append("portfolio replacement advisory observe_only")
+
     setup = ctx.get("setup") or {}
     setup_label = setup.get("setup_label")
     setup_policy = setup.get("setup_policy_action")
@@ -185,6 +194,7 @@ def build_intelligence_context(symbol, action, account_state):
         "buy_opportunity": _compact_dict(account_state.get("buy_opportunity")),
         "opportunity_score": _compact_dict(account_state.get("opportunity_score")),
         "strategy_memory": _compact_dict(account_state.get("strategy_memory")),
+        "portfolio_replacement": _compact_dict(load_portfolio_replacement_memory()),
         "correlation_exposure": _safe_list(account_state.get("correlation_exposure")),
     }
 

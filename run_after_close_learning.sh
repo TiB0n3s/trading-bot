@@ -34,6 +34,10 @@ echo "---- policy_backtest.py ----"
 python3 policy_backtest.py --date "$(date +%F)" --write-summary
 
 echo
+echo "---- portfolio_replacement_report.py ----"
+python3 portfolio_replacement_report.py --minutes 390 --top 20 --write-memory
+
+echo
 echo "---- strategy_brain_report.py ----"
 python3 strategy_brain_report.py
 

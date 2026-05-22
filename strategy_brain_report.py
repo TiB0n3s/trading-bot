@@ -35,6 +35,7 @@ FILES = {
     "missed_opportunity": BASE_DIR / "missed_opportunity_memory.json",
     "excursion": BASE_DIR / "excursion_memory.json",
     "policy_backtest": BASE_DIR / "policy_backtest_summary.json",
+    "portfolio_replacement": BASE_DIR / "portfolio_replacement_memory.json",
 }
 
 
@@ -328,6 +329,55 @@ def section_policy_backtest(policy):
             )
 
 
+
+def section_portfolio_replacement(replacement):
+    print_header("Portfolio replacement intelligence")
+
+    if not replacement:
+        print("  No portfolio_replacement_memory.json available.")
+        return
+
+    print(f"  generated_at          : {replacement.get('generated_at')}")
+    print(f"  mode                  : {replacement.get('mode')}")
+    print(f"  open_position_count   : {replacement.get('open_position_count')}")
+    print(f"  recommendation        : {replacement.get('recommendation')}")
+    print(f"  reason                : {replacement.get('reason')}")
+
+    weakest = replacement.get("weakest_holding") or {}
+    if weakest:
+        print()
+        print(
+            f"  Weakest holding       : {weakest.get('symbol')} "
+            f"plpc={float(weakest.get('unrealized_plpc') or 0):+.2f}% "
+            f"pl=${float(weakest.get('unrealized_pl') or 0):+.2f}"
+        )
+
+    strongest = replacement.get("strongest_candidate") or {}
+    if strongest:
+        print()
+        print(
+            f"  Strongest candidate   : {strongest.get('symbol')} "
+            f"score={strongest.get('score')} "
+            f"decision={strongest.get('decision')} "
+            f"buy_score={strongest.get('buy_opportunity_score')} "
+            f"buy_rec={strongest.get('buy_opportunity_recommendation')} "
+            f"session={strongest.get('session_trend_label')} "
+            f"setup={strongest.get('setup_label')}/{strongest.get('setup_policy_action')}"
+        )
+
+    candidates = replacement.get("replacement_candidates") or []
+    print()
+    print("  Replacement / expansion candidates:")
+    if not candidates:
+        print("    none")
+    else:
+        for c in candidates[:10]:
+            print(
+                f"    {c.get('symbol'):<6} {c.get('decision'):<24} "
+                f"score={c.get('score')} buy_score={c.get('buy_opportunity_score')} "
+                f"reason={c.get('decision_reason')}"
+            )
+
 def section_recommendations(strategy, missed, excursion, policy):
     print_header("Review recommendations")
 
@@ -393,6 +443,7 @@ def main():
     missed = loaded["missed_opportunity"][0]
     excursion = loaded["excursion"][0]
     policy = loaded["policy_backtest"][0]
+    replacement = loaded["portfolio_replacement"][0]
 
     print("=" * 80)
     print("  Strategy Brain Report")

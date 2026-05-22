@@ -22,6 +22,7 @@ from trade_matcher import rebuild_matched_trades
 
 BASE_DIR = Path(__file__).resolve().parent
 OUT_FILE = BASE_DIR / "strategy_memory.json"
+MEMORY_HISTORY_DIR = BASE_DIR / "strategy_memory_history"
 MANUAL_OVERRIDES_FILE = BASE_DIR / "manual_strategy_overrides.json"
 
 LOOKBACK_DAYS = 20
@@ -170,6 +171,46 @@ def apply_manual_overrides(memory):
     memory["manual_overrides_applied"] = applied
     memory["manual_overrides"] = overrides
     return memory
+
+
+def archive_strategy_memory(memory):
+    """Write a timestamped copy of strategy_memory.json for audit/history."""
+    try:
+        MEMORY_HISTORY_DIR.mkdir(exist_ok=True)
+
+        generated_at = memory.get("generated_at")
+        if generated_at:
+            safe_ts = (
+                generated_at
+                .replace("-", "")
+                .replace(":", "")
+                .replace(" ", "_")
+            )
+        else:
+            safe_ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+
+        history_file = MEMORY_HISTORY_DIR / f"{safe_ts}_strategy_memory.json"
+        history_file.write_text(json.dumps(memory, indent=2, sort_keys=True))
+
+        # Keep the last 60 snapshots to avoid unbounded growth.
+        snapshots = sorted(
+            MEMORY_HISTORY_DIR.glob("*_strategy_memory.json"),
+            key=lambda x: x.stat().st_mtime,
+            reverse=True,
+        )
+
+        for old in snapshots[60:]:
+            try:
+                old.unlink()
+            except Exception:
+                pass
+
+        memory["history_snapshot"] = str(history_file)
+        return str(history_file)
+
+    except Exception as e:
+        memory["history_snapshot_error"] = str(e)
+        return None
 
 def main():
     try:
@@ -363,7 +404,12 @@ def main():
 
     memory = apply_manual_overrides(memory)
 
+    snapshot_path = archive_strategy_memory(memory)
+
     OUT_FILE.write_text(json.dumps(memory, indent=2, sort_keys=True))
+
+    if snapshot_path:
+        print(f"Archived strategy memory: {snapshot_path}")
     print(f"Wrote {OUT_FILE}")
     print(f"Closed trades analyzed: {len(rows)}")
 

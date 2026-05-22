@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+import json
 from collections import defaultdict, deque
 from datetime import datetime
 
@@ -157,13 +158,8 @@ def match_trades():
 
     # Synthetic matches for filled position-manager exits that had no matching
     # approved BUY lot in trades.db, usually legacy/orphan positions.
-    existing_exit_order_ids = {
-        str(t.get("exit_order_id") or "")
-        for t in matched
-        if t.get("exit_order_id")
-    }
-
     synthetic = []
+
     with get_connection(DB_PATH) as con:
         sells = con.execute("""
             SELECT *
@@ -176,42 +172,55 @@ def match_trades():
             ORDER BY timestamp ASC
         """).fetchall()
 
+        existing_synthetic_order_ids = {
+            str(row["exit_order_id"] or "")
+            for row in con.execute("""
+                SELECT exit_order_id
+                FROM matched_trades
+                WHERE match_source = 'synthetic_position_manager_exit'
+                  AND exit_order_id IS NOT NULL
+            """).fetchall()
+        }
+
         for sell_row in sells:
             order_id = str(sell_row["order_id"] or "")
-            if order_id and order_id in existing_exit_order_ids:
+            if not order_id:
                 continue
 
-            # Skip if this sell already appears as a normal matched exit timestamp/symbol.
-            already_matched = any(
+            if order_id in existing_synthetic_order_ids:
+                continue
+
+            # If this exact sell already exists as a normal matched trade, skip.
+            normal_match_exists = any(
                 t.get("symbol") == sell_row["symbol"]
                 and t.get("exit_timestamp") == sell_row["timestamp"]
                 for t in matched
             )
-            if already_matched:
+            if normal_match_exists:
                 continue
 
             item = _synthetic_match_from_position_manager_exit(con, sell_row)
             if item:
                 synthetic.append(item)
 
-    if synthetic:
-        matched.extend(synthetic)
+        if synthetic:
+            insert_fields = [
+                "symbol", "entry_timestamp", "exit_timestamp", "holding_minutes",
+                "qty", "entry_price", "exit_price", "realized_pnl",
+                "realized_pnl_pct", "won",
+            ] + ENTRY_CONTEXT_FIELDS + MATCH_SOURCE_FIELDS
 
-        with get_connection(DB_PATH) as con:
+            placeholders = ", ".join(["?"] * len(insert_fields))
+            columns = ", ".join(insert_fields)
+
             for t in synthetic:
-                insert_fields = [
-                    "symbol", "entry_timestamp", "exit_timestamp", "holding_minutes",
-                    "qty", "entry_price", "exit_price", "realized_pnl",
-                    "realized_pnl_pct", "won",
-                ] + ENTRY_CONTEXT_FIELDS + MATCH_SOURCE_FIELDS
-
-                placeholders = ", ".join(["?"] * len(insert_fields))
-                columns = ", ".join(insert_fields)
-
                 con.execute(
                     f"INSERT INTO matched_trades ({columns}) VALUES ({placeholders})",
                     [t.get(field) for field in insert_fields],
                 )
+
+    if synthetic:
+        matched.extend(synthetic)
 
     return matched, open_lots
 

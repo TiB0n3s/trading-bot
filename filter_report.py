@@ -43,6 +43,7 @@ KNOWN_LABELS = {
     "session_momentum_gate": "Session momentum gate",
     "prediction_gate": "Prediction gate",
     "strategy_memory": "Strategy memory gate",
+    "decision_policy": "Decision policy gate",
     "confidence_gate": "Low confidence gate",
     "second_look": "Second-look market check",
     "stale_signal": "Stale signal",

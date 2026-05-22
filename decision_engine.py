@@ -153,6 +153,19 @@ entry_quality:
 
 When risk_level and entry_quality conflict with trend or bias, favor the tighter signal.
 
+DECISION POLICY GUIDANCE:
+account_state may contain "decision_policy", the deterministic executive policy layer.
+It summarizes learned memory, live intelligence context, prediction/opportunity quality, and session risk.
+
+Apply to BUY signals:
+- decision_policy.decision "block" should normally mean reject. This is usually enforced before this call.
+- decision_policy.decision "size_down" means reduce position_size_pct by the provided size_multiplier and avoid high confidence unless the evidence is exceptional.
+- decision_policy.decision "allow" means normal synthesis may proceed.
+- decision_policy.risks are higher priority than generic bullish language.
+- decision_policy.supports can strengthen conviction only when trend/momentum/market context also agree.
+- decision_policy never overrides hard rules or bearish/avoid conditions.
+
+
 INTELLIGENCE CONTEXT GUIDANCE:
 account_state may contain "intelligence_context", a normalized trader-brain summary built from:
 - market_brief: same-day bias, effective live bias, fundamental_score, risk_level, entry_quality

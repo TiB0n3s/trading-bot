@@ -1,0 +1,194 @@
+#!/usr/bin/env python3
+"""
+Decision policy engine.
+
+Purpose:
+- Convert intelligence_context + strategy_memory into one deterministic policy.
+- Runs before Claude.
+- Never loosens hard risk rules.
+- Can block poor BUY setups or tell Claude to size down.
+- SELL signals pass through.
+"""
+
+from __future__ import annotations
+
+from strategy_memory import contextual_memory_for_signal
+
+
+def _to_float(value):
+    try:
+        if value is None:
+            return None
+        return float(value)
+    except Exception:
+        return None
+
+
+def _normalize_score(value):
+    """Normalize score to 0-100. Some existing scores are 0-10."""
+    score = _to_float(value)
+    if score is None:
+        return None
+    return score * 10 if score <= 10 else score
+
+
+def _worst_recommendation(recs):
+    priority = {
+        "avoid": 4,
+        "caution": 3,
+        "neutral": 2,
+        "observe": 1,
+        "favor": 0,
+        None: 0,
+    }
+    if not recs:
+        return None
+    return max(recs, key=lambda r: priority.get(r, 0))
+
+
+def evaluate_decision_policy(symbol, action, intelligence_context=None, account_state=None):
+    intelligence_context = intelligence_context or {}
+    account_state = account_state or {}
+
+    if action != "buy":
+        return {
+            "decision": "allow",
+            "size_multiplier": 1.0,
+            "reason": "sell signal bypasses buy-side decision policy",
+            "evidence": [],
+        }
+
+    evidence = []
+    risks = []
+    supports = []
+
+    summary = intelligence_context.get("summary") or {}
+    recommended_action = summary.get("recommended_action")
+
+    if recommended_action:
+        evidence.append(f"intelligence_context recommended_action={recommended_action}")
+
+    if recommended_action == "block_preferred":
+        risks.append("intelligence context prefers block")
+    elif recommended_action == "size_down":
+        risks.append("intelligence context recommends size down")
+    elif recommended_action == "caution":
+        risks.append("intelligence context recommends caution")
+    elif recommended_action == "allow":
+        supports.append("intelligence context allows")
+
+    opportunity = intelligence_context.get("opportunity_score") or account_state.get("opportunity_score") or {}
+    opp_score = _normalize_score(opportunity.get("score"))
+    opp_decision = opportunity.get("decision")
+
+    if opp_score is not None:
+        evidence.append(f"opportunity_score={opp_score:.1f}")
+
+    if opp_decision == "block":
+        risks.append("opportunity score blocks")
+    elif opp_decision in ("watch", "size_down"):
+        risks.append(f"opportunity score decision={opp_decision}")
+    elif opp_decision in ("allow", "pass"):
+        supports.append("opportunity score allows")
+
+    prediction = intelligence_context.get("prediction") or {}
+    pred_decision = prediction.get("prediction_decision")
+    pred_score = prediction.get("prediction_score")
+
+    if pred_decision:
+        evidence.append(f"prediction_decision={pred_decision} score={pred_score}")
+
+    if pred_decision == "block":
+        risks.append("prediction gate says block")
+    elif pred_decision == "watch":
+        risks.append("prediction gate says watch")
+    elif pred_decision in ("allow", "pass", "buy"):
+        supports.append("prediction supports")
+
+    session_gate = intelligence_context.get("session_momentum_gate") or {}
+    if session_gate.get("would_block"):
+        risks.append(f"session momentum gate would block: {session_gate.get('reason')}")
+    elif session_gate.get("severity") in ("pass", "supportive"):
+        supports.append("session momentum supportive")
+
+    # Learned/contextual memory.
+    memory = contextual_memory_for_signal(symbol, intelligence_context)
+    memory_matches = memory.get("matches") or []
+
+    recs = [m.get("recommendation") for m in memory_matches]
+    worst_rec = _worst_recommendation(recs)
+
+    learned_min_scores = [
+        int(m["min_setup_score"])
+        for m in memory_matches
+        if isinstance(m.get("min_setup_score"), int)
+    ]
+    learned_min_score = max(learned_min_scores) if learned_min_scores else None
+
+    if memory_matches:
+        evidence.append(
+            "strategy_memory_matches="
+            + ",".join(f"{m.get('label')}:{m.get('recommendation')}" for m in memory_matches[:6])
+        )
+
+    if worst_rec == "avoid":
+        risks.append("strategy memory has avoid recommendation")
+    elif worst_rec == "caution":
+        risks.append("strategy memory has caution recommendation")
+    elif worst_rec == "favor":
+        supports.append("strategy memory favors this context")
+
+    # Determine final policy.
+    decision = "allow"
+    size_multiplier = 1.0
+    reason = "decision policy allows"
+
+    # Hard block when learned/contextual threshold says score is insufficient.
+    if learned_min_score is not None and opp_score is not None:
+        if worst_rec in ("avoid", "caution") and opp_score < learned_min_score:
+            decision = "block"
+            size_multiplier = 0.0
+            reason = (
+                f"strategy memory requires score >= {learned_min_score}; "
+                f"opportunity_score={opp_score:.1f}; recommendation={worst_rec}"
+            )
+
+    # Hard block on strong negative deterministic signals.
+    if decision != "block":
+        if opp_decision == "block" or pred_decision == "block":
+            decision = "block"
+            size_multiplier = 0.0
+            reason = f"deterministic policy block: opportunity={opp_decision}, prediction={pred_decision}"
+
+    # Intelligence block-preferred becomes live block only if support is weak.
+    if decision != "block" and recommended_action == "block_preferred" and len(supports) == 0:
+        decision = "block"
+        size_multiplier = 0.0
+        reason = "intelligence context block_preferred with no supporting evidence"
+
+    # Size down for caution/avoid memory or multiple risks.
+    if decision != "block":
+        if worst_rec == "avoid":
+            decision = "size_down"
+            size_multiplier = 0.35
+            reason = "strategy memory avoid context; allowing only reduced-size Claude review"
+        elif worst_rec == "caution" or recommended_action == "size_down":
+            decision = "size_down"
+            size_multiplier = 0.5
+            reason = "cautionary learned/live context; reduce size"
+        elif recommended_action == "caution" or len(risks) >= 2:
+            decision = "size_down"
+            size_multiplier = 0.75
+            reason = "multiple caution signals; reduce size"
+
+    return {
+        "decision": decision,
+        "size_multiplier": size_multiplier,
+        "reason": reason,
+        "risks": risks[:8],
+        "supports": supports[:8],
+        "evidence": evidence[:10],
+        "learned_min_score": learned_min_score,
+        "worst_memory_recommendation": worst_rec,
+        "memory_matches": memory_matches[:8],
+    }

@@ -27,6 +27,7 @@ from macro_risk import get_macro_risk
 from setup_classifier import classify_setup
 from strategy_memory import memory_for_signal
 from decision_context import build_intelligence_context
+from decision_policy import evaluate_decision_policy
 from rolling_context import rolling_summary, rolling_symbol_context
 from decision_thresholds import PREDICTION_GATE_THRESHOLDS
 from runtime_config import (
@@ -4182,6 +4183,39 @@ def process_signal(data):
         f"primary_supports={summary.get('primary_supports')} "
         f"primary_risks={summary.get('primary_risks')}"
     )
+
+    decision_policy = evaluate_decision_policy(
+        symbol=symbol,
+        action=action,
+        intelligence_context=intelligence_context,
+        account_state=account_state,
+    )
+    account_state["decision_policy"] = decision_policy
+    claude_account_state["decision_policy"] = decision_policy
+
+    logger.info(
+        f"DECISION_POLICY {symbol} {action.upper()}: "
+        f"decision={decision_policy.get('decision')} "
+        f"size_multiplier={decision_policy.get('size_multiplier')} "
+        f"reason={decision_policy.get('reason')} "
+        f"risks={decision_policy.get('risks')} "
+        f"supports={decision_policy.get('supports')}"
+    )
+
+    if action == "buy" and decision_policy.get("decision") == "block":
+        reason = decision_policy.get("reason", "decision policy blocked setup")
+        logger.warning(
+            f"Decision policy gate blocked {symbol} BUY before Claude: {reason}"
+        )
+        log_rejection(
+            symbol,
+            action,
+            "decision_policy",
+            reason,
+            price=price,
+            account_state=account_state,
+        )
+        return
 
     decision = evaluate_signal(data, claude_account_state)
 

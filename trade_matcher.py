@@ -5,6 +5,13 @@ from datetime import datetime
 from db import DB_PATH, get_connection
 
 
+MATCH_SOURCE_FIELDS = [
+    "match_source",
+    "entry_source",
+    "exit_order_id",
+    "exit_reason",
+]
+
 ENTRY_CONTEXT_FIELDS = [
     "macro_regime",
     "risk_multiplier",
@@ -148,6 +155,64 @@ def match_trades():
                 if lot["qty"] <= 0:
                     open_lots[symbol].popleft()
 
+    # Synthetic matches for filled position-manager exits that had no matching
+    # approved BUY lot in trades.db, usually legacy/orphan positions.
+    existing_exit_order_ids = {
+        str(t.get("exit_order_id") or "")
+        for t in matched
+        if t.get("exit_order_id")
+    }
+
+    synthetic = []
+    with get_connection(DB_PATH) as con:
+        sells = con.execute("""
+            SELECT *
+            FROM trades
+            WHERE action = 'sell'
+              AND approved = 1
+              AND order_status = 'filled'
+              AND fill_price IS NOT NULL
+              AND rejection_reason LIKE 'position_manager_%'
+            ORDER BY timestamp ASC
+        """).fetchall()
+
+        for sell_row in sells:
+            order_id = str(sell_row["order_id"] or "")
+            if order_id and order_id in existing_exit_order_ids:
+                continue
+
+            # Skip if this sell already appears as a normal matched exit timestamp/symbol.
+            already_matched = any(
+                t.get("symbol") == sell_row["symbol"]
+                and t.get("exit_timestamp") == sell_row["timestamp"]
+                for t in matched
+            )
+            if already_matched:
+                continue
+
+            item = _synthetic_match_from_position_manager_exit(con, sell_row)
+            if item:
+                synthetic.append(item)
+
+    if synthetic:
+        matched.extend(synthetic)
+
+        with get_connection(DB_PATH) as con:
+            for t in synthetic:
+                insert_fields = [
+                    "symbol", "entry_timestamp", "exit_timestamp", "holding_minutes",
+                    "qty", "entry_price", "exit_price", "realized_pnl",
+                    "realized_pnl_pct", "won",
+                ] + ENTRY_CONTEXT_FIELDS + MATCH_SOURCE_FIELDS
+
+                placeholders = ", ".join(["?"] * len(insert_fields))
+                columns = ", ".join(insert_fields)
+
+                con.execute(
+                    f"INSERT INTO matched_trades ({columns}) VALUES ({placeholders})",
+                    [t.get(field) for field in insert_fields],
+                )
+
     return matched, open_lots
 
 
@@ -204,7 +269,11 @@ def init_matched_trades_table():
 
             buy_opportunity_score REAL,
             buy_opportunity_recommendation TEXT,
-            buy_opportunity_reason TEXT
+            buy_opportunity_reason TEXT,
+            exit_reason TEXT,
+            exit_order_id TEXT,
+            entry_source TEXT,
+            match_source TEXT
         )
     """)
 
@@ -247,6 +316,120 @@ def init_matched_trades_table():
     con.close()
 
 
+
+def _event_payload_for_order(con, order_id):
+    """Find bot_events payload for a position-manager order by Alpaca order_id."""
+    if not order_id:
+        return None
+
+    try:
+        rows = con.execute("""
+            SELECT payload_json
+            FROM bot_events
+            WHERE event_type = 'POSITION_MANAGER_ORDER'
+              AND payload_json LIKE ?
+            ORDER BY id DESC
+            LIMIT 1
+        """, (f"%{order_id}%",)).fetchall()
+    except Exception:
+        return None
+
+    if not rows:
+        return None
+
+    try:
+        return json.loads(rows[0]["payload_json"] or "{}")
+    except Exception:
+        return None
+
+
+def _synthetic_match_from_position_manager_exit(con, sell_row):
+    """
+    Build a synthetic matched trade for a filled position-manager sell that has
+    no recorded FIFO buy lot in trades.db.
+
+    This is for legacy/orphan positions where Alpaca held the position but
+    the entry leg was not logged as an approved filled BUY in trades.db.
+    """
+    payload = _event_payload_for_order(con, sell_row["order_id"])
+    if not payload:
+        return None
+
+    decision = payload.get("decision") or {}
+
+    try:
+        qty = float(sell_row["qty"] or decision.get("qty") or 0)
+        entry_price = float(decision.get("avg_entry") or 0)
+        exit_price = float(sell_row["fill_price"] or 0)
+    except Exception:
+        return None
+
+    if qty <= 0 or entry_price <= 0 or exit_price <= 0:
+        return None
+
+    realized_pnl = round((exit_price - entry_price) * qty, 2)
+    realized_pnl_pct = round(((exit_price - entry_price) / entry_price) * 100.0, 3)
+    won = 1 if realized_pnl > 0 else 0
+
+    return {
+        "symbol": sell_row["symbol"],
+        "entry_timestamp": None,
+        "exit_timestamp": sell_row["timestamp"],
+        "holding_minutes": None,
+        "qty": qty,
+        "entry_price": entry_price,
+        "exit_price": exit_price,
+        "realized_pnl": realized_pnl,
+        "realized_pnl_pct": realized_pnl_pct,
+        "won": won,
+
+        # Entry-side context from position-manager decision/payload.
+        "macro_regime": None,
+        "risk_multiplier": None,
+        "market_bias": None,
+        "risk_level": None,
+        "entry_quality": None,
+        "trend_direction": None,
+        "trend_strength": None,
+        "momentum_direction": None,
+        "momentum_pct": None,
+        "correlation_cluster": None,
+        "cluster_exposure_pct": None,
+
+        "market_bias_effective": None,
+        "market_bias_override_reason": None,
+        "fundamental_score": None,
+
+        "session_trend_label": None,
+        "session_trend_score": None,
+        "session_return_pct": None,
+        "session_momentum_5m_pct": decision.get("momentum_5m_pct"),
+        "session_momentum_15m_pct": decision.get("momentum_15m_pct"),
+        "session_momentum_30m_pct": decision.get("momentum_30m_pct"),
+        "session_distance_from_vwap_pct": decision.get("vwap_dist_pct"),
+        "session_momentum_reason": None,
+
+        "prediction_score": None,
+        "prediction_decision": None,
+        "prediction_reason": None,
+
+        "setup_label": None,
+        "setup_policy_action": None,
+        "setup_policy_reason": None,
+        "setup_confidence_adjustment": None,
+        "setup_size_multiplier": None,
+
+        "buy_opportunity_score": None,
+        "buy_opportunity_recommendation": None,
+        "buy_opportunity_reason": None,
+
+        "match_source": "synthetic_position_manager_exit",
+        "entry_source": "position_manager_avg_entry",
+        "exit_order_id": sell_row["order_id"],
+        "exit_reason": sell_row["rejection_reason"],
+    }
+
+
 def rebuild_matched_trades():
     matched, open_lots = match_trades()
     init_matched_trades_table()
@@ -265,7 +448,7 @@ def rebuild_matched_trades():
         "realized_pnl",
         "realized_pnl_pct",
         "won",
-    ] + ENTRY_CONTEXT_FIELDS
+    ] + ENTRY_CONTEXT_FIELDS + MATCH_SOURCE_FIELDS
 
     placeholders = ", ".join(["?"] * len(columns))
     col_sql = ", ".join(columns)

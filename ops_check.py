@@ -17,6 +17,7 @@ Usage:
   python3 ops_check.py predictions
   python3 ops_check.py signal-lessons
   python3 ops_check.py trends
+  python3 ops_check.py historical-backfill START_DATE END_DATE
   python3 ops_check.py all
   python3 ops_check.py filters 2026-05-08
   python3 ops_check.py events 2026-05-26
@@ -89,6 +90,23 @@ def main():
 
     command = sys.argv[1].lower()
     target_date = sys.argv[2] if len(sys.argv) > 2 else date.today().isoformat()
+
+    if command == "historical-backfill":
+        if len(sys.argv) < 4:
+            print("Usage: python3 ops_check.py historical-backfill START_DATE END_DATE")
+            return 2
+
+        ok = run(
+            "Historical Learning Backfill",
+            [
+                "historical_learning_backfill.py",
+                "--start-date",
+                sys.argv[2],
+                "--end-date",
+                sys.argv[3],
+            ],
+        )
+        return 0 if ok else 1
 
     if command == "all":
         checks = []

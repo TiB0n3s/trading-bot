@@ -86,22 +86,24 @@ def main():
         return 1
 
     print(
-        f"{'Sym':<7} {'Score':>7} {'Timing':>7} {'P(profit)':>10} {'P(order)':>9} "
+        f"{'Sym':<7} {'Score':>7} {'Timing':>7} {'Trend':>7} {'P(profit)':>10} {'P(order)':>9} "
         f"{'ExpPnL':>9} {'Conf':<9} {'Sample':>6} {'Bias':<8} "
-        f"{'Risk':<10} {'Entry':<18} {'Timing Rec':<36} Reason"
+        f"{'Risk':<10} {'Trend Label':<20} {'Timing Rec':<34} Reason"
     )
     print(
-        f"{'-'*7} {'-'*7} {'-'*7} {'-'*10} {'-'*9} "
+        f"{'-'*7} {'-'*7} {'-'*7} {'-'*7} {'-'*10} {'-'*9} "
         f"{'-'*9} {'-'*9} {'-'*6} {'-'*8} "
-        f"{'-'*10} {'-'*18} {'-'*36} {'-'*60}"
+        f"{'-'*10} {'-'*20} {'-'*34} {'-'*60}"
     )
 
     for r in rows:
         timing_score = "-" if r["timing_score"] is None else f"{float(r['timing_score']):.0f}"
+        trend_score = "-" if r["trend_score"] is None else f"{float(r['trend_score']):.0f}"
         print(
             f"{r['symbol']:<7} "
             f"{float(r['prediction_score'] or 0):>7.2f} "
             f"{timing_score:>7} "
+            f"{trend_score:>7} "
             f"{pct(r['probability_of_profit']):>10} "
             f"{pct(r['probability_of_order']):>9} "
             f"{money(r['expected_pnl']):>9} "
@@ -109,8 +111,8 @@ def main():
             f"{int(r['sample_size'] or 0):>6} "
             f"{short(r['bias'], 8):<8} "
             f"{short(r['risk_level'], 10):<10} "
-            f"{short(r['entry_quality'], 18):<18} "
-            f"{short(r['recommended_entry_timing'], 36):<36} "
+            f"{short(r['trend_label'], 20):<20} "
+            f"{short(r['recommended_entry_timing'], 34):<34} "
             f"{short(r['reason'], 60)}"
         )
 
@@ -120,6 +122,8 @@ def main():
     print("  Observe-only prediction layer. Does not alter live trading.")
     print("  Low/very_low confidence is expected until more sessions accumulate.")
     print("  Use this report to compare predictions against later realized outcomes.")
+    print("  Timing Rec is observe-only and comes from historical signal timing lessons.")
+    print("  Trend score/label are observe-only and come from historical trend context similarity.")
 
     return 0
 

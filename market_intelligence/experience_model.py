@@ -43,6 +43,12 @@ PREDICTION_COLUMNS = [
     "historical_avg_exit_delay",
     "historical_timing_sample_size",
     "timing_reason",
+    "trend_score",
+    "trend_label",
+    "trend_regime",
+    "trend_confidence",
+    "trend_similarity_sample_size",
+    "trend_reason",
     "raw_json",
     "created_at",
     "updated_at",
@@ -81,6 +87,13 @@ def init_prediction_tables(db_path: Path | str = DB_PATH) -> None:
                 historical_timing_sample_size INTEGER,
                 timing_reason TEXT,
 
+                trend_score REAL,
+                trend_label TEXT,
+                trend_regime TEXT,
+                trend_confidence TEXT,
+                trend_similarity_sample_size INTEGER,
+                trend_reason TEXT,
+
                 raw_json TEXT,
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL,
@@ -117,6 +130,12 @@ def init_prediction_tables(db_path: Path | str = DB_PATH) -> None:
             "historical_avg_exit_delay": "REAL",
             "historical_timing_sample_size": "INTEGER",
             "timing_reason": "TEXT",
+            "trend_score": "REAL",
+            "trend_label": "TEXT",
+            "trend_regime": "TEXT",
+            "trend_confidence": "TEXT",
+            "trend_similarity_sample_size": "INTEGER",
+            "trend_reason": "TEXT",
         }
         for col, col_type in timing_columns.items():
             if col not in existing_cols:
@@ -397,6 +416,147 @@ def _timing_recommendation_from_row(row):
     return "review_timing", 50.0
 
 
+
+def trend_context_for_symbol(con, market_date: str, symbol: str):
+    try:
+        return con.execute(
+            """
+            SELECT *
+            FROM historical_trend_context
+            WHERE market_date = ?
+              AND symbol = ?
+            """,
+            (market_date, symbol),
+        ).fetchone()
+    except Exception:
+        return None
+
+
+def trend_similarity_lesson(con, market_date: str, symbol: str) -> dict:
+    """Return observe-only trend score using historical trend contexts + signal outcomes.
+
+    Finds prior symbol/date rows with the same trend_label/regime when possible,
+    then summarizes linked historical_signal_outcomes by date+symbol.
+    """
+    target = trend_context_for_symbol(con, market_date, symbol)
+
+    if not target:
+        return {
+            "trend_score": 50.0,
+            "trend_label": None,
+            "trend_regime": None,
+            "trend_confidence": None,
+            "trend_similarity_sample_size": 0,
+            "trend_reason": "No historical_trend_context row available for this symbol/date.",
+        }
+
+    try:
+        rows = con.execute(
+            """
+            SELECT
+                t.market_date,
+                t.symbol,
+                t.trend_label,
+                t.trend_regime,
+                t.relative_strength_score,
+                t.distance_from_sma_20_pct,
+                COUNT(s.id) AS signal_rows,
+                SUM(CASE WHEN s.matched_outcome_id IS NOT NULL THEN 1 ELSE 0 END) AS matched_signals,
+                SUM(CASE WHEN s.realized_pnl > 0 THEN 1 ELSE 0 END) AS winners,
+                SUM(CASE WHEN s.realized_pnl < 0 THEN 1 ELSE 0 END) AS losers,
+                AVG(s.realized_pnl) AS avg_pnl,
+                SUM(s.realized_pnl) AS total_pnl,
+                AVG(s.realized_pnl_pct) AS avg_pnl_pct
+            FROM historical_trend_context t
+            LEFT JOIN historical_signal_outcomes s
+              ON s.market_date = t.market_date
+             AND s.symbol = t.symbol
+            WHERE t.market_date < ?
+              AND (
+                    t.trend_label = ?
+                 OR t.trend_regime = ?
+                 OR t.symbol = ?
+              )
+            GROUP BY t.market_date, t.symbol
+            HAVING matched_signals > 0
+            ORDER BY
+              CASE WHEN t.symbol = ? THEN 0 ELSE 1 END,
+              CASE WHEN t.trend_label = ? THEN 0 ELSE 1 END,
+              t.market_date DESC
+            LIMIT 40
+            """,
+            (
+                market_date,
+                target["trend_label"],
+                target["trend_regime"],
+                symbol,
+                symbol,
+                target["trend_label"],
+            ),
+        ).fetchall()
+    except Exception as e:
+        return {
+            "trend_score": 50.0,
+            "trend_label": target["trend_label"],
+            "trend_regime": target["trend_regime"],
+            "trend_confidence": target["trend_confidence"],
+            "trend_similarity_sample_size": 0,
+            "trend_reason": f"Trend similarity lookup failed: {e}",
+        }
+
+    if not rows:
+        return {
+            "trend_score": 50.0,
+            "trend_label": target["trend_label"],
+            "trend_regime": target["trend_regime"],
+            "trend_confidence": target["trend_confidence"],
+            "trend_similarity_sample_size": 0,
+            "trend_reason": (
+                f"No prior matched signal outcomes for trend_label={target['trend_label']} "
+                f"or trend_regime={target['trend_regime']}."
+            ),
+        }
+
+    matched = sum(int(r["matched_signals"] or 0) for r in rows)
+    winners = sum(int(r["winners"] or 0) for r in rows)
+    total_pnl = sum(float(r["total_pnl"] or 0) for r in rows)
+    avg_pnl = total_pnl / matched if matched else 0.0
+    win_rate = winners / matched if matched else 0.0
+
+    score = 50.0
+    score += (win_rate - 0.5) * 35.0
+    score += max(-15.0, min(15.0, avg_pnl * 2.5))
+
+    # Modest adjustment from current trend shape.
+    if target["trend_label"] == "confirmed_uptrend":
+        score += 4
+    elif target["trend_label"] == "uptrend_pullback":
+        score += 3
+    elif target["trend_label"] == "extended_uptrend":
+        score -= 4
+    elif target["trend_label"] == "downtrend":
+        score -= 8
+    elif target["trend_label"] == "volatile_unclear":
+        score -= 5
+
+    score = round(clamp(score), 2)
+
+    return {
+        "trend_score": score,
+        "trend_label": target["trend_label"],
+        "trend_regime": target["trend_regime"],
+        "trend_confidence": target["trend_confidence"],
+        "trend_similarity_sample_size": matched,
+        "trend_reason": (
+            f"trend_label={target['trend_label']} regime={target['trend_regime']} "
+            f"matched_signals={matched} win_rate={win_rate:.1%} "
+            f"avg_pnl=${avg_pnl:+.2f} total_pnl=${total_pnl:+.2f}; "
+            f"current_reason={target['trend_reason']}"
+        ),
+    }
+
+
+
 def timing_lesson_for_symbol(con, market_date: str, symbol: str) -> dict:
     """Return observe-only timing lesson from historical_signal_outcomes.
 
@@ -633,15 +793,26 @@ def predict_symbol(market_date: str, symbol: str, db_path: Path | str = DB_PATH)
 
     with get_connection(db_path) as con:
         timing = timing_lesson_for_symbol(con, market_date, symbol)
+        trend = trend_similarity_lesson(con, market_date, symbol)
+
+    # Gentle observe-only score blend: trend/timing should inform, not dominate.
+    base_score = float(pred.get("prediction_score") or 50.0)
+    timing_score = float(timing.get("timing_score") or 50.0)
+    trend_score = float(trend.get("trend_score") or 50.0)
+    blended_score = round(clamp((base_score * 0.70) + (timing_score * 0.15) + (trend_score * 0.15)), 2)
+    pred["prediction_score"] = blended_score
 
     combined_raw = pred["raw"]
     combined_raw["timing_lesson"] = timing
+    combined_raw["trend_lesson"] = trend
+    combined_raw["base_prediction_score_before_timing_trend_blend"] = base_score
 
     return {
         "market_date": market_date,
         "symbol": symbol,
         **{k: v for k, v in pred.items() if k != "raw"},
         **timing,
+        **trend,
         "raw": combined_raw,
     }
 
@@ -670,6 +841,12 @@ def upsert_prediction(prediction: dict, db_path: Path | str = DB_PATH) -> None:
         "historical_avg_exit_delay": prediction.get("historical_avg_exit_delay"),
         "historical_timing_sample_size": prediction.get("historical_timing_sample_size"),
         "timing_reason": prediction.get("timing_reason"),
+        "trend_score": prediction.get("trend_score"),
+        "trend_label": prediction.get("trend_label"),
+        "trend_regime": prediction.get("trend_regime"),
+        "trend_confidence": prediction.get("trend_confidence"),
+        "trend_similarity_sample_size": prediction.get("trend_similarity_sample_size"),
+        "trend_reason": prediction.get("trend_reason"),
         "raw_json": json.dumps(prediction.get("raw") or {}, sort_keys=True),
         "created_at": now,
         "updated_at": now,

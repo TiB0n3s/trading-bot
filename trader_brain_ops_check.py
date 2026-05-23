@@ -7,12 +7,43 @@ Read-only readiness check for the observe-only trader-brain architecture.
 
 import json
 from pathlib import Path
-
+from market_intelligence.intraday_state import build_intraday_state
+from market_intelligence.tape_reader import classify_tape
 from config import APPROVED_SYMBOLS
 from market_intelligence.market_state import load_market_context, macro_regime, symbol_context
 from strategy.trade_scorer import score_trade
 from db import DB_PATH, get_connection
 
+def check_tape_smoke():
+    print("\n── Tape Smoke Test ────────────────────────────────────")
+
+    bars = []
+    price = 100.0
+    for i in range(30):
+        price += 0.1
+        bars.append({
+            "h": price + 0.05,
+            "l": price - 0.05,
+            "c": price,
+            "v": 1000 + i,
+        })
+
+    state = build_intraday_state("AAPL", bars)
+    tape = classify_tape(state)
+
+    print(f"symbol      : {state.get('symbol')}")
+    print(f"bar_count   : {state.get('bar_count')}")
+    print(f"trend_label : {state.get('trend_label')}")
+    print(f"tape_label  : {tape.get('label')}")
+    print(f"tape_score  : {tape.get('score')}")
+    print(f"action_hint : {tape.get('action_hint')}")
+
+    if state.get("bar_count") == 30 and tape.get("label"):
+        ok("tape smoke test completed")
+        return True
+
+    fail("tape smoke test failed")
+    return False
 
 def ok(msg):
     print(f"[OK]   {msg}")
@@ -138,6 +169,7 @@ def main():
         check_db_columns(),
         check_market_context(),
         check_scorer_smoke(),
+        check_tape_smoke(),
         check_recent_scores(),
     ]
 

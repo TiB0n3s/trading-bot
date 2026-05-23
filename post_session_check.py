@@ -250,6 +250,11 @@ def main():
     checks.append(run_cmd("Drawdown Report", [sys.executable, "drawdown_report.py", target_date]))
     checks.append(run_cmd("Analytics Report", [sys.executable, "analytics_report.py", "--date", target_date]))
 
+    # Market-intelligence learning reports — read-only.
+    checks.append(run_cmd("Daily Symbol Intelligence", [sys.executable, "intelligence_context_report.py", "--date", target_date]))
+    checks.append(run_cmd("Event Attribution Report", [sys.executable, "event_attribution_report.py", "--date", target_date]))
+    checks.append(run_cmd("Context Trade Join Report", [sys.executable, "context_trade_join_report.py", "--date", target_date, "--details", "--active-only"]))
+
     print("\n" + "=" * 64)
     if all(checks):
         ok("Post-session check passed")

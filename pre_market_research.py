@@ -13,6 +13,7 @@ Safety goals:
 - Keep one normalized schema consumed by app.py.
 """
 
+import argparse
 import json
 import logging
 import os
@@ -22,6 +23,8 @@ from datetime import date, datetime
 from pathlib import Path
 
 from symbols_config import APPROVED_SYMBOLS_LIST
+from market_intelligence.research_output import write_raw_research, raw_research_summary
+from market_intelligence.market_brief_builder import build_market_brief, write_market_context, summary_for_brief
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 OUTPUT_FILE = SCRIPT_DIR / "market_context.json"
@@ -286,8 +289,20 @@ def choose_macro_sentiment(batch_results: list[dict]) -> str:
 
 
 def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--date", help="Market date YYYY-MM-DD, default today")
+    parser.add_argument(
+        "--raw-output",
+        help="Optional path to write raw research JSON before builder normalization",
+    )
+    parser.add_argument(
+        "--build-output",
+        help="Optional path to write normalized rich market context JSON using market_brief_builder",
+    )
+    args = parser.parse_args()
+
     started = datetime.now()
-    today = date.today().isoformat()
+    today = args.date or date.today().isoformat()
 
     batches = list(_chunks(SYMBOLS, BATCH_SIZE))
     total_batches = len(batches)
@@ -358,6 +373,31 @@ def main():
     except Exception as e:
         logger.error(f"Failed to write {OUTPUT_FILE}: {e}")
         sys.exit(2)
+
+    if args.raw_output:
+        try:
+            write_raw_research(result, args.raw_output)
+            logger.info(f"Wrote raw research output {args.raw_output}")
+            print(f"  Raw output  : {args.raw_output}")
+            print(f"  Raw summary : {raw_research_summary(result)}")
+        except Exception as e:
+            logger.error(f"Failed to write raw research output {args.raw_output}: {e}")
+            sys.exit(2)
+
+    if args.build_output:
+        try:
+            rich_context = build_market_brief(
+                result,
+                market_date=today,
+                source="pre_market_research:builder",
+            )
+            write_market_context(rich_context, args.build_output)
+            logger.info(f"Wrote built market context {args.build_output}")
+            print(f"  Built output: {args.build_output}")
+            print(f"  Built summary: {summary_for_brief(rich_context)}")
+        except Exception as e:
+            logger.error(f"Failed to build market context {args.build_output}: {e}")
+            sys.exit(2)
 
     elapsed = (datetime.now() - started).total_seconds()
     syms = result.get("symbols", {})

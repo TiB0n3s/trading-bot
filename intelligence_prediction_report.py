@@ -124,8 +124,6 @@ def main():
     print("  Use this report to compare predictions against later realized outcomes.")
     print("  Timing Rec is observe-only and comes from historical signal timing lessons.")
     print("  Trend score/label are observe-only and come from historical trend context similarity.")
-    print("  Timing Rec is observe-only and comes from historical signal timing lessons.")
-    print("  Trend score/label are observe-only and come from historical trend context similarity.")
 
     return 0
 

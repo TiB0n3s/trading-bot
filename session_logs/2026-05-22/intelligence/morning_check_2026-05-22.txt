@@ -1,0 +1,116 @@
+2026-05-22 15:07:51,578 - INFO - DB performance indexes initialized
+2026-05-22 15:07:51,742 - WARNING - Startup reconciliation: AAPL held in Alpaca but no open position tracked in trades.db
+2026-05-22 15:07:51,742 - WARNING - Startup reconciliation: IWM held in Alpaca but no open position tracked in trades.db
+2026-05-22 15:07:51,743 - WARNING - Startup reconciliation: LLY held in Alpaca but no open position tracked in trades.db
+2026-05-22 15:07:51,743 - WARNING - Startup reconciliation: MA held in Alpaca but no open position tracked in trades.db
+2026-05-22 15:07:51,743 - WARNING - Startup reconciliation: SPY held in Alpaca but no open position tracked in trades.db
+2026-05-22 15:07:51,743 - INFO - Startup reconciliation: 6 positions in Alpaca, 1 tracked in DB, 5 discrepancies
+2026-05-22 15:07:51,743 - INFO - Symbol overrides loaded: disabled=0, buy_disabled=0, sell_only=0
+2026-05-22 15:07:51,745 - INFO - Trend table built for 41/41 approved symbols
+2026-05-22 15:07:51,746 - INFO - Hydrated 0 active cooldowns from cooldowns table (of 3 total)
+2026-05-22 15:07:51,747 - INFO - Hydrated 0 recent sells from recent_sells table (of 0 total)
+2026-05-22 15:07:51,747 - INFO - Market bias loaded for 41 symbols (buy=6, avoid=0, neutral=35, macro=mixed)
+====================================================================================================================================
+  Market Alignment Report
+====================================================================================================================================
+  market_date       : 2026-05-22
+  macro_sentiment   : mixed
+  source            : pre_market_research
+  context_freshness : fresh (market_date matches today (2026-05-22))
+  trend_source      : bot signal history, not live index market data
+  gate_readiness    : observe_only_weak_benchmark_data
+
+Sym    Cluster              Bench   SymBias   Risk       Entry              BenchBias  BenchTrend         Cnt   Aligned  Reason                      
+------ -------------------- ------- --------- ---------- ------------------ ---------- ------------------ ----- -------- ----------------------------
+AAPL   mega_cap_tech        QQQ     neutral   medium     good_if_breadth_h… neutral    neutral/weak       1     yes      benchmark neutral/weak      
+ABBV   large_cap_healthcare SPY     neutral   medium     good_on_pullbacks  neutral    neutral/weak       0     yes      benchmark neutral/weak      
+AMD    semiconductors       QQQ     neutral   -          -                  neutral    neutral/weak       1     yes      benchmark neutral/weak      
+ASML   semiconductors       QQQ     neutral   medium     good_on_pullbacks  neutral    neutral/weak       1     yes      benchmark neutral/weak      
+AVGO   semiconductors       QQQ     neutral   -          -                  neutral    neutral/weak       1     yes      benchmark neutral/weak      
+BE     ai_power             SPY     neutral   high       tactical_only      neutral    neutral/weak       0     yes      benchmark neutral/weak      
+CAT    industrials          SPY     buy       medium     good_on_pullbacks  neutral    neutral/weak       0     yes      benchmark neutral/weak      
+COST   consumer_retail      SPY     neutral   low        good_on_pullbacks  neutral    neutral/weak       0     yes      benchmark neutral/weak      
+CRDO   ai_infrastructure    QQQ     neutral   high       good_on_pullbacks  neutral    neutral/weak       1     yes      benchmark neutral/weak      
+CRM    enterprise_software  QQQ     neutral   high       conditional        neutral    neutral/weak       1     yes      benchmark neutral/weak      
+CRSP   biotech_speculative  IWM     neutral   very_high  tactical_only      neutral    neutral/weak       0     yes      benchmark neutral/weak      
+CVX    energy               SPY     neutral   -          -                  neutral    neutral/weak       0     yes      benchmark neutral/weak      
+GE     aerospace_industria… SPY     buy       medium     good_on_pullbacks  neutral    neutral/weak       0     yes      benchmark neutral/weak      
+GEV    ai_power             SPY     buy       medium     good_on_pullbacks  neutral    neutral/weak       0     yes      benchmark neutral/weak      
+GLD    gold_hedge           GLD     neutral   -          -                  neutral    bullish/weak       2     yes      aligned                     
+GOOGL  mega_cap_tech        QQQ     neutral   -          -                  neutral    neutral/weak       1     yes      benchmark neutral/weak      
+HWM    defense_industrial   SPY     neutral   medium     good_on_pullbacks  neutral    neutral/weak       0     yes      benchmark neutral/weak      
+IWM    small_caps           IWM     neutral   -          -                  neutral    neutral/weak       0     yes      benchmark neutral/weak      
+KO     consumer_staples     SPY     neutral   low        good_on_pullbacks  neutral    neutral/weak       0     yes      benchmark neutral/weak      
+LIN    industrials          SPY     neutral   low        good_on_pullbacks  neutral    neutral/weak       0     yes      benchmark neutral/weak      
+LLY    large_cap_healthcare SPY     neutral   medium     good_on_pullbacks  neutral    neutral/weak       0     yes      benchmark neutral/weak      
+LMT    defense              SPY     neutral   medium     good_on_pullbacks  neutral    neutral/weak       0     yes      benchmark neutral/weak      
+MA     payments             SPY     neutral   low        good_on_pullbacks  neutral    neutral/weak       0     yes      benchmark neutral/weak      
+META   mega_cap_tech        QQQ     neutral   -          -                  neutral    neutral/weak       1     yes      benchmark neutral/weak      
+MRK    large_cap_healthcare SPY     neutral   medium     good_on_pullbacks  neutral    neutral/weak       0     yes      benchmark neutral/weak      
+MRNA   biotech_speculative  IWM     neutral   high       tactical_only      neutral    neutral/weak       0     yes      benchmark neutral/weak      
+MSFT   mega_cap_tech        QQQ     neutral   medium     good_on_pullbacks  neutral    neutral/weak       1     yes      benchmark neutral/weak      
+NFLX   high_beta_growth     QQQ     buy       medium     good_if_holds_gap  neutral    neutral/weak       1     yes      benchmark neutral/weak      
+NVDA   semiconductors       QQQ     buy       high       good_on_pullbacks  neutral    neutral/weak       1     yes      benchmark neutral/weak      
+ORCL   enterprise_software  QQQ     neutral   medium     conditional        neutral    neutral/weak       1     yes      benchmark neutral/weak      
+QQQ    mega_cap_tech        QQQ     neutral   medium     good_if_holds_gap  neutral    neutral/weak       1     yes      benchmark neutral/weak      
+RKLB   space_defense        SPY     neutral   very_high  good_on_pullbacks  neutral    neutral/weak       0     yes      benchmark neutral/weak      
+RTX    defense              SPY     neutral   medium     good_on_pullbacks  neutral    neutral/weak       0     yes      benchmark neutral/weak      
+SPY    broad_index          SPY     neutral   low        good_if_breadth_h… neutral    neutral/weak       0     yes      benchmark neutral/weak      
+TSCO   consumer_retail      SPY     neutral   medium     good_on_pullbacks  neutral    neutral/weak       0     yes      benchmark neutral/weak      
+TSLA   high_beta_growth     QQQ     neutral   high       tactical_only      neutral    neutral/weak       1     yes      benchmark neutral/weak      
+UNH    large_cap_healthcare SPY     neutral   high       conditional        neutral    neutral/weak       0     yes      benchmark neutral/weak      
+V      payments             SPY     neutral   low        good_on_pullbacks  neutral    neutral/weak       0     yes      benchmark neutral/weak      
+VRT    ai_infrastructure    QQQ     buy       medium     good_on_pullbacks  neutral    neutral/weak       1     yes      benchmark neutral/weak      
+VRTX   biotech_quality      SPY     neutral   medium     good_on_pullbacks  neutral    neutral/weak       0     yes      benchmark neutral/weak      
+XOM    energy               SPY     neutral   -          -                  neutral    neutral/weak       0     yes      benchmark neutral/weak      
+
+Aligned for BUY context : 41
+Not aligned / avoid     : 0
+
+Observe-only: this report does not block trades.
+Do not promote to a hard gate unless context_freshness is fresh and gate_readiness is reviewed.
+================================================================
+  Morning Readiness Check
+================================================================
+
+── Market Context ─────────────────────────────────────
+[OK]   market_date is today: 2026-05-22
+[OK]   all approved symbols present: 41/41
+macro_sentiment : mixed
+source          : pre_market_research
+format          : batched_normalized_approved_symbols
+bias counts     : {'neutral': 35, 'buy': 6}
+[OK]   market bias entries appear populated
+
+── Rolling Momentum Context ─────────────────────────
+generated_at  : 2026-05-22T15:06:15.188573
+market_time_et: 2026-05-22T16:06:15.188578-04:00
+mode          : observe_only
+symbols       : 41/41
+errors        : 0
+[OK]   rolling momentum contains all approved symbols
+[OK]   rolling momentum has no symbol errors
+
+── Market Alignment Report ───────────────────────────
+[OK]   Market alignment report completed
+
+── Services ───────────────────────────────────────────
+[OK]   trading-bot active
+[OK]   fill-stream active
+[OK]   cloudflared active
+[OK]   nginx active
+
+── Alpaca Account ─────────────────────────────────────
+[OK]   Alpaca reachable; status=ACTIVE
+balance         : 96049.93
+portfolio_value : 100365.55
+buying_power    : 392517.63
+
+── Local Debug Endpoint ───────────────────────────────
+[OK]   /debug/symbol/QQQ reachable
+QQQ market_bias : neutral
+QQQ trend       : None
+QQQ buy blocks  : ['market_hours']
+
+================================================================
+[OK]   Morning readiness check passed

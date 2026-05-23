@@ -1,0 +1,87 @@
+
+============================================================
+  Trading Bot Analytics Report — DATE 2026-05-22
+============================================================
+
+── EXECUTION ───────────────────────────────────────────────
+  Filled buys              : 3
+  Filled sells             : 4
+  Synthetic exits          : 0
+  Open tracked positions   : 1 (LMT)
+  Fill events captured     : 55
+
+── RISK FILTERS ────────────────────────────────────────────
+  market_hours              : 18
+  ghost_sell                : 366
+  cooldown                  : 8
+  trend_confirmation        : 31
+  macro_position_limit      : 208
+  setup_policy              : 2
+  session_momentum_gate     : 1
+  prediction_gate           : 1
+  confidence_gate           : 1
+  second_look               : 7
+  claude_rejection          : 72
+  TOTAL                     : 715
+
+── SESSION MOMENTUM ATTRIBUTION ────────────────────────────
+  Label                   Total  Approved  Rejected Approval%
+  ---------------------- ------ --------- --------- ---------
+  developing_uptrend        104         3       101      2.9%
+  strong_uptrend             73         0        73      0.0%
+  rangebound                 62         2        60      3.2%
+  unknown                    45         0        45      0.0%
+  reversal_attempt            6         0         6      0.0%
+  fading                      3         0         3      0.0%
+
+── PERFORMANCE ─────────────────────────────────────────────
+  Realized P&L             : $-2.16
+  Closed trades            : 3 (1W / 2L / 0F)
+  Win rate                 : 33.3%
+  Avg win                  : $+4.20
+  Avg loss                 : $-3.18
+  Profit factor            : 0.66
+  Expectancy per trade     : $-0.72
+
+── PER-SYMBOL PERFORMANCE ──────────────────────────────────
+  Symbol         P&L  Closed       W/L/F    Qty
+  ------- ----------  ------  ----------  -----
+  LMT     $    +4.20       1       1/0/0    1.0
+  GE      $    -1.41       1       0/1/0    3.0
+  CRM     $    -4.95       1       0/1/0    5.0
+
+── MATCHED-TRADE ATTRIBUTION ───────────────────────────────
+  Trades                   : 4
+  Realized P&L             : $-1.57
+  Expectancy               : $-0.39
+  Win rate                 : 50.0%
+  Gross profit / loss      : $4.79 / $6.36
+  Profit factor            : 0.75
+
+  Per-symbol (from matched_trades):
+    Symbol  Trades         P&L     Expect    Win%
+    ------- ------  ----------  ---------  ------
+    LMT          1  $    +4.20  $   +4.20  100.0%
+    QQQ          1  $    +0.59  $   +0.59  100.0%
+    GE           1  $    -1.41  $   -1.41    0.0%
+    CRM          1  $    -4.95  $   -4.95    0.0%
+
+  By macro_regime:
+    mixed                  n=  3  P&L=$    -2.16  expect=$  -0.72
+
+  By trend (direction/strength):
+    bullish/developing     n=  2  P&L=$    -0.75  expect=$  -0.38
+    bullish/weak           n=  1  P&L=$    -1.41  expect=$  -1.41
+
+── DATA QUALITY ────────────────────────────────────────────
+  Confirmed-fill trades    : 4
+  Best-effort FIFO trades  : 3
+  Confirmed P&L            : $-1.57
+  Best-effort P&L          : $-2.16
+  P&L gap                  : 27.3%
+  Trade-count gap          : 25.0%
+
+  WARNING: analytics views diverge materially because some historical rows
+  lack fill_price. Use confirmed-fill analytics for attribution; use
+  best-effort FIFO as a broad outcome sanity check.
+

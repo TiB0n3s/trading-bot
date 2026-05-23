@@ -1,0 +1,585 @@
+timestamp            symbol  action  approved  confidence  rejection_reason                                              order_id  order_status  qty  fill_price
+-------------------  ------  ------  --------  ----------  ------------------------------------------------------------  --------  ------------  ---  ----------
+2026-05-22 14:25:13  LIN     buy     0                     macro_position_limit: open_position_count=8 >= macro max_new                                         
+                                                           _positions=8; candidate=LIN session=rangebound/1 return=0.37                                         
+                                                           5% vwap_dist=0.276%; weakest_holding=MA plpc=-0.27% replacem                                         
+                                                           ent_hint=observe_only; buy_score=10; buy_rec=strong_buy_cand                                         
+                                                           idate                                                                                                
+
+2026-05-22 14:25:09  LMT     buy     0                     macro_position_limit: open_position_count=8 >= macro max_new                                         
+                                                           _positions=8; candidate=LMT session=developing_uptrend/5 ret                                         
+                                                           urn=1.119% vwap_dist=0.614%; weakest_holding=MA plpc=-0.28%                                          
+                                                           replacement_hint=observe_only; buy_score=14; buy_rec=strong_                                         
+                                                           buy_candidate                                                                                        
+
+2026-05-22 14:25:04  LLY     buy     0                     macro_position_limit: open_position_count=8 >= macro max_new                                         
+                                                           _positions=8; candidate=LLY session=strong_uptrend/6 return=                                         
+                                                           0.904% vwap_dist=0.427%; weakest_holding=MA plpc=-0.28% repl                                         
+                                                           acement_hint=observe_only; buy_score=15; buy_rec=strong_buy_                                         
+                                                           candidate                                                                                            
+
+2026-05-22 14:20:34  LLY     buy     0                     macro_position_limit: open_position_count=8 >= macro max_new                                         
+                                                           _positions=8; candidate=LLY session=developing_uptrend/3 ret                                         
+                                                           urn=0.69% vwap_dist=0.29%; weakest_holding=MA plpc=-0.28% re                                         
+                                                           placement_hint=observe_only; buy_score=14; buy_rec=strong_bu                                         
+                                                           y_candidate                                                                                          
+
+2026-05-22 14:20:34  LMT     buy     0                     macro_position_limit: open_position_count=8 >= macro max_new                                         
+                                                           _positions=8; candidate=LMT session=strong_uptrend/7 return=                                         
+                                                           1.134% vwap_dist=0.635%; weakest_holding=MA plpc=-0.28% repl                                         
+                                                           acement_hint=observe_only; buy_score=15; buy_rec=strong_buy_                                         
+                                                           candidate                                                                                            
+
+2026-05-22 14:20:03  LIN     buy     0                     macro_position_limit: open_position_count=8 >= macro max_new                                         
+                                                           _positions=8; candidate=LIN session=developing_uptrend/3 ret                                         
+                                                           urn=0.577% vwap_dist=0.323%; weakest_holding=MA plpc=-0.26%                                          
+                                                           replacement_hint=observe_only; buy_score=12; buy_rec=strong_                                         
+                                                           buy_candidate                                                                                        
+
+2026-05-22 14:15:31  LIN     buy     0                     macro_position_limit: open_position_count=8 >= macro max_new                                         
+                                                           _positions=8; candidate=LIN session=developing_uptrend/3 ret                                         
+                                                           urn=0.622% vwap_dist=0.312%; weakest_holding=MA plpc=-0.31%                                          
+                                                           replacement_hint=observe_only; buy_score=12; buy_rec=strong_                                         
+                                                           buy_candidate                                                                                        
+
+2026-05-22 14:15:01  LMT     buy     0                     macro_position_limit: open_position_count=8 >= macro max_new                                         
+                                                           _positions=8; candidate=LMT session=strong_uptrend/8 return=                                         
+                                                           1.468% vwap_dist=0.643%; weakest_holding=MA plpc=-0.32% repl                                         
+                                                           acement_hint=observe_only; buy_score=15; buy_rec=strong_buy_                                         
+                                                           candidate                                                                                            
+
+2026-05-22 14:10:52  LMT     buy     0                     macro_position_limit: open_position_count=8 >= macro max_new                                         
+                                                           _positions=8; candidate=LMT session=developing_uptrend/3 ret                                         
+                                                           urn=1.328% vwap_dist=0.571%; weakest_holding=MA plpc=-0.26%                                          
+                                                           replacement_hint=observe_only; buy_score=14; buy_rec=strong_                                         
+                                                           buy_candidate                                                                                        
+
+2026-05-22 14:10:06  LIN     buy     0                     macro_position_limit: open_position_count=8 >= macro max_new                                         
+                                                           _positions=8; candidate=LIN session=developing_uptrend/3 ret                                         
+                                                           urn=0.697% vwap_dist=0.318%; weakest_holding=MA plpc=-0.30%                                          
+                                                           replacement_hint=observe_only; buy_score=12; buy_rec=strong_                                         
+                                                           buy_candidate                                                                                        
+
+2026-05-22 14:05:20  LIN     buy     0                     macro_position_limit: open_position_count=8 >= macro max_new                                         
+                                                           _positions=8; candidate=LIN session=developing_uptrend/3 ret                                         
+                                                           urn=0.64% vwap_dist=0.332%; weakest_holding=MA plpc=-0.32% r                                         
+                                                           eplacement_hint=observe_only; buy_score=12; buy_rec=strong_b                                         
+                                                           uy_candidate                                                                                         
+
+2026-05-22 14:00:27  LMT     buy     0                     macro_position_limit: open_position_count=8 >= macro max_new                                         
+                                                           _positions=8; candidate=LMT session=developing_uptrend/3 ret                                         
+                                                           urn=1.222% vwap_dist=0.586%; weakest_holding=MA plpc=-0.28%                                          
+                                                           replacement_hint=observe_only; buy_score=14; buy_rec=strong_                                         
+                                                           buy_candidate                                                                                        
+
+2026-05-22 14:00:26  LIN     buy     0                     macro_position_limit: open_position_count=8 >= macro max_new                                         
+                                                           _positions=8; candidate=LIN session=developing_uptrend/3 ret                                         
+                                                           urn=0.544% vwap_dist=0.341%; weakest_holding=MA plpc=-0.28%                                          
+                                                           replacement_hint=observe_only; buy_score=12; buy_rec=strong_                                         
+                                                           buy_candidate                                                                                        
+
+2026-05-22 14:00:16  CRDO    buy     0                     macro_position_limit: open_position_count=8 >= macro max_new                                         
+                                                           _positions=8; candidate=CRDO session=developing_uptrend/4 re                                         
+                                                           turn=6.467% vwap_dist=2.108%; weakest_holding=MA plpc=-0.29%                                         
+                                                            replacement_hint=observe_only; buy_score=10; buy_rec=strong                                         
+                                                           _buy_candidate                                                                                       
+
+2026-05-22 14:00:06  LLY     buy     0                     macro_position_limit: open_position_count=8 >= macro max_new                                         
+                                                           _positions=8; candidate=LLY session=rangebound/2 return=0.76                                         
+                                                           3% vwap_dist=0.317%; weakest_holding=MA plpc=-0.31% replacem                                         
+                                                           ent_hint=observe_only; buy_score=12; buy_rec=strong_buy_cand                                         
+                                                           idate                                                                                                
+
+2026-05-22 13:55:54  LMT     buy     0                     macro_position_limit: open_position_count=8 >= macro max_new                                         
+                                                           _positions=8; candidate=LMT session=developing_uptrend/4 ret                                         
+                                                           urn=1.197% vwap_dist=0.555%; weakest_holding=MA plpc=-0.24%                                          
+                                                           replacement_hint=observe_only; buy_score=14; buy_rec=strong_                                         
+                                                           buy_candidate                                                                                        
+
+2026-05-22 13:55:51  LIN     buy     0                     macro_position_limit: open_position_count=8 >= macro max_new                                         
+                                                           _positions=8; candidate=LIN session=developing_uptrend/3 ret                                         
+                                                           urn=0.627% vwap_dist=0.309%; weakest_holding=MA plpc=-0.24%                                          
+                                                           replacement_hint=observe_only; buy_score=12; buy_rec=strong_                                         
+                                                           buy_candidate                                                                                        
+
+2026-05-22 13:55:38  ABBV    buy     0                     macro_position_limit: open_position_count=8 >= macro max_new                                         
+                                                           _positions=8; candidate=ABBV session=reversal_attempt/2 retu                                         
+                                                           rn=-0.346% vwap_dist=0.162%; weakest_holding=MA plpc=-0.27%                                          
+                                                           replacement_hint=observe_only; buy_score=2; buy_rec=avoid                                            
+
+2026-05-22 13:55:18  LLY     buy     0                     macro_position_limit: open_position_count=8 >= macro max_new                                         
+                                                           _positions=8; candidate=LLY session=developing_uptrend/5 ret                                         
+                                                           urn=0.835% vwap_dist=0.366%; weakest_holding=MA plpc=-0.24%                                          
+                                                           replacement_hint=observe_only; buy_score=14; buy_rec=strong_                                         
+                                                           buy_candidate                                                                                        
+
+2026-05-22 13:50:46  LIN     buy     0                     macro_position_limit: open_position_count=8 >= macro max_new                                         
+                                                           _positions=8; candidate=LIN session=developing_uptrend/3 ret                                         
+                                                           urn=0.613% vwap_dist=0.314%; weakest_holding=MA plpc=-0.24%                                          
+                                                           replacement_hint=observe_only; buy_score=10; buy_rec=strong_                                         
+                                                           buy_candidate                                                                                        
+
+2026-05-22 13:50:14  LMT     buy     0                     macro_position_limit: open_position_count=8 >= macro max_new                                         
+                                                           _positions=8; candidate=LMT session=developing_uptrend/3 ret                                         
+                                                           urn=1.142% vwap_dist=0.514%; weakest_holding=MA plpc=-0.28%                                          
+                                                           replacement_hint=observe_only; buy_score=14; buy_rec=strong_                                         
+                                                           buy_candidate                                                                                        
+
+2026-05-22 13:50:07  LLY     buy     0                     macro_position_limit: open_position_count=8 >= macro max_new                                         
+                                                           _positions=8; candidate=LLY session=developing_uptrend/5 ret                                         
+                                                           urn=0.717% vwap_dist=0.419%; weakest_holding=MA plpc=-0.27%                                          
+                                                           replacement_hint=observe_only; buy_score=14; buy_rec=strong_                                         
+                                                           buy_candidate                                                                                        
+
+2026-05-22 13:45:55  LIN     buy     0                     macro_position_limit: open_position_count=8 >= macro max_new                                         
+                                                           _positions=8; candidate=LIN session=rangebound/1 return=0.47                                         
+                                                           2% vwap_dist=0.288%; weakest_holding=MA plpc=-0.22% replacem                                         
+                                                           ent_hint=observe_only; buy_score=8; buy_rec=small_buy_candid                                         
+                                                           ate                                                                                                  
+
+2026-05-22 13:45:28  LLY     buy     0                     macro_position_limit: open_position_count=8 >= macro max_new                                         
+                                                           _positions=8; candidate=LLY session=developing_uptrend/3 ret                                         
+                                                           urn=0.785% vwap_dist=0.355%; weakest_holding=MA plpc=-0.22%                                          
+                                                           replacement_hint=observe_only; buy_score=14; buy_rec=strong_                                         
+                                                           buy_candidate                                                                                        
+
+2026-05-22 13:45:22  CRM     buy     0                     macro_position_limit: open_position_count=8 >= macro max_new                                         
+                                                           _positions=8; candidate=CRM session=developing_uptrend/4 ret                                         
+                                                           urn=1.668% vwap_dist=0.687%; weakest_holding=MA plpc=-0.22%                                          
+                                                           replacement_hint=observe_only; buy_score=7; buy_rec=small_bu                                         
+                                                           y_candidate                                                                                          
+
+2026-05-22 13:45:13  META    buy     0                     macro_position_limit: open_position_count=8 >= macro max_new                                         
+                                                           _positions=8; candidate=META session=developing_uptrend/3 re                                         
+                                                           turn=0.321% vwap_dist=0.395%; weakest_holding=MA plpc=-0.22%                                         
+                                                            replacement_hint=observe_only; buy_score=3; buy_rec=avoid                                           
+
+2026-05-22 13:40:09  LIN     buy     0                     macro_position_limit: open_position_count=8 >= macro max_new                                         
+                                                           _positions=8; candidate=LIN session=developing_uptrend/3 ret                                         
+                                                           urn=0.596% vwap_dist=0.3%; weakest_holding=MA plpc=-0.16% re                                         
+                                                           placement_hint=observe_only; buy_score=10; buy_rec=strong_bu                                         
+                                                           y_candidate                                                                                          
+
+2026-05-22 13:40:08  CRDO    buy     0                     macro_position_limit: open_position_count=8 >= macro max_new                                         
+                                                           _positions=8; candidate=CRDO session=strong_uptrend/7 return                                         
+                                                           =7.268% vwap_dist=3.03%; weakest_holding=MA plpc=-0.16% repl                                         
+                                                           acement_hint=observe_only; buy_score=11; buy_rec=strong_buy_                                         
+                                                           candidate                                                                                            
+
+2026-05-22 13:40:07  LLY     buy     0                     macro_position_limit: open_position_count=8 >= macro max_new                                         
+                                                           _positions=8; candidate=LLY session=developing_uptrend/4 ret                                         
+                                                           urn=0.574% vwap_dist=0.402%; weakest_holding=MA plpc=-0.16%                                          
+                                                           replacement_hint=observe_only; buy_score=12; buy_rec=strong_                                         
+                                                           buy_candidate                                                                                        
+
+2026-05-22 13:40:07  CRM     buy     0                     macro_position_limit: open_position_count=8 >= macro max_new                                         
+                                                           _positions=8; candidate=CRM session=strong_uptrend/7 return=                                         
+                                                           1.677% vwap_dist=0.819%; weakest_holding=MA plpc=-0.16% repl                                         
+                                                           acement_hint=observe_only; buy_score=8; buy_rec=small_buy_ca                                         
+                                                           ndidate                                                                                              
+
+2026-05-22 13:40:05  META    buy     0                     macro_position_limit: open_position_count=8 >= macro max_new                                         
+                                                           _positions=8; candidate=META session=rangebound/1 return=0.3                                         
+                                                           87% vwap_dist=0.344%; weakest_holding=MA plpc=-0.18% replace                                         
+                                                           ment_hint=observe_only; buy_score=1; buy_rec=avoid                                                   
+
+2026-05-22 13:35:29  LMT     buy     0                     macro_position_limit: open_position_count=8 >= macro max_new                                         
+                                                           _positions=8; candidate=LMT session=developing_uptrend/5 ret                                         
+                                                           urn=0.903% vwap_dist=0.526%; weakest_holding=MA plpc=-0.11%                                          
+                                                           replacement_hint=observe_only; buy_score=14; buy_rec=strong_                                         
+                                                           buy_candidate                                                                                        
+
+2026-05-22 13:35:16  LIN     buy     0                     macro_position_limit: open_position_count=8 >= macro max_new                                         
+                                                           _positions=8; candidate=LIN session=developing_uptrend/5 ret                                         
+                                                           urn=0.532% vwap_dist=0.334%; weakest_holding=MA plpc=-0.11%                                          
+                                                           replacement_hint=observe_only; buy_score=12; buy_rec=strong_                                         
+                                                           buy_candidate                                                                                        
+
+2026-05-22 13:35:06  CRDO    buy     0                     macro_position_limit: open_position_count=8 >= macro max_new                                         
+                                                           _positions=8; candidate=CRDO session=strong_uptrend/6 return                                         
+                                                           =7.833% vwap_dist=3.069%; weakest_holding=MA plpc=-0.11% rep                                         
+                                                           lacement_hint=observe_only; buy_score=11; buy_rec=strong_buy                                         
+                                                           _candidate                                                                                           
+
+2026-05-22 13:35:05  RKLB    buy     0                     macro_position_limit: open_position_count=8 >= macro max_new                                         
+                                                           _positions=8; candidate=RKLB session=rangebound/2 return=-0.                                         
+                                                           975% vwap_dist=0.624%; weakest_holding=MA plpc=-0.11% replac                                         
+                                                           ement_hint=observe_only; buy_score=3; buy_rec=avoid                                                  
+
+2026-05-22 13:35:05  CRM     buy     0                     macro_position_limit: open_position_count=8 >= macro max_new                                         
+                                                           _positions=8; candidate=CRM session=strong_uptrend/7 return=                                         
+                                                           1.693% vwap_dist=0.769%; weakest_holding=MA plpc=-0.11% repl                                         
+                                                           acement_hint=observe_only; buy_score=8; buy_rec=small_buy_ca                                         
+                                                           ndidate                                                                                              
+
+2026-05-22 13:35:02  META    buy     0                     macro_position_limit: open_position_count=8 >= macro max_new                                         
+                                                           _positions=8; candidate=META session=rangebound/1 return=0.3                                         
+                                                           62% vwap_dist=0.202%; weakest_holding=MA plpc=-0.11% replace                                         
+                                                           ment_hint=observe_only; buy_score=0; buy_rec=avoid                                                   
+
+2026-05-22 13:30:15  LLY     buy     0                     macro_position_limit: open_position_count=8 >= macro max_new                                         
+                                                           _positions=8; candidate=LLY session=rangebound/1 return=0.01                                         
+                                                           5% vwap_dist=0.207%; weakest_holding=MA plpc=-0.17% replacem                                         
+                                                           ent_hint=observe_only; buy_score=9; buy_rec=small_buy_candid                                         
+                                                           ate                                                                                                  
+
+2026-05-22 13:30:14  CRDO    buy     0                     macro_position_limit: open_position_count=8 >= macro max_new                                         
+                                                           _positions=8; candidate=CRDO session=strong_uptrend/8 return                                         
+                                                           =9.084% vwap_dist=3.58%; weakest_holding=MA plpc=-0.16% repl                                         
+                                                           acement_hint=observe_only; buy_score=15; buy_rec=strong_buy_                                         
+                                                           candidate                                                                                            
+
+2026-05-22 13:30:13  LIN     buy     0                     macro_position_limit: open_position_count=8 >= macro max_new                                         
+                                                           _positions=8; candidate=LIN session=developing_uptrend/5 ret                                         
+                                                           urn=0.531% vwap_dist=0.355%; weakest_holding=MA plpc=-0.16%                                          
+                                                           replacement_hint=observe_only; buy_score=12; buy_rec=strong_                                         
+                                                           buy_candidate                                                                                        
+
+2026-05-22 13:30:11  RKLB    buy     0                     macro_position_limit: open_position_count=8 >= macro max_new                                         
+                                                           _positions=8; candidate=RKLB session=developing_uptrend/4 re                                         
+                                                           turn=-0.349% vwap_dist=0.743%; weakest_holding=MA plpc=-0.16                                         
+                                                           % replacement_hint=observe_only; buy_score=7; buy_rec=small_                                         
+                                                           buy_candidate                                                                                        
+
+2026-05-22 13:30:11  META    buy     0                     macro_position_limit: open_position_count=8 >= macro max_new                                         
+                                                           _positions=8; candidate=META session=developing_uptrend/3 re                                         
+                                                           turn=0.368% vwap_dist=0.212%; weakest_holding=MA plpc=-0.16%                                         
+                                                            replacement_hint=observe_only; buy_score=2; buy_rec=avoid                                           
+
+2026-05-22 13:30:04  CRM     buy     0                     macro_position_limit: open_position_count=8 >= macro max_new                                         
+                                                           _positions=8; candidate=CRM session=strong_uptrend/6 return=                                         
+                                                           1.612% vwap_dist=0.667%; weakest_holding=MA plpc=-0.18% repl                                         
+                                                           acement_hint=observe_only; buy_score=8; buy_rec=small_buy_ca                                         
+                                                           ndidate                                                                                              
+
+2026-05-22 13:25:12  LIN     buy     0                     macro_position_limit: open_position_count=8 >= macro max_new                                         
+                                                           _positions=8; candidate=LIN session=strong_uptrend/6 return=                                         
+                                                           0.293% vwap_dist=0.448%; weakest_holding=MA plpc=-0.19% repl                                         
+                                                           acement_hint=observe_only; buy_score=13; buy_rec=strong_buy_                                         
+                                                           candidate                                                                                            
+
+2026-05-22 13:25:07  META    buy     0                     macro_position_limit: open_position_count=8 >= macro max_new                                         
+                                                           _positions=8; candidate=META session=developing_uptrend/4 re                                         
+                                                           turn=0.349% vwap_dist=0.222%; weakest_holding=MA plpc=-0.19%                                         
+                                                            replacement_hint=observe_only; buy_score=2; buy_rec=avoid                                           
+
+2026-05-22 13:25:05  AMD     buy     0                     macro_position_limit: open_position_count=8 >= macro max_new                                         
+                                                           _positions=8; candidate=AMD session=rangebound/1 return=1.77                                         
+                                                           % vwap_dist=0.378%; weakest_holding=MA plpc=-0.19% replaceme                                         
+                                                           nt_hint=observe_only; buy_score=5; buy_rec=watch                                                     
+
+2026-05-22 13:25:05  CRDO    buy     0                     macro_position_limit: open_position_count=8 >= macro max_new                                         
+                                                           _positions=8; candidate=CRDO session=strong_uptrend/8 return                                         
+                                                           =8.363% vwap_dist=3.403%; weakest_holding=MA plpc=-0.19% rep                                         
+                                                           lacement_hint=observe_only; buy_score=15; buy_rec=strong_buy                                         
+                                                           _candidate                                                                                           
+
+2026-05-22 13:25:04  CRM     buy     0                     macro_position_limit: open_position_count=8 >= macro max_new                                         
+                                                           _positions=8; candidate=CRM session=developing_uptrend/3 ret                                         
+                                                           urn=1.325% vwap_dist=0.47%; weakest_holding=MA plpc=-0.19% r                                         
+                                                           eplacement_hint=observe_only; buy_score=7; buy_rec=small_buy                                         
+                                                           _candidate                                                                                           
+
+2026-05-22 13:25:03  LLY     buy     0                     macro_position_limit: open_position_count=8 >= macro max_new                                         
+                                                           _positions=8; candidate=LLY session=rangebound/1 return=0.26                                         
+                                                           % vwap_dist=0.297%; weakest_holding=MA plpc=-0.19% replaceme                                         
+                                                           nt_hint=observe_only; buy_score=12; buy_rec=strong_buy_candi                                         
+                                                           date                                                                                                 
+
+2026-05-22 13:25:01  RKLB    buy     0                     macro_position_limit: open_position_count=8 >= macro max_new                                         
+                                                           _positions=8; candidate=RKLB session=strong_uptrend/8 return                                         
+                                                           =0.593% vwap_dist=0.594%; weakest_holding=MA plpc=-0.19% rep                                         
+                                                           lacement_hint=observe_only; buy_score=8; buy_rec=small_buy_c                                         
+                                                           andidate                                                                                             
+
+2026-05-22 13:20:17  LLY     buy     0                     macro_position_limit: open_position_count=8 >= macro max_new                                         
+                                                           _positions=8; candidate=LLY session=developing_uptrend/3 ret                                         
+                                                           urn=0.356% vwap_dist=0.332%; weakest_holding=MA plpc=-0.24%                                          
+                                                           replacement_hint=observe_only; buy_score=14; buy_rec=strong_                                         
+                                                           buy_candidate                                                                                        
+
+2026-05-22 13:20:13  LMT     buy     0                     macro_position_limit: open_position_count=8 >= macro max_new                                         
+                                                           _positions=8; candidate=LMT session=developing_uptrend/3 ret                                         
+                                                           urn=0.91% vwap_dist=0.633%; weakest_holding=MA plpc=-0.24% r                                         
+                                                           eplacement_hint=observe_only; buy_score=14; buy_rec=strong_b                                         
+                                                           uy_candidate                                                                                         
+
+2026-05-22 13:20:10  LIN     buy     0                     macro_position_limit: open_position_count=8 >= macro max_new                                         
+                                                           _positions=8; candidate=LIN session=developing_uptrend/4 ret                                         
+                                                           urn=0.295% vwap_dist=0.368%; weakest_holding=MA plpc=-0.24%                                          
+                                                           replacement_hint=observe_only; buy_score=12; buy_rec=strong_                                         
+                                                           buy_candidate                                                                                        
+
+2026-05-22 13:20:09  CRDO    buy     0                     macro_position_limit: open_position_count=8 >= macro max_new                                         
+                                                           _positions=8; candidate=CRDO session=strong_uptrend/8 return                                         
+                                                           =8.044% vwap_dist=3.47%; weakest_holding=MA plpc=-0.24% repl                                         
+                                                           acement_hint=observe_only; buy_score=15; buy_rec=strong_buy_                                         
+                                                           candidate                                                                                            
+
+2026-05-22 13:20:05  AMD     buy     0                     macro_position_limit: open_position_count=8 >= macro max_new                                         
+                                                           _positions=8; candidate=AMD session=developing_uptrend/4 ret                                         
+                                                           urn=1.859% vwap_dist=0.466%; weakest_holding=MA plpc=-0.24%                                          
+                                                           replacement_hint=observe_only; buy_score=5; buy_rec=watch                                            
+
+2026-05-22 13:20:05  GE      buy     0                     macro_position_limit: open_position_count=8 >= macro max_new                                         
+                                                           _positions=8; candidate=GE session=developing_uptrend/4 retu                                         
+                                                           rn=0.729% vwap_dist=0.537%; weakest_holding=MA plpc=-0.24% r                                         
+                                                           eplacement_hint=observe_only; buy_score=10; buy_rec=strong_b                                         
+                                                           uy_candidate                                                                                         
+
+2026-05-22 13:20:04  RKLB    buy     0                     macro_position_limit: open_position_count=8 >= macro max_new                                         
+                                                           _positions=8; candidate=RKLB session=strong_uptrend/6 return                                         
+                                                           =0.037% vwap_dist=0.296%; weakest_holding=MA plpc=-0.24% rep                                         
+                                                           lacement_hint=observe_only; buy_score=8; buy_rec=small_buy_c                                         
+                                                           andidate                                                                                             
+
+2026-05-22 13:20:02  CRM     buy     0                     macro_position_limit: open_position_count=8 >= macro max_new                                         
+                                                           _positions=8; candidate=CRM session=strong_uptrend/6 return=                                         
+                                                           0.793% vwap_dist=0.524%; weakest_holding=MA plpc=-0.23% repl                                         
+                                                           acement_hint=observe_only; buy_score=8; buy_rec=small_buy_ca                                         
+                                                           ndidate                                                                                              
+
+2026-05-22 13:15:37  LLY     buy     0                     macro_position_limit: open_position_count=8 >= macro max_new                                         
+                                                           _positions=8; candidate=LLY session=rangebound/1 return=0.32                                         
+                                                           2% vwap_dist=0.203%; weakest_holding=MA plpc=-0.26% replacem                                         
+                                                           ent_hint=observe_only; buy_score=9; buy_rec=small_buy_candid                                         
+                                                           ate                                                                                                  
+
+2026-05-22 13:15:32  LMT     buy     0                     macro_position_limit: open_position_count=8 >= macro max_new                                         
+                                                           _positions=8; candidate=LMT session=strong_uptrend/6 return=                                         
+                                                           0.812% vwap_dist=0.603%; weakest_holding=MA plpc=-0.27% repl                                         
+                                                           acement_hint=observe_only; buy_score=15; buy_rec=strong_buy_                                         
+                                                           candidate                                                                                            
+
+2026-05-22 13:15:10  AMD     buy     0                     macro_position_limit: open_position_count=8 >= macro max_new                                         
+                                                           _positions=8; candidate=AMD session=strong_uptrend/6 return=                                         
+                                                           1.657% vwap_dist=0.77%; weakest_holding=MA plpc=-0.25% repla                                         
+                                                           cement_hint=observe_only; buy_score=8; buy_rec=small_buy_can                                         
+                                                           didate                                                                                               
+
+2026-05-22 13:15:10  CRDO    buy     0                     macro_position_limit: open_position_count=8 >= macro max_new                                         
+                                                           _positions=8; candidate=CRDO session=rangebound/2 return=6.0                                         
+                                                           83% vwap_dist=3.329%; weakest_holding=MA plpc=-0.25% replace                                         
+                                                           ment_hint=observe_only; buy_score=4; buy_rec=watch                                                   
+
+2026-05-22 13:10:53  LMT     buy     0                     macro_position_limit: open_position_count=8 >= macro max_new                                         
+                                                           _positions=8; candidate=LMT session=strong_uptrend/6 return=                                         
+                                                           0.747% vwap_dist=0.605%; weakest_holding=MA plpc=-0.25% repl                                         
+                                                           acement_hint=observe_only; buy_score=15; buy_rec=strong_buy_                                         
+                                                           candidate                                                                                            
+
+2026-05-22 13:10:15  CRDO    buy     0                     macro_position_limit: open_position_count=8 >= macro max_new                                         
+                                                           _positions=8; candidate=CRDO session=developing_uptrend/4 re                                         
+                                                           turn=5.214% vwap_dist=3.598%; weakest_holding=MA plpc=-0.23%                                         
+                                                            replacement_hint=observe_only; buy_score=8; buy_rec=small_b                                         
+                                                           uy_candidate                                                                                         
+
+2026-05-22 13:10:04  ASML    buy     0                     macro_position_limit: open_position_count=8 >= macro max_new                                         
+                                                           _positions=8; candidate=ASML session=developing_uptrend/3 re                                         
+                                                           turn=1.07% vwap_dist=0.581%; weakest_holding=MA plpc=-0.23%                                          
+                                                           replacement_hint=observe_only; buy_score=13; buy_rec=strong_                                         
+                                                           buy_candidate                                                                                        
+
+2026-05-22 13:10:03  LLY     buy     0                     macro_position_limit: open_position_count=8 >= macro max_new                                         
+                                                           _positions=8; candidate=LLY session=rangebound/1 return=0.14                                         
+                                                           2% vwap_dist=0.186%; weakest_holding=MA plpc=-0.23% replacem                                         
+                                                           ent_hint=observe_only; buy_score=9; buy_rec=small_buy_candid                                         
+                                                           ate                                                                                                  
+
+2026-05-22 13:10:03  COST    buy     0                     macro_position_limit: open_position_count=8 >= macro max_new                                         
+                                                           _positions=8; candidate=COST session=rangebound/0 return=-0.                                         
+                                                           158% vwap_dist=0.103%; weakest_holding=MA plpc=-0.23% replac                                         
+                                                           ement_hint=observe_only; buy_score=1; buy_rec=avoid                                                  
+
+2026-05-22 13:10:03  AMD     buy     0                     macro_position_limit: open_position_count=8 >= macro max_new                                         
+                                                           _positions=8; candidate=AMD session=strong_uptrend/8 return=                                         
+                                                           1.958% vwap_dist=0.974%; weakest_holding=MA plpc=-0.23% repl                                         
+                                                           acement_hint=observe_only; buy_score=10; buy_rec=strong_buy_                                         
+                                                           candidate                                                                                            
+
+2026-05-22 13:05:36  LIN     buy     0                     macro_position_limit: open_position_count=8 >= macro max_new                                         
+                                                           _positions=8; candidate=LIN session=developing_uptrend/4 ret                                         
+                                                           urn=-0.142% vwap_dist=0.204%; weakest_holding=MA plpc=-0.16%                                         
+                                                            replacement_hint=observe_only; buy_score=11; buy_rec=strong                                         
+                                                           _buy_candidate                                                                                       
+
+2026-05-22 13:05:26  COST    buy     0                     macro_position_limit: open_position_count=8 >= macro max_new                                         
+                                                           _positions=8; candidate=COST session=developing_uptrend/4 re                                         
+                                                           turn=-0.364% vwap_dist=0.179%; weakest_holding=MA plpc=-0.17                                         
+                                                           % replacement_hint=observe_only; buy_score=5; buy_rec=watch                                          
+
+2026-05-22 13:05:26  ASML    buy     0                     macro_position_limit: open_position_count=8 >= macro max_new                                         
+                                                           _positions=8; candidate=ASML session=developing_uptrend/3 re                                         
+                                                           turn=1.15% vwap_dist=0.693%; weakest_holding=MA plpc=-0.17%                                          
+                                                           replacement_hint=observe_only; buy_score=13; buy_rec=strong_                                         
+                                                           buy_candidate                                                                                        
+
+2026-05-22 13:05:16  LMT     buy     0                     macro_position_limit: open_position_count=8 >= macro max_new                                         
+                                                           _positions=8; candidate=LMT session=developing_uptrend/3 ret                                         
+                                                           urn=0.489% vwap_dist=0.552%; weakest_holding=MA plpc=-0.17%                                          
+                                                           replacement_hint=observe_only; buy_score=12; buy_rec=strong_                                         
+                                                           buy_candidate                                                                                        
+
+2026-05-22 13:05:13  LLY     buy     0                     macro_position_limit: open_position_count=8 >= macro max_new                                         
+                                                           _positions=8; candidate=LLY session=developing_uptrend/3 ret                                         
+                                                           urn=0.539% vwap_dist=0.219%; weakest_holding=MA plpc=-0.17%                                          
+                                                           replacement_hint=observe_only; buy_score=9; buy_rec=small_bu                                         
+                                                           y_candidate                                                                                          
+
+2026-05-22 13:05:09  CRDO    buy     0                     macro_position_limit: open_position_count=8 >= macro max_new                                         
+                                                           _positions=8; candidate=CRDO session=rangebound/2 return=5.8                                         
+                                                           17% vwap_dist=3.67%; weakest_holding=MA plpc=-0.17% replacem                                         
+                                                           ent_hint=observe_only; buy_score=8; buy_rec=small_buy_candid                                         
+                                                           ate                                                                                                  
+
+2026-05-22 13:05:07  AMD     buy     0                     macro_position_limit: open_position_count=8 >= macro max_new                                         
+                                                           _positions=8; candidate=AMD session=developing_uptrend/4 ret                                         
+                                                           urn=1.747% vwap_dist=0.677%; weakest_holding=MA plpc=-0.17%                                          
+                                                           replacement_hint=observe_only; buy_score=9; buy_rec=small_bu                                         
+                                                           y_candidate                                                                                          
+
+2026-05-22 13:01:02  LMT     buy     0                     macro_position_limit: open_position_count=8 >= macro max_new                                         
+                                                           _positions=8; candidate=LMT session=developing_uptrend/5 ret                                         
+                                                           urn=0.579% vwap_dist=0.501%; weakest_holding=MA plpc=-0.09%                                          
+                                                           replacement_hint=observe_only; buy_score=14; buy_rec=strong_                                         
+                                                           buy_candidate                                                                                        
+
+2026-05-22 13:00:22  LLY     buy     0                     macro_position_limit: open_position_count=8 >= macro max_new                                         
+                                                           _positions=8; candidate=LLY session=rangebound/1 return=0.68                                         
+                                                           8% vwap_dist=0.15%; weakest_holding=MA plpc=-0.12% replaceme                                         
+                                                           nt_hint=observe_only; buy_score=7; buy_rec=small_buy_candida                                         
+                                                           te                                                                                                   
+
+2026-05-22 13:00:22  ASML    buy     0                     macro_position_limit: open_position_count=8 >= macro max_new                                         
+                                                           _positions=8; candidate=ASML session=developing_uptrend/4 re                                         
+                                                           turn=1.057% vwap_dist=0.655%; weakest_holding=MA plpc=-0.12%                                         
+                                                            replacement_hint=observe_only; buy_score=15; buy_rec=strong                                         
+                                                           _buy_candidate                                                                                       
+
+2026-05-22 13:00:22  CAT     buy     0                     macro_position_limit: open_position_count=8 >= macro max_new                                         
+                                                           _positions=8; candidate=CAT session=developing_uptrend/3 ret                                         
+                                                           urn=1.197% vwap_dist=0.511%; weakest_holding=MA plpc=-0.12%                                          
+                                                           replacement_hint=observe_only; buy_score=10; buy_rec=strong_                                         
+                                                           buy_candidate                                                                                        
+
+2026-05-22 13:00:22  CRDO    buy     0                     macro_position_limit: open_position_count=8 >= macro max_new                                         
+                                                           _positions=8; candidate=CRDO session=developing_uptrend/3 re                                         
+                                                           turn=5.824% vwap_dist=4.034%; weakest_holding=MA plpc=-0.12%                                         
+                                                            replacement_hint=observe_only; buy_score=10; buy_rec=strong                                         
+                                                           _buy_candidate                                                                                       
+
+2026-05-22 13:00:21  GE      buy     0                     macro_position_limit: open_position_count=8 >= macro max_new                                         
+                                                           _positions=8; candidate=GE session=developing_uptrend/5 retu                                         
+                                                           rn=0.853% vwap_dist=0.624%; weakest_holding=MA plpc=-0.12% r                                         
+                                                           eplacement_hint=observe_only; buy_score=14; buy_rec=strong_b                                         
+                                                           uy_candidate                                                                                         
+
+2026-05-22 13:00:17  AMD     buy     0                     macro_position_limit: open_position_count=8 >= macro max_new                                         
+                                                           _positions=8; candidate=AMD session=rangebound/2 return=1.56                                         
+                                                           6% vwap_dist=0.59%; weakest_holding=MA plpc=-0.12% replaceme                                         
+                                                           nt_hint=observe_only; buy_score=7; buy_rec=small_buy_candida                                         
+                                                           te                                                                                                   
+
+2026-05-22 12:55:43  GE      buy     0                     macro_position_limit: open_position_count=8 >= macro max_new                                         
+                                                           _positions=8; candidate=GE session=rangebound/1 return=0.479                                         
+                                                           % vwap_dist=0.642%; weakest_holding=MA plpc=-0.14% replaceme                                         
+                                                           nt_hint=observe_only; buy_score=12; buy_rec=strong_buy_candi                                         
+                                                           date                                                                                                 
+
+2026-05-22 12:55:11  LMT     buy     0                     macro_position_limit: open_position_count=8 >= macro max_new                                         
+                                                           _positions=8; candidate=LMT session=developing_uptrend/3 ret                                         
+                                                           urn=0.19% vwap_dist=0.42%; weakest_holding=MA plpc=-0.13% re                                         
+                                                           placement_hint=observe_only; buy_score=12; buy_rec=strong_bu                                         
+                                                           y_candidate                                                                                          
+
+2026-05-22 12:55:10  ASML    buy     0                     macro_position_limit: open_position_count=8 >= macro max_new                                         
+                                                           _positions=8; candidate=ASML session=rangebound/1 return=0.8                                         
+                                                           42% vwap_dist=0.503%; weakest_holding=MA plpc=-0.13% replace                                         
+                                                           ment_hint=observe_only; buy_score=11; buy_rec=strong_buy_can                                         
+                                                           didate                                                                                               
+
+2026-05-22 12:55:07  LLY     buy     0                     macro_position_limit: open_position_count=8 >= macro max_new                                         
+                                                           _positions=8; candidate=LLY session=rangebound/2 return=0.91                                         
+                                                           % vwap_dist=0.252%; weakest_holding=MA plpc=-0.10% replaceme                                         
+                                                           nt_hint=observe_only; buy_score=10; buy_rec=strong_buy_candi                                         
+                                                           date                                                                                                 
+
+2026-05-22 12:55:07  CRM     buy     0                     macro_position_limit: open_position_count=8 >= macro max_new                                         
+                                                           _positions=8; candidate=CRM session=reversal_attempt/2 retur                                         
+                                                           n=-0.227% vwap_dist=0.543%; weakest_holding=MA plpc=-0.10% r                                         
+                                                           eplacement_hint=observe_only; buy_score=5; buy_rec=watch                                             
+
+2026-05-22 12:55:06  CRDO    buy     0                     macro_position_limit: open_position_count=8 >= macro max_new                                         
+                                                           _positions=8; candidate=CRDO session=developing_uptrend/5 re                                         
+                                                           turn=7.36% vwap_dist=4.388%; weakest_holding=MA plpc=-0.10%                                          
+                                                           replacement_hint=observe_only; buy_score=14; buy_rec=strong_                                         
+                                                           buy_candidate                                                                                        
+
+2026-05-22 12:55:02  AMD     buy     0                     macro_position_limit: open_position_count=8 >= macro max_new                                         
+                                                           _positions=8; candidate=AMD session=developing_uptrend/5 ret                                         
+                                                           urn=1.83% vwap_dist=0.782%; weakest_holding=MA plpc=-0.10% r                                         
+                                                           eplacement_hint=observe_only; buy_score=13; buy_rec=strong_b                                         
+                                                           uy_candidate                                                                                         
+
+2026-05-22 12:50:35  GE      buy     0                     macro_position_limit: open_position_count=8 >= macro max_new                                         
+                                                           _positions=8; candidate=GE session=developing_uptrend/3 retu                                         
+                                                           rn=0.733% vwap_dist=0.568%; weakest_holding=MA plpc=-0.16% r                                         
+                                                           eplacement_hint=observe_only; buy_score=12; buy_rec=strong_b                                         
+                                                           uy_candidate                                                                                         
+
+2026-05-22 12:50:35  ASML    buy     0                     macro_position_limit: open_position_count=8 >= macro max_new                                         
+                                                           _positions=8; candidate=ASML session=rangebound/1 return=1.0                                         
+                                                           01% vwap_dist=0.597%; weakest_holding=MA plpc=-0.16% replace                                         
+                                                           ment_hint=observe_only; buy_score=11; buy_rec=strong_buy_can                                         
+                                                           didate                                                                                               
+
+2026-05-22 12:50:19  CAT     buy     0                     macro_position_limit: open_position_count=8 >= macro max_new                                         
+                                                           _positions=8; candidate=CAT session=rangebound/1 return=1.97                                         
+                                                           9% vwap_dist=0.571%; weakest_holding=MA plpc=-0.13% replacem                                         
+                                                           ent_hint=observe_only; buy_score=6; buy_rec=watch                                                    
+
+2026-05-22 12:50:19  LLY     buy     0                     macro_position_limit: open_position_count=8 >= macro max_new                                         
+                                                           _positions=8; candidate=LLY session=developing_uptrend/5 ret                                         
+                                                           urn=0.83% vwap_dist=0.36%; weakest_holding=MA plpc=-0.13% re                                         
+                                                           placement_hint=observe_only; buy_score=12; buy_rec=strong_bu                                         
+                                                           y_candidate                                                                                          
+
+2026-05-22 12:50:09  CRDO    buy     0                     macro_position_limit: open_position_count=8 >= macro max_new                                         
+                                                           _positions=8; candidate=CRDO session=developing_uptrend/3 re                                         
+                                                           turn=7.067% vwap_dist=4.272%; weakest_holding=MA plpc=-0.13%                                         
+                                                            replacement_hint=observe_only; buy_score=8; buy_rec=small_b                                         
+                                                           uy_candidate                                                                                         
+
+2026-05-22 12:50:05  META    buy     0                     macro_position_limit: open_position_count=8 >= macro max_new                                         
+                                                           _positions=8; candidate=META session=reversal_attempt/1 retu                                         
+                                                           rn=-0.059% vwap_dist=0.15%; weakest_holding=MA plpc=-0.13% r                                         
+                                                           eplacement_hint=observe_only; buy_score=0; buy_rec=avoid                                             
+
+2026-05-22 12:50:05  LMT     buy     0                     macro_position_limit: open_position_count=8 >= macro max_new                                         
+                                                           _positions=8; candidate=LMT session=developing_uptrend/4 ret                                         
+                                                           urn=0.603% vwap_dist=0.488%; weakest_holding=MA plpc=-0.13%                                          
+                                                           replacement_hint=observe_only; buy_score=14; buy_rec=strong_                                         
+                                                           buy_candidate                                                                                        
+
+2026-05-22 12:50:01  AMD     buy     0                     macro_position_limit: open_position_count=8 >= macro max_new                                         
+                                                           _positions=8; candidate=AMD session=strong_uptrend/8 return=                                         
+                                                           1.582% vwap_dist=0.842%; weakest_holding=MA plpc=-0.12% repl                                         
+                                                           acement_hint=observe_only; buy_score=14; buy_rec=strong_buy_                                         
+                                                           candidate                                                                                            
+
+2026-05-22 12:50:01  TSLA    buy     0                     macro_position_limit: open_position_count=8 >= macro max_new                                         
+                                                           _positions=8; candidate=TSLA session=strong_uptrend/6 return                                         
+                                                           =2.098% vwap_dist=0.64%; weakest_holding=MA plpc=-0.12% repl                                         
+                                                           acement_hint=observe_only; buy_score=12; buy_rec=strong_buy_                                         
+                                                           candidate                                                                                            
+
+2026-05-22 12:45:16  GE      buy     0                     macro_position_limit: open_position_count=8 >= macro max_new                                         
+                                                           _positions=8; candidate=GE session=developing_uptrend/5 retu                                         
+                                                           rn=0.503% vwap_dist=0.635%; weakest_holding=MA plpc=-0.07% r                                         
+                                                           eplacement_hint=observe_only; buy_score=14; buy_rec=strong_b                                         
+                                                           uy_candidate                                                                                         
+
+2026-05-22 12:45:13  CRDO    buy     0                     macro_position_limit: open_position_count=8 >= macro max_new                                         
+                                                           _positions=8; candidate=CRDO session=rangebound/2 return=6.6                                         
+                                                           58% vwap_dist=4.443%; weakest_holding=MA plpc=-0.07% replace                                         
+                                                           ment_hint=observe_only; buy_score=6; buy_rec=watch                                                   

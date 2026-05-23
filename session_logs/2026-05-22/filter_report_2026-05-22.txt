@@ -1,0 +1,92 @@
+
+========================================================================
+  Filter Effectiveness Report
+========================================================================
+  Total signals      : 724
+  Approved signals   : 9
+  Rejected signals   : 715
+  Rejection rate     : 98.8%
+
+── Top rejection categories ────────────────────────────────────────
+  Category                     Label                         Count
+  ---------------------------- ---------------------------- ------
+  ghost_sell                   Ghost sell                      366
+  macro_position_limit         Macro position limit            208
+  trend_confirmation           Trend confirmation               31
+  sell_profit_threshold        Other / Claude                   26
+  sell_discipline              Other / Claude                   21
+  affordability                Other / Claude                   21
+  market_hours                 Outside trading hours            18
+  cooldown                     Cooldown                          8
+  second_look                  Second-look market check          7
+  strategy_memory              Strategy memory gate              3
+  setup_policy                 Entry quality / setup policy      2
+  opportunity_score            Other / Claude                    1
+  confidence_gate              Low confidence gate               1
+  prediction_gate              Prediction gate                   1
+  session_momentum_gate        Session momentum gate             1
+
+── Top rejected symbols ────────────────────────────────────────────
+  Symbol   Rejected
+  -------- --------
+  ASML           46
+  AMD            43
+  LLY            43
+  GEV            42
+  CAT            41
+  CRDO           40
+  BE             38
+  LMT            34
+  GOOGL          30
+  COST           30
+  RKLB           28
+  TSLA           26
+  GE             26
+  LIN            24
+  VRTX           23
+  CRM            20
+  META           20
+  VRT            18
+  UNH            17
+  HWM            17
+
+── Category × top symbols ──────────────────────────────────────────
+  ghost_sell                   BE:37, GOOGL:29, GEV:28, COST:26, VRTX:22, CAT:22, AMD:22, ASML:21
+  macro_position_limit         CRDO:26, LLY:25, LMT:23, ASML:19, AMD:17, LIN:15, CRM:15, CAT:14
+  trend_confirmation           RKLB:3, LMT:3, CRDO:3, COST:2, GLD:2, CRM:2, LIN:2, ASML:2
+  sell_profit_threshold        IWM:12, AAPL:6, QQQ:6, GE:2
+  sell_discipline              SPY:11, MA:5, LLY:3, AAPL:2
+  affordability                LLY:9, LMT:5, ASML:3, GEV:2, CAT:2
+  market_hours                 UNH:1, HWM:1, LIN:1, GEV:1, CAT:1, CRDO:1, CRM:1, AMD:1
+  cooldown                     GE:3, LMT:3, CRM:2
+  second_look                  CRDO:4, CAT:1, TSLA:1, AMD:1
+  strategy_memory              CRDO:3
+  setup_policy                 CRDO:2
+  opportunity_score            LLY:1
+  confidence_gate              LLY:1
+  prediction_gate              LLY:1
+  session_momentum_gate        GE:1
+
+── Recent rejection samples ────────────────────────────────────────
+     ID Time                Sym    Act   Category                 Reason
+  ----- ------------------- ------ ----- ------------------------ ----------------------------------------
+    724 2026-05-22 15:01:21 UNH    buy   market_hours             outside market hours: 2026-05-22 16:01:21 EDT
+    723 2026-05-22 15:01:12 HWM    sell  market_hours             outside market hours: 2026-05-22 16:01:12 EDT
+    722 2026-05-22 15:01:10 LIN    sell  market_hours             outside market hours: 2026-05-22 16:01:10 EDT
+    721 2026-05-22 15:00:53 GEV    sell  market_hours             outside market hours: 2026-05-22 16:00:53 EDT
+    720 2026-05-22 15:00:49 CAT    sell  market_hours             outside market hours: 2026-05-22 16:00:49 EDT
+    719 2026-05-22 15:00:33 CRDO   buy   market_hours             outside market hours: 2026-05-22 16:00:33 EDT
+    718 2026-05-22 15:00:23 CRM    sell  market_hours             outside market hours: 2026-05-22 16:00:23 EDT
+    717 2026-05-22 15:00:21 AMD    sell  market_hours             outside market hours: 2026-05-22 16:00:21 EDT
+    716 2026-05-22 15:00:20 TSLA   sell  market_hours             outside market hours: 2026-05-22 16:00:20 EDT
+    715 2026-05-22 15:00:10 ABBV   sell  market_hours             outside market hours: 2026-05-22 16:00:10 EDT
+    714 2026-05-22 15:00:10 SPY    sell  market_hours             outside market hours: 2026-05-22 16:00:10 EDT
+    713 2026-05-22 15:00:09 BE     sell  market_hours             outside market hours: 2026-05-22 16:00:09 EDT
+    712 2026-05-22 15:00:07 QQQ    sell  market_hours             outside market hours: 2026-05-22 16:00:07 EDT
+    711 2026-05-22 15:00:06 ASML   sell  market_hours             outside market hours: 2026-05-22 16:00:06 EDT
+    710 2026-05-22 15:00:06 LLY    sell  market_hours             outside market hours: 2026-05-22 16:00:06 EDT
+    709 2026-05-22 15:00:04 AVGO   buy   market_hours             outside market hours: 2026-05-22 16:00:04 EDT
+    708 2026-05-22 15:00:04 GE     buy   market_hours             outside market hours: 2026-05-22 16:00:04 EDT
+    707 2026-05-22 15:00:02 GOOGL  sell  market_hours             outside market hours: 2026-05-22 16:00:02 EDT
+    705 2026-05-22 14:55:07 LLY    buy   opportunity_score        score=0 bucket=blocked decision=block reasons=trend_bullish_developing,momentum_
+    704 2026-05-22 14:55:06 GE     sell  ghost_sell               no open Alpaca position

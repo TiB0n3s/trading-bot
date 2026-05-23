@@ -1,0 +1,134 @@
+
+============================================================
+  DAILY SUMMARY — 2026-05-22
+============================================================
+
+── SIGNALS ──────────────────────────────────────────────
+  Total received : 724
+  Approved       : 9  (1%)
+  Rejected       : 715  (99%)
+
+  Rejection breakdown:
+     366  Ghost sell (no Alpaca position)
+     208  Macro position limit
+      68  Other (Claude verbose)
+      31  Trend confirmation
+      18  Outside trading hours
+       8  Cooldown active
+       7  Second-look market check
+       3  Strategy memory gate
+       2  Entry quality / setup policy
+       1  Session momentum gate
+       1  Prediction gate
+       1  Low confidence (Claude)
+       1  Entry quality / pullback requirement
+
+── ACTIONABLE SIGNALS ───────────────────────────────────
+  Total actionable : 340
+  Approved         : 9  (2.6%)
+  Rejected         : 331  (97.4%)
+
+  Excluded noise:
+     366  Ghost sell (no Alpaca position)
+      18  Outside trading hours
+
+── SESSION MOMENTUM GATE ─────────────────────────────────
+  By session label:
+       1  fading
+  By symbol:
+       1  GE
+
+── ORDERS BY SYMBOL ─────────────────────────────────────
+  Symbol  Approved   Orders    Null
+  ------  --------  -------    ----
+  ASML           2        0       2
+  CRM            2        2       0
+  GE             2        2       0
+  LMT            2        2       0
+  QQQ            1        1       0
+
+── REALIZED P&L (from matched_trades) ───────────────────
+  Symbol         P&L  Trades
+  ------  ----------  ------
+  LMT     +     4.20       1
+  GE          -1.41       1
+  CRM         -4.95       1
+  ------  ----------  ------
+  TOTAL       -2.16       3
+
+── WIN RATE & PROFIT FACTOR ─────────────────────────────
+  Matched trades : 3
+  Wins           : 1  (33%)
+  Losses         : 2
+  Flat           : 0
+  Gross profit   : $4.20
+  Gross loss     : $6.36
+  Profit factor  : 0.66
+  Expectancy     : $-0.72 per matched trade
+
+── BEST / WORST TRADES ───────────────────────────────────
+  Best  : LMT  1.0 shares  buy=528.58 sell=532.78  P&L=+4.20
+  Worst : CRM  5.0 shares  buy=181.07 sell=180.08  P&L=-4.95
+
+── CLAUDE API USAGE (est.) ───────────────────────────────
+  Est. API calls : 724
+  Est. tokens    : 398,200 in / 90,500 out
+  Est. cost      : $0.6806  (Haiku @ $0.80/$4.00 per MTok)
+
+── LIVE EXECUTION ───────────────────────────────────────
+  Trade rows        : 724
+  Approved          : 9
+  Rejected          : 715
+  Approval rate     : 1.2%
+  BUY rows          : 293
+  BUY approved      : 5
+  BUY rejected      : 288
+  BUY approval rate : 1.7%
+
+── Live BUYs by Setup Label ──────────────────────────────────────────────
+Group                                      Count   Approved  Rejected  Approval% 
+------------------------------------------ ------- --------- --------- ----------
+near_vwap_neutral_fade_risk                107     2         105       1.9%      
+balanced_transition_state                  71      1         70        1.4%      
+above_vwap_neutral_continuation            49      0         49        0.0%      
+above_vwap_strength_continuation           32      2         30        6.2%      
+unclassified_transition                    26      0         26        0.0%      
+below_vwap_neutral_drift_risk              4       0         4         0.0%      
+avoid_below_vwap_weak_drift                2       0         2         0.0%      
+neutral_near_vwap_balanced                 1       0         1         0.0%      
+near_vwap_weak_strength_followthrough      1       0         1         0.0%      
+
+── Live BUYs by Setup Policy Action ──────────────────────────────────────
+Group                                      Count   Approved  Rejected  Approval% 
+------------------------------------------ ------- --------- --------- ----------
+neutral                                    257     3         254       1.2%      
+boost                                      33      2         31        6.1%      
+block                                      2       0         2         0.0%      
+allow                                      1       0         1         0.0%      
+
+── Live BUYs by Rejection Category ───────────────────────────────────────
+Group                                      Count   Approved  Rejected  Approval% 
+------------------------------------------ ------- --------- --------- ----------
+Macro position limit                       208     0         208       0.0%      
+Trend confirmation                         31      0         31        0.0%      
+Other (Claude verbose)                     21      0         21        0.0%      
+Cooldown active                            8       0         8         0.0%      
+Second-look market check                   7       0         7         0.0%      
+approved                                   5       5         0         100.0%    
+Outside trading hours                      4       0         4         0.0%      
+Strategy memory gate                       3       0         3         0.0%      
+Entry quality / setup policy               2       0         2         0.0%      
+Session momentum gate                      1       0         1         0.0%      
+
+── Setup Policy Blocks by Setup Label ────────────────────────────────────
+Group                                      Count   Approved  Rejected  Approval% 
+------------------------------------------ ------- --------- --------- ----------
+avoid_below_vwap_weak_drift                2       0         2         0.0%      
+
+── Setup Policy Blocks by Policy Reason ──────────────────────────────────
+Group                                      Count   Approved  Rejected  Approval% 
+------------------------------------------ ------- --------- --------- ----------
+setup_policy:block:avoid_below_vwap_weak_d 2       0         2         0.0%      
+
+============================================================
+

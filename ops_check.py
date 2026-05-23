@@ -17,6 +17,7 @@ Usage:
   python3 ops_check.py predictions
   python3 ops_check.py signal-lessons
   python3 ops_check.py trends
+  python3 ops_check.py prediction-validation
   python3 ops_check.py historical-backfill START_DATE END_DATE
   python3 ops_check.py all
   python3 ops_check.py filters 2026-05-08
@@ -46,6 +47,7 @@ COMMANDS = {
     "predictions": ["intelligence_prediction_report.py", "--date"],
     "signal-lessons": ["signal_timing_lesson_report.py", "--date"],
     "trends": ["trend_context_report.py", "--date"],
+    "prediction-validation": ["prediction_validation_report.py", "--date"],
 }
 
 
@@ -77,7 +79,7 @@ def args_for_command(command, target_date):
     if command in ("drawdown", "post"):
         return args + [target_date]
 
-    if command in ("intelligence", "events", "context", "learning", "predictions", "signal-lessons", "trends"):
+    if command in ("intelligence", "events", "context", "learning", "predictions", "signal-lessons", "trends", "prediction-validation"):
         return [args[0], "--date", target_date]
 
     return args
@@ -124,6 +126,7 @@ def main():
         checks.append(run("Intelligence Prediction Report", ["intelligence_prediction_report.py", "--date", target_date]))
         checks.append(run("Signal Timing Lesson Report", ["signal_timing_lesson_report.py", "--date", target_date]))
         checks.append(run("Trend Context Report", ["trend_context_report.py", "--date", target_date]))
+        checks.append(run("Prediction Validation Report", ["prediction_validation_report.py", "--date", target_date]))
 
         print()
         print("=" * 72)

@@ -1,20 +1,28 @@
 #!/usr/bin/env python3
 """
-Print the next trading date.
+Print the next regular US stock-market trading date.
 
-Simple weekday calendar:
-- Mon-Thu -> next day
-- Fri/Sat/Sun -> Monday
+Uses shared holiday-aware market calendar helpers from market_time.py.
 
-This intentionally ignores market holidays for now. We can add NYSE holiday
-support later.
+Usage:
+  python3 next_trading_date.py
+  python3 next_trading_date.py --from-date 2026-05-22
 """
 
-from datetime import date, timedelta
+import argparse
+from datetime import date
 
-d = date.today() + timedelta(days=1)
+from market_time import next_trading_date
 
-while d.weekday() >= 5:
-    d += timedelta(days=1)
 
-print(d.isoformat())
+def main():
+    parser = argparse.ArgumentParser(description="Print next regular US stock-market trading date.")
+    parser.add_argument("--from-date", help="Base date YYYY-MM-DD; output next trading date after it")
+    args = parser.parse_args()
+
+    base = date.fromisoformat(args.from_date) if args.from_date else None
+    print(next_trading_date(base).isoformat())
+
+
+if __name__ == "__main__":
+    main()

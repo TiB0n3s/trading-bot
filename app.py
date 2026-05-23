@@ -5063,6 +5063,117 @@ def _latest_session_momentum_for_symbol(symbol):
         logger.warning(f"session momentum unavailable for {symbol}: {e}")
         return None
 
+
+def _load_status_symbol_intelligence(target_date=None):
+    """Read-only latest daily_symbol_predictions snapshot for /status.
+
+    This does not affect trading behavior. It only exposes observe-only
+    prediction/timing/trend intelligence for operator visibility.
+    """
+    try:
+        with get_connection(DB_PATH) as con:
+            if target_date is None:
+                row = con.execute(
+                    "SELECT MAX(market_date) AS market_date FROM daily_symbol_predictions"
+                ).fetchone()
+                target_date = row["market_date"] if row else None
+
+            if not target_date:
+                return {
+                    "available": False,
+                    "market_date": None,
+                    "symbols": {},
+                    "reason": "no daily_symbol_predictions rows found",
+                }
+
+            rows = con.execute("""
+                SELECT
+                    market_date,
+                    symbol,
+                    prediction_score,
+                    probability_of_profit,
+                    probability_of_order,
+                    expected_pnl,
+                    expected_win_rate,
+                    confidence,
+                    sample_size,
+                    reason,
+                    raw_json,
+                    timing_score,
+                    recommended_entry_timing,
+                    recommended_exit_timing,
+                    historical_timing_sample_size,
+                    timing_reason,
+                    trend_score,
+                    trend_label,
+                    trend_regime,
+                    trend_confidence,
+                    trend_similarity_sample_size,
+                    trend_reason,
+                    updated_at
+                FROM daily_symbol_predictions
+                WHERE market_date = ?
+                ORDER BY symbol
+            """, (target_date,)).fetchall()
+
+        symbols = {}
+        for r in rows:
+            raw = {}
+            try:
+                raw = json.loads(r["raw_json"] or "{}")
+            except Exception:
+                raw = {}
+
+            prediction_decision = (
+                raw.get("prediction_decision")
+                or raw.get("decision")
+                or raw.get("recommendation")
+                or "observe_only"
+            )
+
+            symbols[r["symbol"]] = {
+                "prediction_score": r["prediction_score"],
+                "probability_of_profit": r["probability_of_profit"],
+                "probability_of_order": r["probability_of_order"],
+                "expected_pnl": r["expected_pnl"],
+                "expected_win_rate": r["expected_win_rate"],
+                "prediction_confidence": r["confidence"],
+                "prediction_decision": prediction_decision,
+                "sample_size": r["sample_size"],
+                "prediction_reason": r["reason"],
+                "timing_score": r["timing_score"],
+                "recommended_entry_timing": r["recommended_entry_timing"],
+                "recommended_exit_timing": r["recommended_exit_timing"],
+                "historical_timing_sample_size": r["historical_timing_sample_size"],
+                "timing_reason": r["timing_reason"],
+                "trend_score": r["trend_score"],
+                "trend_label": r["trend_label"],
+                "trend_regime": r["trend_regime"],
+                "trend_confidence": r["trend_confidence"],
+                "trend_similarity_sample_size": r["trend_similarity_sample_size"],
+                "trend_reason": r["trend_reason"],
+                "updated_at": r["updated_at"],
+            }
+
+        return {
+            "available": bool(symbols),
+            "market_date": target_date,
+            "symbol_count": len(symbols),
+            "symbols": symbols,
+            "observe_only": True,
+        }
+
+    except Exception as e:
+        logger.error(f"/status symbol_intelligence load failed: {e}")
+        return {
+            "available": False,
+            "market_date": target_date,
+            "symbols": {},
+            "error": str(e),
+            "observe_only": True,
+        }
+
+
 @app.route("/status", methods=["GET"])
 def status():
     result = {
@@ -5287,6 +5398,15 @@ def status():
             }
     except Exception as e:
         logger.error(f"/status trend_table_summary error: {e}")
+
+    try:
+        result["symbol_intelligence"] = _load_status_symbol_intelligence()
+    except Exception as e:
+        result["symbol_intelligence"] = {
+            "available": False,
+            "error": str(e),
+            "observe_only": True,
+        }
 
     # Today's signal counts from trades.db
     try:

@@ -35,6 +35,7 @@ from market_intelligence.intelligence_store import (
 from market_intelligence.event_collectors.company_news_collector import (
     collect_company_news_events,
 )
+from market_intelligence.experience_model import predict_all_symbols
 
 
 def short(v, width):
@@ -111,6 +112,7 @@ def main():
     parser.add_argument("--apply-context", action="store_true")
     parser.add_argument("--output", help="Optional JSON output path for collected/scored events")
     parser.add_argument("--no-dedupe", action="store_true", help="Insert duplicates instead of skipping existing same-day events")
+    parser.add_argument("--predict", action="store_true", help="Generate observe-only symbol predictions after event/context updates")
     args = parser.parse_args()
 
     symbols = [s.upper() for s in args.symbol] if args.symbol else APPROVED_SYMBOLS_LIST
@@ -206,6 +208,8 @@ def main():
     print()
     print(f"Inserted {len(inserted)} daily_symbol_events rows.")
 
+    updated_symbols_by_date = defaultdict(set)
+
     if args.apply_context:
         by_date_symbol = defaultdict(set)
         for _, e in inserted:
@@ -218,8 +222,30 @@ def main():
                 result = update_daily_context_from_events(market_date, sym)
                 updated += int(result.get("updated", 0))
                 skipped += int(result.get("skipped_no_events", 0))
+                if int(result.get("updated", 0)) > 0:
+                    updated_symbols_by_date[market_date].add(sym)
 
         print(f"Applied event aggregates to daily_symbol_context: updated={updated}, skipped={skipped}")
+
+    if args.predict:
+        prediction_count = 0
+
+        if args.apply_context and updated_symbols_by_date:
+            for market_date, syms in sorted(updated_symbols_by_date.items()):
+                for sym in sorted(syms):
+                    preds = predict_all_symbols(market_date, symbol=sym, write=True)
+                    prediction_count += len(preds)
+        else:
+            # If no new events were inserted or --apply-context was not used,
+            # still generate predictions for the requested symbol set/date.
+            for sym in symbols:
+                try:
+                    preds = predict_all_symbols(args.date, symbol=sym, write=True)
+                    prediction_count += len(preds)
+                except Exception as e:
+                    print(f"[WARN] prediction failed for {args.date} {sym}: {e}")
+
+        print(f"Generated observe-only predictions: {prediction_count}")
 
     return 0
 

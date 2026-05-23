@@ -221,6 +221,12 @@ def _init_db():
             ("buy_opportunity_score", "REAL"),
             ("buy_opportunity_recommendation", "TEXT"),
             ("buy_opportunity_reason", "TEXT"),
+            ("trader_brain_score",              "REAL"),
+            ("trader_brain_setup_type",         "TEXT"),
+            ("trader_brain_approved",           "INTEGER"),
+            ("trader_brain_reason",             "TEXT"),
+            ("trader_brain_positive_factors",   "TEXT"),
+            ("trader_brain_risk_factors",       "TEXT"),
         ]
         for col_name, col_type in context_cols:
             if col_name not in existing_cols:
@@ -1573,6 +1579,12 @@ def log_trade(signal, decision, order, account_state=None):
             "prediction_reason",
             "correlation_cluster",
             "cluster_exposure_pct",
+            "trader_brain_score",
+            "trader_brain_setup_type",
+            "trader_brain_approved",
+            "trader_brain_reason",
+            "trader_brain_positive_factors",
+            "trader_brain_risk_factors",
             "setup_label",
             "setup_policy_action",
             "setup_policy_reason",
@@ -1623,6 +1635,12 @@ def log_trade(signal, decision, order, account_state=None):
             prediction_gate.get("prediction_reason"),
             ctx["correlation_cluster"],
             ctx["cluster_exposure_pct"],
+            ctx["trader_brain_score"],
+            ctx["trader_brain_setup_type"],
+            ctx["trader_brain_approved"],
+            ctx["trader_brain_reason"],
+            ctx["trader_brain_positive_factors"],
+            ctx["trader_brain_risk_factors"],
             setup_obs.get("setup_label"),
             setup_obs.get("setup_policy_action"),
             setup_obs.get("setup_policy_reason"),
@@ -1675,6 +1693,12 @@ def _build_decision_context(symbol, action, account_state=None):
         "session_momentum_reason": None,
         "correlation_cluster": None,
         "cluster_exposure_pct": None,
+        "trader_brain_score": None,
+        "trader_brain_setup_type": None,
+        "trader_brain_approved": None,
+        "trader_brain_reason": None,
+        "trader_brain_positive_factors": None,
+        "trader_brain_risk_factors": None,
     }
 
     try:
@@ -1709,6 +1733,14 @@ def _build_decision_context(symbol, action, account_state=None):
             ctx["session_distance_from_vwap_pct"] = session_momentum.get("distance_from_vwap_pct")
             ctx["session_momentum_reason"] = session_momentum.get("reason")
 
+            tb = account_state.get("trader_brain") or {}
+            if tb:
+                ctx["trader_brain_score"] = tb.get("score")
+                ctx["trader_brain_setup_type"] = tb.get("setup_type")
+                ctx["trader_brain_approved"] = 1 if tb.get("approved_by_scorer") else 0
+                ctx["trader_brain_reason"] = tb.get("reason")
+                ctx["trader_brain_positive_factors"] = json.dumps(tb.get("positive_factors") or [])
+                ctx["trader_brain_risk_factors"] = json.dumps(tb.get("risk_factors") or [])
             corr = account_state.get("correlation_exposure") or []
             if corr:
                 # If symbol is in multiple clusters, attribute to the highest-exposure one.
@@ -1766,6 +1798,12 @@ def log_rejection(symbol, action, category, reason, price=None, account_state=No
         "setup_policy_reason",
         "setup_confidence_adjustment",
         "setup_size_multiplier",
+        "trader_brain_score",
+        "trader_brain_setup_type",
+        "trader_brain_approved",
+        "trader_brain_reason",
+        "trader_brain_positive_factors",
+        "trader_brain_risk_factors",
     ]
 
     values = [
@@ -1805,6 +1843,12 @@ def log_rejection(symbol, action, category, reason, price=None, account_state=No
         setup_obs.get("setup_policy_reason"),
         setup_obs.get("setup_confidence_adjustment"),
         setup_obs.get("setup_size_multiplier"),
+        ctx["trader_brain_score"],
+        ctx["trader_brain_setup_type"],
+        ctx["trader_brain_approved"],
+        ctx["trader_brain_reason"],
+        ctx["trader_brain_positive_factors"],
+        ctx["trader_brain_risk_factors"],
     ]
 
     placeholders = ", ".join(["?"] * len(values))
@@ -2139,6 +2183,8 @@ def _log_trader_brain_observe_only(symbol, action, account_state=None):
             momentum=momentum,
             market_alignment=alignment,
         )
+
+        account_state["trader_brain"] = thesis.to_dict()
 
         logger.info(
             "TRADER_BRAIN observe_only "

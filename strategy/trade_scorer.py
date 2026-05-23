@@ -37,6 +37,7 @@ def score_trade(
     trend: dict[str, Any] | None = None,
     momentum: dict[str, Any] | None = None,
     market_alignment: dict[str, Any] | None = None,
+    tape: dict[str, Any] | None = None,
 ) -> TradeThesis:
     """
     Return a TradeThesis for the proposed signal.
@@ -50,6 +51,7 @@ def score_trade(
     trend = trend or {}
     momentum = momentum or {}
     market_alignment = market_alignment or {}
+    tape = tape or account_state.get("tape") or {}
 
     ctx = load_market_context()
     regime = macro_regime(ctx)
@@ -152,6 +154,33 @@ def score_trade(
         score = _add(score, 8, positive, "benchmark/market alignment supportive")
     elif aligned is False:
         score = _penalize(score, 15, risks, "benchmark/market alignment not supportive")
+
+    # Intraday tape classification.
+    tape_label = tape.get("label")
+    tape_score = tape.get("score")
+    tape_hint = tape.get("action_hint")
+
+    if tape_label == "clean_momentum":
+        score = _add(score, 10, positive, "tape classification clean_momentum")
+    elif tape_label == "constructive_tape":
+        score = _add(score, 6, positive, "tape classification constructive_tape")
+    elif tape_label == "extended_above_vwap":
+        score = _penalize(score, 10, risks, "tape warns extended_above_vwap")
+    elif tape_label == "below_vwap":
+        score = _penalize(score, 12, risks, "tape below_vwap")
+    elif tape_label == "fading_or_weak_tape":
+        score = _penalize(score, 18, risks, "tape fading_or_weak_tape")
+    elif tape_label == "mixed_tape":
+        score = _penalize(score, 3, risks, "tape mixed_tape")
+
+    if tape_hint in ("avoid_chasing", "downgrade_or_reject_buy", "caution_or_reject_buy"):
+        risks.append(f"tape action_hint={tape_hint}")
+
+    if tape_score is not None:
+        if tape_score >= 35:
+            positive.append(f"tape_score strong ({tape_score})")
+        elif tape_score <= -30:
+            risks.append(f"tape_score weak ({tape_score})")
 
     # Risk level.
     risk_level = sym_ctx.get("risk_level")

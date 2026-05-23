@@ -117,6 +117,7 @@ def replay_row(row: dict[str, Any]) -> dict[str, Any]:
         trend=trend_from_row(row),
         momentum=momentum_from_row(row),
         market_alignment=alignment_from_row(row),
+        tape=row.get("tape") or {},
     )
 
     original_approved = bool(row.get("approved"))

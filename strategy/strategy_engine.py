@@ -39,6 +39,7 @@ def evaluate_strategy_observe_only(
     trend: dict[str, Any] | None = None,
     momentum: dict[str, Any] | None = None,
     market_alignment: dict[str, Any] | None = None,
+    tape: dict[str, Any] | None = None,
 ) -> StrategyResult:
     """
     Evaluate a signal through the future strategy-engine interface.
@@ -58,6 +59,7 @@ def evaluate_strategy_observe_only(
         trend=trend,
         momentum=momentum,
         market_alignment=market_alignment,
+        tape=tape,
     )
 
     notes = [

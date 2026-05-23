@@ -13,6 +13,8 @@ Usage:
 """
 
 import argparse
+import json
+from strategy.setup_classifier import classify_setup
 from collections import defaultdict
 from datetime import date, timedelta
 
@@ -101,6 +103,8 @@ def main() -> int:
 
     by_bucket = defaultdict(int)
     by_setup = defaultdict(int)
+    by_setup_classification = defaultdict(int)
+    by_posture = defaultdict(int)
     by_symbol = defaultdict(lambda: {"rows": 0, "avg_score": 0.0, "approved": 0})
 
     for r in scored:
@@ -118,6 +122,34 @@ def main() -> int:
 
         by_bucket[bucket_score(r["trader_brain_score"])] += 1
         by_setup[r["trader_brain_setup_type"] or "missing"] += 1
+
+        try:
+            positive_factors = json.loads(r["trader_brain_positive_factors"] or "[]")
+        except Exception:
+            positive_factors = []
+
+        try:
+            risk_factors = json.loads(r["trader_brain_risk_factors"] or "[]")
+        except Exception:
+            risk_factors = []
+
+        thesis_like = {
+            "score": r["trader_brain_score"],
+            "approved_by_scorer": bool(r["trader_brain_approved"]),
+            "setup_type": r["trader_brain_setup_type"],
+            "market_bias": None,
+            "risk_level": None,
+            "entry_quality": None,
+            "trend_direction": None,
+            "trend_strength": None,
+            "benchmark_aligned": None,
+            "positive_factors": positive_factors,
+            "risk_factors": risk_factors,
+        }
+
+        setup_class = classify_setup(thesis_like)
+        by_setup_classification[setup_class["label"]] += 1
+        by_posture[setup_class["posture"]] += 1
 
         sym = r["symbol"] or "?"
         by_symbol[sym]["rows"] += 1
@@ -141,6 +173,16 @@ def main() -> int:
     print("── Setup Types ────────────────────────────────────────")
     for setup, n in sorted(by_setup.items(), key=lambda x: -x[1]):
         print(f"  {setup:<24} {n:>5}")
+
+    print()
+    print("── Setup Classifications ──────────────────────────────")
+    for setup, n in sorted(by_setup_classification.items(), key=lambda x: -x[1]):
+        print(f"  {setup:<28} {n:>5}")
+
+    print()
+    print("── Setup Postures ─────────────────────────────────────")
+    for posture, n in sorted(by_posture.items(), key=lambda x: -x[1]):
+        print(f"  {posture:<28} {n:>5}")
 
     print()
     print("── Symbol Summary ─────────────────────────────────────")

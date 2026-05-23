@@ -10,6 +10,7 @@ import time
 from setup_policy import evaluate_setup_policy
 from pathlib import Path
 from live_features import build_snapshot
+from market_intelligence.alpaca_tape import build_tape_context
 from flask import Flask, request, jsonify, abort
 from indicator_state import (
     compute_indicator_state,
@@ -5354,6 +5355,8 @@ def debug_trader_brain(symbol):
 
         price = request.args.get("price")
         momentum = None
+        tape_context = None
+        tape_classification = None
 
         if price is not None:
             try:
@@ -5364,6 +5367,31 @@ def debug_trader_brain(symbol):
         if momentum:
             account_state["momentum"] = momentum
 
+        use_tape = request.args.get("tape", "false").lower() in ("1", "true", "yes", "on")
+
+        if use_tape:
+            try:
+                tape_price = float(price) if price is not None else None
+                tape_context = build_tape_context(
+                    symbol,
+                    current_price=tape_price,
+                    lookback_minutes=int(request.args.get("lookback_minutes", "90")),
+                )
+                tape_classification = (
+                    tape_context.get("classification")
+                    if tape_context and tape_context.get("ok")
+                    else None
+                )
+
+                if tape_classification:
+                    account_state["tape"] = tape_classification
+
+            except Exception as e:
+                tape_context = {
+                    "ok": False,
+                    "error": str(e),
+                }
+
         thesis = score_trade(
             symbol=symbol,
             action=request.args.get("action", "buy").lower(),
@@ -5371,6 +5399,7 @@ def debug_trader_brain(symbol):
             trend=trend,
             momentum=momentum or {},
             market_alignment=alignment,
+            tape=tape_classification or {},
         )
 
         return jsonify({
@@ -5383,6 +5412,7 @@ def debug_trader_brain(symbol):
             "momentum": momentum,
             "trader_brain": thesis.to_dict(),
             "observe_only": True,
+            "tape_context": tape_context,
         })
 
     except Exception as e:

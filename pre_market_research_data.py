@@ -31,6 +31,7 @@ from market_intelligence.market_brief_builder import (
     write_market_context,
     summary_for_brief,
 )
+from market_intelligence.intelligence_store import ingest_market_context
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 OUTPUT_FILE = SCRIPT_DIR / "market_context.json"
@@ -290,6 +291,7 @@ def main():
     parser.add_argument("--raw-output", help="Optional raw research output path")
     parser.add_argument("--build-output", help="Optional built market context output path")
     parser.add_argument("--max-symbols", type=int, help="Debug: limit symbols processed")
+    parser.add_argument("--ingest-context", action="store_true", help="Store built context in daily_symbol_context")
     args = parser.parse_args()
 
     started = datetime.now()
@@ -359,6 +361,7 @@ def main():
         logger.info(f"Wrote built data-only market context {built_path}")
 
     live_written = False
+    ingest_summary = None
     if should_write_live(args.build_output):
         backup = backup_live_context()
         if backup:
@@ -368,6 +371,14 @@ def main():
         live_written = True
     else:
         logger.info(f"Skipped live {OUTPUT_FILE} write because --build-output targets {args.build_output}")
+
+    if args.ingest_context:
+        ingest_target = built_path if built_path else OUTPUT_FILE
+        ingest_summary = ingest_market_context(ingest_target)
+        logger.info(
+            f"Ingested market context into daily_symbol_context: "
+            f"{ingest_summary['symbols']} symbols for {ingest_summary['market_date']}"
+        )
 
     elapsed = (datetime.now() - started).total_seconds()
     bias_counts = Counter((e or {}).get("bias", "missing") for e in template["symbols"].values())
@@ -385,6 +396,7 @@ def main():
     print(f"  Built output: {built_path or '(not written)'}")
     print(f"  Built summary: {summary_for_brief(brief)}")
     print(f"  Live output : {OUTPUT_FILE if live_written else '(not modified)'}")
+    print(f"  DB ingest   : {ingest_summary if ingest_summary else '(not requested)'}")
     print()
     print(f"  {'Symbol':<7} {'Bias':<8} {'Conf':<7} {'Risk':<10} {'Entry':<22} Reason")
     print(f"  {'-'*7} {'-'*8} {'-'*7} {'-'*10} {'-'*22} {'-'*60}")

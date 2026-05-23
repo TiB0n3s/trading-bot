@@ -254,6 +254,7 @@ def main():
     checks.append(run_cmd("Daily Symbol Intelligence", [sys.executable, "intelligence_context_report.py", "--date", target_date]))
     checks.append(run_cmd("Event Attribution Report", [sys.executable, "event_attribution_report.py", "--date", target_date]))
     checks.append(run_cmd("Context Trade Join Report", [sys.executable, "context_trade_join_report.py", "--date", target_date, "--details", "--active-only"]))
+    checks.append(run_cmd("Intelligence Learning Report", [sys.executable, "intelligence_learning_report.py", "--date", target_date]))
 
     print("\n" + "=" * 64)
     if all(checks):

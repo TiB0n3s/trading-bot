@@ -101,6 +101,48 @@ def pct_change(old, new):
 
 
 def load_signals(start_date=None, end_date=None, symbol=None):
+    """Load deduped signal events when available, otherwise raw signal experience."""
+    params = []
+    where = ["first_timestamp IS NOT NULL", "symbol IS NOT NULL", "action IS NOT NULL"]
+
+    if start_date:
+        where.append("market_date >= ?")
+        params.append(start_date)
+    if end_date:
+        where.append("market_date <= ?")
+        params.append(end_date)
+    if symbol:
+        where.append("symbol = ?")
+        params.append(symbol.upper())
+
+    with get_connection(DB_PATH) as con:
+        try:
+            rows = con.execute(
+                f"""
+                SELECT
+                    id,
+                    first_timestamp AS timestamp,
+                    market_date,
+                    symbol,
+                    action,
+                    signal_price,
+                    approved,
+                    order_id,
+                    rejection_reason,
+                    decision_summary
+                FROM historical_signal_events
+                WHERE {' AND '.join(where)}
+                ORDER BY first_timestamp, id
+                """,
+                params,
+            ).fetchall()
+
+            if rows:
+                return rows
+        except Exception:
+            pass
+
+    # Fallback for older DBs.
     params = []
     where = ["timestamp IS NOT NULL", "symbol IS NOT NULL", "action IS NOT NULL"]
 

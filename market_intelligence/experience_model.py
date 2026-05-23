@@ -283,25 +283,41 @@ def outcome_for_context(con, market_date: str, symbol: str):
         and r["fill_price"] is not None
     )
 
-    # Add historical signal experience when live trades rows are missing due to DB rebuild.
+    # Add deduped historical signal events when live trades rows are missing due to DB rebuild.
+    hist_signals = []
     try:
         hist_signals = con.execute(
             """
             SELECT *
-            FROM historical_signal_experience
+            FROM historical_signal_events
             WHERE market_date = ?
               AND symbol = ?
-              AND decision_summary IN ('signal_received', 'processing_signal', 'order_placed')
             """,
             (market_date, symbol),
         ).fetchall()
     except Exception:
         hist_signals = []
 
+    # Fallback to raw signal experience if deduped events are not built yet.
+    if not hist_signals:
+        try:
+            hist_signals = con.execute(
+                """
+                SELECT *
+                FROM historical_signal_experience
+                WHERE market_date = ?
+                  AND symbol = ?
+                  AND decision_summary IN ('signal_received', 'processing_signal', 'order_placed')
+                """,
+                (market_date, symbol),
+            ).fetchall()
+        except Exception:
+            hist_signals = []
+
     if not signals and hist_signals:
-        signals = sum(1 for r in hist_signals if r["decision_summary"] in ("signal_received", "processing_signal"))
-        approved = sum(1 for r in hist_signals if int(r["approved"] or 0) == 1 or r["decision_summary"] == "order_placed")
-        orders = sum(1 for r in hist_signals if r["decision_summary"] == "order_placed" or r["order_id"])
+        signals = len(hist_signals)
+        approved = sum(1 for r in hist_signals if int(r["approved"] or 0) == 1)
+        orders = sum(1 for r in hist_signals if (r["order_id"] or r["decision_summary"] == "order_placed"))
         filled = orders
 
     matched = []

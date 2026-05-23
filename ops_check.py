@@ -16,6 +16,7 @@ Usage:
   python3 ops_check.py learning
   python3 ops_check.py predictions
   python3 ops_check.py signal-lessons
+  python3 ops_check.py trends
   python3 ops_check.py all
   python3 ops_check.py filters 2026-05-08
   python3 ops_check.py events 2026-05-26
@@ -43,6 +44,7 @@ COMMANDS = {
     "learning": ["intelligence_learning_report.py", "--date"],
     "predictions": ["intelligence_prediction_report.py", "--date"],
     "signal-lessons": ["signal_timing_lesson_report.py", "--date"],
+    "trends": ["trend_context_report.py", "--date"],
 }
 
 
@@ -74,7 +76,7 @@ def args_for_command(command, target_date):
     if command in ("drawdown", "post"):
         return args + [target_date]
 
-    if command in ("intelligence", "events", "context", "learning", "predictions", "signal-lessons"):
+    if command in ("intelligence", "events", "context", "learning", "predictions", "signal-lessons", "trends"):
         return [args[0], "--date", target_date]
 
     return args
@@ -103,6 +105,7 @@ def main():
         checks.append(run("Intelligence Learning Report", ["intelligence_learning_report.py", "--date", target_date]))
         checks.append(run("Intelligence Prediction Report", ["intelligence_prediction_report.py", "--date", target_date]))
         checks.append(run("Signal Timing Lesson Report", ["signal_timing_lesson_report.py", "--date", target_date]))
+        checks.append(run("Trend Context Report", ["trend_context_report.py", "--date", target_date]))
 
         print()
         print("=" * 72)

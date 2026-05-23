@@ -257,6 +257,7 @@ def main():
     checks.append(run_cmd("Intelligence Learning Report", [sys.executable, "intelligence_learning_report.py", "--date", target_date]))
     checks.append(run_cmd("Intelligence Prediction Report", [sys.executable, "intelligence_prediction_report.py", "--date", target_date]))
     checks.append(run_cmd("Signal Timing Lesson Report", [sys.executable, "signal_timing_lesson_report.py", "--date", target_date]))
+    checks.append(run_cmd("Trend Context Report", [sys.executable, "trend_context_report.py", "--date", target_date]))
 
     print("\n" + "=" * 64)
     if all(checks):

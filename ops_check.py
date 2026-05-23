@@ -10,8 +10,12 @@ Usage:
   python3 ops_check.py filters
   python3 ops_check.py drawdown
   python3 ops_check.py post
+  python3 ops_check.py intelligence
+  python3 ops_check.py events
+  python3 ops_check.py context
   python3 ops_check.py all
   python3 ops_check.py filters 2026-05-08
+  python3 ops_check.py events 2026-05-26
 """
 
 import subprocess
@@ -27,16 +31,12 @@ COMMANDS = {
     "positions": ["position_review.py"],
     "alignment": ["market_alignment_report.py"],
     "adaptive": ["adaptive_confirmation_report.py"],
-    "adaptive_impact": ["adaptive_impact_report.py"],
-    "strategy_intelligence": ["strategy_intelligence_report.py"],
-    "blocked": ["blocked_signal_outcome_report.py", "--date"],
-    "session": ["session_momentum.py", "--all"],
-    "position-momentum": ["position_momentum_monitor.py"],
     "filters": ["filter_report.py", "--date"],
     "drawdown": ["drawdown_report.py"],
     "post": ["post_session_check.py"],
-    "trader-brain": ["trader_brain_ops_check.py"],
-    "market-context": ["market_context_report.py"],
+    "intelligence": ["intelligence_context_report.py", "--date"],
+    "events": ["event_attribution_report.py", "--date"],
+    "context": ["context_trade_join_report.py", "--date"],
 }
 
 
@@ -59,6 +59,21 @@ def run(label, args):
         return False
 
 
+def args_for_command(command, target_date):
+    args = COMMANDS[command]
+
+    if command == "filters":
+        return ["filter_report.py", "--date", target_date]
+
+    if command in ("drawdown", "post"):
+        return args + [target_date]
+
+    if command in ("intelligence", "events", "context"):
+        return [args[0], "--date", target_date]
+
+    return args
+
+
 def main():
     if len(sys.argv) < 2:
         print(__doc__.strip())
@@ -72,16 +87,13 @@ def main():
         checks.append(run("Morning Check", ["morning_check.py"]))
         checks.append(run("Position Review", ["position_review.py"]))
         checks.append(run("Market Alignment Report", ["market_alignment_report.py"]))
-        checks.append(run("Session Momentum Refresh", ["session_momentum.py", "--all"]))
-        checks.append(run("Position Momentum Monitor", ["position_momentum_monitor.py"]))
         checks.append(run("Adaptive Confirmation Report", ["adaptive_confirmation_report.py"]))
-        checks.append(run("Adaptive Impact Report", ["adaptive_impact_report.py", target_date]))
         checks.append(run("Filter Report", ["filter_report.py", "--date", target_date]))
-        checks.append(run("Blocked Signal Outcome Report", ["blocked_signal_outcome_report.py", "--date", target_date]))
         checks.append(run("Drawdown Report", ["drawdown_report.py", target_date]))
         checks.append(run("Post-Session Check", ["post_session_check.py", target_date]))
-        checks.append(run("Trader Brain Ops Check", ["trader_brain_ops_check.py"]))
-        checks.append(run("Market Context Report", ["market_context_report.py"]))
+        checks.append(run("Daily Symbol Intelligence", ["intelligence_context_report.py", "--date", target_date]))
+        checks.append(run("Event Attribution Report", ["event_attribution_report.py", "--date", target_date]))
+        checks.append(run("Context Trade Join Report", ["context_trade_join_report.py", "--date", target_date]))
 
         print()
         print("=" * 72)
@@ -98,16 +110,7 @@ def main():
         print(__doc__.strip())
         return 2
 
-    args = COMMANDS[command]
-
-    if command == "filters":
-        args = ["filter_report.py", "--date", target_date]
-    elif command == "blocked":
-        args = ["blocked_signal_outcome_report.py", "--date", target_date]
-    elif command in ("drawdown", "post", "adaptive_impact", "strategy_intelligence"):
-        args = args + [target_date]
-
-    ok = run(command.title(), args)
+    ok = run(command.title(), args_for_command(command, target_date))
     return 0 if ok else 1
 
 

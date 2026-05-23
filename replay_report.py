@@ -54,8 +54,8 @@ def main() -> int:
     if not disagreements:
         print("  No disagreements.")
     else:
-        print(f"  {'ID':>5} {'Time':<19} {'Sym':<6} {'Act':<5} {'Orig':<6} {'Replay':<6} {'Score':>6} {'Setup':<18} Reason")
-        print(f"  {'-'*5} {'-'*19} {'-'*6} {'-'*5} {'-'*6} {'-'*6} {'-'*6} {'-'*18} {'-'*30}")
+        print(f"  {'ID':>5} {'Time':<19} {'Sym':<6} {'Act':<5} {'Orig':<6} {'Replay':<6} {'Score':>6} {'Setup':<18} {'Posture':<18} Reason")
+        print(f"  {'-'*5} {'-'*19} {'-'*6} {'-'*5} {'-'*6} {'-'*6} {'-'*6} {'-'*18} {'-'*18} {'-'*30}")
 
         for r in disagreements[-25:]:
             print(
@@ -67,13 +67,15 @@ def main() -> int:
                 f"{str(r.get('replay_approved')):<6} "
                 f"{float(r.get('score') or 0):>6.1f} "
                 f"{str(r.get('setup_type'))[:18]:<18} "
+                f"{str(r.get('setup_label') or r.get('setup_type'))[:18]:<18} "
+                f"{str(r.get('setup_posture') or '')[:18]:<18} "
                 f"{str(r.get('reason') or '')[:80]}"
             )
 
     print()
     print("── Recent Replay Rows ─────────────────────────────────")
-    print(f"  {'ID':>5} {'Time':<19} {'Sym':<6} {'Act':<5} {'Orig':<6} {'Replay':<6} {'Score':>6} {'Setup':<18}")
-    print(f"  {'-'*5} {'-'*19} {'-'*6} {'-'*5} {'-'*6} {'-'*6} {'-'*6} {'-'*18}")
+    print(f"  {'ID':>5} {'Time':<19} {'Sym':<6} {'Act':<5} {'Orig':<6} {'Replay':<6} {'Score':>6} {'Setup':<18} {'Posture':<18}")
+    print(f"  {'-'*5} {'-'*19} {'-'*6} {'-'*5} {'-'*6} {'-'*6} {'-'*6} {'-'*18} {'-'*18}")
 
     for r in results[-25:]:
         print(
@@ -84,6 +86,8 @@ def main() -> int:
             f"{str(r.get('original_approved')):<6} "
             f"{str(r.get('replay_approved')):<6} "
             f"{float(r.get('score') or 0):>6.1f} "
+            f"{str(r.get('setup_label') or r.get('setup_type'))[:18]:<18} "
+            f"{str(r.get('setup_posture') or '')[:18]:<18}"
             f"{str(r.get('setup_type'))[:18]:<18}"
         )
 

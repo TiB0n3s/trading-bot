@@ -11,7 +11,7 @@ signals before promoting it into live decision flow.
 from __future__ import annotations
 
 from typing import Any
-
+from strategy.setup_classifier import classify_setup
 from db import DB_PATH, get_connection
 from strategy.trade_scorer import score_trade
 
@@ -120,6 +120,11 @@ def replay_row(row: dict[str, Any]) -> dict[str, Any]:
         tape=row.get("tape") or {},
     )
 
+    setup_classification = classify_setup(
+        thesis.to_dict(),
+        tape=row.get("tape") or {},
+    )
+
     original_approved = bool(row.get("approved"))
     replay_approved = bool(thesis.approved_by_scorer)
 
@@ -132,6 +137,9 @@ def replay_row(row: dict[str, Any]) -> dict[str, Any]:
         "replay_approved": replay_approved,
         "agreement": original_approved == replay_approved,
         "score": thesis.score,
+        "setup_classification": setup_classification,
+        "setup_label": setup_classification.get("label"),
+        "setup_posture": setup_classification.get("posture"),
         "setup_type": thesis.setup_type,
         "reason": thesis.reason,
         "replayable": True,

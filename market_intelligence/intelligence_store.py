@@ -411,3 +411,197 @@ def insert_daily_symbol_event(event: dict, db_path: Path | str = DB_PATH) -> int
             [row[c] for c in cols],
         )
         return int(cur.lastrowid)
+
+
+EVENT_SCORE_FIELDS = [
+    "consumer_appetite_score",
+    "revenue_impact_score",
+    "profit_potential_score",
+    "margin_risk_score",
+    "supply_chain_risk_score",
+    "materials_risk_score",
+    "competitive_risk_score",
+    "execution_risk_score",
+]
+
+
+def _avg(values):
+    nums = []
+    for v in values:
+        try:
+            if v is not None:
+                nums.append(float(v))
+        except (TypeError, ValueError):
+            pass
+    return round(sum(nums) / len(nums), 2) if nums else None
+
+
+def _max(values):
+    nums = []
+    for v in values:
+        try:
+            if v is not None:
+                nums.append(float(v))
+        except (TypeError, ValueError):
+            pass
+    return round(max(nums), 2) if nums else None
+
+
+def aggregate_symbol_events(market_date: str, symbol: str, db_path: Path | str = DB_PATH) -> dict:
+    """Aggregate daily_symbol_events into one learnable symbol-level score set.
+
+    Upside fields are averaged because multiple bullish events should not
+    unrealistically stack forever.
+
+    Risk fields use max because one serious supply-chain/regulatory/execution
+    risk is enough to matter.
+    """
+    with get_connection(db_path) as con:
+        events = con.execute(
+            """
+            SELECT *
+            FROM daily_symbol_events
+            WHERE market_date = ?
+              AND symbol = ?
+            """,
+            (market_date, symbol),
+        ).fetchall()
+
+    if not events:
+        return {
+            "market_date": market_date,
+            "symbol": symbol,
+            "event_count": 0,
+            "has_events": False,
+        }
+
+    upside_fields = [
+        "consumer_appetite_score",
+        "revenue_impact_score",
+        "profit_potential_score",
+    ]
+    risk_fields = [
+        "margin_risk_score",
+        "supply_chain_risk_score",
+        "materials_risk_score",
+        "competitive_risk_score",
+        "execution_risk_score",
+    ]
+
+    out = {
+        "market_date": market_date,
+        "symbol": symbol,
+        "event_count": len(events),
+        "has_events": True,
+    }
+
+    for field in upside_fields:
+        out[field] = _avg([e[field] for e in events])
+
+    for field in risk_fields:
+        out[field] = _max([e[field] for e in events])
+
+    # Catalyst score balances upside and confidence against risk.
+    upside = _avg([
+        out.get("consumer_appetite_score"),
+        out.get("revenue_impact_score"),
+        out.get("profit_potential_score"),
+    ]) or 0
+
+    risk = _avg([
+        out.get("margin_risk_score"),
+        out.get("supply_chain_risk_score"),
+        out.get("materials_risk_score"),
+        out.get("competitive_risk_score"),
+        out.get("execution_risk_score"),
+    ]) or 0
+
+    out["catalyst_score"] = round(max(0, min(100, upside - (risk * 0.35) + 20)), 2)
+
+    impacts = [e["expected_market_impact"] for e in events if e["expected_market_impact"]]
+    relevance = [e["trade_relevance"] for e in events if e["trade_relevance"]]
+
+    out["event_impacts"] = ", ".join(sorted(set(impacts))) if impacts else None
+    out["event_relevance"] = ", ".join(sorted(set(relevance))) if relevance else None
+
+    return out
+
+
+def update_daily_context_from_events(market_date: str, symbol: str | None = None, db_path: Path | str = DB_PATH) -> dict:
+    """Update daily_symbol_context rows with aggregate event scores.
+
+    If symbol is None, update all symbols present in daily_symbol_context for
+    the market date.
+    """
+    init_intelligence_tables(db_path)
+
+    with get_connection(db_path) as con:
+        if symbol:
+            symbols = [symbol.upper()]
+        else:
+            rows = con.execute(
+                """
+                SELECT symbol
+                FROM daily_symbol_context
+                WHERE market_date = ?
+                ORDER BY symbol
+                """,
+                (market_date,),
+            ).fetchall()
+            symbols = [r["symbol"] for r in rows]
+
+    updated = 0
+    skipped = 0
+    summaries = []
+
+    for sym in symbols:
+        agg = aggregate_symbol_events(market_date, sym, db_path=db_path)
+
+        if not agg.get("has_events"):
+            skipped += 1
+            continue
+
+        with get_connection(db_path) as con:
+            con.execute(
+                """
+                UPDATE daily_symbol_context
+                SET
+                    catalyst_score = ?,
+                    consumer_appetite_score = ?,
+                    revenue_impact_score = ?,
+                    profit_potential_score = ?,
+                    margin_risk_score = ?,
+                    supply_chain_risk_score = ?,
+                    materials_risk_score = ?,
+                    competitive_risk_score = ?,
+                    execution_risk_score = ?,
+                    updated_at = ?
+                WHERE market_date = ?
+                  AND symbol = ?
+                """,
+                (
+                    agg.get("catalyst_score"),
+                    agg.get("consumer_appetite_score"),
+                    agg.get("revenue_impact_score"),
+                    agg.get("profit_potential_score"),
+                    agg.get("margin_risk_score"),
+                    agg.get("supply_chain_risk_score"),
+                    agg.get("materials_risk_score"),
+                    agg.get("competitive_risk_score"),
+                    agg.get("execution_risk_score"),
+                    datetime.now().isoformat(timespec="seconds"),
+                    market_date,
+                    sym,
+                ),
+            )
+
+        updated += 1
+        summaries.append(agg)
+
+    return {
+        "market_date": market_date,
+        "symbol": symbol.upper() if symbol else None,
+        "updated": updated,
+        "skipped_no_events": skipped,
+        "summaries": summaries,
+    }

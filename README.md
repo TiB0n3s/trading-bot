@@ -1,1171 +1,942 @@
 # Trading Bot
 
-Automated AI-assisted trading bot for Alpaca paper/cash-safe trading using TradingView webhook signals, live market context, session momentum, setup classification, and AI decisioning.
+Automated AI-assisted paper trading bot using TradingView webhooks, a Flask/Gunicorn webhook server, Alpaca paper trading, pre-market intelligence, event scoring, prediction reports, and layered risk controls.
 
-> This project is for experimental trading automation and risk-control research. It is not financial advice.
+This project is currently operated as a paper-trading system. Several live-safe controls are present in the codebase, but prediction-driven live behavior is intentionally observe-only until enough paper-session validation exists.
 
 ---
 
 ## Current Status
 
-As of the latest project state, the bot is operational with:
+As of the latest roadmap work:
 
-- Flask webhook server behind Gunicorn, Nginx, and Cloudflare Tunnel
-- TradingView alerts from TradingPilotAI V3
-- Claude Haiku decision engine
-- Alpaca order execution
-- SQLite trade/rejection/fill attribution
-- Session-aware momentum risk controls
-- Live-bias override framework
-- Setup policy filtering
-- Position momentum monitor with optional auto-sell
-- Daily/weekly performance reports
-- Cron-based fill polling, market research, summaries, session momentum refresh, and position momentum checks
+- Bot is operational in paper trading.
+- `/status` exposes read-only `symbol_intelligence`.
+- Daily intelligence pipeline creates:
+  - `daily_symbol_context`
+  - `daily_symbol_events`
+  - `daily_symbol_predictions`
+  - trend context reports
+- `prediction_validation_report.py` exists and is wired into `ops_check.py`.
+- `next_trading_date.py` now uses holiday-aware market calendar logic from `market_time.py`.
+- Prediction layer remains observe-only.
+- No prediction score currently changes live trading decisions.
 
-Repository:
+---
+
+## High-Level Architecture
 
 ```text
-github.com/TiB0n3s/trading-bot
+TradingView Alerts
+        |
+        v
+Cloudflare Tunnel
+        |
+        v
+Nginx Reverse Proxy
+        |
+        v
+Gunicorn + Flask app.py
+        |
+        v
+Pre-check stack
+        |
+        v
+Claude Haiku decision engine
+        |
+        v
+Alpaca paper trading
+        |
+        v
+Fill stream / fill poller
+        |
+        v
+SQLite trades.db
+        |
+        v
+Reports, intelligence, validation
+Runtime Environment
 
-Primary VM:
+Production VM:
 
-Host: 192.168.99.250
+Host/IP: local Ubuntu VM
 User: tradingbot
 Project path: /home/tradingbot/trading-bot
-Infrastructure
-
-Production stack:
-
-Cloudflare Tunnel
-        ↓
-Nginx reverse proxy
-        ↓
-Gunicorn
-        ↓
-Flask app.py webhook server
-        ↓
-Alpaca / Claude / SQLite
+Python venv: /home/tradingbot/trading-bot/venv
+Reverse proxy: Nginx
+App server: Gunicorn
+Webhook app: Flask
+Tunnel: Cloudflare Tunnel
+Database: SQLite trades.db
 
 Systemd services:
 
-trading-bot    Flask/Gunicorn webhook server
-fill-stream    Alpaca websocket fill listener
-cloudflared    Cloudflare tunnel
-nginx          Reverse proxy
-
-Project directory:
-
-cd ~/trading-bot
+trading-bot
+fill-stream
+cloudflared
+nginx
 
 Secrets are stored in:
 
 /etc/trading-bot.env
 
-Permissions should remain:
+Never store secrets in systemd service files, source code, README examples, or committed config.
 
-sudo chmod 600 /etc/trading-bot.env
+Expected env vars include:
 
-Secrets should never be placed directly in service files or committed to Git.
-
+WEBHOOK_SECRET
+ANTHROPIC_API_KEY
+ALPACA_API_KEY
+ALPACA_SECRET_KEY
+LOG_LEVEL
+EXECUTION_MODE
+LIVE_TRADING_ENABLED
 Approved Symbols
 
-Current approved symbols:
+Current intelligence/reporting universe:
 
 AAPL
-SPY
-QQQ
-MSFT
-NVDA
-ORCL
-TSCO
-TSLA
-META
+ABBV
 AMD
-CVX
-XOM
-GOOGL
-GLD
-IWM
+ASML
 AVGO
-CRDO
-GEV
 BE
 CAT
-VRT
+COST
+CRDO
+CRM
+CRSP
+CVX
+GE
+GEV
+GLD
+GOOGL
+HWM
+IWM
+KO
+LIN
+LLY
+LMT
+MA
+META
+MRK
+MRNA
+MSFT
+NFLX
+NVDA
+ORCL
+QQQ
 RKLB
 RTX
-LMT
-HWM
-VRTX
-MRNA
-CRSP
+SPY
+TSCO
+TSLA
+UNH
 V
-MA
-LLY
-LIN
-GE
+VRT
+VRTX
+XOM
 
-Total:
+Symbol definitions and price ranges are maintained in symbols_config.py and imported through config.py.
 
-33 approved symbols
-Core Trading Flow
-
-TradingView sends webhook alerts to:
-
-https://trading.tib0n3s.xyz/webhook
-
-The Flask app receives signals shaped roughly like:
-
-{
-  "symbol": "NVDA",
-  "action": "buy",
-  "price": 235.44,
-  "source": "TradingPilotAI"
-}
-
-Supported actions:
-
-buy
-sell
-
-The bot validates the payload, applies pre-checks, optionally calls Claude Haiku, and then routes approved orders through Alpaca.
-
-Execution Modes
-
-The bot supports multiple execution/risk modes through environment config.
-
-Common env flags:
-
-EXECUTION_MODE=paper
-LIVE_TRADING_ENABLED=false
-ENFORCE_SESSION_MOMENTUM_GATE=true
-POSITION_MOMENTUM_AUTO_SELL=true
-POSITION_MOMENTUM_SELL_CANDIDATES_ONLY=true
-
-Recommended safety defaults:
-
-LIVE_TRADING_ENABLED=false
-POSITION_MOMENTUM_SELL_CANDIDATES_ONLY=true
-
-For cash-safe/live-style deployments, make sure cash-safe controls and max order limits are configured before enabling live trading.
-
-Main Trading Rules
-
-Current core rules include:
-
-Max open positions: 8
-Max buy size: 2% of account balance
-Bullish/confirmed buy size: up to 2.5%
-Max total exposure per symbol: 4%
-Daily loss circuit breaker: -3%
-Trading window: 9:45 AM – 3:45 PM ET
-Cooldown: 15 minutes per symbol/action pair
-Sell→buy churn window: 30 minutes
-Minimum sell→buy price improvement: 0.5%
-Very-high-risk symbols: broker.py halves quantity
-
-Sells are generally allowed even when buy-side gates are restrictive so the bot can reduce exposure.
-
-Buy Signal Gate Order
-
-A BUY signal moves through the following major stages:
-
-Webhook validation
-→ webhook event persistence / dedupe
-→ market context refresh
-→ account state build
-→ stale signal check
-→ setup observation
-→ setup policy
-→ cash-safe gates
-→ duplicate webhook check
-→ symbol override check
-→ trend table update
-→ market hours check
-→ circuit breaker check
-→ current position lookup
-→ cooldown check
-→ sell→buy churn window check
-→ sell→buy price improvement check
-→ daily symbol buy limit
-→ per-symbol exposure cap
-→ correlation cluster cap
-→ macro risk gate
-→ macro max position limit
-→ trend confirmation gate
-→ fundamental score gate
-→ market-bias context injection
-→ chase-prevention / entry-quality gate
-→ short-term 1-minute momentum
-→ add-on momentum gate
-→ prediction gate
-→ live-bias override
-→ hard/soft/live-downgrade bias enforcement
-→ prediction block/watch enforcement
-→ session momentum gate
-→ Claude Haiku decision engine
-→ decision consistency guard
-→ cash-safe confidence gate
-→ low-confidence buy gate
-→ second-look market check
-→ Alpaca broker order
-→ cooldown/recent state persistence
-→ trade log
-Sell Signal Gate Order
-
-A SELL signal follows a lighter path because sells reduce exposure:
-
-Webhook validation
-→ webhook event persistence / dedupe
-→ market context refresh
-→ account state build
-→ stale signal check
-→ setup observation skipped/not applicable
-→ duplicate webhook check
-→ symbol override check
-→ trend table update
-→ market hours check
-→ ghost sell filter
-→ current position lookup
-→ cooldown check
-→ sell trend confirmation
-→ Claude Haiku decision engine
-→ broker sell path
-→ cooldown write
-→ recent sell write
-→ trade log
-
-Buy-only gates skipped for sells include:
-
-circuit breaker blocking
-sell→buy churn
-daily buy limit
-exposure cap
-correlation cap
-macro buy block
-market bias avoid
-chase prevention
-prediction gate
-session momentum buy gate
-low-confidence buy gate
-second-look buy checks
-Live-Bias Override Framework
-
-Pre-market research is no longer treated as an unconditional early blocker in all cases.
-
-Instead:
-
-market_context.json provides original bias
-live features / setup / prediction / momentum update intraday context
-_live_bias_override() computes effective intraday bias
-effective bias is enforced after prediction evidence exists
-
-Tracked fields:
-
-market_bias_original
-market_bias_effective
-market_bias_override_reason
-avoid_type
-
-Possible effective states include:
-
-avoid_hard
-avoid_soft
-live_override_buy
-live_override_neutral
-neutral
-buy
-
-Hard avoids remain protective. Soft avoids may be overridden only when live evidence is strong enough.
-
-Market Context
-
-Daily market context is stored in:
-
-market_context.json
-
-Generated from structured brief parsing:
-
-python3 parse_market_brief.py --date YYYY-MM-DD /tmp/market_brief.json
-
-Typical symbol fields:
-
-{
-  "bias": "buy",
-  "confidence": "medium",
-  "reason": "Strong relative strength with supportive macro tape",
-  "avoid_type": null,
-  "fundamental_score": "bullish",
-  "risk_level": "medium",
-  "entry_quality": "good_on_pullbacks"
-}
-
-For avoid names:
-
-{
-  "bias": "avoid",
-  "avoid_type": "soft"
-}
-
-or:
-
-{
-  "bias": "avoid",
-  "avoid_type": "hard"
-}
-
-The app lazily reloads market_context.json when the file changes.
-
-Setup Policy
-
-Setup policy is active.
-
-The log line should read:
-
-Setup policy evaluated:
-
-Current behavior:
-
-boost   → signal continues with favorable setup context
-allow   → signal continues
-neutral → signal continues
-block   → signal rejected as setup_policy
-
-Example hard-avoid setup label:
-
-avoid_stretched_above_vwap_strength
-
-Example favorable setup labels:
-
-confirmed_near_vwap_recovery
-near_vwap_weak_strength_followthrough
-above_vwap_strength_continuation
-
-Unknown setup labels are treated as neutral unless explicitly added to policy lists.
-
-Prediction Gate
-
-The prediction gate scores buy quality before Claude.
-
-Inputs include:
-
-trend direction
-trend strength
-market bias
-setup label
-setup policy action
-short-term momentum direction
-short-term momentum percent
-consecutive buy count
-recent favorable setup memory
-
-The gate can reject weak BUYs before Claude, saving API cost.
-
-Common result fields:
-
-prediction_score
-prediction_decision
-prediction_reason
-Momentum Systems
-
-The project now has two momentum systems.
-
-1. Short-Term Signal Momentum
-
-This is the original event-driven momentum check.
-
-It runs during BUY signal processing.
-
-It fetches recent Alpaca 1-minute bars and computes:
-
-momentum_5m_pct
-momentum_15m_pct
-direction = rising / falling / flat
-
-Primary direction is based on recent 5-minute movement:
-
-> +0.10% = rising
-< -0.10% = falling
-otherwise = flat
-
-This feeds:
-
-confidence hints
-prediction gate
-add-on momentum gate
-live-bias override
-Claude account_state
-2. Session Momentum
-
-Session momentum is continuously refreshed and stored in SQLite.
-
-Script:
-
-session_momentum.py
-
-Table:
-
-session_momentum
-
-It calculates, per symbol:
-
-bar_count
-session_open_price
-latest_price
-session_return_pct
-momentum_5m_pct
-momentum_15m_pct
-momentum_30m_pct
-vwap
-distance_from_vwap_pct
-trend_label
-trend_score
-reason
-updated_at
-
-Trend labels:
-
-strong_uptrend
-developing_uptrend
-reversal_attempt
-rangebound
-fading
-downtrend
-insufficient_data
-
-Manual refresh:
-
-python3 session_momentum.py --all
-
-Via ops helper:
-
-python3 ops_check.py session
-
-Current values can also be viewed through /status.
-
-Session Momentum Gate
-
-Session momentum is now an active BUY risk gate.
-
-Controlled by:
-
-ENFORCE_SESSION_MOMENTUM_GATE=true
-
-The gate can block BUYs when broader session conditions are weak.
-
-High-level rule:
-
-Block BUY if:
-  session_label is downtrend
-  OR trend_score <= -5
-
-Block BUY if:
-  session_label is fading / score <= -2
-  AND prediction_score < 8
-  AND not bullish/confirmed with boost setup
-
-This helps prevent buying short-term bounces inside broader fading/downtrend sessions.
-
-Rejection category:
-
-session_momentum_gate
-Position Momentum Monitor
-
-The bot now includes a proactive position risk monitor that does not require TradingView sell alerts.
-
-Script:
-
-position_momentum_monitor.py
-
-Tables:
-
-position_momentum_checks
-position_momentum_actions
-
-Purpose:
-
-Read current Alpaca positions
-Read latest session_momentum
-Classify held positions as hold / watch / sell_candidate
-Persist every check
-Optionally auto-sell severe sell candidates
-
-Manual run:
-
-python3 position_momentum_monitor.py
-
-Via ops helper:
-
-python3 ops_check.py position-momentum
-
-Example output:
-
-Symbol Action          Severity         Label            Score    Sess%     15m%     30m%    VWAP%
------- --------------- ---------------- ---------------- ----- -------- -------- -------- --------
-LIN    hold            pass             rangebound           0   -0.305   -0.032    0.171    0.082
-Position Momentum Auto-Sell
-
-Auto-sell is now available behind environment flags.
-
-Current live controls:
-
-POSITION_MOMENTUM_AUTO_SELL=true
-POSITION_MOMENTUM_SELL_CANDIDATES_ONLY=true
-
-Auto-sell only considers positions classified as:
-
-sell_candidate
-
-Current safety layers include:
-
-market must be open
-position must be long
-session momentum must be fresh
-minimum 1-minute bar count required
-decision must be sell_candidate
-profit/loss-aware guard
-minimum hold-time guard
-auto-sell cooldown/dedupe
-broker.py sell path cancels brackets before selling
-position_momentum_actions records submitted auto-sells
-
-Cooldown table:
-
-position_momentum_actions
-
-Auto-sell audit table:
-
-position_momentum_checks
-
-Emergency disable:
-
-sudo sed -i 's/^POSITION_MOMENTUM_AUTO_SELL=.*/POSITION_MOMENTUM_AUTO_SELL=false/' /etc/trading-bot.env
-grep POSITION_MOMENTUM_AUTO_SELL /etc/trading-bot.env
-
-Cron scripts reload /etc/trading-bot.env each run, so no service restart is needed for this flag.
-
-Broker Behavior
-
-File:
-
-broker.py
-
-Function:
-
-place_order(symbol, action, position_size_pct, stop_loss_pct, take_profit_pct, risk_level=None, client_order_id=None)
-
-Buy path:
-
-calculates qty from account balance and position_size_pct
-applies very_high risk halving
-rejects qty < 1
-submits market bracket order
-
-Sell path:
-
-fetches existing Alpaca position
-rejects non-long qty
-cancels open bracket orders for symbol
-waits 1 second
-re-fetches position and verifies qty
-submits market sell
-
-For sell orders, stop/take-profit values are not meaningful and are passed as zero by bot logic where appropriate.
-
-Main Files
+Main Runtime Files
 app.py
 
 Main Flask webhook server.
 
-Responsibilities:
+Exposes:
 
-webhook validation
-signal processing
-pre-check stack
-trend table
-market context refresh
-setup policy handling
-prediction gate
-live-bias override
-session momentum gate
-Claude decision call
-broker order routing
-trade/rejection logging
-/status endpoint
-/positions endpoint
-/health endpoint
+POST /webhook?secret=...
+GET  /health
+GET  /status?secret=...
+GET  /positions?secret=...
+GET  /debug/symbol/<SYMBOL>?secret=...
+
+Core responsibilities:
+
+Receives TradingView alerts.
+Validates webhook secret and payload.
+Enforces approved symbol list.
+Applies pre-Claude risk checks.
+Builds account state for Claude.
+Calls decision_engine.py.
+Places orders through broker.py.
+Persists trades, rejections, context, and order metadata to trades.db.
+Exposes operator state through /status, /positions, and debug endpoints.
 decision_engine.py
 
-Claude Haiku decision engine.
+Claude Haiku decision layer.
 
-Responsibilities:
+The bot sends signal data and account state to Claude after pre-checks pass. Claude returns JSON with:
 
-construct prompt
-send signal/account_state to Claude
-parse JSON decision
-apply trading rules
-return approved/rejected decision
+{
+  "approved": true,
+  "reason": "reason",
+  "position_size_pct": 1.5,
+  "stop_loss_pct": 0.5,
+  "take_profit_pct": 1.5,
+  "confidence": "high"
+}
 
-Includes guidance for:
+Errors or parse failures default to rejection for safety.
 
-trend table
-market bias
-live bias override
-fundamental score
-risk level
-entry quality
-short-term momentum
-session momentum
-cash-safe mode
-sell handling
 broker.py
 
-Alpaca order placement.
+Alpaca order execution wrapper.
 
-Responsibilities:
+Buy path:
 
-buy quantity sizing
-bracket buy submission
-sell position lookup
-bracket cancel before sell
-market sell submission
-cash-mode live guard
-very_high risk quantity halving
-session_momentum.py
+Computes quantity from cash balance, position_size_pct, and latest trade price.
+Applies very-high-risk quantity reduction.
+Blocks too-small orders.
+Places bracket buy orders with stop-loss and take-profit.
 
-Session-aware momentum refresher.
+Sell path:
 
-Responsibilities:
+Fetches current Alpaca position.
+Refuses sells if quantity is zero or short.
+Cancels open bracket orders.
+Confirms available quantity after cancel.
+Places market sell order.
 
-fetch Alpaca 1-minute bars
-calculate 5m / 15m / 30m momentum
-calculate VWAP distance
-classify session trend
-upsert session_momentum table
-position_momentum_monitor.py
-
-Held-position momentum monitor.
-
-Responsibilities:
-
-read current Alpaca positions
-read session_momentum
-classify hold/watch/sell_candidate
-persist checks
-optionally auto-sell severe candidates
-dedupe/cooldown auto-sells
-parse_market_brief.py
-
-Parses structured daily market research into:
-
-market_context.json
-
-Supports:
-
-bias
-avoid_type
-confidence
-fundamental_score
-risk_level
-entry_quality
-macro context
-symbol table parsing
-pre_market_research.py
-
-Automated pre-market research script.
-
-Generates structured market context using Claude/web research.
-
-Runs via cron as backup to manual Chrome/Claude brief workflow.
+Live/cash safety guards are present for future use.
 
 fill_stream.py
 
-Alpaca websocket listener for fills.
+Alpaca websocket listener.
 
-Tracks real-time fill updates and writes fill data.
+Responsibilities:
 
-Uses runtime-configured Alpaca base URL.
+Subscribes to Alpaca trade updates.
+Records fill events to fill_events.
+Updates matching rows in trades.
+Inserts synthetic exit rows for unmatched sell-side bracket exits.
 
+Managed by systemd:
+
+sudo systemctl status fill-stream
+sudo systemctl restart fill-stream
 fill_poller.py
 
-Cron fallback for missed fills.
+Fallback fill reconciler.
 
-Runs every 2 minutes.
-
-daily_summary.py
-
-Daily and weekly reports.
-
-Includes:
-
-signal counts
-rejection breakdown
-orders by symbol
-realized P&L
-win rate
-profit factor
-session momentum gate summary
-
-Run:
-
-python3 daily_summary.py
-python3 daily_summary.py --week
-analytics_report.py
-
-Broader analytics report.
-
-Includes:
-
-execution summary
-risk filters
-session momentum attribution
-performance
-per-symbol performance
-matched trade attribution
-data quality
-
-Run:
-
-python3 analytics_report.py --week
-blocked_signal_outcome_report.py
-
-Blocked signal analysis.
-
-Includes:
-
-prediction reasons
-setup labels
-setup policy actions
-effective market bias
-original market bias
-session momentum labels
-session momentum gate rows
-recent blocked BUY samples
-
-Run:
-
-python3 blocked_signal_outcome_report.py --date $(date +%F)
-ops_check.py
-
-Convenience command runner.
-
-Common commands:
-
-python3 ops_check.py session
-python3 ops_check.py position-momentum
-python3 ops_check.py blocked
-python3 ops_check.py filters
-python3 ops_check.py drawdown
-db.py
-
-SQLite connection utilities.
-
-Used to centralize DB connection behavior.
+Runs every 2 minutes through cron and updates pending orders from Alpaca in case websocket events are missed.
 
 market_time.py
 
-Market-hours helpers.
+Shared market-time and trading-calendar helpers.
 
-Used for regular-session checks and Eastern-time handling.
+Responsibilities:
 
-SQLite Tables
+Eastern-time session helpers.
+Market open/closed labeling.
+Trading day detection.
+Common NYSE full-day holiday handling.
+Shared next_trading_date() helper.
 
-Key tables include:
+This is now the source of truth for holiday-aware trading date selection.
 
-trades
-cooldowns
-recent_sells
+next_trading_date.py
+
+Small CLI wrapper around market_time.next_trading_date().
+
+Usage:
+
+python3 next_trading_date.py
+python3 next_trading_date.py --from-date 2026-05-22
+
+Used by cron jobs to target the next valid market session.
+
+Pre-Check Stack
+
+The bot performs a large stack of zero-API-cost checks before calling Claude.
+
+Current buy/sell signal flow includes:
+
+Webhook validation
+Duplicate webhook protection
+Symbol override checks
+Market-hours check
+Circuit breaker
+Ghost sell filter
+Cooldown check
+Sell-to-buy churn prevention
+Daily symbol buy limit
+Per-symbol exposure cap
+Correlation cluster cap
+Trend confirmation gate
+Macro-risk gate
+Macro position limit
+Fundamental score gate
+Market bias avoid gate
+Chase prevention gate
+Momentum check
+Claude decision
+Confidence gate
+Final broker-adjacent safety check
+Order placement
+
+Most rejection paths persist rows to trades.db with category-prefixed rejection reasons, such as:
+
+market_hours:
+duplicate_webhook:
+symbol_override:
+circuit_breaker:
+ghost_sell:
+cooldown:
+churn_window:
+churn_price:
+daily_symbol_buy_limit:
+exposure_cap:
+correlation_cap:
+trend_confirmation:
+macro_risk:
+macro_position_limit:
+fundamental_score:
+market_bias_avoid:
+chase_prevention:
+confidence_gate:
+
+These prefixes are used by reports and daily summaries.
+
+Core Risk Rules
+
+Current core paper-trading risk framework:
+
+Max open positions: controlled by macro regime, usually up to 8
+Macro caution max positions: usually 6
+Per-symbol exposure cap: 4%
+Daily loss circuit breaker: -3%
+Cooldown: 15 minutes per symbol/action after successful order
+Sell-to-buy churn window: 30 minutes
+Sell-to-buy price improvement requirement: 0.5%
+Trend confirmation: 3 consecutive BUY alerts required for BUY
+Market hours: regular trading window, Eastern Time
+
+Risk is layered. Sells remain allowed through many buy-side risk restrictions so the bot can reduce exposure.
+
+Market Context and Intelligence Pipeline
+
+The bot maintains a daily intelligence layer.
+
+Key tables:
+
+daily_symbol_context
+daily_symbol_events
+daily_symbol_predictions
+historical_signal_outcomes
+historical_trade_outcomes
+historical_trend_context
 matched_trades
-session_momentum
-position_momentum_checks
-position_momentum_actions
 
-Important trade attribution columns include:
+Key scripts:
 
-macro_regime
-risk_multiplier
-market_bias
-market_bias_effective
-market_bias_override_reason
-fundamental_score
-risk_level
-entry_quality
-trend_direction
-trend_strength
-momentum_direction
-momentum_pct
-session_trend_label
-session_trend_score
-session_return_pct
-session_momentum_5m_pct
-session_momentum_15m_pct
-session_momentum_30m_pct
-session_distance_from_vwap_pct
-session_momentum_reason
-setup_label
-setup_policy_action
+pre_market_research_data.py
+collect_and_score_events.py
+apply_event_scores.py
+predict_symbol_outcomes.py
+intelligence_context_report.py
+event_attribution_report.py
+intelligence_prediction_report.py
+trend_context_report.py
+prediction_validation_report.py
+
+Daily intelligence flow:
+
+pre_market_research_data.py
+        |
+        v
+daily_symbol_context
+        |
+        v
+collect_and_score_events.py
+        |
+        v
+daily_symbol_events
+        |
+        v
+apply event aggregates to context
+        |
+        v
+predict_symbol_outcomes.py
+        |
+        v
+daily_symbol_predictions
+        |
+        v
+/status symbol_intelligence
+ops_check.py prediction-validation
+Prediction Layer
+
+The prediction layer is observe-only.
+
+It produces fields such as:
+
 prediction_score
-prediction_decision
-API Endpoints
-Health
-curl -s "https://trading.tib0n3s.xyz/health" | jq
-Status
-curl -s "https://trading.tib0n3s.xyz/status?secret=$WEBHOOK_SECRET" | jq
+probability_of_profit
+probability_of_order
+expected_pnl
+expected_win_rate
+confidence
+sample_size
+reason
+timing_score
+recommended_entry_timing
+recommended_exit_timing
+timing_reason
+trend_score
+trend_label
+trend_regime
+trend_confidence
+trend_reason
 
-Useful slices:
+Current behavior:
+
+Predictions are visible in /status.
+Predictions are reported by intelligence_prediction_report.py.
+Predictions are validated by prediction_validation_report.py.
+Predictions do not yet block trades.
+Predictions do not yet alter sizing.
+Predictions do not yet override existing gates.
+
+The correct roadmap path is:
+
+observe-only
+→ validation report
+→ warn-only
+→ soft modifier
+→ possible live gate much later
+/status Symbol Intelligence
+
+GET /status?secret=... includes:
+
+"symbol_intelligence": {
+  "available": true,
+  "market_date": "YYYY-MM-DD",
+  "symbol_count": 41,
+  "observe_only": true,
+  "symbols": {
+    "AAPL": {
+      "prediction_score": 53.93,
+      "probability_of_profit": null,
+      "probability_of_order": null,
+      "expected_pnl": null,
+      "expected_win_rate": null,
+      "prediction_confidence": "very_low",
+      "prediction_decision": "observe_only",
+      "sample_size": 0,
+      "prediction_reason": "...",
+      "timing_score": 62,
+      "recommended_entry_timing": "prefer_wait_for_confirmation",
+      "recommended_exit_timing": null,
+      "historical_timing_sample_size": 0,
+      "timing_reason": "...",
+      "trend_score": 64,
+      "trend_label": "confirmed_uptrend",
+      "trend_regime": "bullish",
+      "trend_confidence": "high",
+      "trend_similarity_sample_size": 0,
+      "trend_reason": "...",
+      "updated_at": "..."
+    }
+  }
+}
+
+Validation:
+
+set -a
+. /etc/trading-bot.env
+set +a
 
 curl -s "https://trading.tib0n3s.xyz/status?secret=$WEBHOOK_SECRET" \
-  | jq '.execution_mode, .market_session, .macro_risk'
+  | jq '.symbol_intelligence | {
+      available,
+      market_date,
+      symbol_count,
+      observe_only,
+      sample_symbols: (.symbols | keys[:5])
+    }'
 
-Session momentum summary:
+Spot-check one symbol:
 
 curl -s "https://trading.tib0n3s.xyz/status?secret=$WEBHOOK_SECRET" \
-  | jq '.session_momentum_gate_enabled, .session_momentum_summary'
+  | jq '.symbol_intelligence.symbols.AAPL'
+Operator Check Wrapper
 
-Held positions with session momentum:
+ops_check.py wraps common reports.
 
-curl -s "https://trading.tib0n3s.xyz/status?secret=$WEBHOOK_SECRET" \
-  | jq '.positions[] | {symbol, session_momentum}'
-Positions
-curl -s "https://trading.tib0n3s.xyz/positions?secret=$WEBHOOK_SECRET" | jq
-Cron Jobs
+Usage:
 
-Current important cron jobs:
+python3 ops_check.py morning
+python3 ops_check.py positions
+python3 ops_check.py alignment
+python3 ops_check.py adaptive
+python3 ops_check.py filters
+python3 ops_check.py drawdown
+python3 ops_check.py post
+python3 ops_check.py intelligence
+python3 ops_check.py events
+python3 ops_check.py context
+python3 ops_check.py learning
+python3 ops_check.py predictions
+python3 ops_check.py signal-lessons
+python3 ops_check.py trends
+python3 ops_check.py prediction-validation
+python3 ops_check.py historical-backfill START_DATE END_DATE
+python3 ops_check.py all
 
-*/2 * * * *       fill_poller.py
-0 8 * * 1-5      pre_market_research.py
-0 16 * * 1-5     daily_summary.py
-5 16 * * 5       daily_summary.py --week
-*/2 8-15 * * 1-5 session_momentum.py --all
-*/2 8-15 * * 1-5 position_momentum_monitor.py
-
-Cron lines that need secrets should source /etc/trading-bot.env:
-
-*/2 8-15 * * 1-5 cd /home/tradingbot/trading-bot && set -a && . /etc/trading-bot.env && set +a && /home/tradingbot/trading-bot/venv/bin/python session_momentum.py --all >> session_momentum.log 2>&1
-
-*/2 8-15 * * 1-5 cd /home/tradingbot/trading-bot && set -a && . /etc/trading-bot.env && set +a && /home/tradingbot/trading-bot/venv/bin/python position_momentum_monitor.py >> position_momentum_monitor.log 2>&1
-
-View crontab:
-
-crontab -l
-Log Files
-
-Important logs:
-
-trading_bot.log
-fill_stream.log
-session_momentum.log
-position_momentum_monitor.log
-
-Useful live monitor:
-
-tail -f ~/trading-bot/trading_bot.log \
-  | grep --line-buffered "APPROVED\|REJECTED\|ORDER\|Cooldown\|Exposure\|churn\|Trend\|bias\|momentum"
-
-Position momentum monitor:
-
-tail -f ~/trading-bot/position_momentum_monitor.log \
-  | grep --line-buffered "AUTO-SELL\|SELL_CANDIDATE\|WATCH\|POSITION MOMENTUM"
-
-Runtime logs should be ignored by Git.
-
-Recommended .gitignore patterns:
-
-*.log
-*.log.*
-*.gz
-session_momentum.log*
-position_momentum_monitor.log*
-Common Commands
-
-Activate project:
+Useful next-session validation:
 
 cd ~/trading-bot
 source venv/bin/activate
-set -a
-source /etc/trading-bot.env
-set +a
 
-Compile key files:
+TARGET_DATE=$(python3 next_trading_date.py)
+echo "$TARGET_DATE"
 
-python3 -m py_compile \
-  app.py \
-  decision_engine.py \
-  broker.py \
-  session_momentum.py \
-  position_momentum_monitor.py \
-  ops_check.py \
-  daily_summary.py \
-  analytics_report.py \
-  blocked_signal_outcome_report.py
+python3 ops_check.py intelligence "$TARGET_DATE"
+python3 ops_check.py events "$TARGET_DATE"
+python3 ops_check.py predictions "$TARGET_DATE"
+python3 ops_check.py trends "$TARGET_DATE"
+python3 ops_check.py prediction-validation "$TARGET_DATE"
+Prediction Validation Report
 
-Run tests:
+prediction_validation_report.py compares predictions to later signal/trade outcomes.
 
-python3 run_tests.py
+Usage:
 
-Restart services:
+python3 prediction_validation_report.py
+python3 prediction_validation_report.py 2026-05-26
+python3 prediction_validation_report.py --date 2026-05-26
+python3 ops_check.py prediction-validation 2026-05-26
 
-sudo systemctl restart trading-bot
-sudo systemctl restart fill-stream
+Pre-session mode is expected to show:
+
+Predictions          : 41
+Symbols with signals : 0
+Symbols with trades  : 0
+Symbols with matches : 0
+
+After the trading session, the report should answer:
+
+Did higher prediction_score buckets outperform lower-score buckets?
+Did recommended_entry_timing align with better outcomes?
+Did trend_label / trend_regime identify risk?
+Did weak predictions avoid losses or correlate with blocked signals?
+Common Reports
+Morning readiness
+python3 ops_check.py morning
+
+Checks:
+
+Market context freshness
+Services
+Alpaca account access
+Market alignment
+Debug endpoint
+Filter effectiveness
+python3 ops_check.py filters $(date +%F)
+python3 filter_report.py --date 2026-05-26
+python3 filter_report.py --week
+
+Summarizes rejection categories and symbols.
+
+Daily summary
+python3 daily_summary.py
+python3 daily_summary.py 2026-05-26
+python3 daily_summary.py --week
+
+Includes:
+
+Signal counts
+Rejection breakdown
+Orders by symbol
+Matched-trade P&L
+Win rate
+Profit factor
+Claude cost estimate
+Analytics report
+python3 analytics_report.py
+python3 analytics_report.py --date 2026-05-26
+python3 analytics_report.py --week
+python3 analytics_report.py --all
+
+Includes:
+
+Execution
+Risk filters
+Performance
+Per-symbol performance
+Matched-trade attribution
+Data quality
+Trend context
+python3 ops_check.py trends 2026-05-26
+python3 trend_context_report.py --date 2026-05-26
+
+Shows trend-label and trend-regime distributions.
+
+Event attribution
+python3 ops_check.py events 2026-05-26
+python3 event_attribution_report.py --date 2026-05-26
+
+Shows daily event counts by type, impact, relevance, and outcome attribution.
+
+Cron Jobs
+
+Cron runs as user tradingbot.
+
+View cron:
+
+crontab -l
+
+Current major cron categories:
+
+*/2 * * * *          fill_poller.py
+0 8 * * 1-5          pre_market_research_data.py
+5 8 * * 1-5          collect_and_score_events.py --apply-context --predict
+0 16 * * 1-5         daily_summary.py
+5 16 * * 5           daily_summary.py --week
+10 16 * * 1-5        trade_matcher.py
+*/2 8-15 * * 1-5     rolling/session/position momentum jobs
+*/2 8-15 * * 1-5     position manager
+30 16 * * 1-5        after-close learning
+0 18 * * 1-4         after-hours event collection for next session
+0 18 * * 5           Friday after-hours event collection
+0 10,18 * * 6,0      weekend event collection
+
+Cron jobs that require secrets should source:
+
+set -a && . /etc/trading-bot.env && set +a
+Services
 
 Check services:
 
-sudo systemctl status trading-bot --no-pager -l
-sudo systemctl status fill-stream --no-pager -l
-Reviewing Session Momentum
+sudo systemctl status trading-bot
+sudo systemctl status fill-stream
+sudo systemctl status cloudflared
+sudo systemctl status nginx
 
-All symbols:
+Restart app:
 
-python3 ops_check.py session
+sudo systemctl restart trading-bot
 
-SQLite:
+Restart fill stream:
 
-sqlite3 -cmd ".headers on" -cmd ".mode column" trades.db "
-SELECT symbol, updated_at, trend_label, trend_score,
-       session_return_pct, momentum_5m_pct, momentum_15m_pct,
-       momentum_30m_pct, distance_from_vwap_pct, bar_count, reason
-FROM session_momentum
-ORDER BY trend_score DESC;
+sudo systemctl restart fill-stream
+
+Tail logs:
+
+tail -f trading_bot.log
+tail -f fill_stream.log
+tail -f fill_poller.log
+tail -f pre_market_research.log
+tail -f event_collection.log
+tail -f daily_summary.log
+tail -f after_close_learning.log
+
+Useful filtered app log:
+
+tail -f ~/trading-bot/trading_bot.log \
+  | grep --line-buffered "APPROVED\|REJECTED\|ORDER\|Cooldown\|Exposure\|churn\|Trend\|bias\|chase\|momentum\|prediction"
+Health and Operator Endpoints
+
+Health:
+
+curl http://localhost:5000/health
+
+Status:
+
+set -a
+. /etc/trading-bot.env
+set +a
+
+curl -s "https://trading.tib0n3s.xyz/status?secret=$WEBHOOK_SECRET" | jq
+
+Positions:
+
+curl -s "https://trading.tib0n3s.xyz/positions?secret=$WEBHOOK_SECRET" | jq
+
+Debug symbol:
+
+curl -s "https://trading.tib0n3s.xyz/debug/symbol/AAPL?secret=$WEBHOOK_SECRET" | jq
+Database
+
+Database path:
+
+/home/tradingbot/trading-bot/trades.db
+
+List tables:
+
+sqlite3 trades.db ".tables"
+
+Important tables:
+
+trades
+matched_trades
+fill_events
+webhook_events
+cooldowns
+recent_sells
+daily_symbol_context
+daily_symbol_events
+daily_symbol_predictions
+historical_signal_outcomes
+historical_trade_outcomes
+historical_trend_context
+session_momentum
+position_momentum_actions
+position_momentum_checks
+
+Check intelligence row counts:
+
+TARGET_DATE=$(python3 next_trading_date.py)
+
+sqlite3 trades.db "
+SELECT 'context' AS table_name, COUNT(*)
+FROM daily_symbol_context
+WHERE market_date = '$TARGET_DATE'
+UNION ALL
+SELECT 'events', COUNT(*)
+FROM daily_symbol_events
+WHERE market_date = '$TARGET_DATE'
+UNION ALL
+SELECT 'predictions', COUNT(*)
+FROM daily_symbol_predictions
+WHERE market_date = '$TARGET_DATE';
 "
+Manual Validation Workflow
+Before next market session
+cd ~/trading-bot
+source venv/bin/activate
 
-Weak names:
+TARGET_DATE=$(python3 next_trading_date.py)
+echo "$TARGET_DATE"
 
-sqlite3 -cmd ".headers on" -cmd ".mode column" trades.db "
-SELECT symbol, trend_label, trend_score,
-       session_return_pct, momentum_5m_pct, momentum_15m_pct,
-       momentum_30m_pct, distance_from_vwap_pct, reason
-FROM session_momentum
-WHERE trend_label IN ('fading', 'downtrend')
-ORDER BY trend_score ASC;
-"
+python3 ops_check.py intelligence "$TARGET_DATE"
+python3 ops_check.py events "$TARGET_DATE"
+python3 ops_check.py predictions "$TARGET_DATE"
+python3 ops_check.py trends "$TARGET_DATE"
+python3 ops_check.py prediction-validation "$TARGET_DATE"
+During session
 
-Strong names:
+Monitor logs:
 
-sqlite3 -cmd ".headers on" -cmd ".mode column" trades.db "
-SELECT symbol, trend_label, trend_score,
-       session_return_pct, momentum_5m_pct, momentum_15m_pct,
-       momentum_30m_pct, distance_from_vwap_pct, reason
-FROM session_momentum
-WHERE trend_label IN ('strong_uptrend', 'developing_uptrend')
-ORDER BY trend_score DESC;
-"
-Reviewing Position Momentum
+tail -f trading_bot.log \
+  | grep --line-buffered "Signal received\|Processing\|blocked\|APPROVED\|ORDER\|prediction\|momentum"
 
-Manual check:
+Check live operator view:
 
-python3 position_momentum_monitor.py
-
-Via ops:
-
-python3 ops_check.py position-momentum
-
-Today’s checks:
-
-sqlite3 -cmd ".headers on" -cmd ".mode column" trades.db "
-SELECT symbol, action, severity, trend_label, COUNT(*) AS n
-FROM position_momentum_checks
-WHERE timestamp >= date('now')
-GROUP BY symbol, action, severity, trend_label
-ORDER BY n DESC;
-"
-
-Watch/sell candidates:
-
-sqlite3 -cmd ".headers on" -cmd ".mode column" trades.db "
-SELECT timestamp, symbol, action, severity, trend_label, trend_score,
-       session_return_pct, momentum_15m_pct, momentum_30m_pct,
-       distance_from_vwap_pct, reason
-FROM position_momentum_checks
-WHERE action IN ('watch', 'sell_candidate')
-ORDER BY id DESC
-LIMIT 20;
-"
-
-Auto-sell audit:
-
-sqlite3 -cmd ".headers on" -cmd ".mode column" trades.db "
-SELECT timestamp, symbol, action, severity,
-       auto_sell_enabled, order_submitted, order_id, reason
-FROM position_momentum_checks
-ORDER BY id DESC
-LIMIT 20;
-"
-
-Auto-sell action cooldowns:
-
-sqlite3 -cmd ".headers on" -cmd ".mode column" trades.db "
-SELECT *
-FROM position_momentum_actions;
-"
-Reports
-
-Filter report:
-
+curl -s "https://trading.tib0n3s.xyz/status?secret=$WEBHOOK_SECRET" | jq '.symbol_intelligence'
+After close
+python3 ops_check.py post $(date +%F)
+python3 ops_check.py predictions $(date +%F)
+python3 ops_check.py trends $(date +%F)
+python3 ops_check.py prediction-validation $(date +%F)
+python3 analytics_report.py --date $(date +%F)
 python3 filter_report.py --date $(date +%F)
+Development Workflow
 
-Blocked signal report:
-
-python3 blocked_signal_outcome_report.py --date $(date +%F)
-
-Session momentum gate rows:
-
-python3 blocked_signal_outcome_report.py --date $(date +%F) \
-  | grep -A45 -E "Top session momentum labels|Session momentum gate rows"
-
-Daily summary:
-
-python3 daily_summary.py
-
-Weekly summary:
-
-python3 daily_summary.py --week
-
-Analytics report:
-
-python3 analytics_report.py --week
-
-Session momentum attribution:
-
-python3 analytics_report.py --week \
-  | sed -n '/SESSION MOMENTUM ATTRIBUTION/,/PERFORMANCE/p'
-Git Workflow
-
-Check changes:
-
-git status --short
-git diff --stat
-
-Run tests before commit:
-
-python3 run_tests.py
-
-Stage code only:
-
-git add app.py decision_engine.py broker.py session_momentum.py position_momentum_monitor.py ops_check.py daily_summary.py analytics_report.py blocked_signal_outcome_report.py .gitignore
-
-Commit:
-
-git commit -m "Describe change"
-
-If push is rejected due to non-fast-forward:
-
-git pull --rebase origin live-bias-override-framework
-git push origin live-bias-override-framework
-
-Do not force-push unless you intentionally want to overwrite remote commits.
-
-Known Issues / Watch Items
-
-Current known items:
-
-Some TradingView ghost sell signals still occur; ghost_sell filter handles them.
-Bracket stop-loss exits are not fully represented as bot-initiated sells in trades.db.
-market_context.json must be kept fresh daily.
-Session momentum depends on cron successfully loading /etc/trading-bot.env.
-Position momentum auto-sell is live and should be monitored closely after rollout.
-Startup reconciliation can reveal mismatches between Alpaca positions and trades.db.
-
-Recent reconciliation examples have included:
-
-held in Alpaca but no open position tracked in trades.db
-tracked as open in trades.db but not found in Alpaca
-
-These should be reviewed when they occur.
-
-Morning Routine
-SSH into the VM.
-Activate environment.
-Check /status and /positions.
-Generate or parse market brief.
-Confirm market_context.json.
-Refresh/check session momentum.
-Confirm cron health.
-Watch logs near open.
-
-Commands:
+Activate environment:
 
 cd ~/trading-bot
 source venv/bin/activate
+
+Compile changed Python files:
+
+python3 -m py_compile app.py broker.py decision_engine.py
+
+Compile all Python files:
+
+python3 -m compileall .
+
+Check git status:
+
+git status --short
+
+Commit:
+
+git add <files>
+git commit -m "Description"
+
+Restart service after app changes:
+
+sudo systemctl restart trading-bot
+sudo systemctl status trading-bot --no-pager
+Safety Rules for Changes
+
+Do not change live trading behavior unless explicitly intended.
+
+Preferred safe work while market is closed:
+
+Read-only reports
+Operator visibility
+Validation reports
+Schema-safe migrations
+Holiday/date targeting
+Documentation
+Ops checks
+
+Avoid during active trading unless necessary:
+
+Order execution changes
+Risk gate changes
+Sizing changes
+Claude prompt changes
+Webhook processing changes
+Broker behavior changes
+Roadmap Status
+2. Validate next real paper-trading session
+
+Status: Ready.
+
+Need to confirm next market session:
+
+8:00 pre-market data job creates daily_symbol_context
+8:05 event collector applies context and runs predictions
+daily_symbol_predictions exists before trading
+post-session checks include prediction/timing/trend reports
+prediction_score correlates directionally with outcomes
+
+Useful commands:
+
+TARGET_DATE=$(python3 next_trading_date.py)
+
+python3 ops_check.py intelligence "$TARGET_DATE"
+python3 ops_check.py events "$TARGET_DATE"
+python3 ops_check.py predictions "$TARGET_DATE"
+python3 ops_check.py trends "$TARGET_DATE"
+python3 ops_check.py prediction-validation "$TARGET_DATE"
+3. Add prediction/timing/trend fields to /status
+
+Status: Complete.
+
+/status now exposes read-only symbol_intelligence.
+
+4. Build prediction validation report
+
+Status: Initial complete.
+
+prediction_validation_report.py exists and is wired into:
+
+python3 ops_check.py prediction-validation DATE
+
+The report is useful pre-session and post-session.
+
+5. Formal sector/index models
+
+Status: Later.
+
+Potential future files:
+
+market_intelligence/sector_model.py
+market_intelligence/index_model.py
+
+Goals:
+
+sector strength
+theme strength
+benchmark alignment
+QQQ/SPY/IWM/GLD support or conflict
+6. app.py decomposition
+
+Status: Later.
+
+Possible future extraction targets:
+
+signal_router.py
+risk_engine.py
+execution_engine.py
+market_state.py
+state_store.py
+
+Safest first extraction:
+
+signal_router.py
+
+Initially observe-only beside existing /webhook logic.
+
+7. Risk engine skeleton
+
+Status: Later.
+
+Future concepts:
+
+risk_engine.py
+RiskCheckResult
+RiskDecision
+layered risk checks
+observe-only comparison against current app.py decisions
+8. Soft risk modifier / live use of predictions
+
+Status: Not ready.
+
+The prediction layer is working, but confidence is still low because historical sample size is small and much of the data was reconstructed.
+
+Correct path:
+
+observe-only
+→ validation report
+→ warn-only
+→ soft modifier
+→ possible live gate much later
+
+Potential future behavior, not enabled:
+
+prediction_score < 35 → require extra confirmation or reduce size
+expected_pnl negative + weak trend_score → avoid/chase block
+recommended_entry_timing = prefer_wait_for_confirmation → require confirmation
+trend_label = extended_uptrend + weak expectancy → reduce size or block chase
+Known Issues / Watch Items
+Prediction confidence is currently very_low until more sessions accumulate.
+Some historical outcomes were reconstructed and should not be over-weighted.
+Holiday targeting is now improved, but early closes are not modeled.
+Prediction data is observe-only and should not be used as a live gate yet.
+Event collection can surface low-quality financial news items; validation is needed.
+Large share-price symbols may still hit affordability constraints.
+Historical bracket stop/take-profit exits depend on synthetic exit capture.
+Useful One-Liners
+
+Check services:
+
+for s in trading-bot fill-stream cloudflared nginx; do
+  echo "---- $s ----"
+  systemctl is-active "$s"
+done
+
+Check next trading date:
+
+python3 next_trading_date.py
+
+Check prediction readiness:
+
+TARGET_DATE=$(python3 next_trading_date.py)
+python3 ops_check.py prediction-validation "$TARGET_DATE"
+
+Check /status intelligence summary:
+
 set -a
-source /etc/trading-bot.env
+. /etc/trading-bot.env
 set +a
 
 curl -s "https://trading.tib0n3s.xyz/status?secret=$WEBHOOK_SECRET" \
-  | jq '.market_session, .macro_risk, .session_momentum_summary'
+  | jq '.symbol_intelligence | {
+      available,
+      market_date,
+      symbol_count,
+      observe_only,
+      sample_symbols: (.symbols | keys[:5])
+    }'
 
-python3 ops_check.py session
-python3 ops_check.py position-momentum
+Check row counts:
 
-Parse daily market context:
+TARGET_DATE=$(python3 next_trading_date.py)
 
-python3 parse_market_brief.py --date YYYY-MM-DD /tmp/market_brief.json
-
-Verify:
-
-jq '.market_date, .macro_sentiment, .symbols | keys | length' market_context.json
-Emergency Controls
-
-Disable session momentum buy gate:
-
-sudo sed -i 's/^ENFORCE_SESSION_MOMENTUM_GATE=.*/ENFORCE_SESSION_MOMENTUM_GATE=false/' /etc/trading-bot.env
-sudo systemctl restart trading-bot
-
-Disable position momentum auto-sell:
-
-sudo sed -i 's/^POSITION_MOMENTUM_AUTO_SELL=.*/POSITION_MOMENTUM_AUTO_SELL=false/' /etc/trading-bot.env
-grep POSITION_MOMENTUM_AUTO_SELL /etc/trading-bot.env
-
-Stop trading bot:
-
-sudo systemctl stop trading-bot
-
-Restart trading bot:
-
-sudo systemctl restart trading-bot
-
-Check errors:
-
-sudo journalctl -u trading-bot -n 120 --no-pager
-tail -n 120 ~/trading-bot/trading_bot.log
-Development Notes
-
-Before enabling any new gate or execution behavior:
-
-1. Add observe-only logging.
-2. Persist attribution to SQLite.
-3. Add report visibility.
-4. Add tests or smoke tests.
-5. Run during market hours in observe-only mode.
-6. Review candidates.
-7. Add env flag.
-8. Enable only after guardrails are verified.
-
-Current philosophy:
-
-Prefer pre-Claude deterministic filters for cost control.
-Use Claude only after hard gates and live context are populated.
-Keep sell-side controls conservative but able to reduce exposure.
-Persist every meaningful reject/action with category prefixes.
-Make every new gate observable before making it enforceable.
-Test Suite
-
-Targeted tests include:
-
-trend tests
-fast-lane buy tests
-fast-lane sell tests
-FIFO trade matcher tests
-live-bias override tests
-
-Run:
-
-python3 run_tests.py
-
-Expected:
-
-[OK] all test file(s) passed
+sqlite3 trades.db "
+SELECT 'context', COUNT(*) FROM daily_symbol_context WHERE market_date='$TARGET_DATE'
+UNION ALL
+SELECT 'events', COUNT(*) FROM daily_symbol_events WHERE market_date='$TARGET_DATE'
+UNION ALL
+SELECT 'predictions', COUNT(*) FROM daily_symbol_predictions WHERE market_date='$TARGET_DATE';
+"
 Disclaimer
 
-This bot automates experimental trading decisions in a paper/cash-safe environment. It can make mistakes, reject good trades, approve poor trades, or fail due to third-party APIs, stale data, software bugs, or market conditions.
-
-Use at your own risk.
+This project is for personal paper-trading experimentation and engineering research. It is not financial advice. Automated trading can lose money quickly. Use paper trading, strict risk controls, and extensive validation before considering any live deployment.

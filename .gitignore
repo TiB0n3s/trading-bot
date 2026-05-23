@@ -10,6 +10,32 @@ market_context.json
 .env
 *.env
 
+# Source package folders are intentional.
+# Do not ignore these directories wholesale.
+!analytics_ext/
+!data_layer/
+!execution/
+!market_intelligence/
+!market_intelligence/event_collectors/
+!risk/
+!strategy/
+!tests/
+
+# Track Python source in source package folders.
+!analytics_ext/**/*.py
+!data_layer/**/*.py
+!execution/**/*.py
+!market_intelligence/**/*.py
+!risk/**/*.py
+!strategy/**/*.py
+!tests/**/*.py
+
+# Still ignore generated/cache files everywhere.
+__pycache__/
+*.pyc
+*.pyo
+*.bak*
+
 # Runtime logs / rotated logs
 *.log.*
 *.gz

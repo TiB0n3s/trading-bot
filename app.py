@@ -24,6 +24,7 @@ from decision_engine import evaluate_signal, get_mock_account_state
 from opportunity_score import score_buy_opportunity
 from broker import place_order, get_account, get_position, api
 from macro_risk import get_macro_risk
+from strategy.trade_scorer import score_trade
 from setup_classifier import classify_setup
 from strategy_memory import memory_for_signal
 from decision_context import build_intelligence_context
@@ -2117,6 +2118,53 @@ def _symbol_market_alignment(symbol):
             "reason": f"alignment error: {e}",
         }
 
+def _log_trader_brain_observe_only(symbol, action, account_state=None):
+    """Run deterministic trader-brain scorer in observe-only mode.
+
+    This does not approve, reject, size, or place orders. It only logs what the
+    new scoring layer would have concluded using the current decision context.
+    """
+    try:
+        account_state = account_state or {}
+
+        trend = _trend_table.get(symbol) or {}
+        momentum = account_state.get("momentum") or {}
+        alignment = account_state.get("market_alignment") or _symbol_market_alignment(symbol)
+
+        thesis = score_trade(
+            symbol=symbol,
+            action=action,
+            account_state=account_state,
+            trend=trend,
+            momentum=momentum,
+            market_alignment=alignment,
+        )
+
+        logger.info(
+            "TRADER_BRAIN observe_only "
+            f"symbol={symbol} action={action} "
+            f"score={thesis.score} "
+            f"approved_by_scorer={thesis.approved_by_scorer} "
+            f"setup_type={thesis.setup_type} "
+            f"macro_regime={thesis.macro_regime} "
+            f"market_bias={thesis.market_bias} "
+            f"risk_level={thesis.risk_level} "
+            f"entry_quality={thesis.entry_quality} "
+            f"trend={thesis.trend_direction}/{thesis.trend_strength} "
+            f"momentum={thesis.momentum_direction}:{thesis.momentum_pct} "
+            f"benchmark={thesis.benchmark} "
+            f"benchmark_aligned={thesis.benchmark_aligned} "
+            f"positive_factors={thesis.positive_factors} "
+            f"risk_factors={thesis.risk_factors} "
+            f"reason={thesis.reason}"
+        )
+
+        return thesis
+
+    except Exception as e:
+        logger.warning(f"TRADER_BRAIN observe_only failed for {symbol} {action}: {e}")
+        return None
+
 def _live_bias_override(symbol, bias_entry, trend, setup_obs, prediction_gate, momentum):
     """
     Convert pre-market bias into an effective intraday bias using live evidence.
@@ -4084,6 +4132,13 @@ def process_signal(data):
         }
         logger.warning(f"Session momentum unavailable for {symbol}: {e}")
 
+    # Trader-brain market alignment context, observe-only for now.
+    if action == "buy":
+        try:
+            account_state["market_alignment"] = _symbol_market_alignment(symbol)
+        except Exception as e:
+            logger.warning(f"Market alignment context failed for {symbol}: {e}")
+
     # Momentum check (buy signals only, fail-open — never blocks trading)
     alignment = None
     action_hint = None
@@ -4285,6 +4340,9 @@ def process_signal(data):
                     f"Session momentum gate observe-only for {symbol} BUY: "
                     f"{session_gate.get('severity')} {reason}"
                 )
+
+    # Deterministic trader-brain score, observe-only.
+    _log_trader_brain_observe_only(symbol, action, account_state)
 
     account_state["trend_table"] = _trend_table
 

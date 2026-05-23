@@ -256,16 +256,23 @@ def events_for_context(con, market_date: str, symbol: str):
 
 
 def outcome_for_context(con, market_date: str, symbol: str):
-    """Return trade/outcome stats for a symbol/date."""
-    trades = con.execute(
-        """
-        SELECT *
-        FROM trades
-        WHERE timestamp LIKE ?
-          AND symbol = ?
-        """,
-        (f"{market_date}%", symbol),
-    ).fetchall()
+    """Return trade/outcome stats for a symbol/date.
+
+    Uses live trades/matched_trades when present, plus learning-only historical
+    tables rebuilt from Alpaca exports and signal logs.
+    """
+    try:
+        trades = con.execute(
+            """
+            SELECT *
+            FROM trades
+            WHERE timestamp LIKE ?
+              AND symbol = ?
+            """,
+            (f"{market_date}%", symbol),
+        ).fetchall()
+    except Exception:
+        trades = []
 
     signals = len(trades)
     approved = sum(1 for r in trades if int(r["approved"] or 0) == 1)
@@ -276,10 +283,32 @@ def outcome_for_context(con, market_date: str, symbol: str):
         and r["fill_price"] is not None
     )
 
+    # Add historical signal experience when live trades rows are missing due to DB rebuild.
+    try:
+        hist_signals = con.execute(
+            """
+            SELECT *
+            FROM historical_signal_experience
+            WHERE market_date = ?
+              AND symbol = ?
+              AND decision_summary IN ('signal_received', 'processing_signal', 'order_placed')
+            """,
+            (market_date, symbol),
+        ).fetchall()
+    except Exception:
+        hist_signals = []
+
+    if not signals and hist_signals:
+        signals = sum(1 for r in hist_signals if r["decision_summary"] in ("signal_received", "processing_signal"))
+        approved = sum(1 for r in hist_signals if int(r["approved"] or 0) == 1 or r["decision_summary"] == "order_placed")
+        orders = sum(1 for r in hist_signals if r["decision_summary"] == "order_placed" or r["order_id"])
+        filled = orders
+
+    matched = []
     try:
         matched = con.execute(
             """
-            SELECT *
+            SELECT realized_pnl, realized_pnl_pct
             FROM matched_trades
             WHERE exit_timestamp LIKE ?
               AND symbol = ?
@@ -289,9 +318,26 @@ def outcome_for_context(con, market_date: str, symbol: str):
     except Exception:
         matched = []
 
-    closed = len(matched)
-    pnl = sum(float(r["realized_pnl"] or 0) for r in matched)
-    wins = sum(1 for r in matched if float(r["realized_pnl"] or 0) > 0)
+    hist_outcomes = []
+    try:
+        hist_outcomes = con.execute(
+            """
+            SELECT realized_pnl, realized_pnl_pct
+            FROM historical_trade_outcomes
+            WHERE exit_timestamp LIKE ?
+              AND symbol = ?
+            """,
+            (f"{market_date}%", symbol),
+        ).fetchall()
+    except Exception:
+        hist_outcomes = []
+
+    # Combine live matched trades and learning-only reconstructed outcomes.
+    closed_rows = list(matched) + list(hist_outcomes)
+
+    closed = len(closed_rows)
+    pnl = sum(float(r["realized_pnl"] or 0) for r in closed_rows)
+    wins = sum(1 for r in closed_rows if float(r["realized_pnl"] or 0) > 0)
 
     return {
         "signals": signals,

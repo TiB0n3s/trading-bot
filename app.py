@@ -5315,6 +5315,82 @@ def status():
 
     return jsonify(result), 200
 
+@app.route("/debug/trader-brain/<symbol>", methods=["GET"])
+def debug_trader_brain(symbol):
+    validate_secret(request)
+
+    symbol = symbol.upper()
+
+    if symbol not in APPROVED_SYMBOLS:
+        return jsonify({
+            "error": "symbol not approved",
+            "symbol": symbol,
+        }), 400
+
+    try:
+        _load_market_context()
+        _refresh_signal_history(symbol)
+
+        trend = _compute_trend(_signal_history.get(symbol, []))
+        _trend_table[symbol] = trend
+
+        account_state = get_mock_account_state() or {}
+        macro_risk = get_macro_risk(Path(__file__).parent)
+        account_state["macro_risk"] = macro_risk
+
+        bias_entry = _market_bias.get(symbol) or {}
+        if bias_entry.get("bias") == "buy":
+            account_state["market_bias"] = "buy"
+
+        if bias_entry.get("fundamental_score"):
+            account_state["fundamental_score"] = bias_entry["fundamental_score"]
+        if bias_entry.get("risk_level"):
+            account_state["risk_level"] = bias_entry["risk_level"]
+        if bias_entry.get("entry_quality"):
+            account_state["entry_quality"] = bias_entry["entry_quality"]
+
+        alignment = _symbol_market_alignment(symbol)
+        account_state["market_alignment"] = alignment
+
+        price = request.args.get("price")
+        momentum = None
+
+        if price is not None:
+            try:
+                momentum = get_momentum(symbol, float(price), premarket_bias=bias_entry.get("bias"))
+            except Exception as e:
+                momentum = {"error": str(e)}
+
+        if momentum:
+            account_state["momentum"] = momentum
+
+        thesis = score_trade(
+            symbol=symbol,
+            action=request.args.get("action", "buy").lower(),
+            account_state=account_state,
+            trend=trend,
+            momentum=momentum or {},
+            market_alignment=alignment,
+        )
+
+        return jsonify({
+            "symbol": symbol,
+            "action": request.args.get("action", "buy").lower(),
+            "trend": trend,
+            "market_bias": bias_entry,
+            "macro_risk": macro_risk,
+            "market_alignment": alignment,
+            "momentum": momentum,
+            "trader_brain": thesis.to_dict(),
+            "observe_only": True,
+        })
+
+    except Exception as e:
+        logger.exception(f"/debug/trader-brain failed for {symbol}: {e}")
+        return jsonify({
+            "error": str(e),
+            "symbol": symbol,
+        }), 500
 
 @app.route("/positions", methods=["GET"])
 def positions():

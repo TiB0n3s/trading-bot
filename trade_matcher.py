@@ -440,8 +440,9 @@ def _synthetic_match_from_position_manager_exit(con, sell_row):
 
 
 def rebuild_matched_trades():
-    matched, open_lots = match_trades()
+    # Fresh-DB safety: create matched_trades before match_trades().
     init_matched_trades_table()
+    matched, open_lots = match_trades()
 
     con = get_connection(DB_PATH)
     con.execute("DELETE FROM matched_trades")

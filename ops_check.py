@@ -36,6 +36,7 @@ COMMANDS = {
     "drawdown": ["drawdown_report.py"],
     "post": ["post_session_check.py"],
     "trader-brain": ["trader_brain_ops_check.py"],
+    "market-context": ["market_context_report.py"],
 }
 
 
@@ -80,6 +81,7 @@ def main():
         checks.append(run("Drawdown Report", ["drawdown_report.py", target_date]))
         checks.append(run("Post-Session Check", ["post_session_check.py", target_date]))
         checks.append(run("Trader Brain Ops Check", ["trader_brain_ops_check.py"]))
+        checks.append(run("Market Context Report", ["market_context_report.py"]))
 
         print()
         print("=" * 72)

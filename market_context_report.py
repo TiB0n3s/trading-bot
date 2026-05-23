@@ -12,7 +12,7 @@ import json
 from collections import Counter
 from datetime import datetime
 from pathlib import Path
-
+from market_intelligence.market_brief_schema import schema_quality_summary
 import pytz
 
 from config import APPROVED_SYMBOLS
@@ -46,6 +46,43 @@ def main() -> int:
     print(f"source          : {ctx.get('source')}")
     print(f"format          : {ctx.get('format')}")
 
+    quality = schema_quality_summary(ctx)
+
+    print()
+    print("── Rich Schema Coverage ───────────────────────────────")
+    print(f"index_state entries : {quality.get('index_state_count', 0)}")
+    print(f"sector_state entries: {quality.get('sector_state_count', 0)}")
+    print(f"macro_events        : {quality.get('macro_events_count', 0)}")
+
+    rich_coverage = quality.get("rich_field_coverage") or {}
+    symbol_count = quality.get("symbol_count") or len(symbols) or 1
+
+    for field, count in sorted(rich_coverage.items()):
+        pct = count / symbol_count * 100 if symbol_count else 0
+        status = "[OK]" if pct >= 90 else "[WARN]" if pct >= 50 else "[LOW]"
+        print(f"{status} {field:<28} {count:>3}/{symbol_count:<3} {pct:>6.1f}%")
+
+
+    list_fields = [
+        "key_catalysts",
+        "key_risks",
+        "support_levels",
+        "resistance_levels",
+    ]
+
+    print()
+    print("── Rich List Coverage ─────────────────────────────────")
+    for field in list_fields:
+        count = sum(
+            1 for entry in symbols.values()
+            if isinstance(entry, dict)
+            and isinstance(entry.get(field), list)
+            and len(entry.get(field)) > 0
+        )
+        pct = count / symbol_count * 100 if symbol_count else 0
+        status = "[OK]" if pct >= 90 else "[WARN]" if pct >= 50 else "[LOW]"
+        print(f"{status} {field:<28} {count:>3}/{symbol_count:<3} {pct:>6.1f}%")
+        
     if ctx.get("market_date") == today_et:
         print("[OK]   market_context date matches today")
     else:

@@ -86,21 +86,22 @@ def main():
         return 1
 
     print(
-        f"{'Sym':<7} {'Score':>7} {'P(profit)':>10} {'P(order)':>9} "
+        f"{'Sym':<7} {'Score':>7} {'Timing':>7} {'P(profit)':>10} {'P(order)':>9} "
         f"{'ExpPnL':>9} {'Conf':<9} {'Sample':>6} {'Bias':<8} "
-        f"{'Risk':<10} {'Entry':<18} {'Cat':>5} Reason"
+        f"{'Risk':<10} {'Entry':<18} {'Timing Rec':<36} Reason"
     )
     print(
-        f"{'-'*7} {'-'*7} {'-'*10} {'-'*9} "
+        f"{'-'*7} {'-'*7} {'-'*7} {'-'*10} {'-'*9} "
         f"{'-'*9} {'-'*9} {'-'*6} {'-'*8} "
-        f"{'-'*10} {'-'*18} {'-'*5} {'-'*60}"
+        f"{'-'*10} {'-'*18} {'-'*36} {'-'*60}"
     )
 
     for r in rows:
-        cat = "-" if r["catalyst_score"] is None else f"{float(r['catalyst_score']):.0f}"
+        timing_score = "-" if r["timing_score"] is None else f"{float(r['timing_score']):.0f}"
         print(
             f"{r['symbol']:<7} "
             f"{float(r['prediction_score'] or 0):>7.2f} "
+            f"{timing_score:>7} "
             f"{pct(r['probability_of_profit']):>10} "
             f"{pct(r['probability_of_order']):>9} "
             f"{money(r['expected_pnl']):>9} "
@@ -109,7 +110,7 @@ def main():
             f"{short(r['bias'], 8):<8} "
             f"{short(r['risk_level'], 10):<10} "
             f"{short(r['entry_quality'], 18):<18} "
-            f"{cat:>5} "
+            f"{short(r['recommended_entry_timing'], 36):<36} "
             f"{short(r['reason'], 60)}"
         )
 

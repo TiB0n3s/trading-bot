@@ -36,6 +36,13 @@ PREDICTION_COLUMNS = [
     "sample_size",
     "similarity_basis",
     "reason",
+    "timing_score",
+    "recommended_entry_timing",
+    "recommended_exit_timing",
+    "historical_avg_entry_delay",
+    "historical_avg_exit_delay",
+    "historical_timing_sample_size",
+    "timing_reason",
     "raw_json",
     "created_at",
     "updated_at",
@@ -66,6 +73,14 @@ def init_prediction_tables(db_path: Path | str = DB_PATH) -> None:
                 similarity_basis TEXT,
                 reason TEXT,
 
+                timing_score REAL,
+                recommended_entry_timing TEXT,
+                recommended_exit_timing TEXT,
+                historical_avg_entry_delay REAL,
+                historical_avg_exit_delay REAL,
+                historical_timing_sample_size INTEGER,
+                timing_reason TEXT,
+
                 raw_json TEXT,
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL,
@@ -88,6 +103,24 @@ def init_prediction_tables(db_path: Path | str = DB_PATH) -> None:
             ON daily_symbol_predictions(symbol, market_date)
             """
         )
+
+        # Add timing columns for existing databases.
+        existing_cols = {
+            row["name"]
+            for row in con.execute("PRAGMA table_info(daily_symbol_predictions)").fetchall()
+        }
+        timing_columns = {
+            "timing_score": "REAL",
+            "recommended_entry_timing": "TEXT",
+            "recommended_exit_timing": "TEXT",
+            "historical_avg_entry_delay": "REAL",
+            "historical_avg_exit_delay": "REAL",
+            "historical_timing_sample_size": "INTEGER",
+            "timing_reason": "TEXT",
+        }
+        for col, col_type in timing_columns.items():
+            if col not in existing_cols:
+                con.execute(f"ALTER TABLE daily_symbol_predictions ADD COLUMN {col} {col_type}")
 
 
 def score_bucket(value, label):
@@ -327,6 +360,126 @@ def similarity_score(target_ctx, target_events, hist_ctx, hist_events):
     return score, reasons
 
 
+
+def _timing_recommendation_from_row(row):
+    """Map aggregate timing stats into deterministic observe-only guidance."""
+    matched = int(row["matched"] or 0)
+    action = row["action"]
+    bucket = str(row["bucket"] or "")
+    avg_pnl = float(row["avg_pnl"] or 0)
+    total_pnl = float(row["total_pnl"] or 0)
+
+    if matched < 3:
+        return "watch_more_data", 50.0
+
+    if action == "buy":
+        if "immediate_entry" in bucket and avg_pnl > 0:
+            return "allow_immediate_if_context_confirms", 65.0
+        if "immediate_entry" in bucket and avg_pnl < 0:
+            return "avoid_immediate_entry_or_require_confirmation", 35.0
+        if "delayed_entry" in bucket and avg_pnl > 0:
+            return "prefer_wait_for_confirmation", 62.0
+        if "very_late_entry" in bucket and avg_pnl < 0:
+            return "avoid_late_chasing", 30.0
+        if total_pnl > 0:
+            return "setup_has_positive_timing_expectancy", 60.0
+        return "setup_timing_needs_caution", 42.0
+
+    if action == "sell":
+        if "immediate_exit" in bucket and avg_pnl > 0:
+            return "sell_signal_exit_timing_good", 65.0
+        if "delayed_exit" in bucket and avg_pnl < 0:
+            return "consider_faster_exit", 38.0
+        if total_pnl > 0:
+            return "sell_context_generally_profitable", 58.0
+        return "sell_timing_needs_review", 45.0
+
+    return "review_timing", 50.0
+
+
+def timing_lesson_for_symbol(con, market_date: str, symbol: str) -> dict:
+    """Return observe-only timing lesson from historical_signal_outcomes.
+
+    Preference order:
+    1. symbol-specific buy timing
+    2. all-symbol buy timing
+    3. no data
+    """
+    def fetch(symbol_filter: bool):
+        params = []
+        where = ["action = 'buy'", "market_date <= ?"]
+        params.append(market_date)
+
+        if symbol_filter:
+            where.append("symbol = ?")
+            params.append(symbol)
+
+        where_sql = " AND ".join(where)
+
+        return con.execute(
+            f"""
+            SELECT
+              entry_timing_label AS bucket,
+              action,
+              COUNT(*) AS n,
+              SUM(CASE WHEN matched_outcome_id IS NOT NULL THEN 1 ELSE 0 END) AS matched,
+              ROUND(AVG(entry_delay_minutes), 2) AS avg_entry_delay,
+              ROUND(AVG(exit_delay_minutes), 2) AS avg_exit_delay,
+              ROUND(AVG(realized_pnl), 4) AS avg_pnl,
+              ROUND(SUM(realized_pnl), 4) AS total_pnl,
+              ROUND(AVG(realized_pnl_pct), 4) AS avg_pnl_pct
+            FROM historical_signal_outcomes
+            WHERE {where_sql}
+            GROUP BY entry_timing_label, action
+            HAVING matched > 0
+            ORDER BY total_pnl DESC, matched DESC
+            LIMIT 1
+            """,
+            params,
+        ).fetchone()
+
+    try:
+        row = fetch(symbol_filter=True)
+    except Exception:
+        row = None
+
+    scope = "symbol_specific"
+    if not row:
+        try:
+            row = fetch(symbol_filter=False)
+            scope = "global_buy_timing"
+        except Exception:
+            row = None
+
+    if not row:
+        return {
+            "timing_score": 50.0,
+            "recommended_entry_timing": "watch_more_data",
+            "recommended_exit_timing": None,
+            "historical_avg_entry_delay": None,
+            "historical_avg_exit_delay": None,
+            "historical_timing_sample_size": 0,
+            "timing_reason": "No historical signal timing outcomes available yet.",
+        }
+
+    rec, score = _timing_recommendation_from_row(row)
+
+    return {
+        "timing_score": score,
+        "recommended_entry_timing": rec,
+        "recommended_exit_timing": None,
+        "historical_avg_entry_delay": row["avg_entry_delay"],
+        "historical_avg_exit_delay": row["avg_exit_delay"],
+        "historical_timing_sample_size": int(row["matched"] or 0),
+        "timing_reason": (
+            f"{scope}: best historical buy timing bucket={row['bucket']} "
+            f"matched={row['matched']} avg_pnl={row['avg_pnl']} "
+            f"total_pnl={row['total_pnl']} avg_entry_delay={row['avg_entry_delay']}m"
+        ),
+    }
+
+
+
 def prediction_from_matches(target_ctx, matches):
     """Create probability/score from weighted historical matches."""
     if not matches:
@@ -478,11 +631,18 @@ def predict_symbol(market_date: str, symbol: str, db_path: Path | str = DB_PATH)
 
     pred = prediction_from_matches(target_ctx, matches)
 
+    with get_connection(db_path) as con:
+        timing = timing_lesson_for_symbol(con, market_date, symbol)
+
+    combined_raw = pred["raw"]
+    combined_raw["timing_lesson"] = timing
+
     return {
         "market_date": market_date,
         "symbol": symbol,
         **{k: v for k, v in pred.items() if k != "raw"},
-        "raw": pred["raw"],
+        **timing,
+        "raw": combined_raw,
     }
 
 
@@ -503,6 +663,13 @@ def upsert_prediction(prediction: dict, db_path: Path | str = DB_PATH) -> None:
         "sample_size": prediction.get("sample_size"),
         "similarity_basis": prediction.get("similarity_basis"),
         "reason": prediction.get("reason"),
+        "timing_score": prediction.get("timing_score"),
+        "recommended_entry_timing": prediction.get("recommended_entry_timing"),
+        "recommended_exit_timing": prediction.get("recommended_exit_timing"),
+        "historical_avg_entry_delay": prediction.get("historical_avg_entry_delay"),
+        "historical_avg_exit_delay": prediction.get("historical_avg_exit_delay"),
+        "historical_timing_sample_size": prediction.get("historical_timing_sample_size"),
+        "timing_reason": prediction.get("timing_reason"),
         "raw_json": json.dumps(prediction.get("raw") or {}, sort_keys=True),
         "created_at": now,
         "updated_at": now,

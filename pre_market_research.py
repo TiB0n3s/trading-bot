@@ -25,6 +25,7 @@ from pathlib import Path
 from symbols_config import APPROVED_SYMBOLS_LIST
 from market_intelligence.research_output import write_raw_research, raw_research_summary
 from market_intelligence.market_brief_builder import build_market_brief, write_market_context, summary_for_brief
+from market_intelligence.raw_research_template import build_template
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 OUTPUT_FILE = SCRIPT_DIR / "market_context.json"
@@ -299,73 +300,116 @@ def main():
         "--build-output",
         help="Optional path to write normalized rich market context JSON using market_brief_builder",
     )
+    parser.add_argument(
+        "--template-fallback",
+        action="store_true",
+        help="If research fails, generate conservative template research instead of exiting",
+    )
+    parser.add_argument(
+        "--skip-claude",
+        action="store_true",
+        help="Skip Claude/web research and generate conservative template research",
+    )
     args = parser.parse_args()
 
     started = datetime.now()
     today = args.date or date.today().isoformat()
 
-    batches = list(_chunks(SYMBOLS, BATCH_SIZE))
-    total_batches = len(batches)
+    def _fallback_result(reason: str) -> dict:
+        logger.warning(f"Using conservative research fallback: {reason}")
+        fallback = build_template(today)
+        fallback["source"] = "pre_market_research_template_fallback"
+        fallback["fallback_reason"] = reason
+        fallback["macro_summary"] = (
+            "Conservative template fallback generated because automated Claude research "
+            f"did not complete: {reason}"
+        )
+        return fallback
 
-    merged_symbols: dict[str, dict] = {}
     batch_results: list[dict] = []
     batch_errors: list[str] = []
+    total_batches = 0
 
-    for idx, batch_symbols in enumerate(batches, start=1):
-        try:
-            result = call_claude_for_batch(today, batch_symbols, idx, total_batches)
-            batch_results.append(result)
-
-            raw_symbols = result.get("symbols") or {}
-            extras = sorted(set(raw_symbols) - set(batch_symbols))
-            missing = sorted(set(batch_symbols) - set(raw_symbols))
-
-            if extras:
-                logger.warning(f"Batch {idx}: ignoring symbols outside batch: {extras}")
-            if missing:
-                logger.warning(f"Batch {idx}: defaulting missing symbols: {missing}")
-
-            for sym in batch_symbols:
-                merged_symbols[sym] = _normalize_symbol_entry(raw_symbols.get(sym))
-
-        except Exception as e:
-            msg = f"batch {idx}/{total_batches} failed for {batch_symbols}: {e}"
-            logger.error(msg)
-            batch_errors.append(msg)
-
-            # Fail safe for this batch instead of leaving symbols absent.
-            for sym in batch_symbols:
-                merged_symbols[sym] = _normalize_symbol_entry(None)
-
-    macro_sentiment = choose_macro_sentiment(batch_results)
-    macro_summaries = [
-        str(r.get("macro_summary", "")).strip()
-        for r in batch_results
-        if str(r.get("macro_summary", "")).strip()
-    ]
-
-    if macro_summaries:
-        macro_summary = " | ".join(macro_summaries[:3])
+    if args.skip_claude:
+        result = _fallback_result("--skip-claude requested")
+        syms = result.get("symbols", {})
+        macro_sentiment = result.get("macro_sentiment", "mixed")
+        macro_summary = result.get("macro_summary", "")
     else:
-        macro_summary = "No macro summary available; using neutral defaults for missing context."
+        batches = list(_chunks(SYMBOLS, BATCH_SIZE))
+        total_batches = len(batches)
 
-    # Final hard normalization to exactly approved universe.
-    final_symbols = {}
-    for sym in SYMBOLS:
-        final_symbols[sym] = _normalize_symbol_entry(merged_symbols.get(sym))
+        merged_symbols: dict[str, dict] = {}
 
-    result = {
-        "market_date": today,
-        "generated_at": datetime.now().isoformat(),
-        "macro_sentiment": macro_sentiment,
-        "macro_summary": macro_summary[:1000],
-        "symbols": final_symbols,
-        "source": "pre_market_research",
-        "format": "batched_normalized_approved_symbols",
-        "batch_count": total_batches,
-        "batch_size": BATCH_SIZE,
-        "batch_errors": batch_errors,
-    }
+        try:
+            for idx, batch_symbols in enumerate(batches, start=1):
+                try:
+                    result_batch = call_claude_for_batch(today, batch_symbols, idx, total_batches)
+                    batch_results.append(result_batch)
+
+                    raw_symbols = result_batch.get("symbols") or {}
+                    extras = sorted(set(raw_symbols) - set(batch_symbols))
+                    missing = sorted(set(batch_symbols) - set(raw_symbols))
+
+                    if extras:
+                        logger.warning(f"Batch {idx}: ignoring symbols outside batch: {extras}")
+                    if missing:
+                        logger.warning(f"Batch {idx}: defaulting missing symbols: {missing}")
+
+                    for sym in batch_symbols:
+                        merged_symbols[sym] = _normalize_symbol_entry(raw_symbols.get(sym))
+
+                except KeyboardInterrupt:
+                    raise
+
+                except Exception as e:
+                    msg = f"batch {idx}/{total_batches} failed for {batch_symbols}: {e}"
+                    logger.error(msg)
+                    batch_errors.append(msg)
+
+                    # Fail safe for this batch instead of leaving symbols absent.
+                    for sym in batch_symbols:
+                        merged_symbols[sym] = _normalize_symbol_entry(None)
+
+        except KeyboardInterrupt:
+            if not args.template_fallback:
+                raise
+            result = _fallback_result("KeyboardInterrupt during Claude research")
+            syms = result.get("symbols", {})
+            macro_sentiment = result.get("macro_sentiment", "mixed")
+            macro_summary = result.get("macro_summary", "")
+            batch_errors.append("keyboard_interrupt_fallback")
+        else:
+            macro_sentiment = choose_macro_sentiment(batch_results)
+            macro_summaries = [
+                str(r.get("macro_summary", "")).strip()
+                for r in batch_results
+                if str(r.get("macro_summary", "")).strip()
+            ]
+
+            if macro_summaries:
+                macro_summary = " | ".join(macro_summaries[:3])
+            else:
+                macro_summary = "No macro summary available; using neutral defaults for missing context."
+
+            # Final hard normalization to exactly approved universe.
+            final_symbols = {}
+            for sym in SYMBOLS:
+                final_symbols[sym] = _normalize_symbol_entry(merged_symbols.get(sym))
+
+            result = {
+                "market_date": today,
+                "generated_at": datetime.now().isoformat(),
+                "macro_sentiment": macro_sentiment,
+                "macro_summary": macro_summary[:1000],
+                "symbols": final_symbols,
+                "source": "pre_market_research",
+                "format": "batched_normalized_approved_symbols",
+                "batch_count": total_batches,
+                "batch_size": BATCH_SIZE,
+                "batch_errors": batch_errors,
+            }
+            syms = result.get("symbols", {})
 
     try:
         OUTPUT_FILE.write_text(json.dumps(result, indent=2))
@@ -378,8 +422,6 @@ def main():
         try:
             write_raw_research(result, args.raw_output)
             logger.info(f"Wrote raw research output {args.raw_output}")
-            print(f"  Raw output  : {args.raw_output}")
-            print(f"  Raw summary : {raw_research_summary(result)}")
         except Exception as e:
             logger.error(f"Failed to write raw research output {args.raw_output}: {e}")
             sys.exit(2)
@@ -393,8 +435,6 @@ def main():
             )
             write_market_context(rich_context, args.build_output)
             logger.info(f"Wrote built market context {args.build_output}")
-            print(f"  Built output: {args.build_output}")
-            print(f"  Built summary: {summary_for_brief(rich_context)}")
         except Exception as e:
             logger.error(f"Failed to build market context {args.build_output}: {e}")
             sys.exit(2)
@@ -412,6 +452,18 @@ def main():
     print(f"  Macro       : {macro_sentiment}")
     print(f"  Bias counts : {dict(bias_counts)}")
     print(f"  Summary     : {macro_summary[:220]}")
+
+    if args.raw_output:
+        print(f"  Raw output  : {args.raw_output}")
+        print(f"  Raw summary : {raw_research_summary(result)}")
+
+    if args.build_output:
+        print(f"  Built output: {args.build_output}")
+        try:
+            print(f"  Built summary: {summary_for_brief(rich_context)}")
+        except Exception:
+            pass
+
     print()
     print(f"  {'Symbol':<7} {'Bias':<8} {'Conf':<7} {'Risk':<10} {'Entry':<22} Reason")
     print(f"  {'-'*7} {'-'*8} {'-'*7} {'-'*10} {'-'*22} {'-'*60}")
@@ -429,7 +481,7 @@ def main():
     print(f"  Output      : {OUTPUT_FILE}")
 
     if batch_errors:
-        logger.warning("One or more research batches failed; output contains safe neutral defaults.")
+        logger.warning("One or more research batches failed; output contains safe neutral defaults or fallback.")
 
 
 if __name__ == "__main__":

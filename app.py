@@ -11,6 +11,7 @@ from setup_policy import evaluate_setup_policy
 from pathlib import Path
 from live_features import build_snapshot
 from market_intelligence.alpaca_tape import build_tape_context
+from strategy.setup_classifier import classify_setup
 from flask import Flask, request, jsonify, abort
 from indicator_state import (
     compute_indicator_state,
@@ -2183,6 +2184,11 @@ def _log_trader_brain_observe_only(symbol, action, account_state=None):
             trend=trend,
             momentum=momentum,
             market_alignment=alignment,
+        )
+
+        setup_classification = classify_setup(
+            thesis.to_dict(),
+            tape=tape_classification or {},
         )
 
         account_state["trader_brain"] = thesis.to_dict()
@@ -5413,6 +5419,7 @@ def debug_trader_brain(symbol):
             "trader_brain": thesis.to_dict(),
             "observe_only": True,
             "tape_context": tape_context,
+            "setup_classification": setup_classification,
         })
 
     except Exception as e:

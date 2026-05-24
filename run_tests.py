@@ -36,6 +36,7 @@ def load_env_file(path=ENV_FILE):
 
 TESTS = [
     "tests/test_rejection_categories.py",
+    "tests/test_market_context_schema.py",
     "tests/test_trend.py",
     "tests/test_fast_lane.py",
     "tests/test_fast_lane_sell.py",

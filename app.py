@@ -37,6 +37,7 @@ from strategy.strategy_engine import evaluate_strategy_observe_only
 from risk.account_risk import account_risk_snapshot
 from risk.live_guards import live_guard_policy, live_order_allowed
 from risk.macro_policy import policy_from_market_context
+from data_layer.ledger import ledger_summary
 from runtime_config import (
     EXECUTION_MODE,
     LIVE_TRADING_ENABLED,
@@ -5099,6 +5100,12 @@ def status():
             result["account"]["buying_power"] = acct["buying_power"]
     except Exception:
         pass
+
+    # Read-only ledger/DB summary.
+    try:
+        result["ledger_summary"] = ledger_summary()
+    except Exception as e:
+        result["ledger_summary_error"] = str(e)
 
     # Detailed positions (now with trend, market_bias, and exposure-cap signals)
     symbols_at_cap = []

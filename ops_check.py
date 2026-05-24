@@ -250,6 +250,28 @@ def intelligence_summary(target_date):
         print(f"event rows      : {event_count}")
         print(f"prediction rows : {prediction_count}")
 
+        freshness = con.execute(
+            """
+            SELECT
+              (SELECT MAX(created_at)
+               FROM daily_symbol_events
+               WHERE market_date = ?) AS latest_event_at,
+              (SELECT MAX(updated_at)
+               FROM daily_symbol_context
+               WHERE market_date = ?) AS latest_context_at,
+              (SELECT MAX(updated_at)
+               FROM daily_symbol_predictions
+               WHERE market_date = ?) AS latest_prediction_at
+            """,
+            (target_date, target_date, target_date),
+        ).fetchone()
+
+        print()
+        print("Freshness")
+        print(f"  latest event      : {freshness['latest_event_at'] or '-'}")
+        print(f"  latest context    : {freshness['latest_context_at'] or '-'}")
+        print(f"  latest prediction : {freshness['latest_prediction_at'] or '-'}")
+
         print()
         print("Bias counts")
         rows = con.execute(
@@ -334,6 +356,20 @@ def intelligence_summary(target_date):
 
     if prediction_count not in (0, context_count):
         print("[WARN] prediction row count does not match context row count")
+
+    if (
+        freshness["latest_event_at"]
+        and freshness["latest_context_at"]
+        and freshness["latest_event_at"] > freshness["latest_context_at"]
+    ):
+        print("[WARN] latest event row is newer than daily_symbol_context; run apply_event_scores.py")
+
+    if (
+        freshness["latest_context_at"]
+        and freshness["latest_prediction_at"]
+        and freshness["latest_context_at"] > freshness["latest_prediction_at"]
+    ):
+        print("[WARN] latest context row is newer than daily_symbol_predictions; run predict_symbol_outcomes.py")
 
     if ok:
         print()
@@ -487,11 +523,51 @@ def dataset_health(target_date):
         context_count = target_counts.get("daily_symbol_context") or 0
         prediction_count = target_counts.get("daily_symbol_predictions") or 0
 
+        freshness = {}
+        if all(
+            _table_exists(con, table)
+            for table in ("daily_symbol_events", "daily_symbol_context", "daily_symbol_predictions")
+        ):
+            freshness = con.execute(
+                """
+                SELECT
+                  (SELECT MAX(created_at)
+                   FROM daily_symbol_events
+                   WHERE market_date = ?) AS latest_event_at,
+                  (SELECT MAX(updated_at)
+                   FROM daily_symbol_context
+                   WHERE market_date = ?) AS latest_context_at,
+                  (SELECT MAX(updated_at)
+                   FROM daily_symbol_predictions
+                   WHERE market_date = ?) AS latest_prediction_at
+                """,
+                (target_date, target_date, target_date),
+            ).fetchone()
+
+            print()
+            print("Intelligence freshness")
+            print(f"  latest event      : {freshness['latest_event_at'] or '-'}")
+            print(f"  latest context    : {freshness['latest_context_at'] or '-'}")
+            print(f"  latest prediction : {freshness['latest_prediction_at'] or '-'}")
+
         if context_count <= 0:
             print("[FAIL] no target-date daily_symbol_context rows found")
             ok = False
         if prediction_count not in (0, context_count):
             print("[WARN] target-date prediction count does not match context count")
+        if freshness:
+            if (
+                freshness["latest_event_at"]
+                and freshness["latest_context_at"]
+                and freshness["latest_event_at"] > freshness["latest_context_at"]
+            ):
+                print("[WARN] latest event row is newer than daily_symbol_context")
+            if (
+                freshness["latest_context_at"]
+                and freshness["latest_prediction_at"]
+                and freshness["latest_context_at"] > freshness["latest_prediction_at"]
+            ):
+                print("[WARN] latest context row is newer than daily_symbol_predictions")
 
     print()
     if ok:

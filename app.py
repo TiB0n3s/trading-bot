@@ -33,6 +33,7 @@ from position_intelligence import get_position_intelligence
 from bot_events import log_event
 from rolling_context import rolling_summary, rolling_symbol_context
 from decision_thresholds import PREDICTION_GATE_THRESHOLDS
+from strategy.strategy_engine import evaluate_strategy_observe_only
 from runtime_config import (
     EXECUTION_MODE,
     LIVE_TRADING_ENABLED,
@@ -78,8 +79,27 @@ app = Flask(__name__)
 DB_PATH = Path(__file__).parent / "trades.db"
 _START_TIME = datetime.now(timezone.utc)
 ENFORCE_SETUP_POLICY_BLOCKS = True
-ENFORCE_PREDICTION_BLOCKS = True
-ENFORCE_PREDICTION_WATCH_IN_CASH = True
+
+PREDICTION_GATE_MODE = os.getenv("PREDICTION_GATE_MODE", "hard").strip().lower()
+if PREDICTION_GATE_MODE not in ("off", "warn", "soft", "hard"):
+    logger.warning(
+        f"Invalid PREDICTION_GATE_MODE={PREDICTION_GATE_MODE!r}; defaulting to hard"
+    )
+    PREDICTION_GATE_MODE = "hard"
+
+# Preserve existing behavior by default:
+# - hard: block prediction_decision=block, and block watch in cash mode
+# - soft/warn/off: do not hard-reject here; other scoring/telemetry remains active
+ENFORCE_PREDICTION_BLOCKS = PREDICTION_GATE_MODE == "hard"
+ENFORCE_PREDICTION_WATCH_IN_CASH = PREDICTION_GATE_MODE == "hard"
+
+STRATEGY_ENGINE_MODE = os.getenv("STRATEGY_ENGINE_MODE", "observe").strip().lower()
+if STRATEGY_ENGINE_MODE not in ("off", "observe"):
+    logger.warning(
+        f"Invalid STRATEGY_ENGINE_MODE={STRATEGY_ENGINE_MODE!r}; defaulting to observe"
+    )
+    STRATEGY_ENGINE_MODE = "observe"
+
 ENFORCE_SESSION_MOMENTUM_GATE = os.getenv(
     "ENFORCE_SESSION_MOMENTUM_GATE",
     "false"
@@ -4257,9 +4277,26 @@ def process_signal(data):
             )
         )
 
+        prediction_would_block = (
+            prediction_decision == "block"
+            or (
+                is_cash_mode()
+                and prediction_decision == "watch"
+            )
+        )
+
+        if PREDICTION_GATE_MODE == "warn" and prediction_would_block:
+            logger.warning(
+                f"Prediction gate warn-only for {symbol} BUY: "
+                f"mode={EXECUTION_MODE} prediction_gate_mode={PREDICTION_GATE_MODE} "
+                f"score={prediction_gate.get('prediction_score')} "
+                f"decision={prediction_decision} "
+                f"reason={prediction_gate.get('prediction_reason')}"
+            )
+
         if should_block_prediction:
             reason = (
-                f"mode={EXECUTION_MODE} "
+                f"mode={EXECUTION_MODE} prediction_gate_mode={PREDICTION_GATE_MODE} "
                 f"score={prediction_gate.get('prediction_score')} "
                 f"decision={prediction_decision} "
                 f"reason={prediction_gate.get('prediction_reason')}"
@@ -4285,6 +4322,41 @@ def process_signal(data):
                     f"Session momentum gate observe-only for {symbol} BUY: "
                     f"{session_gate.get('severity')} {reason}"
                 )
+
+    if STRATEGY_ENGINE_MODE == "observe":
+        try:
+            strategy_trend = _trend_table.get(symbol) or {}
+            strategy_momentum = account_state.get("momentum") or {}
+            strategy_alignment = account_state.get("market_alignment") or {}
+
+            if not strategy_alignment and action == "buy":
+                try:
+                    strategy_alignment = _symbol_market_alignment(symbol)
+                except Exception:
+                    strategy_alignment = {}
+
+            strategy_result = evaluate_strategy_observe_only(
+                symbol=symbol,
+                action=action,
+                account_state=account_state,
+                trend=strategy_trend,
+                momentum=strategy_momentum,
+                market_alignment=strategy_alignment,
+                tape=account_state.get("tape") or {},
+            )
+            strategy_observation = strategy_result.to_dict()
+            account_state["strategy_observation"] = strategy_observation
+
+            trader_brain = strategy_observation.get("trader_brain") or {}
+            logger.info(
+                f"Strategy observe for {symbol} {action.upper()}: "
+                f"score={trader_brain.get('score')} "
+                f"approved_by_scorer={trader_brain.get('approved_by_scorer')} "
+                f"setup={trader_brain.get('setup_type')} "
+                f"reason={trader_brain.get('reason')}"
+            )
+        except Exception as e:
+            logger.warning(f"Strategy observe failed for {symbol} {action.upper()}: {e}")
 
     account_state["trend_table"] = _trend_table
 
@@ -4960,6 +5032,9 @@ def status():
         "runtime_config": public_runtime_config(),
     }
     result["session_momentum_gate_enabled"] = ENFORCE_SESSION_MOMENTUM_GATE
+    result["prediction_gate_mode"] = PREDICTION_GATE_MODE
+    result["prediction_gate_thresholds"] = PREDICTION_GATE_THRESHOLDS
+    result["strategy_engine_mode"] = STRATEGY_ENGINE_MODE
     result["session_momentum_summary"] = _session_momentum_summary()
     result["session_momentum"] = _session_momentum_snapshot()
     

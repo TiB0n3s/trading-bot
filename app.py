@@ -34,6 +34,9 @@ from bot_events import log_event
 from rolling_context import rolling_summary, rolling_symbol_context
 from decision_thresholds import PREDICTION_GATE_THRESHOLDS
 from strategy.strategy_engine import evaluate_strategy_observe_only
+from risk.account_risk import account_risk_snapshot
+from risk.live_guards import live_guard_policy, live_order_allowed
+from risk.macro_policy import policy_from_market_context
 from runtime_config import (
     EXECUTION_MODE,
     LIVE_TRADING_ENABLED,
@@ -99,6 +102,13 @@ if STRATEGY_ENGINE_MODE not in ("off", "observe"):
         f"Invalid STRATEGY_ENGINE_MODE={STRATEGY_ENGINE_MODE!r}; defaulting to observe"
     )
     STRATEGY_ENGINE_MODE = "observe"
+
+RISK_POLICY_MODE = os.getenv("RISK_POLICY_MODE", "compare").strip().lower()
+if RISK_POLICY_MODE not in ("off", "compare"):
+    logger.warning(
+        f"Invalid RISK_POLICY_MODE={RISK_POLICY_MODE!r}; defaulting to compare"
+    )
+    RISK_POLICY_MODE = "compare"
 
 ENFORCE_SESSION_MOMENTUM_GATE = os.getenv(
     "ENFORCE_SESSION_MOMENTUM_GATE",
@@ -5036,6 +5046,7 @@ def status():
     result["prediction_gate_thresholds"] = PREDICTION_GATE_THRESHOLDS
     result["strategy_engine_mode"] = STRATEGY_ENGINE_MODE
     result["execution_policy_mode"] = os.getenv("EXECUTION_POLICY_MODE", "compare").strip().lower()
+    result["risk_policy_mode"] = RISK_POLICY_MODE
     result["session_momentum_summary"] = _session_momentum_summary()
     result["session_momentum"] = _session_momentum_snapshot()
     
@@ -5154,6 +5165,51 @@ def status():
         result["correlation_exposure"] = cluster_status
     except Exception as e:
         logger.error(f"/status correlation_exposure error: {e}")
+
+    # Read-only risk package telemetry.
+    # This does not replace or weaken live inline risk gates.
+    if RISK_POLICY_MODE == "compare":
+        try:
+            macro_live = result.get("macro_risk") or get_macro_risk(Path(__file__).parent)
+            positions_for_risk = result.get("positions") or []
+            account_for_risk = result.get("account") or {}
+
+            result["risk_account_snapshot"] = account_risk_snapshot(
+                account=account_for_risk,
+                positions=positions_for_risk,
+                daily_pnl_pct=account_for_risk.get("daily_pnl_pct"),
+                max_positions=int(macro_live.get("max_new_positions") or 8),
+            )
+
+            guard_policy = live_guard_policy(os.environ)
+            allowed, guard_reason = live_order_allowed(guard_policy)
+            result["risk_live_guard_policy"] = {
+                **guard_policy,
+                "live_order_allowed": allowed,
+                "live_order_reason": guard_reason,
+            }
+
+            ctx_path = Path(__file__).parent / "market_context.json"
+            if ctx_path.exists():
+                ctx = json.loads(ctx_path.read_text())
+                macro_policy_compare = policy_from_market_context(ctx)
+                result["risk_macro_policy_compare"] = {
+                    "package_policy": macro_policy_compare,
+                    "live_macro_risk": macro_live,
+                    "matches_live": (
+                        macro_policy_compare.get("macro_regime") == macro_live.get("macro_regime")
+                        and macro_policy_compare.get("risk_multiplier") == macro_live.get("risk_multiplier")
+                        and macro_policy_compare.get("max_new_positions") == macro_live.get("max_new_positions")
+                        and macro_policy_compare.get("block_new_buys") == macro_live.get("block_new_buys")
+                    ),
+                }
+            else:
+                result["risk_macro_policy_compare"] = {
+                    "error": "market_context.json missing",
+                    "live_macro_risk": macro_live,
+                }
+        except Exception as e:
+            result["risk_policy_error"] = str(e)
 
     # Pre-check state — what would block / pass right now if a buy signal arrived
     try:

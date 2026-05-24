@@ -13,6 +13,7 @@ Usage:
   python3 ops_check.py events
   python3 ops_check.py premarket
   python3 ops_check.py market-context-check
+  python3 ops_check.py intelligence-summary
   python3 ops_check.py all
   python3 ops_check.py filters 2026-05-08
 """
@@ -194,6 +195,148 @@ def check_market_context_file():
     return ok
 
 
+def intelligence_summary(target_date):
+    import sqlite3
+
+    db_path = BASE_DIR / "trades.db"
+
+    print()
+    print("=" * 72)
+    print(f"  Intelligence Summary — {target_date}")
+    print("=" * 72)
+
+    if not db_path.exists():
+        print(f"[FAIL] missing {db_path}")
+        return False
+
+    ok = True
+
+    with sqlite3.connect(db_path) as con:
+        con.row_factory = sqlite3.Row
+
+        context_count = con.execute(
+            """
+            SELECT COUNT(*) AS n
+            FROM daily_symbol_context
+            WHERE market_date = ?
+            """,
+            (target_date,),
+        ).fetchone()["n"]
+
+        event_count = con.execute(
+            """
+            SELECT COUNT(*) AS n
+            FROM daily_symbol_events
+            WHERE market_date = ?
+            """,
+            (target_date,),
+        ).fetchone()["n"]
+
+        prediction_count = con.execute(
+            """
+            SELECT COUNT(*) AS n
+            FROM daily_symbol_predictions
+            WHERE market_date = ?
+            """,
+            (target_date,),
+        ).fetchone()["n"]
+
+        print(f"context rows    : {context_count}")
+        print(f"event rows      : {event_count}")
+        print(f"prediction rows : {prediction_count}")
+
+        print()
+        print("Bias counts")
+        rows = con.execute(
+            """
+            SELECT COALESCE(bias, 'missing') AS bias, COUNT(*) AS n
+            FROM daily_symbol_context
+            WHERE market_date = ?
+            GROUP BY COALESCE(bias, 'missing')
+            ORDER BY bias
+            """,
+            (target_date,),
+        ).fetchall()
+        if rows:
+            for r in rows:
+                print(f"  {r['bias']:<10} {r['n']}")
+        else:
+            print("  none")
+
+        print()
+        print("Prediction confidence")
+        rows = con.execute(
+            """
+            SELECT COALESCE(confidence, 'missing') AS confidence, COUNT(*) AS n
+            FROM daily_symbol_predictions
+            WHERE market_date = ?
+            GROUP BY COALESCE(confidence, 'missing')
+            ORDER BY confidence
+            """,
+            (target_date,),
+        ).fetchall()
+        if rows:
+            for r in rows:
+                print(f"  {r['confidence']:<10} {r['n']}")
+        else:
+            print("  none")
+
+        print()
+        print("Avoid rows")
+        rows = con.execute(
+            """
+            SELECT symbol, bias, risk_level, entry_quality, avoid_type, reason
+            FROM daily_symbol_context
+            WHERE market_date = ?
+              AND bias = 'avoid'
+            ORDER BY symbol
+            """,
+            (target_date,),
+        ).fetchall()
+        if rows:
+            for r in rows:
+                print(
+                    f"  {r['symbol']:<6} "
+                    f"risk={r['risk_level']} "
+                    f"entry={r['entry_quality']} "
+                    f"avoid_type={r['avoid_type']} "
+                    f"reason={r['reason']}"
+                )
+        else:
+            print("  none")
+
+        print()
+        print("Latest context updates")
+        rows = con.execute(
+            """
+            SELECT symbol, updated_at
+            FROM daily_symbol_context
+            WHERE market_date = ?
+            ORDER BY updated_at DESC, symbol
+            LIMIT 10
+            """,
+            (target_date,),
+        ).fetchall()
+        if rows:
+            for r in rows:
+                print(f"  {r['symbol']:<6} {r['updated_at']}")
+        else:
+            print("  none")
+
+    if context_count <= 0:
+        print("[FAIL] no daily_symbol_context rows found")
+        ok = False
+
+    if prediction_count not in (0, context_count):
+        print("[WARN] prediction row count does not match context row count")
+
+    if ok:
+        print()
+        print("[OK] intelligence summary completed")
+
+    return ok
+
+
 def main():
     env_loaded = load_env_file()
     print(f"env_file_loaded={env_loaded}")
@@ -207,6 +350,9 @@ def main():
 
     if command == "market-context-check":
         return 0 if check_market_context_file() else 1
+
+    if command == "intelligence-summary":
+        return 0 if intelligence_summary(target_date) else 1
 
     if command == "premarket":
         checks = []

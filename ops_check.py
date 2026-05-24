@@ -11,16 +11,38 @@ Usage:
   python3 ops_check.py drawdown
   python3 ops_check.py post
   python3 ops_check.py events
+  python3 ops_check.py premarket
   python3 ops_check.py all
   python3 ops_check.py filters 2026-05-08
 """
 
+import os
 import subprocess
 import sys
 from datetime import date
 from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parent
+ENV_FILE = Path("/etc/trading-bot.env")
+
+
+def load_env_file(path=ENV_FILE):
+    if not path.exists():
+        return False
+
+    for raw_line in path.read_text().splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+
+        key, value = line.split("=", 1)
+        key = key.strip()
+        value = value.strip().strip('"').strip("'")
+
+        if key and key not in os.environ:
+            os.environ[key] = value
+
+    return True
 
 
 COMMANDS = {
@@ -60,12 +82,33 @@ def run(label, args):
 
 
 def main():
+    env_loaded = load_env_file()
+    print(f"env_file_loaded={env_loaded}")
+
     if len(sys.argv) < 2:
         print(__doc__.strip())
         return 2
 
     command = sys.argv[1].lower()
     target_date = sys.argv[2] if len(sys.argv) > 2 else date.today().isoformat()
+
+    if command == "premarket":
+        checks = []
+        checks.append(run("Morning Check", ["morning_check.py"]))
+        checks.append(run("Position Review", ["position_review.py"]))
+        checks.append(run("Market Alignment Report", ["market_alignment_report.py"]))
+        checks.append(run("Session Momentum Refresh", ["session_momentum.py", "--all"]))
+        checks.append(run("Position Momentum Monitor", ["position_momentum_monitor.py"]))
+        checks.append(run("Bot Events", ["bot_events.py", "--limit", "25"]))
+
+        print()
+        print("=" * 72)
+        if all(checks):
+            print("[OK] premarket checks completed successfully")
+            return 0
+
+        print("[WARN] one or more premarket checks reported issues")
+        return 1
 
     if command == "all":
         checks = []

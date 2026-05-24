@@ -32,6 +32,7 @@ from market_intelligence.market_brief_builder import (
     summary_for_brief,
 )
 from market_intelligence.intelligence_store import ingest_market_context
+from alerts import send_alert
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 OUTPUT_FILE = SCRIPT_DIR / "market_context.json"
@@ -380,6 +381,32 @@ def main():
             f"{ingest_summary['symbols']} symbols for {ingest_summary['market_date']}"
         )
 
+    try:
+        if args.ingest_context and ingest_summary:
+            send_alert(
+                title="Pre-market research complete",
+                message=(
+                    f"Built market context for {today}: "
+                    f"{ingest_summary.get('symbols')} symbols ingested."
+                ),
+                severity="info",
+                source="pre_market_research_data.py",
+                payload={
+                    "market_date": today,
+                    "macro_sentiment": macro_sentiment,
+                    "macro_regime": macro_regime,
+                    "risk_multiplier": risk_multiplier,
+                    "max_new_positions": max_new_positions,
+                    "block_new_buys": block_new_buys,
+                    "raw_output": str(raw_path) if raw_path else None,
+                    "built_output": str(built_path) if built_path else None,
+                    "live_written": live_written,
+                    "ingest_summary": ingest_summary,
+                },
+            )
+    except Exception:
+        pass
+
     elapsed = (datetime.now() - started).total_seconds()
     bias_counts = Counter((e or {}).get("bias", "missing") for e in template["symbols"].values())
 
@@ -416,4 +443,17 @@ def main():
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    try:
+        raise SystemExit(main())
+    except Exception as exc:
+        try:
+            send_alert(
+                title="Pre-market research failed",
+                message=str(exc),
+                severity="error",
+                source="pre_market_research_data.py",
+                payload={"error": str(exc)},
+            )
+        except Exception:
+            pass
+        raise

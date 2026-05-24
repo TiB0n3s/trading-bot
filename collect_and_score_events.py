@@ -36,6 +36,7 @@ from market_intelligence.event_collectors.company_news_collector import (
     collect_company_news_events,
 )
 from market_intelligence.experience_model import predict_all_symbols
+from alerts import send_alert
 
 
 def short(v, width):
@@ -171,6 +172,18 @@ def main():
         if len(errors) > 20:
             print(f"  ... {len(errors) - 20} more")
 
+        send_alert(
+            title="Event scoring warnings",
+            message=f"{len(errors)} event scoring errors for {args.date}",
+            severity="warning",
+            source="collect_and_score_events.py",
+            payload={
+                "market_date": args.date,
+                "error_count": len(errors),
+                "sample_errors": errors[:20],
+            },
+        )
+
     by_type = Counter(e.get("event_type") for e in new_events)
     by_impact = Counter(e.get("expected_market_impact") for e in new_events)
     by_relevance = Counter(e.get("trade_relevance") for e in new_events)
@@ -244,6 +257,29 @@ def main():
                     prediction_count += len(preds)
                 except Exception as e:
                     print(f"[WARN] prediction failed for {args.date} {sym}: {e}")
+                    send_alert(
+                        title="Prediction generation failed",
+                        message=f"Prediction failed for {args.date} {sym}: {e}",
+                        severity="warning",
+                        source="collect_and_score_events.py",
+                        symbol=sym,
+                        payload={"market_date": args.date, "symbol": sym, "error": str(e)},
+                    )
+
+        if prediction_count <= 0:
+            send_alert(
+                title="No predictions generated",
+                message=f"collect_and_score_events generated 0 predictions for {args.date}",
+                severity="warning",
+                source="collect_and_score_events.py",
+                payload={
+                    "market_date": args.date,
+                    "symbols": symbols,
+                    "apply_context": args.apply_context,
+                    "new_events": len(new_events),
+                    "inserted": len(inserted),
+                },
+            )
 
         print(f"Generated observe-only predictions: {prediction_count}")
 
@@ -251,4 +287,17 @@ def main():
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    try:
+        raise SystemExit(main())
+    except Exception as exc:
+        try:
+            send_alert(
+                title="Event collection failed",
+                message=str(exc),
+                severity="error",
+                source="collect_and_score_events.py",
+                payload={"error": str(exc)},
+            )
+        except Exception:
+            pass
+        raise

@@ -108,3 +108,19 @@ python3 ops/tuesday_qa_runner.py --date 2026-05-26
 
 It follows `ops/tuesday_qa_runbook.md` and writes logs under `ops/qa_logs/`.
 Use `--dry-run` to preview the schedule without running checks.
+
+## Post-Tuesday Planning
+
+Use these docs after the paper session to decide what to improve next:
+
+- `ops/tuesday_debrief_template.md`: debrief scorecard and decision tree.
+- `ops/module_inventory.md`: active vs scheduled vs research-only module map.
+- `ops/ml_platform_roadmap.md`: staged ML/research-platform direction.
+
+The read-only ML dataset exporter can generate CSV evidence once
+`feature_snapshots` and `labeled_setups` exist:
+
+```bash
+cd ~/trading-bot
+python3 export_ml_dataset.py --date 2026-05-26 --output /tmp/ml_dataset_2026-05-26.csv
+```

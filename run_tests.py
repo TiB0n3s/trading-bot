@@ -6,13 +6,36 @@ Usage:
   python3 run_tests.py
 """
 
+import os
 import subprocess
 import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
+ENV_FILE = Path("/etc/trading-bot.env")
+
+
+def load_env_file(path=ENV_FILE):
+    if not path.exists():
+        return False
+
+    for raw_line in path.read_text().splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+
+        key, value = line.split("=", 1)
+        key = key.strip()
+        value = value.strip().strip('"').strip("'")
+
+        if key and key not in os.environ:
+            os.environ[key] = value
+
+    return True
+
 
 TESTS = [
+    "tests/test_rejection_categories.py",
     "tests/test_trend.py",
     "tests/test_fast_lane.py",
     "tests/test_fast_lane_sell.py",
@@ -22,9 +45,12 @@ TESTS = [
 
 
 def main():
+    env_loaded = load_env_file()
+
     print("=" * 64)
     print("  Trading Bot Targeted Tests")
     print("=" * 64)
+    print(f"env_file_loaded={env_loaded}")
 
     failures = 0
 

@@ -1563,6 +1563,8 @@ def log_trade(signal, decision, order, account_state=None):
         )
         setup_obs = (account_state or {}).get("setup_observation") or {}
         prediction_gate = (account_state or {}).get("prediction_gate") or {}
+        strategy_observation = (account_state or {}).get("strategy_observation") or {}
+        trader_brain = strategy_observation.get("trader_brain") or {}
 
         columns = [
             "timestamp",
@@ -1612,6 +1614,12 @@ def log_trade(signal, decision, order, account_state=None):
             "buy_opportunity_score",
             "buy_opportunity_recommendation",
             "buy_opportunity_reason",
+            "trader_brain_score",
+            "trader_brain_setup_type",
+            "trader_brain_approved",
+            "trader_brain_reason",
+            "trader_brain_positive_factors",
+            "trader_brain_risk_factors",
         ]
 
         values = [
@@ -1662,6 +1670,12 @@ def log_trade(signal, decision, order, account_state=None):
             (account_state or {}).get("buy_opportunity", {}).get("buy_opportunity_score"),
             (account_state or {}).get("buy_opportunity", {}).get("buy_opportunity_recommendation"),
             (account_state or {}).get("buy_opportunity", {}).get("buy_opportunity_reason"),
+            trader_brain.get("score"),
+            trader_brain.get("setup_type"),
+            1 if trader_brain.get("approved_by_scorer") is True else 0 if trader_brain.get("approved_by_scorer") is False else None,
+            trader_brain.get("reason"),
+            json.dumps(trader_brain.get("positive_factors") or [], sort_keys=True),
+            json.dumps(trader_brain.get("risk_factors") or [], sort_keys=True),
         ]
 
         placeholders = ", ".join(["?"] * len(values))
@@ -1759,6 +1773,8 @@ def log_rejection(symbol, action, category, reason, price=None, account_state=No
     ctx = _build_decision_context(symbol, action, account_state)
     setup_obs = (account_state or {}).get("setup_observation") or {}
     prediction_gate = (account_state or {}).get("prediction_gate") or {}
+    strategy_observation = (account_state or {}).get("strategy_observation") or {}
+    trader_brain = strategy_observation.get("trader_brain") or {}
 
     columns = [
         "timestamp",
@@ -1797,6 +1813,12 @@ def log_rejection(symbol, action, category, reason, price=None, account_state=No
         "setup_policy_reason",
         "setup_confidence_adjustment",
         "setup_size_multiplier",
+        "trader_brain_score",
+        "trader_brain_setup_type",
+        "trader_brain_approved",
+        "trader_brain_reason",
+        "trader_brain_positive_factors",
+        "trader_brain_risk_factors",
     ]
 
     values = [
@@ -1836,6 +1858,12 @@ def log_rejection(symbol, action, category, reason, price=None, account_state=No
         setup_obs.get("setup_policy_reason"),
         setup_obs.get("setup_confidence_adjustment"),
         setup_obs.get("setup_size_multiplier"),
+        trader_brain.get("score"),
+        trader_brain.get("setup_type"),
+        1 if trader_brain.get("approved_by_scorer") is True else 0 if trader_brain.get("approved_by_scorer") is False else None,
+        trader_brain.get("reason"),
+        json.dumps(trader_brain.get("positive_factors") or [], sort_keys=True),
+        json.dumps(trader_brain.get("risk_factors") or [], sort_keys=True),
     ]
 
     placeholders = ", ".join(["?"] * len(values))

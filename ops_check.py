@@ -10,6 +10,7 @@ Usage:
   python3 ops_check.py filters
   python3 ops_check.py drawdown
   python3 ops_check.py post
+  python3 ops_check.py events
   python3 ops_check.py all
   python3 ops_check.py filters 2026-05-08
 """
@@ -35,6 +36,7 @@ COMMANDS = {
     "filters": ["filter_report.py", "--date"],
     "drawdown": ["drawdown_report.py"],
     "post": ["post_session_check.py"],
+    "events": ["bot_events.py", "--limit", "25"],
 }
 
 

@@ -2,6 +2,9 @@
 
 Use this before the next market session.
 
+For the Tuesday 2026-05-26 paper-session QA plan, also see
+`ops/tuesday_qa_runbook.md`.
+
 ## 1. Confirm repo state
 
 ```bash
@@ -36,6 +39,38 @@ Expected:
 
 env_file_loaded=True
 all targeted tests pass
+
+Note:
+
+run_tests.py automatically re-execs under ./venv/bin/python when the project
+venv is present, so this command can be run from a plain shell or an activated
+venv.
+
+3a. Check dataset health
+python3 ops_check.py dataset-health 2026-05-26
+
+Expected before Tuesday:
+
+daily_symbol_context and daily_symbol_predictions have 41 rows for 2026-05-26.
+daily_symbol_events is populated.
+feature_snapshots, labeled_setups, and matched_trades may still be zero until
+market-session collection and closed-trade matching have real data.
+
+3b. Check feature pipeline health
+python3 ops_check.py feature-health 2026-05-26
+
+Expected after a DB rebuild:
+
+feature_snapshots and labeled_setups may be zero, but schema should pass.
+Rotated logs may show prior collection/labeling from before the rebuild. Logs
+prove prior behavior, but they do not contain enough data to restore full rows.
+
+Tuesday session watch:
+
+python3 ops_check.py feature-watch 2026-05-26
+
+After the first live_features cron run, feature_snapshots should be nonzero.
+After snapshots are 35+ minutes old, labeled_setups should start increasing.
 4. Run premarket ops check
 python3 ops_check.py premarket
 

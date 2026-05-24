@@ -13,6 +13,19 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
 ENV_FILE = Path("/etc/trading-bot.env")
+VENV_PYTHON = ROOT / "venv" / "bin" / "python"
+
+
+def reexec_under_venv_if_available():
+    if not VENV_PYTHON.exists():
+        return
+
+    venv_dir = VENV_PYTHON.parent.parent.resolve()
+    current_prefix = Path(sys.prefix).resolve()
+    if current_prefix == venv_dir:
+        return
+
+    os.execv(str(VENV_PYTHON), [str(VENV_PYTHON), str(Path(__file__).resolve())] + sys.argv[1:])
 
 
 def load_env_file(path=ENV_FILE):
@@ -46,6 +59,7 @@ TESTS = [
 
 
 def main():
+    reexec_under_venv_if_available()
     env_loaded = load_env_file()
 
     print("=" * 64)

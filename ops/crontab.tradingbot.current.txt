@@ -1,0 +1,58 @@
+# Edit this file to introduce tasks to be run by cron.
+# 
+# Each task to run has to be defined through a single line
+# indicating with different fields when the task will be run
+# and what command to run for the task
+# 
+# To define the time you can provide concrete values for
+# minute (m), hour (h), day of month (dom), month (mon),
+# and day of week (dow) or use '*' in these fields (for 'any').
+# 
+# Notice that tasks will be started based on the cron's system
+# daemon's notion of time and timezones.
+# 
+# Output of the crontab jobs (including errors) is sent through
+# email to the user the crontab file belongs to (unless redirected).
+# 
+# For example, you can run a backup of all your user accounts
+# at 5 a.m every week with:
+# 0 5 * * 1 tar -zcf /var/backups/home.tgz /home/
+# 
+# For more information see the manual pages of crontab(5) and cron(8)
+# 
+# m h  dom mon dow   command
+*/2 * * * * cd /home/tradingbot/trading-bot && set -a && . /etc/trading-bot.env && set +a && /home/tradingbot/trading-bot/venv/bin/python fill_poller.py >> fill_poller.log 2>&1
+
+0 8 * * 1-5 cd /home/tradingbot/trading-bot && set -a && . /etc/trading-bot.env && set +a && /home/tradingbot/trading-bot/venv/bin/python pre_market_research_data.py --raw-output /tmp/raw_market_research_$(date +\%F).data.json --build-output market_context.json --ingest-context >> /home/tradingbot/trading-bot/pre_market_research.log 2>&1
+
+5 8 * * 1-5 cd /home/tradingbot/trading-bot && set -a && . /etc/trading-bot.env && set +a && /home/tradingbot/trading-bot/venv/bin/python collect_and_score_events.py --date $(date +\%F) --max-per-symbol 2 --apply-context --predict --output /tmp/events_$(date +\%F).auto.json >> /home/tradingbot/trading-bot/event_collection.log 2>&1
+
+0 16 * * 1-5 cd /home/tradingbot/trading-bot && set -a && . /etc/trading-bot.env && set +a && /home/tradingbot/trading-bot/venv/bin/python daily_summary.py >> daily_summary.log 2>&1
+
+5 16 * * 5 cd /home/tradingbot/trading-bot && set -a && . /etc/trading-bot.env && set +a && /home/tradingbot/trading-bot/venv/bin/python daily_summary.py --week >> daily_summary.log 2>&1
+
+10 16 * * 1-5 cd /home/tradingbot/trading-bot && set -a && . /etc/trading-bot.env && set +a && /home/tradingbot/trading-bot/venv/bin/python trade_matcher.py >> trade_matcher.log 2>&1
+
+*/2 8-14 * * 1-5 /home/tradingbot/trading-bot/run_live_features.sh
+
+*/5 8-14 * * 1-5 /home/tradingbot/trading-bot/run_label_features.sh
+
+*/2 8-15 * * 1-5 cd /home/tradingbot/trading-bot && set -a && . /etc/trading-bot.env && set +a && /home/tradingbot/trading-bot/venv/bin/python rolling_momentum.py >> rolling_momentum.log 2>&1
+
+*/2 8-15 * * 1-5 cd /home/tradingbot/trading-bot && set -a && . /etc/trading-bot.env && set +a && /home/tradingbot/trading-bot/venv/bin/python session_momentum.py --all >> session_momentum.log 2>&1
+
+1-59/2 8-15 * * 1-5 cd /home/tradingbot/trading-bot && set -a && . /etc/trading-bot.env && set +a && /home/tradingbot/trading-bot/venv/bin/python position_momentum_monitor.py >> position_momentum_monitor.log 2>&1
+
+*/2 8-15 * * 1-5 /home/tradingbot/trading-bot/run_position_manager.sh >> /home/tradingbot/trading-bot/position_manager.log 2>&1
+
+30 16 * * 1-5 /home/tradingbot/trading-bot/run_after_close_learning.sh >> /home/tradingbot/trading-bot/after_close_learning.log 2>&1
+
+*/2 8-15 * * 1-5 cd /home/tradingbot/trading-bot && set -a && . /etc/trading-bot.env && set +a && /home/tradingbot/trading-bot/venv/bin/python /home/tradingbot/trading-bot/portfolio_replacement_report.py --minutes 120 --top 20 --write-memory >> /home/tradingbot/trading-bot/portfolio_rotation.log 2>&1 && /home/tradingbot/trading-bot/venv/bin/python /home/tradingbot/trading-bot/portfolio_rotation_manager.py >> /home/tradingbot/trading-bot/portfolio_rotation.log 2>&1
+
+# After-hours event collection for next trading session, Mon-Thu.
+0 18 * * 1-4 cd /home/tradingbot/trading-bot && set -a && . /etc/trading-bot.env && set +a && TARGET_DATE=$(/home/tradingbot/trading-bot/venv/bin/python next_trading_date.py) && /home/tradingbot/trading-bot/venv/bin/python collect_and_score_events.py --date "$TARGET_DATE" --max-per-symbol 2 --output /tmp/events_"$TARGET_DATE"_afterhours.json >> /home/tradingbot/trading-bot/event_collection.log 2>&1
+
+# Friday after-hours + weekend event collection for next trading session.
+0 18 * * 5 cd /home/tradingbot/trading-bot && set -a && . /etc/trading-bot.env && set +a && TARGET_DATE=$(/home/tradingbot/trading-bot/venv/bin/python next_trading_date.py) && /home/tradingbot/trading-bot/venv/bin/python collect_and_score_events.py --date "$TARGET_DATE" --max-per-symbol 2 --output /tmp/events_"$TARGET_DATE"_friday_afterhours.json >> /home/tradingbot/trading-bot/event_collection.log 2>&1
+
+0 10,18 * * 6,0 cd /home/tradingbot/trading-bot && set -a && . /etc/trading-bot.env && set +a && TARGET_DATE=$(/home/tradingbot/trading-bot/venv/bin/python next_trading_date.py) && /home/tradingbot/trading-bot/venv/bin/python collect_and_score_events.py --date "$TARGET_DATE" --max-per-symbol 2 --output /tmp/events_"$TARGET_DATE"_weekend.json >> /home/tradingbot/trading-bot/event_collection.log 2>&1

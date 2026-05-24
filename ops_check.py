@@ -10,7 +10,16 @@ Usage:
   python3 ops_check.py filters
   python3 ops_check.py drawdown
   python3 ops_check.py post
+  python3 ops_check.py intelligence
   python3 ops_check.py events
+  python3 ops_check.py context
+  python3 ops_check.py learning
+  python3 ops_check.py predictions
+  python3 ops_check.py signal-lessons
+  python3 ops_check.py trends
+  python3 ops_check.py prediction-validation
+  python3 ops_check.py bot-events
+  python3 ops_check.py event-attribution
   python3 ops_check.py premarket
   python3 ops_check.py market-context-check
   python3 ops_check.py intelligence-summary
@@ -66,6 +75,15 @@ COMMANDS = {
     "drawdown": ["drawdown_report.py"],
     "post": ["post_session_check.py"],
     "events": ["bot_events.py", "--limit", "25"],
+    "bot-events": ["bot_events.py", "--limit", "25"],
+    "event-attribution": ["event_attribution_report.py", "--date"],
+    "intelligence": ["intelligence_context_report.py", "--date"],
+    "context": ["context_trade_join_report.py", "--date"],
+    "learning": ["intelligence_learning_report.py", "--date"],
+    "predictions": ["intelligence_prediction_report.py", "--date"],
+    "signal-lessons": ["signal_timing_lesson_report.py", "--date"],
+    "trends": ["trend_context_report.py", "--date"],
+    "prediction-validation": ["prediction_validation_report.py", "--date"],
 }
 
 
@@ -1396,6 +1414,17 @@ def main():
         args = ["blocked_signal_outcome_report.py", "--date", target_date]
     elif command in ("drawdown", "post", "adaptive_impact", "strategy_intelligence"):
         args = args + [target_date]
+    elif command in (
+        "intelligence",
+        "context",
+        "learning",
+        "predictions",
+        "signal-lessons",
+        "trends",
+        "prediction-validation",
+        "event-attribution",
+    ):
+        args = [args[0], "--date", target_date]
 
     ok = run(command.title(), args)
     return 0 if ok else 1

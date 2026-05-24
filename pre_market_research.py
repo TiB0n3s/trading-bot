@@ -1,5 +1,21 @@
 #!/usr/bin/env python3
 """
+LEGACY / QC ONLY.
+
+This Claude-first pre-market research script is no longer the preferred
+production intelligence path. The primary deterministic pre-market flow is:
+
+    pre_market_research_data.py
+      -> market_intelligence.market_brief_builder
+      -> market_context.json
+      -> daily_symbol_context ingest
+
+Do not wire this script back into cron or live market_context generation unless
+the deterministic path is unavailable and the operator intentionally chooses
+this as a temporary fallback.
+"""
+
+"""
 Pre-market research — batched Claude Sonnet web_search.
 
 Researches all approved symbols in batches and produces a per-symbol trading

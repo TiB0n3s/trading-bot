@@ -38,6 +38,7 @@ from risk.account_risk import account_risk_snapshot
 from risk.live_guards import live_guard_policy, live_order_allowed
 from risk.macro_policy import policy_from_market_context
 from data_layer.ledger import ledger_summary
+from alerts import alert_config_public
 from runtime_config import (
     EXECUTION_MODE,
     LIVE_TRADING_ENABLED,
@@ -5048,6 +5049,7 @@ def status():
     result["strategy_engine_mode"] = STRATEGY_ENGINE_MODE
     result["execution_policy_mode"] = os.getenv("EXECUTION_POLICY_MODE", "compare").strip().lower()
     result["risk_policy_mode"] = RISK_POLICY_MODE
+    result["alerts"] = alert_config_public()
     result["session_momentum_summary"] = _session_momentum_summary()
     result["session_momentum"] = _session_momentum_snapshot()
     

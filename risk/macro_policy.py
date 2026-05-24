@@ -16,7 +16,7 @@ from typing import Any
 DEFAULT_MACRO_POLICY = {
     "macro_regime": "normal",
     "risk_multiplier": 1.0,
-    "max_new_positions": 8,
+    "max_new_positions": 12,
     "block_new_buys": False,
     "reason": "Default normal regime",
 }
@@ -38,7 +38,7 @@ def policy_for_regime(regime: Any) -> dict[str, Any]:
         return {
             "macro_regime": normalized,
             "risk_multiplier": 1.0,
-            "max_new_positions": 8,
+            "max_new_positions": 12,
             "block_new_buys": False,
             "reason": "Macro context normal/risk-on",
         }
@@ -47,7 +47,7 @@ def policy_for_regime(regime: Any) -> dict[str, Any]:
         return {
             "macro_regime": normalized,
             "risk_multiplier": 0.75,
-            "max_new_positions": 6,
+            "max_new_positions": 8,
             "block_new_buys": False,
             "reason": "Macro context caution/mixed",
         }
@@ -56,7 +56,7 @@ def policy_for_regime(regime: Any) -> dict[str, Any]:
         return {
             "macro_regime": normalized,
             "risk_multiplier": 0.50,
-            "max_new_positions": 4,
+            "max_new_positions": 5,
             "block_new_buys": False,
             "reason": "Macro context defensive/risk-off",
         }
@@ -73,7 +73,7 @@ def policy_for_regime(regime: Any) -> dict[str, Any]:
     return {
         "macro_regime": normalized,
         "risk_multiplier": 0.75,
-        "max_new_positions": 6,
+        "max_new_positions": 8,
         "block_new_buys": False,
         "reason": f"Unknown macro regime '{normalized}'; using caution defaults",
     }

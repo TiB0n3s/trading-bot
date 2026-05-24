@@ -22,3 +22,4 @@ crontab ops/crontab.tradingbot.current.txt
 
 Do not restore blindly. Review paths, environment loading, market schedule,
 and any newly added jobs first.
+```

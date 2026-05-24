@@ -9,8 +9,20 @@ from runtime_config import (
     is_cash_mode,
     max_order_dollars,
 )
+from execution.order_policy import (
+    calculate_buy_qty,
+    calculate_bracket_prices,
+    cash_order_cap_check,
+)
 
 logger = logging.getLogger(__name__)
+
+EXECUTION_POLICY_MODE = os.getenv("EXECUTION_POLICY_MODE", "compare").strip().lower()
+if EXECUTION_POLICY_MODE not in ("off", "compare"):
+    logger.warning(
+        f"Invalid EXECUTION_POLICY_MODE={EXECUTION_POLICY_MODE!r}; defaulting to compare"
+    )
+    EXECUTION_POLICY_MODE = "compare"
 
 ALPACA_API_KEY = os.environ.get("ALPACA_API_KEY", "")
 ALPACA_SECRET_KEY = os.environ.get("ALPACA_SECRET_KEY", "")
@@ -120,6 +132,28 @@ def place_order(symbol, action, position_size_pct, stop_loss_pct, take_profit_pc
                 original_qty = qty
                 qty = qty // 2
                 logger.info(f"Risk multiplier applied to {symbol}: very_high risk_level — sizing halved {original_qty} → {qty}")
+
+            if EXECUTION_POLICY_MODE == "compare":
+                try:
+                    policy_qty = calculate_buy_qty(
+                        balance=balance,
+                        position_size_pct=position_size_pct,
+                        current_price=current_price,
+                        risk_level=risk_level,
+                    )
+                    logger.info(
+                        f"EXECUTION_POLICY_COMPARE qty {symbol}: "
+                        f"live_qty={qty} "
+                        f"policy_qty={policy_qty.get('qty')} "
+                        f"allowed={policy_qty.get('allowed')} "
+                        f"risk_amount_live={risk_amount:.2f} "
+                        f"risk_amount_policy={policy_qty.get('risk_amount')} "
+                        f"reason={policy_qty.get('reason')} "
+                        f"risk_adjustment={policy_qty.get('risk_adjustment')}"
+                    )
+                except Exception as e:
+                    logger.warning(f"EXECUTION_POLICY_COMPARE qty failed for {symbol}: {e}")
+
             logger.info(f"Buy sizing: {symbol} qty={qty} at {current_price} | risk_amount={risk_amount:.2f} balance={balance}")
             if qty < 1:
                 logger.error(f"Position size too small for {symbol} - qty rounds to 0 at price {current_price} with balance {balance}")
@@ -127,6 +161,25 @@ def place_order(symbol, action, position_size_pct, stop_loss_pct, take_profit_pc
             if is_cash_mode():
                 order_notional = qty * current_price
                 cap = max_order_dollars()
+
+                if EXECUTION_POLICY_MODE == "compare":
+                    try:
+                        policy_cap = cash_order_cap_check(
+                            qty=qty,
+                            current_price=current_price,
+                            max_order_dollars=cap,
+                        )
+                        logger.info(
+                            f"EXECUTION_POLICY_COMPARE cash_cap {symbol}: "
+                            f"live_notional={order_notional:.2f} "
+                            f"policy_notional={policy_cap.get('notional')} "
+                            f"cap={policy_cap.get('max_order_dollars')} "
+                            f"allowed={policy_cap.get('allowed')} "
+                            f"reason={policy_cap.get('reason')}"
+                        )
+                    except Exception as e:
+                        logger.warning(f"EXECUTION_POLICY_COMPARE cash_cap failed for {symbol}: {e}")
+
                 if order_notional > cap:
                     logger.error(
                         f"LIVE GUARD: refusing BUY {symbol}; notional ${order_notional:.2f} "
@@ -141,6 +194,27 @@ def place_order(symbol, action, position_size_pct, stop_loss_pct, take_profit_pc
             stop_price = round(current_price * (1 + stop_loss_pct / 100), 2)
             take_price = round(current_price * (1 - take_profit_pct / 100), 2)
             logger.info(f"SELL order - Stop: {stop_price} (above entry), Target: {take_price} (below entry)")
+
+        if EXECUTION_POLICY_MODE == "compare":
+            try:
+                policy_bracket = calculate_bracket_prices(
+                    side=side,
+                    current_price=current_price,
+                    stop_loss_pct=stop_loss_pct,
+                    take_profit_pct=take_profit_pct,
+                )
+                logger.info(
+                    f"EXECUTION_POLICY_COMPARE bracket {symbol}: "
+                    f"side={side} "
+                    f"live_stop={stop_price} "
+                    f"policy_stop={policy_bracket.get('stop_price')} "
+                    f"live_take={take_price} "
+                    f"policy_take={policy_bracket.get('take_profit_price')} "
+                    f"allowed={policy_bracket.get('allowed')} "
+                    f"reason={policy_bracket.get('reason')}"
+                )
+            except Exception as e:
+                logger.warning(f"EXECUTION_POLICY_COMPARE bracket failed for {symbol}: {e}")
         if side == "buy":
             order = api.submit_order(
                 symbol=symbol,

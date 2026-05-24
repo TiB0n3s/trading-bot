@@ -5035,6 +5035,7 @@ def status():
     result["prediction_gate_mode"] = PREDICTION_GATE_MODE
     result["prediction_gate_thresholds"] = PREDICTION_GATE_THRESHOLDS
     result["strategy_engine_mode"] = STRATEGY_ENGINE_MODE
+    result["execution_policy_mode"] = os.getenv("EXECUTION_POLICY_MODE", "compare").strip().lower()
     result["session_momentum_summary"] = _session_momentum_summary()
     result["session_momentum"] = _session_momentum_snapshot()
     

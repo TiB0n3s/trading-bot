@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import json
+from pathlib import Path
 
 from db import DB_PATH
 from ml_platform.brain_features import (
@@ -19,8 +20,16 @@ from ml_platform.brain_features import (
 from ml_platform.datasets import dataset_profile, write_profile
 from ml_platform.experiments import create_experiment
 from ml_platform.evaluation import default_evaluation_plan
+from ml_platform.governance import (
+    ENV_KILL_SWITCH_DEFAULTS,
+    build_dataset_manifest,
+    governance_contract,
+    label_taxonomy,
+    model_card_template,
+)
 from ml_platform.integration_contract import default_contract
 from ml_platform.registry import load_registry, register_model
+from ml_platform.replay import replay_decisions_scaffold
 from ml_platform.serving import SQLitePredictionProvider
 
 
@@ -63,6 +72,26 @@ def main() -> int:
     sub.add_parser("list-models", help="List registry contents")
     sub.add_parser("integration-contract", help="Print ML/brain promotion contract")
     sub.add_parser("evaluation-plan", help="Print default evaluation requirements")
+    sub.add_parser("governance-contract", help="Print ML governance requirements")
+    sub.add_parser("label-taxonomy", help="Print label taxonomy v1")
+    sub.add_parser("env-policy", help="Print ML kill-switch defaults")
+
+    manifest = sub.add_parser("dataset-manifest", help="Build a read-only dataset manifest")
+    manifest.add_argument("--db-path", default=str(DB_PATH))
+    manifest.add_argument("--start-date")
+    manifest.add_argument("--end-date")
+    manifest.add_argument("--query-version", default="brain_features_query_v1")
+    manifest.add_argument("--label-version", default="label_taxonomy_v1")
+    manifest.add_argument("--output")
+
+    model_card = sub.add_parser("model-card-template", help="Print a model-card template")
+    model_card.add_argument("--model-id", default="candidate_model")
+
+    replay = sub.add_parser("replay-decisions", help="Print the shadow replay output contract")
+    replay.add_argument("--start-date", required=True)
+    replay.add_argument("--end-date", required=True)
+    replay.add_argument("--policy", default="current")
+    replay.add_argument("--candidate-model", required=True)
 
     pred = sub.add_parser("get-prediction", help="Read one observe-only prediction")
     pred.add_argument("--date", required=True)
@@ -138,6 +167,51 @@ def main() -> int:
 
     if args.command == "evaluation-plan":
         print(json.dumps(default_evaluation_plan(), indent=2, sort_keys=True))
+        return 0
+
+    if args.command == "governance-contract":
+        print(json.dumps(governance_contract(), indent=2, sort_keys=True))
+        return 0
+
+    if args.command == "label-taxonomy":
+        print(json.dumps(label_taxonomy(), indent=2, sort_keys=True))
+        return 0
+
+    if args.command == "env-policy":
+        print(json.dumps(ENV_KILL_SWITCH_DEFAULTS, indent=2, sort_keys=True))
+        return 0
+
+    if args.command == "dataset-manifest":
+        result = build_dataset_manifest(
+            db_path=args.db_path,
+            start_date=args.start_date,
+            end_date=args.end_date,
+            query_version=args.query_version,
+            label_version=args.label_version,
+        )
+        if args.output:
+            output_path = Path(args.output)
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+            output_path.write_text(json.dumps(result, indent=2, sort_keys=True) + "\n")
+            print(f"Wrote dataset manifest to {output_path}")
+        print(json.dumps(result, indent=2, sort_keys=True))
+        return 0
+
+    if args.command == "model-card-template":
+        print(json.dumps(model_card_template(args.model_id), indent=2, sort_keys=True))
+        return 0
+
+    if args.command == "replay-decisions":
+        print(json.dumps(
+            replay_decisions_scaffold(
+                start_date=args.start_date,
+                end_date=args.end_date,
+                policy=args.policy,
+                candidate_model=args.candidate_model,
+            ),
+            indent=2,
+            sort_keys=True,
+        ))
         return 0
 
     if args.command == "get-prediction":

@@ -15,6 +15,7 @@ ML output is observe-only.
 3. Model artifact/registry conventions.
 4. Shadow serving/reporting.
 5. Paper-only soft influence after validation.
+6. Data governance, replay, and promotion governance.
 
 ## Promotion Requirements
 
@@ -28,6 +29,20 @@ Before any model can affect paper trading it must have:
 - an environment flag defaulting off,
 - a rollback plan,
 - no ability to loosen hard risk or broker controls.
+- a decision-time audit trail proving there was no feature leakage.
+
+## Governance Commands
+
+```bash
+python3 -m ml_platform.cli governance-contract
+python3 -m ml_platform.cli dataset-manifest --start-date 2026-05-20 --end-date 2026-05-26
+python3 -m ml_platform.cli model-card-template --model-id similarity_v0
+python3 -m ml_platform.cli replay-decisions --start-date 2026-05-01 --end-date 2026-05-26 --candidate-model similarity_v0
+python3 -m ml_platform.cli env-policy
+```
+
+These commands are research scaffolds. They do not write to `trades.db`, call a
+broker, or affect Tuesday's paper-trading runtime.
 
 ## Current Scaffolding
 

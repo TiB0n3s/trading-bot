@@ -11,6 +11,12 @@ python3 -m ml_platform.cli export-brain-features --date 2026-05-26 --output /tmp
 python3 -m ml_platform.cli create-experiment setup_baseline --dataset-start 2026-05-20 --dataset-end 2026-05-26
 python3 -m ml_platform.cli integration-contract
 python3 -m ml_platform.cli evaluation-plan
+python3 -m ml_platform.cli governance-contract
+python3 -m ml_platform.cli dataset-manifest --start-date 2026-05-20 --end-date 2026-05-26
+python3 -m ml_platform.cli label-taxonomy
+python3 -m ml_platform.cli model-card-template --model-id similarity_v0
+python3 -m ml_platform.cli replay-decisions --start-date 2026-05-01 --end-date 2026-05-26 --candidate-model similarity_v0
+python3 -m ml_platform.cli env-policy
 python3 -m ml_platform.cli get-prediction --date 2026-05-26 --symbol AAPL
 python3 -m ml_platform.cli list-models
 ```
@@ -23,9 +29,30 @@ python3 -m ml_platform.cli list-models
 - No writes to `trades.db`.
 - No broker/order calls.
 - Registry status defaults to `research`.
+- ML kill switches default off.
 
 Promotion beyond research requires explicit operator approval, tests, reports,
 environment flags defaulting off, and rollback.
+
+## Governance
+
+`governance.py` is the contract layer for the ML platform. It defines:
+
+- leakage checkpoints and feature availability requirements,
+- immutable decision snapshot fields,
+- dataset manifest identity fields,
+- label taxonomy v1,
+- order/fill truth hierarchy and fill confidence,
+- model abstention output,
+- minimum sample gates,
+- baseline comparisons,
+- friction/slippage assumptions,
+- calibration and drift checks,
+- non-authority language for every model card.
+
+The first hard rule is auditability: future training rows must record what was
+knowable at decision time before they can be trusted for evaluation or
+promotion.
 
 ## Brain Integration
 

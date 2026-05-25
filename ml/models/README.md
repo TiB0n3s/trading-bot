@@ -20,6 +20,25 @@ Suggested fields:
 }
 ```
 
+Every model card must also state:
+
+- This model does not place orders.
+- This model does not override hard risk controls.
+- This model does not increase position size unless explicitly promoted later.
+- This model is invalid outside listed symbols, regimes, and date ranges.
+- This model must abstain on stale or missing features.
+
+Model output should include abstention:
+
+```json
+{
+  "prediction": "avoid_entry",
+  "confidence": 0.61,
+  "abstain": false,
+  "abstain_reason": null
+}
+```
+
 Allowed statuses:
 
 - `research`
@@ -37,4 +56,5 @@ Use the registry CLI for local metadata:
 
 ```bash
 python3 -m ml_platform.cli list-models
+python3 -m ml_platform.cli model-card-template --model-id similarity_v0
 ```

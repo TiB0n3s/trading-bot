@@ -15,12 +15,20 @@ without changing runtime behavior.
 
 ## Initial Label Targets
 
-- `ret_fwd_5m`
-- `ret_fwd_15m`
-- `ret_fwd_30m`
-- `max_up_15m`
-- `max_down_15m`
-- `outcome_label`
+- `entry_quality_outcome`
+- `max_favorable_excursion`
+- `max_adverse_excursion`
+- `time_to_profit`
+- `time_to_drawdown`
+- `profit_after_15m`
+- `profit_after_30m`
+- `profit_after_60m`
+- `would_hit_stop`
+- `would_hit_take_profit`
+- `was_late_entry`
+- `was_churn`
+- `was_bad_fill`
+- `was_correct_rejection`
 
 First useful model target:
 
@@ -39,6 +47,35 @@ policy, broker state, and risk controls into one noisy label.
 - No same-row `labeled_setups` outputs as features.
 - Daily context must be available at or before the snapshot date.
 - Event context must use only events collected before the evaluated session.
+- Every canonical row needs `feature_available_at`, `feature_generated_at`,
+  `feature_age_seconds`, `source`, `is_stale`, and `staleness_reason`.
+- Decision-time rows must not use anything learned after
+  `order_decision_time`.
+- Trend/momentum reports generated after the fact are evaluation evidence, not
+  decision-time features.
+
+## Dataset Manifest
+
+Every exported dataset should include a manifest with:
+
+- `dataset_id`
+- `created_at`
+- `source_db_path`
+- `source_db_hash`
+- `query_version`
+- `label_version`
+- `feature_version`
+- `row_count`
+- `symbol_count`
+- `date_range`
+- `excluded_rows_reason_counts`
+- `git_sha`
+
+Generate the current scaffold manifest with:
+
+```bash
+python3 -m ml_platform.cli dataset-manifest --start-date 2026-05-20 --end-date 2026-05-26
+```
 
 ## Minimum Sample Guidelines
 

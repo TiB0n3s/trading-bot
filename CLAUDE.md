@@ -28,6 +28,9 @@ Recent completed roadmap items:
 - `feature_snapshots` includes ML leakage/audit fields:
   `feature_available_at`, `feature_generated_at`, `feature_age_seconds`,
   `source`, `is_stale`, and `staleness_reason`.
+- Migrations are manual before deploy/restore, but pending migrations are
+  surfaced by `morning_check.py`, `ops_check.py premarket`, and
+  `ops_check.py migration-status`.
 - The prediction layer is observe-only and does not modify trade decisions.
 - The intelligence pipeline is staged for the next live paper-trading session.
 

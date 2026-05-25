@@ -497,6 +497,10 @@ staleness_reason
 
 Use `python3 db_migrations.py status` and `python3 db_migrations.py apply` to
 check or apply idempotent schema migrations.
+
+Migrations are manual before deployment or DB restore. Pending migrations are
+also surfaced by `morning_check.py`, `ops_check.py migration-status`, and the
+premarket/all ops check bundles.
 /status Symbol Intelligence
 
 GET /status?secret=... includes:

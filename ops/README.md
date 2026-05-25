@@ -116,6 +116,11 @@ python3 db_migrations.py status
 python3 db_migrations.py apply
 ```
 
+Migration execution is intentionally manual before deployment, DB restore, or
+schema-dependent ops work. `morning_check.py`, `ops_check.py premarket`, and
+`ops_check.py all` surface pending migrations so a restored or fresh DB does not
+silently run with an old schema.
+
 The first tracked migration adds feature leakage/audit columns to
 `feature_snapshots`: `feature_available_at`, `feature_generated_at`,
 `feature_age_seconds`, `source`, `is_stale`, and `staleness_reason`.

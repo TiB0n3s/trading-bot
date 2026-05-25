@@ -14,11 +14,49 @@ import urllib.request
 from collections import Counter
 from pathlib import Path
 
+BASE_DIR = Path(__file__).resolve().parent
+VENV_PYTHON = BASE_DIR / "venv" / "bin" / "python"
+ENV_FILE = Path("/etc/trading-bot.env")
+
+
+def reexec_under_venv_if_available():
+    if not VENV_PYTHON.exists():
+        return
+
+    venv_dir = VENV_PYTHON.parent.parent.resolve()
+    current_prefix = Path(sys.prefix).resolve()
+    if current_prefix == venv_dir:
+        return
+
+    os.execv(str(VENV_PYTHON), [str(VENV_PYTHON), str(Path(__file__).resolve())] + sys.argv[1:])
+
+
+reexec_under_venv_if_available()
+
+
+def load_env_file(path=ENV_FILE):
+    if not path.exists():
+        return False
+
+    for raw_line in path.read_text().splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        key = key.strip()
+        value = value.strip().strip('"').strip("'")
+        if key and key not in os.environ:
+            os.environ[key] = value
+    return True
+
+
+load_env_file()
+
 from config import APPROVED_SYMBOLS
+from db_migrations import status as migration_status
 from broker import get_account
 from market_time import expected_market_context_date
 
-BASE_DIR = Path(__file__).resolve().parent
 MARKET_CONTEXT = BASE_DIR / "market_context.json"
 ROLLING_MOMENTUM = BASE_DIR / "rolling_momentum.json"
 
@@ -244,6 +282,27 @@ def check_market_alignment_report():
         return False
 
 
+def check_db_migrations():
+    print("\n── DB Migrations ─────────────────────────────────────")
+    try:
+        rows = migration_status(BASE_DIR / "trades.db")
+    except Exception as e:
+        fail(f"migration status check failed: {e}")
+        return False
+
+    pending = [row for row in rows if not row["applied"]]
+    for row in rows:
+        marker = "applied" if row["applied"] else "pending"
+        print(f"{marker:>8}  {row['migration_id']}")
+
+    if pending:
+        fail(f"{len(pending)} pending DB migration(s)")
+        return False
+
+    ok("all DB migrations applied")
+    return True
+
+
 def main():
     print("=" * 64)
     print("  Morning Readiness Check")
@@ -252,6 +311,7 @@ def main():
     checks = [
         check_market_context(),
         check_rolling_momentum(),
+        check_db_migrations(),
         check_market_alignment_report(),
         check_services(),
         check_alpaca(),

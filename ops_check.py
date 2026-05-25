@@ -28,6 +28,7 @@ Usage:
   python3 ops_check.py feature-watch
   python3 ops_check.py rejection-summary
   python3 ops_check.py order-health
+  python3 ops_check.py migration-status
   python3 ops_check.py all
   python3 ops_check.py filters 2026-05-08
 """
@@ -1124,6 +1125,9 @@ def rejection_summary(target_date):
                 examples.setdefault(category, r["rejection_reason"] or "")
             for category, n in sorted(buckets.items(), key=lambda x: (-x[1], x[0])):
                 print(f"  {category:<28} {n:>5}  example={examples[category]}")
+            unknown_count = buckets.get("unknown_error", 0)
+            if unknown_count:
+                print(f"[WARN] unknown_error rejection category count={unknown_count}; check for log_rejection bypasses")
         else:
             print("  none")
 
@@ -1175,6 +1179,33 @@ def rejection_summary(target_date):
 
     print()
     print("[OK] rejection summary completed")
+    return True
+
+
+def migration_status_check():
+    from db_migrations import status as migration_status
+
+    print()
+    print("=" * 72)
+    print("  DB Migration Status")
+    print("=" * 72)
+
+    try:
+        rows = migration_status(BASE_DIR / "trades.db")
+    except Exception as e:
+        print(f"[FAIL] migration status check failed: {e}")
+        return False
+
+    pending = [row for row in rows if not row["applied"]]
+    for row in rows:
+        marker = "applied" if row["applied"] else "pending"
+        print(f"{marker:>8}  {row['migration_id']}  {row['description']}")
+
+    if pending:
+        print(f"[FAIL] {len(pending)} pending DB migration(s)")
+        return False
+
+    print("[OK] all DB migrations applied")
     return True
 
 
@@ -1357,8 +1388,12 @@ def main():
     if command == "order-health":
         return 0 if order_health(target_date) else 1
 
+    if command == "migration-status":
+        return 0 if migration_status_check() else 1
+
     if command == "premarket":
         checks = []
+        checks.append(run("DB Migration Status", ["ops_check.py", "migration-status"]))
         checks.append(run("Morning Check", ["morning_check.py"]))
         checks.append(run("Position Review", ["position_review.py"]))
         checks.append(run("Market Alignment Report", ["market_alignment_report.py"]))
@@ -1377,6 +1412,7 @@ def main():
 
     if command == "all":
         checks = []
+        checks.append(run("DB Migration Status", ["ops_check.py", "migration-status"]))
         checks.append(run("Morning Check", ["morning_check.py"]))
         checks.append(run("Position Review", ["position_review.py"]))
         checks.append(run("Market Alignment Report", ["market_alignment_report.py"]))

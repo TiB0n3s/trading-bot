@@ -241,6 +241,22 @@ VALIDATION_SPLIT_POLICY = {
     ),
 }
 
+POST_QA_SYMBOL_CANDIDATES = (
+    "AMZN",
+    "JPM",
+    "TSM",
+    "PYPL",
+    "SOFI",
+    "PFE",
+    "CMCSA",
+    "T",
+    "VZ",
+    "F",
+    "HBAN",
+    "KEY",
+    "KHC",
+)
+
 SYMBOL_UNIVERSE_POLICY = {
     "problem": "A current fixed symbol list can introduce survivorship bias if historical membership changed.",
     "required_fields": (
@@ -250,6 +266,8 @@ SYMBOL_UNIVERSE_POLICY = {
         "symbol_add_remove_reason",
     ),
     "training_rule": "Datasets should use the symbol universe that was active at the evaluated timestamp.",
+    "post_qa_candidate_symbols": POST_QA_SYMBOL_CANDIDATES,
+    "candidate_rule": "Candidate additions require post-QA review, point-in-time universe versioning, and fresh data collection before training claims.",
 }
 
 DEMOTION_POLICY = {
@@ -524,6 +542,7 @@ def governance_contract() -> dict[str, Any]:
         "counterfactual_policy": COUNTERFACTUAL_POLICY,
         "label_feedback_policy": LABEL_FEEDBACK_POLICY,
         "validation_split_policy": VALIDATION_SPLIT_POLICY,
+        "post_qa_symbol_candidates": POST_QA_SYMBOL_CANDIDATES,
         "symbol_universe_policy": SYMBOL_UNIVERSE_POLICY,
         "demotion_policy": DEMOTION_POLICY,
         "point_in_time_context_policy": POINT_IN_TIME_CONTEXT_POLICY,

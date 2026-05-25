@@ -79,6 +79,30 @@ only and selection-biased.
   point-in-time market-context archive or decision snapshot.
 - Manual overrides and symbol overrides must be timestamped as training
   confounders or affected rows must be excluded.
+- Symbol-universe changes must be versioned. Historical datasets should not
+  treat newly added symbols as if they were always eligible.
+
+## Post-QA Symbol Candidates
+
+Candidate additions to review after Tuesday QA:
+
+- AMZN
+- JPM
+- TSM
+- PYPL
+- SOFI
+- PFE
+- CMCSA
+- T
+- VZ
+- F
+- HBAN
+- KEY
+- KHC
+
+These are not part of Tuesday's runtime change plan. If approved later, they
+need a new symbol-universe version and fresh data coverage before symbol-level
+ML claims.
 
 ## Validation Rules
 

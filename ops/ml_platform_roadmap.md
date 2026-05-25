@@ -118,6 +118,37 @@ Required before historical brain-feature training:
 Status: `strategy.trade_scorer` remains future/shadow-only for ML until this is
 implemented.
 
+### Symbol Universe Expansion Pending Review
+
+Goal: reduce survivorship bias and improve future-forward data coverage without
+changing Tuesday's paper-trading behavior.
+
+Candidate symbols to review after Tuesday QA:
+
+- AMZN
+- JPM
+- TSM
+- PYPL
+- SOFI
+- PFE
+- CMCSA
+- T
+- VZ
+- F
+- HBAN
+- KEY
+- KHC
+
+Rules before adding any candidate to live collection or approved trading:
+
+- Record a new `symbol_universe_version`.
+- Record active-from timestamp and add reason.
+- Backfill or collect enough feature/context/outcome data before making
+  symbol-level ML claims.
+- Keep the old universe identifiable so historical evaluation does not pretend
+  these symbols were always eligible.
+- Run post-QA readiness checks before any runtime approved-symbol change.
+
 ### Dataset Layer
 
 Goal: canonical tables/views for signals, trades, fills, market context,
@@ -519,6 +550,8 @@ Critical blockers before real training:
 3. Implement purged/embargoed walk-forward validation.
 4. Add point-in-time context archives before using `strategy.trade_scorer` in
    historical replay.
+5. Version the symbol universe and review post-QA candidate additions:
+   AMZN, JPM, TSM, PYPL, SOFI, PFE, CMCSA, T, VZ, F, HBAN, KEY, KHC.
 
 The biggest missing concept is auditability of what the bot knew at decision
 time. Without that, training, evaluation, and promotion can look sophisticated

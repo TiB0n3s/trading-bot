@@ -34,8 +34,15 @@ def atomic_write_json(path: Path | str, data: Any, *, indent: int = 2, sort_keys
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp_path = path.with_name(f".{path.name}.tmp")
-    tmp_path.write_text(json.dumps(data, indent=indent, sort_keys=sort_keys) + "\n")
-    os.replace(tmp_path, path)
+    try:
+        tmp_path.write_text(json.dumps(data, indent=indent, sort_keys=sort_keys) + "\n")
+        os.replace(tmp_path, path)
+    except Exception:
+        try:
+            tmp_path.unlink(missing_ok=True)
+        except Exception:
+            pass
+        raise
     return path
 
 

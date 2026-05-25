@@ -15,14 +15,16 @@ To compare the live server schedule against the tracked copy:
 cd ~/trading-bot
 crontab -l > /tmp/live-crontab.txt
 diff -u ops/crontab.tradingbot.current.txt /tmp/live-crontab.txt
+```
 
 To restore intentionally after review:
 
+```bash
 crontab ops/crontab.tradingbot.current.txt
+```
 
 Do not restore blindly. Review paths, environment loading, market schedule,
 and any newly added jobs first.
-```
 
 
 ## Read-Only Dataset Checks
@@ -117,10 +119,36 @@ Use these docs after the paper session to decide what to improve next:
 - `ops/module_inventory.md`: active vs scheduled vs research-only module map.
 - `ops/ml_platform_roadmap.md`: staged ML/research-platform direction.
 
+Ahead-of-live integration work should use the staged test lane. These tests
+exercise observe-only contracts without changing live webhook, broker, order, or
+risk-control behavior:
+
+```bash
+cd ~/trading-bot
+python3 run_staged_tests.py
+python3 -m ml_platform.cli staged-readiness \
+  --start-date 2026-05-26 \
+  --end-date 2026-05-26 \
+  --candidate-model similarity_v0 \
+  --prediction-symbol AAPL \
+  --output /tmp/staged_ml_readiness_2026-05-26.json
+python3 -m ml_platform.cli retraining-readiness \
+  --start-date 2026-05-26 \
+  --end-date 2026-05-26 \
+  --trading-sessions-observed 0 \
+  --output /tmp/retraining_readiness_2026-05-26.json
+```
+
+`ml/models/similarity_v0/` is metadata-only. It is a versioned research
+placeholder, not a trained artifact and not a runtime dependency.
+
 The read-only ML dataset exporter can generate CSV evidence once
 `feature_snapshots` and `labeled_setups` exist:
 
 ```bash
 cd ~/trading-bot
-python3 export_ml_dataset.py --date 2026-05-26 --output /tmp/ml_dataset_2026-05-26.csv
+python3 export_ml_dataset.py \
+  --date 2026-05-26 \
+  --output /tmp/ml_dataset_2026-05-26.csv \
+  --manifest-output /tmp/ml_dataset_2026-05-26.manifest.json
 ```

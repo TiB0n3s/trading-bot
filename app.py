@@ -58,7 +58,7 @@ from symbols_config import (
     CLUSTER_EXPOSURE_LIMITS,
     PRICE_RANGES,
 )
-from market_time import now_et, is_market_hours, market_session
+from market_time import now_et, is_market_hours, market_session, expected_market_context_date
 from db import init_db_performance_indexes
 from db import (
     DB_PATH,
@@ -1365,10 +1365,13 @@ def _load_market_context():
         _market_context_mtime = current_mtime
         ctx = json.loads(path.read_text())
         market_date = ctx.get("market_date")
-        today = datetime.now(pytz.timezone("America/New_York")).date().isoformat()
+        expected_date = expected_market_context_date().isoformat()
         _market_bias.clear()
-        if market_date != today:
-            logger.warning(f"market_context.json is stale (market_date={market_date}, today={today}) — cleared market bias")
+        if market_date != expected_date:
+            logger.warning(
+                "market_context.json is stale "
+                f"(market_date={market_date}, expected={expected_date}) — cleared market bias"
+            )
             return
         symbols = ctx.get("symbols") or {}
         for sym, entry in symbols.items():

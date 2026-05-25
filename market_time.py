@@ -164,3 +164,16 @@ def next_trading_date(from_date: date | None = None) -> date:
         d += timedelta(days=1)
 
     return d
+
+
+def expected_market_context_date(from_date: date | None = None) -> date:
+    """Return the market_context date expected for the current session.
+
+    On trading days, the live bot should consume same-day context. On weekends
+    and full-day market holidays, pre-market research may already target the
+    next regular trading session.
+    """
+    d = from_date or now_et().date()
+    if is_trading_day(d):
+        return d
+    return next_trading_date(d)

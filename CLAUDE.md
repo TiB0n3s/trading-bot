@@ -16,6 +16,12 @@ Recent completed roadmap items:
 - `prediction_validation_report.py` exists.
 - `ops_check.py prediction-validation DATE` works.
 - `next_trading_date.py` uses holiday-aware market calendar helpers from `market_time.py`.
+- `market_context.json` validation uses the expected trading session, so weekend/holiday context can target the next market day.
+- `export_ml_dataset.py` can write an audit manifest with `--manifest-output`.
+- `ml_platform` has a staged observe-only integration lane through `staged-readiness`.
+- `retraining-readiness` reports current blockers and never promotes automatically.
+- `ml/models/similarity_v0/` is research-only metadata with no trained artifact.
+- `run_staged_tests.py` runs ahead-of-live staged integration tests separately from current behavior tests.
 - The prediction layer is observe-only and does not modify trade decisions.
 - The intelligence pipeline is staged for the next live paper-trading session.
 
@@ -68,6 +74,24 @@ recommended_entry_timing
 trend_score
 trend_label
 trend_regime
+
+ML platform rule
+
+The ML platform is allowed to be one step ahead of live behavior only in staged
+or observe-only paths. Do not import staged ML integration into `app.py`
+webhook, `broker.py`, order execution, or hard risk-control paths without
+explicit instruction.
+
+Current staged/audit commands:
+
+python3 run_staged_tests.py
+python3 -m ml_platform.cli staged-readiness --start-date 2026-05-26 --end-date 2026-05-26 --candidate-model similarity_v0 --prediction-symbol AAPL
+python3 -m ml_platform.cli retraining-readiness --start-date 2026-05-26 --end-date 2026-05-26 --trading-sessions-observed 0
+python3 export_ml_dataset.py --date 2026-05-26 --output /tmp/ml_dataset_2026-05-26.csv --manifest-output /tmp/ml_dataset_2026-05-26.manifest.json
+
+These commands are read-only with respect to `trades.db`, broker state, orders,
+position sizing, and risk controls. `similarity_v0` is metadata-only until an
+operator explicitly promotes a real artifact through review.
 
 Correct roadmap path:
 
@@ -250,6 +274,7 @@ Market session labels.
 Market-hours checks.
 Holiday-aware trading-day helpers.
 Shared next_trading_date().
+Expected market_context trading-session date helper.
 
 Keep calendar/date logic here rather than duplicating it across scripts.
 
@@ -608,6 +633,21 @@ python3 ops_check.py events "$TARGET_DATE"
 python3 ops_check.py predictions "$TARGET_DATE"
 python3 ops_check.py trends "$TARGET_DATE"
 python3 ops_check.py prediction-validation "$TARGET_DATE"
+
+Staged ML/ahead-of-live checks:
+
+python3 run_staged_tests.py
+python3 -m ml_platform.cli staged-readiness \
+  --start-date "$TARGET_DATE" \
+  --end-date "$TARGET_DATE" \
+  --candidate-model similarity_v0 \
+  --prediction-symbol AAPL \
+  --output /tmp/staged_ml_readiness_"$TARGET_DATE".json
+python3 -m ml_platform.cli retraining-readiness \
+  --start-date "$TARGET_DATE" \
+  --end-date "$TARGET_DATE" \
+  --trading-sessions-observed 0 \
+  --output /tmp/retraining_readiness_"$TARGET_DATE".json
 Prediction Validation Report
 
 prediction_validation_report.py is read-only.

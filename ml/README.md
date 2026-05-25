@@ -38,6 +38,8 @@ python3 -m ml_platform.cli governance-contract
 python3 -m ml_platform.cli dataset-manifest --start-date 2026-05-20 --end-date 2026-05-26
 python3 -m ml_platform.cli model-card-template --model-id similarity_v0
 python3 -m ml_platform.cli replay-decisions --start-date 2026-05-01 --end-date 2026-05-26 --candidate-model similarity_v0
+python3 -m ml_platform.cli staged-readiness --start-date 2026-05-26 --end-date 2026-05-26 --candidate-model similarity_v0 --prediction-symbol AAPL
+python3 -m ml_platform.cli retraining-readiness --start-date 2026-05-26 --end-date 2026-05-26 --trading-sessions-observed 0
 python3 -m ml_platform.cli env-policy
 ```
 
@@ -52,7 +54,12 @@ python3 -m ml_platform.cli export-brain-features --date 2026-05-26 --output /tmp
 python3 -m ml_platform.cli create-experiment setup_baseline --dataset-start 2026-05-20 --dataset-end 2026-05-26
 python3 -m ml_platform.cli integration-contract
 python3 -m ml_platform.cli list-models
+python3 run_staged_tests.py
 ```
 
 Generated experiment/model artifacts are local research outputs and are ignored
 by default. Promote only reviewed metadata/artifacts intentionally.
+
+`models/similarity_v0/` is the first versioned research placeholder. It contains
+metadata only: no trained model artifact, no runtime import, and no permission
+to influence orders, position sizing, or risk controls.

@@ -12,13 +12,11 @@ import subprocess
 import sys
 import urllib.request
 from collections import Counter
-from datetime import datetime
 from pathlib import Path
-
-import pytz
 
 from config import APPROVED_SYMBOLS
 from broker import get_account
+from market_time import expected_market_context_date
 
 BASE_DIR = Path(__file__).resolve().parent
 MARKET_CONTEXT = BASE_DIR / "market_context.json"
@@ -70,14 +68,14 @@ def check_market_context():
         fail(f"market_context.json could not be parsed: {e}")
         return False
 
-    today_et = datetime.now(pytz.timezone("America/New_York")).date().isoformat()
+    expected_date = expected_market_context_date().isoformat()
     market_date = ctx.get("market_date")
     symbols = ctx.get("symbols") or {}
 
-    if market_date == today_et:
-        ok(f"market_date is today: {market_date}")
+    if market_date == expected_date:
+        ok(f"market_date matches expected trading session: {market_date}")
     else:
-        fail(f"market_date is stale or unexpected: {market_date} != {today_et}")
+        fail(f"market_date is stale or unexpected: {market_date} != {expected_date}")
 
     missing = sorted(APPROVED_SYMBOLS - set(symbols))
     extra = sorted(set(symbols) - APPROVED_SYMBOLS)
@@ -116,7 +114,7 @@ def check_market_context():
     else:
         ok("market bias entries appear populated")
 
-    return market_date == today_et and not missing
+    return market_date == expected_date and not missing
 
 
 def check_rolling_momentum():

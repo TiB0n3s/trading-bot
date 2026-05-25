@@ -1,0 +1,25 @@
+{
+  "abstention_required": true,
+  "artifact_path": null,
+  "created_for": "staged_ml_integration_v1",
+  "dataset_manifest_id": null,
+  "feature_version": "feature_snapshots_v1",
+  "last_trained_date": null,
+  "model_id": "similarity_v0",
+  "next_retraining_review_after": "20 trading sessions or drift/performance alert",
+  "notes": [
+    "Metadata scaffold only.",
+    "No trained model artifact is present.",
+    "No runtime code loads this model.",
+    "This model does not place orders, loosen risk controls, or increase position size."
+  ],
+  "promotion_allowed": false,
+  "retraining_policy": "manual_reviewed_batch_retraining",
+  "rollback_plan": null,
+  "runtime_effect": "none",
+  "status": "research",
+  "target": "ret_fwd_15m",
+  "training_data_end_date": null,
+  "training_window": null,
+  "validation_window": null
+}

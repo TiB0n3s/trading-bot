@@ -29,8 +29,10 @@ from ml_platform.governance import (
 )
 from ml_platform.integration_contract import default_contract
 from ml_platform.registry import load_registry, register_model
+from ml_platform.readiness import retraining_readiness_report
 from ml_platform.replay import replay_decisions_scaffold
 from ml_platform.serving import SQLitePredictionProvider
+from ml_platform.staged import staged_ml_integration_report, write_staged_report
 
 
 def main() -> int:
@@ -72,6 +74,12 @@ def main() -> int:
     sub.add_parser("list-models", help="List registry contents")
     sub.add_parser("integration-contract", help="Print ML/brain promotion contract")
     sub.add_parser("evaluation-plan", help="Print default evaluation requirements")
+    readiness = sub.add_parser("retraining-readiness", help="Print manual retraining readiness evidence")
+    readiness.add_argument("--db-path", default=str(DB_PATH))
+    readiness.add_argument("--start-date")
+    readiness.add_argument("--end-date")
+    readiness.add_argument("--trading-sessions-observed", type=int, default=0)
+    readiness.add_argument("--output")
     sub.add_parser("governance-contract", help="Print ML governance requirements")
     sub.add_parser("label-taxonomy", help="Print label taxonomy v1")
     sub.add_parser("env-policy", help="Print ML kill-switch defaults")
@@ -92,6 +100,15 @@ def main() -> int:
     replay.add_argument("--end-date", required=True)
     replay.add_argument("--policy", default="current")
     replay.add_argument("--candidate-model", required=True)
+
+    staged = sub.add_parser("staged-readiness", help="Print staged observe-only ML integration report")
+    staged.add_argument("--db-path", default=str(DB_PATH))
+    staged.add_argument("--start-date", required=True)
+    staged.add_argument("--end-date", required=True)
+    staged.add_argument("--policy", default="current")
+    staged.add_argument("--candidate-model", required=True)
+    staged.add_argument("--prediction-symbol")
+    staged.add_argument("--output")
 
     pred = sub.add_parser("get-prediction", help="Read one observe-only prediction")
     pred.add_argument("--date", required=True)
@@ -122,8 +139,6 @@ def main() -> int:
         manifest = brain_feature_manifest(rows)
         print(f"Wrote brain feature CSV to {path}")
         if args.manifest_output:
-            from pathlib import Path
-
             manifest_path = Path(args.manifest_output)
             manifest_path.parent.mkdir(parents=True, exist_ok=True)
             manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n")
@@ -169,6 +184,31 @@ def main() -> int:
         print(json.dumps(default_evaluation_plan(), indent=2, sort_keys=True))
         return 0
 
+    if args.command == "retraining-readiness":
+        profile_result = dataset_profile(
+            db_path=args.db_path,
+            start_date=args.start_date,
+            end_date=args.end_date,
+        )
+        manifest_result = build_dataset_manifest(
+            db_path=args.db_path,
+            start_date=args.start_date,
+            end_date=args.end_date,
+            query_version="retraining_readiness_v1",
+        )
+        result = retraining_readiness_report(
+            dataset_profile=profile_result,
+            dataset_manifest=manifest_result,
+            trading_sessions_observed=args.trading_sessions_observed,
+        )
+        if args.output:
+            output_path = Path(args.output)
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+            output_path.write_text(json.dumps(result, indent=2, sort_keys=True) + "\n")
+            print(f"Wrote retraining readiness report to {output_path}")
+        print(json.dumps(result, indent=2, sort_keys=True))
+        return 0
+
     if args.command == "governance-contract":
         print(json.dumps(governance_contract(), indent=2, sort_keys=True))
         return 0
@@ -212,6 +252,21 @@ def main() -> int:
             indent=2,
             sort_keys=True,
         ))
+        return 0
+
+    if args.command == "staged-readiness":
+        result = staged_ml_integration_report(
+            db_path=args.db_path,
+            start_date=args.start_date,
+            end_date=args.end_date,
+            policy=args.policy,
+            candidate_model=args.candidate_model,
+            prediction_symbol=args.prediction_symbol,
+        )
+        if args.output:
+            path = write_staged_report(result, args.output)
+            print(f"Wrote staged readiness report to {path}")
+        print(json.dumps(result, indent=2, sort_keys=True))
         return 0
 
     if args.command == "get-prediction":

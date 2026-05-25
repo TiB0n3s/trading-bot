@@ -677,12 +677,16 @@ A model can only move from observe-only to paper-trading influence after it has:
 8. Scope `app.py` decomposition as a multi-week mini-project.
 9. Add rejected-signal forward outcome tracking.
 10. Define label v1 formally.
-11. Add dataset manifest generation to dataset export flow.
-12. Convert the similarity model into versioned model `v0`.
-13. Build the real `replay-decisions` command.
-14. Add calibration and walk-forward evaluation.
-15. Define the first retraining-readiness report and 20-session review cadence.
-16. Only then expose the read-only prediction provider in `/status`.
+11. Done: add dataset manifest generation to dataset export flow.
+12. Started: staged observe-only ML integration lane and `staged-readiness`
+    report.
+13. Started: convert the similarity model into versioned model `v0` with
+    research-only metadata.
+14. Build the real `replay-decisions` command.
+15. Add calibration and walk-forward evaluation.
+16. Started: define the first retraining-readiness report and 20-session review
+    cadence.
+17. Only then expose the read-only prediction provider in `/status`.
 
 Critical blockers before real training:
 

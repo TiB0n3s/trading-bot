@@ -1,0 +1,12 @@
+{
+  "calibration": null,
+  "confusion_matrix": null,
+  "counterfactual_rejected_signal_report": null,
+  "decision_delta_report": null,
+  "metrics": {},
+  "promotion_allowed": false,
+  "purged_walk_forward_validation": null,
+  "runtime_effect": "none",
+  "status": "not_run",
+  "walk_forward_splits": 0
+}

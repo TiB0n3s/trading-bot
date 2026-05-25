@@ -15,10 +15,12 @@ from __future__ import annotations
 
 import argparse
 import csv
+import json
 import sqlite3
 from pathlib import Path
 
 from db import DB_PATH
+from ml_platform.governance import build_dataset_manifest
 
 
 BASE_COLUMNS = [
@@ -84,6 +86,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--end-date", help="End snapshot date, YYYY-MM-DD")
     parser.add_argument("--output", required=True, help="CSV output path")
     parser.add_argument("--db-path", default=str(DB_PATH), help="SQLite DB path")
+    parser.add_argument("--manifest-output", help="Optional JSON dataset manifest output path")
+    parser.add_argument("--query-version", default="ml_dataset_export_v1")
+    parser.add_argument("--label-version", default="label_taxonomy_v1")
     args = parser.parse_args()
 
     if args.date and (args.start_date or args.end_date):
@@ -208,6 +213,18 @@ def main() -> int:
     args = parse_args()
     rows = fetch_rows(args)
     path = write_csv(rows, args.output)
+    manifest_path = None
+    if args.manifest_output:
+        manifest = build_dataset_manifest(
+            db_path=args.db_path,
+            start_date=args.date or args.start_date,
+            end_date=args.date or args.end_date,
+            query_version=args.query_version,
+            label_version=args.label_version,
+        )
+        manifest_path = Path(args.manifest_output)
+        manifest_path.parent.mkdir(parents=True, exist_ok=True)
+        manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n")
 
     labeled = sum(1 for r in rows if r["outcome_label"] is not None)
     symbols = {r["symbol"] for r in rows}
@@ -217,6 +234,8 @@ def main() -> int:
     print(f"rows         : {len(rows)}")
     print(f"labeled_rows : {labeled}")
     print(f"symbols      : {len(symbols)}")
+    if manifest_path:
+        print(f"manifest     : {manifest_path}")
 
     if not rows:
         print("[WARN] no feature_snapshots matched the requested date range")

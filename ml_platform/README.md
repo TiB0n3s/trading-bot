@@ -11,11 +11,13 @@ python3 -m ml_platform.cli export-brain-features --date 2026-05-26 --output /tmp
 python3 -m ml_platform.cli create-experiment setup_baseline --dataset-start 2026-05-20 --dataset-end 2026-05-26
 python3 -m ml_platform.cli integration-contract
 python3 -m ml_platform.cli evaluation-plan
+python3 -m ml_platform.cli retraining-readiness --start-date 2026-05-26 --end-date 2026-05-26 --trading-sessions-observed 0
 python3 -m ml_platform.cli governance-contract
 python3 -m ml_platform.cli dataset-manifest --start-date 2026-05-20 --end-date 2026-05-26
 python3 -m ml_platform.cli label-taxonomy
 python3 -m ml_platform.cli model-card-template --model-id similarity_v0
 python3 -m ml_platform.cli replay-decisions --start-date 2026-05-01 --end-date 2026-05-26 --candidate-model similarity_v0
+python3 -m ml_platform.cli staged-readiness --start-date 2026-05-26 --end-date 2026-05-26 --candidate-model similarity_v0 --prediction-symbol AAPL
 python3 -m ml_platform.cli env-policy
 python3 -m ml_platform.cli get-prediction --date 2026-05-26 --symbol AAPL
 python3 -m ml_platform.cli list-models
@@ -24,7 +26,8 @@ python3 -m ml_platform.cli list-models
 ## Boundaries
 
 - No model serving.
-- `serving.py` is an interface scaffold only; it is not imported by runtime.
+- `serving.py` is a read-only provider scaffold only; it is not imported by runtime.
+- `staged.py` composes ahead-of-live integration evidence only; it is not imported by runtime.
 - No runtime decision changes.
 - No writes to `trades.db`.
 - No broker/order calls.
@@ -102,3 +105,25 @@ features:
 This is the first bridge between the current bot brain and the future ML
 platform. It creates offline features only. It does not import runtime order
 code, write to SQLite, or modify decisions.
+
+## Staged Readiness
+
+`staged.py` composes the current observe-only platform pieces into a single
+readiness report:
+
+- dataset profile,
+- dataset manifest,
+- brain feature manifest,
+- replay output contract,
+- prediction-provider contract,
+- retraining-readiness blockers,
+- promotion gates.
+
+The report must keep `runtime_effect: none`.
+
+`readiness.py` defines the manual retraining-readiness report. It defaults to
+`promotion_allowed: false` and lists blockers such as missing feature snapshots,
+labels, matched outcomes, and fewer than 20 observed trading sessions.
+
+Use `python3 run_staged_tests.py` to test these ahead-of-live contracts without
+changing current live/paper behavior.

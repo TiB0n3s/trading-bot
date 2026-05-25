@@ -2,3 +2,7 @@
 !.gitignore
 !README.md
 !registry.example.json
+!similarity_v0/
+!similarity_v0/README.md
+!similarity_v0/model_card.json
+!similarity_v0/metrics.placeholder.json

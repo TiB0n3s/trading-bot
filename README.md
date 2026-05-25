@@ -19,6 +19,11 @@ As of the latest roadmap work:
   - trend context reports
 - `prediction_validation_report.py` exists and is wired into `ops_check.py`.
 - `next_trading_date.py` now uses holiday-aware market calendar logic from `market_time.py`.
+- `market_context.json` date checks use the expected trading session, so weekend/holiday premarket context may target the next open market day.
+- `export_ml_dataset.py` can write a dataset manifest next to the CSV export.
+- `ml_platform` has a staged, ahead-of-live integration lane with `staged-readiness` and `retraining-readiness` reports.
+- `ml/models/similarity_v0/` is a research-only metadata placeholder, not a trained model artifact.
+- `run_staged_tests.py` runs observe-only integration tests separate from the live/current behavior tests.
 - Prediction layer remains observe-only.
 - No prediction score currently changes live trading decisions.
 
@@ -233,6 +238,7 @@ Market open/closed labeling.
 Trading day detection.
 Common NYSE full-day holiday handling.
 Shared next_trading_date() helper.
+Expected market_context trading-session date selection.
 
 This is now the source of truth for holiday-aware trading date selection.
 
@@ -406,6 +412,58 @@ observe-only
 → warn-only
 → soft modifier
 → possible live gate much later
+
+ML Platform and Staged Integration
+
+The ML platform is a research/audit layer. It is intentionally separate from
+live webhook, broker, order, and hard risk-control paths.
+
+Current staged pieces:
+
+ml_platform/brain_features.py
+ml_platform/governance.py
+ml_platform/readiness.py
+ml_platform/replay.py
+ml_platform/serving.py
+ml_platform/staged.py
+ml/models/similarity_v0/
+run_staged_tests.py
+tests/staged/
+
+Useful read-only commands:
+
+python3 run_staged_tests.py
+python3 -m ml_platform.cli staged-readiness \
+  --start-date 2026-05-26 \
+  --end-date 2026-05-26 \
+  --candidate-model similarity_v0 \
+  --prediction-symbol AAPL \
+  --output /tmp/staged_ml_readiness_2026-05-26.json
+python3 -m ml_platform.cli retraining-readiness \
+  --start-date 2026-05-26 \
+  --end-date 2026-05-26 \
+  --trading-sessions-observed 0 \
+  --output /tmp/retraining_readiness_2026-05-26.json
+
+The staged readiness report composes dataset profile, dataset manifest, brain
+feature manifest, replay contract, prediction-provider contract, retraining
+readiness, and promotion gates. It reports `runtime_effect: none`.
+
+`similarity_v0` is metadata-only. It has no trained artifact, no runtime import,
+and no authority to place orders, loosen risk controls, or change sizing.
+
+Dataset Export and Manifest
+
+The supervised dataset exporter is read-only and can write an audit manifest:
+
+python3 export_ml_dataset.py \
+  --date 2026-05-26 \
+  --output /tmp/ml_dataset_2026-05-26.csv \
+  --manifest-output /tmp/ml_dataset_2026-05-26.manifest.json
+
+Dataset manifests include DB hash, query version, label version, feature
+version, row/symbol counts, git SHA, override-file hashes, and policy-artifact
+hashes. They are intended for auditability, not promotion by themselves.
 /status Symbol Intelligence
 
 GET /status?secret=... includes:

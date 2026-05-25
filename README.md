@@ -26,6 +26,8 @@ As of the latest roadmap work:
 - `run_staged_tests.py` runs observe-only integration tests separate from the live/current behavior tests.
 - `broker.py` has input validation, structured error types, and unit coverage for core order-flow boundaries.
 - `ops/db_connection_audit.py` reports manual SQLite connection patterns to support gradual cleanup.
+- `db_migrations.py` provides an idempotent schema migration runner.
+- `feature_snapshots` now carries leakage/audit fields required by the ML governance contract.
 - Prediction layer remains observe-only.
 - No prediction score currently changes live trading decisions.
 
@@ -482,6 +484,19 @@ python3 export_ml_dataset.py \
 Dataset manifests include DB hash, query version, label version, feature
 version, row/symbol counts, git SHA, override-file hashes, and policy-artifact
 hashes. They are intended for auditability, not promotion by themselves.
+
+Feature leakage fields now live in `feature_snapshots` and are exported in ML
+datasets:
+
+feature_available_at
+feature_generated_at
+feature_age_seconds
+source
+is_stale
+staleness_reason
+
+Use `python3 db_migrations.py status` and `python3 db_migrations.py apply` to
+check or apply idempotent schema migrations.
 /status Symbol Intelligence
 
 GET /status?secret=... includes:

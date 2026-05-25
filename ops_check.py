@@ -1020,12 +1020,10 @@ def feature_watch(target_date):
 
 
 def _reason_category(reason):
-    reason = (reason or "").strip()
-    if not reason:
-        return "missing"
-    if ":" in reason:
-        return reason.split(":", 1)[0].strip() or "missing"
-    return reason.split()[0].strip() if reason.split() else "missing"
+    from rejection_categories import reason_category
+
+    category = reason_category(reason)
+    return "missing" if category == "unknown_error" and not (reason or "").strip() else category
 
 
 def rejection_summary(target_date):

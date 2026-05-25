@@ -29,6 +29,23 @@ MARKET_CONTEXT_FILE = BASE_DIR / "market_context.json"
 ET = pytz.timezone("America/New_York")
 _BAR_CACHE: dict[tuple[str, str], tuple[list[float], list[float]]] = {}
 
+
+def add_feature_audit_fields(snapshot: dict) -> dict:
+    """Attach leakage/audit metadata for dataset exports."""
+    generated_at = datetime.now(ET).isoformat()
+    feature_time = snapshot.get("timestamp") or generated_at
+    snapshot["feature_generated_at"] = generated_at
+    snapshot["feature_available_at"] = generated_at
+    snapshot["feature_age_seconds"] = 0.0
+    snapshot["source"] = "live_features"
+    snapshot["is_stale"] = 0
+    snapshot["staleness_reason"] = None
+    if not snapshot.get("timestamp"):
+        snapshot["timestamp"] = feature_time
+        snapshot["is_stale"] = 1
+        snapshot["staleness_reason"] = "missing_snapshot_timestamp"
+    return snapshot
+
 def load_market_context() -> dict:
     if not MARKET_CONTEXT_FILE.exists():
         return {}
@@ -193,7 +210,7 @@ def build_snapshot(symbol: str) -> dict:
     snapshot["setup_key"] = setup.setup_key
     snapshot["setup_rationale"] = setup.rationale
 
-    return snapshot
+    return add_feature_audit_fields(snapshot)
 
 def insert_snapshot(snapshot: dict) -> None:
     with get_connection(DB_PATH) as con:
@@ -220,6 +237,12 @@ def insert_snapshot(snapshot: dict) -> None:
                 market_bias,
                 trend_direction,
                 trend_strength,
+                feature_available_at,
+                feature_generated_at,
+                feature_age_seconds,
+                source,
+                is_stale,
+                staleness_reason,
                 bar_timeframe,
                 bar_count,
                 setup_label,
@@ -227,7 +250,7 @@ def insert_snapshot(snapshot: dict) -> None:
                 setup_score,
                 setup_confidence,
                 setup_key
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 snapshot.get("timestamp"),
@@ -250,6 +273,12 @@ def insert_snapshot(snapshot: dict) -> None:
                 snapshot.get("market_bias"),
                 snapshot.get("trend_direction"),
                 snapshot.get("trend_strength"),
+                snapshot.get("feature_available_at"),
+                snapshot.get("feature_generated_at"),
+                snapshot.get("feature_age_seconds"),
+                snapshot.get("source"),
+                snapshot.get("is_stale"),
+                snapshot.get("staleness_reason"),
                 snapshot.get("bar_timeframe"),
                 snapshot.get("bar_count"),
                 snapshot.get("setup_label"),

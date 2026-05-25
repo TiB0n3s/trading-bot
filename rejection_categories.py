@@ -16,6 +16,7 @@ COOLDOWN = "cooldown"
 SELL_TO_BUY_CHURN = "sell_to_buy_churn"
 AFFORDABILITY = "affordability"
 PRICE_SANITY = "price_sanity"
+PAYLOAD_VALIDATION = "payload_validation"
 BROKER_REJECTED = "broker_rejected"
 CLAUDE_REJECTED = "claude_rejected"
 PREDICTION_GATE = "prediction_gate"
@@ -35,6 +36,7 @@ ALL_REJECTION_CATEGORIES = {
     SELL_TO_BUY_CHURN,
     AFFORDABILITY,
     PRICE_SANITY,
+    PAYLOAD_VALIDATION,
     BROKER_REJECTED,
     CLAUDE_REJECTED,
     PREDICTION_GATE,
@@ -42,3 +44,31 @@ ALL_REJECTION_CATEGORIES = {
     ORDER_QTY_ZERO,
     UNKNOWN_ERROR,
 }
+
+LEGACY_CATEGORY_ALIASES: dict[str, str] = {}
+
+
+def normalize_category(category: str | None) -> str:
+    """Return a stable rejection category for persisted/reportable reasons."""
+    raw = str(category or "").strip().lower()
+    if not raw:
+        return UNKNOWN_ERROR
+    return LEGACY_CATEGORY_ALIASES.get(raw, raw)
+
+
+def format_rejection_reason(category: str | None, reason: str | None) -> str:
+    """Format rejection_reason as a stable category prefix plus free-text reason."""
+    stable_category = normalize_category(category)
+    clean_reason = str(reason or "").strip()
+    if clean_reason.startswith(f"{stable_category}:"):
+        return clean_reason
+    return f"{stable_category}: {clean_reason}" if clean_reason else f"{stable_category}:"
+
+
+def reason_category(rejection_reason: str | None) -> str:
+    """Extract and normalize the category prefix from a persisted rejection."""
+    reason = str(rejection_reason or "").strip()
+    if not reason:
+        return UNKNOWN_ERROR
+    prefix = reason.split(":", 1)[0]
+    return normalize_category(prefix)

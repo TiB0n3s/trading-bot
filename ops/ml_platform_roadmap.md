@@ -668,14 +668,17 @@ A model can only move from observe-only to paper-trading influence after it has:
 
 1. Add schema/migration management.
 2. Add immutable decision snapshots.
-3. Add `feature_available_at` and `feature_generated_at` fields.
+3. Done: add `feature_available_at`, `feature_generated_at`,
+   `feature_age_seconds`, `source`, `is_stale`, and `staleness_reason` fields
+   to `feature_snapshots_v2`.
 4. Add serving latency enforcement before any webhook-path provider import.
 5. Add policy-artifact rollback/registry entries for after-close learning
    memory files.
 6. Add timestamped override history and dataset-manifest override hashes.
 7. Add data-retention tiers and archive/compaction commands.
 8. Scope `app.py` decomposition as a multi-week mini-project.
-9. Add rejected-signal forward outcome tracking.
+9. Started: add `rejected_signal_outcomes` schema target for rejected-signal
+   forward outcome tracking. Builder still pending.
 10. Define label v1 formally.
 11. Done: add dataset manifest generation to dataset export flow.
 12. Started: staged observe-only ML integration lane and `staged-readiness`

@@ -130,6 +130,12 @@ def init_prediction_tables(db_path: Path | str = DB_PATH) -> None:
                 market_bias TEXT,
                 trend_direction TEXT,
                 trend_strength TEXT,
+                feature_available_at TEXT,
+                feature_generated_at TEXT,
+                feature_age_seconds REAL,
+                source TEXT,
+                is_stale INTEGER,
+                staleness_reason TEXT,
                 bar_timeframe TEXT,
                 bar_count INTEGER,
                 setup_label TEXT,
@@ -207,6 +213,12 @@ def init_prediction_tables(db_path: Path | str = DB_PATH) -> None:
         }
 
         feature_snapshot_cols = [
+            ("feature_available_at", "TEXT"),
+            ("feature_generated_at", "TEXT"),
+            ("feature_age_seconds", "REAL"),
+            ("source", "TEXT"),
+            ("is_stale", "INTEGER"),
+            ("staleness_reason", "TEXT"),
             ("bar_timeframe", "TEXT"),
             ("bar_count", "INTEGER"),
             ("setup_label", "TEXT"),
@@ -230,6 +242,47 @@ def init_db_performance_indexes(db_path: Path | str = DB_PATH) -> None:
         )
         con.execute(
             "CREATE INDEX IF NOT EXISTS idx_trades_symbol_timestamp ON trades(symbol, timestamp)"
+        )
+
+
+def ensure_rejected_signal_outcomes_table(db_path: Path | str = DB_PATH) -> None:
+    """Create the counterfactual outcome table for rejected signals."""
+    with get_connection(db_path) as con:
+        con.execute(
+            """
+            CREATE TABLE IF NOT EXISTS rejected_signal_outcomes (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                trade_id INTEGER UNIQUE,
+                timestamp TEXT NOT NULL,
+                symbol TEXT NOT NULL,
+                action TEXT NOT NULL,
+                signal_price REAL,
+                rejection_reason TEXT,
+                return_5m REAL,
+                return_15m REAL,
+                return_30m REAL,
+                return_60m REAL,
+                return_eod REAL,
+                max_favorable_60m REAL,
+                max_adverse_60m REAL,
+                label_status TEXT NOT NULL DEFAULT 'pending',
+                source TEXT,
+                generated_at TEXT NOT NULL DEFAULT (datetime('now')),
+                FOREIGN KEY (trade_id) REFERENCES trades(id)
+            )
+            """
+        )
+        con.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_rejected_signal_outcomes_symbol_timestamp
+            ON rejected_signal_outcomes(symbol, timestamp)
+            """
+        )
+        con.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_rejected_signal_outcomes_status
+            ON rejected_signal_outcomes(label_status)
+            """
         )
         con.execute(
             "CREATE INDEX IF NOT EXISTS idx_trades_order_id ON trades(order_id)"

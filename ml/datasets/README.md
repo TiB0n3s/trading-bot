@@ -71,6 +71,9 @@ only and selection-biased.
 - Event context must use only events collected before the evaluated session.
 - Every canonical row needs `feature_available_at`, `feature_generated_at`,
   `feature_age_seconds`, `source`, `is_stale`, and `staleness_reason`.
+- These fields are now part of `feature_snapshots_v2` and are exported by
+  `export_ml_dataset.py`. Legacy rows may use fallback values during export
+  until enough v2 snapshots are collected.
 - Decision-time rows must not use anything learned after
   `order_decision_time`.
 - Trend/momentum reports generated after the fact are evaluation evidence, not

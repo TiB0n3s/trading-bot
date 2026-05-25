@@ -46,6 +46,12 @@ BASE_COLUMNS = [
     "market_bias",
     "trend_direction",
     "trend_strength",
+    "feature_available_at",
+    "feature_generated_at",
+    "feature_age_seconds",
+    "source",
+    "is_stale",
+    "staleness_reason",
     "bar_timeframe",
     "bar_count",
     "setup_label",
@@ -113,6 +119,16 @@ def table_exists(con: sqlite3.Connection, table: str) -> bool:
     return row is not None
 
 
+def table_columns(con: sqlite3.Connection, table: str) -> set[str]:
+    if not table_exists(con, table):
+        return set()
+    return {row["name"] for row in con.execute(f"PRAGMA table_info({table})").fetchall()}
+
+
+def optional_column(columns: set[str], table_alias: str, column: str, fallback: str = "NULL") -> str:
+    return f"{table_alias}.{column}" if column in columns else f"{fallback} AS {column}"
+
+
 def fetch_rows(args: argparse.Namespace) -> list[sqlite3.Row]:
     db_path = Path(args.db_path)
     where_sql, params = date_filter(args)
@@ -124,6 +140,7 @@ def fetch_rows(args: argparse.Namespace) -> list[sqlite3.Row]:
         missing = [t for t in required if not table_exists(con, t)]
         if missing:
             raise SystemExit(f"Missing required table(s): {', '.join(missing)}")
+        fs_columns = table_columns(con, "feature_snapshots")
 
         # Context/prediction tables are expected in normal operation, but left
         # joins keep this export useful during recovery or partial rebuilds.
@@ -151,6 +168,12 @@ def fetch_rows(args: argparse.Namespace) -> list[sqlite3.Row]:
                 fs.market_bias,
                 fs.trend_direction,
                 fs.trend_strength,
+                {optional_column(fs_columns, 'fs', 'feature_available_at', 'fs.timestamp')},
+                {optional_column(fs_columns, 'fs', 'feature_generated_at', 'fs.timestamp')},
+                {optional_column(fs_columns, 'fs', 'feature_age_seconds', '0')},
+                {optional_column(fs_columns, 'fs', 'source', "'feature_snapshots_legacy'")},
+                {optional_column(fs_columns, 'fs', 'is_stale', '0')},
+                {optional_column(fs_columns, 'fs', 'staleness_reason')},
                 fs.bar_timeframe,
                 fs.bar_count,
                 fs.setup_label,

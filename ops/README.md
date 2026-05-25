@@ -105,6 +105,26 @@ python3 run_tests.py
 ```
 
 
+## Schema Migrations
+
+Use `db_migrations.py` for idempotent schema changes instead of manual
+one-off `ALTER TABLE` statements:
+
+```bash
+cd ~/trading-bot
+python3 db_migrations.py status
+python3 db_migrations.py apply
+```
+
+The first tracked migration adds feature leakage/audit columns to
+`feature_snapshots`: `feature_available_at`, `feature_generated_at`,
+`feature_age_seconds`, `source`, `is_stale`, and `staleness_reason`.
+
+The second tracked migration creates `rejected_signal_outcomes`, the canonical
+target table for future counterfactual labels on rejected signals. The forward
+return builder is still a separate pending step.
+
+
 ## Tuesday QA Runbook
 
 Use the Tuesday QA runbook to turn the 2026-05-26 paper session into a structured

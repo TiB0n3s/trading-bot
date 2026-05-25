@@ -24,6 +24,10 @@ Recent completed roadmap items:
 - `run_staged_tests.py` runs ahead-of-live staged integration tests separately from current behavior tests.
 - `broker.py` has validation/unit coverage for core order-flow boundaries.
 - `ops/db_connection_audit.py` reports manual SQLite connection assignments for gradual cleanup.
+- `db_migrations.py` tracks idempotent schema migrations.
+- `feature_snapshots` includes ML leakage/audit fields:
+  `feature_available_at`, `feature_generated_at`, `feature_age_seconds`,
+  `source`, `is_stale`, and `staleness_reason`.
 - The prediction layer is observe-only and does not modify trade decisions.
 - The intelligence pipeline is staged for the next live paper-trading session.
 
@@ -654,6 +658,7 @@ python3 ops_check.py predictions "$TARGET_DATE"
 python3 ops_check.py trends "$TARGET_DATE"
 python3 ops_check.py prediction-validation "$TARGET_DATE"
 python3 ops/db_connection_audit.py
+python3 db_migrations.py status
 
 Staged ML/ahead-of-live checks:
 

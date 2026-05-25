@@ -387,6 +387,8 @@ def similarity_score(target_ctx, target_events, hist_ctx, hist_events):
     hist_sig = event_signature(hist_events)
 
     if target_ctx["symbol"] == hist_ctx["symbol"]:
+        # Deliberately visible because same-symbol weighting can dominate sparse
+        # histories. Review this once enough post-QA rows exist per symbol.
         score += 15
         reasons.append("same_symbol")
 

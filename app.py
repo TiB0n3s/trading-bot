@@ -40,6 +40,8 @@ from risk.macro_policy import policy_from_market_context
 from data_layer.ledger import ledger_summary
 from alerts import alert_config_public
 from policy_artifacts import policy_artifact_status
+from exceptions import ValidationError
+from rejection_categories import format_rejection_reason
 from runtime_config import (
     EXECUTION_MODE,
     LIVE_TRADING_ENABLED,
@@ -1761,7 +1763,7 @@ def _build_decision_context(symbol, action, account_state=None):
 def log_rejection(symbol, action, category, reason, price=None, account_state=None):
     """Persist a pre-Claude rejection to trades.db so reports can count it."""
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    full_reason = f"{category}: {reason}"
+    full_reason = format_rejection_reason(category, reason)
     ctx = _build_decision_context(symbol, action, account_state)
     setup_obs = (account_state or {}).get("setup_observation") or {}
     prediction_gate = (account_state or {}).get("prediction_gate") or {}
@@ -3291,9 +3293,23 @@ def process_signal(data):
     dedupe_key = data.get("_dedupe_key")
     ...
     _load_market_context()
-    action = data.get("action", "").lower()
-    symbol = data.get("symbol", "")
-    price = data.get("price", 0)
+    try:
+        action = str(data.get("action", "")).strip().lower()
+        symbol = str(data.get("symbol", "")).strip().upper()
+        price = data.get("price", 0)
+        if action not in ("buy", "sell"):
+            raise ValidationError(f"invalid action={action!r}")
+        if not symbol:
+            raise ValidationError("missing symbol")
+    except ValidationError as e:
+        logger.warning(f"Invalid signal payload rejected: {e}")
+        if dedupe_key:
+            _mark_webhook_event_status(
+                dedupe_key,
+                "rejected",
+                failure_reason=format_rejection_reason("payload_validation", str(e)),
+            )
+        return
     logger.info(f"Processing {action.upper()} signal for {symbol} at {price}")
 
     account_state = get_mock_account_state()
@@ -3329,7 +3345,7 @@ def process_signal(data):
             _mark_webhook_event_status(
                 dedupe_key,
                 "rejected",
-                failure_reason=f"{category}: {reason}",
+                failure_reason=format_rejection_reason(category, reason),
             )
 
         return True

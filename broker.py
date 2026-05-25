@@ -1,7 +1,9 @@
 import os
 import time
 import logging
+from typing import Any
 import alpaca_trade_api as tradeapi
+from exceptions import BrokerError, ValidationError
 from runtime_config import (
     EXECUTION_MODE,
     LIVE_TRADING_ENABLED,
@@ -30,7 +32,74 @@ ALPACA_BASE_URL = get_alpaca_base_url()
 
 api = tradeapi.REST(ALPACA_API_KEY, ALPACA_SECRET_KEY, ALPACA_BASE_URL)
 
-def get_account():
+
+def _normalize_symbol(symbol: str) -> str:
+    normalized = str(symbol or "").strip().upper()
+    if not normalized:
+        raise ValidationError("symbol is required")
+    if not normalized.replace(".", "").replace("-", "").isalnum():
+        raise ValidationError(f"invalid symbol={symbol!r}")
+    return normalized
+
+
+def _normalize_action(action: str) -> str:
+    normalized = str(action or "").strip().lower()
+    if normalized not in ("buy", "sell"):
+        raise ValidationError(f"invalid action={action!r}; expected buy or sell")
+    return normalized
+
+
+def _positive_float(name: str, value: Any, *, allow_zero: bool = False) -> float:
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValidationError(f"{name} must be numeric") from exc
+
+    if allow_zero:
+        if parsed < 0:
+            raise ValidationError(f"{name} must be >= 0")
+    elif parsed <= 0:
+        raise ValidationError(f"{name} must be > 0")
+    return parsed
+
+
+def _optional_positive_int(name: str, value: Any) -> int | None:
+    if value is None:
+        return None
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError) as exc:
+        raise ValidationError(f"{name} must be an integer") from exc
+    if parsed <= 0:
+        raise ValidationError(f"{name} must be > 0")
+    return parsed
+
+
+def validate_order_request(
+    symbol: str,
+    action: str,
+    position_size_pct: Any,
+    stop_loss_pct: Any,
+    take_profit_pct: Any,
+    qty_override: Any = None,
+) -> dict[str, Any]:
+    """Validate and normalize broker order inputs without calling Alpaca."""
+    return {
+        "symbol": _normalize_symbol(symbol),
+        "action": _normalize_action(action),
+        "position_size_pct": _positive_float("position_size_pct", position_size_pct),
+        "stop_loss_pct": _positive_float("stop_loss_pct", stop_loss_pct, allow_zero=True),
+        "take_profit_pct": _positive_float("take_profit_pct", take_profit_pct, allow_zero=True),
+        "qty_override": _optional_positive_int("qty_override", qty_override),
+    }
+
+
+def _classify_broker_exception(exc: Exception) -> BrokerError:
+    """Wrap broker exceptions with a structured type while preserving context."""
+    return BrokerError(str(exc))
+
+
+def get_account() -> dict[str, Any] | None:
     try:
         account = api.get_account()
         return {
@@ -43,8 +112,10 @@ def get_account():
         logger.error(f"Failed to get account: {e}")
         return None
 
-def get_position(symbol):
+
+def get_position(symbol: str) -> dict[str, Any] | None:
     try:
+        symbol = _normalize_symbol(symbol)
         position = api.get_position(symbol)
         return {
             "symbol": symbol,
@@ -57,8 +128,33 @@ def get_position(symbol):
         logger.info(f"No position found for {symbol}: {e}")
         return None
 
-def place_order(symbol, action, position_size_pct, stop_loss_pct, take_profit_pct, risk_level=None, client_order_id=None, qty_override=None):
+
+def place_order(
+    symbol: str,
+    action: str,
+    position_size_pct: float,
+    stop_loss_pct: float,
+    take_profit_pct: float,
+    risk_level: str | None = None,
+    client_order_id: str | None = None,
+    qty_override: int | None = None,
+) -> dict[str, Any] | None:
     try:
+        request = validate_order_request(
+            symbol=symbol,
+            action=action,
+            position_size_pct=position_size_pct,
+            stop_loss_pct=stop_loss_pct,
+            take_profit_pct=take_profit_pct,
+            qty_override=qty_override,
+        )
+        symbol = request["symbol"]
+        action = request["action"]
+        position_size_pct = request["position_size_pct"]
+        stop_loss_pct = request["stop_loss_pct"]
+        take_profit_pct = request["take_profit_pct"]
+        qty_override = request["qty_override"]
+
         if is_cash_mode() and not LIVE_TRADING_ENABLED:
             logger.error(
                 f"LIVE GUARD: refusing {action.upper()} {symbol} because "
@@ -84,7 +180,7 @@ def place_order(symbol, action, position_size_pct, stop_loss_pct, take_profit_pc
                     qty = position_qty
 
             except Exception as e:
-                logger.error(f"Failed to fetch position for {symbol}: {e}")
+                logger.error(f"Failed to fetch position for {symbol}: {_classify_broker_exception(e)}")
                 return None
 
             if qty <= 0:
@@ -123,7 +219,7 @@ def place_order(symbol, action, position_size_pct, stop_loss_pct, take_profit_pc
                     f"available={available_qty}"
                 )
             except Exception as e:
-                logger.error(f"Failed to cancel open orders for {symbol}: {e}")
+                logger.error(f"Failed to cancel open orders for {symbol}: {_classify_broker_exception(e)}")
                 return None
         else:
             risk_amount = balance * (position_size_pct / 100)
@@ -247,6 +343,9 @@ def place_order(symbol, action, position_size_pct, stop_loss_pct, take_profit_pc
             "take_profit": take_price,
             "status": order.status
         }
+    except ValidationError as e:
+        logger.error(f"Invalid order request: {e}")
+        return None
     except Exception as e:
         logger.error(f"Order placement failed: {e}")
         return None

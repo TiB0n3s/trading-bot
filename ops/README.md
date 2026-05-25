@@ -86,6 +86,25 @@ recent context. `order-health` checks approved rows for order IDs/statuses,
 fill-event distribution, and imported Alpaca order status summaries.
 
 
+## Maintainability Audits
+
+Use the DB connection audit while refactoring database access. It is read-only
+and flags manual connection assignments that should be reviewed for `close()` or
+conversion to `with get_connection(...)` blocks:
+
+```bash
+cd ~/trading-bot
+python3 ops/db_connection_audit.py
+```
+
+Broker boundary unit tests live in `tests/test_broker.py` and are included in
+the normal targeted test runner:
+
+```bash
+python3 run_tests.py
+```
+
+
 ## Tuesday QA Runbook
 
 Use the Tuesday QA runbook to turn the 2026-05-26 paper session into a structured

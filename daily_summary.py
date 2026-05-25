@@ -543,13 +543,12 @@ def _refresh_matched():
 def run(target_date: str = None):
     target_date = target_date or str(date.today())
     _refresh_matched()
-    con = get_connection(DB_PATH)
-    rows = con.execute(
-        "SELECT * FROM trades WHERE timestamp LIKE ?", (f"{target_date}%",)
-    ).fetchall()
-    trade_rows = _load_trade_rows(con, target_date=target_date)
-    matched = _query_matched(con, "AND exit_timestamp LIKE ?", (f"{target_date}%",))
-    con.close()
+    with get_connection(DB_PATH) as con:
+        rows = con.execute(
+            "SELECT * FROM trades WHERE timestamp LIKE ?", (f"{target_date}%",)
+        ).fetchall()
+        trade_rows = _load_trade_rows(con, target_date=target_date)
+        matched = _query_matched(con, "AND exit_timestamp LIKE ?", (f"{target_date}%",))
     _render(rows, matched, f"DAILY SUMMARY — {target_date}", trade_rows=trade_rows)
 
 
@@ -568,22 +567,21 @@ def run_week(target_date: str = None):
     end_excl = (friday + timedelta(days=1)).isoformat()
 
     _refresh_matched()
-    con = get_connection(DB_PATH)
-    rows = con.execute(
-        "SELECT * FROM trades WHERE timestamp >= ? AND timestamp < ?",
-        (monday.isoformat(), end_excl),
-    ).fetchall()
-    trade_rows = _load_trade_rows(
-        con,
-        start_date=monday.isoformat(),
-        end_date=end_excl,
-    )
-    matched = _query_matched(
-        con,
-        "AND exit_timestamp >= ? AND exit_timestamp < ?",
-        (monday.isoformat(), end_excl),
-    )
-    con.close()
+    with get_connection(DB_PATH) as con:
+        rows = con.execute(
+            "SELECT * FROM trades WHERE timestamp >= ? AND timestamp < ?",
+            (monday.isoformat(), end_excl),
+        ).fetchall()
+        trade_rows = _load_trade_rows(
+            con,
+            start_date=monday.isoformat(),
+            end_date=end_excl,
+        )
+        matched = _query_matched(
+            con,
+            "AND exit_timestamp >= ? AND exit_timestamp < ?",
+            (monday.isoformat(), end_excl),
+        )
     _render(
         rows,
         matched,

@@ -1441,46 +1441,36 @@ def _record_webhook_event(dedupe_key, data):
     """
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     try:
-        con = sqlite3.connect(DB_PATH)
-        con.execute(
-            """
-            DELETE FROM webhook_events
-            WHERE received_at < datetime('now', ?)
-            """,
-            (f"-{WEBHOOK_DEDUPE_SECONDS} seconds",),
-        )
-        con.execute(
-            """
-            INSERT INTO webhook_events (
-                dedupe_key, received_at, symbol, action, signal_price, source,
-                payload_json, status
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, 'received')
-            """,
-            (
-                dedupe_key,
-                timestamp,
-                str(data.get("symbol", "")).upper(),
-                str(data.get("action", "")).lower(),
-                data.get("price"),
-                data.get("source"),
-                json.dumps(data, sort_keys=True),
-            ),
-        )
-        con.commit()
-        con.close()
+        with get_connection(DB_PATH) as con:
+            con.execute(
+                """
+                DELETE FROM webhook_events
+                WHERE received_at < datetime('now', ?)
+                """,
+                (f"-{WEBHOOK_DEDUPE_SECONDS} seconds",),
+            )
+            con.execute(
+                """
+                INSERT INTO webhook_events (
+                    dedupe_key, received_at, symbol, action, signal_price, source,
+                    payload_json, status
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, 'received')
+                """,
+                (
+                    dedupe_key,
+                    timestamp,
+                    str(data.get("symbol", "")).upper(),
+                    str(data.get("action", "")).lower(),
+                    data.get("price"),
+                    data.get("source"),
+                    json.dumps(data, sort_keys=True),
+                ),
+            )
         return True
     except sqlite3.IntegrityError:
-        try:
-            con.close()
-        except Exception:
-            pass
         return False
     except Exception as e:
         logger.error(f"Webhook dedupe persistence failed: {e}")
-        try:
-            con.close()
-        except Exception:
-            pass
         # Fail open so a DB hiccup does not drop a legitimate sell/risk-reducing signal.
         return True
 
@@ -1531,13 +1521,11 @@ def _mark_webhook_event_status(
 
         params.append(dedupe_key)
 
-        con = sqlite3.connect(DB_PATH)
-        con.execute(
-            f"UPDATE webhook_events SET {', '.join(assignments)} WHERE dedupe_key = ?",
-            params,
-        )
-        con.commit()
-        con.close()
+        with get_connection(DB_PATH) as con:
+            con.execute(
+                f"UPDATE webhook_events SET {', '.join(assignments)} WHERE dedupe_key = ?",
+                params,
+            )
     except Exception as e:
         logger.warning(f"Failed to update webhook event status for {dedupe_key}: {e}")
 

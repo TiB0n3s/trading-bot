@@ -289,16 +289,15 @@ def _get_symbol_history(symbol, trend_direction=None, trend_strength=None):
     """Query matched_trades for recent symbol outcome context to inject into Claude."""
     try:
         from db import DB_PATH, get_connection
-        con = get_connection(DB_PATH)
-        rows = con.execute("""
-            SELECT won, realized_pnl_pct, holding_minutes,
-                   trend_direction, trend_strength
-            FROM matched_trades
-            WHERE symbol = ?
-            ORDER BY exit_timestamp DESC
-            LIMIT 10
-        """, (symbol,)).fetchall()
-        con.close()
+        with get_connection(DB_PATH) as con:
+            rows = con.execute("""
+                SELECT won, realized_pnl_pct, holding_minutes,
+                       trend_direction, trend_strength
+                FROM matched_trades
+                WHERE symbol = ?
+                ORDER BY exit_timestamp DESC
+                LIMIT 10
+            """, (symbol,)).fetchall()
 
         if not rows:
             return {"sample_size": 0}

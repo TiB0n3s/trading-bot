@@ -22,6 +22,8 @@ Recent completed roadmap items:
 - `retraining-readiness` reports current blockers and never promotes automatically.
 - `ml/models/similarity_v0/` is research-only metadata with no trained artifact.
 - `run_staged_tests.py` runs ahead-of-live staged integration tests separately from current behavior tests.
+- `broker.py` has validation/unit coverage for core order-flow boundaries.
+- `ops/db_connection_audit.py` reports manual SQLite connection assignments for gradual cleanup.
 - The prediction layer is observe-only and does not modify trade decisions.
 - The intelligence pipeline is staged for the next live paper-trading session.
 
@@ -243,6 +245,24 @@ Confirms available quantity after cancel.
 Places market sell.
 
 Do not change sell safety guards casually.
+
+Broker boundary work:
+
+- Validate and normalize symbol/action/sizing inputs before API calls.
+- Invalid order requests should fail closed and return `None`.
+- Preserve broker behavior unless explicitly asked to change execution policy.
+- Keep unit coverage in `tests/test_broker.py` when modifying order logic.
+
+exceptions.py
+
+Structured exception types for expected boundaries:
+
+ValidationError
+BrokerError
+BrokerAuthError
+BrokerRateLimitError
+BrokerTransientError
+DataAccessError
 
 fill_stream.py
 
@@ -633,6 +653,7 @@ python3 ops_check.py events "$TARGET_DATE"
 python3 ops_check.py predictions "$TARGET_DATE"
 python3 ops_check.py trends "$TARGET_DATE"
 python3 ops_check.py prediction-validation "$TARGET_DATE"
+python3 ops/db_connection_audit.py
 
 Staged ML/ahead-of-live checks:
 

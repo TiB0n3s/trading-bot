@@ -24,6 +24,8 @@ As of the latest roadmap work:
 - `ml_platform` has a staged, ahead-of-live integration lane with `staged-readiness` and `retraining-readiness` reports.
 - `ml/models/similarity_v0/` is a research-only metadata placeholder, not a trained model artifact.
 - `run_staged_tests.py` runs observe-only integration tests separate from the live/current behavior tests.
+- `broker.py` has input validation, structured error types, and unit coverage for core order-flow boundaries.
+- `ops/db_connection_audit.py` reports manual SQLite connection patterns to support gradual cleanup.
 - Prediction layer remains observe-only.
 - No prediction score currently changes live trading decisions.
 
@@ -205,6 +207,22 @@ Confirms available quantity after cancel.
 Places market sell order.
 
 Live/cash safety guards are present for future use.
+Inputs are normalized and validated before broker/API calls. Invalid order
+requests fail closed and return `None`.
+
+exceptions.py
+
+Structured exception types for expected bot boundaries:
+
+ValidationError
+BrokerError
+BrokerAuthError
+BrokerRateLimitError
+BrokerTransientError
+DataAccessError
+
+These are currently used to make validation and broker failures easier to
+classify without changing live order behavior.
 
 fill_stream.py
 

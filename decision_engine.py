@@ -367,7 +367,8 @@ def evaluate_signal(signal_data, account_state):
             model='claude-haiku-4-5-20251001',
             max_tokens=1000,
             system=TRADING_RULES,
-            messages=[{'role': 'user', 'content': prompt}]
+            messages=[{'role': 'user', 'content': prompt}],
+            timeout=10.0,
         )
         response_text = message.content[0].text
         logger.info(f'AI decision: {response_text}')

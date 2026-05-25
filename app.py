@@ -75,12 +75,22 @@ from config import (
     MARKET_CLOSE_MINUTES,
     DAILY_LOSS_LIMIT_PCT,
     MAX_BUYS_PER_SYMBOL_PER_DAY,
+    MAX_OPEN_POSITIONS,
     WEBHOOK_DEDUPE_SECONDS,
     SYMBOL_MARKET_ALIGNMENT,
     ADAPTIVE_BUY_CONFIRMATION_ENABLED,
 )
-EXECUTION_MODE = os.getenv("EXECUTION_MODE", "paper").strip().lower()
 IS_PAPER_MODE = EXECUTION_MODE == "paper"
+
+logging.basicConfig(
+    level=os.environ.get("LOG_LEVEL", "INFO").upper(),
+    format="%(asctime)s - %(levelname)s - %(message)s",
+    handlers=[
+        logging.FileHandler("trading_bot.log"),
+        logging.StreamHandler()
+    ]
+)
+logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
 
@@ -88,16 +98,17 @@ DB_PATH = Path(__file__).parent / "trades.db"
 _START_TIME = datetime.now(timezone.utc)
 ENFORCE_SETUP_POLICY_BLOCKS = True
 
-PREDICTION_GATE_MODE = os.getenv("PREDICTION_GATE_MODE", "hard").strip().lower()
+PREDICTION_GATE_MODE = os.getenv("PREDICTION_GATE_MODE", "warn").strip().lower()
 if PREDICTION_GATE_MODE not in ("off", "warn", "soft", "hard"):
     logger.warning(
-        f"Invalid PREDICTION_GATE_MODE={PREDICTION_GATE_MODE!r}; defaulting to hard"
+        f"Invalid PREDICTION_GATE_MODE={PREDICTION_GATE_MODE!r}; defaulting to warn"
     )
-    PREDICTION_GATE_MODE = "hard"
+    PREDICTION_GATE_MODE = "warn"
 
-# Preserve existing behavior by default:
-# - hard: block prediction_decision=block, and block watch in cash mode
-# - soft/warn/off: do not hard-reject here; other scoring/telemetry remains active
+# Prediction promotion ladder:
+# - warn/off/soft: do not hard-reject; keep telemetry and reports active
+# - hard: block prediction_decision=block and block watch in cash mode only
+# Hard mode requires enough labeled paper-session outcomes and operator review.
 ENFORCE_PREDICTION_BLOCKS = PREDICTION_GATE_MODE == "hard"
 ENFORCE_PREDICTION_WATCH_IN_CASH = PREDICTION_GATE_MODE == "hard"
 
@@ -190,22 +201,6 @@ def _init_db():
             )
         """)
 
-        existing_webhook_cols = {
-        r[1] for r in con.execute("PRAGMA table_info(webhook_events)").fetchall()
-    }
-    webhook_context_cols = [
-        ("queued_at", "TEXT"),
-        ("started_at", "TEXT"),
-        ("finished_at", "TEXT"),
-        ("order_id", "TEXT"),
-        ("client_order_id", "TEXT"),
-        ("failure_reason", "TEXT"),
-
-    ]
-    for col_name, col_type in webhook_context_cols:
-        if col_name not in existing_webhook_cols:
-            con.execute(f"ALTER TABLE webhook_events ADD COLUMN {col_name} {col_type}")
-
         con.execute("""
             CREATE TABLE IF NOT EXISTS recent_webhooks (
                 dedupe_key      TEXT PRIMARY KEY,
@@ -215,50 +210,6 @@ def _init_db():
                 first_seen      TEXT NOT NULL
             )
         """)
-
-        # Idempotent column additions for decision-context attribution.
-        # Each new row written by log_trade / log_rejection captures the state of
-        # bias / trend / momentum / macro / cluster gates at decision time so the
-        # analytics layer can correlate outcomes with the context that produced them.
-        existing_cols = {r[1] for r in con.execute("PRAGMA table_info(trades)").fetchall()}
-        context_cols = [
-            ("macro_regime",         "TEXT"),
-            ("risk_multiplier",      "REAL"),
-            ("market_bias",          "TEXT"),
-            ("market_bias_effective", "TEXT"),
-            ("market_bias_override_reason", "TEXT"),
-            ("fundamental_score",    "TEXT"),
-            ("risk_level",           "TEXT"),
-            ("entry_quality",        "TEXT"),
-            ("trend_direction",      "TEXT"),
-            ("trend_strength",       "TEXT"),
-            ("momentum_direction",   "TEXT"),
-            ("session_trend_label", "TEXT"),
-            ("session_trend_score", "REAL"),
-            ("session_return_pct", "REAL"),
-            ("session_momentum_5m_pct", "REAL"),
-            ("session_momentum_15m_pct", "REAL"),
-            ("session_momentum_30m_pct", "REAL"),
-            ("session_distance_from_vwap_pct", "REAL"),
-            ("session_momentum_reason", "TEXT"),
-            ("momentum_pct",         "REAL"),
-            ("prediction_score", "REAL"),
-            ("prediction_decision", "TEXT"),
-            ("prediction_reason", "TEXT"),
-            ("correlation_cluster",  "TEXT"),
-            ("cluster_exposure_pct", "REAL"),
-            ("setup_label",          "TEXT"),
-            ("setup_policy_action",  "TEXT"),
-            ("setup_policy_reason",  "TEXT"),
-            ("setup_confidence_adjustment", "REAL"),
-            ("setup_size_multiplier", "REAL"),
-            ("buy_opportunity_score", "REAL"),
-            ("buy_opportunity_recommendation", "TEXT"),
-            ("buy_opportunity_reason", "TEXT"),
-        ]
-        for col_name, col_type in context_cols:
-            if col_name not in existing_cols:
-                con.execute(f"ALTER TABLE trades ADD COLUMN {col_name} {col_type}")
 
 _init_db()
 
@@ -271,16 +222,6 @@ try:
     init_session_momentum_table()
 except Exception as e:
     logger.error(f"Session momentum table initialization failed: {e}")
-
-logging.basicConfig(
-    level=os.environ.get("LOG_LEVEL", "INFO").upper(),
-    format="%(asctime)s - %(levelname)s - %(message)s",
-    handlers=[
-        logging.FileHandler("trading_bot.log"),
-        logging.StreamHandler()
-    ]
-)
-logger = logging.getLogger(__name__)
 
 try:
     init_db_performance_indexes()
@@ -1532,10 +1473,21 @@ def _mark_webhook_event_status(
         logger.warning(f"Failed to update webhook event status for {dedupe_key}: {e}")
 
 def validate_secret(req):
-    secret = req.args.get("secret", "")
+    auth_header = req.headers.get("Authorization", "")
+    bearer_secret = ""
+    if auth_header.lower().startswith("bearer "):
+        bearer_secret = auth_header.split(" ", 1)[1].strip()
+
+    secret = (
+        req.headers.get("X-Webhook-Secret")
+        or bearer_secret
+        or req.args.get("secret", "")
+    )
     if secret != WEBHOOK_SECRET:
         logger.warning(f"Invalid secret from {req.remote_addr}")
         abort(401)
+    if req.args.get("secret"):
+        logger.warning("Secret accepted from query parameter; prefer X-Webhook-Secret or Authorization header")
 
 def log_trade(signal, decision, order, account_state=None):
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -5486,7 +5438,7 @@ def positions():
 
     result["summary"] = {
         "total_positions": len(positions_list),
-        "max_positions": 8,
+        "max_positions": MAX_OPEN_POSITIONS,
         "total_unrealized_pl": round(total_unrealized, 2),
         "account_balance": balance,
         "daily_pnl_pct": daily_pnl_pct,

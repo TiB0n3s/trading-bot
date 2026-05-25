@@ -25,9 +25,15 @@ As of the latest roadmap work:
 - `ml/models/similarity_v0/` is a research-only metadata placeholder, not a trained model artifact.
 - `run_staged_tests.py` runs observe-only integration tests separate from the live/current behavior tests.
 - `broker.py` has input validation, structured error types, and unit coverage for core order-flow boundaries.
+- `broker.py` polls for bracket-order cancellation before market sells instead of relying on a fixed sleep.
 - `ops/db_connection_audit.py` reports manual SQLite connection patterns to support gradual cleanup.
 - `db_migrations.py` provides an idempotent schema migration runner.
 - `feature_snapshots` now carries leakage/audit fields required by the ML governance contract.
+- App-startup schema `ALTER TABLE` work has moved into `db_migrations.py`.
+- Webhook/status secrets should be supplied by `X-Webhook-Secret` or
+  `Authorization: Bearer ...`; query-string secrets are legacy fallback only.
+- Prediction gate mode defaults to warn-only until labeled paper-session
+  outcomes justify promotion to hard blocking.
 - Prediction layer remains observe-only.
 - No prediction score currently changes live trading decisions.
 
@@ -155,11 +161,11 @@ Main Flask webhook server.
 
 Exposes:
 
-POST /webhook?secret=...
+POST /webhook
 GET  /health
-GET  /status?secret=...
-GET  /positions?secret=...
-GET  /debug/symbol/<SYMBOL>?secret=...
+GET  /status
+GET  /positions
+GET  /debug/symbol/<SYMBOL>
 
 Core responsibilities:
 
@@ -501,9 +507,13 @@ check or apply idempotent schema migrations.
 Migrations are manual before deployment or DB restore. Pending migrations are
 also surfaced by `morning_check.py`, `ops_check.py migration-status`, and the
 premarket/all ops check bundles.
+
+Current tracked migrations cover feature leakage/audit fields,
+`rejected_signal_outcomes`, webhook-event lifecycle/status columns, and trade
+decision-context columns that used to be added during app startup.
 /status Symbol Intelligence
 
-GET /status?secret=... includes:
+GET /status includes:
 
 "symbol_intelligence": {
   "available": true,
@@ -543,7 +553,8 @@ set -a
 . /etc/trading-bot.env
 set +a
 
-curl -s "https://trading.tib0n3s.xyz/status?secret=$WEBHOOK_SECRET" \
+curl -s -H "X-Webhook-Secret: $WEBHOOK_SECRET" \
+  "https://trading.tib0n3s.xyz/status" \
   | jq '.symbol_intelligence | {
       available,
       market_date,
@@ -554,7 +565,8 @@ curl -s "https://trading.tib0n3s.xyz/status?secret=$WEBHOOK_SECRET" \
 
 Spot-check one symbol:
 
-curl -s "https://trading.tib0n3s.xyz/status?secret=$WEBHOOK_SECRET" \
+curl -s -H "X-Webhook-Secret: $WEBHOOK_SECRET" \
+  "https://trading.tib0n3s.xyz/status" \
   | jq '.symbol_intelligence.symbols.AAPL'
 Operator Check Wrapper
 
@@ -744,15 +756,18 @@ set -a
 . /etc/trading-bot.env
 set +a
 
-curl -s "https://trading.tib0n3s.xyz/status?secret=$WEBHOOK_SECRET" | jq
+curl -s -H "X-Webhook-Secret: $WEBHOOK_SECRET" \
+  "https://trading.tib0n3s.xyz/status" | jq
 
 Positions:
 
-curl -s "https://trading.tib0n3s.xyz/positions?secret=$WEBHOOK_SECRET" | jq
+curl -s -H "X-Webhook-Secret: $WEBHOOK_SECRET" \
+  "https://trading.tib0n3s.xyz/positions" | jq
 
 Debug symbol:
 
-curl -s "https://trading.tib0n3s.xyz/debug/symbol/AAPL?secret=$WEBHOOK_SECRET" | jq
+curl -s -H "X-Webhook-Secret: $WEBHOOK_SECRET" \
+  "https://trading.tib0n3s.xyz/debug/symbol/AAPL" | jq
 Database
 
 Database path:
@@ -820,7 +835,8 @@ tail -f trading_bot.log \
 
 Check live operator view:
 
-curl -s "https://trading.tib0n3s.xyz/status?secret=$WEBHOOK_SECRET" | jq '.symbol_intelligence'
+curl -s -H "X-Webhook-Secret: $WEBHOOK_SECRET" \
+  "https://trading.tib0n3s.xyz/status" | jq '.symbol_intelligence'
 After close
 python3 ops_check.py post $(date +%F)
 python3 ops_check.py predictions $(date +%F)
@@ -1012,7 +1028,8 @@ set -a
 . /etc/trading-bot.env
 set +a
 
-curl -s "https://trading.tib0n3s.xyz/status?secret=$WEBHOOK_SECRET" \
+curl -s -H "X-Webhook-Secret: $WEBHOOK_SECRET" \
+  "https://trading.tib0n3s.xyz/status" \
   | jq '.symbol_intelligence | {
       available,
       market_date,

@@ -29,6 +29,8 @@ if EXECUTION_POLICY_MODE not in ("off", "compare"):
 ALPACA_API_KEY = os.environ.get("ALPACA_API_KEY", "")
 ALPACA_SECRET_KEY = os.environ.get("ALPACA_SECRET_KEY", "")
 ALPACA_BASE_URL = get_alpaca_base_url()
+SELL_CANCEL_POLL_ATTEMPTS = int(os.getenv("SELL_CANCEL_POLL_ATTEMPTS", "5"))
+SELL_CANCEL_POLL_SLEEP_SECONDS = float(os.getenv("SELL_CANCEL_POLL_SLEEP_SECONDS", "0.5"))
 
 api = tradeapi.REST(ALPACA_API_KEY, ALPACA_SECRET_KEY, ALPACA_BASE_URL)
 
@@ -96,7 +98,24 @@ def validate_order_request(
 
 def _classify_broker_exception(exc: Exception) -> BrokerError:
     """Wrap broker exceptions with a structured type while preserving context."""
-    return BrokerError(str(exc))
+    wrapped = BrokerError(str(exc))
+    wrapped.__cause__ = exc
+    return wrapped
+
+
+def _wait_for_open_order_cancels(symbol: str) -> list[Any]:
+    """Poll open orders until cancel requests have settled or attempts expire."""
+    remaining: list[Any] = []
+    for attempt in range(1, SELL_CANCEL_POLL_ATTEMPTS + 1):
+        remaining = list(api.list_orders(status="open", symbols=[symbol]) or [])
+        if not remaining:
+            return []
+        logger.info(
+            f"Waiting for {len(remaining)} open order cancel(s) for {symbol} "
+            f"attempt={attempt}/{SELL_CANCEL_POLL_ATTEMPTS}"
+        )
+        time.sleep(SELL_CANCEL_POLL_SLEEP_SECONDS)
+    return remaining
 
 
 def get_account() -> dict[str, Any] | None:
@@ -180,7 +199,7 @@ def place_order(
                     qty = position_qty
 
             except Exception as e:
-                logger.error(f"Failed to fetch position for {symbol}: {_classify_broker_exception(e)}")
+                logger.error(f"Failed to fetch position for {symbol}: {_classify_broker_exception(e)}", exc_info=True)
                 return None
 
             if qty <= 0:
@@ -202,7 +221,14 @@ def place_order(
                 for o in open_orders:
                     api.cancel_order(o.id)
                     logger.info(f"Cancelled open order {o.id} ({o.side} {o.qty} {symbol} type={o.order_type}) before sell")
-                time.sleep(1)
+
+                remaining_orders = _wait_for_open_order_cancels(symbol)
+                if remaining_orders:
+                    logger.error(
+                        f"Open orders still present after cancel polling for {symbol}: "
+                        f"{[getattr(o, 'id', '?') for o in remaining_orders]}"
+                    )
+                    return None
                 
                 refreshed = api.get_position(symbol)
                 available_qty = int(float(refreshed.qty))
@@ -219,7 +245,7 @@ def place_order(
                     f"available={available_qty}"
                 )
             except Exception as e:
-                logger.error(f"Failed to cancel open orders for {symbol}: {_classify_broker_exception(e)}")
+                logger.error(f"Failed to cancel open orders for {symbol}: {_classify_broker_exception(e)}", exc_info=True)
                 return None
         else:
             risk_amount = balance * (position_size_pct / 100)

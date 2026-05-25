@@ -104,6 +104,10 @@ the normal targeted test runner:
 python3 run_tests.py
 ```
 
+The sell path cancels open bracket orders and polls Alpaca for cancellation
+propagation before submitting a market sell. If repeated cancellation polling
+fails, the sell fails closed instead of assuming a fixed sleep was enough.
+
 
 ## Schema Migrations
 
@@ -128,6 +132,27 @@ The first tracked migration adds feature leakage/audit columns to
 The second tracked migration creates `rejected_signal_outcomes`, the canonical
 target table for future counterfactual labels on rejected signals. The forward
 return builder is still a separate pending step.
+
+The third tracked migration adds webhook-event lifecycle/status columns used by
+the app to record queue, start, finish, order, and failure metadata.
+
+The fourth tracked migration adds trade decision-context columns that used to
+be added by app startup. Runtime startup should not own schema `ALTER TABLE`
+work; run `python3 db_migrations.py apply` before deployment or restore.
+
+
+## Webhook Secrets
+
+Operator endpoints and TradingView webhooks should pass the secret in a header:
+
+```bash
+curl -s -H "X-Webhook-Secret: $WEBHOOK_SECRET" \
+  "https://trading.tib0n3s.xyz/status" | jq
+```
+
+`Authorization: Bearer $WEBHOOK_SECRET` is also accepted. Query-string
+`?secret=...` is still accepted for backward compatibility, but should be
+treated as legacy because reverse proxies and access logs often record URLs.
 
 
 ## Tuesday QA Runbook

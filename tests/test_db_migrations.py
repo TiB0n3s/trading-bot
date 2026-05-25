@@ -43,6 +43,12 @@ def columns(path: Path) -> set[str]:
     return {row[1] for row in rows}
 
 
+def table_columns(path: Path, table: str) -> set[str]:
+    with sqlite3.connect(path) as con:
+        rows = con.execute(f"PRAGMA table_info({table})").fetchall()
+    return {row[1] for row in rows}
+
+
 def test_feature_audit_migration_is_idempotent():
     with tempfile.TemporaryDirectory() as tmp:
         db_path = Path(tmp) / "test.db"
@@ -88,9 +94,70 @@ def test_rejected_signal_outcomes_migration_creates_table():
         assert_true(row is not None, "rejected_signal_outcomes table")
 
 
+def test_webhook_event_status_migration_adds_columns():
+    with tempfile.TemporaryDirectory() as tmp:
+        db_path = Path(tmp) / "test.db"
+        with sqlite3.connect(db_path) as con:
+            con.execute(
+                """
+                CREATE TABLE webhook_events (
+                    dedupe_key TEXT PRIMARY KEY,
+                    received_at TEXT,
+                    status TEXT
+                )
+                """
+            )
+
+        applied = apply_migration(MIGRATIONS[2], db_path)
+        assert_equal(applied, True, "apply")
+
+        expected = {
+            "queued_at",
+            "started_at",
+            "finished_at",
+            "order_id",
+            "client_order_id",
+            "failure_reason",
+        }
+        assert_true(expected <= table_columns(db_path, "webhook_events"), "webhook event status columns")
+
+
+def test_trade_decision_context_migration_adds_columns():
+    with tempfile.TemporaryDirectory() as tmp:
+        db_path = Path(tmp) / "test.db"
+        with sqlite3.connect(db_path) as con:
+            con.execute(
+                """
+                CREATE TABLE trades (
+                    id INTEGER PRIMARY KEY,
+                    timestamp TEXT,
+                    symbol TEXT,
+                    action TEXT
+                )
+                """
+            )
+
+        applied = apply_migration(MIGRATIONS[3], db_path)
+        assert_equal(applied, True, "apply")
+
+        expected = {
+            "macro_regime",
+            "market_bias",
+            "prediction_decision",
+            "setup_policy_action",
+            "buy_opportunity_score",
+            "buy_opportunity_reason",
+        }
+        assert_true(expected <= table_columns(db_path, "trades"), "trade decision context columns")
+
+
 if __name__ == "__main__":
     test_feature_audit_migration_is_idempotent()
     print("[OK] test_feature_audit_migration_is_idempotent")
     test_rejected_signal_outcomes_migration_creates_table()
     print("[OK] test_rejected_signal_outcomes_migration_creates_table")
-    print("\nAll 2 DB migration tests passed.")
+    test_webhook_event_status_migration_adds_columns()
+    print("[OK] test_webhook_event_status_migration_adds_columns")
+    test_trade_decision_context_migration_adds_columns()
+    print("[OK] test_trade_decision_context_migration_adds_columns")
+    print("\nAll 4 DB migration tests passed.")

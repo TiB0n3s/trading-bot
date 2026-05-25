@@ -71,6 +71,57 @@ MIGRATIONS: tuple[Migration, ...] = (
             """,
         ),
     ),
+    Migration(
+        migration_id="20260525_003_webhook_event_status_columns",
+        description="Add webhook event lifecycle/status metadata columns.",
+        statements=(
+            "ALTER TABLE webhook_events ADD COLUMN queued_at TEXT",
+            "ALTER TABLE webhook_events ADD COLUMN started_at TEXT",
+            "ALTER TABLE webhook_events ADD COLUMN finished_at TEXT",
+            "ALTER TABLE webhook_events ADD COLUMN order_id TEXT",
+            "ALTER TABLE webhook_events ADD COLUMN client_order_id TEXT",
+            "ALTER TABLE webhook_events ADD COLUMN failure_reason TEXT",
+        ),
+    ),
+    Migration(
+        migration_id="20260525_004_trade_decision_context_columns",
+        description="Add decision-context attribution columns to trades.",
+        statements=(
+            "ALTER TABLE trades ADD COLUMN macro_regime TEXT",
+            "ALTER TABLE trades ADD COLUMN risk_multiplier REAL",
+            "ALTER TABLE trades ADD COLUMN market_bias TEXT",
+            "ALTER TABLE trades ADD COLUMN market_bias_effective TEXT",
+            "ALTER TABLE trades ADD COLUMN market_bias_override_reason TEXT",
+            "ALTER TABLE trades ADD COLUMN fundamental_score TEXT",
+            "ALTER TABLE trades ADD COLUMN risk_level TEXT",
+            "ALTER TABLE trades ADD COLUMN entry_quality TEXT",
+            "ALTER TABLE trades ADD COLUMN trend_direction TEXT",
+            "ALTER TABLE trades ADD COLUMN trend_strength TEXT",
+            "ALTER TABLE trades ADD COLUMN momentum_direction TEXT",
+            "ALTER TABLE trades ADD COLUMN session_trend_label TEXT",
+            "ALTER TABLE trades ADD COLUMN session_trend_score REAL",
+            "ALTER TABLE trades ADD COLUMN session_return_pct REAL",
+            "ALTER TABLE trades ADD COLUMN session_momentum_5m_pct REAL",
+            "ALTER TABLE trades ADD COLUMN session_momentum_15m_pct REAL",
+            "ALTER TABLE trades ADD COLUMN session_momentum_30m_pct REAL",
+            "ALTER TABLE trades ADD COLUMN session_distance_from_vwap_pct REAL",
+            "ALTER TABLE trades ADD COLUMN session_momentum_reason TEXT",
+            "ALTER TABLE trades ADD COLUMN momentum_pct REAL",
+            "ALTER TABLE trades ADD COLUMN prediction_score REAL",
+            "ALTER TABLE trades ADD COLUMN prediction_decision TEXT",
+            "ALTER TABLE trades ADD COLUMN prediction_reason TEXT",
+            "ALTER TABLE trades ADD COLUMN correlation_cluster TEXT",
+            "ALTER TABLE trades ADD COLUMN cluster_exposure_pct REAL",
+            "ALTER TABLE trades ADD COLUMN setup_label TEXT",
+            "ALTER TABLE trades ADD COLUMN setup_policy_action TEXT",
+            "ALTER TABLE trades ADD COLUMN setup_policy_reason TEXT",
+            "ALTER TABLE trades ADD COLUMN setup_confidence_adjustment REAL",
+            "ALTER TABLE trades ADD COLUMN setup_size_multiplier REAL",
+            "ALTER TABLE trades ADD COLUMN buy_opportunity_score REAL",
+            "ALTER TABLE trades ADD COLUMN buy_opportunity_recommendation TEXT",
+            "ALTER TABLE trades ADD COLUMN buy_opportunity_reason TEXT",
+        ),
+    ),
 )
 
 
@@ -98,6 +149,16 @@ def table_columns(con, table: str) -> set[str]:
     return {row["name"] for row in con.execute(f"PRAGMA table_info({table})").fetchall()}
 
 
+def alter_table_add_column(statement: str) -> tuple[str, str] | None:
+    normalized = " ".join(statement.strip().split())
+    parts = normalized.split()
+    if len(parts) < 6:
+        return None
+    if [p.upper() for p in parts[:5]] != ["ALTER", "TABLE", parts[2].upper(), "ADD", "COLUMN"]:
+        return None
+    return parts[2], parts[5]
+
+
 def apply_migration(migration: Migration, db_path: Path | str = DB_PATH) -> bool:
     """Apply one migration if it is not already recorded."""
     ensure_migration_table(db_path)
@@ -107,9 +168,10 @@ def apply_migration(migration: Migration, db_path: Path | str = DB_PATH) -> bool
 
     with get_connection(db_path) as con:
         for statement in migration.statements:
-            if "ALTER TABLE feature_snapshots ADD COLUMN" in statement:
-                columns = table_columns(con, "feature_snapshots")
-                column = statement.rsplit(" ADD COLUMN ", 1)[-1].split()[0]
+            alter = alter_table_add_column(statement)
+            if alter:
+                table, column = alter
+                columns = table_columns(con, table)
                 if column in columns:
                     continue
             con.execute(statement)

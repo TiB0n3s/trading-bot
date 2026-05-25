@@ -58,6 +58,7 @@ class FakeApi:
 
     def cancel_order(self, order_id):
         self.cancelled.append(order_id)
+        self.open_orders = [o for o in self.open_orders if o.id != order_id]
 
     def submit_order(self, **kwargs):
         self.submitted.append(kwargs)

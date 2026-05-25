@@ -23,6 +23,8 @@ Recent completed roadmap items:
 - `ml/models/similarity_v0/` is research-only metadata with no trained artifact.
 - `run_staged_tests.py` runs ahead-of-live staged integration tests separately from current behavior tests.
 - `broker.py` has validation/unit coverage for core order-flow boundaries.
+- `broker.py` now polls for Alpaca bracket-order cancellation before market
+  sells instead of assuming cancellation completes after a fixed sleep.
 - `ops/db_connection_audit.py` reports manual SQLite connection assignments for gradual cleanup.
 - `db_migrations.py` tracks idempotent schema migrations.
 - `feature_snapshots` includes ML leakage/audit fields:
@@ -31,6 +33,11 @@ Recent completed roadmap items:
 - Migrations are manual before deploy/restore, but pending migrations are
   surfaced by `morning_check.py`, `ops_check.py premarket`, and
   `ops_check.py migration-status`.
+- App startup no longer owns schema `ALTER TABLE` migration work.
+- Webhook/status secrets should use `X-Webhook-Secret` or
+  `Authorization: Bearer ...`; query-string secrets are legacy fallback only.
+- Prediction gate mode defaults to warn-only until labeled paper-session
+  outcomes justify promotion to hard blocking.
 - The prediction layer is observe-only and does not modify trade decisions.
 - The intelligence pipeline is staged for the next live paper-trading session.
 
@@ -177,11 +184,11 @@ Main Flask/Gunicorn webhook app.
 
 Key routes:
 
-POST /webhook?secret=...
+POST /webhook
 GET  /health
-GET  /status?secret=...
-GET  /positions?secret=...
-GET  /debug/symbol/<SYMBOL>?secret=...
+GET  /status
+GET  /positions
+GET  /debug/symbol/<SYMBOL>
 
 Responsibilities:
 
@@ -610,7 +617,8 @@ set -a
 . /etc/trading-bot.env
 set +a
 
-curl -s "https://trading.tib0n3s.xyz/status?secret=$WEBHOOK_SECRET" \
+curl -s -H "X-Webhook-Secret: $WEBHOOK_SECRET" \
+  "https://trading.tib0n3s.xyz/status" \
   | jq '.symbol_intelligence | {
       available,
       market_date,
@@ -621,7 +629,8 @@ curl -s "https://trading.tib0n3s.xyz/status?secret=$WEBHOOK_SECRET" \
 
 Spot-check:
 
-curl -s "https://trading.tib0n3s.xyz/status?secret=$WEBHOOK_SECRET" \
+curl -s -H "X-Webhook-Secret: $WEBHOOK_SECRET" \
+  "https://trading.tib0n3s.xyz/status" \
   | jq '.symbol_intelligence.symbols.AAPL'
 Operator Check Wrapper
 
@@ -662,6 +671,10 @@ python3 ops_check.py trends "$TARGET_DATE"
 python3 ops_check.py prediction-validation "$TARGET_DATE"
 python3 ops/db_connection_audit.py
 python3 db_migrations.py status
+
+Current tracked migrations cover feature leakage/audit fields,
+`rejected_signal_outcomes`, webhook-event lifecycle/status columns, and trade
+decision-context columns that used to be added during app startup.
 
 Staged ML/ahead-of-live checks:
 
@@ -848,15 +861,18 @@ set -a
 . /etc/trading-bot.env
 set +a
 
-curl -s "https://trading.tib0n3s.xyz/status?secret=$WEBHOOK_SECRET" | jq
+curl -s -H "X-Webhook-Secret: $WEBHOOK_SECRET" \
+  "https://trading.tib0n3s.xyz/status" | jq
 
 Positions:
 
-curl -s "https://trading.tib0n3s.xyz/positions?secret=$WEBHOOK_SECRET" | jq
+curl -s -H "X-Webhook-Secret: $WEBHOOK_SECRET" \
+  "https://trading.tib0n3s.xyz/positions" | jq
 
 Debug symbol:
 
-curl -s "https://trading.tib0n3s.xyz/debug/symbol/AAPL?secret=$WEBHOOK_SECRET" | jq
+curl -s -H "X-Webhook-Secret: $WEBHOOK_SECRET" \
+  "https://trading.tib0n3s.xyz/debug/symbol/AAPL" | jq
 Development Workflow
 
 Activate:

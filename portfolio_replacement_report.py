@@ -24,6 +24,7 @@ import pytz
 from broker import api
 from db import DB_PATH, get_connection
 from bot_events import log_event
+from policy_artifacts import atomic_write_json
 
 
 ET = pytz.timezone("America/New_York")
@@ -386,7 +387,7 @@ def build_replacement_memory(positions, weakest, best, candidates, minutes):
 
 
 def write_replacement_memory(memory):
-    PORTFOLIO_REPLACEMENT_MEMORY_FILE.write_text(json.dumps(memory, indent=2, sort_keys=True))
+    atomic_write_json(PORTFOLIO_REPLACEMENT_MEMORY_FILE, memory)
     print(f"Wrote {PORTFOLIO_REPLACEMENT_MEMORY_FILE}")
     return memory
 

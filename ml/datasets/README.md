@@ -176,6 +176,8 @@ influence runtime decisions. Manifests must hash:
 - `policy_backtest_summary.json`
 
 Treat these as `policy_artifact` inputs, not inert report files.
+Policy artifact writers must use atomic temp-file replacement because the Flask
+runtime can read them while after-close learning is running.
 
 ## Retention Tiers
 

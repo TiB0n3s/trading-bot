@@ -20,6 +20,7 @@ from datetime import date, timedelta, datetime
 from pathlib import Path
 
 from db import DB_PATH, get_connection
+from policy_artifacts import atomic_write_json
 
 BASE_DIR = Path(__file__).resolve().parent
 POLICY_BACKTEST_SUMMARY_FILE = BASE_DIR / "policy_backtest_summary.json"
@@ -491,7 +492,7 @@ def build_policy_backtest_summary(results):
 
 def write_policy_backtest_summary(results):
     summary = build_policy_backtest_summary(results)
-    POLICY_BACKTEST_SUMMARY_FILE.write_text(json.dumps(summary, indent=2, sort_keys=True))
+    atomic_write_json(POLICY_BACKTEST_SUMMARY_FILE, summary)
     print(f"Wrote {POLICY_BACKTEST_SUMMARY_FILE}")
     return summary
 

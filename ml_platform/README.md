@@ -84,6 +84,10 @@ These are governed as `policy_artifact` inputs. Their hashes are included in
 dataset manifests, and `/status` exposes their current hashes/mtimes under
 `policy_artifacts`.
 
+Policy artifact writes use atomic temp-file replacement, and
+`POLICY_ARTIFACTS_ENABLED=false` makes live loaders return neutral state without
+deleting the artifact files.
+
 ## Brain Integration
 
 `brain_features.py` turns existing deterministic bot intelligence into ML

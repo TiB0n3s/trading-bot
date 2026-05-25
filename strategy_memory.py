@@ -9,6 +9,8 @@ import json
 import logging
 from pathlib import Path
 
+from policy_artifacts import policy_artifacts_enabled
+
 logger = logging.getLogger(__name__)
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -20,6 +22,9 @@ _strategy_memory_mtime = 0.0
 
 def _load_strategy_memory():
     global _strategy_memory, _strategy_memory_mtime
+
+    if not policy_artifacts_enabled():
+        return {}
 
     if not MEMORY_FILE.exists():
         return {}
@@ -64,7 +69,11 @@ def memory_for_signal(symbol, setup_quality=None):
             "available": False,
             "recommendation": "none",
             "min_setup_score": None,
-            "reason": "strategy_memory.json unavailable",
+            "reason": (
+                "policy artifacts disabled"
+                if not policy_artifacts_enabled()
+                else "strategy_memory.json unavailable"
+            ),
         }
 
     symbol = (symbol or "").upper()
@@ -116,7 +125,11 @@ def contextual_memory_for_signal(symbol, intelligence_context=None):
     if not mem:
         return {
             "available": False,
-            "reason": "strategy_memory.json unavailable",
+            "reason": (
+                "policy artifacts disabled"
+                if not policy_artifacts_enabled()
+                else "strategy_memory.json unavailable"
+            ),
             "matches": [],
         }
 

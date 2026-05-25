@@ -25,6 +25,7 @@ import pytz
 
 from broker import api
 from db import DB_PATH, get_connection
+from policy_artifacts import atomic_write_json
 
 
 ET = pytz.timezone("America/New_York")
@@ -374,7 +375,7 @@ def build_missed_opportunity_memory(results, target_date):
 
 def write_missed_opportunity_memory(results, target_date):
     memory = build_missed_opportunity_memory(results, target_date)
-    MISSED_MEMORY_FILE.write_text(json.dumps(memory, indent=2, sort_keys=True))
+    atomic_write_json(MISSED_MEMORY_FILE, memory)
     print(f"Wrote {MISSED_MEMORY_FILE}")
     return memory
 

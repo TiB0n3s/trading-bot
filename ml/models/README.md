@@ -74,6 +74,8 @@ registry discipline:
 
 Longer term, register these as `policy_artifact` entries with hash, source
 script, generated timestamp, rollback target, and runtime effect.
+`POLICY_ARTIFACTS_ENABLED=false` is the live kill switch for learned policy
+artifact influence.
 
 Use the registry CLI for local metadata:
 

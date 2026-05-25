@@ -188,6 +188,7 @@ ENV_KILL_SWITCH_DEFAULTS = {
     "ML_STATUS_EXPOSURE_ENABLED": "false",
     "ML_MODEL_ID": "",
     "ML_MODEL_MAX_AGE_SECONDS": "",
+    "POLICY_ARTIFACTS_ENABLED": "true",
     "AFTER_CLOSE_POLICY_ARTIFACTS_ENABLED": "true",
 }
 
@@ -406,10 +407,11 @@ POLICY_ARTIFACT_GOVERNANCE = {
     "required_controls": (
         "hash/version visible in /status",
         "failure alert from run_after_close_learning.sh",
+        "atomic temp-file plus os.replace writes",
         "rollback path to prior known-good artifact set",
         "registry entries as policy_artifact before broader ML promotion",
     ),
-    "kill_switch_rule": "A future kill switch should allow policy artifacts to fail closed to no learned policy influence.",
+    "kill_switch_rule": "POLICY_ARTIFACTS_ENABLED=false makes loaders return neutral/no learned policy influence without deleting files.",
 }
 
 RETRAINING_POLICY = {

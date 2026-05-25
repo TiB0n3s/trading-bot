@@ -18,6 +18,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 from db import DB_PATH, get_connection
+from policy_artifacts import atomic_write_json
 from trade_matcher import rebuild_matched_trades
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -221,7 +222,7 @@ def archive_strategy_memory(memory):
             safe_ts = datetime.now().strftime("%Y%m%d_%H%M%S")
 
         history_file = MEMORY_HISTORY_DIR / f"{safe_ts}_strategy_memory.json"
-        history_file.write_text(json.dumps(memory, indent=2, sort_keys=True))
+        atomic_write_json(history_file, memory)
 
         # Keep the last 60 snapshots to avoid unbounded growth.
         snapshots = sorted(
@@ -438,7 +439,7 @@ def main():
 
     snapshot_path = archive_strategy_memory(memory)
 
-    OUT_FILE.write_text(json.dumps(memory, indent=2, sort_keys=True))
+    atomic_write_json(OUT_FILE, memory)
 
     if snapshot_path:
         print(f"Archived strategy memory: {snapshot_path}")

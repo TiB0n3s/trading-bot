@@ -10,6 +10,8 @@ import json
 import logging
 from pathlib import Path
 
+from policy_artifacts import policy_artifacts_enabled
+
 logger = logging.getLogger(__name__)
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -21,6 +23,12 @@ _mtime = 0.0
 
 def load_portfolio_replacement_memory():
     global _memory, _mtime
+
+    if not policy_artifacts_enabled():
+        return {
+            "available": False,
+            "reason": "policy artifacts disabled",
+        }
 
     if not MEMORY_FILE.exists():
         return {

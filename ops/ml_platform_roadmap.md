@@ -60,6 +60,10 @@ or destabilize the webhook path if treated as routine cleanup.
    - Their hashes/mtimes must appear in `/status` and dataset manifests.
    - `run_after_close_learning.sh` must alert on failure so stale artifacts are
      visible before the next session.
+   - Writes must be atomic because Flask can read these files while after-close
+     learning is running.
+   - `POLICY_ARTIFACTS_ENABLED=false` must make live loaders return neutral
+     state without file deletion.
 
 ## Platform Layers
 
@@ -394,15 +398,15 @@ Current controls:
 - `dataset-manifest` includes policy artifact hashes and tracking status.
 - `run_after_close_learning.sh` logs a critical `AFTER_CLOSE_LEARNING` bot event
   if the run fails before completion.
+- Policy artifact writes use temp-file plus `os.replace()` atomic replacement.
+- `POLICY_ARTIFACTS_ENABLED=false` makes live loaders return neutral/no learned
+  policy influence without deleting artifact files.
 
 Remaining:
 
 - Add rollback tooling to restore the prior known-good artifact set.
 - Register these under the model registry as `policy_artifact` entries.
-- Add a future kill switch to ignore learned policy artifacts and fall back to
-  no learned policy influence.
-- Make partial-run artifact writes atomic where the individual report scripts
-  currently write JSON directly.
+- Add an ops check for stale or unexpectedly changed policy artifacts.
 
 ### Promotion Governance Layer
 

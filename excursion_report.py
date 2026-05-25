@@ -25,6 +25,7 @@ import pytz
 
 from broker import api
 from db import DB_PATH, get_connection
+from policy_artifacts import atomic_write_json
 
 
 ET = pytz.timezone("America/New_York")
@@ -431,7 +432,7 @@ def build_excursion_memory(results, target_date=None):
 
 def write_excursion_memory(results, target_date=None):
     memory = build_excursion_memory(results, target_date)
-    EXCURSION_MEMORY_FILE.write_text(json.dumps(memory, indent=2, sort_keys=True))
+    atomic_write_json(EXCURSION_MEMORY_FILE, memory)
     print(f"Wrote {EXCURSION_MEMORY_FILE}")
     return memory
 

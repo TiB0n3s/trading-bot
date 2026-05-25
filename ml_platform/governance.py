@@ -145,7 +145,9 @@ MIN_SAMPLE_GATES = {
 BASELINE_POLICIES = (
     "always_approve",
     "always_reject",
+    "null_no_ml_current_bot",
     "current_bot_policy",
+    "current_claude_plus_deterministic_gates",
     "symbol_historical_average",
     "setup_label_average",
     "macro_regime_average",
@@ -209,6 +211,140 @@ KNOWN_BAD_CASE_FIXTURES = (
     "synthetic_matched_exit",
     "broker_fill_mismatch",
 )
+
+COUNTERFACTUAL_POLICY = {
+    "problem": "Approved trades have observed outcomes, but rejected signals do not unless forward outcomes are reconstructed.",
+    "selection_bias": "A supervised model trained only on approved trades learns what past approvals looked like, not which signals were worth taking.",
+    "required_before_training": (
+        "reconstruct rejected-signal forward returns from point-in-time bar data",
+        "or explicitly mark reports as approved-trade-only and selection-biased",
+    ),
+    "preferred_targets": REJECTED_SIGNAL_FORWARD_RETURNS,
+}
+
+LABEL_FEEDBACK_POLICY = {
+    "problem": "Realized trade labels depend on adaptive exit logic that can change over time.",
+    "required_before_training": (
+        "prefer fixed-horizon labels such as profit_after_15m, profit_after_30m, profit_after_60m",
+        "version any realized-exit labels with exit_policy_version and position_manager_version",
+        "do not mix realized PnL labels across exit-policy versions without controls",
+    ),
+}
+
+VALIDATION_SPLIT_POLICY = {
+    "method": "purged_walk_forward_validation",
+    "requirements": (
+        "purge temporally adjacent training samples near each test boundary",
+        "embargo same-symbol samples immediately after training windows",
+        "report symbol/date leakage checks",
+        "consider combinatorial purged cross-validation for mature datasets",
+    ),
+}
+
+SYMBOL_UNIVERSE_POLICY = {
+    "problem": "A current fixed symbol list can introduce survivorship bias if historical membership changed.",
+    "required_fields": (
+        "symbol_universe_version",
+        "symbol_active_from",
+        "symbol_active_to",
+        "symbol_add_remove_reason",
+    ),
+    "training_rule": "Datasets should use the symbol universe that was active at the evaluated timestamp.",
+}
+
+DEMOTION_POLICY = {
+    "demotion_paths": {
+        "paper_gate": "observe_only",
+        "warn_only": "observe_only",
+        "observe_only": "research",
+    },
+    "triggers": (
+        "rolling performance below threshold",
+        "calibration drift outside tolerance",
+        "feature or regime drift outside tolerance",
+        "fill quality degradation",
+        "operator concern or failed readiness check",
+    ),
+    "rule": "Promotion without a matching demotion path is incomplete.",
+}
+
+POINT_IN_TIME_CONTEXT_POLICY = {
+    "problem": "Historical replay must not read the current market_context.json or current override files.",
+    "required_sources": (
+        "archived market_context snapshot by timestamp/date",
+        "archived daily_symbol_context rows",
+        "archived symbol/manual override state by effective timestamp",
+        "decision_snapshot context values",
+    ),
+    "blocked_until": "strategy.trade_scorer and brain feature replay have point-in-time context injection.",
+}
+
+CLASS_IMBALANCE_POLICY = {
+    "problem": "Accuracy can be misleading when win/loss, approve/reject, or avoid/take labels are imbalanced.",
+    "required_metrics": (
+        "precision_at_threshold",
+        "recall_of_winners",
+        "false_reject_rate_for_winners",
+        "expected_value_after_friction",
+        "balanced_accuracy",
+        "class_distribution",
+    ),
+    "allowed_controls": (
+        "class_weighting",
+        "threshold_tuning",
+        "cost-sensitive evaluation",
+    ),
+}
+
+SERVING_LATENCY_CONTRACT = {
+    "prediction_read_budget_ms": 25,
+    "hard_timeout_ms": 50,
+    "cache_or_ttl_required_before_app_integration": True,
+    "failure_behavior": "fail_open_to_no_prediction",
+    "runtime_rule": "Prediction reads must never block signal processing or hard risk checks.",
+}
+
+OVERRIDE_CONFOUNDER_POLICY = {
+    "files": (
+        "manual_strategy_overrides.json",
+        "symbol_overrides.json",
+    ),
+    "required_training_fields": (
+        "override_state",
+        "override_source",
+        "override_effective_at",
+        "override_expires_at",
+    ),
+    "rule": "Rows affected by unknown override state must be excluded or flagged before training.",
+}
+
+RETRAINING_POLICY = {
+    "default_mode": "manual_reviewed_batch_retraining",
+    "model_card_fields": (
+        "last_trained_date",
+        "retraining_policy",
+        "retraining_trigger",
+        "training_data_end_date",
+    ),
+    "triggers": (
+        "rolling performance decay",
+        "feature distribution drift",
+        "symbol universe drift",
+        "macro regime shift",
+        "approval/rejection mix drift",
+        "scheduled after-close learning review",
+    ),
+}
+
+APP_REFACTOR_RISK_POLICY = {
+    "classification": "mini_project",
+    "requirements": (
+        "extract behind tests",
+        "feature-flag or shadow-run new path",
+        "preserve old path until behavior parity is proven",
+        "avoid broker/order behavior changes during extraction",
+    ),
+}
 
 
 @dataclass(frozen=True)
@@ -354,10 +490,15 @@ def model_card_template(model_id: str = "candidate_model") -> dict[str, Any]:
             "stale features",
             "missing decision snapshot",
             "outside validation date range",
+            "point-in-time context unavailable",
+            "unsupported symbol universe version",
         ],
         "minimum_sample_gates": MIN_SAMPLE_GATES,
         "calibration_required": True,
         "rollback_plan": None,
+        "demotion_policy": DEMOTION_POLICY,
+        "last_trained_date": None,
+        "retraining_policy": RETRAINING_POLICY["default_mode"],
         "non_authority": MODEL_CARD_NON_AUTHORITY,
     }
 
@@ -380,4 +521,15 @@ def governance_contract() -> dict[str, Any]:
         "env_kill_switch_defaults": ENV_KILL_SWITCH_DEFAULTS,
         "model_card_non_authority": MODEL_CARD_NON_AUTHORITY,
         "known_bad_case_fixtures": KNOWN_BAD_CASE_FIXTURES,
+        "counterfactual_policy": COUNTERFACTUAL_POLICY,
+        "label_feedback_policy": LABEL_FEEDBACK_POLICY,
+        "validation_split_policy": VALIDATION_SPLIT_POLICY,
+        "symbol_universe_policy": SYMBOL_UNIVERSE_POLICY,
+        "demotion_policy": DEMOTION_POLICY,
+        "point_in_time_context_policy": POINT_IN_TIME_CONTEXT_POLICY,
+        "class_imbalance_policy": CLASS_IMBALANCE_POLICY,
+        "serving_latency_contract": SERVING_LATENCY_CONTRACT,
+        "override_confounder_policy": OVERRIDE_CONFOUNDER_POLICY,
+        "retraining_policy": RETRAINING_POLICY,
+        "app_refactor_risk_policy": APP_REFACTOR_RISK_POLICY,
     }

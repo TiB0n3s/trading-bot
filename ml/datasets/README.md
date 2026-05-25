@@ -40,6 +40,28 @@ over the next 15 or 30 minutes?
 Avoid using “should buy” as the first target. It mixes market outcome, current
 policy, broker state, and risk controls into one noisy label.
 
+Prefer fixed-horizon labels for training. Realized PnL labels are useful, but
+they depend on the active exit logic and must carry `exit_policy_version` and
+`position_manager_version`.
+
+## Counterfactual Outcomes
+
+Approved trades have observed outcomes. Rejected signals only become useful for
+"should we have taken this?" if their forward price path is reconstructed.
+
+Required rejected-signal labels:
+
+- `return_5m`
+- `return_15m`
+- `return_30m`
+- `return_60m`
+- `return_eod`
+- `max_favorable_60m`
+- `max_adverse_60m`
+
+Until those are present, supervised reports must say they are approved-trade
+only and selection-biased.
+
 ## Leakage Rules
 
 - No future prices or labels in feature columns.
@@ -53,6 +75,20 @@ policy, broker state, and risk controls into one noisy label.
   `order_decision_time`.
 - Trend/momentum reports generated after the fact are evaluation evidence, not
   decision-time features.
+- Historical replay must not read the current `market_context.json`; it needs a
+  point-in-time market-context archive or decision snapshot.
+- Manual overrides and symbol overrides must be timestamped as training
+  confounders or affected rows must be excluded.
+
+## Validation Rules
+
+- Use purged walk-forward validation with embargo periods for financial
+  time-series samples.
+- Track class distribution for every target.
+- Report precision at threshold, winner recall, false-reject rate for winners,
+  expected value after friction, balanced accuracy, and class distribution.
+- Compare against the null no-ML current bot and the current Claude plus
+  deterministic-gate policy, not only random baselines.
 
 ## Dataset Manifest
 

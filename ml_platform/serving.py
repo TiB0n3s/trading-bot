@@ -3,6 +3,10 @@
 This is a dormant serving-layer scaffold. Runtime code does not import it yet.
 Future app.py integration should start read-only: log/dashboard only, no
 decision influence.
+
+Future runtime integration must honor the serving latency contract in
+`ml_platform.governance`: prediction reads fail open to no prediction and must
+never block signal processing.
 """
 
 from __future__ import annotations
@@ -35,6 +39,9 @@ class PredictionView:
 class PredictionProvider(Protocol):
     """Read-only prediction provider contract."""
 
+    latency_budget_ms: int
+    timeout_ms: int
+
     def get_prediction(self, market_date: str, symbol: str) -> PredictionView | None:
         ...
 
@@ -44,6 +51,8 @@ class SQLitePredictionProvider:
 
     def __init__(self, db_path: Path | str = DB_PATH):
         self.db_path = Path(db_path)
+        self.latency_budget_ms = 25
+        self.timeout_ms = 50
 
     def get_prediction(self, market_date: str, symbol: str) -> PredictionView | None:
         with sqlite3.connect(f"file:{self.db_path}?mode=ro", uri=True) as con:

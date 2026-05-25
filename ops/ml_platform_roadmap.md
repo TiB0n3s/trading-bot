@@ -32,7 +32,8 @@ Current state:
 - `ml_platform.governance` defines first-class contracts for leakage policy,
   decision snapshots, dataset manifests, label taxonomy, fill confidence,
   abstention, sample gates, baselines, calibration, drift checks, kill switches,
-  and model-card non-authority.
+  counterfactual handling, point-in-time context, demotion, retraining cadence,
+  serving latency, override confounders, and model-card non-authority.
 - `dataset-manifest`, `governance-contract`, `label-taxonomy`,
   `model-card-template`, and `env-policy` CLI commands are staged as read-only
   research/operator tools.
@@ -64,6 +65,58 @@ Remaining:
 - Add schema/migration management before structural DB refactors.
 - Add durable decision snapshots after Tuesday's session is preserved.
 - Add rejected-signal forward returns and stale-context quality gates.
+- Archive point-in-time market context and override state before historical
+  brain-feature replay is trusted.
+
+### Counterfactual And Selection-Bias Layer
+
+Goal: prevent the platform from learning only what past approvals looked like.
+
+Problem:
+
+- Approved trades have observed outcomes.
+- Rejected signals do not have observed trade outcomes unless forward market
+  movement is reconstructed.
+- A model trained only on approved trades learns "what made approved trades win
+  or lose", not "what made a signal worth taking."
+
+Required before training:
+
+- Reconstruct rejected-signal forward returns from point-in-time bar data, or
+  explicitly mark any model/report as approved-trade-only and selection-biased.
+- Store rejected-signal outcomes for 5/15/30/60 minute returns, EOD return,
+  max favorable excursion, and max adverse excursion.
+- Evaluate "would this have improved decisions?" against both approved and
+  rejected opportunities.
+
+Status: identified as a hard blocker for real model training. The existing
+`signal_outcome_builder.py`/bar-data infrastructure should be reviewed after
+Tuesday and promoted into the canonical dataset path if suitable.
+
+### Point-In-Time Context Layer
+
+Goal: ensure historical replay uses the context that existed at signal time.
+
+Problem:
+
+- Replaying historical signals through code that calls `load_market_context()`
+  can silently use today's `market_context.json`.
+- Manual override files can change behavior without appearing as features.
+- Symbol-list changes can create survivorship bias.
+
+Required before historical brain-feature training:
+
+- Archive `market_context.json` or equivalent market context by date/timestamp.
+- Version `daily_symbol_context`, manual overrides, symbol overrides, and symbol
+  universe membership by effective timestamp.
+- Add `symbol_universe_version`, active-from/active-to timestamps, and add/remove
+  reasons.
+- Exclude or flag rows whose override state is unknown.
+- Inject point-in-time context into `strategy.trade_scorer`; do not let replay
+  read the live context file.
+
+Status: `strategy.trade_scorer` remains future/shadow-only for ML until this is
+implemented.
 
 ### Dataset Layer
 
@@ -89,6 +142,11 @@ Remaining:
   rejection.
 - Mark fill confidence using the truth hierarchy: Alpaca order/fill data,
   fill stream, fill poller, trades table, then synthetic matcher.
+- Prefer fixed-horizon labels for model training. Realized-PnL labels must carry
+  `exit_policy_version` and `position_manager_version` because adaptive exit
+  logic changes what "win" means over time.
+- Track class distribution for every target. Accuracy alone is not acceptable
+  when labels are imbalanced.
 
 ### Experiment Layer
 
@@ -105,6 +163,8 @@ Remaining:
 
 - Record git SHA, dataset hash, config hash, and output hash.
 - Convert the existing similarity model into versioned model/rule `v0`.
+- Record override-state hash, symbol-universe version, exit-policy version,
+  feature version, label version, and retraining policy.
 
 ### Evaluation Layer
 
@@ -127,6 +187,14 @@ Remaining:
   whether prediction correlated with outcome, whether acting on it would improve
   PnL/drawdown/bad entries, whether it would reject too many winners, whether it
   would concentrate risk, and whether it would conflict with hard controls.
+- Use purged walk-forward validation, not naive adjacent splits. Training rows
+  temporally close to the test boundary must be purged, and same-symbol rows
+  immediately after training windows need an embargo period.
+- Surface class imbalance with precision at threshold, winner recall,
+  false-reject rate for winners, expected value after friction, balanced
+  accuracy, and class distribution.
+- Compare against a null no-ML current-bot baseline and the current
+  Claude-plus-deterministic-gates system specifically.
 
 ### Replay Layer
 
@@ -162,7 +230,9 @@ Baselines:
 
 - always approve,
 - always reject,
+- null no-ML current bot,
 - current bot policy,
+- current Claude plus deterministic gates,
 - symbol historical average,
 - setup-label average,
 - macro-regime average,
@@ -178,6 +248,7 @@ Friction assumptions:
 - latency assumption,
 - market order vs limit order behavior,
 - stop-loss/take-profit execution approximation.
+- purge/embargo settings for temporally correlated signals.
 
 ### Model Registry
 
@@ -198,6 +269,8 @@ Remaining:
   not override hard risk controls, does not increase size without later
   promotion, is invalid outside listed symbols/regimes/date ranges, and must
   abstain on stale or missing features.
+- Model cards also need `last_trained_date`, `retraining_policy`,
+  `retraining_trigger`, `training_data_end_date`, and demotion/rollback fields.
 
 ### Promotion Governance Layer
 
@@ -219,6 +292,9 @@ Promotion gates:
 - drift checks for feature distributions, symbol universe, macro regime,
   prediction confidence, approval/rejection mix, PnL attribution, and fill
   quality.
+- a demotion path for every promoted state. A `paper_gate` or `warn_only` model
+  must move back to `observe_only` when rolling performance, calibration,
+  feature drift, regime drift, or fill quality breaches thresholds.
 
 Default kill switches:
 
@@ -243,6 +319,15 @@ Promotion remains blocked if the model cannot explain top positive features,
 top negative features, missing features, similar historical cases, regime
 match/mismatch, calibration bucket, and abstention status.
 
+Retraining policy:
+
+- Default to manually reviewed batch retraining.
+- Retraining triggers include rolling performance decay, feature drift, symbol
+  universe drift, macro regime shift, approval/rejection mix drift, and the
+  after-close learning review.
+- The after-close learning pipeline should feed retraining readiness reports
+  first, not silently deploy new models.
+
 ### Serving Layer
 
 Goal: read-only prediction service used by `app.py`, initially only for logging
@@ -260,6 +345,9 @@ Remaining:
 - Keep all runtime influence off until paper evidence supports promotion.
 - Serving must degrade to no prediction if disabled, stale, missing, or failed;
   it must never block signal processing.
+- Prediction reads need an explicit latency budget before `app.py` integration:
+  target 25 ms, hard timeout 50 ms, cache/TTL required if reads are too slow,
+  and failure behavior is fail-open to no prediction.
 
 ### Operator UI/API
 
@@ -280,8 +368,9 @@ Remaining:
 
 ### Phase 1: Stabilize Foundation
 
-- Split `app.py` into webhook handling, signal validation, context building,
-  risk checks, order execution, and logging after Tuesday.
+- Treat `app.py` decomposition as its own mini-project, not a casual cleanup.
+  Extract webhook handling, signal validation, context building, risk checks,
+  order execution, and logging behind tests and feature/shadow flags.
 - Add formal schema/migration management instead of scattered runtime table
   creation. This includes a schema version table, migration files, migration
   status command, backup before migration, rollback notes, and idempotent
@@ -296,7 +385,7 @@ Remaining:
 
 Status: partially started with safety docs, ops checks, ML scaffolding, and
 readiness automation. Structural refactor is intentionally deferred until after
-Tuesday.
+Tuesday and should be scheduled as a multi-week risk-managed project.
 
 ### Phase 2: Make ML Loop Real
 
@@ -307,6 +396,8 @@ Tuesday.
 - Add walk-forward validation before any live influence.
 - Add rejected-signal outcome tracking with 5/15/30/60 minute, EOD, MFE, and
   MAE forward returns.
+- Resolve the counterfactual problem, fixed-horizon label policy, purged
+  validation, and point-in-time context before any real training.
 
 Status: scaffolded, not train-ready. Waiting on post-rebuild
 `feature_snapshots`, `labeled_setups`, and matched outcomes.
@@ -420,6 +511,14 @@ A model can only move from observe-only to paper-trading influence after it has:
 8. Build the real `replay-decisions` command.
 9. Add calibration and walk-forward evaluation.
 10. Only then expose the read-only prediction provider in `/status`.
+
+Critical blockers before real training:
+
+1. Resolve counterfactual outcomes for rejected signals.
+2. Pin fixed-horizon labels or version realized-exit labels by exit logic.
+3. Implement purged/embargoed walk-forward validation.
+4. Add point-in-time context archives before using `strategy.trade_scorer` in
+   historical replay.
 
 The biggest missing concept is auditability of what the bot knew at decision
 time. Without that, training, evaluation, and promotion can look sophisticated

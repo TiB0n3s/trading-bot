@@ -48,11 +48,21 @@ environment flags defaulting off, and rollback.
 - baseline comparisons,
 - friction/slippage assumptions,
 - calibration and drift checks,
+- counterfactual and selection-bias policy,
+- point-in-time context requirements,
+- purged/embargoed validation requirements,
+- class-imbalance metrics,
+- serving latency and fail-open behavior,
+- demotion and retraining policy,
 - non-authority language for every model card.
 
 The first hard rule is auditability: future training rows must record what was
 knowable at decision time before they can be trusted for evaluation or
 promotion.
+
+The second hard rule is counterfactual coverage: a model trained only on
+approved trades is selection-biased and cannot claim to know which rejected
+signals were worth taking.
 
 ## Brain Integration
 

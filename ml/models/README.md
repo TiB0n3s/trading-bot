@@ -16,6 +16,9 @@ Suggested fields:
   "validation_window": "YYYY-MM-DD..YYYY-MM-DD",
   "metrics_path": "ml/experiments/.../metrics.json",
   "created_at": "ISO-8601",
+  "last_trained_date": "YYYY-MM-DD",
+  "retraining_policy": "manual_reviewed_batch_retraining",
+  "training_data_end_date": "YYYY-MM-DD",
   "notes": "observe-only"
 }
 ```
@@ -27,6 +30,8 @@ Every model card must also state:
 - This model does not increase position size unless explicitly promoted later.
 - This model is invalid outside listed symbols, regimes, and date ranges.
 - This model must abstain on stale or missing features.
+- This model must demote when rolling performance, calibration, drift, or fill
+  quality breaches its status thresholds.
 
 Model output should include abstention:
 
@@ -51,6 +56,7 @@ Allowed statuses:
 - `retired`
 
 Anything beyond `research` requires explicit operator approval and code review.
+Promotion requires a matching demotion path and rollback plan.
 
 Use the registry CLI for local metadata:
 

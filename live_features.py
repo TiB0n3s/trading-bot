@@ -4,8 +4,50 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import os
+import sys
 from datetime import datetime, timedelta
 from pathlib import Path
+
+BASE_DIR = Path(__file__).resolve().parent
+VENV_PYTHON = BASE_DIR / "venv" / "bin" / "python"
+ENV_FILE = Path("/etc/trading-bot.env")
+
+
+def reexec_under_venv_if_available() -> None:
+    if not VENV_PYTHON.exists():
+        return
+
+    venv_dir = VENV_PYTHON.parent.parent.resolve()
+    current_prefix = Path(sys.prefix).resolve()
+    if current_prefix == venv_dir:
+        return
+
+    os.execv(str(VENV_PYTHON), [str(VENV_PYTHON), str(Path(__file__).resolve())] + sys.argv[1:])
+
+
+reexec_under_venv_if_available()
+
+
+def load_env_file(path: Path = ENV_FILE) -> bool:
+    if not path.exists():
+        return False
+
+    for raw_line in path.read_text().splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+
+        key, value = line.split("=", 1)
+        key = key.strip()
+        value = value.strip().strip('"').strip("'")
+        if key and key not in os.environ:
+            os.environ[key] = value
+
+    return True
+
+
+load_env_file()
 
 import pytz
 
@@ -14,7 +56,7 @@ from config import SYMBOL_MARKET_ALIGNMENT
 from db import get_connection, DB_PATH
 from feature_engine import compute_feature_snapshot
 from macro_risk import get_macro_risk
-from market_time import market_session
+from market_time import is_trading_day, market_session, now_et
 from symbols_config import APPROVED_SYMBOLS
 from setup_engine import classify_setup
 
@@ -24,7 +66,6 @@ logging.basicConfig(
     format="%(asctime)s - %(levelname)s - %(message)s",
 )
 
-BASE_DIR = Path(__file__).resolve().parent
 MARKET_CONTEXT_FILE = BASE_DIR / "market_context.json"
 ET = pytz.timezone("America/New_York")
 _BAR_CACHE: dict[tuple[str, str], tuple[list[float], list[float]]] = {}
@@ -312,12 +353,7 @@ def collect_all_symbols(write: bool = False, stdout: bool = False) -> tuple[int,
             failed += 1
             logger.error(f"{symbol}: snapshot failed: {e}")
 
-    logger.info(
-    f"{symbol}: snapshot collected "
-    f"setup={snapshot.get('setup_label')} "
-    f"rec={snapshot.get('setup_recommendation')} "
-    f"score={snapshot.get('setup_score')}"
-)
+    logger.info(f"feature snapshot collection complete: success={success} failed={failed}")
     return success, failed
 
 def main() -> int:
@@ -333,6 +369,10 @@ def main() -> int:
 
     if args.symbol and args.all_symbols:
         parser.error("Use either --symbol or --all-symbols, not both")
+
+    if not is_trading_day(now_et().date()):
+        logger.info("Skipping live feature collection: today is not a trading day")
+        return 0
 
     if args.all_symbols:
         success, failed = collect_all_symbols(write=args.write, stdout=args.stdout)

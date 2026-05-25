@@ -48,9 +48,6 @@ def init_fill_events_table():
     con.close()
 
 
-init_fill_events_table()
-
-
 def record_fill_event(event, order):
     """Persist every Alpaca trade_update event to fill_events for forensic history.
     Captures every event regardless of whether it matches a trades.db row."""
@@ -234,9 +231,8 @@ async def trade_update_handler(data):
     except Exception as e:
         logger.error(f"Error in trade_update_handler: {e} | raw data: {data}")
 
-logger.info(f"Starting Alpaca trade update stream: base_url={ALPACA_BASE_URL}")
-
 def run_stream():
+    logger.info(f"Starting Alpaca trade update stream: base_url={ALPACA_BASE_URL}")
     stream = Stream(
         ALPACA_API_KEY,
         ALPACA_SECRET_KEY,
@@ -252,6 +248,8 @@ def main():
     if not ALPACA_API_KEY or not ALPACA_SECRET_KEY:
         logger.error("ALPACA_API_KEY or ALPACA_SECRET_KEY not set — exiting")
         raise SystemExit(1)
+
+    init_fill_events_table()
 
     while True:
         try:

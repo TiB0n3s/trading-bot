@@ -53,11 +53,14 @@ TESTS = [
     "tests/test_market_context_schema.py",
     "tests/test_broker.py",
     "tests/test_db_migrations.py",
+    "tests/test_fill_stream.py",
     "tests/test_trend.py",
     "tests/test_fast_lane.py",
     "tests/test_fast_lane_sell.py",
     "tests/test_trade_matcher.py",
     "tests/test_live_bias_override.py",
+    "tests/test_macro_risk.py",
+    "tests/test_pnl.py",
 ]
 
 

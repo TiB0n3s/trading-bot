@@ -40,7 +40,23 @@ from datetime import date
 from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parent
+VENV_PYTHON = BASE_DIR / "venv" / "bin" / "python"
 ENV_FILE = Path("/etc/trading-bot.env")
+
+
+def reexec_under_venv_if_available():
+    if not VENV_PYTHON.exists():
+        return
+
+    venv_dir = VENV_PYTHON.parent.parent.resolve()
+    current_prefix = Path(sys.prefix).resolve()
+    if current_prefix == venv_dir:
+        return
+
+    os.execv(str(VENV_PYTHON), [str(VENV_PYTHON), str(Path(__file__).resolve())] + sys.argv[1:])
+
+
+reexec_under_venv_if_available()
 
 
 def load_env_file(path=ENV_FILE):

@@ -1,7 +1,25 @@
 import sqlite3
+import sys
+import tempfile
 from pathlib import Path
 
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
+
 import fill_stream
+
+
+class SimpleMonkeyPatch:
+    def __init__(self):
+        self._changes = []
+
+    def setattr(self, obj, name, value):
+        self._changes.append((obj, name, getattr(obj, name)))
+        setattr(obj, name, value)
+
+    def undo(self):
+        for obj, name, original in reversed(self._changes):
+            setattr(obj, name, original)
 
 
 def make_test_db(tmp_path: Path):
@@ -44,6 +62,7 @@ def count_trades(db_path: Path):
 
 def test_insert_synthetic_exit_is_idempotent_by_order_id(tmp_path, monkeypatch):
     db_path = make_test_db(tmp_path)
+
     def test_get_connection():
         con = sqlite3.connect(db_path)
         con.row_factory = sqlite3.Row
@@ -76,26 +95,59 @@ def test_insert_synthetic_exit_is_idempotent_by_order_id(tmp_path, monkeypatch):
     assert count_trades(db_path) == 1
 
 
-def trade_order_exists(order_id: str) -> bool:
-    """Return True if trades already contains this order_id.
+def test_trade_order_exists_checks_order_id(tmp_path, monkeypatch):
+    db_path = make_test_db(tmp_path)
+    insert_order_id = "existing-order-1"
 
-    Used to make synthetic bracket-exit insertion idempotent when Alpaca
-    reconnects or replays a fill event.
-    """
-    if not order_id:
-        return False
+    con = sqlite3.connect(db_path)
+    con.execute(
+        """
+        INSERT INTO trades (
+            timestamp, symbol, action, signal_price, approved,
+            order_id, order_status, qty, fill_price
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            "2026-05-11 10:00:00",
+            "AAPL",
+            "buy",
+            100.0,
+            1,
+            insert_order_id,
+            "filled",
+            1,
+            100.0,
+        ),
+    )
+    con.commit()
+    con.close()
 
-    try:
+    def test_get_connection():
         con = sqlite3.connect(db_path)
-        row = con.execute(
-            "SELECT id FROM trades WHERE order_id = ? LIMIT 1",
-            (order_id,),
-        ).fetchone()
-        con.close()
-        return row is not None
-    except Exception as e:
-        logger.error(f"trade_order_exists failed for order {order_id}: {e}")
-        return False
+        con.row_factory = sqlite3.Row
+        return con
 
-    assert fill_stream.trade_order_exists("existing-order-1") is True
+    monkeypatch.setattr(fill_stream, "get_connection", test_get_connection)
+
+    assert fill_stream.trade_order_exists(insert_order_id) is True
     assert fill_stream.trade_order_exists("missing-order") is False
+
+
+def run_with_temp_db(test_func):
+    with tempfile.TemporaryDirectory() as tmp:
+        monkeypatch = SimpleMonkeyPatch()
+        try:
+            test_func(Path(tmp), monkeypatch)
+        finally:
+            monkeypatch.undo()
+
+
+if __name__ == "__main__":
+    tests = [
+        test_insert_synthetic_exit_is_idempotent_by_order_id,
+        test_trade_order_exists_checks_order_id,
+    ]
+    for test in tests:
+        run_with_temp_db(test)
+        print(f"[OK] {test.__name__}")
+    print(f"\nAll {len(tests)} fill stream tests passed.")

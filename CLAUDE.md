@@ -485,9 +485,9 @@ Current operating rules include:
 
 Paper trading by default
 Maximum open positions controlled by macro regime
-Normal max positions: 8
-Caution max positions: 6
-Defensive max positions: 4
+Normal/risk-on max positions: 12
+Caution max positions: 8
+Defensive max positions: 5
 Capital preservation max positions: 0
 Per-symbol exposure cap: 4%
 Daily loss circuit breaker: -3%

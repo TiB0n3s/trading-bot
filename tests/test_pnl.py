@@ -1,7 +1,25 @@
 import sqlite3
+import sys
+import tempfile
 from pathlib import Path
 
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
+
 import pnl
+
+
+class SimpleMonkeyPatch:
+    def __init__(self):
+        self._changes = []
+
+    def setattr(self, obj, name, value):
+        self._changes.append((obj, name, getattr(obj, name)))
+        setattr(obj, name, value)
+
+    def undo(self):
+        for obj, name, original in reversed(self._changes):
+            setattr(obj, name, original)
 
 
 def make_test_db(tmp_path: Path):
@@ -166,3 +184,28 @@ def test_daily_realized_pnl_filters_by_date(tmp_path, monkeypatch):
     insert_trade(db_path, "2026-05-11 11:00:00", "MSFT", "sell", 10, 210.00)
 
     assert pnl.get_daily_realized_pnl("2026-05-11") == 100.00
+
+
+def run_with_temp_db(test_func):
+    with tempfile.TemporaryDirectory() as tmp:
+        monkeypatch = SimpleMonkeyPatch()
+        try:
+            test_func(Path(tmp), monkeypatch)
+        finally:
+            monkeypatch.undo()
+
+
+if __name__ == "__main__":
+    tests = [
+        test_daily_realized_pnl_uses_confirmed_fills_only,
+        test_daily_realized_pnl_ignores_null_fill_price_even_with_signal_price,
+        test_daily_realized_pnl_ignores_unapproved_rows,
+        test_daily_realized_pnl_ignores_non_filled_statuses,
+        test_daily_realized_pnl_fifo_multi_lot,
+        test_daily_realized_pnl_unmatched_sell_does_not_create_fake_pnl,
+        test_daily_realized_pnl_filters_by_date,
+    ]
+    for test in tests:
+        run_with_temp_db(test)
+        print(f"[OK] {test.__name__}")
+    print(f"\nAll {len(tests)} P&L tests passed.")

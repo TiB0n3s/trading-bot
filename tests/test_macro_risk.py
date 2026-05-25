@@ -41,7 +41,7 @@ def test_missing_context_defaults_safe():
 
     assert_equal(result["macro_regime"], "unknown", "missing macro_regime")
     assert_equal(result["risk_multiplier"], 0.75, "missing risk_multiplier")
-    assert_equal(result["max_new_positions"], 6, "missing max positions")
+    assert_equal(result["max_new_positions"], 8, "missing max positions")
     assert_equal(result["block_new_buys"], False, "missing block buys")
 
 
@@ -52,7 +52,7 @@ def test_risk_on_policy():
 
     assert_equal(result["macro_regime"], "risk_on", "risk-on regime")
     assert_equal(result["risk_multiplier"], 1.0, "risk-on multiplier")
-    assert_equal(result["max_new_positions"], 8, "risk-on max positions")
+    assert_equal(result["max_new_positions"], 12, "risk-on max positions")
     assert_equal(result["block_new_buys"], False, "risk-on block buys")
 
 
@@ -63,7 +63,7 @@ def test_neutral_policy():
 
     assert_equal(result["macro_regime"], "neutral", "neutral regime")
     assert_equal(result["risk_multiplier"], 0.75, "neutral multiplier")
-    assert_equal(result["max_new_positions"], 6, "neutral max positions")
+    assert_equal(result["max_new_positions"], 8, "neutral max positions")
     assert_equal(result["block_new_buys"], False, "neutral block buys")
 
 
@@ -74,7 +74,7 @@ def test_defensive_policy():
 
     assert_equal(result["macro_regime"], "defensive", "defensive regime")
     assert_equal(result["risk_multiplier"], 0.5, "defensive multiplier")
-    assert_equal(result["max_new_positions"], 4, "defensive max positions")
+    assert_equal(result["max_new_positions"], 5, "defensive max positions")
     assert_equal(result["block_new_buys"], False, "defensive block buys")
 
 

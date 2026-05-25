@@ -335,8 +335,9 @@ Core Risk Rules
 
 Current core paper-trading risk framework:
 
-Max open positions: controlled by macro regime, usually up to 8
-Macro caution max positions: usually 6
+Max open positions: controlled by macro regime, up to 12 in normal/risk-on context
+Macro caution max positions: usually 8
+Macro defensive max positions: usually 5
 Per-symbol exposure cap: 4%
 Daily loss circuit breaker: -3%
 Cooldown: 15 minutes per symbol/action after successful order

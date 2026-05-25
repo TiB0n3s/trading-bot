@@ -5025,8 +5025,79 @@ def _latest_session_momentum_for_symbol(symbol):
         return None
 
 
+def _symbol_intelligence_snapshot(market_date=None):
+    """Return observe-only daily prediction rows for /status visibility."""
+    market_date = market_date or expected_market_context_date().isoformat()
+    try:
+        with get_connection(DB_PATH) as con:
+            rows = con.execute(
+                """
+                SELECT
+                    symbol,
+                    prediction_score,
+                    probability_of_profit,
+                    probability_of_order,
+                    expected_pnl,
+                    expected_win_rate,
+                    confidence,
+                    sample_size,
+                    reason,
+                    timing_score,
+                    recommended_entry_timing,
+                    recommended_exit_timing,
+                    historical_timing_sample_size,
+                    timing_reason,
+                    trend_score,
+                    trend_label,
+                    trend_regime,
+                    trend_confidence,
+                    trend_similarity_sample_size,
+                    trend_reason,
+                    updated_at
+                FROM daily_symbol_predictions
+                WHERE market_date = ?
+                ORDER BY symbol
+                """,
+                (market_date,),
+            ).fetchall()
+
+        symbols = {}
+        for row in rows:
+            item = dict(row)
+            symbol = item.pop("symbol")
+            item["prediction_confidence"] = item.pop("confidence", None)
+            item["prediction_reason"] = item.pop("reason", None)
+            item["prediction_decision"] = "observe_only"
+            symbols[symbol] = item
+
+        return {
+            "available": bool(symbols),
+            "market_date": market_date,
+            "symbol_count": len(symbols),
+            "observe_only": True,
+            "symbols": symbols,
+        }
+    except Exception as e:
+        logger.warning(f"symbol intelligence unavailable: {e}")
+        return {
+            "available": False,
+            "market_date": market_date,
+            "observe_only": True,
+            "error": str(e),
+            "symbols": {},
+            "symbol_count": 0,
+        }
+
+
+def _symbol_intelligence_for_symbol(symbol, market_date=None):
+    snapshot = _symbol_intelligence_snapshot(market_date=market_date)
+    return (snapshot.get("symbols") or {}).get(symbol.upper())
+
+
 @app.route("/status", methods=["GET"])
 def status():
+    validate_secret(request)
+
     result = {
         "timestamp": datetime.now().isoformat(),
         "execution_mode": EXECUTION_MODE,
@@ -5041,6 +5112,7 @@ def status():
     result["alerts"] = alert_config_public()
     result["session_momentum_summary"] = _session_momentum_summary()
     result["session_momentum"] = _session_momentum_snapshot()
+    result["symbol_intelligence"] = _symbol_intelligence_snapshot()
     result["policy_artifacts"] = policy_artifact_status(Path(__file__).parent)
     
     # Uptime
@@ -5611,6 +5683,12 @@ def debug_symbol(symbol):
         result["market_alignment"] = _symbol_market_alignment(symbol)
     except Exception as e:
         result["market_alignment_error"] = str(e)
+
+    # Observe-only daily prediction intelligence
+    try:
+        result["symbol_intelligence"] = _symbol_intelligence_for_symbol(symbol)
+    except Exception as e:
+        result["symbol_intelligence_error"] = str(e)
 
     # Observe-only adaptive BUY confirmation diagnostics
     try:

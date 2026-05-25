@@ -7,7 +7,9 @@ imported by `app.py`, `broker.py`, cron, or order execution.
 
 ```bash
 python3 -m ml_platform.cli profile-dataset --start-date 2026-05-20 --end-date 2026-05-26
+python3 -m ml_platform.cli export-brain-features --date 2026-05-26 --output /tmp/brain_features.csv
 python3 -m ml_platform.cli create-experiment setup_baseline --dataset-start 2026-05-20 --dataset-end 2026-05-26
+python3 -m ml_platform.cli integration-contract
 python3 -m ml_platform.cli list-models
 ```
 
@@ -21,3 +23,17 @@ python3 -m ml_platform.cli list-models
 
 Promotion beyond research requires explicit operator approval, tests, reports,
 environment flags defaulting off, and rollback.
+
+## Brain Integration
+
+`brain_features.py` turns existing deterministic bot intelligence into ML
+features:
+
+- `setup_engine.classify_setup`
+- `daily_symbol_context`
+- `daily_symbol_events`
+- `daily_symbol_predictions`
+
+This is the first bridge between the current bot brain and the future ML
+platform. It creates offline features only. It does not import runtime order
+code, write to SQLite, or modify decisions.

@@ -11,8 +11,14 @@ import argparse
 import json
 
 from db import DB_PATH
+from ml_platform.brain_features import (
+    brain_feature_manifest,
+    build_brain_feature_rows,
+    write_brain_features_csv,
+)
 from ml_platform.datasets import dataset_profile, write_profile
 from ml_platform.experiments import create_experiment
+from ml_platform.integration_contract import default_contract
 from ml_platform.registry import load_registry, register_model
 
 
@@ -25,6 +31,14 @@ def main() -> int:
     profile.add_argument("--start-date")
     profile.add_argument("--end-date")
     profile.add_argument("--output")
+
+    brain = sub.add_parser("export-brain-features", help="Export existing bot-brain features")
+    brain.add_argument("--db-path", default=str(DB_PATH))
+    brain.add_argument("--date")
+    brain.add_argument("--start-date")
+    brain.add_argument("--end-date")
+    brain.add_argument("--output", required=True)
+    brain.add_argument("--manifest-output")
 
     create = sub.add_parser("create-experiment", help="Create an experiment scaffold")
     create.add_argument("name")
@@ -45,6 +59,7 @@ def main() -> int:
     register.add_argument("--notes", default="Research only. No runtime use.")
 
     sub.add_parser("list-models", help="List registry contents")
+    sub.add_parser("integration-contract", help="Print ML/brain promotion contract")
 
     args = parser.parse_args()
 
@@ -58,6 +73,26 @@ def main() -> int:
             path = write_profile(result, args.output)
             print(f"Wrote dataset profile to {path}")
         print(json.dumps(result, indent=2, sort_keys=True))
+        return 0
+
+    if args.command == "export-brain-features":
+        rows = build_brain_feature_rows(
+            db_path=args.db_path,
+            date_arg=args.date,
+            start_date=args.start_date,
+            end_date=args.end_date,
+        )
+        path = write_brain_features_csv(rows, args.output)
+        manifest = brain_feature_manifest(rows)
+        print(f"Wrote brain feature CSV to {path}")
+        if args.manifest_output:
+            from pathlib import Path
+
+            manifest_path = Path(args.manifest_output)
+            manifest_path.parent.mkdir(parents=True, exist_ok=True)
+            manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n")
+            print(f"Wrote brain feature manifest to {manifest_path}")
+        print(json.dumps(manifest, indent=2, sort_keys=True))
         return 0
 
     if args.command == "create-experiment":
@@ -88,6 +123,10 @@ def main() -> int:
 
     if args.command == "list-models":
         print(json.dumps(load_registry(), indent=2, sort_keys=True))
+        return 0
+
+    if args.command == "integration-contract":
+        print(json.dumps(default_contract(), indent=2, sort_keys=True))
         return 0
 
     parser.error(f"unknown command {args.command}")

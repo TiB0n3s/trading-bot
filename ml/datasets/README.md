@@ -55,3 +55,9 @@ Use the read-only platform CLI to summarize whether enough data exists:
 ```bash
 python3 -m ml_platform.cli profile-dataset --start-date 2026-05-20 --end-date 2026-05-26
 ```
+
+Brain/intelligence feature export:
+
+```bash
+python3 -m ml_platform.cli export-brain-features --date 2026-05-26 --output /tmp/brain_features.csv
+```

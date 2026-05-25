@@ -33,6 +33,39 @@ becomes an ML-driven trading system.
 5. Serving layer: read-only status/report surfaces first; no live decision
    modification until enough paper evidence exists.
 
+## Bot Brain Integration Layer
+
+The first integration point is offline feature generation from existing bot
+intelligence, not live model serving.
+
+Reusable logic staged for ML:
+
+- `setup_engine.classify_setup`: converts intraday feature snapshots into
+  deterministic setup labels/scores.
+- `daily_symbol_context`: premarket context, risk, entry quality, and aggregated
+  event scores.
+- `daily_symbol_events`: catalyst/event coverage and future event embeddings.
+- `daily_symbol_predictions`: existing observe-only similarity predictions.
+- `market_intelligence.tape_reader`: future intraday tape labels from bar data.
+- `strategy.trade_scorer`: future shadow-only trader-brain score, with leakage
+  controls before historical use.
+- `decision_context` / `decision_policy`: future policy-replay features, not
+  live authority.
+
+Current command:
+
+```bash
+python3 -m ml_platform.cli export-brain-features \
+  --date 2026-05-26 \
+  --output /tmp/brain_features_2026-05-26.csv
+```
+
+Promotion remains blocked until the integration contract allows it:
+
+```bash
+python3 -m ml_platform.cli integration-contract
+```
+
 ## Refactor sequence after Tuesday
 
 1. Extract signal-processing logic from `app.py` behind tests.

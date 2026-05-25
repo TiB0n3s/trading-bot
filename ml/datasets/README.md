@@ -115,9 +115,18 @@ and `symbol_universe_version`. VWAP distance, relative strength, spread, volume,
 and momentum features can behave very differently for defensive/dividend names
 than for high-beta growth names.
 
+Cohort membership should be treated as a hypothesis. A symbol can behave like a
+different cohort in a different regime, so post-QA profiling should check
+cohort consistency by regime before using cohort labels for training.
+
 Experience-model and similarity-model reports should either compare within
 cohorts or prove that feature normalization makes cross-cohort matching
 meaningful.
+
+Run a signal-frequency and signal-quality triage before spending ML research
+time on candidates. Defensive/dividend symbols may produce too few clean
+momentum alerts to justify inclusion even if they are liquid and operationally
+safe.
 
 ## Validation Rules
 

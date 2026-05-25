@@ -292,6 +292,9 @@ SYMBOL_UNIVERSE_POLICY = {
     "candidate_rule": "Candidate additions require post-QA review, point-in-time universe versioning, and fresh data collection before training claims.",
     "similarity_rule": "Experience/similarity matching should compare within symbol cohorts or use normalized features before cross-cohort claims.",
     "feature_distribution_rule": "Profile feature distributions per symbol_universe_version and cohort before cross-symbol training.",
+    "cohort_consistency_rule": "Treat cohort labels as hypotheses. Check whether each symbol's realized feature distributions remain cohort-consistent by regime before cross-symbol training.",
+    "candidate_signal_triage_rule": "Before ML research investment, compare candidate signal frequency and signal quality against the existing approved universe.",
+    "defensive_cohort_warning": "Defensive/dividend candidates may produce too few clean momentum alerts for this bot and can remain candidates indefinitely if signal quality is weak.",
 }
 
 DEMOTION_POLICY = {

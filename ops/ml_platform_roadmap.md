@@ -194,6 +194,13 @@ Rules before adding any candidate to live collection or approved trading:
 - Keep experience-model similarity matching cohort-aware, or normalize features
   enough to justify cross-cohort comparisons. A SOFI setup should not inherit
   confidence from NVDA-like historical context without evidence.
+- Treat cohort labels as hypotheses, not permanent truth. Check whether each
+  symbol's realized feature distributions remain cohort-consistent across macro
+  regimes before including it in cross-symbol training.
+- Run a signal-frequency and signal-quality triage against the current approved
+  universe before committing ML research time to candidates. Defensive/dividend
+  names such as T, VZ, and PFE may not produce enough clean momentum alerts for
+  this bot and can remain candidates indefinitely.
 
 ### Dataset Layer
 

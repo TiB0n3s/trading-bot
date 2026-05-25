@@ -174,6 +174,12 @@ Candidate symbols to review after Tuesday QA:
 - KEY
 - KHC
 
+Candidate cohorts:
+
+- Large-cap liquid: AMZN, JPM, TSM.
+- Defensive/dividend: T, VZ, PFE, KHC, CMCSA.
+- Low-price higher-volatility: SOFI, HBAN, KEY, F.
+
 Rules before adding any candidate to live collection or approved trading:
 
 - Record a new `symbol_universe_version`.
@@ -183,6 +189,11 @@ Rules before adding any candidate to live collection or approved trading:
 - Keep the old universe identifiable so historical evaluation does not pretend
   these symbols were always eligible.
 - Run post-QA readiness checks before any runtime approved-symbol change.
+- Profile feature distributions per symbol, cohort, and
+  `symbol_universe_version` before cross-symbol training.
+- Keep experience-model similarity matching cohort-aware, or normalize features
+  enough to justify cross-cohort comparisons. A SOFI setup should not inherit
+  confidence from NVDA-like historical context without evidence.
 
 ### Dataset Layer
 
@@ -231,6 +242,8 @@ Remaining:
 - Convert the existing similarity model into versioned model/rule `v0`.
 - Record override-state hash, symbol-universe version, exit-policy version,
   feature version, label version, and retraining policy.
+- Add symbol-cohort awareness to similarity experiments before claims on newly
+  added defensive, large-cap liquid, or low-price/high-volatility cohorts.
 
 ### Evaluation Layer
 

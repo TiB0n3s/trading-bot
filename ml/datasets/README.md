@@ -100,9 +100,24 @@ Candidate additions to review after Tuesday QA:
 - KEY
 - KHC
 
+Candidate cohorts:
+
+- Large-cap liquid: AMZN, JPM, TSM.
+- Defensive/dividend: T, VZ, PFE, KHC, CMCSA.
+- Low-price higher-volatility: SOFI, HBAN, KEY, F.
+
 These are not part of Tuesday's runtime change plan. If approved later, they
 need a new symbol-universe version and fresh data coverage before symbol-level
 ML claims.
+
+Before cross-symbol training, profile feature distributions by symbol, cohort,
+and `symbol_universe_version`. VWAP distance, relative strength, spread, volume,
+and momentum features can behave very differently for defensive/dividend names
+than for high-beta growth names.
+
+Experience-model and similarity-model reports should either compare within
+cohorts or prove that feature normalization makes cross-cohort matching
+meaningful.
 
 ## Validation Rules
 

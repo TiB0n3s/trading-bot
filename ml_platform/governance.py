@@ -257,6 +257,27 @@ POST_QA_SYMBOL_CANDIDATES = (
     "KHC",
 )
 
+SYMBOL_COHORTS = {
+    "large_cap_liquid": (
+        "AMZN",
+        "JPM",
+        "TSM",
+    ),
+    "defensive_dividend": (
+        "T",
+        "VZ",
+        "PFE",
+        "KHC",
+        "CMCSA",
+    ),
+    "low_price_higher_volatility": (
+        "SOFI",
+        "HBAN",
+        "KEY",
+        "F",
+    ),
+}
+
 SYMBOL_UNIVERSE_POLICY = {
     "problem": "A current fixed symbol list can introduce survivorship bias if historical membership changed.",
     "required_fields": (
@@ -267,7 +288,10 @@ SYMBOL_UNIVERSE_POLICY = {
     ),
     "training_rule": "Datasets should use the symbol universe that was active at the evaluated timestamp.",
     "post_qa_candidate_symbols": POST_QA_SYMBOL_CANDIDATES,
+    "post_qa_candidate_cohorts": SYMBOL_COHORTS,
     "candidate_rule": "Candidate additions require post-QA review, point-in-time universe versioning, and fresh data collection before training claims.",
+    "similarity_rule": "Experience/similarity matching should compare within symbol cohorts or use normalized features before cross-cohort claims.",
+    "feature_distribution_rule": "Profile feature distributions per symbol_universe_version and cohort before cross-symbol training.",
 }
 
 DEMOTION_POLICY = {
@@ -581,6 +605,7 @@ def governance_contract() -> dict[str, Any]:
         "label_feedback_policy": LABEL_FEEDBACK_POLICY,
         "validation_split_policy": VALIDATION_SPLIT_POLICY,
         "post_qa_symbol_candidates": POST_QA_SYMBOL_CANDIDATES,
+        "symbol_cohorts": SYMBOL_COHORTS,
         "symbol_universe_policy": SYMBOL_UNIVERSE_POLICY,
         "demotion_policy": DEMOTION_POLICY,
         "point_in_time_context_policy": POINT_IN_TIME_CONTEXT_POLICY,

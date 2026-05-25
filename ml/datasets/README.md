@@ -130,6 +130,14 @@ Every exported dataset should include a manifest with:
 - `date_range`
 - `excluded_rows_reason_counts`
 - `git_sha`
+- `override_files`
+- `override_state_hash`
+- `override_tracking_status`
+
+Until full timestamped override history exists, manifests must at least hash
+the current `manual_strategy_overrides.json` and `symbol_overrides.json` state
+and mark the tracking status. Rows spanning unknown active override periods
+should be excluded or flagged before training.
 
 Generate the current scaffold manifest with:
 

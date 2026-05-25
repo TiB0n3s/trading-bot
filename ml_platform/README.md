@@ -64,6 +64,11 @@ The second hard rule is counterfactual coverage: a model trained only on
 approved trades is selection-biased and cannot claim to know which rejected
 signals were worth taking.
 
+Before runtime integration, the serving layer has a hard SLA: target 25 ms,
+hard timeout 50 ms, in-memory TTL cache loaded outside the webhook path, and
+fail-open to no prediction. Provider failure must never block signal
+processing.
+
 ## Brain Integration
 
 `brain_features.py` turns existing deterministic bot intelligence into ML

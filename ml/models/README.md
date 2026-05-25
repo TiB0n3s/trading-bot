@@ -18,6 +18,7 @@ Suggested fields:
   "created_at": "ISO-8601",
   "last_trained_date": "YYYY-MM-DD",
   "retraining_policy": "manual_reviewed_batch_retraining",
+  "next_retraining_review_after": "20 trading sessions or drift/performance alert",
   "training_data_end_date": "YYYY-MM-DD",
   "notes": "observe-only"
 }
@@ -57,6 +58,8 @@ Allowed statuses:
 
 Anything beyond `research` requires explicit operator approval and code review.
 Promotion requires a matching demotion path and rollback plan.
+Automatic retraining is disabled by default; after-close learning should create
+readiness evidence for manual review first.
 
 Use the registry CLI for local metadata:
 

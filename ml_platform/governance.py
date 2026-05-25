@@ -318,6 +318,8 @@ SERVING_LATENCY_CONTRACT = {
     "prediction_read_budget_ms": 25,
     "hard_timeout_ms": 50,
     "cache_or_ttl_required_before_app_integration": True,
+    "cache_strategy": "in_memory_ttl_cache_loaded_outside_webhook_path",
+    "ttl_seconds": 60,
     "failure_behavior": "fail_open_to_no_prediction",
     "runtime_rule": "Prediction reads must never block signal processing or hard risk checks.",
 }
@@ -332,17 +334,26 @@ OVERRIDE_CONFOUNDER_POLICY = {
         "override_source",
         "override_effective_at",
         "override_expires_at",
+        "override_state_hash",
+        "override_tracking_status",
+    ),
+    "dataset_manifest_fields": (
+        "override_files",
+        "override_state_hash",
+        "override_tracking_status",
     ),
     "rule": "Rows affected by unknown override state must be excluded or flagged before training.",
 }
 
 RETRAINING_POLICY = {
     "default_mode": "manual_reviewed_batch_retraining",
+    "default_cadence": "no automatic retraining; review after 20 trading sessions or after drift/performance alert",
     "model_card_fields": (
         "last_trained_date",
         "retraining_policy",
         "retraining_trigger",
         "training_data_end_date",
+        "next_retraining_review_after",
     ),
     "triggers": (
         "rolling performance decay",
@@ -356,6 +367,7 @@ RETRAINING_POLICY = {
 
 APP_REFACTOR_RISK_POLICY = {
     "classification": "mini_project",
+    "estimated_scope": "multi_week_regression_risk",
     "requirements": (
         "extract behind tests",
         "feature-flag or shadow-run new path",
@@ -379,6 +391,9 @@ class DatasetManifest:
     date_range: dict[str, str | None]
     excluded_rows_reason_counts: dict[str, int] = field(default_factory=dict)
     git_sha: str | None = None
+    override_files: dict[str, str | None] = field(default_factory=dict)
+    override_state_hash: str | None = None
+    override_tracking_status: str = "not_tracked"
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -404,6 +419,13 @@ def _file_sha256(path: Path) -> str | None:
         for chunk in iter(lambda: fh.read(1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def _override_file_hashes(project_root: Path) -> dict[str, str | None]:
+    return {
+        name: _file_sha256(project_root / name)
+        for name in OVERRIDE_CONFOUNDER_POLICY["files"]
+    }
 
 
 def _table_exists(con: sqlite3.Connection, table: str) -> bool:
@@ -457,6 +479,16 @@ def build_dataset_manifest(
     created_at = datetime.now(timezone.utc).isoformat()
     source_db_hash = _file_sha256(db_path)
     git_sha = _git_sha()
+    project_root = Path(__file__).resolve().parents[1]
+    override_files = _override_file_hashes(project_root)
+    override_state_hash = hashlib.sha256(
+        json.dumps(override_files, sort_keys=True).encode("utf-8")
+    ).hexdigest()
+    override_tracking_status = (
+        "hashed_current_files_only"
+        if any(value is not None for value in override_files.values())
+        else "no_override_files_present"
+    )
     identity_payload = {
         "source_db_hash": source_db_hash,
         "query_version": query_version,
@@ -466,6 +498,8 @@ def build_dataset_manifest(
         "symbol_count": symbol_count,
         "date_range": date_range,
         "git_sha": git_sha,
+        "override_state_hash": override_state_hash,
+        "override_tracking_status": override_tracking_status,
     }
     dataset_id = hashlib.sha256(
         json.dumps(identity_payload, sort_keys=True).encode("utf-8")
@@ -484,6 +518,9 @@ def build_dataset_manifest(
         date_range=date_range,
         excluded_rows_reason_counts=excluded_rows_reason_counts or {},
         git_sha=git_sha,
+        override_files=override_files,
+        override_state_hash=override_state_hash,
+        override_tracking_status=override_tracking_status,
     )
     return manifest.to_dict()
 
@@ -517,6 +554,7 @@ def model_card_template(model_id: str = "candidate_model") -> dict[str, Any]:
         "demotion_policy": DEMOTION_POLICY,
         "last_trained_date": None,
         "retraining_policy": RETRAINING_POLICY["default_mode"],
+        "next_retraining_review_after": None,
         "non_authority": MODEL_CARD_NON_AUTHORITY,
     }
 

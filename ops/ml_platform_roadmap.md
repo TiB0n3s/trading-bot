@@ -21,6 +21,38 @@ becomes an ML-driven trading system.
 4. Track order/fill integrity with `order-health`.
 5. Preserve clean Tuesday session evidence before structural refactors.
 
+## Explicit Pending Gates After Tuesday QA
+
+These items must remain visible because they can quietly corrupt future ML work
+or destabilize the webhook path if treated as routine cleanup.
+
+1. Serving latency SLA:
+   - Define and enforce a prediction-read budget before `app.py` imports any
+     provider.
+   - Current contract: target 25 ms, hard timeout 50 ms, in-memory TTL cache
+     loaded outside the webhook path, TTL 60 seconds, fail-open to no
+     prediction.
+   - A provider timeout/error must never block signal processing or hard risk
+     checks.
+2. Manual override confounders:
+   - `manual_strategy_overrides.json` and `symbol_overrides.json` must be
+     timestamped or hashed into dataset manifests.
+   - Dataset rows spanning unknown active override periods must be excluded or
+     flagged before training.
+   - Current manifest contract includes `override_files`,
+     `override_state_hash`, and `override_tracking_status`.
+3. `app.py` refactor risk:
+   - Treat decomposition as a multi-week mini-project with regression risk.
+   - Use tests, feature/shadow flags, and behavior-parity checks before any old
+     path is removed.
+   - Do not mix extraction with broker/order/risk-control behavior changes.
+4. Retraining cadence:
+   - No automatic retraining by default.
+   - First policy: manually reviewed batch retraining after 20 trading sessions
+     or after a drift/performance alert.
+   - After-close learning should produce retraining-readiness evidence, not
+     silently deploy new model artifacts.
+
 ## Platform Layers
 
 ### Data Governance Layer
@@ -58,7 +90,8 @@ Required rules:
   decision, rejection reason, order id, git SHA, and env profile hash.
 - Dataset comparisons require a manifest with dataset id, created time, source
   DB path/hash, query version, label version, feature version, row count, symbol
-  count, date range, excluded-row reason counts, and git SHA.
+  count, date range, excluded-row reason counts, git SHA, override file hashes,
+  override state hash, and override tracking status.
 
 Remaining:
 
@@ -112,6 +145,8 @@ Required before historical brain-feature training:
 - Add `symbol_universe_version`, active-from/active-to timestamps, and add/remove
   reasons.
 - Exclude or flag rows whose override state is unknown.
+- Include override state hash/status in every dataset manifest until full
+  timestamped override history exists.
 - Inject point-in-time context into `strategy.trade_scorer`; do not let replay
   read the live context file.
 
@@ -353,6 +388,8 @@ match/mismatch, calibration bucket, and abstention status.
 Retraining policy:
 
 - Default to manually reviewed batch retraining.
+- Initial cadence is review after 20 trading sessions or after a drift or
+  performance alert, whichever comes first.
 - Retraining triggers include rolling performance decay, feature drift, symbol
   universe drift, macro regime shift, approval/rejection mix drift, and the
   after-close learning review.
@@ -377,8 +414,9 @@ Remaining:
 - Serving must degrade to no prediction if disabled, stale, missing, or failed;
   it must never block signal processing.
 - Prediction reads need an explicit latency budget before `app.py` integration:
-  target 25 ms, hard timeout 50 ms, cache/TTL required if reads are too slow,
-  and failure behavior is fail-open to no prediction.
+  target 25 ms, hard timeout 50 ms, in-memory TTL cache loaded outside the
+  webhook path, TTL 60 seconds, and failure behavior is fail-open to no
+  prediction.
 
 ### Operator UI/API
 
@@ -535,13 +573,17 @@ A model can only move from observe-only to paper-trading influence after it has:
 1. Add schema/migration management.
 2. Add immutable decision snapshots.
 3. Add `feature_available_at` and `feature_generated_at` fields.
-4. Add rejected-signal forward outcome tracking.
-5. Define label v1 formally.
-6. Add dataset manifest generation to dataset export flow.
-7. Convert the similarity model into versioned model `v0`.
-8. Build the real `replay-decisions` command.
-9. Add calibration and walk-forward evaluation.
-10. Only then expose the read-only prediction provider in `/status`.
+4. Add serving latency enforcement before any webhook-path provider import.
+5. Add timestamped override history and dataset-manifest override hashes.
+6. Scope `app.py` decomposition as a multi-week mini-project.
+7. Add rejected-signal forward outcome tracking.
+8. Define label v1 formally.
+9. Add dataset manifest generation to dataset export flow.
+10. Convert the similarity model into versioned model `v0`.
+11. Build the real `replay-decisions` command.
+12. Add calibration and walk-forward evaluation.
+13. Define the first retraining-readiness report and 20-session review cadence.
+14. Only then expose the read-only prediction provider in `/status`.
 
 Critical blockers before real training:
 

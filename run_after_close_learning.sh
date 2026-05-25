@@ -9,6 +9,26 @@ set +a
 
 source /home/tradingbot/trading-bot/venv/bin/activate
 
+on_failure() {
+    local exit_code=$?
+    python3 - <<PY2 || true
+from bot_events import log_event
+log_event(
+    event_type="AFTER_CLOSE_LEARNING",
+    action="failure",
+    decision="failed",
+    severity="critical",
+    reason="after-close learning failed before completion; policy artifacts may be stale",
+    source="run_after_close_learning.sh",
+    context={"exit_code": ${exit_code}},
+)
+PY2
+    echo "After-close learning failed with exit code ${exit_code}: $(date)" >&2
+    exit "${exit_code}"
+}
+
+trap on_failure ERR
+
 echo "============================================================"
 echo "After-close learning run started: $(date)"
 echo "============================================================"
@@ -52,6 +72,28 @@ python3 portfolio_replacement_report.py --minutes 390 --top 20 --write-memory
 echo
 echo "---- strategy_brain_report.py ----"
 python3 strategy_brain_report.py
+
+echo
+echo "---- policy artifact hashes ----"
+python3 - <<'PY2'
+import hashlib
+from pathlib import Path
+
+files = [
+    "strategy_memory.json",
+    "portfolio_replacement_memory.json",
+    "excursion_memory.json",
+    "missed_opportunity_memory.json",
+    "policy_backtest_summary.json",
+]
+
+for name in files:
+    path = Path(name)
+    if not path.exists():
+        print(f"{name}: missing")
+        continue
+    print(f"{name}: sha256={hashlib.sha256(path.read_bytes()).hexdigest()} size={path.stat().st_size}")
+PY2
 
 
 python3 - <<'PY2'

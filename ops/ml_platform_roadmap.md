@@ -52,6 +52,14 @@ or destabilize the webhook path if treated as routine cleanup.
      or after a drift/performance alert.
    - After-close learning should produce retraining-readiness evidence, not
      silently deploy new model artifacts.
+5. Existing after-close policy artifacts:
+   - `strategy_memory.json`, `portfolio_replacement_memory.json`,
+     `excursion_memory.json`, `missed_opportunity_memory.json`, and
+     `policy_backtest_summary.json` already influence runtime context/policy.
+   - Treat them as `policy_artifact`, not plain reports.
+   - Their hashes/mtimes must appear in `/status` and dataset manifests.
+   - `run_after_close_learning.sh` must alert on failure so stale artifacts are
+     visible before the next session.
 
 ## Platform Layers
 
@@ -358,6 +366,44 @@ Remaining:
 - Model cards also need `last_trained_date`, `retraining_policy`,
   `retraining_trigger`, `training_data_end_date`, and demotion/rollback fields.
 
+### Existing Policy Artifact Governance Layer
+
+Goal: bring the pre-existing after-close learning artifacts under governance.
+
+Problem:
+
+- `run_after_close_learning.sh` writes memory artifacts nightly.
+- `strategy_memory.py`, `portfolio_replacement_memory.py`,
+  `decision_policy.py`, and `decision_context.py` load these artifacts in the
+  live runtime path.
+- These artifacts can block, size down, or alter live decision context before
+  any future ML `PredictionProvider` exists.
+
+Governed artifacts:
+
+- `strategy_memory.json`
+- `portfolio_replacement_memory.json`
+- `excursion_memory.json`
+- `missed_opportunity_memory.json`
+- `policy_backtest_summary.json`
+
+Current controls:
+
+- `/status` exposes read-only hashes, mtimes, generated timestamps, and combined
+  state hash under `policy_artifacts`.
+- `dataset-manifest` includes policy artifact hashes and tracking status.
+- `run_after_close_learning.sh` logs a critical `AFTER_CLOSE_LEARNING` bot event
+  if the run fails before completion.
+
+Remaining:
+
+- Add rollback tooling to restore the prior known-good artifact set.
+- Register these under the model registry as `policy_artifact` entries.
+- Add a future kill switch to ignore learned policy artifacts and fall back to
+  no learned policy influence.
+- Make partial-run artifact writes atomic where the individual report scripts
+  currently write JSON directly.
+
 ### Promotion Governance Layer
 
 Goal: make model promotion boring, slow, reversible, and evidence-based.
@@ -452,6 +498,32 @@ Remaining:
 
 - Add model comparison and daily ML readiness reports.
 - Add model-card status to operator output once real models exist.
+- Surface after-close policy artifact health, hash drift, and stale-artifact
+  warnings in ops checks.
+
+### Data Retention Layer
+
+Goal: keep the ML/audit trail useful without letting `trades.db` grow without
+bound.
+
+Retention tiers:
+
+- Hot: queried in webhook/status paths. Examples: open positions, cooldowns,
+  recent sells, latest market context, latest policy artifact hashes.
+- Warm: queried by daily ops and evaluation reports. Examples: recent trades,
+  feature snapshots, labeled setups, daily context/events/predictions.
+- Cold: archival/replay only. Examples: old decision snapshots, historical
+  market context snapshots, override history, rejected-signal forward outcomes,
+  and old policy artifact versions.
+
+Pending:
+
+- Classify every new ML/audit table as hot, warm, or cold before adding it to
+  `trades.db`.
+- Decide whether cold archives stay in the main SQLite DB, move to separate
+  SQLite files, or become file-based archives.
+- Add retention/compaction commands before indefinite snapshot retention is
+  enabled.
 
 ## Recommended Phases
 
@@ -594,16 +666,19 @@ A model can only move from observe-only to paper-trading influence after it has:
 2. Add immutable decision snapshots.
 3. Add `feature_available_at` and `feature_generated_at` fields.
 4. Add serving latency enforcement before any webhook-path provider import.
-5. Add timestamped override history and dataset-manifest override hashes.
-6. Scope `app.py` decomposition as a multi-week mini-project.
-7. Add rejected-signal forward outcome tracking.
-8. Define label v1 formally.
-9. Add dataset manifest generation to dataset export flow.
-10. Convert the similarity model into versioned model `v0`.
-11. Build the real `replay-decisions` command.
-12. Add calibration and walk-forward evaluation.
-13. Define the first retraining-readiness report and 20-session review cadence.
-14. Only then expose the read-only prediction provider in `/status`.
+5. Add policy-artifact rollback/registry entries for after-close learning
+   memory files.
+6. Add timestamped override history and dataset-manifest override hashes.
+7. Add data-retention tiers and archive/compaction commands.
+8. Scope `app.py` decomposition as a multi-week mini-project.
+9. Add rejected-signal forward outcome tracking.
+10. Define label v1 formally.
+11. Add dataset manifest generation to dataset export flow.
+12. Convert the similarity model into versioned model `v0`.
+13. Build the real `replay-decisions` command.
+14. Add calibration and walk-forward evaluation.
+15. Define the first retraining-readiness report and 20-session review cadence.
+16. Only then expose the read-only prediction provider in `/status`.
 
 Critical blockers before real training:
 

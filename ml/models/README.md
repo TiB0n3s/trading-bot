@@ -61,6 +61,20 @@ Promotion requires a matching demotion path and rollback plan.
 Automatic retraining is disabled by default; after-close learning should create
 readiness evidence for manual review first.
 
+## Policy Artifacts
+
+Some runtime-influencing artifacts are not predictive models but still need
+registry discipline:
+
+- `strategy_memory.json`
+- `portfolio_replacement_memory.json`
+- `excursion_memory.json`
+- `missed_opportunity_memory.json`
+- `policy_backtest_summary.json`
+
+Longer term, register these as `policy_artifact` entries with hash, source
+script, generated timestamp, rollback target, and runtime effect.
+
 Use the registry CLI for local metadata:
 
 ```bash

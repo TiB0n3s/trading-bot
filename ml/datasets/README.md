@@ -157,11 +157,38 @@ Every exported dataset should include a manifest with:
 - `override_files`
 - `override_state_hash`
 - `override_tracking_status`
+- `policy_artifact_files`
+- `policy_artifact_state_hash`
+- `policy_artifact_tracking_status`
 
 Until full timestamped override history exists, manifests must at least hash
 the current `manual_strategy_overrides.json` and `symbol_overrides.json` state
 and mark the tracking status. Rows spanning unknown active override periods
 should be excluded or flagged before training.
+
+After-close learning memory files are also dataset confounders because they
+influence runtime decisions. Manifests must hash:
+
+- `strategy_memory.json`
+- `portfolio_replacement_memory.json`
+- `excursion_memory.json`
+- `missed_opportunity_memory.json`
+- `policy_backtest_summary.json`
+
+Treat these as `policy_artifact` inputs, not inert report files.
+
+## Retention Tiers
+
+- Hot: webhook/status path state such as open positions, cooldowns, recent
+  sells, latest context, and latest policy artifact hashes.
+- Warm: daily ops/evaluation data such as recent trades, feature snapshots,
+  labels, context, events, and predictions.
+- Cold: archival/replay data such as old decision snapshots, market context
+  history, override history, rejected-signal outcomes, and old policy artifact
+  versions.
+
+Classify new ML/audit tables into hot, warm, or cold before adding them to
+`trades.db`.
 
 Generate the current scaffold manifest with:
 

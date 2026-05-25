@@ -84,6 +84,13 @@ app = Flask(__name__)
 DB_PATH = Path(__file__).parent / "trades.db"
 _START_TIME = datetime.now(timezone.utc)
 ENFORCE_SETUP_POLICY_BLOCKS = True
+POLICY_ARTIFACT_FILES = (
+    "strategy_memory.json",
+    "portfolio_replacement_memory.json",
+    "excursion_memory.json",
+    "missed_opportunity_memory.json",
+    "policy_backtest_summary.json",
+)
 
 PREDICTION_GATE_MODE = os.getenv("PREDICTION_GATE_MODE", "hard").strip().lower()
 if PREDICTION_GATE_MODE not in ("off", "warn", "soft", "hard"):
@@ -5064,6 +5071,55 @@ def _latest_session_momentum_for_symbol(symbol):
         logger.warning(f"session momentum unavailable for {symbol}: {e}")
         return None
 
+
+def _policy_artifact_status():
+    """Read-only hashes for after-close policy artifacts shown in /status."""
+    base_dir = Path(__file__).parent
+    artifacts = {}
+    combined = {}
+
+    for name in POLICY_ARTIFACT_FILES:
+        path = base_dir / name
+        item = {
+            "exists": path.exists(),
+            "runtime_effect": "policy_artifact",
+        }
+
+        if path.exists():
+            try:
+                raw = path.read_bytes()
+                digest = hashlib.sha256(raw).hexdigest()
+                stat = path.stat()
+                item.update({
+                    "sha256": digest,
+                    "size_bytes": stat.st_size,
+                    "mtime": datetime.fromtimestamp(stat.st_mtime, timezone.utc).isoformat(),
+                })
+                combined[name] = digest
+                try:
+                    data = json.loads(raw.decode("utf-8"))
+                    if isinstance(data, dict):
+                        item["generated_at"] = data.get("generated_at")
+                        item["lookback_days"] = data.get("lookback_days")
+                except Exception:
+                    item["generated_at"] = None
+            except Exception as e:
+                item["error"] = str(e)
+        else:
+            combined[name] = None
+
+        artifacts[name] = item
+
+    return {
+        "artifact_type": "policy_artifact",
+        "runtime_effect": "live_policy_context",
+        "state_hash": hashlib.sha256(
+            json.dumps(combined, sort_keys=True).encode("utf-8")
+        ).hexdigest(),
+        "files": artifacts,
+    }
+
+
 @app.route("/status", methods=["GET"])
 def status():
     result = {
@@ -5080,6 +5136,7 @@ def status():
     result["alerts"] = alert_config_public()
     result["session_momentum_summary"] = _session_momentum_summary()
     result["session_momentum"] = _session_momentum_snapshot()
+    result["policy_artifacts"] = _policy_artifact_status()
     
     # Uptime
     try:

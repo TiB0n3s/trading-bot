@@ -188,6 +188,7 @@ ENV_KILL_SWITCH_DEFAULTS = {
     "ML_STATUS_EXPOSURE_ENABLED": "false",
     "ML_MODEL_ID": "",
     "ML_MODEL_MAX_AGE_SECONDS": "",
+    "AFTER_CLOSE_POLICY_ARTIFACTS_ENABLED": "true",
 }
 
 MODEL_CARD_NON_AUTHORITY = (
@@ -372,6 +373,45 @@ OVERRIDE_CONFOUNDER_POLICY = {
     "rule": "Rows affected by unknown override state must be excluded or flagged before training.",
 }
 
+POLICY_ARTIFACT_FILES = (
+    "strategy_memory.json",
+    "portfolio_replacement_memory.json",
+    "excursion_memory.json",
+    "missed_opportunity_memory.json",
+    "policy_backtest_summary.json",
+)
+
+POLICY_ARTIFACT_GOVERNANCE = {
+    "artifact_type": "policy_artifact",
+    "problem": "After-close learning artifacts already influence runtime decisions outside the ML promotion ladder.",
+    "files": POLICY_ARTIFACT_FILES,
+    "runtime_loaders": (
+        "strategy_memory.py",
+        "portfolio_replacement_memory.py",
+        "decision_policy.py",
+        "decision_context.py",
+    ),
+    "required_manifest_fields": (
+        "policy_artifact_files",
+        "policy_artifact_state_hash",
+        "policy_artifact_tracking_status",
+    ),
+    "required_status_fields": (
+        "sha256",
+        "mtime",
+        "generated_at",
+        "exists",
+        "runtime_effect",
+    ),
+    "required_controls": (
+        "hash/version visible in /status",
+        "failure alert from run_after_close_learning.sh",
+        "rollback path to prior known-good artifact set",
+        "registry entries as policy_artifact before broader ML promotion",
+    ),
+    "kill_switch_rule": "A future kill switch should allow policy artifacts to fail closed to no learned policy influence.",
+}
+
 RETRAINING_POLICY = {
     "default_mode": "manual_reviewed_batch_retraining",
     "default_cadence": "no automatic retraining; review after 20 trading sessions or after drift/performance alert",
@@ -403,6 +443,47 @@ APP_REFACTOR_RISK_POLICY = {
     ),
 }
 
+DATA_RETENTION_POLICY = {
+    "problem": "Decision snapshots, context history, override history, and rejected-signal outcomes can grow trades.db without bound.",
+    "tiers": {
+        "hot": {
+            "description": "queried in webhook/status paths",
+            "examples": (
+                "open positions",
+                "cooldowns",
+                "recent sells",
+                "latest market context",
+                "latest policy artifact hashes",
+            ),
+            "storage": "trades.db or small JSON files",
+        },
+        "warm": {
+            "description": "queried by daily ops and evaluation reports",
+            "examples": (
+                "recent trades",
+                "feature_snapshots",
+                "labeled_setups",
+                "daily_symbol_context",
+                "daily_symbol_events",
+                "daily_symbol_predictions",
+            ),
+            "storage": "trades.db until growth requires partitions",
+        },
+        "cold": {
+            "description": "archival/replay only",
+            "examples": (
+                "old decision snapshots",
+                "old market context snapshots",
+                "override history",
+                "rejected-signal forward outcomes",
+                "old policy artifact versions",
+            ),
+            "storage": "archive files or separate SQLite databases",
+        },
+    },
+    "rule": "Classify new ML tables as hot, warm, or cold before adding them to trades.db.",
+}
+
 
 @dataclass(frozen=True)
 class DatasetManifest:
@@ -421,6 +502,9 @@ class DatasetManifest:
     override_files: dict[str, str | None] = field(default_factory=dict)
     override_state_hash: str | None = None
     override_tracking_status: str = "not_tracked"
+    policy_artifact_files: dict[str, str | None] = field(default_factory=dict)
+    policy_artifact_state_hash: str | None = None
+    policy_artifact_tracking_status: str = "not_tracked"
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -452,6 +536,13 @@ def _override_file_hashes(project_root: Path) -> dict[str, str | None]:
     return {
         name: _file_sha256(project_root / name)
         for name in OVERRIDE_CONFOUNDER_POLICY["files"]
+    }
+
+
+def _policy_artifact_hashes(project_root: Path) -> dict[str, str | None]:
+    return {
+        name: _file_sha256(project_root / name)
+        for name in POLICY_ARTIFACT_FILES
     }
 
 
@@ -516,6 +607,15 @@ def build_dataset_manifest(
         if any(value is not None for value in override_files.values())
         else "no_override_files_present"
     )
+    policy_artifact_files = _policy_artifact_hashes(project_root)
+    policy_artifact_state_hash = hashlib.sha256(
+        json.dumps(policy_artifact_files, sort_keys=True).encode("utf-8")
+    ).hexdigest()
+    policy_artifact_tracking_status = (
+        "hashed_current_files_only"
+        if any(value is not None for value in policy_artifact_files.values())
+        else "no_policy_artifacts_present"
+    )
     identity_payload = {
         "source_db_hash": source_db_hash,
         "query_version": query_version,
@@ -527,6 +627,8 @@ def build_dataset_manifest(
         "git_sha": git_sha,
         "override_state_hash": override_state_hash,
         "override_tracking_status": override_tracking_status,
+        "policy_artifact_state_hash": policy_artifact_state_hash,
+        "policy_artifact_tracking_status": policy_artifact_tracking_status,
     }
     dataset_id = hashlib.sha256(
         json.dumps(identity_payload, sort_keys=True).encode("utf-8")
@@ -548,6 +650,9 @@ def build_dataset_manifest(
         override_files=override_files,
         override_state_hash=override_state_hash,
         override_tracking_status=override_tracking_status,
+        policy_artifact_files=policy_artifact_files,
+        policy_artifact_state_hash=policy_artifact_state_hash,
+        policy_artifact_tracking_status=policy_artifact_tracking_status,
     )
     return manifest.to_dict()
 
@@ -604,6 +709,7 @@ def governance_contract() -> dict[str, Any]:
         "env_kill_switch_defaults": ENV_KILL_SWITCH_DEFAULTS,
         "model_card_non_authority": MODEL_CARD_NON_AUTHORITY,
         "known_bad_case_fixtures": KNOWN_BAD_CASE_FIXTURES,
+        "policy_artifact_governance": POLICY_ARTIFACT_GOVERNANCE,
         "counterfactual_policy": COUNTERFACTUAL_POLICY,
         "label_feedback_policy": LABEL_FEEDBACK_POLICY,
         "validation_split_policy": VALIDATION_SPLIT_POLICY,
@@ -617,4 +723,5 @@ def governance_contract() -> dict[str, Any]:
         "override_confounder_policy": OVERRIDE_CONFOUNDER_POLICY,
         "retraining_policy": RETRAINING_POLICY,
         "app_refactor_risk_policy": APP_REFACTOR_RISK_POLICY,
+        "data_retention_policy": DATA_RETENTION_POLICY,
     }

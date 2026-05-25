@@ -69,6 +69,21 @@ hard timeout 50 ms, in-memory TTL cache loaded outside the webhook path, and
 fail-open to no prediction. Provider failure must never block signal
 processing.
 
+## Existing Policy Artifacts
+
+The after-close learning pipeline already writes memory files that influence
+runtime decisions:
+
+- `strategy_memory.json`
+- `portfolio_replacement_memory.json`
+- `excursion_memory.json`
+- `missed_opportunity_memory.json`
+- `policy_backtest_summary.json`
+
+These are governed as `policy_artifact` inputs. Their hashes are included in
+dataset manifests, and `/status` exposes their current hashes/mtimes under
+`policy_artifacts`.
+
 ## Brain Integration
 
 `brain_features.py` turns existing deterministic bot intelligence into ML

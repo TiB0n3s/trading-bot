@@ -28,3 +28,14 @@ Before any model can affect paper trading it must have:
 - an environment flag defaulting off,
 - a rollback plan,
 - no ability to loosen hard risk or broker controls.
+
+## Current Scaffolding
+
+```bash
+python3 -m ml_platform.cli profile-dataset --start-date 2026-05-20 --end-date 2026-05-26
+python3 -m ml_platform.cli create-experiment setup_baseline --dataset-start 2026-05-20 --dataset-end 2026-05-26
+python3 -m ml_platform.cli list-models
+```
+
+Generated experiment/model artifacts are local research outputs and are ignored
+by default. Promote only reviewed metadata/artifacts intentionally.

@@ -26,3 +26,9 @@ Each experiment should record:
 - known caveats.
 
 No experiment result is automatically approved for runtime use.
+
+The scaffold command creates ignored local experiment directories:
+
+```bash
+python3 -m ml_platform.cli create-experiment setup_baseline --dataset-start 2026-05-20 --dataset-end 2026-05-26
+```

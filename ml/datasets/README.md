@@ -46,4 +46,12 @@ policy, broker state, and risk controls into one noisy label.
 - 500-2,000 labeled snapshots: exploratory baselines only.
 - 2,000+ labeled snapshots: begin walk-forward validation.
 - Matched-trade models need separate thresholds because trades are much sparser
-  than snapshots.
+than snapshots.
+
+## Profiling
+
+Use the read-only platform CLI to summarize whether enough data exists:
+
+```bash
+python3 -m ml_platform.cli profile-dataset --start-date 2026-05-20 --end-date 2026-05-26
+```

@@ -28,3 +28,9 @@ Allowed statuses:
 - `retired`
 
 Anything beyond `research` requires explicit operator approval and code review.
+
+Use the registry CLI for local metadata:
+
+```bash
+python3 -m ml_platform.cli list-models
+```

@@ -21,6 +21,7 @@ class BrainIntegrationContract:
         "dataset_exports",
         "shadow_scores",
         "status_read_only",
+        "read_only_prediction_provider",
     )
     prohibited_without_approval: tuple[str, ...] = (
         "order_submission",
@@ -45,6 +46,9 @@ class BrainIntegrationContract:
         "daily_symbol_predictions": "Existing observe-only similarity predictions",
         "strategy.trade_scorer": "Future shadow-only trader-brain score",
         "market_intelligence.tape_reader": "Intraday tape labels from bars",
+        "feature_snapshots.trend_direction": "Order-time trend features",
+        "feature_snapshots.ret_5m/ret_15m": "Snapshot momentum features",
+        "trades.session_momentum_*": "Order-time session trend/momentum audit features",
         "decision_context": "Future normalized intelligence summary features",
         "decision_policy": "Future policy replay labels, not live authority",
     })

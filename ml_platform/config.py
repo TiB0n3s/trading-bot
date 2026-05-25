@@ -16,6 +16,10 @@ FEATURE_VERSION = "feature_snapshots_v1"
 
 MODEL_STATUSES = {
     "research",
+    "observe_only",
+    "warn_only",
+    "paper_gate",
+    "live_candidate",
     "shadow",
     "paper_soft",
     "retired",

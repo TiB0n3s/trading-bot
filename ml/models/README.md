@@ -23,6 +23,10 @@ Suggested fields:
 Allowed statuses:
 
 - `research`
+- `observe_only`
+- `warn_only`
+- `paper_gate`
+- `live_candidate`
 - `shadow`
 - `paper_soft`
 - `retired`

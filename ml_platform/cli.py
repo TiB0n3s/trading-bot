@@ -18,8 +18,10 @@ from ml_platform.brain_features import (
 )
 from ml_platform.datasets import dataset_profile, write_profile
 from ml_platform.experiments import create_experiment
+from ml_platform.evaluation import default_evaluation_plan
 from ml_platform.integration_contract import default_contract
 from ml_platform.registry import load_registry, register_model
+from ml_platform.serving import SQLitePredictionProvider
 
 
 def main() -> int:
@@ -60,6 +62,11 @@ def main() -> int:
 
     sub.add_parser("list-models", help="List registry contents")
     sub.add_parser("integration-contract", help="Print ML/brain promotion contract")
+    sub.add_parser("evaluation-plan", help="Print default evaluation requirements")
+
+    pred = sub.add_parser("get-prediction", help="Read one observe-only prediction")
+    pred.add_argument("--date", required=True)
+    pred.add_argument("--symbol", required=True)
 
     args = parser.parse_args()
 
@@ -127,6 +134,16 @@ def main() -> int:
 
     if args.command == "integration-contract":
         print(json.dumps(default_contract(), indent=2, sort_keys=True))
+        return 0
+
+    if args.command == "evaluation-plan":
+        print(json.dumps(default_evaluation_plan(), indent=2, sort_keys=True))
+        return 0
+
+    if args.command == "get-prediction":
+        provider = SQLitePredictionProvider()
+        prediction = provider.get_prediction(args.date, args.symbol)
+        print(json.dumps(prediction.to_dict() if prediction else None, indent=2, sort_keys=True))
         return 0
 
     parser.error(f"unknown command {args.command}")

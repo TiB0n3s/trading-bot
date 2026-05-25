@@ -10,12 +10,15 @@ python3 -m ml_platform.cli profile-dataset --start-date 2026-05-20 --end-date 20
 python3 -m ml_platform.cli export-brain-features --date 2026-05-26 --output /tmp/brain_features.csv
 python3 -m ml_platform.cli create-experiment setup_baseline --dataset-start 2026-05-20 --dataset-end 2026-05-26
 python3 -m ml_platform.cli integration-contract
+python3 -m ml_platform.cli evaluation-plan
+python3 -m ml_platform.cli get-prediction --date 2026-05-26 --symbol AAPL
 python3 -m ml_platform.cli list-models
 ```
 
 ## Boundaries
 
 - No model serving.
+- `serving.py` is an interface scaffold only; it is not imported by runtime.
 - No runtime decision changes.
 - No writes to `trades.db`.
 - No broker/order calls.
@@ -33,6 +36,7 @@ features:
 - `daily_symbol_context`
 - `daily_symbol_events`
 - `daily_symbol_predictions`
+- snapshot trend/momentum fields from `feature_snapshots`
 
 This is the first bridge between the current bot brain and the future ML
 platform. It creates offline features only. It does not import runtime order

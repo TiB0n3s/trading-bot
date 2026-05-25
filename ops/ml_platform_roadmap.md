@@ -185,12 +185,33 @@ Candidate symbols to review after Tuesday QA:
 - HBAN
 - KEY
 - KHC
+- ZS
+- CRM
+- PDD
+- SNPS
+- HPQ
+- DKS
+- BBY
+- DELL
+- ADSK
+- MDB
+- BURL
+- OKTA
+- DLTR
+- NTAP
+- GPS
+- AEO
+- BKE
 
 Candidate cohorts:
 
 - Large-cap liquid: AMZN, JPM, TSM.
 - Defensive/dividend: T, VZ, PFE, KHC, CMCSA.
 - Low-price higher-volatility: SOFI, HBAN, KEY, F.
+- Enterprise/software: ZS, CRM, SNPS, ADSK, MDB, OKTA.
+- Retail/consumer discretionary: DKS, BBY, BURL, DLTR, GPS, AEO, BKE.
+- Hardware/infrastructure: HPQ, DELL, NTAP.
+- International/ecommerce: PDD.
 
 Rules before adding any candidate to live collection or approved trading:
 
@@ -213,6 +234,31 @@ Rules before adding any candidate to live collection or approved trading:
   universe before committing ML research time to candidates. Defensive/dividend
   names such as T, VZ, and PFE may not produce enough clean momentum alerts for
   this bot and can remain candidates indefinitely.
+
+### TradingView Alert Role Review
+
+Goal: decide whether TradingView alerts are adding useful signal or mostly
+noise now that Alpaca bar data drives rolling momentum, session momentum,
+live feature snapshots, setup classification, and prediction validation.
+
+Near-term posture:
+
+- Keep TradingView alerts connected until enough side-by-side evidence exists.
+- Treat TradingView alerts as one external signal source, not as ground truth.
+- Build an observe-only internal signal candidate from Alpaca bars using the
+  same feature, setup, momentum, and context layers already in the bot.
+- Compare TradingView-triggered signals against internal bar-derived signal
+  candidates over multiple paper sessions.
+- Measure which source better predicts 5m/15m/30m forward returns, approvals,
+  rejects, missed opportunities, and avoidable noise.
+- If TradingView alerts are mostly rejected or lower-quality than internal
+  candidates, demote or disable them and keep only high-conviction alert types.
+
+Promotion rule:
+
+- Do not remove TradingView from the live signal path until the internal signal
+  generator has observe-only evidence, operator-visible reports, and a rollback
+  path.
 
 ### Dataset Layer
 
@@ -690,6 +736,9 @@ A model can only move from observe-only to paper-trading influence after it has:
 16. Started: define the first retraining-readiness report and 20-session review
     cadence.
 17. Only then expose the read-only prediction provider in `/status`.
+18. Evaluate whether TradingView alerts should remain primary, become
+    secondary, or be replaced by an Alpaca-bar-derived internal signal
+    generator after side-by-side paper-session evidence.
 
 Critical blockers before real training:
 
@@ -699,7 +748,9 @@ Critical blockers before real training:
 4. Add point-in-time context archives before using `strategy.trade_scorer` in
    historical replay.
 5. Version the symbol universe and review post-QA candidate additions:
-   AMZN, JPM, TSM, PYPL, SOFI, PFE, CMCSA, T, VZ, F, HBAN, KEY, KHC.
+   AMZN, JPM, TSM, PYPL, SOFI, PFE, CMCSA, T, VZ, F, HBAN, KEY, KHC, ZS, CRM,
+   PDD, SNPS, HPQ, DKS, BBY, DELL, ADSK, MDB, BURL, OKTA, DLTR, NTAP, GPS,
+   AEO, BKE.
 
 The biggest missing concept is auditability of what the bot knew at decision
 time. Without that, training, evaluation, and promotion can look sophisticated

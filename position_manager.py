@@ -49,6 +49,18 @@ WEAK_SETUP_BREAKEVEN_LOCK_TRIGGER_PCT = float(os.getenv("WEAK_SETUP_BREAKEVEN_LO
 WEAK_SETUP_BREAKEVEN_LOCK_FLOOR_PCT = float(os.getenv("WEAK_SETUP_BREAKEVEN_LOCK_FLOOR_PCT", "0.02"))
 FULL_EXIT_LOSS_PCT = float(os.getenv("POSITION_MANAGER_FULL_EXIT_LOSS_PCT", "-1.25"))
 VWAP_LOSS_EXIT_PCT = float(os.getenv("POSITION_MANAGER_VWAP_LOSS_EXIT_PCT", "-0.35"))
+CONTINUATION_EXIT_CHECK_ENABLED = os.getenv(
+    "POSITION_MANAGER_CONTINUATION_EXIT_CHECK_ENABLED", "true"
+).lower() in ("1", "true", "yes", "on")
+CONTINUATION_EXIT_HARD_LOSS_FLOOR_PCT = float(
+    os.getenv("POSITION_MANAGER_CONTINUATION_HARD_LOSS_FLOOR_PCT", "-0.75")
+)
+CONTINUATION_EXIT_MIN_MOMENTUM_PCT = float(
+    os.getenv("POSITION_MANAGER_CONTINUATION_MIN_MOMENTUM_PCT", "0.05")
+)
+CONTINUATION_EXIT_MIN_VWAP_DIST_PCT = float(
+    os.getenv("POSITION_MANAGER_CONTINUATION_MIN_VWAP_DIST_PCT", "0.05")
+)
 
 
 def now_utc():
@@ -183,6 +195,37 @@ def pct_change(first, last):
     return (last - first) / first * 100.0
 
 
+def continuation_exit_delay_reason(current_pl_pct, momentum_15m, momentum_30m, vwap_dist_pct):
+    """
+    Return a hold reason when a soft full-exit trigger conflicts with live tape.
+
+    The hard loss floor is intentionally separate from FULL_EXIT_LOSS_PCT so
+    operators can allow some breathing room without weakening the emergency stop.
+    """
+    if not CONTINUATION_EXIT_CHECK_ENABLED:
+        return None
+
+    if current_pl_pct <= CONTINUATION_EXIT_HARD_LOSS_FLOOR_PCT:
+        return None
+
+    supports = []
+
+    if momentum_15m is not None and momentum_15m >= CONTINUATION_EXIT_MIN_MOMENTUM_PCT:
+        supports.append(f"15m={momentum_15m:.2f}%")
+    if momentum_30m is not None and momentum_30m >= CONTINUATION_EXIT_MIN_MOMENTUM_PCT:
+        supports.append(f"30m={momentum_30m:.2f}%")
+    if vwap_dist_pct is not None and vwap_dist_pct >= CONTINUATION_EXIT_MIN_VWAP_DIST_PCT:
+        supports.append(f"vwap_dist={vwap_dist_pct:.2f}%")
+
+    if len(supports) >= 2:
+        return (
+            "full exit delayed by continuation check "
+            f"(current_pl={current_pl_pct:.2f}%, supports={', '.join(supports)})"
+        )
+
+    return None
+
+
 def momentum_window(bars, window):
     if len(bars) < 2:
         return None
@@ -279,6 +322,7 @@ def evaluate_position(position, state):
     action = "hold"
     sell_fraction = 0.0
     severity = "pass"
+    hard_full_exit = False
 
     current_pl_pct = peak["current_pl_pct"]
     giveback_pct = peak["giveback_pct"]
@@ -289,6 +333,7 @@ def evaluate_position(position, state):
         action = "sell_full"
         sell_fraction = 1.0
         severity = "high"
+        hard_full_exit = True
         reasons.append(f"loss {current_pl_pct:.2f}% <= full-exit threshold {FULL_EXIT_LOSS_PCT:.2f}%")
 
     if action == "hold" and vwap_dist_pct is not None and current_pl_pct < 0 and vwap_dist_pct <= VWAP_LOSS_EXIT_PCT:
@@ -332,6 +377,19 @@ def evaluate_position(position, state):
             f"trigger {breakeven_trigger:.2f}%, current {current_pl_pct:.2f}% <= "
             f"floor {breakeven_floor:.2f}%, weak_entry_context={weak_entry_context}"
         )
+
+    if action == "sell_full" and not hard_full_exit:
+        delay_reason = continuation_exit_delay_reason(
+            current_pl_pct,
+            momentum_15m,
+            momentum_30m,
+            vwap_dist_pct,
+        )
+        if delay_reason:
+            action = "hold"
+            sell_fraction = 0.0
+            severity = "watch"
+            reasons.append(delay_reason)
 
     # Partial exit: protect profit after favorable move and giveback.
     if action == "hold" and peak_pl_pct >= MIN_PROFIT_PARTIAL_PCT and giveback_pct >= PROFIT_GIVEBACK_TRIGGER_PCT:

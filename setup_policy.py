@@ -13,13 +13,15 @@ HARD_AVOID_LABELS = {
 FAVORABLE_LABELS = {
     "confirmed_near_vwap_recovery",
     "near_vwap_weak_strength_followthrough",
-    "above_vwap_strength_continuation",
 }
 
 WATCH_LABELS = {
     "oversold_weak_bounce_watch",
     "oversold_neutral_rebound_watch",
     "neutral_near_vwap_balanced",
+    # Demoted from boost after 2026-05-26 review: continuation above VWAP
+    # produced chase-prone entries when the move was already extended.
+    "above_vwap_strength_continuation",
 }
 
 NEUTRAL_LABELS = {

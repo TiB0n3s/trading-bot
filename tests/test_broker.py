@@ -103,6 +103,13 @@ def test_validate_order_request_normalizes_inputs():
     assert_equal(request["position_size_pct"], 1.5, "position size")
 
 
+def test_validate_order_request_allows_zero_position_size_for_sell():
+    request = broker.validate_order_request("MA", "sell", 0, 0, 0)
+    assert_equal(request["symbol"], "MA", "symbol")
+    assert_equal(request["action"], "sell", "action")
+    assert_equal(request["position_size_pct"], 0.0, "position size")
+
+
 def test_validate_order_request_rejects_bad_action():
     assert_raises(
         ValidationError,
@@ -148,7 +155,7 @@ def test_place_order_very_high_risk_halves_buy_qty():
 def test_place_order_sell_closes_existing_position_without_bracket():
     def run(fake):
         fake.open_orders = [Obj(id="open-1", side="buy", qty="5", order_type="limit")]
-        result = broker.place_order("AAPL", "sell", 1.0, 1.0, 3.0, qty_override=3)
+        result = broker.place_order("AAPL", "sell", 0, 0, 0, qty_override=3)
         assert_true(result, "sell result")
         assert_equal(result["qty"], 3, "sell qty")
         assert_equal(result["side"], "sell", "sell side")
@@ -163,6 +170,7 @@ def test_place_order_sell_closes_existing_position_without_bracket():
 def main():
     tests = [
         test_validate_order_request_normalizes_inputs,
+        test_validate_order_request_allows_zero_position_size_for_sell,
         test_validate_order_request_rejects_bad_action,
         test_place_order_buy_submits_bracket_order,
         test_place_order_buy_too_small_does_not_submit,

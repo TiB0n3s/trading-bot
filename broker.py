@@ -86,10 +86,15 @@ def validate_order_request(
     qty_override: Any = None,
 ) -> dict[str, Any]:
     """Validate and normalize broker order inputs without calling Alpaca."""
+    normalized_action = _normalize_action(action)
     return {
         "symbol": _normalize_symbol(symbol),
-        "action": _normalize_action(action),
-        "position_size_pct": _positive_float("position_size_pct", position_size_pct),
+        "action": normalized_action,
+        "position_size_pct": _positive_float(
+            "position_size_pct",
+            position_size_pct,
+            allow_zero=normalized_action == "sell",
+        ),
         "stop_loss_pct": _positive_float("stop_loss_pct", stop_loss_pct, allow_zero=True),
         "take_profit_pct": _positive_float("take_profit_pct", take_profit_pct, allow_zero=True),
         "qty_override": _optional_positive_int("qty_override", qty_override),

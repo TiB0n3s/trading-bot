@@ -67,6 +67,7 @@ REQUIRED_SYMBOL = {
 VALID_BIAS = {"buy", "avoid", "neutral"}
 VALID_CONFIDENCE = {"high", "medium", "low"}
 VALID_AVOID_TYPE = {"hard", "soft", None}
+PLACEHOLDER_TEXT = "Research pending."
 
 
 def load_context(path=None):
@@ -203,6 +204,42 @@ def test_rich_market_context_score_fields_are_numeric():
     assert not bad, bad
 
 
+def test_rich_market_context_symbol_research_lists_are_populated():
+    ctx = load_context()
+    empty = {}
+
+    for sym, entry in (ctx.get("symbols") or {}).items():
+        entry = entry or {}
+        for field in (
+            "key_catalysts",
+            "key_risks",
+            "support_levels",
+            "resistance_levels",
+        ):
+            if not entry.get(field):
+                empty[f"{sym}.{field}"] = entry.get(field)
+
+    assert not empty, empty
+
+
+def test_rich_market_context_has_no_research_pending_placeholders():
+    ctx = load_context()
+    placeholders = []
+
+    def walk(value, path):
+        if value == PLACEHOLDER_TEXT:
+            placeholders.append(path)
+        elif isinstance(value, dict):
+            for key, child in value.items():
+                walk(child, f"{path}.{key}" if path else str(key))
+        elif isinstance(value, list):
+            for idx, child in enumerate(value):
+                walk(child, f"{path}[{idx}]")
+
+    walk(ctx, "")
+    assert not placeholders, placeholders
+
+
 if __name__ == "__main__":
     test_rich_market_context_has_required_top_fields()
     test_rich_market_context_source_and_format()
@@ -212,4 +249,6 @@ if __name__ == "__main__":
     test_rich_market_context_sector_state_shape()
     test_rich_market_context_symbol_value_rules()
     test_rich_market_context_score_fields_are_numeric()
+    test_rich_market_context_symbol_research_lists_are_populated()
+    test_rich_market_context_has_no_research_pending_placeholders()
     print("[OK] rich market context schema")

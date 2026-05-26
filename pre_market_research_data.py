@@ -41,6 +41,17 @@ ENV_FILE = Path("/etc/trading-bot.env")
 SYMBOLS = APPROVED_SYMBOLS_LIST
 INDEX_SYMBOLS = ("SPY", "QQQ", "IWM", "GLD")
 
+SECTOR_GROUPS = {
+    "mega_cap_tech": ("AAPL", "MSFT", "NVDA", "META", "AMD", "GOOGL", "AVGO", "ASML"),
+    "semiconductors": ("NVDA", "AMD", "AVGO", "ASML", "CRDO"),
+    "energy": ("CVX", "XOM"),
+    "industrials": ("CAT", "LIN", "GE", "GEV", "HWM", "VRT"),
+    "defense": ("RKLB", "RTX", "LMT", "HWM"),
+    "healthcare_biotech": ("VRTX", "MRNA", "CRSP", "LLY", "ABBV", "MRK", "UNH"),
+    "consumer_retail": ("TSCO", "TSLA", "NFLX", "COST", "KO"),
+    "payments": ("V", "MA"),
+}
+
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger("pre_market_research_data")
 
@@ -82,6 +93,22 @@ def safe_round(v, digits=3):
     return None if v is None else round(float(v), digits)
 
 
+def unique_price_levels(levels, digits=2, limit=3):
+    seen = set()
+    out = []
+    for level in levels:
+        if level is None:
+            continue
+        rounded = round(float(level), digits)
+        if rounded <= 0 or rounded in seen:
+            continue
+        seen.add(rounded)
+        out.append(rounded)
+        if len(out) >= limit:
+            break
+    return out
+
+
 def get_recent_bars(symbol):
     """Return lightweight recent data from Alpaca IEX feed."""
     out = {
@@ -90,6 +117,8 @@ def get_recent_bars(symbol):
         "intraday_pct": None,
         "momentum_30m_pct": None,
         "last_price": None,
+        "support_levels": [],
+        "resistance_levels": [],
         "bar_count_1m": 0,
         "error": None,
     }
@@ -106,6 +135,12 @@ def get_recent_bars(symbol):
             out["last_price"] = float(last.c)
         elif len(daily_bars) == 1:
             out["last_price"] = float(daily_bars[-1].c)
+
+        recent_daily = daily_bars[-5:]
+        daily_supports = sorted((float(b.l) for b in recent_daily), reverse=True)
+        daily_resistances = sorted((float(b.h) for b in recent_daily))
+        out["support_levels"] = unique_price_levels(daily_supports)
+        out["resistance_levels"] = unique_price_levels(daily_resistances)
     except Exception as e:
         out["error"] = f"daily bars failed: {e}"
 
@@ -126,11 +161,32 @@ def get_recent_bars(symbol):
             last_30 = float(minute_bars[-1].c)
             out["momentum_30m_pct"] = pct_change(first_30, last_30)
 
+        if minute_bars:
+            minute_support = min(float(b.l) for b in minute_bars)
+            minute_resistance = max(float(b.h) for b in minute_bars)
+            out["support_levels"] = unique_price_levels(
+                [minute_support] + out["support_levels"]
+            )
+            out["resistance_levels"] = unique_price_levels(
+                [minute_resistance] + out["resistance_levels"]
+            )
+
     except Exception as e:
         if out["error"]:
             out["error"] += f"; minute bars failed: {e}"
         else:
             out["error"] = f"minute bars failed: {e}"
+
+    if out["last_price"]:
+        last_price = float(out["last_price"])
+        supports = [level for level in out["support_levels"] if level <= last_price]
+        resistances = [level for level in out["resistance_levels"] if level >= last_price]
+        out["support_levels"] = unique_price_levels(supports + [last_price * 0.99])
+        out["resistance_levels"] = unique_price_levels(resistances + [last_price * 1.01])
+        if not out["support_levels"]:
+            out["support_levels"] = unique_price_levels([last_price * 0.99])
+        if not out["resistance_levels"]:
+            out["resistance_levels"] = unique_price_levels([last_price * 1.01])
 
     return out
 
@@ -157,6 +213,93 @@ def classify_macro(market):
         return "mixed", "caution", 0.75, 6, False, "Index momentum is mildly negative/mixed; using caution sizing."
 
     return "mixed", "caution", 0.75, 6, False, "Index context is mixed or incomplete; using caution defaults."
+
+
+def trend_from_pct(pct):
+    if pct is None:
+        return "mixed"
+    if pct >= 0.35:
+        return "up"
+    if pct <= -0.35:
+        return "down"
+    return "mixed"
+
+
+def average_present(values):
+    present = [v for v in values if v is not None]
+    if not present:
+        return None
+    return sum(present) / len(present)
+
+
+def describe_snapshot(data):
+    bits = []
+    daily = data.get("daily_pct")
+    intra = data.get("intraday_pct")
+    mom30 = data.get("momentum_30m_pct")
+    bars = data.get("bar_count_1m", 0)
+
+    if daily is not None:
+        bits.append(f"daily={daily:+.2f}%")
+    if intra is not None:
+        bits.append(f"intraday={intra:+.2f}%")
+    if mom30 is not None:
+        bits.append(f"30m={mom30:+.2f}%")
+    bits.append(f"1m_bars={bars}")
+    return ", ".join(bits)
+
+
+def build_index_state(market_data):
+    index_state = {}
+    for symbol in INDEX_SYMBOLS:
+        data = market_data.get(symbol, {})
+        reference_pct = data.get("intraday_pct")
+        if reference_pct is None:
+            reference_pct = data.get("daily_pct")
+
+        index_state[symbol] = {
+            "trend": trend_from_pct(reference_pct),
+            "premarket_gap_pct": safe_round(data.get("intraday_pct")),
+            "above_vwap": None,
+            "key_levels": [],
+            "notes": f"Data-only Alpaca context: {describe_snapshot(data)}.",
+        }
+
+    return index_state
+
+
+def build_sector_state(market_data):
+    sector_state = {}
+    for sector, symbols in SECTOR_GROUPS.items():
+        snapshots = [market_data.get(sym, {}) for sym in symbols if sym in market_data]
+        daily_avg = average_present(s.get("daily_pct") for s in snapshots)
+        intra_avg = average_present(s.get("intraday_pct") for s in snapshots)
+        mom_avg = average_present(s.get("momentum_30m_pct") for s in snapshots)
+
+        reference_pct = intra_avg if intra_avg is not None else daily_avg
+        trend = trend_from_pct(reference_pct)
+        risk = "medium"
+        if reference_pct is not None and reference_pct <= -0.75:
+            risk = "high"
+        elif reference_pct is not None and reference_pct >= 0.75:
+            risk = "low"
+
+        coverage = sum(1 for s in snapshots if s.get("daily_pct") is not None or s.get("intraday_pct") is not None)
+        note_bits = [f"coverage={coverage}/{len(symbols)}"]
+        if daily_avg is not None:
+            note_bits.append(f"avg_daily={daily_avg:+.2f}%")
+        if intra_avg is not None:
+            note_bits.append(f"avg_intraday={intra_avg:+.2f}%")
+        if mom_avg is not None:
+            note_bits.append(f"avg_30m={mom_avg:+.2f}%")
+
+        sector_state[sector] = {
+            "trend": trend,
+            "risk": risk,
+            "notes": "Data-only Alpaca context: " + ", ".join(note_bits) + ".",
+        }
+
+    return sector_state
 
 
 def classify_symbol(symbol, data, macro_sentiment):
@@ -257,6 +400,50 @@ def classify_symbol(symbol, data, macro_sentiment):
     }
 
 
+def build_symbol_evidence(data, classification, macro_sentiment, macro_regime):
+    daily = data.get("daily_pct")
+    intra = data.get("intraday_pct")
+    mom30 = data.get("momentum_30m_pct")
+    bars = data.get("bar_count_1m", 0)
+    bias = classification.get("bias")
+
+    catalysts = []
+    risks = []
+
+    if daily is not None and daily >= 1.25:
+        catalysts.append(f"Positive recent daily trend ({daily:+.2f}%).")
+    if intra is not None and intra >= 0.35:
+        catalysts.append(f"Positive premarket/intraday tape ({intra:+.2f}%).")
+    if mom30 is not None and mom30 >= 0.10:
+        catalysts.append(f"Positive 30-minute momentum ({mom30:+.2f}%).")
+    if bias == "buy":
+        catalysts.append(f"Data-only classifier bias is buy: {classification.get('entry_quality')}.")
+    if not catalysts:
+        catalysts.append("No strong data-only catalyst; waiting for live confirmation.")
+
+    if daily is not None and daily <= -2.0:
+        risks.append(f"Weak recent daily trend ({daily:+.2f}%).")
+    if intra is not None and intra <= -0.35:
+        risks.append(f"Negative premarket/intraday tape ({intra:+.2f}%).")
+    if mom30 is not None and mom30 < 0:
+        risks.append(f"Short-term momentum fading ({mom30:+.2f}%).")
+    if bars < 10:
+        risks.append(f"Limited premarket 1-minute bar coverage ({bars} bars).")
+    if macro_sentiment != "risk-on":
+        risks.append(f"Macro context is {macro_sentiment}/{macro_regime}; use confirmation.")
+    if bias == "avoid":
+        risks.append(f"Data-only classifier bias is avoid: {classification.get('reason')}.")
+    if not risks:
+        risks.append("No major data-only risk flagged before open.")
+
+    return {
+        "key_catalysts": catalysts[:4],
+        "key_risks": risks[:4],
+        "support_levels": data.get("support_levels") or [],
+        "resistance_levels": data.get("resistance_levels") or [],
+    }
+
+
 def should_write_live(build_output):
     if not build_output:
         return True
@@ -318,13 +505,24 @@ def main():
     template["max_new_positions"] = max_new_positions
     template["block_new_buys"] = block_new_buys
     template["macro_summary"] = macro_summary
+    template["index_state"] = build_index_state(market_data)
+    template["sector_state"] = build_sector_state(market_data)
     template["data_only"] = True
 
     symbols_out = template.get("symbols", {})
 
     for sym in SYMBOLS:
         if sym in market_data:
-            symbols_out[sym].update(classify_symbol(sym, market_data[sym], macro_sentiment))
+            classification = classify_symbol(sym, market_data[sym], macro_sentiment)
+            symbols_out[sym].update(classification)
+            symbols_out[sym].update(
+                build_symbol_evidence(
+                    market_data[sym],
+                    classification,
+                    macro_sentiment,
+                    macro_regime,
+                )
+            )
             symbols_out[sym]["data_snapshot"] = {
                 "daily_pct": safe_round(market_data[sym].get("daily_pct")),
                 "intraday_pct": safe_round(market_data[sym].get("intraday_pct")),

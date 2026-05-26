@@ -676,6 +676,13 @@ Current tracked migrations cover feature leakage/audit fields,
 `rejected_signal_outcomes`, webhook-event lifecycle/status columns, and trade
 decision-context columns that used to be added during app startup.
 
+Rejected-signal counterfactual outcomes can be populated and checked with:
+
+```bash
+python3 rejected_signal_outcome_builder.py --date YYYY-MM-DD
+python3 ops_check.py rejected-outcomes YYYY-MM-DD
+```
+
 Staged ML/ahead-of-live checks:
 
 python3 run_staged_tests.py

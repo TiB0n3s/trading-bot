@@ -165,40 +165,63 @@ Required before historical brain-feature training:
 Status: `strategy.trade_scorer` remains future/shadow-only for ML until this is
 implemented.
 
-### Symbol Universe Expansion Pending Review
+### Symbol Universe Expansion
 
 Goal: reduce survivorship bias and improve future-forward data coverage without
 changing Tuesday's paper-trading behavior.
 
-Candidate symbols to review after Tuesday QA:
+Promoted to approved collection on 2026-05-26 as
+`approved_universe_2026_05_26_internal_bar_expansion_v1`:
 
 - AMZN
 - JPM
 - TSM
+- SNPS
+- DELL
+- ADSK
+- NTAP
+- ZS
 - PYPL
 - SOFI
 - PFE
-- CMCSA
-- T
 - VZ
+- T
+- CMCSA
+- DKS
+- MDB
+- OKTA
+- BURL
+
+These symbols are intentionally tagged `internal_bar_only`: collect Alpaca
+research, session momentum, rolling momentum, live features, and outcomes, but
+do not add TradingView alerts. The purpose is to compare bar-derived/internal
+candidate quality against the existing alert-driven universe.
+
+Initial auto-buy methodology:
+
+- `auto_buy_manager.py --scope internal` scores internal/bar-only candidates
+  from session momentum, latest live feature snapshot/setup, and market context.
+- It writes `auto_buy_candidates` and `AUTO_BUY_CANDIDATE` bot events for
+  comparison against TradingView-triggered signals.
+- Live paper buys are disabled by default and require both `--live` and
+  `AUTO_BUY_LIVE_BUYS=true`.
+- Current default live sizing, if explicitly enabled, is intentionally small:
+  `AUTO_BUY_POSITION_SIZE_PCT=0.50`, `AUTO_BUY_STOP_LOSS_PCT=1.00`, and
+  `AUTO_BUY_TAKE_PROFIT_PCT=2.00`.
+- Live execution is capped by `AUTO_BUY_MAX_ORDERS_PER_RUN`,
+  `AUTO_BUY_MAX_DAILY_ORDERS`, and `AUTO_BUY_COOLDOWN_MINUTES`.
+
+Remaining candidates to review after additional paper evidence:
+
 - F
 - HBAN
 - KEY
 - KHC
-- ZS
 - CRM
 - PDD
-- SNPS
 - HPQ
-- DKS
 - BBY
-- DELL
-- ADSK
-- MDB
-- BURL
-- OKTA
 - DLTR
-- NTAP
 - GPS
 - AEO
 - BKE
@@ -723,8 +746,10 @@ A model can only move from observe-only to paper-trading influence after it has:
 6. Add timestamped override history and dataset-manifest override hashes.
 7. Add data-retention tiers and archive/compaction commands.
 8. Scope `app.py` decomposition as a multi-week mini-project.
-9. Started: add `rejected_signal_outcomes` schema target for rejected-signal
-   forward outcome tracking. Builder still pending.
+9. Done: add `rejected_signal_outcomes` schema target plus
+   `rejected_signal_outcome_builder.py` and `ops_check.py rejected-outcomes`
+   coverage reporting. Continue collecting multiple paper sessions before
+   treating counterfactual labels as training-ready.
 10. Define label v1 formally.
 11. Done: add dataset manifest generation to dataset export flow.
 12. Started: staged observe-only ML integration lane and `staged-readiness`
@@ -742,15 +767,14 @@ A model can only move from observe-only to paper-trading influence after it has:
 
 Critical blockers before real training:
 
-1. Resolve counterfactual outcomes for rejected signals.
+1. Continue collecting and validating counterfactual outcomes for rejected
+   signals across multiple paper sessions.
 2. Pin fixed-horizon labels or version realized-exit labels by exit logic.
 3. Implement purged/embargoed walk-forward validation.
 4. Add point-in-time context archives before using `strategy.trade_scorer` in
    historical replay.
-5. Version the symbol universe and review post-QA candidate additions:
-   AMZN, JPM, TSM, PYPL, SOFI, PFE, CMCSA, T, VZ, F, HBAN, KEY, KHC, ZS, CRM,
-   PDD, SNPS, HPQ, DKS, BBY, DELL, ADSK, MDB, BURL, OKTA, DLTR, NTAP, GPS,
-   AEO, BKE.
+5. Continue symbol-universe versioning and review remaining candidates:
+   F, HBAN, KEY, KHC, CRM, PDD, HPQ, BBY, DLTR, GPS, AEO, BKE.
 
 The biggest missing concept is auditability of what the bot knew at decision
 time. Without that, training, evaluation, and promotion can look sophisticated

@@ -755,7 +755,7 @@ def maybe_execute_auto_sell(position, decision, market_open: bool) -> dict[str, 
         )
         return None
 
-        # Profit/risk gate:
+    # Profit/risk gate:
     # Do not auto-sell small red positions or tiny green positions.
     # Allow auto-sell only when profit is worth taking or loss is large enough
     # to justify risk control.
@@ -781,7 +781,7 @@ def maybe_execute_auto_sell(position, decision, market_open: bool) -> dict[str, 
         )
         return None
 
-        # Profit-protection / hard-risk gate:
+    # Profit-protection / hard-risk gate:
     # Do not auto-sell just because momentum is weak.
     # Auto-sell is allowed only when:
     #   1) profit is worth protecting and momentum has rolled over, or

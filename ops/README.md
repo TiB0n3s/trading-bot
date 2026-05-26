@@ -78,12 +78,22 @@ Use these read-only reports during or after a session:
 ```bash
 cd ~/trading-bot
 python3 ops_check.py rejection-summary 2026-05-26
+python3 ops_check.py rejected-outcomes 2026-05-26
+python3 auto_buy_manager.py --scope internal
+python3 ops_check.py auto-buy 2026-05-26
 python3 ops_check.py order-health 2026-05-26
 ```
 
 `rejection-summary` groups rejected trade rows by reason/category, symbol, and
-recent context. `order-health` checks approved rows for order IDs/statuses,
-fill-event distribution, and imported Alpaca order status summaries.
+recent context. `rejected-outcomes` checks counterfactual forward-return
+coverage for rejected signals after `rejected_signal_outcome_builder.py` runs.
+`auto_buy_manager.py` scores Alpaca-bar-derived internal buy candidates without
+requiring TradingView alerts. Live paper buys require both `--live` and
+`AUTO_BUY_LIVE_BUYS=true`, and are constrained by
+`AUTO_BUY_MAX_ORDERS_PER_RUN`, `AUTO_BUY_MAX_DAILY_ORDERS`, and
+`AUTO_BUY_COOLDOWN_MINUTES`.
+`order-health` checks approved rows for order IDs/statuses, fill-event
+distribution, and imported Alpaca order status summaries.
 
 
 ## Maintainability Audits
@@ -130,8 +140,12 @@ The first tracked migration adds feature leakage/audit columns to
 `feature_age_seconds`, `source`, `is_stale`, and `staleness_reason`.
 
 The second tracked migration creates `rejected_signal_outcomes`, the canonical
-target table for future counterfactual labels on rejected signals. The forward
-return builder is still a separate pending step.
+target table for counterfactual labels on rejected signals. Populate it with:
+
+```bash
+python3 rejected_signal_outcome_builder.py --date YYYY-MM-DD
+python3 ops_check.py rejected-outcomes YYYY-MM-DD
+```
 
 The third tracked migration adds webhook-event lifecycle/status columns used by
 the app to record queue, start, finish, order, and failure metadata.

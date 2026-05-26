@@ -370,7 +370,6 @@ def _is_favorable_setup_label(setup_label: str | None) -> bool:
         "confirmed_near_vwap_recovery",
         "near_vwap_weak_strength_followthrough",
         "oversold_weak_bounce_watch",
-        "above_vwap_strength_continuation",
     }
 
 
@@ -642,7 +641,6 @@ def evaluate_buy_opportunity(
         "confirmed_near_vwap_recovery",
         "near_vwap_weak_strength_followthrough",
         "oversold_weak_bounce_watch",
-        "above_vwap_strength_continuation",
         "balanced_transition_state",
     }
 
@@ -652,6 +650,7 @@ def evaluate_buy_opportunity(
         "avoid_below_vwap_weak_drift",
         "below_vwap_neutral_drift_risk",
         "late_strength_near_vwap_risk",
+        "above_vwap_strength_continuation",
     }
 
     if setup_label in favorable_setups:
@@ -2573,6 +2572,77 @@ def _safe_float(value):
         return None
 
 
+def _sell_continuation_delay_reason(account_state, trend, unrealized_pct):
+    """
+    Return a rejection reason when a normal webhook SELL looks early.
+
+    This protects against indicator-alert noise cutting a position while the
+    latest session tape still supports continuation. Hard loss exits and broker
+    brackets do not use this path.
+    """
+    enabled = os.getenv("SELL_CONTINUATION_CHECK_ENABLED", "true").strip().lower()
+    if enabled not in ("1", "true", "yes", "on"):
+        return None
+
+    unrealized_pct = _safe_float(unrealized_pct)
+    if unrealized_pct is None:
+        return None
+
+    hard_loss_floor = _env_float("SELL_CONTINUATION_HARD_LOSS_FLOOR_PCT", -0.75)
+    if unrealized_pct <= hard_loss_floor:
+        return None
+
+    session = (account_state or {}).get("session_momentum") or {}
+    trend = trend or {}
+
+    session_score = _safe_float(session.get("trend_score"))
+    session_5m = _safe_float(session.get("momentum_5m_pct"))
+    session_15m = _safe_float(session.get("momentum_15m_pct"))
+    session_30m = _safe_float(session.get("momentum_30m_pct"))
+    vwap_dist = _safe_float(session.get("distance_from_vwap_pct"))
+    session_label = session.get("trend_label")
+
+    if session_5m is not None and session_5m <= _env_float("SELL_CONTINUATION_MAX_5M_DROP_PCT", -0.20):
+        return None
+    if session_15m is not None and session_15m <= _env_float("SELL_CONTINUATION_MAX_15M_DROP_PCT", -0.10):
+        return None
+
+    supports = []
+    min_momentum = _env_float("SELL_CONTINUATION_MIN_MOMENTUM_PCT", 0.15)
+    min_vwap_dist = _env_float("SELL_CONTINUATION_MIN_VWAP_DIST_PCT", 0.10)
+    min_session_score = _env_float("SELL_CONTINUATION_MIN_SESSION_SCORE", 2.0)
+
+    if session_15m is not None and session_15m >= min_momentum:
+        supports.append(f"15m={session_15m:.3f}%")
+    if session_30m is not None and session_30m >= min_momentum:
+        supports.append(f"30m={session_30m:.3f}%")
+    if vwap_dist is not None and vwap_dist >= min_vwap_dist:
+        supports.append(f"vwap_dist={vwap_dist:.3f}%")
+    if session_score is not None and session_score >= min_session_score:
+        supports.append(f"session_score={session_score:.1f}")
+
+    direction = trend.get("direction")
+    strength = trend.get("strength")
+    consecutive_count = int(trend.get("consecutive_count") or 0)
+    strong_bearish_pressure = (
+        direction == "bearish"
+        and strength == "confirmed"
+        and consecutive_count >= 3
+    )
+
+    required_support_count = int(os.getenv("SELL_CONTINUATION_MIN_SUPPORTS", "2"))
+    if len(supports) >= required_support_count and not strong_bearish_pressure:
+        return (
+            "sell continuation check: "
+            f"unrealized={unrealized_pct:.2f}% "
+            f"session_label={session_label} "
+            f"trend={direction}/{strength} count={consecutive_count}; "
+            f"supports={', '.join(supports)}"
+        )
+
+    return None
+
+
 def _compute_spread_pct(bid, ask):
     bid_f = _safe_float(bid)
     ask_f = _safe_float(ask)
@@ -4104,6 +4174,26 @@ def process_signal(data):
         }
         logger.warning(f"Session momentum unavailable for {symbol}: {e}")
 
+    if action == "sell" and existing_position:
+        try:
+            avg_entry = float(existing_position.get("avg_entry") or 0)
+            current_price = float(existing_position.get("current_price") or price or 0)
+            qty = float(existing_position.get("qty") or 0)
+            if avg_entry > 0 and current_price > 0 and qty > 0:
+                unrealized_pct = (current_price - avg_entry) / avg_entry * 100.0
+                continuation_reason = _sell_continuation_delay_reason(
+                    account_state,
+                    _trend_table.get(symbol) or {},
+                    unrealized_pct,
+                )
+                if continuation_reason:
+                    if _reject_current_signal("sell_continuation_check", continuation_reason):
+                        return
+        except Exception as e:
+            logger.warning(
+                f"Sell continuation check failed for {symbol}; fail-open for SELL safety: {e}"
+            )
+
     # Momentum check (buy signals only, fail-open — never blocks trading)
     alignment = None
     action_hint = None
@@ -4841,6 +4931,8 @@ def process_signal(data):
                         _write_recent_sell(symbol, current_et, price)
             else:
                 logger.error(f"Order placement failed for {symbol}")
+                decision["approved"] = False
+                decision["reason"] = "order_submission_failed: broker returned no order_result"
                 if dedupe_key:
                     _mark_webhook_event_status(
                         dedupe_key,

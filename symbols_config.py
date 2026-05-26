@@ -6,8 +6,34 @@ This is the single source of truth for:
 - price sanity ranges
 - correlation clusters
 - cluster exposure limits
+- signal-source cohorts for TradingView vs. internal/bar-only research
 - shared symbol lists used by research/parser/decision prompts
 """
+
+SYMBOL_UNIVERSE_VERSION = "approved_universe_2026_05_26_internal_bar_expansion_v1"
+
+INTERNAL_BAR_ONLY_SYMBOLS_LIST = [
+    "AMZN",
+    "JPM",
+    "TSM",
+    "SNPS",
+    "DELL",
+    "ADSK",
+    "NTAP",
+    "ZS",
+    "PYPL",
+    "SOFI",
+    "PFE",
+    "VZ",
+    "T",
+    "CMCSA",
+    "DKS",
+    "MDB",
+    "OKTA",
+    "BURL",
+]
+
+INTERNAL_BAR_ONLY_SYMBOLS = set(INTERNAL_BAR_ONLY_SYMBOLS_LIST)
 
 SYMBOL_CONFIG = {
     # Core / original
@@ -57,11 +83,44 @@ SYMBOL_CONFIG = {
     "ABBV":  {"price_range": (150, 275),  "clusters": ["healthcare"]},
     "MRK":   {"price_range": (80, 160),   "clusters": ["healthcare"]},
     "UNH":   {"price_range": (250, 600),  "clusters": ["healthcare"]},
+
+    # Internal/bar-only research cohort — May 2026.
+    # These are collected through Alpaca-derived research/momentum/features
+    # without adding TradingView alerts, so their signal quality can be
+    # compared against the alert-driven universe.
+    "AMZN":  {"price_range": (150, 350),  "clusters": ["mega_cap_tech", "consumer_growth"]},
+    "JPM":   {"price_range": (150, 400),  "clusters": ["financials"]},
+    "TSM":   {"price_range": (100, 400),  "clusters": ["mega_cap_tech", "semiconductors", "ai_infra"]},
+    "SNPS":  {"price_range": (300, 800),  "clusters": ["software_infra", "semiconductors"]},
+    "DELL":  {"price_range": (60, 250),   "clusters": ["hardware_infra", "ai_infra"]},
+    "ADSK":  {"price_range": (150, 450),  "clusters": ["software_infra"]},
+    "NTAP":  {"price_range": (60, 200),   "clusters": ["hardware_infra"]},
+    "ZS":    {"price_range": (100, 400),  "clusters": ["software_infra", "cybersecurity"]},
+    "PYPL":  {"price_range": (30, 150),   "clusters": ["payments"]},
+    "SOFI":  {"price_range": (5, 40),     "clusters": ["financials", "consumer_growth"]},
+    "PFE":   {"price_range": (15, 70),    "clusters": ["healthcare"]},
+    "VZ":    {"price_range": (25, 70),    "clusters": ["telecom", "defensive"]},
+    "T":     {"price_range": (15, 45),    "clusters": ["telecom", "defensive"]},
+    "CMCSA": {"price_range": (20, 80),    "clusters": ["telecom", "consumer"]},
+    "DKS":   {"price_range": (100, 350),  "clusters": ["consumer"]},
+    "MDB":   {"price_range": (100, 600),  "clusters": ["software_infra"]},
+    "OKTA":  {"price_range": (50, 220),   "clusters": ["software_infra", "cybersecurity"]},
+    "BURL":  {"price_range": (150, 450),  "clusters": ["consumer"]},
 }
 
 APPROVED_SYMBOLS_LIST = list(SYMBOL_CONFIG.keys())
 APPROVED_SYMBOLS = set(APPROVED_SYMBOLS_LIST)
 APPROVED_SYMBOLS_CSV = ", ".join(APPROVED_SYMBOLS_LIST)
+TRADINGVIEW_ALERT_SYMBOLS_LIST = [
+    symbol for symbol in APPROVED_SYMBOLS_LIST
+    if symbol not in INTERNAL_BAR_ONLY_SYMBOLS
+]
+TRADINGVIEW_ALERT_SYMBOLS = set(TRADINGVIEW_ALERT_SYMBOLS_LIST)
+
+SYMBOL_SIGNAL_SOURCE = {
+    symbol: "internal_bar_only" if symbol in INTERNAL_BAR_ONLY_SYMBOLS else "tradingview_alert"
+    for symbol in APPROVED_SYMBOLS_LIST
+}
 
 PRICE_RANGES = {
     symbol: cfg["price_range"]
@@ -85,6 +144,12 @@ CLUSTER_EXPOSURE_LIMITS = {
     "payments": 8.0,
     "aerospace": 8.0,
     "software_infra": 8.0,
+    "semiconductors": 10.0,
+    "hardware_infra": 8.0,
+    "financials": 8.0,
+    "telecom": 8.0,
+    "defensive": 8.0,
+    "cybersecurity": 8.0,
     "consumer": 8.0,
     "consumer_growth": 8.0,
     "hedge": 8.0,

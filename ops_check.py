@@ -27,8 +27,12 @@ Usage:
   python3 ops_check.py feature-health
   python3 ops_check.py feature-watch
   python3 ops_check.py rejection-summary
+  python3 ops_check.py rejected-outcomes
+  python3 ops_check.py auto-buy
   python3 ops_check.py order-health
   python3 ops_check.py migration-status
+  python3 ops_check.py strong-days
+  python3 ops_check.py strong-days 2026-05-26
   python3 ops_check.py all
   python3 ops_check.py filters 2026-05-08
 """
@@ -101,6 +105,7 @@ COMMANDS = {
     "signal-lessons": ["signal_timing_lesson_report.py", "--date"],
     "trends": ["trend_context_report.py", "--date"],
     "prediction-validation": ["prediction_validation_report.py", "--date"],
+    "strong-days": ["strong_day_participation_report.py", "--date"],
 }
 
 
@@ -1225,6 +1230,210 @@ def migration_status_check():
     return True
 
 
+def rejected_outcomes_health(target_date):
+    import sqlite3
+
+    db_path = BASE_DIR / "trades.db"
+
+    print()
+    print("=" * 72)
+    print(f"  Rejected Signal Outcomes - {target_date}")
+    print("=" * 72)
+
+    if not db_path.exists():
+        print(f"[FAIL] missing {db_path}")
+        return False
+
+    with sqlite3.connect(f"file:{db_path}?mode=ro", uri=True) as con:
+        con.row_factory = sqlite3.Row
+
+        if not _table_exists(con, "rejected_signal_outcomes"):
+            print("[FAIL] rejected_signal_outcomes table is missing")
+            return False
+
+        rejected = con.execute(
+            """
+            SELECT COUNT(*) AS n
+            FROM trades
+            WHERE substr(timestamp, 1, 10) = ?
+              AND approved = 0
+              AND symbol IS NOT NULL
+              AND action IS NOT NULL
+              AND signal_price IS NOT NULL
+              AND LOWER(action) IN ('buy', 'sell')
+            """,
+            (target_date,),
+        ).fetchone()["n"]
+
+        outcomes = con.execute(
+            """
+            SELECT
+                COUNT(*) AS n,
+                SUM(CASE WHEN label_status = 'labeled' THEN 1 ELSE 0 END) AS labeled,
+                SUM(CASE WHEN label_status = 'partial' THEN 1 ELSE 0 END) AS partial,
+                SUM(CASE WHEN label_status = 'pending' THEN 1 ELSE 0 END) AS pending,
+                SUM(CASE WHEN label_status = 'no_bars' THEN 1 ELSE 0 END) AS no_bars,
+                SUM(CASE WHEN label_status = 'error' THEN 1 ELSE 0 END) AS error
+            FROM rejected_signal_outcomes
+            WHERE substr(timestamp, 1, 10) = ?
+            """,
+            (target_date,),
+        ).fetchone()
+
+        covered = int(outcomes["n"] or 0)
+        missing = int(rejected or 0) - covered
+        print(f"  rejected_rows          {int(rejected or 0):>8}")
+        print(f"  outcome_rows           {covered:>8}")
+        print(f"  missing_outcomes       {missing:>8}")
+        print(f"  labeled                {int(outcomes['labeled'] or 0):>8}")
+        print(f"  partial                {int(outcomes['partial'] or 0):>8}")
+        print(f"  pending                {int(outcomes['pending'] or 0):>8}")
+        print(f"  no_bars                {int(outcomes['no_bars'] or 0):>8}")
+        print(f"  error                  {int(outcomes['error'] or 0):>8}")
+
+        print()
+        print("By action/status")
+        rows = con.execute(
+            """
+            SELECT action, label_status, COUNT(*) AS n,
+                   AVG(return_15m) AS avg_return_15m,
+                   AVG(return_60m) AS avg_return_60m
+            FROM rejected_signal_outcomes
+            WHERE substr(timestamp, 1, 10) = ?
+            GROUP BY action, label_status
+            ORDER BY action, label_status
+            """,
+            (target_date,),
+        ).fetchall()
+        if rows:
+            for row in rows:
+                avg15 = row["avg_return_15m"]
+                avg60 = row["avg_return_60m"]
+                avg15_s = f"{avg15:.3f}%" if avg15 is not None else "-"
+                avg60_s = f"{avg60:.3f}%" if avg60 is not None else "-"
+                print(
+                    f"  {row['action']:<5} {row['label_status']:<10} "
+                    f"{row['n']:>6} avg15={avg15_s:>9} avg60={avg60_s:>9}"
+                )
+        else:
+            print("  none")
+
+        print()
+        print("Top rejection categories with outcomes")
+        rows = con.execute(
+            """
+            SELECT
+                CASE
+                  WHEN instr(rejection_reason, ':') > 0
+                    THEN substr(rejection_reason, 1, instr(rejection_reason, ':') - 1)
+                  ELSE COALESCE(rejection_reason, 'unknown')
+                END AS category,
+                COUNT(*) AS n,
+                AVG(return_15m) AS avg_return_15m,
+                AVG(max_favorable_60m) AS avg_mfe_60m
+            FROM rejected_signal_outcomes
+            WHERE substr(timestamp, 1, 10) = ?
+            GROUP BY category
+            ORDER BY n DESC, category
+            LIMIT 12
+            """,
+            (target_date,),
+        ).fetchall()
+        if rows:
+            for row in rows:
+                avg15 = row["avg_return_15m"]
+                mfe = row["avg_mfe_60m"]
+                avg15_s = f"{avg15:.3f}%" if avg15 is not None else "-"
+                mfe_s = f"{mfe:.3f}%" if mfe is not None else "-"
+                print(f"  {row['category']:<30} {row['n']:>6} avg15={avg15_s:>9} mfe60={mfe_s:>9}")
+        else:
+            print("  none")
+
+    if missing > 0:
+        print()
+        print("[WARN] rejected outcome coverage is incomplete")
+        return False
+
+    print()
+    print("[OK] rejected outcome coverage completed")
+    return True
+
+
+def auto_buy_health(target_date):
+    import sqlite3
+
+    db_path = BASE_DIR / "trades.db"
+
+    print()
+    print("=" * 72)
+    print(f"  Auto-Buy Candidates - {target_date}")
+    print("=" * 72)
+
+    if not db_path.exists():
+        print(f"[FAIL] missing {db_path}")
+        return False
+
+    with sqlite3.connect(f"file:{db_path}?mode=ro", uri=True) as con:
+        con.row_factory = sqlite3.Row
+
+        if not _table_exists(con, "auto_buy_candidates"):
+            print("[WARN] auto_buy_candidates table is missing; run auto_buy_manager.py first")
+            return False
+
+        rows = con.execute(
+            """
+            SELECT decision, COUNT(*) AS n, AVG(score) AS avg_score, MAX(score) AS max_score
+            FROM auto_buy_candidates
+            WHERE substr(timestamp, 1, 10) = ?
+            GROUP BY decision
+            ORDER BY n DESC, decision
+            """,
+            (target_date,),
+        ).fetchall()
+
+        print("Decision distribution")
+        if rows:
+            for row in rows:
+                avg_score = row["avg_score"]
+                max_score = row["max_score"]
+                avg_s = f"{avg_score:.2f}" if avg_score is not None else "-"
+                max_s = f"{max_score:.2f}" if max_score is not None else "-"
+                print(f"  {row['decision']:<24} {row['n']:>6} avg={avg_s:>7} max={max_s:>7}")
+        else:
+            print("  none")
+
+        print()
+        print("Top candidates")
+        rows = con.execute(
+            """
+            SELECT timestamp, symbol, signal_source, decision, score,
+                   session_trend_label, session_trend_score,
+                   setup_label, reason, order_submitted, order_id
+            FROM auto_buy_candidates
+            WHERE substr(timestamp, 1, 10) = ?
+            ORDER BY score DESC, id DESC
+            LIMIT 15
+            """,
+            (target_date,),
+        ).fetchall()
+        if rows:
+            for row in rows:
+                print(
+                    f"  {row['timestamp']} {row['symbol']:<6} "
+                    f"{row['decision']:<22} score={row['score']:<5} "
+                    f"source={row['signal_source'] or '-':<18} "
+                    f"session={row['session_trend_label']}/{row['session_trend_score']} "
+                    f"setup={row['setup_label'] or '-'} "
+                    f"order={row['order_id'] or '-'}"
+                )
+        else:
+            print("  none")
+
+    print()
+    print("[OK] auto-buy candidate check completed")
+    return True
+
+
 def order_health(target_date):
     import sqlite3
 
@@ -1401,6 +1610,12 @@ def main():
     if command == "rejection-summary":
         return 0 if rejection_summary(target_date) else 1
 
+    if command == "rejected-outcomes":
+        return 0 if rejected_outcomes_health(target_date) else 1
+
+    if command == "auto-buy":
+        return 0 if auto_buy_health(target_date) else 1
+
     if command == "order-health":
         return 0 if order_health(target_date) else 1
 
@@ -1438,6 +1653,8 @@ def main():
         checks.append(run("Adaptive Impact Report", ["adaptive_impact_report.py", target_date]))
         checks.append(run("Filter Report", ["filter_report.py", "--date", target_date]))
         checks.append(run("Blocked Signal Outcome Report", ["blocked_signal_outcome_report.py", "--date", target_date]))
+        checks.append(run("Rejected Outcomes", ["ops_check.py", "rejected-outcomes", target_date]))
+        checks.append(run("Auto-Buy Candidates", ["ops_check.py", "auto-buy", target_date]))
         checks.append(run("Drawdown Report", ["drawdown_report.py", target_date]))
         checks.append(run("Post-Session Check", ["post_session_check.py", target_date]))
 
@@ -1473,6 +1690,7 @@ def main():
         "trends",
         "prediction-validation",
         "event-attribution",
+        "strong-days",
     ):
         args = [args[0], "--date", target_date]
 

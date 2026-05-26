@@ -151,6 +151,28 @@ def test_trade_decision_context_migration_adds_columns():
         assert_true(expected <= table_columns(db_path, "trades"), "trade decision context columns")
 
 
+def test_decision_snapshots_migration_creates_table():
+    with tempfile.TemporaryDirectory() as tmp:
+        db_path = Path(tmp) / "test.db"
+        with sqlite3.connect(db_path) as con:
+            con.execute("CREATE TABLE trades (id INTEGER PRIMARY KEY)")
+
+        applied = apply_migration(MIGRATIONS[4], db_path)
+        assert_equal(applied, True, "apply")
+
+        expected = {
+            "decision_time",
+            "trade_id",
+            "source",
+            "final_decision",
+            "market_context_hash",
+            "symbol_universe_version",
+            "env_profile_hash",
+            "git_sha",
+        }
+        assert_true(expected <= table_columns(db_path, "decision_snapshots"), "decision snapshot columns")
+
+
 if __name__ == "__main__":
     test_feature_audit_migration_is_idempotent()
     print("[OK] test_feature_audit_migration_is_idempotent")
@@ -160,4 +182,6 @@ if __name__ == "__main__":
     print("[OK] test_webhook_event_status_migration_adds_columns")
     test_trade_decision_context_migration_adds_columns()
     print("[OK] test_trade_decision_context_migration_adds_columns")
-    print("\nAll 4 DB migration tests passed.")
+    test_decision_snapshots_migration_creates_table()
+    print("[OK] test_decision_snapshots_migration_creates_table")
+    print("\nAll 5 DB migration tests passed.")

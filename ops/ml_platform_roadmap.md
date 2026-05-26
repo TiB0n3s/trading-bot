@@ -735,22 +735,28 @@ A model can only move from observe-only to paper-trading influence after it has:
 
 ## Best Next Additions After Tuesday
 
-1. Add schema/migration management.
-2. Add immutable decision snapshots.
+1. Done: add schema/migration management.
+2. Done: add immutable decision snapshots.
 3. Done: add `feature_available_at`, `feature_generated_at`,
    `feature_age_seconds`, `source`, `is_stale`, and `staleness_reason` fields
    to `feature_snapshots_v2`.
 4. Add serving latency enforcement before any webhook-path provider import.
-5. Add policy-artifact rollback/registry entries for after-close learning
-   memory files.
-6. Add timestamped override history and dataset-manifest override hashes.
-7. Add data-retention tiers and archive/compaction commands.
+5. Started: add policy-artifact rollback/registry entries for after-close
+   learning memory files. Current ops check surfaces stale/missing artifacts;
+   rollback tooling and registry entries remain.
+6. Started: add timestamped override history and dataset-manifest override
+   hashes. Current point-in-time archive snapshots market context, override
+   files, policy artifact hashes, and symbol-universe version.
+7. Started: add data-retention tiers and archive/compaction commands. Current
+   policy classifies hot/warm/cold tables and leaves destructive compaction
+   disabled.
 8. Scope `app.py` decomposition as a multi-week mini-project.
 9. Done: add `rejected_signal_outcomes` schema target plus
    `rejected_signal_outcome_builder.py` and `ops_check.py rejected-outcomes`
    coverage reporting. Continue collecting multiple paper sessions before
    treating counterfactual labels as training-ready.
-10. Define label v1 formally.
+10. Done: define label v1 formally with fixed-horizon returns, excursion
+    labels, classification labels, and exit-policy requirements.
 11. Done: add dataset manifest generation to dataset export flow.
 12. Started: staged observe-only ML integration lane and `staged-readiness`
     report.
@@ -761,18 +767,22 @@ A model can only move from observe-only to paper-trading influence after it has:
 16. Started: define the first retraining-readiness report and 20-session review
     cadence.
 17. Only then expose the read-only prediction provider in `/status`.
-18. Evaluate whether TradingView alerts should remain primary, become
+18. Started: evaluate whether TradingView alerts should remain primary, become
     secondary, or be replaced by an Alpaca-bar-derived internal signal
-    generator after side-by-side paper-session evidence.
+    generator after side-by-side paper-session evidence. `auto_buy_outcome_report.py`
+    now compares internal candidate forward returns against the TradingView
+    signal baseline.
 
 Critical blockers before real training:
 
 1. Continue collecting and validating counterfactual outcomes for rejected
    signals across multiple paper sessions.
-2. Pin fixed-horizon labels or version realized-exit labels by exit logic.
+2. Continue validating fixed-horizon label v1 and version realized-exit labels
+   by exit logic before realized-PnL training claims.
 3. Implement purged/embargoed walk-forward validation.
-4. Add point-in-time context archives before using `strategy.trade_scorer` in
-   historical replay.
+4. Continue point-in-time context archiving before using `strategy.trade_scorer`
+   in historical replay; first archive command is staged, but replay selection
+   logic is not yet implemented.
 5. Continue symbol-universe versioning and review remaining candidates:
    F, HBAN, KEY, KHC, CRM, PDD, HPQ, BBY, DLTR, GPS, AEO, BKE.
 

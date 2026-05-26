@@ -29,6 +29,10 @@ Usage:
   python3 ops_check.py rejection-summary
   python3 ops_check.py rejected-outcomes
   python3 ops_check.py auto-buy
+  python3 ops_check.py auto-buy-outcomes
+  python3 ops_check.py decision-snapshots
+  python3 ops_check.py policy-artifacts
+  python3 ops_check.py retention
   python3 ops_check.py order-health
   python3 ops_check.py migration-status
   python3 ops_check.py strong-days
@@ -105,6 +109,7 @@ COMMANDS = {
     "signal-lessons": ["signal_timing_lesson_report.py", "--date"],
     "trends": ["trend_context_report.py", "--date"],
     "prediction-validation": ["prediction_validation_report.py", "--date"],
+    "auto-buy-outcomes": ["auto_buy_outcome_report.py", "--date"],
     "strong-days": ["strong_day_participation_report.py", "--date"],
 }
 
@@ -1434,6 +1439,140 @@ def auto_buy_health(target_date):
     return True
 
 
+def decision_snapshot_health(target_date):
+    import sqlite3
+
+    from decision_snapshots import summarize_snapshots
+
+    db_path = BASE_DIR / "trades.db"
+
+    print()
+    print("=" * 72)
+    print(f"  Decision Snapshots - {target_date}")
+    print("=" * 72)
+
+    if not db_path.exists():
+        print(f"[FAIL] missing {db_path}")
+        return False
+
+    ok = True
+    summary = summarize_snapshots(target_date, db_path)
+    print(f"  snapshots              {summary['total']:>8}")
+    print(f"  symbols                {summary['symbols']:>8}")
+    print(f"  missing_context_hash   {summary['missing_context_hash']:>8}")
+    print(f"  missing_git_sha        {summary['missing_git_sha']:>8}")
+
+    print()
+    print("Decision distribution")
+    if summary["by_decision"]:
+        for row in summary["by_decision"]:
+            print(
+                f"  {row['final_decision'] or '-':<24} approved={row['approved']} n={row['n']}"
+            )
+    else:
+        print("  none")
+
+    with sqlite3.connect(f"file:{db_path}?mode=ro", uri=True) as con:
+        con.row_factory = sqlite3.Row
+        if not _table_exists(con, "decision_snapshots"):
+            print("[FAIL] decision_snapshots table is missing")
+            return False
+        if _table_exists(con, "trades"):
+            trade_count = con.execute(
+                "SELECT COUNT(*) AS n FROM trades WHERE substr(timestamp, 1, 10) = ?",
+                (target_date,),
+            ).fetchone()["n"]
+            snapshot_trade_count = con.execute(
+                """
+                SELECT COUNT(DISTINCT trade_id) AS n
+                FROM decision_snapshots
+                WHERE substr(decision_time, 1, 10) = ?
+                  AND trade_id IS NOT NULL
+                """,
+                (target_date,),
+            ).fetchone()["n"]
+            print()
+            print("Trade coverage")
+            print(f"  trades_today           {int(trade_count or 0):>8}")
+            print(f"  snapshots_with_trade   {int(snapshot_trade_count or 0):>8}")
+            if trade_count and snapshot_trade_count < trade_count:
+                print("[WARN] older trades may predate decision snapshot logging")
+
+    if summary["total"] and summary["missing_context_hash"]:
+        ok = False
+        print("[WARN] some snapshots are missing market_context_hash")
+
+    print()
+    print("[OK] decision snapshot check completed" if ok else "[WARN] decision snapshot check found issues")
+    return ok
+
+
+def policy_artifact_health():
+    from datetime import datetime, timezone
+
+    from policy_artifacts import policy_artifact_status
+
+    print()
+    print("=" * 72)
+    print("  Policy Artifact Health")
+    print("=" * 72)
+
+    status = policy_artifact_status(BASE_DIR)
+    print(f"enabled     : {status.get('enabled')}")
+    print(f"effect      : {status.get('runtime_effect')}")
+    print(f"state_hash  : {status.get('state_hash')}")
+
+    ok = True
+    now = datetime.now(timezone.utc)
+    for name, item in status.get("files", {}).items():
+        exists = item.get("exists")
+        mtime = item.get("mtime")
+        age_hours = None
+        if mtime:
+            try:
+                age_hours = (now - datetime.fromisoformat(mtime)).total_seconds() / 3600
+            except Exception:
+                age_hours = None
+        age_s = f"{age_hours:.1f}h" if age_hours is not None else "-"
+        print(
+            f"  {name:<36} exists={str(exists):<5} age={age_s:>8} "
+            f"generated_at={item.get('generated_at') or '-'} sha={str(item.get('sha256') or '-')[:12]}"
+        )
+        if not exists:
+            ok = False
+            print(f"    [WARN] missing policy artifact: {name}")
+        elif age_hours is not None and age_hours > 72:
+            print(f"    [WARN] artifact older than 72h: {name}")
+
+    print()
+    print("[OK] policy artifact check completed" if ok else "[WARN] policy artifact check found issues")
+    return ok
+
+
+def retention_health():
+    from ml_platform.retention import retention_policy
+
+    print()
+    print("=" * 72)
+    print("  ML/Audit Retention Policy")
+    print("=" * 72)
+
+    policy = retention_policy()
+    print(f"version       : {policy['version']}")
+    print(f"destructive   : {policy['destructive_compaction_enabled']}")
+    print(f"rule          : {policy['rule']}")
+    print()
+    for row in policy["rules"]:
+        window = row["default_window_days"] if row["default_window_days"] is not None else "preserve"
+        print(
+            f"  {row['name']:<30} tier={row['tier']:<5} window={str(window):<8} storage={row['storage']}"
+        )
+
+    print()
+    print("[OK] retention policy is classified; no destructive compaction is enabled")
+    return True
+
+
 def order_health(target_date):
     import sqlite3
 
@@ -1616,6 +1755,15 @@ def main():
     if command == "auto-buy":
         return 0 if auto_buy_health(target_date) else 1
 
+    if command == "decision-snapshots":
+        return 0 if decision_snapshot_health(target_date) else 1
+
+    if command == "policy-artifacts":
+        return 0 if policy_artifact_health() else 1
+
+    if command == "retention":
+        return 0 if retention_health() else 1
+
     if command == "order-health":
         return 0 if order_health(target_date) else 1
 
@@ -1655,6 +1803,10 @@ def main():
         checks.append(run("Blocked Signal Outcome Report", ["blocked_signal_outcome_report.py", "--date", target_date]))
         checks.append(run("Rejected Outcomes", ["ops_check.py", "rejected-outcomes", target_date]))
         checks.append(run("Auto-Buy Candidates", ["ops_check.py", "auto-buy", target_date]))
+        checks.append(run("Auto-Buy Outcomes", ["auto_buy_outcome_report.py", "--date", target_date]))
+        checks.append(run("Decision Snapshots", ["ops_check.py", "decision-snapshots", target_date]))
+        checks.append(run("Policy Artifacts", ["ops_check.py", "policy-artifacts"]))
+        checks.append(run("Retention Policy", ["ops_check.py", "retention"]))
         checks.append(run("Drawdown Report", ["drawdown_report.py", target_date]))
         checks.append(run("Post-Session Check", ["post_session_check.py", target_date]))
 
@@ -1690,6 +1842,7 @@ def main():
         "trends",
         "prediction-validation",
         "event-attribution",
+        "auto-buy-outcomes",
         "strong-days",
     ):
         args = [args[0], "--date", target_date]

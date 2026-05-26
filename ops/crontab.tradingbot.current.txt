@@ -24,6 +24,7 @@
 */2 * * * * cd /home/tradingbot/trading-bot && set -a && . /etc/trading-bot.env && set +a && /home/tradingbot/trading-bot/venv/bin/python fill_poller.py >> fill_poller.log 2>&1
 
 0 8 * * 1-5 cd /home/tradingbot/trading-bot && set -a && . /etc/trading-bot.env && set +a && /home/tradingbot/trading-bot/venv/bin/python pre_market_research_data.py --raw-output /tmp/raw_market_research_$(date +\%F).data.json --build-output market_context.json --ingest-context >> /home/tradingbot/trading-bot/pre_market_research.log 2>&1
+5 8 * * 1-5 cd /home/tradingbot/trading-bot && set -a && . /etc/trading-bot.env && set +a && /home/tradingbot/trading-bot/venv/bin/python archive_context_state.py --reason premarket_context_refresh >> /home/tradingbot/trading-bot/context_archive.log 2>&1
 
 5 8 * * 1-5 cd /home/tradingbot/trading-bot && set -a && . /etc/trading-bot.env && set +a && /home/tradingbot/trading-bot/venv/bin/python collect_and_score_events.py --date $(date +\%F) --max-per-symbol 2 --apply-context --predict --output /tmp/events_$(date +\%F).auto.json >> /home/tradingbot/trading-bot/event_collection.log 2>&1
 
@@ -67,7 +68,7 @@
 
 # Post-session review: runs after after-close learning (4:30 PM CT) completes.
 # Logs output to post_session_review.log for review.
-0 17 * * 1-5 cd /home/tradingbot/trading-bot && set -a && . /etc/trading-bot.env && set +a && TODAY=$(date +\%F) && { echo "=== Post-session review $(date -Iseconds) DATE=$TODAY ==="; /home/tradingbot/trading-bot/venv/bin/python ops_check.py post "$TODAY"; /home/tradingbot/trading-bot/venv/bin/python ops_check.py prediction-validation "$TODAY"; /home/tradingbot/trading-bot/venv/bin/python ops_check.py auto-buy "$TODAY"; /home/tradingbot/trading-bot/venv/bin/python analytics_report.py --date "$TODAY"; /home/tradingbot/trading-bot/venv/bin/python filter_report.py --date "$TODAY"; } >> /home/tradingbot/trading-bot/post_session_review.log 2>&1
+0 17 * * 1-5 cd /home/tradingbot/trading-bot && set -a && . /etc/trading-bot.env && set +a && TODAY=$(date +\%F) && { echo "=== Post-session review $(date -Iseconds) DATE=$TODAY ==="; /home/tradingbot/trading-bot/venv/bin/python ops_check.py post "$TODAY"; /home/tradingbot/trading-bot/venv/bin/python ops_check.py prediction-validation "$TODAY"; /home/tradingbot/trading-bot/venv/bin/python ops_check.py auto-buy "$TODAY"; /home/tradingbot/trading-bot/venv/bin/python auto_buy_outcome_report.py --date "$TODAY"; /home/tradingbot/trading-bot/venv/bin/python ops_check.py decision-snapshots "$TODAY"; /home/tradingbot/trading-bot/venv/bin/python ops_check.py policy-artifacts; /home/tradingbot/trading-bot/venv/bin/python analytics_report.py --date "$TODAY"; /home/tradingbot/trading-bot/venv/bin/python filter_report.py --date "$TODAY"; } >> /home/tradingbot/trading-bot/post_session_review.log 2>&1
 
 # Tuesday full-day QA runner: script internally sleeps through 7 timed windows.
 # Single invocation; the script exits after the after-close window (~5 PM CT).

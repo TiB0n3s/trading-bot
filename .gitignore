@@ -49,6 +49,7 @@ position_momentum_monitor.log
 trading_bot.log
 # Runtime databases and SQLite sidecars
 trades.db
+data_archive/
 # DB recovery / backup artifacts
 db_backups/
 db_recovery_*/

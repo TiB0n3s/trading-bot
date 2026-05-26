@@ -31,6 +31,7 @@ from decision_policy import evaluate_decision_policy
 from intelligence_snapshot import get_intelligence_snapshot
 from position_intelligence import get_position_intelligence
 from bot_events import log_event
+from decision_snapshots import record_decision_snapshot
 from rolling_context import rolling_summary, rolling_symbol_context
 from decision_thresholds import PREDICTION_GATE_THRESHOLDS
 from strategy.strategy_engine import evaluate_strategy_observe_only
@@ -1627,10 +1628,29 @@ def log_trade(signal, decision, order, account_state=None):
         col_sql = ", ".join(columns)
 
         with get_connection(DB_PATH) as con:
-            con.execute(
+            cur = con.execute(
                 f"INSERT INTO trades ({col_sql}) VALUES ({placeholders})",
                 values,
             )
+            trade_id = cur.lastrowid
+
+        try:
+            record_decision_snapshot(
+                trade_id=trade_id,
+                timestamp=timestamp,
+                source="app.log_trade",
+                symbol=signal.get("symbol"),
+                action=signal.get("action"),
+                signal_price=signal.get("price"),
+                decision=decision,
+                order=order,
+                context=ctx,
+                account_state=account_state,
+                raw_signal=signal,
+                rejection_reason=None if approved else decision.get("reason"),
+            )
+        except Exception as snapshot_error:
+            logger.warning(f"decision snapshot write failed for {signal.get('symbol')}: {snapshot_error}")
 
     except Exception as e:
         logger.error(f"DB write failed for {signal.get('symbol')}: {e}")
@@ -1816,10 +1836,28 @@ def log_rejection(symbol, action, category, reason, price=None, account_state=No
 
     try:
         with get_connection(DB_PATH) as con:
-            con.execute(
+            cur = con.execute(
                 f"INSERT INTO trades ({col_sql}) VALUES ({placeholders})",
                 values,
             )
+            trade_id = cur.lastrowid
+        try:
+            record_decision_snapshot(
+                trade_id=trade_id,
+                timestamp=timestamp,
+                source="app.log_rejection",
+                symbol=symbol,
+                action=action,
+                signal_price=price,
+                decision={"approved": False, "reason": full_reason},
+                order={},
+                context=ctx,
+                account_state=account_state,
+                raw_signal={"symbol": symbol, "action": action, "price": price},
+                rejection_reason=full_reason,
+            )
+        except Exception as snapshot_error:
+            logger.warning(f"decision snapshot write failed for {symbol}: {snapshot_error}")
     except Exception as e:
         logger.error(f"log_rejection DB write failed for {symbol}: {e}")
 

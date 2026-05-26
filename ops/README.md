@@ -81,6 +81,10 @@ python3 ops_check.py rejection-summary 2026-05-26
 python3 ops_check.py rejected-outcomes 2026-05-26
 python3 auto_buy_manager.py --scope internal
 python3 ops_check.py auto-buy 2026-05-26
+python3 auto_buy_outcome_report.py --date 2026-05-26
+python3 ops_check.py decision-snapshots 2026-05-26
+python3 ops_check.py policy-artifacts
+python3 ops_check.py retention
 python3 ops_check.py order-health 2026-05-26
 ```
 
@@ -92,8 +96,28 @@ requiring TradingView alerts. Live paper buys require both `--live` and
 `AUTO_BUY_LIVE_BUYS=true`, and are constrained by
 `AUTO_BUY_MAX_ORDERS_PER_RUN`, `AUTO_BUY_MAX_DAILY_ORDERS`, and
 `AUTO_BUY_COOLDOWN_MINUTES`.
+`auto_buy_outcome_report.py` compares internal candidates against forward
+feature-snapshot returns and the TradingView signal baseline.
+`decision-snapshots` verifies immutable point-in-time audit coverage for new
+approved/rejected decisions. `policy-artifacts` checks the runtime learning
+artifact files, and `retention` prints the non-destructive hot/warm/cold table
+classification.
 `order-health` checks approved rows for order IDs/statuses, fill-event
 distribution, and imported Alpaca order status summaries.
+
+
+## Point-In-Time Context Archive
+
+Archive the current market context, override hashes, policy artifact hashes,
+and symbol-universe version whenever context changes before a session:
+
+```bash
+cd ~/trading-bot
+python3 archive_context_state.py --reason premarket_context_refresh
+```
+
+The current cron snapshot runs this shortly after the premarket context refresh
+and writes timestamped JSON under `data_archive/point_in_time/`.
 
 
 ## Maintainability Audits
@@ -153,6 +177,9 @@ the app to record queue, start, finish, order, and failure metadata.
 The fourth tracked migration adds trade decision-context columns that used to
 be added by app startup. Runtime startup should not own schema `ALTER TABLE`
 work; run `python3 db_migrations.py apply` before deployment or restore.
+
+The fifth tracked migration creates `decision_snapshots`, an append-only audit
+table that records what the bot knew at each approved/rejected decision time.
 
 
 ## Webhook Secrets

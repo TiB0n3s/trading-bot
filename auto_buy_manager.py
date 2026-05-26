@@ -88,7 +88,7 @@ def _to_float(value: Any, default: float | None = None) -> float | None:
 
 
 def _today() -> str:
-    return datetime.now().strftime("%Y-%m-%d")
+    return now_et().strftime("%Y-%m-%d")
 
 
 def init_auto_buy_table() -> None:
@@ -217,11 +217,14 @@ def recently_auto_bought(symbol: str, cooldown_minutes: int = AUTO_BUY_COOLDOWN_
         return False, "no recent auto-buy order"
 
     try:
-        ts = datetime.strptime(row["timestamp"], "%Y-%m-%d %H:%M:%S")
+        raw_ts = row["timestamp"]
+        ts = datetime.fromisoformat(raw_ts)
+        if ts.tzinfo is not None:
+            ts = ts.astimezone(now_et().tzinfo).replace(tzinfo=None)
     except Exception:
         return True, "recent auto-buy timestamp could not be parsed"
 
-    age_minutes = (datetime.now() - ts).total_seconds() / 60.0
+    age_minutes = (now_et().replace(tzinfo=None) - ts).total_seconds() / 60.0
     if age_minutes < cooldown_minutes:
         return True, (
             f"last auto-buy order {age_minutes:.1f}m ago "
@@ -431,7 +434,7 @@ def log_candidate(candidate: dict[str, Any], live_buy_enabled: bool, order: dict
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
-                datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                now_et().isoformat(),
                 candidate.get("symbol"),
                 candidate.get("signal_source"),
                 candidate.get("decision"),

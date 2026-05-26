@@ -243,47 +243,6 @@ def init_db_performance_indexes(db_path: Path | str = DB_PATH) -> None:
         con.execute(
             "CREATE INDEX IF NOT EXISTS idx_trades_symbol_timestamp ON trades(symbol, timestamp)"
         )
-
-
-def ensure_rejected_signal_outcomes_table(db_path: Path | str = DB_PATH) -> None:
-    """Create the counterfactual outcome table for rejected signals."""
-    with get_connection(db_path) as con:
-        con.execute(
-            """
-            CREATE TABLE IF NOT EXISTS rejected_signal_outcomes (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                trade_id INTEGER UNIQUE,
-                timestamp TEXT NOT NULL,
-                symbol TEXT NOT NULL,
-                action TEXT NOT NULL,
-                signal_price REAL,
-                rejection_reason TEXT,
-                return_5m REAL,
-                return_15m REAL,
-                return_30m REAL,
-                return_60m REAL,
-                return_eod REAL,
-                max_favorable_60m REAL,
-                max_adverse_60m REAL,
-                label_status TEXT NOT NULL DEFAULT 'pending',
-                source TEXT,
-                generated_at TEXT NOT NULL DEFAULT (datetime('now')),
-                FOREIGN KEY (trade_id) REFERENCES trades(id)
-            )
-            """
-        )
-        con.execute(
-            """
-            CREATE INDEX IF NOT EXISTS idx_rejected_signal_outcomes_symbol_timestamp
-            ON rejected_signal_outcomes(symbol, timestamp)
-            """
-        )
-        con.execute(
-            """
-            CREATE INDEX IF NOT EXISTS idx_rejected_signal_outcomes_status
-            ON rejected_signal_outcomes(label_status)
-            """
-        )
         con.execute(
             "CREATE INDEX IF NOT EXISTS idx_trades_order_id ON trades(order_id)"
         )
@@ -336,6 +295,146 @@ def ensure_rejected_signal_outcomes_table(db_path: Path | str = DB_PATH) -> None
             )
 
     init_prediction_tables(db_path)
+
+
+def ensure_rejected_signal_outcomes_table(db_path: Path | str = DB_PATH) -> None:
+    """Create the counterfactual outcome table for rejected signals."""
+    with get_connection(db_path) as con:
+        con.execute(
+            """
+            CREATE TABLE IF NOT EXISTS rejected_signal_outcomes (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                trade_id INTEGER UNIQUE,
+                timestamp TEXT NOT NULL,
+                symbol TEXT NOT NULL,
+                action TEXT NOT NULL,
+                signal_price REAL,
+                rejection_reason TEXT,
+                return_5m REAL,
+                return_15m REAL,
+                return_30m REAL,
+                return_60m REAL,
+                return_eod REAL,
+                max_favorable_60m REAL,
+                max_adverse_60m REAL,
+                label_status TEXT NOT NULL DEFAULT 'pending',
+                source TEXT,
+                generated_at TEXT NOT NULL DEFAULT (datetime('now')),
+                FOREIGN KEY (trade_id) REFERENCES trades(id)
+            )
+            """
+        )
+        con.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_rejected_signal_outcomes_symbol_timestamp
+            ON rejected_signal_outcomes(symbol, timestamp)
+            """
+        )
+        con.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_rejected_signal_outcomes_status
+            ON rejected_signal_outcomes(label_status)
+            """
+        )
+
+
+def ensure_decision_snapshots_table(db_path: Path | str = DB_PATH) -> None:
+    """Create the immutable point-in-time decision snapshot table."""
+    with get_connection(db_path) as con:
+        con.execute(
+            """
+            CREATE TABLE IF NOT EXISTS decision_snapshots (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                created_at TEXT NOT NULL,
+                decision_time TEXT NOT NULL,
+                trade_id INTEGER,
+                source TEXT NOT NULL,
+                symbol TEXT,
+                action TEXT,
+                signal_price REAL,
+                final_decision TEXT,
+                approved INTEGER,
+                rejection_reason TEXT,
+                order_id TEXT,
+                order_status TEXT,
+                confidence TEXT,
+                position_size_pct REAL,
+                stop_loss_pct REAL,
+                take_profit_pct REAL,
+                macro_regime TEXT,
+                risk_multiplier REAL,
+                market_bias TEXT,
+                market_bias_effective TEXT,
+                market_bias_override_reason TEXT,
+                fundamental_score TEXT,
+                risk_level TEXT,
+                entry_quality TEXT,
+                trend_direction TEXT,
+                trend_strength TEXT,
+                momentum_direction TEXT,
+                momentum_pct REAL,
+                session_trend_label TEXT,
+                session_trend_score REAL,
+                session_return_pct REAL,
+                session_momentum_5m_pct REAL,
+                session_momentum_15m_pct REAL,
+                session_momentum_30m_pct REAL,
+                session_distance_from_vwap_pct REAL,
+                session_momentum_reason TEXT,
+                prediction_score REAL,
+                prediction_decision TEXT,
+                prediction_reason TEXT,
+                correlation_cluster TEXT,
+                cluster_exposure_pct REAL,
+                setup_label TEXT,
+                setup_policy_action TEXT,
+                setup_policy_reason TEXT,
+                setup_confidence_adjustment REAL,
+                setup_size_multiplier REAL,
+                buy_opportunity_score REAL,
+                buy_opportunity_recommendation TEXT,
+                buy_opportunity_reason TEXT,
+                trader_brain_score REAL,
+                trader_brain_setup_type TEXT,
+                trader_brain_approved INTEGER,
+                trader_brain_reason TEXT,
+                market_context_date TEXT,
+                market_context_hash TEXT,
+                market_context_mtime TEXT,
+                symbol_universe_version TEXT,
+                env_profile_hash TEXT,
+                git_sha TEXT,
+                raw_signal_json TEXT,
+                decision_json TEXT,
+                order_json TEXT,
+                account_state_json TEXT,
+                FOREIGN KEY (trade_id) REFERENCES trades(id)
+            )
+            """
+        )
+        con.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_decision_snapshots_time
+            ON decision_snapshots(decision_time)
+            """
+        )
+        con.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_decision_snapshots_symbol_time
+            ON decision_snapshots(symbol, decision_time)
+            """
+        )
+        con.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_decision_snapshots_trade_id
+            ON decision_snapshots(trade_id)
+            """
+        )
+
+
+def ensure_ml_audit_tables(db_path: Path | str = DB_PATH) -> None:
+    ensure_rejected_signal_outcomes_table(db_path)
+    ensure_decision_snapshots_table(db_path)
 
 
 def db_health_summary(db_path: Path | str = DB_PATH) -> dict:

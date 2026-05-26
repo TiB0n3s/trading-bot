@@ -30,6 +30,12 @@ Recent completed roadmap items:
 - `feature_snapshots` includes ML leakage/audit fields:
   `feature_available_at`, `feature_generated_at`, `feature_age_seconds`,
   `source`, `is_stale`, and `staleness_reason`.
+- `decision_snapshots` stores immutable point-in-time context for new
+  approved/rejected decisions.
+- `auto_buy_outcome_report.py` compares internal auto-buy candidates against
+  forward feature-snapshot returns and the TradingView signal baseline.
+- `archive_context_state.py` snapshots market context, override hashes, policy
+  artifact hashes, and symbol-universe version for future replay.
 - Migrations are manual before deploy/restore, but pending migrations are
   surfaced by `morning_check.py`, `ops_check.py premarket`, and
   `ops_check.py migration-status`.
@@ -674,13 +680,16 @@ python3 db_migrations.py status
 
 Current tracked migrations cover feature leakage/audit fields,
 `rejected_signal_outcomes`, webhook-event lifecycle/status columns, and trade
-decision-context columns that used to be added during app startup.
+decision-context columns that used to be added during app startup, plus the
+append-only `decision_snapshots` audit table.
 
 Rejected-signal counterfactual outcomes can be populated and checked with:
 
 ```bash
 python3 rejected_signal_outcome_builder.py --date YYYY-MM-DD
 python3 ops_check.py rejected-outcomes YYYY-MM-DD
+python3 ops_check.py decision-snapshots YYYY-MM-DD
+python3 auto_buy_outcome_report.py --date YYYY-MM-DD
 ```
 
 Staged ML/ahead-of-live checks:

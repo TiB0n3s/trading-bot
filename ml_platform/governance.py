@@ -75,22 +75,32 @@ DECISION_SNAPSHOT_FIELDS = (
 
 LABEL_TAXONOMY_V1 = {
     "version": "label_taxonomy_v1",
-    "labels": (
-        "entry_quality_outcome",
-        "max_favorable_excursion",
-        "max_adverse_excursion",
-        "time_to_profit",
-        "time_to_drawdown",
-        "profit_after_15m",
-        "profit_after_30m",
-        "profit_after_60m",
-        "would_hit_stop",
-        "would_hit_take_profit",
-        "was_late_entry",
-        "was_churn",
-        "was_bad_fill",
-        "was_correct_rejection",
-    ),
+    "fixed_horizon_returns": {
+        "ret_5m": "Raw symbol return 5 minutes after signal/candidate time.",
+        "ret_15m": "Raw symbol return 15 minutes after signal/candidate time.",
+        "ret_30m": "Raw symbol return 30 minutes after signal/candidate time.",
+        "ret_60m": "Raw symbol return 60 minutes after signal/candidate time.",
+        "ret_eod": "Raw symbol return from signal/candidate time to same-session close.",
+    },
+    "excursion_labels": {
+        "max_favorable_excursion": "Best action-adjusted move available after the decision within the label horizon.",
+        "max_adverse_excursion": "Worst action-adjusted move after the decision within the label horizon.",
+        "time_to_profit": "Minutes until a configured favorable threshold was first touched.",
+        "time_to_drawdown": "Minutes until a configured adverse threshold was first touched.",
+    },
+    "classification_labels": {
+        "entry_quality_outcome": "good_entry, late_entry, early_entry, noisy_entry, or insufficient_data.",
+        "would_hit_stop": "Whether the configured stop threshold would be touched before/within the horizon.",
+        "would_hit_take_profit": "Whether the configured target threshold would be touched before/within the horizon.",
+        "was_late_entry": "Whether most favorable move occurred before the bot entered or candidate fired.",
+        "was_churn": "Whether the decision quickly reversed into an opposite signal/exit.",
+        "was_bad_fill": "Whether execution materially worsened the signal/candidate price.",
+        "was_correct_rejection": "Whether a rejected opportunity had poor forward return or unacceptable adverse excursion.",
+    },
+    "exit_policy_requirements": {
+        "realized_pnl_labels": "Must include exit_policy_version and position_manager_version.",
+        "fixed_horizon_labels": "Preferred for first training pass because they are less policy-dependent.",
+    },
     "principle": "Keep signal quality, execution quality, exit policy, sizing, and market regime separable.",
 }
 

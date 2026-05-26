@@ -29,6 +29,12 @@ As of the latest roadmap work:
 - `ops/db_connection_audit.py` reports manual SQLite connection patterns to support gradual cleanup.
 - `db_migrations.py` provides an idempotent schema migration runner.
 - `feature_snapshots` now carries leakage/audit fields required by the ML governance contract.
+- `decision_snapshots` records immutable point-in-time decision context for
+  new approvals/rejections.
+- `auto_buy_outcome_report.py` compares internal auto-buy candidates with
+  forward feature-snapshot returns and the TradingView signal baseline.
+- `archive_context_state.py` snapshots market context, override hashes, policy
+  artifact hashes, and symbol-universe version for future replay.
 - App-startup schema `ALTER TABLE` work has moved into `db_migrations.py`.
 - Webhook/status secrets should be supplied by `X-Webhook-Secret` or
   `Authorization: Bearer ...`; query-string secrets are legacy fallback only.
@@ -511,13 +517,16 @@ premarket/all ops check bundles.
 
 Current tracked migrations cover feature leakage/audit fields,
 `rejected_signal_outcomes`, webhook-event lifecycle/status columns, and trade
-decision-context columns that used to be added during app startup.
+decision-context columns that used to be added during app startup, plus the
+append-only `decision_snapshots` audit table.
 
 Rejected-signal counterfactual outcomes can be populated and checked with:
 
 ```bash
 python3 rejected_signal_outcome_builder.py --date YYYY-MM-DD
 python3 ops_check.py rejected-outcomes YYYY-MM-DD
+python3 ops_check.py decision-snapshots YYYY-MM-DD
+python3 auto_buy_outcome_report.py --date YYYY-MM-DD
 ```
 /status Symbol Intelligence
 

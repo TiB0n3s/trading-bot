@@ -614,6 +614,9 @@ Current state:
 - The existing deterministic `prediction_gate` is now documented in code as the
   deterministic signal-quality gate. Cached ML predictions are attached as
   `ml_prediction_*` compare-only fields beside the deterministic gate output.
+- `prediction_validation_report.py` now prints deterministic-gate versus
+  cached-ML agreement/disagreement from `decision_snapshots` when compare
+  fields are present.
 
 Remaining:
 
@@ -621,10 +624,9 @@ Remaining:
   promotion. Compare deterministic-vs-ML agreement/divergence first.
 - Serving must degrade to no prediction if disabled, stale, missing, or failed;
   it must never block signal processing.
-- Prediction reads need an explicit latency budget before `app.py` integration:
-  target 25 ms, hard timeout 50 ms, in-memory TTL cache loaded outside the
-  webhook path, TTL 60 seconds, and failure behavior is fail-open to no
-  prediction.
+- Continue validating the serving latency contract in session logs: target
+  25 ms, hard timeout 50 ms, in-memory TTL cache loaded outside the webhook
+  path, TTL 60 seconds, and failure behavior is fail-open to no prediction.
 
 ### Operator UI/API
 
@@ -857,6 +859,16 @@ A model can only move from observe-only to paper-trading influence after it has:
     now compares internal candidate forward returns against the TradingView
     signal baseline, and `strong_day_participation_report.py --write-db`
     captures full-universe strong-session coverage including no-alert symbols.
+19. Done: add post-learning point-in-time archive to
+    `run_after_close_learning.sh` after policy artifact registration, so
+    after-close strategy/policy memory refreshes are archived as well as
+    pre-market context.
+20. Done: add `auto_buy_decision_snapshots` so the internal auto-buy execution
+    path records candidate decisions, live block reasons, risk cross-check
+    reasons, and submitted order metadata outside the main webhook path.
+21. Started: route fixed-horizon label generation through
+    `label_v1_builder.py`, which validates feature availability/staleness
+    audit fields before delegating to the current label feature builder.
 
 Critical blockers before real training:
 
@@ -873,10 +885,14 @@ Critical blockers before real training:
    `exit_policy_version` and `position_manager_version` controls.
 4. Implement purged/embargoed walk-forward validation.
 5. Continue point-in-time context archiving before using `strategy.trade_scorer`
-   in historical replay; first archive command is staged, but replay selection
-   logic is not yet implemented.
+   in historical replay; pre-market and post-learning archive commands are
+   staged, but replay selection logic is not yet implemented.
 6. Continue symbol-universe versioning and review remaining candidates:
    F, HBAN, KEY, KHC, CRM, PDD, HPQ, BBY, DLTR, GPS, AEO, BKE.
+7. Sequencing note: `run_after_close_learning.sh` currently runs before
+   `run_post_session_review.sh` builds rejected-signal outcomes. That is
+   acceptable while after-close learning does not consume rejected outcomes,
+   but the order must change before rejected outcomes become a learning input.
 
 The biggest missing concept is auditability of what the bot knew at decision
 time. Without that, training, evaluation, and promotion can look sophisticated

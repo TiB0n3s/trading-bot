@@ -174,6 +174,42 @@ def init_auto_buy_table() -> None:
             ON auto_buy_candidates(symbol, timestamp)
             """
         )
+        con.execute(
+            """
+            CREATE TABLE IF NOT EXISTS auto_buy_decision_snapshots (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                created_at TEXT NOT NULL,
+                candidate_timestamp TEXT NOT NULL,
+                symbol TEXT NOT NULL,
+                signal_source TEXT,
+                decision TEXT,
+                score REAL,
+                reason TEXT,
+                hard_block_reason TEXT,
+                live_buy_enabled INTEGER,
+                live_block_reason TEXT,
+                risk_cross_check_reason TEXT,
+                order_submitted INTEGER DEFAULT 0,
+                order_id TEXT,
+                order_status TEXT,
+                candidate_json TEXT,
+                order_json TEXT,
+                runtime_effect TEXT NOT NULL DEFAULT 'auto_buy_paper_execution_path'
+            )
+            """
+        )
+        con.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_auto_buy_decision_snapshots_time
+            ON auto_buy_decision_snapshots(candidate_timestamp)
+            """
+        )
+        con.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_auto_buy_decision_snapshots_symbol_time
+            ON auto_buy_decision_snapshots(symbol, candidate_timestamp)
+            """
+        )
         existing_cols = {
             row["name"]
             for row in con.execute("PRAGMA table_info(auto_buy_candidates)").fetchall()
@@ -603,6 +639,7 @@ def evaluate_auto_buy_candidate(
 
 def log_candidate(candidate: dict[str, Any], live_buy_enabled: bool, order: dict[str, Any] | None = None) -> None:
     order = order or {}
+    timestamp = now_et().isoformat()
     with get_connection(DB_PATH) as con:
         con.execute(
             """
@@ -618,7 +655,7 @@ def log_candidate(candidate: dict[str, Any], live_buy_enabled: bool, order: dict
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
-                now_et().isoformat(),
+                timestamp,
                 candidate.get("symbol"),
                 candidate.get("signal_source"),
                 candidate.get("decision"),
@@ -642,6 +679,34 @@ def log_candidate(candidate: dict[str, Any], live_buy_enabled: bool, order: dict
                 1 if live_buy_enabled else 0,
                 1 if order else 0,
                 order.get("order_id") if isinstance(order, dict) else None,
+            ),
+        )
+        con.execute(
+            """
+            INSERT INTO auto_buy_decision_snapshots (
+                created_at, candidate_timestamp, symbol, signal_source,
+                decision, score, reason, hard_block_reason, live_buy_enabled,
+                live_block_reason, risk_cross_check_reason, order_submitted,
+                order_id, order_status, candidate_json, order_json
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                now_et().isoformat(),
+                timestamp,
+                candidate.get("symbol"),
+                candidate.get("signal_source"),
+                candidate.get("decision"),
+                candidate.get("score"),
+                candidate.get("reason"),
+                candidate.get("hard_block_reason"),
+                1 if live_buy_enabled else 0,
+                candidate.get("live_block_reason"),
+                candidate.get("risk_cross_check_reason"),
+                1 if order else 0,
+                order.get("order_id") if isinstance(order, dict) else None,
+                order.get("status") if isinstance(order, dict) else None,
+                json.dumps(candidate, sort_keys=True, default=str),
+                json.dumps(order, sort_keys=True, default=str),
             ),
         )
 

@@ -144,6 +144,41 @@ def load_strong_day_participation(con, target_date: str) -> dict[str, Any]:
     return {r["symbol"]: dict(r) for r in rows}
 
 
+def load_gate_ml_agreement(con, target_date: str) -> list[dict[str, Any]]:
+    if not table_exists(con, "decision_snapshots"):
+        return []
+    rows = con.execute(
+        """
+        SELECT account_state_json
+        FROM decision_snapshots
+        WHERE substr(decision_time, 1, 10) = ?
+          AND lower(action) = 'buy'
+          AND account_state_json IS NOT NULL
+        """,
+        (target_date,),
+    ).fetchall()
+
+    import json
+
+    out = []
+    for row in rows:
+        try:
+            state = json.loads(row["account_state_json"] or "{}")
+            gate = state.get("prediction_gate") or {}
+            if gate.get("ml_prediction_compare_decision") is None:
+                continue
+            out.append({
+                "gate_decision": gate.get("deterministic_signal_quality_decision") or gate.get("prediction_decision"),
+                "gate_score": gate.get("deterministic_signal_quality_score") or gate.get("prediction_score"),
+                "ml_decision": gate.get("ml_prediction_compare_decision"),
+                "ml_score": gate.get("ml_prediction_score"),
+                "agrees": gate.get("ml_prediction_agrees_with_gate"),
+            })
+        except Exception:
+            continue
+    return out
+
+
 def section(title: str) -> None:
     print()
     print("-" * 72)
@@ -291,6 +326,31 @@ def render_strong_day_buckets(predictions, strong_days) -> None:
         )
 
 
+def render_gate_ml_agreement(agreement_rows) -> None:
+    section("Deterministic Gate vs Cached ML Prediction Agreement")
+    if not agreement_rows:
+        print("No decision_snapshots with cached ml_prediction_* compare fields yet.")
+        return
+
+    total = len(agreement_rows)
+    agree = sum(1 for r in agreement_rows if r.get("agrees") is True)
+    disagree = sum(1 for r in agreement_rows if r.get("agrees") is False)
+    unknown = total - agree - disagree
+    print(f"Rows with compare fields : {total}")
+    print(f"Agreement                : {agree} ({agree / total * 100.0:.1f}%)")
+    print(f"Disagreement             : {disagree} ({disagree / total * 100.0:.1f}%)")
+    print(f"Unknown                  : {unknown}")
+
+    buckets = defaultdict(int)
+    for row in agreement_rows:
+        key = f"{row.get('gate_decision') or '-'} vs {row.get('ml_decision') or '-'}"
+        buckets[key] += 1
+    print()
+    print(f"{'Pair':<24} {'N':>6}")
+    for key, n in sorted(buckets.items(), key=lambda x: (-x[1], x[0])):
+        print(f"{key:<24} {n:>6}")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("date_arg", nargs="?")
@@ -309,6 +369,7 @@ def main() -> int:
         signals = load_signal_outcomes(con, target_date)
         matched = load_matched_trades(con, target_date)
         strong_days = load_strong_day_participation(con, target_date)
+        agreement_rows = load_gate_ml_agreement(con, target_date)
 
     print()
     print(f"Predictions          : {len(predictions)}")
@@ -327,6 +388,7 @@ def main() -> int:
     render_top_bottom(predictions)
     render_outcome_buckets(predictions, signals, matched)
     render_strong_day_buckets(predictions, strong_days)
+    render_gate_ml_agreement(agreement_rows)
 
     print()
     print("[OK] prediction validation report completed")

@@ -268,6 +268,42 @@ MIGRATIONS: tuple[Migration, ...] = (
             """,
         ),
     ),
+    Migration(
+        migration_id="20260527_008_auto_buy_decision_snapshots",
+        description="Create auto_buy_decision_snapshots for auto-buy execution audit/replay visibility.",
+        statements=(
+            """
+            CREATE TABLE IF NOT EXISTS auto_buy_decision_snapshots (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                created_at TEXT NOT NULL,
+                candidate_timestamp TEXT NOT NULL,
+                symbol TEXT NOT NULL,
+                signal_source TEXT,
+                decision TEXT,
+                score REAL,
+                reason TEXT,
+                hard_block_reason TEXT,
+                live_buy_enabled INTEGER,
+                live_block_reason TEXT,
+                risk_cross_check_reason TEXT,
+                order_submitted INTEGER DEFAULT 0,
+                order_id TEXT,
+                order_status TEXT,
+                candidate_json TEXT,
+                order_json TEXT,
+                runtime_effect TEXT NOT NULL DEFAULT 'auto_buy_paper_execution_path'
+            )
+            """,
+            """
+            CREATE INDEX IF NOT EXISTS idx_auto_buy_decision_snapshots_time
+            ON auto_buy_decision_snapshots(candidate_timestamp)
+            """,
+            """
+            CREATE INDEX IF NOT EXISTS idx_auto_buy_decision_snapshots_symbol_time
+            ON auto_buy_decision_snapshots(symbol, candidate_timestamp)
+            """,
+        ),
+    ),
 )
 
 

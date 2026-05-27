@@ -1633,6 +1633,25 @@ def auto_buy_health(target_date):
         else:
             print("  none")
 
+        print()
+        print("Auto-buy audit snapshots")
+        if _table_exists(con, "auto_buy_decision_snapshots"):
+            row = con.execute(
+                """
+                SELECT COUNT(*) AS n,
+                       SUM(CASE WHEN order_submitted = 1 THEN 1 ELSE 0 END) AS submitted,
+                       SUM(CASE WHEN live_block_reason IS NOT NULL AND live_block_reason != '' THEN 1 ELSE 0 END) AS blocked
+                FROM auto_buy_decision_snapshots
+                WHERE substr(candidate_timestamp, 1, 10) = ?
+                """,
+                (target_date,),
+            ).fetchone()
+            print(f"  snapshots             {int(row['n'] or 0):>8}")
+            print(f"  submitted             {int(row['submitted'] or 0):>8}")
+            print(f"  live_blocked          {int(row['blocked'] or 0):>8}")
+        else:
+            print("  [WARN] auto_buy_decision_snapshots table missing")
+
     print()
     print("[OK] auto-buy candidate check completed")
     return True

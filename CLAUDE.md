@@ -719,7 +719,12 @@ python3 db_migrations.py status
 Current tracked migrations cover feature leakage/audit fields,
 `rejected_signal_outcomes`, webhook-event lifecycle/status columns, and trade
 decision-context columns that used to be added during app startup, plus the
-append-only `decision_snapshots` audit table.
+append-only `decision_snapshots` audit table, `strong_day_participation`, and
+`auto_buy_decision_snapshots`.
+
+`label_v1_builder.py` is the formal fixed-horizon label v1 entrypoint. It
+checks feature availability/staleness audit fields before delegating to
+`label_features.py`; use `--check-only` for read-only validation.
 
 Rejected-signal counterfactual outcomes can be populated and checked with:
 
@@ -749,7 +754,9 @@ Prediction Validation Report
 prediction_validation_report.py is read-only. It compares
 `daily_symbol_predictions` against signal/trade outcomes and persisted
 `strong_day_participation` rows after the strong-day report runs with
-`--write-db`.
+`--write-db`. It also reports deterministic signal-quality gate versus cached
+ML prediction agreement from `decision_snapshots` once `ml_prediction_*`
+compare fields exist.
 
 Usage:
 

@@ -496,7 +496,9 @@ symbol, refreshes on a 60-second TTL, and exposes memory-only lookups to the
 webhook path. The serving contract remains target 25 ms / hard timeout 50 ms,
 fail-open to no prediction. The existing deterministic `prediction_gate` is now
 documented as the deterministic signal-quality gate; cached ML predictions are
-recorded beside it as `ml_prediction_*` compare-only fields.
+recorded beside it as `ml_prediction_*` compare-only fields. The validation
+report prints deterministic-gate versus cached-ML agreement once live
+`decision_snapshots` contain compare fields.
 
 `python3 -m ml_platform.cli replay-decisions` is read-only. It re-runs
 `decision_policy` against stored `decision_snapshots`, joins changed decisions
@@ -570,7 +572,13 @@ premarket/all ops check bundles.
 Current tracked migrations cover feature leakage/audit fields,
 `rejected_signal_outcomes`, webhook-event lifecycle/status columns, and trade
 decision-context columns that used to be added during app startup, plus the
-append-only `decision_snapshots` audit table.
+append-only `decision_snapshots` audit table, `strong_day_participation`, and
+`auto_buy_decision_snapshots`.
+
+Fixed-horizon label v1 generation is routed through `label_v1_builder.py`.
+It verifies the feature-snapshot leakage/audit contract before delegating to
+the existing label feature builder. Use `--check-only` for a read-only contract
+check.
 
 Rejected-signal counterfactual outcomes can be populated and checked with:
 
@@ -678,7 +686,9 @@ Prediction Validation Report
 
 prediction_validation_report.py compares predictions to later signal/trade
 outcomes and, after `strong_day_participation_report.py --write-db` runs,
-strong-session participation/coverage outcomes.
+strong-session participation/coverage outcomes. It also reports agreement and
+disagreement between the deterministic signal-quality gate and cached
+`ml_prediction_*` compare-only fields from decision snapshots.
 
 Usage:
 

@@ -110,6 +110,10 @@ feature-snapshot returns, score buckets, and the TradingView signal baseline.
 strong-session participation rows so `prediction_validation_report.py` and
 `intelligence_prediction_report.py` can compare predictions against symbols
 that were strong even if they had no TradingView alert.
+`auto_buy_manager.py` writes `auto_buy_decision_snapshots` for candidate
+decisions, live block reasons, risk cross-checks, and submitted order metadata
+so the internal buy path has its own audit trail beside the main webhook
+decision snapshots.
 `decision-snapshots` verifies immutable point-in-time audit coverage for new
 approved/rejected decisions. `policy-artifacts` checks the runtime learning
 artifact files, and `retention` prints the non-destructive hot/warm/cold table
@@ -119,7 +123,9 @@ distribution, and imported Alpaca order status summaries.
 `prediction_cache.py preload` verifies that `daily_symbol_predictions` can be
 loaded into the TTL cache before the session. The Flask app also starts its own
 background cache refresher so webhook handling reads predictions from memory,
-not SQLite.
+not SQLite. `prediction_validation_report.py` reports deterministic-gate versus
+cached-ML agreement once decision snapshots include `ml_prediction_*` compare
+fields.
 
 Decision policy authority is visible in `/status` under `decision_policy`.
 Default authority is `paper_only`: `DECISION_POLICY_LIVE_BLOCK=true` and
@@ -232,6 +238,17 @@ work; run `python3 db_migrations.py apply` before deployment or restore.
 
 The fifth tracked migration creates `decision_snapshots`, an append-only audit
 table that records what the bot knew at each approved/rejected decision time.
+
+Later tracked migrations add `rejected_signal_outcomes.partial_reason`,
+`strong_day_participation`, and `auto_buy_decision_snapshots`.
+
+`run_label_features.sh` runs `label_v1_builder.py`, which validates the
+feature-snapshot leakage/audit fields before generating fixed-horizon v1
+labels. For a read-only check:
+
+```bash
+python3 label_v1_builder.py --check-only
+```
 
 
 ## Webhook Secrets

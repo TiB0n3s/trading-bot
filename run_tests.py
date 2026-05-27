@@ -57,6 +57,7 @@ TESTS = [
     "tests/test_decision_policy.py",
     "tests/test_prediction_cache.py",
     "tests/test_rejected_signal_outcomes.py",
+    "tests/test_label_v1_builder.py",
     "tests/test_export_ml_dataset.py",
     "tests/test_ml_replay.py",
     "tests/test_policy_artifacts.py",

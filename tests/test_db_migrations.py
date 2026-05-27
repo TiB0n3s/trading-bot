@@ -213,6 +213,25 @@ def test_strong_day_participation_migration_creates_table():
         assert_true(expected <= table_columns(db_path, "strong_day_participation"), "strong day participation columns")
 
 
+def test_auto_buy_decision_snapshots_migration_creates_table():
+    with tempfile.TemporaryDirectory() as tmp:
+        db_path = Path(tmp) / "test.db"
+
+        applied = apply_migration(MIGRATIONS[7], db_path)
+        assert_equal(applied, True, "apply")
+
+        expected = {
+            "candidate_timestamp",
+            "symbol",
+            "decision",
+            "live_block_reason",
+            "order_submitted",
+            "candidate_json",
+            "runtime_effect",
+        }
+        assert_true(expected <= table_columns(db_path, "auto_buy_decision_snapshots"), "auto-buy snapshot columns")
+
+
 if __name__ == "__main__":
     test_feature_audit_migration_is_idempotent()
     print("[OK] test_feature_audit_migration_is_idempotent")
@@ -228,4 +247,6 @@ if __name__ == "__main__":
     print("[OK] test_rejected_outcome_partial_reason_migration_adds_column")
     test_strong_day_participation_migration_creates_table()
     print("[OK] test_strong_day_participation_migration_creates_table")
-    print("\nAll 7 DB migration tests passed.")
+    test_auto_buy_decision_snapshots_migration_creates_table()
+    print("[OK] test_auto_buy_decision_snapshots_migration_creates_table")
+    print("\nAll 8 DB migration tests passed.")

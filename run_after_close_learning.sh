@@ -80,6 +80,10 @@ python3 policy_artifacts.py register \
     --source run_after_close_learning.sh \
     --known-good
 
+echo
+echo "---- point-in-time context archive after policy artifact refresh ----"
+python3 archive_context_state.py --reason after_close_learning_policy_artifacts
+
 
 python3 - <<'PY2'
 from bot_events import log_event

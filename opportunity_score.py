@@ -7,7 +7,12 @@ This is active in paper trading. It converts the bot's existing context into a
 
 from __future__ import annotations
 
+import os
 from datetime import datetime
+from zoneinfo import ZoneInfo
+
+
+BOT_TIMEZONE = ZoneInfo(os.getenv("BOT_TIMEZONE", "America/Chicago"))
 
 
 def _num(value, default=0.0):
@@ -28,7 +33,8 @@ def _trend_staleness_hours(last_time_str):
     if not last_time_str:
         return None
     try:
-        delta = datetime.now() - datetime.strptime(str(last_time_str), "%Y-%m-%d %H:%M:%S")
+        ts = datetime.strptime(str(last_time_str), "%Y-%m-%d %H:%M:%S").replace(tzinfo=BOT_TIMEZONE)
+        delta = datetime.now(BOT_TIMEZONE) - ts
         return delta.total_seconds() / 3600.0
     except Exception:
         return None

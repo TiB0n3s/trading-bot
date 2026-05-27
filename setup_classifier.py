@@ -11,7 +11,12 @@ This is intentionally deterministic:
 
 from __future__ import annotations
 
+import os
 from datetime import datetime
+from zoneinfo import ZoneInfo
+
+
+BOT_TIMEZONE = ZoneInfo(os.getenv("BOT_TIMEZONE", "America/Chicago"))
 
 
 def _clamp(value, low=0, high=100):
@@ -23,9 +28,8 @@ def _apply_trend_staleness(direction, strength, last_time_str):
     if not last_time_str:
         return direction, strength
     try:
-        age_hours = (
-            datetime.now() - datetime.strptime(str(last_time_str), "%Y-%m-%d %H:%M:%S")
-        ).total_seconds() / 3600.0
+        ts = datetime.strptime(str(last_time_str), "%Y-%m-%d %H:%M:%S").replace(tzinfo=BOT_TIMEZONE)
+        age_hours = (datetime.now(BOT_TIMEZONE) - ts).total_seconds() / 3600.0
     except Exception:
         return direction, strength
     if age_hours > 24:

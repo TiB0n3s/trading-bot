@@ -36,6 +36,9 @@ ET = pytz.timezone("America/New_York")
 
 LIVE_SELLS = os.getenv("POSITION_MANAGER_LIVE_SELLS", "false").lower() in ("1", "true", "yes", "on")
 PARTIAL_SELL_PCT = float(os.getenv("POSITION_MANAGER_PARTIAL_SELL_PCT", "0.50"))
+PROMOTE_UNEXECUTABLE_PARTIALS = os.getenv(
+    "POSITION_MANAGER_PROMOTE_UNEXECUTABLE_PARTIALS", "true"
+).lower() in ("1", "true", "yes", "on")
 MIN_PROFIT_PARTIAL_PCT = float(os.getenv("POSITION_MANAGER_MIN_PROFIT_PARTIAL_PCT", "0.75"))
 PROFIT_GIVEBACK_TRIGGER_PCT = float(os.getenv("POSITION_MANAGER_PROFIT_GIVEBACK_TRIGGER_PCT", "50"))
 
@@ -325,6 +328,38 @@ def high_gain_locked_profit_floor(peak_pl_pct):
         return POSITION_MANAGER_LOCK_TIER1_FLOOR_PCT
 
     return None
+
+
+def planned_partial_sell_qty(qty, sell_fraction):
+    """Return the integer share count a partial exit would submit."""
+    try:
+        return int(float(qty or 0) * float(sell_fraction or PARTIAL_SELL_PCT))
+    except (TypeError, ValueError):
+        return 0
+
+
+def normalize_exit_for_share_qty(action, sell_fraction, qty, severity, reasons):
+    """Make soft exits actionable for tiny positions.
+
+    A 1-share position cannot partially exit. When a profit-protection trigger
+    fires, promote the decision to a full exit rather than repeatedly logging an
+    impossible partial sell.
+    """
+    if action != "sell_partial" or not PROMOTE_UNEXECUTABLE_PARTIALS:
+        return action, sell_fraction, severity
+
+    sell_qty = planned_partial_sell_qty(qty, sell_fraction)
+    if sell_qty >= 1:
+        return action, sell_fraction, severity
+
+    action = "sell_full"
+    sell_fraction = 1.0
+    severity = "high" if severity in ("medium", "watch", "pass") else severity
+    reasons.append(
+        "partial_exit_promoted_to_full: calculated partial sell qty < 1 "
+        f"for position qty={qty}; full exit is the smallest actionable protection"
+    )
+    return action, sell_fraction, severity
 
 
 def retained_session_strength_state(session_momentum, current_pl_pct):
@@ -735,6 +770,14 @@ def evaluate_position(position, state, session_momentum=None):
     if not reasons:
         reasons.append("no exit trigger")
 
+    action, sell_fraction, severity = normalize_exit_for_share_qty(
+        action,
+        sell_fraction,
+        qty,
+        severity,
+        reasons,
+    )
+
     return {
         "symbol": symbol,
         "qty": qty,
@@ -901,9 +944,18 @@ def submit_exit(decision):
         return {"submitted": bool(order), "order": order}
 
     if action == "sell_partial":
-        sell_qty = int(qty * float(decision.get("sell_fraction") or PARTIAL_SELL_PCT))
+        sell_qty = planned_partial_sell_qty(qty, decision.get("sell_fraction"))
         if sell_qty < 1:
-            return {"submitted": False, "reason": "partial sell qty < 1"}
+            if not PROMOTE_UNEXECUTABLE_PARTIALS:
+                return {"submitted": False, "reason": "partial sell qty < 1"}
+            from broker import place_order
+            order = place_order(symbol, "sell", 0, 0, 0)
+            return {
+                "submitted": bool(order),
+                "order": order,
+                "promoted_action": "sell_full",
+                "reason": "partial sell qty < 1; promoted to full exit",
+            }
 
         open_orders = api.list_orders(status="open", symbols=[symbol])
         for o in open_orders:

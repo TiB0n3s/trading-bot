@@ -232,6 +232,25 @@ def test_auto_buy_decision_snapshots_migration_creates_table():
         assert_true(expected <= table_columns(db_path, "auto_buy_decision_snapshots"), "auto-buy snapshot columns")
 
 
+def test_historical_trend_context_migration_creates_table():
+    with tempfile.TemporaryDirectory() as tmp:
+        db_path = Path(tmp) / "test.db"
+
+        applied = apply_migration(MIGRATIONS[8], db_path)
+        assert_equal(applied, True, "apply")
+
+        expected = {
+            "market_date",
+            "symbol",
+            "trend_label",
+            "trend_regime",
+            "trend_confidence",
+            "relative_strength_score",
+            "raw_json",
+        }
+        assert_true(expected <= table_columns(db_path, "historical_trend_context"), "historical trend columns")
+
+
 if __name__ == "__main__":
     test_feature_audit_migration_is_idempotent()
     print("[OK] test_feature_audit_migration_is_idempotent")
@@ -249,4 +268,6 @@ if __name__ == "__main__":
     print("[OK] test_strong_day_participation_migration_creates_table")
     test_auto_buy_decision_snapshots_migration_creates_table()
     print("[OK] test_auto_buy_decision_snapshots_migration_creates_table")
-    print("\nAll 8 DB migration tests passed.")
+    test_historical_trend_context_migration_creates_table()
+    print("[OK] test_historical_trend_context_migration_creates_table")
+    print("\nAll 9 DB migration tests passed.")

@@ -22,6 +22,8 @@ import pytz
 
 from broker import place_order
 from bot_events import log_event
+from db import DB_PATH, get_connection
+from decision_snapshots import record_decision_snapshot
 from intelligence_freshness import freshness_for_file
 
 
@@ -182,6 +184,108 @@ def evaluate_rotation(memory):
     return decision
 
 
+def _now_et_string() -> str:
+    return datetime.now(ET).strftime("%Y-%m-%d %H:%M:%S")
+
+
+def log_rotation_sell(decision: dict, order: dict | None) -> int | None:
+    """Write live portfolio-rotation sells into trades.db for fill tracking."""
+    if not order:
+        return None
+
+    order_id = order.get("order_id") if isinstance(order, dict) else None
+    if not order_id:
+        return None
+
+    with get_connection(DB_PATH) as con:
+        existing = con.execute(
+            "SELECT id FROM trades WHERE order_id = ? LIMIT 1",
+            (order_id,),
+        ).fetchone()
+        if existing:
+            return int(existing["id"])
+
+        cur = con.execute(
+            """
+            INSERT INTO trades (
+                timestamp,
+                symbol,
+                action,
+                signal_price,
+                approved,
+                rejection_reason,
+                confidence,
+                position_size_pct,
+                stop_loss_pct,
+                take_profit_pct,
+                order_id,
+                order_status,
+                qty,
+                fill_price
+            ) VALUES (?, ?, 'sell', ?, 1, ?, ?, 0.0, 0.0, 0.0, ?, ?, ?, NULL)
+            """,
+            (
+                _now_et_string(),
+                decision.get("symbol_to_sell"),
+                order.get("current_price"),
+                "portfolio_rotation_manager: live replacement sell submitted; "
+                + str(decision.get("reason") or ""),
+                "portfolio_rotation_manager",
+                order_id,
+                order.get("status") or "submitted",
+                int(float(order.get("qty"))) if order.get("qty") is not None else None,
+            ),
+        )
+        return int(cur.lastrowid)
+
+
+def record_rotation_snapshot(decision: dict, order: dict | None, trade_id: int | None) -> None:
+    """Record an immutable audit row for every portfolio-rotation decision."""
+    weakest = decision.get("weakest") or {}
+    candidate = decision.get("candidate") or decision.get("strongest") or {}
+    timestamp = _now_et_string()
+
+    snapshot_decision = {
+        "approved": decision.get("decision") == "replace_now_live" and bool(order),
+        "decision": decision.get("decision"),
+        "confidence": "portfolio_rotation_manager",
+        "position_size_pct": 0.0,
+        "stop_loss_pct": 0.0,
+        "take_profit_pct": 0.0,
+        "reason": decision.get("reason"),
+    }
+    context = {
+        "market_bias": (candidate or {}).get("market_bias"),
+        "risk_level": (candidate or {}).get("risk_level"),
+        "entry_quality": (candidate or {}).get("entry_quality"),
+        "session_trend_label": (candidate or {}).get("session_trend_label"),
+        "session_trend_score": (candidate or {}).get("session_trend_score"),
+    }
+    account_state = {
+        "portfolio_rotation": {
+            "mode": MODE,
+            "live_sells": LIVE_SELLS,
+            "decision": decision,
+            "runtime_effect": "sell_only_live_rotation" if order else "observe_or_block",
+        }
+    }
+
+    record_decision_snapshot(
+        trade_id=trade_id,
+        timestamp=timestamp,
+        source="portfolio_rotation_manager.py",
+        symbol=decision.get("symbol_to_sell") or weakest.get("symbol"),
+        action="sell",
+        signal_price=weakest.get("current_price") or weakest.get("market_value"),
+        decision=snapshot_decision,
+        order=order or {},
+        context=context,
+        account_state=account_state,
+        raw_signal={"portfolio_replacement_memory": decision.get("memory")},
+        rejection_reason=None if snapshot_decision["approved"] else decision.get("reason"),
+    )
+
+
 def main():
     memory, err = load_memory()
     if err:
@@ -216,6 +320,7 @@ def main():
     )
 
     if decision.get("decision") != "replace_now_live":
+        record_rotation_snapshot(decision, None, None)
         return
 
     symbol = decision.get("symbol_to_sell")
@@ -223,6 +328,8 @@ def main():
 
     result = place_order(symbol, "sell", 0, 0, 0)
     print(f"sell_result={result}")
+    trade_id = log_rotation_sell(decision, result)
+    record_rotation_snapshot(decision, result, trade_id)
 
     log_event(
         event_type="PORTFOLIO_ROTATION_ORDER",

@@ -948,13 +948,6 @@ def evaluate_prediction_gate(**kwargs):
 
 WEBHOOK_SECRET = os.environ.get("WEBHOOK_SECRET", "changeme")
 
-_last_order: dict = {}
-_last_sell: dict = {}
-_trend_table: dict = {}
-_signal_history: dict = {}
-_market_bias: dict = {}
-_market_context_mtime: float = 0
-
 def _reject_current_signal(category, reason, level="warning"):
     if level == "error":
         logger.error(f"{category} blocked {symbol} {action.upper()}: {reason}")
@@ -5363,6 +5356,20 @@ def status():
     result["strategy_engine_mode"] = STRATEGY_ENGINE_MODE
     result["execution_policy_mode"] = os.getenv("EXECUTION_POLICY_MODE", "compare").strip().lower()
     result["risk_policy_mode"] = RISK_POLICY_MODE
+    result["portfolio_rotation"] = {
+        "mode": os.getenv("PORTFOLIO_REPLACEMENT_MODE", "observe_only").strip().lower(),
+        "live_sells": os.getenv("PORTFOLIO_REPLACEMENT_LIVE_SELLS", "false").strip().lower()
+        in ("1", "true", "yes", "on"),
+        "require_replace_now": os.getenv(
+            "PORTFOLIO_REPLACEMENT_REQUIRE_REPLACE_NOW", "true"
+        ).strip().lower() in ("1", "true", "yes", "on"),
+        "min_candidate_score": float(os.getenv("PORTFOLIO_REPLACEMENT_MIN_CANDIDATE_SCORE", "120")),
+        "min_buy_score": float(os.getenv("PORTFOLIO_REPLACEMENT_MIN_BUY_SCORE", "15")),
+        "weak_holding_plpc": float(os.getenv("PORTFOLIO_REPLACEMENT_WEAK_HOLDING_PLPC", "-1.00")),
+        "runtime_effect": "live_sell_path" if os.getenv(
+            "PORTFOLIO_REPLACEMENT_LIVE_SELLS", "false"
+        ).strip().lower() in ("1", "true", "yes", "on") else "observe_only",
+    }
     result["alerts"] = alert_config_public()
     result["session_momentum_summary"] = _session_momentum_summary()
     result["session_momentum"] = _session_momentum_snapshot()

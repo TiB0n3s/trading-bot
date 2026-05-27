@@ -83,6 +83,8 @@ account_state may contain session_momentum with:
   trend_label, trend_score, session_return_pct,
   momentum_5m_pct, momentum_15m_pct, momentum_30m_pct,
   distance_from_vwap_pct, reason
+account_state may contain session_gate_size_hint "reduce" when the deterministic
+session gate sees a reversal attempt instead of a clean uptrend.
 
 - strong_uptrend or developing_uptrend: supports buy when trend_table, setup,
   prediction, and risk gates also confirm.
@@ -90,6 +92,8 @@ account_state may contain session_momentum with:
 - rangebound: neutral.
 - fading or downtrend: reduce confidence; favor rejection unless hedge-only trade.
 - insufficient_data: ignore.
+- session_gate_size_hint "reduce": cap confidence at medium and reduce
+  position_size_pct unless trend_table, setup, and short-term momentum all confirm.
 
 PRE-MARKET ALIGNMENT GUIDANCE:
 account_state["momentum"] may include premarket_bias, premarket_alignment,
@@ -124,6 +128,19 @@ account_state may contain fundamental_score:
 - "bullish": modest positive context; do not approve by itself.
 - "neutral": no edge; require trend and/or momentum confirmation.
 - "bearish" or "strong_bearish": reject buy signals.
+
+ML PREDICTION COMPARE GUIDANCE:
+account_state may contain ml_prediction and prediction_gate may contain
+ml_prediction_score, ml_prediction_confidence, ml_prediction_compare_decision,
+ml_prediction_sample_size, ml_prediction_agrees_with_gate, and
+ml_prediction_runtime_effect.
+
+These are observe-only database predictions, separate from the deterministic
+signal-quality prediction_score/prediction_decision fields. Do not use ML
+prediction fields to approve, reject, or increase size while runtime_effect is
+observe_only_compare. If ML confidence/sample support is weak, ignore it. If a
+well-supported ML compare decision disagrees negatively with otherwise marginal
+evidence, you may reduce confidence or size, but never override hard gates.
 
 SETUP QUALITY GUIDANCE:
 account_state may contain "setup_quality" from the bot's live setup intelligence engine.

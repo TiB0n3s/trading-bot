@@ -16,6 +16,8 @@ os.environ.setdefault("ALPACA_API_KEY", "test-key")
 os.environ.setdefault("ALPACA_SECRET_KEY", "test-secret")
 
 from position_manager import continuation_exit_delay_reason
+from position_manager import normalize_exit_for_share_qty
+from position_manager import planned_partial_sell_qty
 
 
 def assert_true(value, label):
@@ -51,10 +53,46 @@ def test_continuation_does_not_delay_hard_loss():
     assert_equal(reason, None, "hard loss delay")
 
 
+def test_partial_exit_promotes_to_full_when_position_is_one_share():
+    reasons = ["profit giveback trigger"]
+
+    action, sell_fraction, severity = normalize_exit_for_share_qty(
+        action="sell_partial",
+        sell_fraction=0.50,
+        qty=1,
+        severity="medium",
+        reasons=reasons,
+    )
+
+    assert_equal(action, "sell_full", "action")
+    assert_equal(sell_fraction, 1.0, "sell fraction")
+    assert_equal(severity, "high", "severity")
+    assert_true("partial_exit_promoted_to_full" in reasons[-1], "promotion reason")
+
+
+def test_partial_exit_remains_partial_when_share_qty_is_actionable():
+    reasons = ["profit giveback trigger"]
+
+    action, sell_fraction, severity = normalize_exit_for_share_qty(
+        action="sell_partial",
+        sell_fraction=0.50,
+        qty=8,
+        severity="medium",
+        reasons=reasons,
+    )
+
+    assert_equal(action, "sell_partial", "action")
+    assert_equal(sell_fraction, 0.50, "sell fraction")
+    assert_equal(severity, "medium", "severity")
+    assert_equal(planned_partial_sell_qty(8, 0.50), 4, "planned qty")
+
+
 def main():
     tests = [
         test_continuation_delays_soft_full_exit_when_tape_supports,
         test_continuation_does_not_delay_hard_loss,
+        test_partial_exit_promotes_to_full_when_position_is_one_share,
+        test_partial_exit_remains_partial_when_share_qty_is_actionable,
     ]
 
     for test in tests:

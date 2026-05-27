@@ -133,6 +133,55 @@ def test_trade_order_exists_checks_order_id(tmp_path, monkeypatch):
     assert fill_stream.trade_order_exists("missing-order") is False
 
 
+def test_update_db_refreshes_cumulative_filled_qty(tmp_path, monkeypatch):
+    db_path = make_test_db(tmp_path)
+    order_id = "child-sell-1"
+
+    con = sqlite3.connect(db_path)
+    con.execute(
+        """
+        INSERT INTO trades (
+            timestamp, symbol, action, signal_price, approved,
+            order_id, order_status, qty, fill_price
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            "2026-05-27 11:13:44",
+            "RKLB",
+            "sell",
+            147.34,
+            1,
+            order_id,
+            "partially_filled",
+            1,
+            147.34,
+        ),
+    )
+    con.commit()
+    con.close()
+
+    def test_get_connection():
+        con = sqlite3.connect(db_path)
+        con.row_factory = sqlite3.Row
+        return con
+
+    monkeypatch.setattr(fill_stream, "get_connection", test_get_connection)
+
+    rows = fill_stream.update_db(order_id, "filled", 147.352, filled_qty=5)
+
+    con = sqlite3.connect(db_path)
+    row = con.execute(
+        "SELECT order_status, qty, fill_price FROM trades WHERE order_id = ?",
+        (order_id,),
+    ).fetchone()
+    con.close()
+
+    assert rows == 1
+    assert row[0] == "filled"
+    assert row[1] == 5
+    assert row[2] == 147.352
+
+
 def run_with_temp_db(test_func):
     with tempfile.TemporaryDirectory() as tmp:
         monkeypatch = SimpleMonkeyPatch()
@@ -146,6 +195,7 @@ if __name__ == "__main__":
     tests = [
         test_insert_synthetic_exit_is_idempotent_by_order_id,
         test_trade_order_exists_checks_order_id,
+        test_update_db_refreshes_cumulative_filled_qty,
     ]
     for test in tests:
         run_with_temp_db(test)

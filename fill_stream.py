@@ -91,12 +91,19 @@ def record_fill_event(event, order):
         logger.error(f"record_fill_event failed: {e}")
 
 
-def update_db(order_id: str, status: str, fill_price: float | None):
+def update_db(order_id: str, status: str, fill_price: float | None, filled_qty: float | None = None):
     try:
+        qty = int(float(filled_qty)) if filled_qty not in (None, "") else None
         con = get_connection()
         cur = con.execute(
-            "UPDATE trades SET order_status = ?, fill_price = ? WHERE order_id = ?",
-            (status, fill_price, order_id)
+            """
+            UPDATE trades
+            SET order_status = ?,
+                fill_price = COALESCE(?, fill_price),
+                qty = COALESCE(?, qty)
+            WHERE order_id = ?
+            """,
+            (status, fill_price, qty, order_id)
         )
         con.commit()
         con.close()
@@ -199,7 +206,7 @@ async def trade_update_handler(data):
             logger.info(f"Trade event [{event}] {symbol} order={order_id} status={status} — no DB update needed")
             return
 
-        rows = update_db(order_id, status, fill_price)
+        rows = update_db(order_id, status, fill_price, filled_qty)
         if rows:
             logger.info(
                 f"FILL: {symbol} {side.upper()} {filled_qty} shares @ ${fill_price} "

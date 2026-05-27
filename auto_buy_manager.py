@@ -711,6 +711,94 @@ def log_candidate(candidate: dict[str, Any], live_buy_enabled: bool, order: dict
         )
 
 
+def log_auto_buy_order(candidate: dict[str, Any], order: dict[str, Any]) -> bool:
+    """Persist submitted auto-buy orders to the canonical trades ledger."""
+    order_id = order.get("order_id") if isinstance(order, dict) else None
+    if not order_id:
+        return False
+
+    try:
+        qty = int(float(order.get("qty") or 0))
+    except (TypeError, ValueError):
+        qty = None
+
+    with get_connection(DB_PATH) as con:
+        existing = con.execute(
+            "SELECT id FROM trades WHERE order_id = ? LIMIT 1",
+            (order_id,),
+        ).fetchone()
+        if existing:
+            return False
+
+        con.execute(
+            """
+            INSERT INTO trades (
+                timestamp,
+                symbol,
+                action,
+                signal_price,
+                approved,
+                rejection_reason,
+                confidence,
+                position_size_pct,
+                stop_loss_pct,
+                take_profit_pct,
+                order_id,
+                order_status,
+                qty,
+                fill_price,
+                market_bias,
+                risk_level,
+                entry_quality,
+                session_trend_label,
+                session_trend_score,
+                session_return_pct,
+                session_momentum_5m_pct,
+                session_momentum_15m_pct,
+                session_momentum_30m_pct,
+                session_distance_from_vwap_pct,
+                setup_label,
+                setup_policy_action,
+                setup_policy_reason,
+                buy_opportunity_score,
+                buy_opportunity_recommendation,
+                buy_opportunity_reason
+            ) VALUES (?, ?, 'buy', ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, NULL,
+                      ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                now_et().strftime("%Y-%m-%d %H:%M:%S"),
+                candidate.get("symbol"),
+                order.get("current_price"),
+                "auto_buy_manager: internal bar-derived buy submitted",
+                "auto_buy_manager",
+                AUTO_BUY_POSITION_SIZE_PCT,
+                AUTO_BUY_STOP_LOSS_PCT,
+                AUTO_BUY_TAKE_PROFIT_PCT,
+                order_id,
+                order.get("status") or "submitted",
+                qty,
+                candidate.get("market_bias"),
+                candidate.get("risk_level"),
+                candidate.get("entry_quality"),
+                candidate.get("session_trend_label"),
+                candidate.get("session_trend_score"),
+                candidate.get("session_return_pct"),
+                candidate.get("momentum_5m_pct"),
+                candidate.get("momentum_15m_pct"),
+                candidate.get("momentum_30m_pct"),
+                candidate.get("distance_from_vwap_pct"),
+                candidate.get("setup_label"),
+                candidate.get("setup_recommendation"),
+                candidate.get("reason"),
+                candidate.get("score"),
+                candidate.get("decision"),
+                candidate.get("reason"),
+            ),
+        )
+    return True
+
+
 def maybe_execute_auto_buy(candidate: dict[str, Any], market_open: bool, live_requested: bool) -> dict[str, Any] | None:
     if not live_requested or not AUTO_BUY_LIVE_BUYS:
         candidate["live_block_reason"] = "live not requested or AUTO_BUY_LIVE_BUYS is false"
@@ -755,6 +843,10 @@ def maybe_execute_auto_buy(candidate: dict[str, Any], market_open: bool, live_re
     if not order:
         candidate["live_block_reason"] = "broker returned no order"
     else:
+        try:
+            log_auto_buy_order(candidate, order)
+        except Exception as e:
+            candidate["auto_buy_trade_log_error"] = str(e)
         write_app_buy_cooldown(candidate["symbol"])
     return order
 

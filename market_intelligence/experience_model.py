@@ -20,6 +20,7 @@ from pathlib import Path
 from statistics import mean
 
 from db import DB_PATH, get_connection
+from build_historical_trend_context import ensure_historical_trend_context_table
 from market_intelligence.intelligence_store import init_intelligence_tables
 
 
@@ -57,6 +58,7 @@ PREDICTION_COLUMNS = [
 
 def init_prediction_tables(db_path: Path | str = DB_PATH) -> None:
     init_intelligence_tables(db_path)
+    ensure_historical_trend_context_table(db_path)
 
     with get_connection(db_path) as con:
         con.execute(

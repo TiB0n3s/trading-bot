@@ -100,6 +100,34 @@ POSITION_MOMENTUM_BREAK_30M_PCT = float(
     os.getenv("POSITION_MOMENTUM_BREAK_30M_PCT", "-0.50")
 )
 
+# Profit-capture tuning:
+# Live in paper only through position_manager. This does not buy, increase size,
+# or weaken hard-loss exits. It only adjusts profitable soft exits.
+POSITION_MANAGER_PROFIT_CAPTURE_ENABLED = os.getenv(
+    "POSITION_MANAGER_PROFIT_CAPTURE_ENABLED", "true"
+).lower() in ("1", "true", "yes", "on")
+
+POSITION_MANAGER_TIER2_PEAK_PCT = float(
+    os.getenv("POSITION_MANAGER_TIER2_PEAK_PCT", "1.50")
+)
+POSITION_MANAGER_TIER3_PEAK_PCT = float(
+    os.getenv("POSITION_MANAGER_TIER3_PEAK_PCT", "3.00")
+)
+
+# If retained session strength is intact, require more giveback before selling
+# stronger winners. These are percent-of-peak giveback values, not price pct.
+POSITION_MANAGER_RETAINED_TIER2_GIVEBACK_PCT = float(
+    os.getenv("POSITION_MANAGER_RETAINED_TIER2_GIVEBACK_PCT", "60")
+)
+POSITION_MANAGER_RETAINED_TIER3_GIVEBACK_PCT = float(
+    os.getenv("POSITION_MANAGER_RETAINED_TIER3_GIVEBACK_PCT", "45")
+)
+
+# Avoid selling strong retained-session winners on tiny short-term wiggles.
+POSITION_MANAGER_RETAINED_MIN_PROFIT_TO_PROTECT_PCT = float(
+    os.getenv("POSITION_MANAGER_RETAINED_MIN_PROFIT_TO_PROTECT_PCT", "0.40")
+)
+
 
 def now_utc():
     return datetime.now(timezone.utc)
@@ -192,7 +220,8 @@ def get_entry_context(symbol):
 
 def fetch_intraday_bars(symbol, minutes=60):
     start = (now_utc() - timedelta(minutes=minutes + 5)).isoformat()
-    bars = list(api.get_bars(symbol, "1Min", start=start, feed="iex"))
+    # Keep requests bounded so one slow symbol does not stall the full position review.
+    bars = list(api.get_bars(symbol, "1Min", start=start, feed="iex", limit=minutes + 10))
 
     out = []
     for b in bars:
@@ -577,19 +606,48 @@ def evaluate_position(position, state, session_momentum=None):
             reasons.append(f"profitable but momentum fading ({momentum_5m:.2f}%, {momentum_15m:.2f}%)")
 
     if (
-        action in ("sell_partial", "sell_full")
+        POSITION_MANAGER_PROFIT_CAPTURE_ENABLED
+        and action in ("sell_partial", "sell_full")
         and not hard_full_exit
         and current_pl_pct > 0
         and retained_strength.get("retained")
         and not retained_strength.get("broken")
     ):
-        action = "hold"
-        sell_fraction = 0.0
-        severity = "watch"
-        reasons.append(
-            "retained_session_strength: delaying profitable soft exit; "
-            + str(retained_strength.get("reason"))
-        )
+        delay_exit = True
+        delay_detail = "retained session strength intact"
+
+        # For larger winners, use peak-aware giveback bands. This keeps the bot
+        # from selling too early while a strong session trend remains intact,
+        # but still permits exits when the trade has surrendered enough of the move.
+        if peak_pl_pct >= POSITION_MANAGER_TIER3_PEAK_PCT:
+            delay_exit = giveback_pct < POSITION_MANAGER_RETAINED_TIER3_GIVEBACK_PCT
+            delay_detail = (
+                f"tier3 peak={peak_pl_pct:.2f}% giveback={giveback_pct:.1f}% "
+                f"< {POSITION_MANAGER_RETAINED_TIER3_GIVEBACK_PCT:.1f}%"
+            )
+        elif peak_pl_pct >= POSITION_MANAGER_TIER2_PEAK_PCT:
+            delay_exit = giveback_pct < POSITION_MANAGER_RETAINED_TIER2_GIVEBACK_PCT
+            delay_detail = (
+                f"tier2 peak={peak_pl_pct:.2f}% giveback={giveback_pct:.1f}% "
+                f"< {POSITION_MANAGER_RETAINED_TIER2_GIVEBACK_PCT:.1f}%"
+            )
+        elif current_pl_pct < POSITION_MANAGER_RETAINED_MIN_PROFIT_TO_PROTECT_PCT:
+            delay_exit = True
+            delay_detail = (
+                f"small retained winner current={current_pl_pct:.2f}% "
+                f"< {POSITION_MANAGER_RETAINED_MIN_PROFIT_TO_PROTECT_PCT:.2f}%"
+            )
+
+        if delay_exit:
+            action = "hold"
+            sell_fraction = 0.0
+            severity = "watch"
+            reasons.append(
+                "profit_capture_retained_session: delaying profitable soft exit; "
+                + delay_detail
+                + "; "
+                + str(retained_strength.get("reason"))
+            )
 
     if not reasons:
         reasons.append("no exit trigger")

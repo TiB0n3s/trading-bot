@@ -126,8 +126,11 @@ def _wait_for_open_order_cancels(symbol: str) -> list[Any]:
 def get_account() -> dict[str, Any] | None:
     try:
         account = api.get_account()
+        equity = float(getattr(account, "equity", account.portfolio_value))
         return {
-            "balance": float(account.cash),
+            # Use total account equity for sizing/risk context. Cash alone
+            # undercounts deployed capital when open positions are present.
+            "balance": equity,
             "portfolio_value": float(account.portfolio_value),
             "buying_power": float(account.buying_power),
             "status": account.status

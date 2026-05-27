@@ -111,6 +111,7 @@ _START_TIME = datetime.now(timezone.utc)
 ENFORCE_SETUP_POLICY_BLOCKS = True
 
 PREDICTION_GATE_MODE = os.getenv("PREDICTION_GATE_MODE", "warn").strip().lower()
+PREDICTION_SOFT_AVOID_MIN_SAMPLE_SIZE = int(os.getenv("PREDICTION_SOFT_AVOID_MIN_SAMPLE_SIZE", "20"))
 if PREDICTION_GATE_MODE not in ("off", "warn", "soft", "hard"):
     logger.warning(
         f"Invalid PREDICTION_GATE_MODE={PREDICTION_GATE_MODE!r}; defaulting to warn"
@@ -4701,13 +4702,27 @@ def process_signal(data):
                 return
 
         if effective_bias == "avoid_soft" and not allow_buy_from_bias:
+            prediction_sample_size = int(
+                prediction_gate.get("ml_prediction_sample_size")
+                or (ml_prediction or {}).get("sample_size")
+                or 0
+            )
             reason = (
                 f"effective_bias={effective_bias}; "
                 f"{bias_override.get('reason')}; "
+                f"prediction_sample_size={prediction_sample_size}; "
+                f"min_sample_size={PREDICTION_SOFT_AVOID_MIN_SAMPLE_SIZE}; "
                 f"context_reason={bias_entry.get('reason','')}"
             )
-            if _reject_current_signal("soft_avoid_prediction_gate", reason):
-                return
+            if prediction_sample_size >= PREDICTION_SOFT_AVOID_MIN_SAMPLE_SIZE:
+                if _reject_current_signal("soft_avoid_prediction_gate", reason):
+                    return
+            else:
+                logger.warning(
+                    f"Soft-avoid prediction gate not enforced for {symbol}: {reason}"
+                )
+                account_state["soft_avoid_prediction_gate_bypassed"] = True
+                account_state["soft_avoid_prediction_gate_bypass_reason"] = reason
 
         if effective_bias == "live_override_neutral" and not allow_buy_from_bias:
             reason = (
@@ -4850,55 +4865,18 @@ def process_signal(data):
     claude_account_state.pop("market_alignment_error", None)
 
     # Pre-Claude affordability gate.
-    # Avoid spending Claude/API/order-path work on BUYs that cannot purchase
-    # at least 1 whole share after macro risk sizing. This is especially useful
-    # for high-priced symbols like ASML, COST, LLY, etc.
+    # This is only a hard 1-share buying-power check. Macro risk and
+    # buy-opportunity caps belong downstream in position sizing; using them here
+    # causes false pre-Claude blocks on high-priced symbols.
     if action == "buy":
         try:
-            balance_for_affordability = float(account_state.get("balance") or 0)
-            macro_mult_for_affordability = float(
-                account_state.get("macro_risk", {}).get("risk_multiplier", 1.0) or 1.0
-            )
-            buy_opp_for_affordability = (account_state or {}).get("buy_opportunity") or {}
-            rec_for_affordability = buy_opp_for_affordability.get("buy_opportunity_recommendation")
-            score_for_affordability = buy_opp_for_affordability.get("buy_opportunity_score")
-
-            # Match the most likely final sizing before Claude:
-            # - buy_opportunity sizing caps only reduce size; strong_buy_candidate has no cap.
-            # - if no Claude size yet, use a conservative expected base of 1.5%.
-            expected_base_pct = 1.5
-            expected_pct = expected_base_pct * macro_mult_for_affordability
-
-            if _buy_opportunity_sizing_enabled():
-                small_cap = _env_float("BUY_OPPORTUNITY_SMALL_CAP_PCT", 1.25)
-                watch_cap = _env_float("BUY_OPPORTUNITY_WATCH_CAP_PCT", 0.75)
-                avoid_cap = _env_float("BUY_OPPORTUNITY_AVOID_CAP_PCT", 0.50)
-
-                try:
-                    score_f = float(score_for_affordability)
-                except Exception:
-                    score_f = None
-
-                cap = None
-                if rec_for_affordability == "small_buy_candidate" or (score_f is not None and score_f >= 7 and score_f < 10):
-                    cap = small_cap
-                elif rec_for_affordability == "watch" or (score_f is not None and score_f >= 4 and score_f < 7):
-                    cap = watch_cap
-                elif rec_for_affordability == "avoid" or score_f is not None:
-                    cap = avoid_cap
-
-                if cap is not None:
-                    expected_pct = min(expected_pct, cap)
-
+            buying_power_for_affordability = float(account_state.get("buying_power") or 0)
             signal_price_f = float(price or 0)
-            estimated_buy_dollars = balance_for_affordability * expected_pct / 100.0
-            estimated_qty = int(estimated_buy_dollars / signal_price_f) if signal_price_f > 0 else 0
 
-            if balance_for_affordability > 0 and signal_price_f > 0 and estimated_qty < 1:
+            if buying_power_for_affordability > 0 and signal_price_f > 0 and buying_power_for_affordability < signal_price_f:
                 reason = (
-                    f"estimated BUY dollars ${estimated_buy_dollars:.2f} cannot buy 1 share "
-                    f"at signal price ${signal_price_f:.2f}; expected_pct={expected_pct:.3f}% "
-                    f"macro_multiplier={macro_mult_for_affordability:.3f}"
+                    f"buying_power ${buying_power_for_affordability:.2f} cannot buy 1 share "
+                    f"at signal price ${signal_price_f:.2f}"
                 )
                 logger.warning(
                     f"Affordability gate blocked {symbol} BUY before Claude: {reason}"

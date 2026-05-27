@@ -4,9 +4,11 @@ from collections import defaultdict, deque
 from datetime import datetime
 
 from db import DB_PATH, get_connection
+from symbols_config import SYMBOL_SIGNAL_SOURCE
 
 
 MATCH_SOURCE_FIELDS = [
+    "signal_source",
     "match_source",
     "entry_source",
     "exit_order_id",
@@ -154,6 +156,7 @@ def match_trades():
                 item["exit_order_id"] = row_get(row, "order_id")
                 item["exit_reason"] = row_get(row, "rejection_reason")
 
+                item["signal_source"] = SYMBOL_SIGNAL_SOURCE.get(symbol, "unknown")
                 matched.append(item)
 
                 lot["qty"] -= matched_qty
@@ -288,6 +291,7 @@ def init_matched_trades_table():
             exit_reason TEXT,
             exit_order_id TEXT,
             entry_source TEXT,
+            signal_source TEXT,
             match_source TEXT
         )
     """)
@@ -388,6 +392,7 @@ def _synthetic_match_from_position_manager_exit(con, sell_row):
 
     return {
         "symbol": sell_row["symbol"],
+        "signal_source": SYMBOL_SIGNAL_SOURCE.get(sell_row["symbol"], "unknown"),
         "entry_timestamp": None,
         "exit_timestamp": sell_row["timestamp"],
         "holding_minutes": None,

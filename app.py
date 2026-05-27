@@ -112,6 +112,16 @@ ENFORCE_SETUP_POLICY_BLOCKS = True
 
 PREDICTION_GATE_MODE = os.getenv("PREDICTION_GATE_MODE", "warn").strip().lower()
 PREDICTION_SOFT_AVOID_MIN_SAMPLE_SIZE = int(os.getenv("PREDICTION_SOFT_AVOID_MIN_SAMPLE_SIZE", "20"))
+
+INTRA_SESSION_TAPE_DEGRADATION_ENABLED = os.getenv(
+    "INTRA_SESSION_TAPE_DEGRADATION_ENABLED", "true"
+).strip().lower() in ("1", "true", "yes", "on")
+INTRA_SESSION_TAPE_DEGRADATION_START_HOUR_ET = int(
+    os.getenv("INTRA_SESSION_TAPE_DEGRADATION_START_HOUR_ET", "12")
+)
+INTRA_SESSION_TAPE_DEGRADATION_MIN_SETUP_SCORE = float(
+    os.getenv("INTRA_SESSION_TAPE_DEGRADATION_MIN_SETUP_SCORE", "55")
+)
 if PREDICTION_GATE_MODE not in ("off", "warn", "soft", "hard"):
     logger.warning(
         f"Invalid PREDICTION_GATE_MODE={PREDICTION_GATE_MODE!r}; defaulting to warn"
@@ -4799,6 +4809,50 @@ def process_signal(data):
                 f"{session_gate.get('reason')}"
             )
             account_state["session_gate_size_hint"] = "reduce"
+
+
+        # Intra-session tape degradation gate.
+        # After midday, require stronger setup quality when live tape is fading/downtrend.
+        if INTRA_SESSION_TAPE_DEGRADATION_ENABLED:
+            try:
+                now_et = datetime.now(timezone.utc).astimezone(ET)
+                session_label = (account_state.get("session_momentum") or {}).get("trend_label")
+                setup_score_raw = setup_obs.get("setup_score")
+                setup_score = float(setup_score_raw) if setup_score_raw is not None else None
+
+                if (
+                    now_et.hour >= INTRA_SESSION_TAPE_DEGRADATION_START_HOUR_ET
+                    and session_label in ("fading", "downtrend")
+                    and (
+                        setup_score is None
+                        or setup_score < INTRA_SESSION_TAPE_DEGRADATION_MIN_SETUP_SCORE
+                    )
+                ):
+                    reason = (
+                        f"session_label={session_label}; "
+                        f"setup_score={setup_score}; "
+                        f"min_setup_score={INTRA_SESSION_TAPE_DEGRADATION_MIN_SETUP_SCORE}; "
+                        f"start_hour_et={INTRA_SESSION_TAPE_DEGRADATION_START_HOUR_ET}"
+                    )
+                    account_state["intra_session_tape_degradation"] = {
+                        "would_block": True,
+                        "reason": reason,
+                        "setup_score": setup_score,
+                        "min_setup_score": INTRA_SESSION_TAPE_DEGRADATION_MIN_SETUP_SCORE,
+                        "session_label": session_label,
+                    }
+                    if _reject_current_signal("intra_session_tape_degradation", reason):
+                        return
+                else:
+                    account_state["intra_session_tape_degradation"] = {
+                        "would_block": False,
+                        "setup_score": setup_score,
+                        "min_setup_score": INTRA_SESSION_TAPE_DEGRADATION_MIN_SETUP_SCORE,
+                        "session_label": session_label,
+                    }
+            except Exception as e:
+                logger.warning(f"Intra-session tape degradation gate skipped for {symbol}: {e}")
+                account_state["intra_session_tape_degradation_error"] = str(e)
 
     if STRATEGY_ENGINE_MODE == "observe":
         try:

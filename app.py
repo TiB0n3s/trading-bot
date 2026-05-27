@@ -5335,7 +5335,7 @@ def process_signal(data):
                     action=action,
                     position_size_pct=adjusted_position_size_pct,
                     stop_loss_pct=decision.get("stop_loss_pct", 1.75),
-                    take_profit_pct=decision.get("take_profit_pct", 0),
+                    take_profit_pct=0,  # TP disabled; position_manager owns exits
                     risk_level=account_state.get("risk_level"),
                     client_order_id=client_order_id,
                 )

@@ -148,6 +148,12 @@ def match_trades():
                 for field in ENTRY_CONTEXT_FIELDS:
                     item[field] = row_get(entry_row, field)
 
+                # Exit-side source fields.
+                item["match_source"] = "fifo_match"
+                item["entry_source"] = "webhook_buy"
+                item["exit_order_id"] = row_get(row, "order_id")
+                item["exit_reason"] = row_get(row, "rejection_reason")
+
                 matched.append(item)
 
                 lot["qty"] -= matched_qty

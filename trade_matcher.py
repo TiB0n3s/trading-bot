@@ -325,6 +325,7 @@ def init_matched_trades_table():
         "buy_opportunity_score": "REAL",
         "buy_opportunity_recommendation": "TEXT",
         "buy_opportunity_reason": "TEXT",
+        "signal_source": "TEXT",
     }
 
     for name, typ in add_columns.items():

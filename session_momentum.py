@@ -95,10 +95,34 @@ def init_session_momentum_table() -> None:
                 distance_from_vwap_pct REAL,
                 trend_label TEXT,
                 trend_score INTEGER,
-                reason TEXT
+                reason TEXT,
+                best_trend_score INTEGER,
+                best_session_return_pct REAL,
+                best_distance_from_vwap_pct REAL,
+                minutes_strong INTEGER,
+                strength_first_seen_at TEXT,
+                strength_last_seen_at TEXT,
+                pullback_from_session_high_pct REAL,
+                session_strength_seen INTEGER
             )
             """
         )
+
+        for col, typ in (
+            ("best_trend_score", "INTEGER"),
+            ("best_session_return_pct", "REAL"),
+            ("best_distance_from_vwap_pct", "REAL"),
+            ("minutes_strong", "INTEGER"),
+            ("strength_first_seen_at", "TEXT"),
+            ("strength_last_seen_at", "TEXT"),
+            ("pullback_from_session_high_pct", "REAL"),
+            ("session_strength_seen", "INTEGER"),
+        ):
+            existing = {
+                r["name"] for r in con.execute("PRAGMA table_info(session_momentum)").fetchall()
+            }
+            if col not in existing:
+                con.execute(f"ALTER TABLE session_momentum ADD COLUMN {col} {typ}")
 
 
 def _pct_change(start: float | None, end: float | None) -> float | None:
@@ -284,8 +308,83 @@ def build_session_momentum(api: REST, symbol: str) -> dict[str, Any]:
     }
 
 
+def _is_strong_session(row: dict[str, Any]) -> bool:
+    score = _safe_float(row.get("trend_score")) or 0.0
+    session_return = _safe_float(row.get("session_return_pct")) or 0.0
+    return score >= 6 or session_return >= 1.0
+
+
+def _merge_retained_strength(row: dict[str, Any], previous: dict[str, Any] | None) -> dict[str, Any]:
+    """Carry session-strength high-water marks across refreshes for the same trading day."""
+    previous = previous or {}
+    merged = dict(row)
+
+    now = row.get("updated_at")
+    score = _safe_float(row.get("trend_score"))
+    session_return = _safe_float(row.get("session_return_pct"))
+    vwap_dist = _safe_float(row.get("distance_from_vwap_pct"))
+
+    prev_best_score = _safe_float(previous.get("best_trend_score"))
+    prev_best_return = _safe_float(previous.get("best_session_return_pct"))
+    prev_best_vwap = _safe_float(previous.get("best_distance_from_vwap_pct"))
+    prev_minutes_strong = int(previous.get("minutes_strong") or 0)
+    prev_seen = int(previous.get("session_strength_seen") or 0)
+
+    best_score = max(
+        [v for v in (prev_best_score, score) if v is not None],
+        default=None,
+    )
+    best_return = max(
+        [v for v in (prev_best_return, session_return) if v is not None],
+        default=None,
+    )
+    best_vwap = max(
+        [v for v in (prev_best_vwap, vwap_dist) if v is not None],
+        default=None,
+    )
+
+    strong_now = _is_strong_session(row)
+    session_strength_seen = 1 if (prev_seen or strong_now) else 0
+
+    first_seen = previous.get("strength_first_seen_at")
+    last_seen = previous.get("strength_last_seen_at")
+
+    if strong_now:
+        if not first_seen:
+            first_seen = now
+        last_seen = now
+        # session_momentum refresh usually runs every 1-2 minutes; count conservatively.
+        prev_minutes_strong += 1
+
+    pullback_from_high = None
+    if session_return is not None and best_return is not None:
+        pullback_from_high = session_return - best_return
+
+    merged.update({
+        "best_trend_score": int(best_score) if best_score is not None else None,
+        "best_session_return_pct": round(best_return, 3) if best_return is not None else None,
+        "best_distance_from_vwap_pct": round(best_vwap, 3) if best_vwap is not None else None,
+        "minutes_strong": prev_minutes_strong,
+        "strength_first_seen_at": first_seen,
+        "strength_last_seen_at": last_seen,
+        "pullback_from_session_high_pct": round(pullback_from_high, 3) if pullback_from_high is not None else None,
+        "session_strength_seen": session_strength_seen,
+    })
+    return merged
+
+
 def upsert_session_momentum(row: dict[str, Any]) -> None:
+    init_session_momentum_table()
+
     with get_connection(DB_PATH) as con:
+        previous_row = con.execute(
+            "SELECT * FROM session_momentum WHERE symbol = ?",
+            (str(row.get("symbol") or "").upper(),),
+        ).fetchone()
+        previous = dict(previous_row) if previous_row else None
+
+        row = _merge_retained_strength(row, previous)
+
         con.execute(
             """
             INSERT INTO session_momentum (
@@ -302,8 +401,16 @@ def upsert_session_momentum(row: dict[str, Any]) -> None:
                 distance_from_vwap_pct,
                 trend_label,
                 trend_score,
-                reason
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                reason,
+                best_trend_score,
+                best_session_return_pct,
+                best_distance_from_vwap_pct,
+                minutes_strong,
+                strength_first_seen_at,
+                strength_last_seen_at,
+                pullback_from_session_high_pct,
+                session_strength_seen
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(symbol) DO UPDATE SET
                 updated_at=excluded.updated_at,
                 bar_count=excluded.bar_count,
@@ -317,7 +424,15 @@ def upsert_session_momentum(row: dict[str, Any]) -> None:
                 distance_from_vwap_pct=excluded.distance_from_vwap_pct,
                 trend_label=excluded.trend_label,
                 trend_score=excluded.trend_score,
-                reason=excluded.reason
+                reason=excluded.reason,
+                best_trend_score=excluded.best_trend_score,
+                best_session_return_pct=excluded.best_session_return_pct,
+                best_distance_from_vwap_pct=excluded.best_distance_from_vwap_pct,
+                minutes_strong=excluded.minutes_strong,
+                strength_first_seen_at=excluded.strength_first_seen_at,
+                strength_last_seen_at=excluded.strength_last_seen_at,
+                pullback_from_session_high_pct=excluded.pullback_from_session_high_pct,
+                session_strength_seen=excluded.session_strength_seen
             """,
             (
                 row.get("symbol"),
@@ -334,6 +449,14 @@ def upsert_session_momentum(row: dict[str, Any]) -> None:
                 row.get("trend_label"),
                 row.get("trend_score"),
                 row.get("reason"),
+                row.get("best_trend_score"),
+                row.get("best_session_return_pct"),
+                row.get("best_distance_from_vwap_pct"),
+                row.get("minutes_strong"),
+                row.get("strength_first_seen_at"),
+                row.get("strength_last_seen_at"),
+                row.get("pullback_from_session_high_pct"),
+                row.get("session_strength_seen"),
             ),
         )
 
@@ -357,7 +480,7 @@ def refresh_symbol(api: REST, symbol: str) -> dict[str, Any]:
     init_session_momentum_table()
     row = build_session_momentum(api, symbol)
     upsert_session_momentum(row)
-    return row
+    return get_latest_session_momentum(symbol) or row
 
 
 def build_api() -> REST:
@@ -380,6 +503,10 @@ def print_row(row: dict[str, Any]) -> None:
         f"15m={row['momentum_15m_pct']}% "
         f"30m={row['momentum_30m_pct']}% "
         f"vwap_dist={row['distance_from_vwap_pct']}% "
+        f"best_score={row.get('best_trend_score')} "
+        f"best_return={row.get('best_session_return_pct')}% "
+        f"minutes_strong={row.get('minutes_strong')} "
+        f"pullback={row.get('pullback_from_session_high_pct')}% "
         f"bars={row['bar_count']} "
         f"reason={row['reason']}"
     )

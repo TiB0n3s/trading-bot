@@ -26,6 +26,7 @@ import pytz
 from broker import api
 from db import DB_PATH, get_connection
 from bot_events import log_event
+from session_momentum import get_latest_session_momentum
 
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -60,6 +61,43 @@ CONTINUATION_EXIT_MIN_MOMENTUM_PCT = float(
 )
 CONTINUATION_EXIT_MIN_VWAP_DIST_PCT = float(
     os.getenv("POSITION_MANAGER_CONTINUATION_MIN_VWAP_DIST_PCT", "0.05")
+)
+
+POSITION_MOMENTUM_SESSION_CONTEXT_ENABLED = os.getenv(
+    "POSITION_MOMENTUM_SESSION_CONTEXT_ENABLED", "true"
+).lower() in ("1", "true", "yes", "on")
+POSITION_MOMENTUM_RETAINED_STRENGTH_ENABLED = os.getenv(
+    "POSITION_MOMENTUM_RETAINED_STRENGTH_ENABLED", "true"
+).lower() in ("1", "true", "yes", "on")
+POSITION_MOMENTUM_STRONG_SCORE_MIN = float(
+    os.getenv("POSITION_MOMENTUM_STRONG_SCORE_MIN", "6")
+)
+POSITION_MOMENTUM_STRONG_RETURN_MIN_PCT = float(
+    os.getenv("POSITION_MOMENTUM_STRONG_RETURN_MIN_PCT", "1.0")
+)
+POSITION_MOMENTUM_STRONG_MINUTES_MIN = float(
+    os.getenv("POSITION_MOMENTUM_STRONG_MINUTES_MIN", "20")
+)
+POSITION_MOMENTUM_RETAINED_MIN_SCORE = float(
+    os.getenv("POSITION_MOMENTUM_RETAINED_MIN_SCORE", "3")
+)
+POSITION_MOMENTUM_RETAINED_MIN_RETURN_PCT = float(
+    os.getenv("POSITION_MOMENTUM_RETAINED_MIN_RETURN_PCT", "0.25")
+)
+POSITION_MOMENTUM_RETAINED_MIN_VWAP_DIST_PCT = float(
+    os.getenv("POSITION_MOMENTUM_RETAINED_MIN_VWAP_DIST_PCT", "-0.25")
+)
+POSITION_MOMENTUM_BREAK_PULLBACK_PCT = float(
+    os.getenv("POSITION_MOMENTUM_BREAK_PULLBACK_PCT", "-0.75")
+)
+POSITION_MOMENTUM_BREAK_VWAP_DIST_PCT = float(
+    os.getenv("POSITION_MOMENTUM_BREAK_VWAP_DIST_PCT", "-0.35")
+)
+POSITION_MOMENTUM_BREAK_15M_PCT = float(
+    os.getenv("POSITION_MOMENTUM_BREAK_15M_PCT", "-0.35")
+)
+POSITION_MOMENTUM_BREAK_30M_PCT = float(
+    os.getenv("POSITION_MOMENTUM_BREAK_30M_PCT", "-0.50")
 )
 
 
@@ -195,6 +233,135 @@ def pct_change(first, last):
     return (last - first) / first * 100.0
 
 
+def safe_float(value):
+    try:
+        if value is None:
+            return None
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def retained_session_strength_state(session_momentum, current_pl_pct):
+    """Return retained-strength state for delaying profitable soft exits only.
+
+    Always carries session fields through for logging/reporting, even when the
+    current position is not eligible for retained-strength protection.
+    """
+    session = session_momentum or {}
+
+    session_label = session.get("trend_label")
+    session_score = safe_float(session.get("trend_score"))
+    session_return = safe_float(session.get("session_return_pct"))
+    session_15m = safe_float(session.get("momentum_15m_pct"))
+    session_30m = safe_float(session.get("momentum_30m_pct"))
+    session_vwap = safe_float(session.get("distance_from_vwap_pct"))
+
+    best_score = safe_float(session.get("best_trend_score"))
+    best_return = safe_float(session.get("best_session_return_pct"))
+    minutes_strong = safe_float(session.get("minutes_strong"))
+    pullback_from_high = safe_float(session.get("pullback_from_session_high_pct"))
+    strength_seen = bool(int(session.get("session_strength_seen") or 0))
+
+    base = {
+        "session_label": session_label,
+        "session_score": session_score,
+        "session_return_pct": session_return,
+        "session_15m_pct": session_15m,
+        "session_30m_pct": session_30m,
+        "session_vwap_dist_pct": session_vwap,
+        "best_trend_score": best_score,
+        "best_session_return_pct": best_return,
+        "minutes_strong": minutes_strong,
+        "pullback_from_session_high_pct": pullback_from_high,
+        "session_strength_seen": strength_seen,
+    }
+
+    if not POSITION_MOMENTUM_SESSION_CONTEXT_ENABLED:
+        return {
+            **base,
+            "enabled": False,
+            "retained": False,
+            "broken": False,
+            "reason": "session context disabled",
+        }
+
+    if not POSITION_MOMENTUM_RETAINED_STRENGTH_ENABLED:
+        return {
+            **base,
+            "enabled": True,
+            "retained": False,
+            "broken": False,
+            "reason": "retained strength disabled",
+        }
+
+    if current_pl_pct <= 0:
+        return {
+            **base,
+            "enabled": True,
+            "retained": False,
+            "broken": False,
+            "reason": "not profitable",
+        }
+
+    # A one-refresh spike should not qualify as durable session strength.
+    # Strong score can qualify quickly, but return-only strength must persist.
+    return_strength_min_observations = min(5.0, POSITION_MOMENTUM_STRONG_MINUTES_MIN)
+
+    strong_seen = (
+        strength_seen
+        and (
+            (
+                best_score is not None
+                and best_score >= POSITION_MOMENTUM_STRONG_SCORE_MIN
+            )
+            or (
+                best_return is not None
+                and best_return >= POSITION_MOMENTUM_STRONG_RETURN_MIN_PCT
+                and minutes_strong is not None
+                and minutes_strong >= return_strength_min_observations
+            )
+            or (
+                minutes_strong is not None
+                and minutes_strong >= POSITION_MOMENTUM_STRONG_MINUTES_MIN
+            )
+        )
+    )
+
+    retained = (
+        strong_seen
+        and (session_score is None or session_score >= POSITION_MOMENTUM_RETAINED_MIN_SCORE)
+        and (session_return is None or session_return >= POSITION_MOMENTUM_RETAINED_MIN_RETURN_PCT)
+        and (session_vwap is None or session_vwap >= POSITION_MOMENTUM_RETAINED_MIN_VWAP_DIST_PCT)
+    )
+
+    broken = (
+        (pullback_from_high is not None and pullback_from_high <= POSITION_MOMENTUM_BREAK_PULLBACK_PCT)
+        or (session_vwap is not None and session_vwap <= POSITION_MOMENTUM_BREAK_VWAP_DIST_PCT)
+        or (
+            session_15m is not None
+            and session_30m is not None
+            and session_15m <= POSITION_MOMENTUM_BREAK_15M_PCT
+            and session_30m <= POSITION_MOMENTUM_BREAK_30M_PCT
+        )
+    )
+
+    reason = (
+        f"label={session_label} score={session_score} return={session_return} "
+        f"best_score={best_score} best_return={best_return} "
+        f"minutes_strong={minutes_strong} vwap_dist={session_vwap} "
+        f"pullback={pullback_from_high}"
+    )
+
+    return {
+        **base,
+        "enabled": True,
+        "retained": retained,
+        "broken": broken,
+        "reason": reason,
+    }
+
+
 def continuation_exit_delay_reason(current_pl_pct, momentum_15m, momentum_30m, vwap_dist_pct):
     """
     Return a hold reason when a soft full-exit trigger conflicts with live tape.
@@ -291,7 +458,7 @@ def is_weak_entry_context(entry_ctx):
     return False
 
 
-def evaluate_position(position, state):
+def evaluate_position(position, state, session_momentum=None):
     symbol = position.symbol
     qty = float(position.qty)
     avg_entry = float(position.avg_entry_price)
@@ -327,6 +494,7 @@ def evaluate_position(position, state):
     current_pl_pct = peak["current_pl_pct"]
     giveback_pct = peak["giveback_pct"]
     peak_pl_pct = peak["peak_pl_pct"]
+    retained_strength = retained_session_strength_state(session_momentum, current_pl_pct)
 
     # Full exit: losing and momentum/VWAP deteriorating.
     if current_pl_pct <= FULL_EXIT_LOSS_PCT:
@@ -408,6 +576,21 @@ def evaluate_position(position, state):
             severity = "medium"
             reasons.append(f"profitable but momentum fading ({momentum_5m:.2f}%, {momentum_15m:.2f}%)")
 
+    if (
+        action in ("sell_partial", "sell_full")
+        and not hard_full_exit
+        and current_pl_pct > 0
+        and retained_strength.get("retained")
+        and not retained_strength.get("broken")
+    ):
+        action = "hold"
+        sell_fraction = 0.0
+        severity = "watch"
+        reasons.append(
+            "retained_session_strength: delaying profitable soft exit; "
+            + str(retained_strength.get("reason"))
+        )
+
     if not reasons:
         reasons.append("no exit trigger")
 
@@ -426,6 +609,19 @@ def evaluate_position(position, state):
         "momentum_30m_pct": round(momentum_30m, 3) if momentum_30m is not None else None,
         "vwap": round(vwap, 4) if vwap else None,
         "vwap_dist_pct": round(vwap_dist_pct, 3) if vwap_dist_pct is not None else None,
+        "session_momentum": session_momentum or {},
+        "retained_session_strength": retained_strength,
+        "session_trend_label": retained_strength.get("session_label"),
+        "session_trend_score": retained_strength.get("session_score"),
+        "session_return_pct": retained_strength.get("session_return_pct"),
+        "session_momentum_15m_pct": retained_strength.get("session_15m_pct"),
+        "session_momentum_30m_pct": retained_strength.get("session_30m_pct"),
+        "session_distance_from_vwap_pct": retained_strength.get("session_vwap_dist_pct"),
+        "session_best_trend_score": retained_strength.get("best_trend_score"),
+        "session_best_return_pct": retained_strength.get("best_session_return_pct"),
+        "session_minutes_strong": retained_strength.get("minutes_strong"),
+        "session_pullback_from_high_pct": retained_strength.get("pullback_from_session_high_pct"),
+        "session_strength_seen": retained_strength.get("session_strength_seen"),
         "action": action,
         "sell_fraction": sell_fraction,
         "severity": severity,
@@ -606,6 +802,7 @@ def render(decisions):
     print(
         f"{'Sym':<6} {'Qty':>6} {'Avg':>9} {'Cur':>9} {'uP&L%':>8} "
         f"{'Peak%':>8} {'Giveback%':>10} {'5m%':>8} {'15m%':>8} {'VWAP%':>8} "
+        f"{'Sess':>8} {'Best':>8} {'MinStr':>6} "
         f"{'Action':<12} Reason"
     )
     print("-" * 140)
@@ -618,6 +815,9 @@ def render(decisions):
             f"{str(d.get('momentum_5m_pct')):>8} "
             f"{str(d.get('momentum_15m_pct')):>8} "
             f"{str(d.get('vwap_dist_pct')):>8} "
+            f"{str(d.get('session_trend_score')):>8} "
+            f"{str(d.get('session_best_trend_score')):>8} "
+            f"{str(d.get('session_minutes_strong')):>6} "
             f"{d['action']:<12} {'; '.join(d['reasons'])}"
         )
 
@@ -635,7 +835,15 @@ def main():
     except Exception as e:
         raise SystemExit(f"Failed to fetch Alpaca positions: {e}")
 
-    decisions = [evaluate_position(p, state) for p in positions]
+    decisions = []
+    for p in positions:
+        session = None
+        try:
+            symbol = str(getattr(p, "symbol", "") or "").strip().upper()
+            session = get_latest_session_momentum(symbol) if symbol else None
+        except Exception as e:
+            session = {"trend_label": "unavailable", "reason": f"session momentum read error: {e}"}
+        decisions.append(evaluate_position(p, state, session_momentum=session))
     save_state(state)
 
     for d in decisions:

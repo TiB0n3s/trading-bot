@@ -194,6 +194,8 @@ def record_decision_snapshot(
         "setup_policy_reason": setup_obs.get("setup_policy_reason"),
         "setup_confidence_adjustment": setup_obs.get("setup_confidence_adjustment"),
         "setup_size_multiplier": setup_obs.get("setup_size_multiplier"),
+        "setup_score": setup_obs.get("setup_score"),
+        "setup_rationale": setup_obs.get("setup_rationale"),
         "buy_opportunity_score": buy_opportunity.get("buy_opportunity_score"),
         "buy_opportunity_recommendation": buy_opportunity.get("buy_opportunity_recommendation"),
         "buy_opportunity_reason": buy_opportunity.get("buy_opportunity_reason"),

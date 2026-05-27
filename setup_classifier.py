@@ -48,6 +48,83 @@ def _to_float(value):
         return None
 
 
+def _score_modifiers(
+    momentum_acceleration_pct: float | None,
+    volume_surge_ratio: float | None,
+    extension_from_recent_base_pct: float | None,
+    prior_session_return_pct: float | None,
+) -> tuple[int, list[str]]:
+    """
+    Return (delta, notes) for the four numeric fields that are not already
+    covered by the string-enum checks in classify_setup.
+
+    Uses the same thresholds as setup_engine._score_modifiers so that
+    replay/analysis scoring stays consistent with the live feature-snapshot path.
+
+    Note: prior_session_return_pct and extension_from_recent_base_pct overlap
+    partially with existing enum-based checks; callers that pass both string
+    enums AND numeric values will see modest stacking.
+    """
+    delta = 0
+    notes: list[str] = []
+
+    acc = momentum_acceleration_pct
+    if acc is not None:
+        if acc <= -0.05:
+            delta -= 12
+            notes.append(f"strong_decel({acc:.3f})")
+        elif acc <= -0.03:
+            delta -= 8
+            notes.append(f"decel({acc:.3f})")
+        elif acc >= 0.05:
+            delta += 6
+            notes.append(f"strong_accel({acc:.3f})")
+        elif acc >= 0.03:
+            delta += 3
+            notes.append(f"accel({acc:.3f})")
+
+    vol = volume_surge_ratio
+    if vol is not None:
+        if vol >= 2.5:
+            delta += 8
+            notes.append(f"vol_surge({vol:.1f}x)")
+        elif vol >= 2.0:
+            delta += 5
+            notes.append(f"vol_elevated({vol:.1f}x)")
+        elif vol < 0.5:
+            delta -= 10
+            notes.append(f"vol_thin({vol:.1f}x)")
+        elif vol < 0.8:
+            delta -= 5
+            notes.append(f"vol_below_avg({vol:.1f}x)")
+
+    ext = extension_from_recent_base_pct
+    if ext is not None:
+        if ext >= 8.0:
+            delta -= 15
+            notes.append(f"overextended({ext:.1f}%)")
+        elif ext >= 5.0:
+            delta -= 10
+            notes.append(f"extended({ext:.1f}%)")
+        elif ext >= 3.0:
+            delta -= 5
+            notes.append(f"slightly_extended({ext:.1f}%)")
+
+    prior = prior_session_return_pct
+    if prior is not None:
+        if prior > 5.0:
+            delta -= 10
+            notes.append(f"prior_strong_day({prior:.1f}%)")
+        elif prior > 3.0:
+            delta -= 6
+            notes.append(f"prior_good_day({prior:.1f}%)")
+        elif prior > 1.5:
+            delta -= 3
+            notes.append(f"prior_up_day({prior:.1f}%)")
+
+    return delta, notes
+
+
 def classify_setup(
     symbol,
     signal_price,
@@ -272,6 +349,17 @@ def classify_setup(
                 score -= 5
                 reasons.append(f"{cluster} cluster elevated")
 
+    # Numeric feature modifiers (same thresholds as setup_engine._score_modifiers).
+    _mod_delta, _mod_notes = _score_modifiers(
+        momentum_acceleration_pct=_to_float(momentum.get("momentum_acceleration_pct")),
+        volume_surge_ratio=_to_float(momentum.get("volume_surge_ratio")),
+        extension_from_recent_base_pct=_to_float(momentum.get("extension_from_recent_base_pct")),
+        prior_session_return_pct=prior_session_return_pct,
+    )
+    if _mod_delta != 0:
+        score += _mod_delta
+        reasons.append(f"numeric_modifiers: {'; '.join(_mod_notes)} → {_mod_delta:+d}")
+
     score = _clamp(round(score))
 
     # Label and recommendation
@@ -346,6 +434,9 @@ def classify_setup(
             "prior_session_return_pct": prior_session_return_pct,
             "prior_session_age_days": session_age_days,
             "rolling_special_labels": sorted(special_labels),
+            "momentum_acceleration_pct": _to_float(momentum.get("momentum_acceleration_pct")),
+            "volume_surge_ratio": _to_float(momentum.get("volume_surge_ratio")),
+            "extension_from_recent_base_pct": _to_float(momentum.get("extension_from_recent_base_pct")),
             "premarket_alignment": premarket_alignment,
             "premarket_alignment_source": premarket_alignment_source,
             "market_bias": market_bias,

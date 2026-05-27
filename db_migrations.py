@@ -384,6 +384,14 @@ MIGRATIONS: tuple[Migration, ...] = (
             "ALTER TABLE feature_snapshots ADD COLUMN prior_session_return_pct REAL",
         ),
     ),
+    Migration(
+        migration_id="20260527_011_setup_score_rationale",
+        description="Add setup_score and setup_rationale columns to decision_snapshots for modifier audit.",
+        statements=(
+            "ALTER TABLE decision_snapshots ADD COLUMN setup_score INTEGER",
+            "ALTER TABLE decision_snapshots ADD COLUMN setup_rationale TEXT",
+        ),
+    ),
 )
 
 

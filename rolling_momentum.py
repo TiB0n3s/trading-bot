@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Rolling multi-day momentum context — observe-only.
+Rolling multi-day momentum context — live context provider.
 
 Builds rolling_momentum.json for all approved symbols using recent Alpaca bars.
 
@@ -8,7 +8,7 @@ Purpose:
 - Add continuity from prior sessions into today's session logic.
 - Track 5-market-day trend context.
 - Track premarket / regular / postmarket movement.
-- Stay observe-only: this script does not place orders and does not block trades.
+- Does not place orders directly. Provides live context to downstream decision/execution modules.
 
 Output:
   rolling_momentum.json
@@ -411,7 +411,7 @@ def main():
         "generated_at": datetime.now().isoformat(),
         "market_time_et": now_et().isoformat(),
         "source": "rolling_momentum.py",
-        "mode": "observe_only",
+        "mode": "live_context_provider",
         "symbols_count": len(APPROVED_SYMBOLS_LIST),
         "symbols": results,
     }
@@ -422,7 +422,7 @@ def main():
 
     print()
     print("=" * 96)
-    print("  Rolling Momentum Context — Observe Only")
+    print("  Rolling Momentum Context — Live Context Provider")
     print("=" * 96)
     print(f"  Output  : {OUTPUT_FILE}")
     print(f"  Symbols : {len(results)}")

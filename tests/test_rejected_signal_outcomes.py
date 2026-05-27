@@ -71,10 +71,28 @@ def test_sell_outcome_is_action_adjusted():
     assert_close(outcome["max_adverse_60m"], -3.5, "sell mae")
 
 
+def test_near_close_partial_reason():
+    outcome = compute_outcome(
+        {
+            "timestamp": "2026-05-26T15:40:00-04:00",
+            "action": "buy",
+            "signal_price": 100.0,
+        },
+        [
+            {"timestamp": "2026-05-26T15:45:00-04:00", "close": 100.2, "high": 100.3, "low": 99.9},
+            {"timestamp": "2026-05-26T16:00:00-04:00", "close": 100.5, "high": 100.6, "low": 100.1},
+        ],
+    )
+
+    assert_equal(outcome["label_status"], "partial", "status")
+    assert_equal(outcome["partial_reason"], "near_close_no_60m_window", "partial reason")
+
+
 def main():
     tests = [
         test_buy_outcome_uses_raw_forward_returns,
         test_sell_outcome_is_action_adjusted,
+        test_near_close_partial_reason,
     ]
 
     for test in tests:

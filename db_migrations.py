@@ -209,6 +209,65 @@ MIGRATIONS: tuple[Migration, ...] = (
             """,
         ),
     ),
+    Migration(
+        migration_id="20260526_006_rejected_outcome_partial_reason",
+        description="Add partial_reason to rejected_signal_outcomes for near-close/pending diagnostics.",
+        statements=(
+            "ALTER TABLE rejected_signal_outcomes ADD COLUMN partial_reason TEXT",
+        ),
+    ),
+    Migration(
+        migration_id="20260526_007_strong_day_participation",
+        description="Create strong_day_participation table for prediction/intelligence validation.",
+        statements=(
+            """
+            CREATE TABLE IF NOT EXISTS strong_day_participation (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                market_date TEXT NOT NULL,
+                symbol TEXT NOT NULL,
+                signal_source TEXT,
+                min_session_pct REAL NOT NULL,
+                session_return_pct REAL,
+                mfe_pct REAL,
+                return_30m_pct REAL,
+                return_60m_pct REAL,
+                first_strong_time TEXT,
+                session_high_time TEXT,
+                primary_status TEXT,
+                primary_blocker TEXT,
+                buy_signal_count INTEGER,
+                approved_buy_count INTEGER,
+                rejected_buy_count INTEGER,
+                sell_signal_count INTEGER,
+                auto_buy_candidate_count INTEGER,
+                auto_buy_strong_count INTEGER,
+                auto_buy_watch_count INTEGER,
+                auto_buy_submitted_count INTEGER,
+                auto_buy_max_score REAL,
+                auto_buy_first_candidate_time TEXT,
+                auto_buy_first_strong_time TEXT,
+                prediction_score REAL,
+                prediction_decision TEXT,
+                prediction_confidence TEXT,
+                prediction_sample_size INTEGER,
+                prediction_timing_score REAL,
+                prediction_trend_score REAL,
+                prediction_trend_label TEXT,
+                raw_json TEXT,
+                generated_at TEXT NOT NULL,
+                UNIQUE(market_date, symbol, min_session_pct)
+            )
+            """,
+            """
+            CREATE INDEX IF NOT EXISTS idx_strong_day_participation_date_symbol
+            ON strong_day_participation(market_date, symbol)
+            """,
+            """
+            CREATE INDEX IF NOT EXISTS idx_strong_day_participation_status
+            ON strong_day_participation(market_date, primary_status)
+            """,
+        ),
+    ),
 )
 
 

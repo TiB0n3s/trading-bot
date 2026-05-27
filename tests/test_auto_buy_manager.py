@@ -13,6 +13,7 @@ sys.path.insert(0, str(ROOT))
 
 from auto_buy_manager import evaluate_auto_buy_candidate
 from auto_buy_manager import maybe_execute_auto_buy
+from auto_buy_manager import should_collect_candidates
 
 
 def assert_equal(actual, expected, label):
@@ -96,6 +97,20 @@ def test_negative_session_blocks_candidate():
 
     assert_equal(result["decision"], "skip", "decision")
     assert_equal(result["severity"], "blocked", "severity")
+    if "negative_session:downtrend" not in result["hard_block_reason"]:
+        raise AssertionError(f"missing hard block reason: {result['hard_block_reason']}")
+
+
+def test_early_session_buffer_skips_collection():
+    import pytz
+    from datetime import datetime
+
+    et = pytz.timezone("America/New_York")
+    ok, reason = should_collect_candidates(et.localize(datetime(2026, 5, 26, 9, 35)))
+
+    assert_equal(ok, False, "collection allowed")
+    if "session elapsed" not in reason:
+        raise AssertionError(f"unexpected buffer reason: {reason}")
 
 
 def test_live_buy_requires_market_open_and_env_flag():
@@ -116,6 +131,7 @@ def main():
         test_strong_internal_candidate_scores_as_buy_candidate,
         test_held_symbol_is_skipped,
         test_negative_session_blocks_candidate,
+        test_early_session_buffer_skips_collection,
         test_live_buy_requires_market_open_and_env_flag,
     ]
 

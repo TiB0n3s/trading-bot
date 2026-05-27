@@ -16,6 +16,14 @@ from db import DB_PATH, get_connection
 from market_intelligence.experience_model import init_prediction_tables
 
 
+def table_exists(con, table_name):
+    row = con.execute(
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?",
+        (table_name,),
+    ).fetchone()
+    return row is not None
+
+
 def money(v):
     if v is None:
         return "-"
@@ -51,6 +59,32 @@ def main():
         params.append(args.symbol.upper())
 
     with get_connection(DB_PATH) as con:
+        strong_join = ""
+        strong_columns = """
+                NULL AS strong_session_return_pct,
+                NULL AS strong_primary_status,
+                NULL AS strong_primary_blocker,
+                NULL AS strong_auto_buy_candidates,
+                NULL AS strong_auto_buy_max_score
+        """
+        if table_exists(con, "strong_day_participation"):
+            strong_columns = """
+                s.session_return_pct AS strong_session_return_pct,
+                s.primary_status AS strong_primary_status,
+                s.primary_blocker AS strong_primary_blocker,
+                s.auto_buy_candidate_count AS strong_auto_buy_candidates,
+                s.auto_buy_max_score AS strong_auto_buy_max_score
+            """
+            strong_join = """
+            LEFT JOIN strong_day_participation s
+              ON s.market_date = p.market_date
+             AND s.symbol = p.symbol
+             AND s.min_session_pct = (
+                 SELECT MIN(min_session_pct)
+                 FROM strong_day_participation
+                 WHERE market_date = p.market_date
+             )
+            """
         rows = con.execute(
             f"""
             SELECT
@@ -60,11 +94,13 @@ def main():
                 c.entry_quality,
                 c.catalyst_score,
                 c.supply_chain_risk_score,
-                c.competitive_risk_score
+                c.competitive_risk_score,
+                {strong_columns}
             FROM daily_symbol_predictions p
             LEFT JOIN daily_symbol_context c
               ON c.market_date = p.market_date
              AND c.symbol = p.symbol
+            {strong_join}
             WHERE p.market_date = ?
               {symbol_sql}
             ORDER BY p.prediction_score DESC, p.symbol
@@ -88,17 +124,18 @@ def main():
     print(
         f"{'Sym':<7} {'Score':>7} {'Timing':>7} {'Trend':>7} {'P(profit)':>10} {'P(order)':>9} "
         f"{'ExpPnL':>9} {'Conf':<9} {'Sample':>6} {'Bias':<8} "
-        f"{'Risk':<10} {'Trend Label':<20} {'Timing Rec':<34} Reason"
+        f"{'Risk':<10} {'Strong%':>8} {'Strong Status':<22} {'Timing Rec':<28} Reason"
     )
     print(
         f"{'-'*7} {'-'*7} {'-'*7} {'-'*7} {'-'*10} {'-'*9} "
         f"{'-'*9} {'-'*9} {'-'*6} {'-'*8} "
-        f"{'-'*10} {'-'*20} {'-'*34} {'-'*60}"
+        f"{'-'*10} {'-'*8} {'-'*22} {'-'*28} {'-'*60}"
     )
 
     for r in rows:
         timing_score = "-" if r["timing_score"] is None else f"{float(r['timing_score']):.0f}"
         trend_score = "-" if r["trend_score"] is None else f"{float(r['trend_score']):.0f}"
+        strong_pct = "-" if r["strong_session_return_pct"] is None else f"{float(r['strong_session_return_pct']):+.2f}%"
         print(
             f"{r['symbol']:<7} "
             f"{float(r['prediction_score'] or 0):>7.2f} "
@@ -111,8 +148,9 @@ def main():
             f"{int(r['sample_size'] or 0):>6} "
             f"{short(r['bias'], 8):<8} "
             f"{short(r['risk_level'], 10):<10} "
-            f"{short(r['trend_label'], 20):<20} "
-            f"{short(r['recommended_entry_timing'], 34):<34} "
+            f"{strong_pct:>8} "
+            f"{short(r['strong_primary_status'], 22):<22} "
+            f"{short(r['recommended_entry_timing'], 28):<28} "
             f"{short(r['reason'], 60)}"
         )
 
@@ -124,6 +162,7 @@ def main():
     print("  Use this report to compare predictions against later realized outcomes.")
     print("  Timing Rec is observe-only and comes from historical signal timing lessons.")
     print("  Trend score/label are observe-only and come from historical trend context similarity.")
+    print("  Strong Status appears after strong_day_participation_report.py --write-db runs.")
 
     return 0
 

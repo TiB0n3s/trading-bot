@@ -30,7 +30,7 @@ from ml_platform.governance import (
 from ml_platform.integration_contract import default_contract
 from ml_platform.registry import load_registry, register_model
 from ml_platform.readiness import retraining_readiness_report
-from ml_platform.replay import replay_decisions_scaffold
+from ml_platform.replay import replay_decisions_scaffold, replay_decisions_v1
 from ml_platform.serving import SQLitePredictionProvider
 from ml_platform.staged import staged_ml_integration_report, write_staged_report
 
@@ -95,11 +95,13 @@ def main() -> int:
     model_card = sub.add_parser("model-card-template", help="Print a model-card template")
     model_card.add_argument("--model-id", default="candidate_model")
 
-    replay = sub.add_parser("replay-decisions", help="Print the shadow replay output contract")
+    replay = sub.add_parser("replay-decisions", help="Re-run decision_policy against stored snapshots (read-only)")
     replay.add_argument("--start-date", required=True)
     replay.add_argument("--end-date", required=True)
     replay.add_argument("--policy", default="current")
-    replay.add_argument("--candidate-model", required=True)
+    replay.add_argument("--candidate-model", default="similarity_v0")
+    replay.add_argument("--db-path", default=str(DB_PATH))
+    replay.add_argument("--output")
 
     staged = sub.add_parser("staged-readiness", help="Print staged observe-only ML integration report")
     staged.add_argument("--db-path", default=str(DB_PATH))
@@ -242,16 +244,18 @@ def main() -> int:
         return 0
 
     if args.command == "replay-decisions":
-        print(json.dumps(
-            replay_decisions_scaffold(
-                start_date=args.start_date,
-                end_date=args.end_date,
-                policy=args.policy,
-                candidate_model=args.candidate_model,
-            ),
-            indent=2,
-            sort_keys=True,
-        ))
+        result = replay_decisions_v1(
+            start_date=args.start_date,
+            end_date=args.end_date,
+            policy=args.policy,
+            db_path=args.db_path,
+        )
+        if args.output:
+            output_path = Path(args.output)
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+            output_path.write_text(json.dumps(result, indent=2, sort_keys=True) + "\n")
+            print(f"Wrote replay decisions report to {output_path}")
+        print(json.dumps(result, indent=2, sort_keys=True))
         return 0
 
     if args.command == "staged-readiness":

@@ -210,6 +210,10 @@ Initial auto-buy methodology:
   `AUTO_BUY_TAKE_PROFIT_PCT=2.00`.
 - Live execution is capped by `AUTO_BUY_MAX_ORDERS_PER_RUN`,
   `AUTO_BUY_MAX_DAILY_ORDERS`, and `AUTO_BUY_COOLDOWN_MINUTES`.
+- Before submitting a live paper order, auto-buy cross-checks shared app
+  cooldowns, recent-sell churn state, per-symbol app buy count, and
+  correlation-cluster exposure. Candidate collection skips closed-market runs
+  and the first session buffer window to avoid dead/noisy rows.
 
 Remaining candidates to review after additional paper evidence:
 
@@ -669,6 +673,10 @@ Reusable logic staged for ML:
   event scores.
 - `daily_symbol_events`: catalyst/event coverage and future event embeddings.
 - `daily_symbol_predictions`: existing observe-only similarity predictions.
+- `strong_day_participation`: post-session full-symbol-universe participation
+  outcomes, including symbols that were strong without TradingView alerts;
+  used by prediction validation and intelligence prediction reports after
+  `strong_day_participation_report.py --write-db` runs.
 - `market_intelligence.tape_reader`: future intraday tape labels from bar data.
 - `strategy.trade_scorer`: future shadow-only trader-brain score, with leakage
   controls before historical use.
@@ -699,6 +707,10 @@ ML platform use:
 - Trend/momentum features must carry availability timestamps. A trend report
   produced after an order decision is evaluation evidence, not a training
   feature for that decision.
+- Strong-day participation rows are also post-session evaluation evidence.
+  They are valid for prediction validation and cohort analysis, but not as
+  pre-decision training features unless joined through a leakage-safe label
+  builder.
 
 Current command:
 
@@ -762,16 +774,20 @@ A model can only move from observe-only to paper-trading influence after it has:
     report.
 13. Started: convert the similarity model into versioned model `v0` with
     research-only metadata.
-14. Build the real `replay-decisions` command.
+14. Done: build the initial read-only `replay-decisions` command. It re-runs
+    `decision_policy` against stored `decision_snapshots` account-state JSON
+    and reports drift without changing live behavior.
 15. Add calibration and walk-forward evaluation.
 16. Started: define the first retraining-readiness report and 20-session review
     cadence.
-17. Only then expose the read-only prediction provider in `/status`.
+17. Done: expose read-only symbol intelligence in `/status`; prediction values
+    remain observe-only and do not affect live decisions.
 18. Started: evaluate whether TradingView alerts should remain primary, become
     secondary, or be replaced by an Alpaca-bar-derived internal signal
     generator after side-by-side paper-session evidence. `auto_buy_outcome_report.py`
     now compares internal candidate forward returns against the TradingView
-    signal baseline.
+    signal baseline, and `strong_day_participation_report.py --write-db`
+    captures full-universe strong-session coverage including no-alert symbols.
 
 Critical blockers before real training:
 

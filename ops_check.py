@@ -86,6 +86,12 @@ def load_env_file(path=ENV_FILE):
     return True
 
 
+# Commands that take no date arg (run with no extra args)
+# Commands that take a positional date: drawdown, post, adaptive_impact, strategy_intelligence
+# Commands that take --date DATE: filters, blocked, event-attribution, intelligence, context,
+#   learning, predictions, signal-lessons, trends, prediction-validation, auto-buy-outcomes,
+#   strong-days
+# Full arg construction is done in main() below.
 COMMANDS = {
     "morning": ["morning_check.py"],
     "positions": ["position_review.py"],
@@ -93,24 +99,24 @@ COMMANDS = {
     "adaptive": ["adaptive_confirmation_report.py"],
     "adaptive_impact": ["adaptive_impact_report.py"],
     "strategy_intelligence": ["strategy_intelligence_report.py"],
-    "blocked": ["blocked_signal_outcome_report.py", "--date"],
+    "blocked": ["blocked_signal_outcome_report.py"],
     "session": ["session_momentum.py", "--all"],
     "position-momentum": ["position_momentum_monitor.py"],
-    "filters": ["filter_report.py", "--date"],
+    "filters": ["filter_report.py"],
     "drawdown": ["drawdown_report.py"],
     "post": ["post_session_check.py"],
     "events": ["bot_events.py", "--limit", "25"],
     "bot-events": ["bot_events.py", "--limit", "25"],
-    "event-attribution": ["event_attribution_report.py", "--date"],
-    "intelligence": ["intelligence_context_report.py", "--date"],
-    "context": ["context_trade_join_report.py", "--date"],
-    "learning": ["intelligence_learning_report.py", "--date"],
-    "predictions": ["intelligence_prediction_report.py", "--date"],
-    "signal-lessons": ["signal_timing_lesson_report.py", "--date"],
-    "trends": ["trend_context_report.py", "--date"],
-    "prediction-validation": ["prediction_validation_report.py", "--date"],
-    "auto-buy-outcomes": ["auto_buy_outcome_report.py", "--date"],
-    "strong-days": ["strong_day_participation_report.py", "--date"],
+    "event-attribution": ["event_attribution_report.py"],
+    "intelligence": ["intelligence_context_report.py"],
+    "context": ["context_trade_join_report.py"],
+    "learning": ["intelligence_learning_report.py"],
+    "predictions": ["intelligence_prediction_report.py"],
+    "signal-lessons": ["signal_timing_lesson_report.py"],
+    "trends": ["trend_context_report.py"],
+    "prediction-validation": ["prediction_validation_report.py"],
+    "auto-buy-outcomes": ["auto_buy_outcome_report.py"],
+    "strong-days": ["strong_day_participation_report.py"],
 }
 
 
@@ -290,10 +296,21 @@ def intelligence_summary(target_date):
             """,
             (target_date,),
         ).fetchone()["n"]
+        strong_day_count = 0
+        if _table_exists(con, "strong_day_participation"):
+            strong_day_count = con.execute(
+                """
+                SELECT COUNT(*) AS n
+                FROM strong_day_participation
+                WHERE market_date = ?
+                """,
+                (target_date,),
+            ).fetchone()["n"]
 
         print(f"context rows    : {context_count}")
         print(f"event rows      : {event_count}")
         print(f"prediction rows : {prediction_count}")
+        print(f"strong-day rows : {strong_day_count}")
 
         freshness = con.execute(
             """
@@ -474,6 +491,7 @@ def dataset_health(target_date):
             "daily_symbol_context",
             "daily_symbol_events",
             "daily_symbol_predictions",
+            "strong_day_participation",
             "bot_events",
         ]
         for table in core_tables:
@@ -487,6 +505,7 @@ def dataset_health(target_date):
             ("daily_symbol_context", "market_date"),
             ("daily_symbol_events", "market_date"),
             ("daily_symbol_predictions", "market_date"),
+            ("strong_day_participation", "market_date"),
         ]
         target_counts = {}
         for table, col in dated_tables:
@@ -497,7 +516,7 @@ def dataset_health(target_date):
 
         print()
         print("Recent intelligence dates")
-        for table in ("daily_symbol_context", "daily_symbol_events", "daily_symbol_predictions"):
+        for table in ("daily_symbol_context", "daily_symbol_events", "daily_symbol_predictions", "strong_day_participation"):
             if not _table_exists(con, table):
                 print(f"  {table}: missing")
                 continue
@@ -1296,13 +1315,39 @@ def rejected_outcomes_health(target_date):
         print(f"  no_bars                {int(outcomes['no_bars'] or 0):>8}")
         print(f"  error                  {int(outcomes['error'] or 0):>8}")
 
+        cols = {row["name"] for row in con.execute("PRAGMA table_info(rejected_signal_outcomes)").fetchall()}
+        if "partial_reason" in cols:
+            print()
+            print("Partial reasons")
+            rows = con.execute(
+                """
+                SELECT COALESCE(partial_reason, 'unspecified') AS partial_reason,
+                       COUNT(*) AS n
+                FROM rejected_signal_outcomes
+                WHERE substr(timestamp, 1, 10) = ?
+                  AND label_status IN ('partial', 'pending', 'no_bars')
+                GROUP BY COALESCE(partial_reason, 'unspecified')
+                ORDER BY n DESC, partial_reason
+                """,
+                (target_date,),
+            ).fetchall()
+            if rows:
+                for row in rows:
+                    print(f"  {row['partial_reason']:<30} {row['n']:>6}")
+            else:
+                print("  none")
+        elif int(outcomes["partial"] or 0):
+            print()
+            print("[INFO] partial rows may be near-close structural partials or pending forward bars")
+
         print()
         print("By action/status")
         rows = con.execute(
             """
             SELECT action, label_status, COUNT(*) AS n,
                    AVG(return_15m) AS avg_return_15m,
-                   AVG(return_60m) AS avg_return_60m
+                   AVG(return_60m) AS avg_return_60m,
+                   AVG(return_eod) AS avg_return_eod
             FROM rejected_signal_outcomes
             WHERE substr(timestamp, 1, 10) = ?
             GROUP BY action, label_status
@@ -1314,11 +1359,13 @@ def rejected_outcomes_health(target_date):
             for row in rows:
                 avg15 = row["avg_return_15m"]
                 avg60 = row["avg_return_60m"]
+                avgeod = row["avg_return_eod"]
                 avg15_s = f"{avg15:.3f}%" if avg15 is not None else "-"
                 avg60_s = f"{avg60:.3f}%" if avg60 is not None else "-"
+                avgeod_s = f"{avgeod:.3f}%" if avgeod is not None else "-"
                 print(
                     f"  {row['action']:<5} {row['label_status']:<10} "
-                    f"{row['n']:>6} avg15={avg15_s:>9} avg60={avg60_s:>9}"
+                    f"{row['n']:>6} avg15={avg15_s:>9} avg60={avg60_s:>9} avgeod={avgeod_s:>9}"
                 )
         else:
             print("  none")
@@ -1408,6 +1455,29 @@ def auto_buy_health(target_date):
             print("  none")
 
         print()
+        cols = {row["name"] for row in con.execute("PRAGMA table_info(auto_buy_candidates)").fetchall()}
+        if "hard_block_reason" in cols:
+            print("Hard-block reasons")
+            rows = con.execute(
+                """
+                SELECT hard_block_reason, COUNT(*) AS n
+                FROM auto_buy_candidates
+                WHERE substr(timestamp, 1, 10) = ?
+                  AND hard_block_reason IS NOT NULL
+                  AND hard_block_reason != ''
+                GROUP BY hard_block_reason
+                ORDER BY n DESC, hard_block_reason
+                LIMIT 10
+                """,
+                (target_date,),
+            ).fetchall()
+            if rows:
+                for row in rows:
+                    print(f"  {row['hard_block_reason']:<55} {row['n']:>6}")
+            else:
+                print("  none")
+            print()
+
         print("Top candidates")
         rows = con.execute(
             """
@@ -1801,6 +1871,7 @@ def main():
         checks.append(run("Adaptive Impact Report", ["adaptive_impact_report.py", target_date]))
         checks.append(run("Filter Report", ["filter_report.py", "--date", target_date]))
         checks.append(run("Blocked Signal Outcome Report", ["blocked_signal_outcome_report.py", "--date", target_date]))
+        checks.append(run("Strong-Day Participation", ["strong_day_participation_report.py", "--date", target_date, "--write-db"]))
         checks.append(run("Rejected Outcomes", ["ops_check.py", "rejected-outcomes", target_date]))
         checks.append(run("Auto-Buy Candidates", ["ops_check.py", "auto-buy", target_date]))
         checks.append(run("Auto-Buy Outcomes", ["auto_buy_outcome_report.py", "--date", target_date]))
@@ -1825,27 +1896,17 @@ def main():
         print(__doc__.strip())
         return 2
 
-    args = COMMANDS[command]
+    script = COMMANDS[command][0]
+    extra = COMMANDS[command][1:]
 
-    if command == "filters":
-        args = ["filter_report.py", "--date", target_date]
-    elif command == "blocked":
-        args = ["blocked_signal_outcome_report.py", "--date", target_date]
+    if command in ("filters", "blocked", "event-attribution", "intelligence", "context",
+                   "learning", "predictions", "signal-lessons", "trends",
+                   "prediction-validation", "auto-buy-outcomes", "strong-days"):
+        args = [script] + extra + ["--date", target_date]
     elif command in ("drawdown", "post", "adaptive_impact", "strategy_intelligence"):
-        args = args + [target_date]
-    elif command in (
-        "intelligence",
-        "context",
-        "learning",
-        "predictions",
-        "signal-lessons",
-        "trends",
-        "prediction-validation",
-        "event-attribution",
-        "auto-buy-outcomes",
-        "strong-days",
-    ):
-        args = [args[0], "--date", target_date]
+        args = [script] + extra + [target_date]
+    else:
+        args = [script] + extra
 
     ok = run(command.title(), args)
     return 0 if ok else 1

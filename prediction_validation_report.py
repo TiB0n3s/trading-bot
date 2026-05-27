@@ -102,7 +102,7 @@ def load_signal_outcomes(con, target_date: str) -> dict[str, Any]:
         """,
         (target_date,),
     ).fetchall()
-    return {r["symbol"]: r for r in rows}
+    return {r["symbol"]: dict(r) for r in rows}
 
 
 def load_matched_trades(con, target_date: str) -> dict[str, Any]:
@@ -122,7 +122,26 @@ def load_matched_trades(con, target_date: str) -> dict[str, Any]:
         """,
         (target_date,),
     ).fetchall()
-    return {r["symbol"]: r for r in rows}
+    return {r["symbol"]: dict(r) for r in rows}
+
+
+def load_strong_day_participation(con, target_date: str) -> dict[str, Any]:
+    if not table_exists(con, "strong_day_participation"):
+        return {}
+    rows = con.execute(
+        """
+        SELECT *
+        FROM strong_day_participation
+        WHERE market_date = ?
+          AND min_session_pct = (
+              SELECT MIN(min_session_pct)
+              FROM strong_day_participation
+              WHERE market_date = ?
+          )
+        """,
+        (target_date, target_date),
+    ).fetchall()
+    return {r["symbol"]: dict(r) for r in rows}
 
 
 def section(title: str) -> None:
@@ -207,6 +226,71 @@ def render_outcome_buckets(predictions, signals, matched) -> None:
         )
 
 
+def render_strong_day_buckets(predictions, strong_days) -> None:
+    section("Strong-Day Participation By Prediction Bucket")
+    if not strong_days:
+        print("No strong_day_participation rows yet. Run strong_day_participation_report.py --write-db after the session.")
+        return
+
+    buckets = defaultdict(list)
+    for row in predictions:
+        buckets[bucket_for_score(row["prediction_score"])].append(row)
+
+    print(
+        f"{'Bucket':<18} {'N':>4} {'Strong':>7} {'Particip':>8} "
+        f"{'Missed':>7} {'AutoCand':>8} {'AvgStrong%':>10}"
+    )
+    for bucket in ("high_55_plus", "mid_50_55", "low_45_50", "weak_below_45", "unknown"):
+        rows = buckets.get(bucket) or []
+        if not rows:
+            continue
+        symbols = [r["symbol"] for r in rows]
+        tracked_rows = [
+            strong_days.get(s)
+            for s in symbols
+            if strong_days.get(s) and strong_days[s]["session_return_pct"] is not None
+        ]
+        strong_rows = [
+            r for r in tracked_rows
+            if float(r["session_return_pct"] or 0) >= float(r["min_session_pct"] or 0)
+        ]
+        participated = sum(
+            1 for r in strong_rows
+            if r["primary_status"] in ("full_participation", "partial_participation", "auto_buy_participation")
+        )
+        missed = sum(
+            1 for r in strong_rows
+            if r["primary_status"] in ("no_signals", "no_buy_signals", "sell_only_signals", "all_rejected", "auto_buy_candidate_only")
+        )
+        auto_candidates = sum(1 for r in strong_rows if int(r["auto_buy_candidate_count"] or 0) > 0)
+        avg_strong = avg([r["session_return_pct"] for r in strong_rows])
+        print(
+            f"{bucket:<18} {len(rows):>4} {len(strong_rows):>7} {participated:>8} "
+            f"{missed:>7} {auto_candidates:>8} {fmt(avg_strong):>10}"
+        )
+
+    section("Top Strong Days Versus Predictions")
+    ranked = sorted(
+        [
+            r for r in strong_days.values()
+            if r["session_return_pct"] is not None
+            and float(r["session_return_pct"] or 0) >= float(r["min_session_pct"] or 0)
+        ],
+        key=lambda r: float(r["session_return_pct"] or 0),
+        reverse=True,
+    )
+    print(f"{'Sym':<7} {'Strong%':>8} {'Pred':>7} {'Status':<24} {'Source':<18} {'Blocker':<24}")
+    for r in ranked[:12]:
+        print(
+            f"{r['symbol']:<7} "
+            f"{fmt(r['session_return_pct']):>8} "
+            f"{fmt(r['prediction_score']):>7} "
+            f"{str(r['primary_status'] or '-'):<24} "
+            f"{str(r['signal_source'] or '-'):<18} "
+            f"{str(r['primary_blocker'] or '-'):<24}"
+        )
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("date_arg", nargs="?")
@@ -224,11 +308,13 @@ def main() -> int:
         predictions = load_predictions(con, target_date)
         signals = load_signal_outcomes(con, target_date)
         matched = load_matched_trades(con, target_date)
+        strong_days = load_strong_day_participation(con, target_date)
 
     print()
     print(f"Predictions          : {len(predictions)}")
     print(f"Symbols with signals : {len(signals)}")
     print(f"Symbols with matches : {len(matched)}")
+    print(f"Strong-day rows      : {len(strong_days)}")
 
     if not predictions:
         print("[FAIL] No daily_symbol_predictions rows found for this date.")
@@ -240,6 +326,7 @@ def main() -> int:
     render_distribution(predictions)
     render_top_bottom(predictions)
     render_outcome_buckets(predictions, signals, matched)
+    render_strong_day_buckets(predictions, strong_days)
 
     print()
     print("[OK] prediction validation report completed")

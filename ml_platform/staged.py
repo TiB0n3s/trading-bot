@@ -22,7 +22,7 @@ from ml_platform.governance import (
     build_dataset_manifest,
 )
 from ml_platform.readiness import retraining_readiness_report
-from ml_platform.replay import replay_decisions_scaffold
+from ml_platform.replay import replay_decisions_v1
 from ml_platform.serving import SQLitePredictionProvider
 
 
@@ -94,11 +94,11 @@ def staged_ml_integration_report(
         dataset_profile=profile,
         dataset_manifest=manifest,
         brain_feature_manifest=brain_feature_manifest(rows),
-        replay_contract=replay_decisions_scaffold(
+        replay_contract=replay_decisions_v1(
             start_date=start_date,
             end_date=end_date,
             policy=policy,
-            candidate_model=candidate_model,
+            db_path=db_path,
         ),
         prediction_provider_contract={
             "provider": "SQLitePredictionProvider",
@@ -122,7 +122,7 @@ def staged_ml_integration_report(
         },
         notes=(
             "Staged integration is for tests, reports, and operator review.",
-            "It builds manifests, profiles, brain-feature summaries, replay contracts, and prediction-provider contracts.",
+            "It builds manifests, profiles, brain-feature summaries, replay summaries, and prediction-provider contracts.",
             "It does not train models, place orders, loosen risk controls, or write to trades.db.",
         ),
     )

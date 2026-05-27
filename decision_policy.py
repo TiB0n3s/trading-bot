@@ -12,7 +12,41 @@ Purpose:
 
 from __future__ import annotations
 
+from config import DAILY_LOSS_LIMIT_PCT
 from strategy_memory import contextual_memory_for_signal
+
+_HARD_GATE_CONTEXT_CHECKS = [
+    # (account_state key path, condition_fn, block_reason)
+    # Each check looks at account_state data that hard gates in app.py already enforce.
+    # These checks make the policy self-contained for replay and audit; they do not
+    # change live behavior because the hard gates run before the policy is called.
+    (
+        lambda s: s.get("daily_pnl_pct"),
+        lambda v: v is not None and v < DAILY_LOSS_LIMIT_PCT,
+        "circuit_breaker: daily_pnl_pct below loss limit",
+    ),
+    (
+        lambda s: (s.get("macro_risk") or {}).get("block_new_buys"),
+        lambda v: bool(v),
+        "macro_risk: block_new_buys is set",
+    ),
+    (
+        lambda s: (s.get("account") or {}).get("circuit_breaker_active_for_buys"),
+        lambda v: bool(v),
+        "circuit_breaker: active per account state",
+    ),
+]
+
+
+def _hard_gate_block(account_state):
+    for extract, condition, reason in _HARD_GATE_CONTEXT_CHECKS:
+        try:
+            value = extract(account_state)
+            if condition(value):
+                return reason
+        except Exception:
+            pass
+    return None
 
 
 def _to_float(value):
@@ -66,6 +100,20 @@ def evaluate_decision_policy(symbol, action, intelligence_context=None, account_
             "size_multiplier": 1.0,
             "reason": "sell signal bypasses buy-side decision policy",
             "evidence": [],
+        }
+
+    hard_gate = _hard_gate_block(account_state)
+    if hard_gate:
+        return {
+            "decision": "block",
+            "size_multiplier": 0.0,
+            "reason": f"hard gate context in account_state: {hard_gate}",
+            "evidence": [hard_gate],
+            "risks": [hard_gate],
+            "supports": [],
+            "learned_min_score": None,
+            "worst_memory_recommendation": None,
+            "memory_matches": [],
         }
 
     evidence = []

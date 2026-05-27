@@ -7,6 +7,7 @@ Usage:
   python3 post_session_check.py 2026-05-08
 """
 
+import os
 import subprocess
 import sys
 import sqlite3
@@ -14,10 +15,39 @@ from collections import defaultdict
 from datetime import date
 from pathlib import Path
 
+BASE_DIR = Path(__file__).resolve().parent
+VENV_PYTHON = BASE_DIR / "venv" / "bin" / "python"
+ENV_FILE = Path("/etc/trading-bot.env")
+
+
+def _reexec_under_venv_if_available():
+    if not VENV_PYTHON.exists():
+        return
+    venv_dir = VENV_PYTHON.parent.parent.resolve()
+    if Path(sys.prefix).resolve() == venv_dir:
+        return
+    os.execv(str(VENV_PYTHON), [str(VENV_PYTHON), str(Path(__file__).resolve())] + sys.argv[1:])
+
+
+def _load_env_file(path=ENV_FILE):
+    if not path.exists():
+        return
+    for raw_line in path.read_text().splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        key = key.strip()
+        value = value.strip().strip('"').strip("'")
+        if key and key not in os.environ:
+            os.environ[key] = value
+
+
+_reexec_under_venv_if_available()
+_load_env_file()
+
 from broker import api
 from trade_matcher import rebuild_matched_trades
-
-BASE_DIR = Path(__file__).resolve().parent
 from db import DB_PATH, get_connection
 
 
@@ -63,18 +93,17 @@ def db_connect():
 
 def check_missing_fills(target_date):
     print("\n── Missing Fill Prices ─────────────────────────────")
-    con = db_connect()
-    rows = con.execute("""
-        SELECT id, timestamp, symbol, action, order_id, order_status, qty, fill_price
-        FROM trades
-        WHERE timestamp LIKE ?
-          AND approved = 1
-          AND order_id IS NOT NULL
-          AND qty IS NOT NULL
-          AND fill_price IS NULL
-        ORDER BY id DESC
-    """, (f"{target_date}%",)).fetchall()
-    con.close()
+    with db_connect() as con:
+        rows = con.execute("""
+            SELECT id, timestamp, symbol, action, order_id, order_status, qty, fill_price
+            FROM trades
+            WHERE timestamp LIKE ?
+              AND approved = 1
+              AND order_id IS NOT NULL
+              AND qty IS NOT NULL
+              AND fill_price IS NULL
+            ORDER BY id DESC
+        """, (f"{target_date}%",)).fetchall()
 
     if not rows:
         ok("No approved order rows missing fill_price for target date")
@@ -100,22 +129,21 @@ def check_reconciliation():
         fail(f"Could not fetch Alpaca positions: {e}")
         return False
 
-    con = db_connect()
-    rows = con.execute("""
-        SELECT symbol,
-               SUM(CASE
-                       WHEN LOWER(action) = 'buy'  THEN COALESCE(qty, 0)
-                       WHEN LOWER(action) = 'sell' THEN -COALESCE(qty, 0)
-                       ELSE 0
-                   END) AS net_qty
-        FROM trades
-        WHERE order_id IS NOT NULL
-          AND order_status IN ('filled', 'partially_filled')
-        GROUP BY symbol
-        HAVING net_qty > 0
-        ORDER BY symbol
-    """).fetchall()
-    con.close()
+    with db_connect() as con:
+        rows = con.execute("""
+            SELECT symbol,
+                   SUM(CASE
+                           WHEN LOWER(action) = 'buy'  THEN COALESCE(qty, 0)
+                           WHEN LOWER(action) = 'sell' THEN -COALESCE(qty, 0)
+                           ELSE 0
+                       END) AS net_qty
+            FROM trades
+            WHERE order_id IS NOT NULL
+              AND order_status IN ('filled', 'partially_filled')
+            GROUP BY symbol
+            HAVING net_qty > 0
+            ORDER BY symbol
+        """).fetchall()
 
     db_open = {r["symbol"]: float(r["net_qty"]) for r in rows if r["symbol"]}
 
@@ -158,19 +186,18 @@ def check_reconciliation():
 
 def check_fill_events(target_date):
     print("\n── Fill Events ─────────────────────────────────────")
-    con = db_connect()
-    try:
-        rows = con.execute("""
-            SELECT event, symbol, side, status, COUNT(*) AS n
-            FROM fill_events
-            WHERE timestamp LIKE ?
-            GROUP BY event, symbol, side, status
-            ORDER BY n DESC
-            LIMIT 20
-        """, (f"{target_date}%",)).fetchall()
-    except sqlite3.OperationalError:
-        rows = []
-    con.close()
+    with db_connect() as con:
+        try:
+            rows = con.execute("""
+                SELECT event, symbol, side, status, COUNT(*) AS n
+                FROM fill_events
+                WHERE timestamp LIKE ?
+                GROUP BY event, symbol, side, status
+                ORDER BY n DESC
+                LIMIT 20
+            """, (f"{target_date}%",)).fetchall()
+        except sqlite3.OperationalError:
+            rows = []
 
     if not rows:
         warn("No fill_events rows found for target date")
@@ -187,17 +214,16 @@ def check_fill_events(target_date):
 
 def check_signal_counts(target_date):
     print("\n── Signal Counts ───────────────────────────────────")
-    con = db_connect()
-    row = con.execute("""
-        SELECT
-            COUNT(*) AS total,
-            SUM(CASE WHEN approved = 1 THEN 1 ELSE 0 END) AS approved,
-            SUM(CASE WHEN approved = 0 THEN 1 ELSE 0 END) AS rejected,
-            SUM(CASE WHEN order_id IS NOT NULL THEN 1 ELSE 0 END) AS orders
-        FROM trades
-        WHERE timestamp LIKE ?
-    """, (f"{target_date}%",)).fetchone()
-    con.close()
+    with db_connect() as con:
+        row = con.execute("""
+            SELECT
+                COUNT(*) AS total,
+                SUM(CASE WHEN approved = 1 THEN 1 ELSE 0 END) AS approved,
+                SUM(CASE WHEN approved = 0 THEN 1 ELSE 0 END) AS rejected,
+                SUM(CASE WHEN order_id IS NOT NULL THEN 1 ELSE 0 END) AS orders
+            FROM trades
+            WHERE timestamp LIKE ?
+        """, (f"{target_date}%",)).fetchone()
 
     total = row["total"] or 0
     approved = row["approved"] or 0
@@ -249,7 +275,8 @@ def main():
     checks.append(run_cmd("Position Review", [sys.executable, "position_review.py"]))
     checks.append(run_cmd("Drawdown Report", [sys.executable, "drawdown_report.py", target_date]))
     checks.append(run_cmd("Analytics Report", [sys.executable, "analytics_report.py", "--date", target_date]))
-    checks.append(run_cmd("Strong-Day Participation", [sys.executable, "strong_day_participation_report.py", "--date", target_date]))
+    checks.append(run_cmd("Strong-Day Participation", [sys.executable, "strong_day_participation_report.py", "--date", target_date, "--write-db"]))
+    checks.append(run_cmd("Prediction Validation", [sys.executable, "prediction_validation_report.py", "--date", target_date]))
 
     print("\n" + "=" * 64)
     if all(checks):

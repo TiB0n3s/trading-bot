@@ -16,6 +16,7 @@ As of the latest roadmap work:
   - `daily_symbol_context`
   - `daily_symbol_events`
   - `daily_symbol_predictions`
+  - `strong_day_participation` after the post-session strong-day report runs
   - trend context reports
 - `prediction_validation_report.py` exists and is wired into `ops_check.py`.
 - `next_trading_date.py` now uses holiday-aware market calendar logic from `market_time.py`.
@@ -32,7 +33,13 @@ As of the latest roadmap work:
 - `decision_snapshots` records immutable point-in-time decision context for
   new approvals/rejections.
 - `auto_buy_outcome_report.py` compares internal auto-buy candidates with
-  forward feature-snapshot returns and the TradingView signal baseline.
+  forward feature-snapshot returns, score buckets, and the TradingView signal
+  baseline.
+- `strong_day_participation_report.py --write-db` persists strong-session
+  participation rows and joins them back into prediction validation.
+- Auto-buy live paper execution cross-checks shared app cooldowns, recent-sell
+  churn state, per-symbol daily app buys, and correlation-cluster exposure
+  before calling the broker.
 - `archive_context_state.py` snapshots market context, override hashes, policy
   artifact hashes, and symbol-universe version for future replay.
 - App-startup schema `ALTER TABLE` work has moved into `db_migrations.py`.
@@ -624,7 +631,9 @@ python3 ops_check.py trends "$TARGET_DATE"
 python3 ops_check.py prediction-validation "$TARGET_DATE"
 Prediction Validation Report
 
-prediction_validation_report.py compares predictions to later signal/trade outcomes.
+prediction_validation_report.py compares predictions to later signal/trade
+outcomes and, after `strong_day_participation_report.py --write-db` runs,
+strong-session participation/coverage outcomes.
 
 Usage:
 
@@ -632,6 +641,7 @@ python3 prediction_validation_report.py
 python3 prediction_validation_report.py 2026-05-26
 python3 prediction_validation_report.py --date 2026-05-26
 python3 ops_check.py prediction-validation 2026-05-26
+python3 strong_day_participation_report.py --date 2026-05-26 --write-db
 
 Pre-session mode is expected to show:
 
@@ -646,6 +656,7 @@ Did higher prediction_score buckets outperform lower-score buckets?
 Did recommended_entry_timing align with better outcomes?
 Did trend_label / trend_regime identify risk?
 Did weak predictions avoid losses or correlate with blocked signals?
+Did predicted symbols participate in strong sessions or miss them?
 Common Reports
 Morning readiness
 python3 ops_check.py morning
@@ -806,6 +817,7 @@ recent_sells
 daily_symbol_context
 daily_symbol_events
 daily_symbol_predictions
+strong_day_participation
 historical_signal_outcomes
 historical_trade_outcomes
 historical_trend_context
@@ -828,6 +840,10 @@ WHERE market_date = '$TARGET_DATE'
 UNION ALL
 SELECT 'predictions', COUNT(*)
 FROM daily_symbol_predictions
+WHERE market_date = '$TARGET_DATE'
+UNION ALL
+SELECT 'strong_day', COUNT(*)
+FROM strong_day_participation
 WHERE market_date = '$TARGET_DATE';
 "
 Manual Validation Workflow
@@ -858,6 +874,7 @@ After close
 python3 ops_check.py post $(date +%F)
 python3 ops_check.py predictions $(date +%F)
 python3 ops_check.py trends $(date +%F)
+python3 strong_day_participation_report.py --date $(date +%F) --write-db
 python3 ops_check.py prediction-validation $(date +%F)
 python3 analytics_report.py --date $(date +%F)
 python3 filter_report.py --date $(date +%F)

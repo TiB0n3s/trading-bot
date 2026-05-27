@@ -169,6 +169,37 @@ def _summarize(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return summary
 
 
+def _score_bucket(score: float | None) -> str:
+    if score is None:
+        return "missing"
+    if score >= 16:
+        return "16+"
+    if score >= 13:
+        return "13-15"
+    if score >= 10:
+        return "10-12"
+    if score >= 7:
+        return "7-9"
+    return "<7"
+
+
+def _summarize_score_buckets(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    groups: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for row in rows:
+        groups[_score_bucket(row.get("score"))].append(row)
+
+    order = {"16+": 0, "13-15": 1, "10-12": 2, "7-9": 3, "<7": 4, "missing": 5}
+    summary = []
+    for bucket, items in sorted(groups.items(), key=lambda item: order.get(item[0], 99)):
+        line: dict[str, Any] = {"bucket": bucket, "n": len(items)}
+        for minutes in HORIZONS:
+            vals = [r[f"return_{minutes}m"] for r in items if r.get(f"return_{minutes}m") is not None]
+            line[f"avg_return_{minutes}m"] = mean(vals) if vals else None
+            line[f"labeled_{minutes}m"] = len(vals)
+        summary.append(line)
+    return summary
+
+
 def render(target_date: str, rows: list[dict[str, Any]], tv_summary: dict[str, Any]) -> bool:
     print("=" * 88)
     print(f"  Auto-Buy Outcome Report - {target_date}")
@@ -182,6 +213,17 @@ def render(target_date: str, rows: list[dict[str, Any]], tv_summary: dict[str, A
     for line in _summarize(rows):
         print(
             f"  {line['source']:<18} {line['decision']:<22} n={line['n']:<4} "
+            f"5m={_fmt(line['avg_return_5m']):>9} ({line['labeled_5m']}) "
+            f"15m={_fmt(line['avg_return_15m']):>9} ({line['labeled_15m']}) "
+            f"30m={_fmt(line['avg_return_30m']):>9} ({line['labeled_30m']}) "
+            f"60m={_fmt(line['avg_return_60m']):>9} ({line['labeled_60m']})"
+        )
+
+    print()
+    print("Score buckets")
+    for line in _summarize_score_buckets(rows):
+        print(
+            f"  score {line['bucket']:<7} n={line['n']:<4} "
             f"5m={_fmt(line['avg_return_5m']):>9} ({line['labeled_5m']}) "
             f"15m={_fmt(line['avg_return_15m']):>9} ({line['labeled_15m']}) "
             f"30m={_fmt(line['avg_return_30m']):>9} ({line['labeled_30m']}) "

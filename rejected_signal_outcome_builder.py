@@ -166,12 +166,19 @@ def compute_outcome(row: dict, bars: list[dict]) -> dict:
 
     if not bars:
         values["label_status"] = "no_bars"
+        values["partial_reason"] = "no_bars"
     elif all(values[key] is not None for key in ("return_5m", "return_15m", "return_30m", "return_60m")):
         values["label_status"] = "labeled"
+        values["partial_reason"] = None
     elif any(values[key] is not None for key in ("return_5m", "return_15m", "return_30m", "return_60m", "return_eod")):
         values["label_status"] = "partial"
+        if signal_dt + timedelta(minutes=60) > market_close_for(signal_dt):
+            values["partial_reason"] = "near_close_no_60m_window"
+        else:
+            values["partial_reason"] = "missing_forward_bars"
     else:
         values["label_status"] = "pending"
+        values["partial_reason"] = "pending_forward_bars"
 
     return values
 
@@ -285,8 +292,8 @@ def upsert_outcome(row, outcome: dict, source: str = "rejected_signal_outcome_bu
                 trade_id, timestamp, symbol, action, signal_price, rejection_reason,
                 return_5m, return_15m, return_30m, return_60m, return_eod,
                 max_favorable_60m, max_adverse_60m,
-                label_status, source, generated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+                label_status, partial_reason, source, generated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
             ON CONFLICT(trade_id) DO UPDATE SET
                 timestamp = excluded.timestamp,
                 symbol = excluded.symbol,
@@ -301,6 +308,7 @@ def upsert_outcome(row, outcome: dict, source: str = "rejected_signal_outcome_bu
                 max_favorable_60m = excluded.max_favorable_60m,
                 max_adverse_60m = excluded.max_adverse_60m,
                 label_status = excluded.label_status,
+                partial_reason = excluded.partial_reason,
                 source = excluded.source,
                 generated_at = excluded.generated_at
             """,
@@ -319,6 +327,7 @@ def upsert_outcome(row, outcome: dict, source: str = "rejected_signal_outcome_bu
                 outcome.get("max_favorable_60m"),
                 outcome.get("max_adverse_60m"),
                 outcome.get("label_status") or "pending",
+                outcome.get("partial_reason"),
                 source,
             ),
         )

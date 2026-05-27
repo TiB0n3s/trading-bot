@@ -82,6 +82,7 @@ BASE_COLUMNS = [
     "expected_pnl",
     "prediction_confidence",
     "prediction_sample_size",
+    "label_horizon_status",
 ]
 
 
@@ -203,7 +204,18 @@ def fetch_rows(args: argparse.Namespace) -> list[sqlite3.Row]:
                 p.probability_of_order,
                 p.expected_pnl,
                 p.confidence AS prediction_confidence,
-                p.sample_size AS prediction_sample_size
+                p.sample_size AS prediction_sample_size,
+                CASE
+                    WHEN ls.snapshot_id IS NULL
+                        THEN 'unlabeled'
+                    WHEN ls.ret_fwd_5m IS NULL
+                     AND ls.ret_fwd_15m IS NULL
+                     AND ls.ret_fwd_30m IS NULL
+                        THEN 'incomplete'
+                    WHEN ls.ret_fwd_30m IS NULL
+                        THEN 'partial_near_close'
+                    ELSE 'complete'
+                END AS label_horizon_status
             FROM feature_snapshots fs
             LEFT JOIN labeled_setups ls
               ON ls.snapshot_id = fs.id
@@ -232,10 +244,20 @@ def write_csv(rows: list[sqlite3.Row], output: str) -> Path:
     return path
 
 
+def _exclusion_counts(rows: list[sqlite3.Row]) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for r in rows:
+        status = r["label_horizon_status"] or "unlabeled"
+        if status != "complete":
+            counts[status] = counts.get(status, 0) + 1
+    return counts
+
+
 def main() -> int:
     args = parse_args()
     rows = fetch_rows(args)
     path = write_csv(rows, args.output)
+    exclusion_counts = _exclusion_counts(rows)
     manifest_path = None
     if args.manifest_output:
         manifest = build_dataset_manifest(
@@ -244,6 +266,7 @@ def main() -> int:
             end_date=args.date or args.end_date,
             query_version=args.query_version,
             label_version=args.label_version,
+            excluded_rows_reason_counts=exclusion_counts,
         )
         manifest_path = Path(args.manifest_output)
         manifest_path.parent.mkdir(parents=True, exist_ok=True)
@@ -257,6 +280,8 @@ def main() -> int:
     print(f"rows         : {len(rows)}")
     print(f"labeled_rows : {labeled}")
     print(f"symbols      : {len(symbols)}")
+    for reason, n in sorted(exclusion_counts.items()):
+        print(f"  {reason:<28} {n}")
     if manifest_path:
         print(f"manifest     : {manifest_path}")
 

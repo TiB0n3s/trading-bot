@@ -15,7 +15,7 @@ import argparse
 import json
 import os
 import sys
-from datetime import datetime
+from datetime import datetime, time
 from pathlib import Path
 from typing import Any
 
@@ -59,9 +59,12 @@ load_env_file()
 
 from bot_events import log_event
 from db import get_connection
-from market_time import is_market_hours, now_et
+from market_time import ET, is_market_hours, now_et
+from risk.exposure import any_cluster_limit_hit, cluster_exposure
 from symbols_config import (
     APPROVED_SYMBOLS_LIST,
+    CLUSTER_EXPOSURE_LIMITS,
+    CORRELATION_CLUSTERS,
     INTERNAL_BAR_ONLY_SYMBOLS_LIST,
     SYMBOL_SIGNAL_SOURCE,
 )
@@ -76,6 +79,10 @@ AUTO_BUY_TAKE_PROFIT_PCT = float(os.getenv("AUTO_BUY_TAKE_PROFIT_PCT", "2.00"))
 AUTO_BUY_MAX_ORDERS_PER_RUN = int(os.getenv("AUTO_BUY_MAX_ORDERS_PER_RUN", "1"))
 AUTO_BUY_MAX_DAILY_ORDERS = int(os.getenv("AUTO_BUY_MAX_DAILY_ORDERS", "3"))
 AUTO_BUY_COOLDOWN_MINUTES = int(os.getenv("AUTO_BUY_COOLDOWN_MINUTES", "60"))
+AUTO_BUY_SESSION_BUFFER_MINUTES = int(os.getenv("AUTO_BUY_SESSION_BUFFER_MINUTES", "10"))
+APP_BUY_COOLDOWN_MINUTES = int(os.getenv("ORDER_COOLDOWN_MINUTES", "15"))
+APP_RECENT_SELL_COOLDOWN_MINUTES = int(os.getenv("RECENT_SELL_COOLDOWN_MINUTES", "30"))
+CASH_SAFE_MAX_NEW_BUYS_PER_SYMBOL_PER_DAY = int(os.getenv("CASH_SAFE_MAX_NEW_BUYS_PER_SYMBOL_PER_DAY", "1"))
 
 
 def _to_float(value: Any, default: float | None = None) -> float | None:
@@ -89,6 +96,37 @@ def _to_float(value: Any, default: float | None = None) -> float | None:
 
 def _today() -> str:
     return now_et().strftime("%Y-%m-%d")
+
+
+def _parse_et_timestamp(raw_ts: Any) -> datetime | None:
+    if not raw_ts:
+        return None
+    try:
+        ts = datetime.fromisoformat(str(raw_ts).replace("Z", "+00:00"))
+    except Exception:
+        return None
+    if ts.tzinfo is None:
+        return ts
+    return ts.astimezone(ET).replace(tzinfo=None)
+
+
+def session_elapsed_minutes(now=None) -> float:
+    now = now or now_et()
+    open_dt = now.replace(hour=9, minute=30, second=0, microsecond=0)
+    return (now - open_dt).total_seconds() / 60.0
+
+
+def should_collect_candidates(now=None) -> tuple[bool, str]:
+    now = now or now_et()
+    if not is_market_hours(now):
+        return False, "market is closed"
+    elapsed = session_elapsed_minutes(now)
+    if elapsed < AUTO_BUY_SESSION_BUFFER_MINUTES:
+        return False, (
+            f"session elapsed {elapsed:.1f}m < "
+            f"AUTO_BUY_SESSION_BUFFER_MINUTES={AUTO_BUY_SESSION_BUFFER_MINUTES}"
+        )
+    return True, f"session elapsed {elapsed:.1f}m"
 
 
 def init_auto_buy_table() -> None:
@@ -116,6 +154,7 @@ def init_auto_buy_table() -> None:
                 setup_label TEXT,
                 setup_recommendation TEXT,
                 setup_score REAL,
+                hard_block_reason TEXT,
                 feature_snapshot_id INTEGER,
                 live_buy_enabled INTEGER DEFAULT 0,
                 order_submitted INTEGER DEFAULT 0,
@@ -135,6 +174,12 @@ def init_auto_buy_table() -> None:
             ON auto_buy_candidates(symbol, timestamp)
             """
         )
+        existing_cols = {
+            row["name"]
+            for row in con.execute("PRAGMA table_info(auto_buy_candidates)").fetchall()
+        }
+        if "hard_block_reason" not in existing_cols:
+            con.execute("ALTER TABLE auto_buy_candidates ADD COLUMN hard_block_reason TEXT")
 
 
 def latest_session(symbol: str) -> dict[str, Any]:
@@ -181,7 +226,7 @@ def held_symbols() -> set[str]:
 
 
 def client_order_id(symbol: str) -> str:
-    ts = datetime.now().strftime("%Y%m%d%H%M%S")
+    ts = now_et().strftime("%Y%m%d%H%M%S")
     return f"autobuy-{symbol.lower()}-{ts}"
 
 
@@ -217,10 +262,9 @@ def recently_auto_bought(symbol: str, cooldown_minutes: int = AUTO_BUY_COOLDOWN_
         return False, "no recent auto-buy order"
 
     try:
-        raw_ts = row["timestamp"]
-        ts = datetime.fromisoformat(raw_ts)
-        if ts.tzinfo is not None:
-            ts = ts.astimezone(now_et().tzinfo).replace(tzinfo=None)
+        ts = _parse_et_timestamp(row["timestamp"])
+        if ts is None:
+            raise ValueError("unparseable timestamp")
     except Exception:
         return True, "recent auto-buy timestamp could not be parsed"
 
@@ -232,6 +276,139 @@ def recently_auto_bought(symbol: str, cooldown_minutes: int = AUTO_BUY_COOLDOWN_
         )
 
     return False, f"last auto-buy order {age_minutes:.1f}m ago"
+
+
+def app_buy_cooldown_active(symbol: str, cooldown_minutes: int = APP_BUY_COOLDOWN_MINUTES) -> tuple[bool, str]:
+    with get_connection(DB_PATH) as con:
+        row = con.execute(
+            """
+            SELECT last_order_time
+            FROM cooldowns
+            WHERE symbol = ?
+              AND action = 'buy'
+            """,
+            (symbol.upper(),),
+        ).fetchone()
+
+    if not row:
+        return False, "no app buy cooldown"
+
+    ts = _parse_et_timestamp(row["last_order_time"])
+    if ts is None:
+        return True, "app buy cooldown timestamp could not be parsed"
+
+    age_minutes = (now_et().replace(tzinfo=None) - ts).total_seconds() / 60.0
+    if age_minutes < cooldown_minutes:
+        return True, f"app buy cooldown active {age_minutes:.1f}m < {cooldown_minutes}m"
+    return False, f"app buy cooldown expired {age_minutes:.1f}m ago"
+
+
+def recent_sell_active(symbol: str, cooldown_minutes: int = APP_RECENT_SELL_COOLDOWN_MINUTES) -> tuple[bool, str]:
+    with get_connection(DB_PATH) as con:
+        row = con.execute(
+            """
+            SELECT last_sell_time, last_sell_price
+            FROM recent_sells
+            WHERE symbol = ?
+            """,
+            (symbol.upper(),),
+        ).fetchone()
+
+    if not row:
+        return False, "no recent app sell"
+
+    ts = _parse_et_timestamp(row["last_sell_time"])
+    if ts is None:
+        return True, "recent sell timestamp could not be parsed"
+
+    age_minutes = (now_et().replace(tzinfo=None) - ts).total_seconds() / 60.0
+    if age_minutes < cooldown_minutes:
+        return True, (
+            f"recent app sell active {age_minutes:.1f}m < {cooldown_minutes}m "
+            f"price={row['last_sell_price']}"
+        )
+    return False, f"recent app sell expired {age_minutes:.1f}m ago"
+
+
+def app_approved_buys_today(symbol: str) -> int:
+    with get_connection(DB_PATH) as con:
+        row = con.execute(
+            """
+            SELECT COUNT(*) AS n
+            FROM trades
+            WHERE substr(timestamp, 1, 10) = ?
+              AND symbol = ?
+              AND action = 'buy'
+              AND approved = 1
+              AND order_id IS NOT NULL
+            """,
+            (_today(), symbol.upper()),
+        ).fetchone()
+    return int(row["n"] or 0) if row else 0
+
+
+def broker_positions_and_balance() -> tuple[list[dict[str, Any]], float]:
+    from broker import api
+
+    positions = []
+    for p in api.list_positions():
+        positions.append({
+            "symbol": p.symbol.upper(),
+            "qty": getattr(p, "qty", None),
+            "current_price": getattr(p, "current_price", None),
+            "market_value": getattr(p, "market_value", None),
+        })
+    account = api.get_account()
+    balance = _to_float(getattr(account, "equity", None), 0) or 0.0
+    return positions, balance
+
+
+def risk_cross_check(symbol: str) -> tuple[bool, str, dict[str, Any]]:
+    if app_approved_buys_today(symbol) >= CASH_SAFE_MAX_NEW_BUYS_PER_SYMBOL_PER_DAY:
+        return False, (
+            f"app daily symbol buy limit reached: buys_today>="
+            f"{CASH_SAFE_MAX_NEW_BUYS_PER_SYMBOL_PER_DAY}"
+        ), {}
+
+    blocked, reason = app_buy_cooldown_active(symbol)
+    if blocked:
+        return False, reason, {}
+
+    blocked, reason = recent_sell_active(symbol)
+    if blocked:
+        return False, reason, {}
+
+    try:
+        positions, balance = broker_positions_and_balance()
+        cluster_checks = cluster_exposure(
+            symbol,
+            positions,
+            balance,
+            CORRELATION_CLUSTERS,
+            CLUSTER_EXPOSURE_LIMITS,
+        )
+    except Exception as e:
+        return False, f"risk cross-check failed while reading broker exposure: {e}", {}
+
+    hit = any_cluster_limit_hit(cluster_checks)
+    if hit:
+        return False, (
+            f"correlation cap: {hit['cluster']} exposure "
+            f"{hit['exposure_pct']:.2f}% >= {hit['limit_pct']:.2f}%"
+        ), {"correlation_exposure": cluster_checks}
+
+    return True, "risk cross-check passed", {"correlation_exposure": cluster_checks}
+
+
+def write_app_buy_cooldown(symbol: str) -> None:
+    with get_connection(DB_PATH) as con:
+        con.execute(
+            """
+            INSERT OR REPLACE INTO cooldowns (symbol, action, last_order_time)
+            VALUES (?, 'buy', ?)
+            """,
+            (symbol.upper(), now_et().isoformat()),
+        )
 
 
 def evaluate_auto_buy_candidate(
@@ -373,15 +550,20 @@ def evaluate_auto_buy_candidate(
         score -= 2
         reasons.append("feature_vwap_extended:-2")
 
-    hard_block = (
-        bias == "avoid"
-        or setup_rec == "avoid"
-        or label in ("downtrend", "fading")
-        or m15 < -0.20
-        or m30 < -0.35
-    )
+    hard_block_reasons = []
+    if bias == "avoid":
+        hard_block_reasons.append(f"bias_avoid:{avoid_type or 'unspecified'}")
+    if setup_rec == "avoid":
+        hard_block_reasons.append("setup_avoid")
+    if label in ("downtrend", "fading"):
+        hard_block_reasons.append(f"negative_session:{label}")
+    if m15 < -0.20:
+        hard_block_reasons.append(f"15m_falling:{m15:.3f}")
+    if m30 < -0.35:
+        hard_block_reasons.append(f"30m_falling:{m30:.3f}")
+    hard_block_reason = "; ".join(hard_block_reasons) if hard_block_reasons else None
 
-    if hard_block:
+    if hard_block_reasons:
         decision = "skip"
         severity = "blocked"
     elif score >= AUTO_BUY_MIN_SCORE:
@@ -401,6 +583,7 @@ def evaluate_auto_buy_candidate(
         "severity": severity,
         "score": round(score, 2),
         "reason": "; ".join(reasons) if reasons else "no positive auto-buy evidence",
+        "hard_block_reason": hard_block_reason,
         "market_bias": bias,
         "entry_quality": entry_quality,
         "risk_level": risk_level,
@@ -430,8 +613,9 @@ def log_candidate(candidate: dict[str, Any], live_buy_enabled: bool, order: dict
                 momentum_5m_pct, momentum_15m_pct, momentum_30m_pct,
                 distance_from_vwap_pct,
                 setup_label, setup_recommendation, setup_score,
+                hard_block_reason,
                 feature_snapshot_id, live_buy_enabled, order_submitted, order_id
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 now_et().isoformat(),
@@ -453,6 +637,7 @@ def log_candidate(candidate: dict[str, Any], live_buy_enabled: bool, order: dict
                 candidate.get("setup_label"),
                 candidate.get("setup_recommendation"),
                 candidate.get("setup_score"),
+                candidate.get("hard_block_reason"),
                 candidate.get("feature_snapshot_id"),
                 1 if live_buy_enabled else 0,
                 1 if order else 0,
@@ -484,6 +669,13 @@ def maybe_execute_auto_buy(candidate: dict[str, Any], market_open: bool, live_re
         candidate["live_block_reason"] = cooldown_reason
         return None
 
+    risk_ok, risk_reason, risk_details = risk_cross_check(candidate["symbol"])
+    candidate["risk_cross_check_reason"] = risk_reason
+    candidate["risk_cross_check"] = risk_details
+    if not risk_ok:
+        candidate["live_block_reason"] = risk_reason
+        return None
+
     from broker import place_order
 
     order = place_order(
@@ -497,6 +689,8 @@ def maybe_execute_auto_buy(candidate: dict[str, Any], market_open: bool, live_re
     )
     if not order:
         candidate["live_block_reason"] = "broker returned no order"
+    else:
+        write_app_buy_cooldown(candidate["symbol"])
     return order
 
 
@@ -551,7 +745,7 @@ def render(candidates: list[dict[str, Any]], scope: str, market_open: bool) -> N
             f"{c['decision']:<22} {c['score']:>6.1f} "
             f"{str(c.get('session_trend_label')) + '/' + str(c.get('session_trend_score')):<20} "
             f"{str(c.get('setup_label') or '-'):<34} "
-            f"{c.get('reason')}"
+            f"{c.get('hard_block_reason') or c.get('reason')}"
         )
 
 
@@ -566,7 +760,17 @@ def main() -> int:
     args = parser.parse_args()
 
     init_auto_buy_table()
-    market_open = is_market_hours(now_et())
+    now = now_et()
+    market_open = is_market_hours(now)
+    should_collect, collect_reason = should_collect_candidates(now)
+    if not should_collect:
+        print("=" * 112)
+        print("  Auto-Buy Candidate Manager")
+        print("=" * 112)
+        print(f"  skipped        : {collect_reason}")
+        print("  rows_written   : 0")
+        return 0
+
     candidates = build_candidates(args.scope)
 
     submitted = 0

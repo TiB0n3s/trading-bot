@@ -18,28 +18,70 @@ For no_signals symbols, this also acts as a TradingView coverage report:
 first_strong_time and minutes_strong_without_alert show how long the session
 was strong before (and without) any alert being received.
 
-Read-only. Does not place, cancel, or modify orders.
+Read-only by default. With --write-db it persists analytics rows to
+strong_day_participation for prediction/intelligence validation. It does not
+place, cancel, or modify orders.
 
 Usage:
   python3 strong_day_participation_report.py
   python3 strong_day_participation_report.py --date 2026-05-26
+  python3 strong_day_participation_report.py --date 2026-05-26 --write-db
   python3 strong_day_participation_report.py --date 2026-05-26 --min-session-pct 1.5
   python3 strong_day_participation_report.py --date 2026-05-26 --symbol AMD
 """
 
 import argparse
+import json
+import os
+import sys
 from collections import Counter
 from datetime import datetime, timezone
 from pathlib import Path
 
 import pytz
 
+BASE_DIR = Path(__file__).resolve().parent
+VENV_PYTHON = BASE_DIR / "venv" / "bin" / "python"
+ENV_FILE = Path("/etc/trading-bot.env")
+
+
+def reexec_under_venv_if_available():
+    if not VENV_PYTHON.exists():
+        return
+
+    venv_dir = VENV_PYTHON.parent.parent.resolve()
+    current_prefix = Path(sys.prefix).resolve()
+    if current_prefix == venv_dir:
+        return
+
+    os.execv(str(VENV_PYTHON), [str(VENV_PYTHON), str(Path(__file__).resolve())] + sys.argv[1:])
+
+
+def load_env_file(path=ENV_FILE):
+    if not path.exists():
+        return False
+
+    for raw_line in path.read_text().splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+
+        key, value = line.split("=", 1)
+        key = key.strip()
+        value = value.strip().strip('"').strip("'")
+        if key and key not in os.environ:
+            os.environ[key] = value
+    return True
+
+
+reexec_under_venv_if_available()
+load_env_file()
+
 from broker import api
 from db import DB_PATH, get_connection
-from symbols_config import APPROVED_SYMBOLS_LIST
+from symbols_config import APPROVED_SYMBOLS_LIST, SYMBOL_SIGNAL_SOURCE
 
 ET = pytz.timezone("America/New_York")
-BASE_DIR = Path(__file__).resolve().parent
 
 MIN_SESSION_BARS = 10
 
@@ -66,6 +108,62 @@ BLOCKER_PRIORITY = {
 AFFORDABILITY_CATEGORIES = {"exposure_cap", "affordability", "macro_position_limit"}
 MACRO_CAP_CATEGORIES = {"macro_position_limit", "macro_risk"}
 ROTATION_CATEGORIES = {"correlation_cap"}
+
+
+def init_strong_day_participation_table():
+    with get_connection(DB_PATH) as con:
+        con.execute(
+            """
+            CREATE TABLE IF NOT EXISTS strong_day_participation (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                market_date TEXT NOT NULL,
+                symbol TEXT NOT NULL,
+                signal_source TEXT,
+                min_session_pct REAL NOT NULL,
+                session_return_pct REAL,
+                mfe_pct REAL,
+                return_30m_pct REAL,
+                return_60m_pct REAL,
+                first_strong_time TEXT,
+                session_high_time TEXT,
+                primary_status TEXT,
+                primary_blocker TEXT,
+                buy_signal_count INTEGER,
+                approved_buy_count INTEGER,
+                rejected_buy_count INTEGER,
+                sell_signal_count INTEGER,
+                auto_buy_candidate_count INTEGER,
+                auto_buy_strong_count INTEGER,
+                auto_buy_watch_count INTEGER,
+                auto_buy_submitted_count INTEGER,
+                auto_buy_max_score REAL,
+                auto_buy_first_candidate_time TEXT,
+                auto_buy_first_strong_time TEXT,
+                prediction_score REAL,
+                prediction_decision TEXT,
+                prediction_confidence TEXT,
+                prediction_sample_size INTEGER,
+                prediction_timing_score REAL,
+                prediction_trend_score REAL,
+                prediction_trend_label TEXT,
+                raw_json TEXT,
+                generated_at TEXT NOT NULL,
+                UNIQUE(market_date, symbol, min_session_pct)
+            )
+            """
+        )
+        con.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_strong_day_participation_date_symbol
+            ON strong_day_participation(market_date, symbol)
+            """
+        )
+        con.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_strong_day_participation_status
+            ON strong_day_participation(market_date, primary_status)
+            """
+        )
 
 
 # ── bar helpers ──────────────────────────────────────────────────────────────
@@ -196,6 +294,142 @@ def load_max_setup_score(target_date, symbol):
             return None
 
 
+def load_auto_buy_candidates(target_date, symbol):
+    with get_connection(DB_PATH) as con:
+        try:
+            return con.execute(
+                """
+                SELECT timestamp, decision, score, reason, hard_block_reason,
+                       order_submitted, order_id
+                FROM auto_buy_candidates
+                WHERE substr(timestamp, 1, 10) = ?
+                  AND symbol = ?
+                ORDER BY timestamp ASC, id ASC
+                """,
+                (target_date, symbol.upper()),
+            ).fetchall()
+        except Exception:
+            return []
+
+
+def load_prediction(target_date, symbol):
+    with get_connection(DB_PATH) as con:
+        try:
+            row = con.execute(
+                """
+                SELECT prediction_score, confidence, sample_size,
+                       timing_score, trend_score, trend_label
+                FROM daily_symbol_predictions
+                WHERE market_date = ?
+                  AND symbol = ?
+                """,
+                (target_date, symbol.upper()),
+            ).fetchone()
+            if not row:
+                return {}
+            prediction = dict(row)
+            prediction["prediction_decision"] = None
+            return prediction
+        except Exception:
+            return {}
+
+
+def upsert_strong_day_results(results, target_date, min_session_pct):
+    init_strong_day_participation_table()
+    generated_at = datetime.now(ET).isoformat()
+    rows_written = 0
+    with get_connection(DB_PATH) as con:
+        for r in results:
+            if r.get("error"):
+                continue
+            con.execute(
+                """
+                INSERT INTO strong_day_participation (
+                    market_date, symbol, signal_source, min_session_pct,
+                    session_return_pct, mfe_pct, return_30m_pct, return_60m_pct,
+                    first_strong_time, session_high_time,
+                    primary_status, primary_blocker,
+                    buy_signal_count, approved_buy_count, rejected_buy_count,
+                    sell_signal_count,
+                    auto_buy_candidate_count, auto_buy_strong_count,
+                    auto_buy_watch_count, auto_buy_submitted_count,
+                    auto_buy_max_score, auto_buy_first_candidate_time,
+                    auto_buy_first_strong_time,
+                    prediction_score, prediction_decision, prediction_confidence,
+                    prediction_sample_size, prediction_timing_score,
+                    prediction_trend_score, prediction_trend_label,
+                    raw_json, generated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(market_date, symbol, min_session_pct) DO UPDATE SET
+                    signal_source = excluded.signal_source,
+                    session_return_pct = excluded.session_return_pct,
+                    mfe_pct = excluded.mfe_pct,
+                    return_30m_pct = excluded.return_30m_pct,
+                    return_60m_pct = excluded.return_60m_pct,
+                    first_strong_time = excluded.first_strong_time,
+                    session_high_time = excluded.session_high_time,
+                    primary_status = excluded.primary_status,
+                    primary_blocker = excluded.primary_blocker,
+                    buy_signal_count = excluded.buy_signal_count,
+                    approved_buy_count = excluded.approved_buy_count,
+                    rejected_buy_count = excluded.rejected_buy_count,
+                    sell_signal_count = excluded.sell_signal_count,
+                    auto_buy_candidate_count = excluded.auto_buy_candidate_count,
+                    auto_buy_strong_count = excluded.auto_buy_strong_count,
+                    auto_buy_watch_count = excluded.auto_buy_watch_count,
+                    auto_buy_submitted_count = excluded.auto_buy_submitted_count,
+                    auto_buy_max_score = excluded.auto_buy_max_score,
+                    auto_buy_first_candidate_time = excluded.auto_buy_first_candidate_time,
+                    auto_buy_first_strong_time = excluded.auto_buy_first_strong_time,
+                    prediction_score = excluded.prediction_score,
+                    prediction_decision = excluded.prediction_decision,
+                    prediction_confidence = excluded.prediction_confidence,
+                    prediction_sample_size = excluded.prediction_sample_size,
+                    prediction_timing_score = excluded.prediction_timing_score,
+                    prediction_trend_score = excluded.prediction_trend_score,
+                    prediction_trend_label = excluded.prediction_trend_label,
+                    raw_json = excluded.raw_json,
+                    generated_at = excluded.generated_at
+                """,
+                (
+                    target_date,
+                    r.get("symbol"),
+                    r.get("signal_source"),
+                    min_session_pct,
+                    r.get("session_return_pct"),
+                    r.get("mfe_pct"),
+                    r.get("return_30m_pct"),
+                    r.get("return_60m_pct"),
+                    r.get("first_strong_time"),
+                    r.get("session_high_time"),
+                    r.get("primary_status"),
+                    r.get("primary_blocker"),
+                    r.get("buy_signal_count"),
+                    r.get("approved_buy_count"),
+                    r.get("rejected_buy_count"),
+                    r.get("sell_signal_count"),
+                    r.get("auto_buy_candidate_count"),
+                    r.get("auto_buy_strong_count"),
+                    r.get("auto_buy_watch_count"),
+                    r.get("auto_buy_submitted_count"),
+                    r.get("auto_buy_max_score"),
+                    r.get("auto_buy_first_candidate_time"),
+                    r.get("auto_buy_first_strong_time"),
+                    r.get("prediction_score"),
+                    r.get("prediction_decision"),
+                    r.get("prediction_confidence"),
+                    r.get("prediction_sample_size"),
+                    r.get("prediction_timing_score"),
+                    r.get("prediction_trend_score"),
+                    r.get("prediction_trend_label"),
+                    json.dumps(r, sort_keys=True, default=str),
+                    generated_at,
+                ),
+            )
+            rows_written += 1
+    return rows_written
+
+
 # ── classification helpers ───────────────────────────────────────────────────
 
 def _reason_category(reason):
@@ -299,6 +533,19 @@ def _best_rejected_signal(rejected_buys):
     return _signal_hhmm(best), _reason_category(best["rejection_reason"])
 
 
+def _auto_buy_hhmm(row):
+    ts = row["timestamp"]
+    if not ts:
+        return None
+    try:
+        dt = datetime.fromisoformat(str(ts).replace("Z", "+00:00"))
+        if dt.tzinfo is None:
+            dt = ET.localize(dt)
+        return dt.astimezone(ET).strftime("%H:%M")
+    except Exception:
+        return str(ts)[:16]
+
+
 # ── analysis ─────────────────────────────────────────────────────────────────
 
 def analyze_symbol(symbol, target_date, threshold_pct):
@@ -322,6 +569,8 @@ def analyze_symbol(symbol, target_date, threshold_pct):
 
     all_rows = load_symbol_trades(target_date, symbol)
     status, blockers = classify_participation(all_rows)
+    auto_rows = load_auto_buy_candidates(target_date, symbol)
+    prediction = load_prediction(target_date, symbol)
 
     buy_rows = [r for r in all_rows if r["action"] and r["action"].lower() == "buy"]
     sell_rows = [r for r in all_rows if r["action"] and r["action"].lower() == "sell"]
@@ -330,6 +579,19 @@ def analyze_symbol(symbol, target_date, threshold_pct):
 
     blocker_counts = dict(blockers)
     primary_blocker = _primary_blocker(blockers)
+    auto_strong = [r for r in auto_rows if r["decision"] == "strong_buy_candidate"]
+    auto_watch = [r for r in auto_rows if r["decision"] == "watch"]
+    auto_submitted = [r for r in auto_rows if int(r["order_submitted"] or 0) == 1]
+    auto_blocked = [r for r in auto_rows if r["hard_block_reason"]]
+
+    if not buy_rows and auto_submitted:
+        status = "auto_buy_participation"
+        primary_blocker = None
+    elif not buy_rows and (auto_strong or auto_watch):
+        status = "auto_buy_candidate_only"
+        primary_blocker = "auto_buy_not_submitted"
+    elif not buy_rows and auto_blocked and status == "no_signals":
+        primary_blocker = "auto_buy_hard_block"
 
     affordability_gap = sum(n for c, n in blockers if c in AFFORDABILITY_CATEGORIES) or None
     macro_cap_blocked_count = sum(n for c, n in blockers if c in MACRO_CAP_CATEGORIES) or None
@@ -363,6 +625,7 @@ def analyze_symbol(symbol, target_date, threshold_pct):
 
     return {
         "symbol": symbol,
+        "signal_source": SYMBOL_SIGNAL_SOURCE.get(symbol, "unknown"),
         "error": None,
         **metrics,
         "buy_signal_count": len(buy_rows),
@@ -384,6 +647,21 @@ def analyze_symbol(symbol, target_date, threshold_pct):
         "max_buy_opportunity_score": max_buy_opportunity_score,
         "max_session_momentum_score": max_session_momentum_score,
         "max_setup_score": max_setup_score,
+        "auto_buy_candidate_count": len(auto_rows),
+        "auto_buy_strong_count": len(auto_strong),
+        "auto_buy_watch_count": len(auto_watch),
+        "auto_buy_submitted_count": len(auto_submitted),
+        "auto_buy_first_candidate_time": _auto_buy_hhmm(auto_rows[0]) if auto_rows else None,
+        "auto_buy_first_strong_time": _auto_buy_hhmm(auto_strong[0]) if auto_strong else None,
+        "auto_buy_max_score": max((float(r["score"]) for r in auto_rows if r["score"] is not None), default=None),
+        "auto_buy_hard_block_count": len(auto_blocked),
+        "prediction_score": prediction.get("prediction_score"),
+        "prediction_decision": prediction.get("prediction_decision"),
+        "prediction_confidence": prediction.get("confidence"),
+        "prediction_sample_size": prediction.get("sample_size"),
+        "prediction_timing_score": prediction.get("timing_score"),
+        "prediction_trend_score": prediction.get("trend_score"),
+        "prediction_trend_label": prediction.get("trend_label"),
     }
 
 
@@ -416,7 +694,154 @@ def _fmt_gap(minutes):
 
 # ── report output ─────────────────────────────────────────────────────────────
 
-MISSED_STATUSES = {"no_signals", "no_buy_signals", "sell_only_signals", "all_rejected"}
+MISSED_STATUSES = {
+    "no_signals",
+    "no_buy_signals",
+    "sell_only_signals",
+    "all_rejected",
+    "auto_buy_candidate_only",
+}
+
+
+_TV_LATE_ALERT_THRESHOLD_MINS = 30
+
+_CAPACITY_BLOCKERS = {"exposure_cap", "affordability", "macro_position_limit", "macro_risk", "correlation_cap"}
+
+
+def _render_affordability_section(strong):
+    # Symbols where ANY signals hit capacity-type gates
+    capacity_hits = [
+        r for r in strong
+        if (r.get("affordability_gap") or 0) > 0
+        or (r.get("macro_cap_blocked_count") or 0) > 0
+        or (r.get("rotation_blocked_count") or 0) > 0
+        or r.get("primary_blocker") in _CAPACITY_BLOCKERS
+    ]
+    if not capacity_hits:
+        return
+
+    print()
+    print("── Affordability & Capacity Blockers ────────────────────────────────────")
+    print(
+        f"  Symbols with strong days where sizing/capacity gates fired: {len(capacity_hits)}"
+    )
+    print()
+    print(
+        f"  {'Symbol':<6}  {'Session%':>9}  {'Status':<22}  "
+        f"{'Afford':>6}  {'Macro':>5}  {'Rot':>3}  PrimaryBlocker"
+    )
+    print(
+        f"  {'──────':<6}  {'─────────':>9}  {'──────────────────────':<22}  "
+        f"{'──────':>6}  {'─────':>5}  {'───':>3}  ──────────────────"
+    )
+    for r in sorted(capacity_hits, key=lambda x: -(x.get("session_return_pct") or 0)):
+        print(
+            f"  {r['symbol']:<6}  "
+            f"{_fp(r.get('session_return_pct')):>9}  "
+            f"{r.get('primary_status', '?'):<22}  "
+            f"{(r.get('affordability_gap') or 0):>6}  "
+            f"{(r.get('macro_cap_blocked_count') or 0):>5}  "
+            f"{(r.get('rotation_blocked_count') or 0):>3}  "
+            f"{r.get('primary_blocker') or '—'}"
+        )
+
+    # Highlight symbols primarily blocked by pre-Claude affordability gate
+    primary_afford = [
+        r for r in capacity_hits
+        if r.get("primary_blocker") in {"affordability", "exposure_cap"}
+    ]
+    if primary_afford:
+        print()
+        print(
+            "  Note: symbols with primary_blocker=affordability were rejected before Claude."
+        )
+        print(
+            "  The pre-Claude affordability gate uses a conservative estimate (1.5% * macro_mult)."
+        )
+        print(
+            "  High-priced symbols (e.g. ASML, AMD, COST) may fail at reduced macro multipliers."
+        )
+        print(
+            "  To investigate: python3 blocked_signal_outcome_report.py --category affordability"
+        )
+
+
+def _render_tv_coverage_section(strong):
+    tv_strong = [r for r in strong if r.get("signal_source") == "tradingview_alert"]
+    if not tv_strong:
+        return
+
+    uncovered = [r for r in tv_strong if r.get("primary_status") == "no_signals"]
+    late = [
+        r for r in tv_strong
+        if r.get("primary_status") != "no_signals"
+        and r.get("tradingview_alert_gap") is not None
+        and r["tradingview_alert_gap"] >= _TV_LATE_ALERT_THRESHOLD_MINS
+    ]
+    timely = [
+        r for r in tv_strong
+        if r not in uncovered and r not in late
+    ]
+
+    print()
+    print("── TradingView Alert Coverage ───────────────────────────────────────────")
+    print(
+        f"  TV-alert symbols with strong day : {len(tv_strong)}"
+    )
+    print(
+        f"    Timely coverage (alert <{_TV_LATE_ALERT_THRESHOLD_MINS} min after threshold) : {len(timely)}"
+    )
+    print(
+        f"    Late coverage   (alert >={_TV_LATE_ALERT_THRESHOLD_MINS} min after threshold): {len(late)}"
+    )
+    print(
+        f"    No coverage     (no alert received at all)               : {len(uncovered)}"
+    )
+
+    if uncovered:
+        print()
+        print(
+            f"  {'Symbol':<6}  {'Session%':>9}  {'MFE%':>7}  {'FirstStrong':>11}  "
+            f"{'MinsStrongNoAlert':>17}  Status"
+        )
+        print(
+            f"  {'──────':<6}  {'─────────':>9}  {'───────':>7}  {'───────────':>11}  "
+            f"{'─────────────────':>17}  ──────────────────────"
+        )
+        for r in sorted(uncovered, key=lambda x: -(x.get("session_return_pct") or 0)):
+            mins = r.get("minutes_strong_without_alert")
+            mins_str = f"{mins} min" if mins is not None else "n/a"
+            print(
+                f"  {r['symbol']:<6}  "
+                f"{_fp(r.get('session_return_pct')):>9}  "
+                f"{_fp(r.get('mfe_pct')):>7}  "
+                f"{r.get('first_strong_time') or '—':>11}  "
+                f"{mins_str:>17}  "
+                f"{r.get('primary_status', '?')}"
+            )
+
+    if late:
+        print()
+        print("  Late alerts (alert arrived after threshold but with significant delay):")
+        print(
+            f"  {'Symbol':<6}  {'Session%':>9}  {'FirstStrong':>11}  "
+            f"{'AlertGap':>8}  {'FirstAlert':>10}  Status"
+        )
+        print(
+            f"  {'──────':<6}  {'─────────':>9}  {'───────────':>11}  "
+            f"{'────────':>8}  {'──────────':>10}  ──────────────────────"
+        )
+        for r in sorted(late, key=lambda x: -(x.get("tradingview_alert_gap") or 0)):
+            gap = r.get("tradingview_alert_gap")
+            gap_str = f"+{gap} min" if gap is not None else "n/a"
+            print(
+                f"  {r['symbol']:<6}  "
+                f"{_fp(r.get('session_return_pct')):>9}  "
+                f"{r.get('first_strong_time') or '—':>11}  "
+                f"{gap_str:>8}  "
+                f"{r.get('first_buy_signal_time') or '—':>10}  "
+                f"{r.get('primary_status', '?')}"
+            )
 
 
 def print_report(results, target_date, min_session_pct):
@@ -449,6 +874,8 @@ def print_report(results, target_date, min_session_pct):
     print(f"    Missed — sell_only_signals : {count_status('sell_only_signals')}")
     print(f"    Missed — no_buy_signals    : {count_status('no_buy_signals')}")
     print(f"    Missed — no_signals        : {count_status('no_signals')}")
+    print(f"    Auto-buy participation     : {count_status('auto_buy_participation')}")
+    print(f"    Auto-buy candidate only    : {count_status('auto_buy_candidate_only')}")
     if errors:
         print(f"  Bar fetch errors             : {len(errors)}")
 
@@ -460,16 +887,19 @@ def print_report(results, target_date, min_session_pct):
             _print_errors(errors)
         return
 
+    _render_tv_coverage_section(strong)
+    _render_affordability_section(strong)
+
     # ── compact summary table ────────────────────────────────────────────────
     print()
     print("── All Strong-Session Symbols (ranked) ─────────────────────────────────")
     print(
         f"  {'Symbol':<6}  {'Session%':>9}  {'MFE%':>7}  {'FirstStrong':>11}  "
-        f"{'Status':<22}  {'Buys':>4}  {'Sells':>5}  PrimaryBlocker"
+        f"{'Status':<22}  {'Pred':>6}  {'Auto':>5}  PrimaryBlocker"
     )
     print(
         f"  {'──────':<6}  {'─────────':>9}  {'───────':>7}  {'───────────':>11}  "
-        f"{'──────────────────────':<22}  {'────':>4}  {'─────':>5}  ──────────────────"
+        f"{'──────────────────────':<22}  {'──────':>6}  {'─────':>5}  ──────────────────"
     )
     for r in by_return(strong):
         blocker_label = r.get("primary_blocker") or "—"
@@ -480,8 +910,8 @@ def print_report(results, target_date, min_session_pct):
             f"{_fp(r.get('mfe_pct')):>7}  "
             f"{first_strong:>11}  "
             f"{r.get('primary_status', '?'):<22}  "
-            f"{r['buy_signal_count']:>4}  "
-            f"{r['sell_signal_count']:>5}  "
+            f"{_fv(r.get('prediction_score')):>6}  "
+            f"{r['auto_buy_candidate_count']:>5}  "
             f"{blocker_label}"
         )
 
@@ -560,6 +990,15 @@ def _print_detail_block(r, min_session_pct):
     print(f"    {'sell_signal_count':.<34} {r['sell_signal_count']}")
     print(f"    {'approved_buy_count':.<34} {r['approved_buy_count']}")
     print(f"    {'rejected_buy_count':.<34} {r['rejected_buy_count']}")
+    print(f"    {'signal_source':.<34} {r.get('signal_source') or '—'}")
+    print(f"    {'auto_buy_candidate_count':.<34} {r.get('auto_buy_candidate_count', 0)}")
+    print(f"    {'auto_buy_strong_count':.<34} {r.get('auto_buy_strong_count', 0)}")
+    print(f"    {'auto_buy_watch_count':.<34} {r.get('auto_buy_watch_count', 0)}")
+    print(f"    {'auto_buy_submitted_count':.<34} {r.get('auto_buy_submitted_count', 0)}")
+    print(f"    {'auto_buy_first_candidate_time':.<34} {r.get('auto_buy_first_candidate_time') or '—'}")
+    print(f"    {'auto_buy_first_strong_time':.<34} {r.get('auto_buy_first_strong_time') or '—'}")
+    print(f"    {'auto_buy_max_score':.<34} {_fv(r.get('auto_buy_max_score'))}")
+    print(f"    {'auto_buy_hard_block_count':.<34} {r.get('auto_buy_hard_block_count', 0)}")
 
     pb = r.get("primary_blocker")
     print(f"    {'primary_blocker':.<34} {pb or '—'}")
@@ -575,6 +1014,13 @@ def _print_detail_block(r, min_session_pct):
     print(f"    {'max_buy_opportunity_score':.<34} {_fv(r.get('max_buy_opportunity_score'))}")
     print(f"    {'max_session_momentum_score':.<34} {_fv(r.get('max_session_momentum_score'))}")
     print(f"    {'max_setup_score':.<34} {_fv(r.get('max_setup_score'))}")
+    print(f"    {'prediction_score':.<34} {_fv(r.get('prediction_score'))}")
+    print(f"    {'prediction_decision':.<34} {r.get('prediction_decision') or '—'}")
+    print(f"    {'prediction_confidence':.<34} {r.get('prediction_confidence') or '—'}")
+    print(f"    {'prediction_sample_size':.<34} {r.get('prediction_sample_size') if r.get('prediction_sample_size') is not None else '—'}")
+    print(f"    {'prediction_timing_score':.<34} {_fv(r.get('prediction_timing_score'))}")
+    print(f"    {'prediction_trend_score':.<34} {_fv(r.get('prediction_trend_score'))}")
+    print(f"    {'prediction_trend_label':.<34} {r.get('prediction_trend_label') or '—'}")
 
     aff = r.get("affordability_gap")
     macro = r.get("macro_cap_blocked_count")
@@ -613,6 +1059,11 @@ def main():
         help="Session return threshold to qualify as a strong day (default: 1.0)",
     )
     parser.add_argument("--symbol", help="Evaluate only this symbol")
+    parser.add_argument(
+        "--write-db",
+        action="store_true",
+        help="Persist per-symbol participation rows for prediction/intelligence reports.",
+    )
     args = parser.parse_args()
 
     symbols = [args.symbol.upper()] if args.symbol else sorted(APPROVED_SYMBOLS_LIST)
@@ -621,6 +1072,10 @@ def main():
     results = [analyze_symbol(sym, args.date, args.min_session_pct) for sym in symbols]
 
     print_report(results, args.date, args.min_session_pct)
+    if args.write_db:
+        rows_written = upsert_strong_day_results(results, args.date, args.min_session_pct)
+        print()
+        print(f"[OK] wrote strong_day_participation rows: {rows_written}")
 
 
 if __name__ == "__main__":

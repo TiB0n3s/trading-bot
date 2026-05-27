@@ -33,7 +33,11 @@ Recent completed roadmap items:
 - `decision_snapshots` stores immutable point-in-time context for new
   approved/rejected decisions.
 - `auto_buy_outcome_report.py` compares internal auto-buy candidates against
-  forward feature-snapshot returns and the TradingView signal baseline.
+  forward feature-snapshot returns, score buckets, and the TradingView signal
+  baseline.
+- Auto-buy live paper execution cross-checks shared app cooldowns, recent-sell
+  churn state, per-symbol daily app buys, and correlation-cluster exposure
+  before calling the broker.
 - `archive_context_state.py` snapshots market context, override hashes, policy
   artifact hashes, and symbol-universe version for future replay.
 - Migrations are manual before deploy/restore, but pending migrations are
@@ -675,6 +679,14 @@ python3 ops_check.py events "$TARGET_DATE"
 python3 ops_check.py predictions "$TARGET_DATE"
 python3 ops_check.py trends "$TARGET_DATE"
 python3 ops_check.py prediction-validation "$TARGET_DATE"
+
+After the session, persist strong-session participation before validating
+prediction quality:
+
+```bash
+python3 strong_day_participation_report.py --date "$TARGET_DATE" --write-db
+python3 ops_check.py prediction-validation "$TARGET_DATE"
+```
 python3 ops/db_connection_audit.py
 python3 db_migrations.py status
 
@@ -708,7 +720,10 @@ python3 -m ml_platform.cli retraining-readiness \
   --output /tmp/retraining_readiness_"$TARGET_DATE".json
 Prediction Validation Report
 
-prediction_validation_report.py is read-only.
+prediction_validation_report.py is read-only. It compares
+`daily_symbol_predictions` against signal/trade outcomes and persisted
+`strong_day_participation` rows after the strong-day report runs with
+`--write-db`.
 
 Usage:
 
@@ -716,6 +731,7 @@ python3 prediction_validation_report.py
 python3 prediction_validation_report.py 2026-05-26
 python3 prediction_validation_report.py --date 2026-05-26
 python3 ops_check.py prediction-validation 2026-05-26
+python3 strong_day_participation_report.py --date 2026-05-26 --write-db
 
 Before the session, expected state:
 
@@ -729,6 +745,7 @@ After the session, it should help answer:
 Did high prediction_score symbols outperform low-score symbols?
 Did timing recommendations match actual outcomes?
 Did trend labels identify risk?
+Did predicted symbols participate in strong sessions or miss them?
 Did weak/negative setups lose, get blocked, or avoid orders?
 Common Reports
 Morning readiness

@@ -318,6 +318,7 @@ def ensure_rejected_signal_outcomes_table(db_path: Path | str = DB_PATH) -> None
                 max_favorable_60m REAL,
                 max_adverse_60m REAL,
                 label_status TEXT NOT NULL DEFAULT 'pending',
+                partial_reason TEXT,
                 source TEXT,
                 generated_at TEXT NOT NULL DEFAULT (datetime('now')),
                 FOREIGN KEY (trade_id) REFERENCES trades(id)
@@ -336,6 +337,20 @@ def ensure_rejected_signal_outcomes_table(db_path: Path | str = DB_PATH) -> None
             ON rejected_signal_outcomes(label_status)
             """
         )
+        existing_cols = {
+            row["name"]
+            for row in con.execute("PRAGMA table_info(rejected_signal_outcomes)").fetchall()
+        }
+        addable = {
+            "return_eod": "REAL",
+            "max_favorable_60m": "REAL",
+            "max_adverse_60m": "REAL",
+            "source": "TEXT",
+            "partial_reason": "TEXT",
+        }
+        for col, col_type in addable.items():
+            if col not in existing_cols:
+                con.execute(f"ALTER TABLE rejected_signal_outcomes ADD COLUMN {col} {col_type}")
 
 
 def ensure_decision_snapshots_table(db_path: Path | str = DB_PATH) -> None:

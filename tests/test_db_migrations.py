@@ -173,6 +173,46 @@ def test_decision_snapshots_migration_creates_table():
         assert_true(expected <= table_columns(db_path, "decision_snapshots"), "decision snapshot columns")
 
 
+def test_rejected_outcome_partial_reason_migration_adds_column():
+    with tempfile.TemporaryDirectory() as tmp:
+        db_path = Path(tmp) / "test.db"
+        with sqlite3.connect(db_path) as con:
+            con.execute(
+                """
+                CREATE TABLE rejected_signal_outcomes (
+                    id INTEGER PRIMARY KEY,
+                    trade_id INTEGER UNIQUE,
+                    timestamp TEXT,
+                    symbol TEXT,
+                    action TEXT,
+                    label_status TEXT
+                )
+                """
+            )
+
+        applied = apply_migration(MIGRATIONS[5], db_path)
+        assert_equal(applied, True, "apply")
+        assert_true({"partial_reason"} <= table_columns(db_path, "rejected_signal_outcomes"), "partial reason column")
+
+
+def test_strong_day_participation_migration_creates_table():
+    with tempfile.TemporaryDirectory() as tmp:
+        db_path = Path(tmp) / "test.db"
+
+        applied = apply_migration(MIGRATIONS[6], db_path)
+        assert_equal(applied, True, "apply")
+
+        expected = {
+            "market_date",
+            "symbol",
+            "primary_status",
+            "prediction_score",
+            "auto_buy_candidate_count",
+            "raw_json",
+        }
+        assert_true(expected <= table_columns(db_path, "strong_day_participation"), "strong day participation columns")
+
+
 if __name__ == "__main__":
     test_feature_audit_migration_is_idempotent()
     print("[OK] test_feature_audit_migration_is_idempotent")
@@ -184,4 +224,8 @@ if __name__ == "__main__":
     print("[OK] test_trade_decision_context_migration_adds_columns")
     test_decision_snapshots_migration_creates_table()
     print("[OK] test_decision_snapshots_migration_creates_table")
-    print("\nAll 5 DB migration tests passed.")
+    test_rejected_outcome_partial_reason_migration_adds_column()
+    print("[OK] test_rejected_outcome_partial_reason_migration_adds_column")
+    test_strong_day_participation_migration_creates_table()
+    print("[OK] test_strong_day_participation_migration_creates_table")
+    print("\nAll 7 DB migration tests passed.")

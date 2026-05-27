@@ -364,6 +364,26 @@ MIGRATIONS: tuple[Migration, ...] = (
             """,
         ),
     ),
+    Migration(
+        migration_id="20260527_010_entry_intelligence_fields",
+        description="Add observe-only entry intelligence fields to decision_snapshots and feature_snapshots.",
+        statements=(
+            "ALTER TABLE decision_snapshots ADD COLUMN momentum_acceleration_pct REAL",
+            "ALTER TABLE decision_snapshots ADD COLUMN momentum_state TEXT",
+            "ALTER TABLE decision_snapshots ADD COLUMN volume_surge_ratio REAL",
+            "ALTER TABLE decision_snapshots ADD COLUMN volume_state TEXT",
+            "ALTER TABLE decision_snapshots ADD COLUMN extension_from_recent_base_pct REAL",
+            "ALTER TABLE decision_snapshots ADD COLUMN rolling_special_labels TEXT",
+            "ALTER TABLE decision_snapshots ADD COLUMN prior_session_return_pct REAL",
+            "ALTER TABLE decision_snapshots ADD COLUMN prior_session_participated INTEGER",
+            "ALTER TABLE decision_snapshots ADD COLUMN tape_label_at_signal TEXT",
+            "ALTER TABLE decision_snapshots ADD COLUMN tape_bar_age_seconds REAL",
+            "ALTER TABLE feature_snapshots ADD COLUMN momentum_acceleration_pct REAL",
+            "ALTER TABLE feature_snapshots ADD COLUMN volume_surge_ratio REAL",
+            "ALTER TABLE feature_snapshots ADD COLUMN extension_from_recent_base_pct REAL",
+            "ALTER TABLE feature_snapshots ADD COLUMN prior_session_return_pct REAL",
+        ),
+    ),
 )
 
 

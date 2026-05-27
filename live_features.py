@@ -57,6 +57,8 @@ from db import get_connection, DB_PATH
 from feature_engine import compute_feature_snapshot
 from macro_risk import get_macro_risk
 from market_time import is_trading_day, market_session, now_et
+from prior_session_context import prior_session_context
+from rolling_context import rolling_symbol_context
 from symbols_config import APPROVED_SYMBOLS
 from setup_engine import classify_feature_snapshot as classify_setup
 
@@ -242,6 +244,38 @@ def build_snapshot(symbol: str) -> dict:
     snapshot["timestamp"] = datetime.now(ET).isoformat()
     snapshot["bar_timeframe"] = timeframe
     snapshot["bar_count"] = bar_count
+
+    if len(closes) >= 5:
+        returns = []
+        for prev, cur in zip(closes[-5:-1], closes[-4:]):
+            if prev > 0:
+                returns.append((cur - prev) / prev * 100)
+        if len(returns) >= 4:
+            snapshot["momentum_acceleration_pct"] = round(
+                returns[-1] - (sum(returns[:-1]) / len(returns[:-1])),
+                4,
+            )
+
+    if len(volumes) >= 11:
+        current_volume = float(volumes[-1] or 0)
+        prior_volumes = [float(v or 0) for v in volumes[-11:-1]]
+        usable = [v for v in prior_volumes if v > 0]
+        if usable:
+            avg_volume = sum(usable) / len(usable)
+            if avg_volume > 0:
+                snapshot["volume_surge_ratio"] = round(current_volume / avg_volume, 3)
+
+    try:
+        rolling = rolling_symbol_context(symbol) or {}
+        snapshot["extension_from_recent_base_pct"] = rolling.get("extension_from_recent_base_pct")
+    except Exception:
+        snapshot["extension_from_recent_base_pct"] = None
+
+    try:
+        prior = prior_session_context(symbol) or {}
+        snapshot["prior_session_return_pct"] = prior.get("session_return_pct")
+    except Exception:
+        snapshot["prior_session_return_pct"] = None
     
     setup = classify_setup(snapshot)
     snapshot["setup_label"] = setup.setup_label
@@ -290,8 +324,12 @@ def insert_snapshot(snapshot: dict) -> None:
                 setup_recommendation,
                 setup_score,
                 setup_confidence,
-                setup_key
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                setup_key,
+                momentum_acceleration_pct,
+                volume_surge_ratio,
+                extension_from_recent_base_pct,
+                prior_session_return_pct
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 snapshot.get("timestamp"),
@@ -327,6 +365,10 @@ def insert_snapshot(snapshot: dict) -> None:
                 snapshot.get("setup_score"),
                 snapshot.get("setup_confidence"),
                 snapshot.get("setup_key"),
+                snapshot.get("momentum_acceleration_pct"),
+                snapshot.get("volume_surge_ratio"),
+                snapshot.get("extension_from_recent_base_pct"),
+                snapshot.get("prior_session_return_pct"),
             ),
         )
 

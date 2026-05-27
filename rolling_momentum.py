@@ -175,6 +175,7 @@ def classify_context(metrics):
     current_session = metrics.get("current_session_return_pct")
     current_vs_prior = metrics.get("current_price_vs_prior_close_pct")
     after_hours = metrics.get("prior_postmarket_return_pct")
+    extension_from_base = metrics.get("extension_from_recent_base_pct")
 
     if five_day is not None:
         if five_day > 2.0:
@@ -218,8 +219,19 @@ def classify_context(metrics):
 
     special = []
 
-    if five_day is not None and five_day > 4 and overnight_gap is not None and overnight_gap > 1:
+    if (
+        (five_day is not None and five_day > 4 and overnight_gap is not None and overnight_gap > 1)
+        or (
+            five_day is not None
+            and five_day > 4.0
+            and prior_day is not None
+            and prior_day > 2.0
+        )
+    ):
         special.append("gap_up_chase_risk")
+
+    if extension_from_base is not None and extension_from_base > 3.5:
+        special.append("extended_above_recent_base")
 
     if five_day is not None and five_day > 2 and current_session is not None and current_session < -0.3:
         special.append("pullback_in_uptrend")
@@ -315,8 +327,21 @@ def build_symbol_context(symbol):
         last_close = summaries[last_day]["regular"]["close"]
         five_day_return = pct_change(last_close, first_open)
 
+    extension_from_recent_base = None
+    extension_from_recent_base_days = None
+    recent_base_days = prior_market_days[-3:]
+    recent_regular_closes = []
+    for d in recent_base_days:
+        reg = summaries[d].get("regular")
+        if reg and reg.get("close"):
+            recent_regular_closes.append(float(reg["close"]))
+
     latest_bar = bars[-1]
     latest_price = latest_bar["close"]
+    if recent_regular_closes:
+        recent_base = min(recent_regular_closes)
+        extension_from_recent_base = pct_change(latest_price, recent_base)
+        extension_from_recent_base_days = sum(1 for close in recent_regular_closes if latest_price > close)
 
     today_pre = today_summary.get("premarket") if today_summary else None
     today_reg = today_summary.get("regular") if today_summary else None
@@ -348,6 +373,8 @@ def build_symbol_context(symbol):
         "premarket_return_pct": safe_round(premarket_return),
         "current_session_return_pct": safe_round(current_session_return),
         "current_price_vs_prior_close_pct": safe_round(current_vs_prior_close),
+        "extension_from_recent_base_pct": safe_round(extension_from_recent_base),
+        "extension_from_recent_base_days": extension_from_recent_base_days,
     }
 
     classification = classify_context(metrics)

@@ -114,6 +114,32 @@ REJECTED_SIGNAL_FORWARD_RETURNS = (
     "max_adverse_60m",
 )
 
+CANONICAL_SIGNAL_TIME_FEATURES = {
+    "feature_version": "feature_snapshots_v3",
+    "fields": {
+        "momentum_acceleration_pct": {
+            "source": "app.get_momentum/live_features bar snapshot",
+            "available_at": "signal_time",
+            "leakage_status": "allowed_signal_time",
+        },
+        "volume_surge_ratio": {
+            "source": "app.get_momentum/live_features bar snapshot",
+            "available_at": "signal_time",
+            "leakage_status": "allowed_signal_time",
+        },
+        "extension_from_recent_base_pct": {
+            "source": "rolling_momentum.json generated from recent bars",
+            "available_at": "signal_time",
+            "leakage_status": "allowed_if_context_fresh_at_signal_time",
+        },
+        "prior_session_return_pct": {
+            "source": "strong_day_participation most recent prior row",
+            "available_at": "signal_time",
+            "leakage_status": "allowed_prior_session_only",
+        },
+    },
+}
+
 ORDER_FILL_TRUTH_HIERARCHY = (
     "alpaca_order_fill_data",
     "fill_stream",

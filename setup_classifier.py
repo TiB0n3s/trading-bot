@@ -59,11 +59,15 @@ def classify_setup(
     entry_quality=None,
     macro_risk=None,
     correlation_exposure=None,
+    prior_session=None,
+    rolling_momentum=None,
 ):
     trend = trend or {}
     momentum = momentum or {}
     macro_risk = macro_risk or {}
     correlation_exposure = correlation_exposure or []
+    prior_session = prior_session or {}
+    rolling_momentum = rolling_momentum or {}
 
     score = 50
     reasons = []
@@ -101,8 +105,13 @@ def classify_setup(
     momentum_direction = momentum.get("direction")
     momentum_5m = _to_float(momentum.get("momentum_5m_pct", momentum.get("momentum_pct")))
     momentum_15m = _to_float(momentum.get("momentum_15m_pct"))
+    momentum_state = momentum.get("momentum_state")
+    volume_state = momentum.get("volume_state")
     price_vs_bars = _to_float(momentum.get("price_vs_bars"))
     premarket_alignment = momentum.get("premarket_alignment")
+    prior_session_return_pct = _to_float(prior_session.get("session_return_pct"))
+    session_age_days = prior_session.get("session_age_days")
+    special_labels = set(rolling_momentum.get("special_labels") or [])
 
     if momentum_direction == "rising":
         score += 12
@@ -113,6 +122,23 @@ def classify_setup(
     elif momentum_direction == "flat":
         score -= 3
         reasons.append("flat 5m tape")
+
+    if momentum_state == "accelerating":
+        score += 8
+        reasons.append("momentum accelerating")
+    elif momentum_state == "decelerating":
+        score -= 10
+        reasons.append("momentum decelerating")
+
+    if volume_state == "surge":
+        score += 6
+        reasons.append("volume surge")
+    elif volume_state == "elevated":
+        score += 3
+        reasons.append("elevated volume")
+    elif volume_state == "thin":
+        score -= 8
+        reasons.append("thin volume")
 
     if momentum_5m is not None:
         if momentum_5m >= 0.30:
@@ -157,6 +183,22 @@ def classify_setup(
         elif -0.35 <= price_vs_bars <= 0.20:
             score += 5
             reasons.append("entry near recent tape")
+
+    if prior_session_return_pct is not None and prior_session_return_pct > 3.0 and session_age_days == 1:
+        score -= 12
+        reasons.append(f"prior session strong day {prior_session_return_pct:.2f}%")
+
+    if "extended_above_recent_base" in special_labels:
+        score -= 12
+        reasons.append("extended above recent base")
+
+    if "pullback_in_uptrend" in special_labels and "extended_above_recent_base" in special_labels:
+        score -= 10
+        reasons.append("extended pullback-in-uptrend risk")
+
+    if "gap_up_chase_risk" in special_labels:
+        score -= 15
+        reasons.append("gap/chase risk")
 
     # Market context
     if market_bias == "buy":
@@ -269,6 +311,7 @@ def classify_setup(
             and strength == "confirmed"
             and market_bias == "buy"
             and momentum_direction == "rising"
+            and momentum_state != "decelerating"
             and premarket_alignment in ("confirmed", "neutral", None)
         )
         if not strong_exception:
@@ -297,7 +340,12 @@ def classify_setup(
             "momentum_direction": momentum_direction,
             "momentum_5m_pct": momentum_5m,
             "momentum_15m_pct": momentum_15m,
+            "momentum_state": momentum_state,
+            "volume_state": volume_state,
             "price_vs_bars": price_vs_bars,
+            "prior_session_return_pct": prior_session_return_pct,
+            "prior_session_age_days": session_age_days,
+            "rolling_special_labels": sorted(special_labels),
             "premarket_alignment": premarket_alignment,
             "premarket_alignment_source": premarket_alignment_source,
             "market_bias": market_bias,

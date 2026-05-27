@@ -59,6 +59,7 @@ ROLLING MOMENTUM GUIDANCE:
 account_state may contain rolling_momentum with:
   trend_context, continuation_score, five_day_return_pct, prior_day_return_pct,
   overnight_gap_pct, premarket_return_pct, current_session_return_pct,
+  extension_from_recent_base_pct, extension_from_recent_base_days,
   special_labels, fresh (true/false), age_minutes
 
 Treat as advisory context only; never overrides hard pre-checks.
@@ -70,20 +71,54 @@ Treat as advisory context only; never overrides hard pre-checks.
   entry_quality is excellent.
 - special_labels "pullback_in_uptrend": treat weakness as potentially tactical;
   require bullish trend confirmation.
+- special_labels "extended_above_recent_base": reduce confidence one level and
+  prefer smaller sizing.
 - special_labels "overnight_contradiction" or "after_hours_warning": reduce confidence.
 - Stale or absent rolling_momentum: ignore entirely.
+
+PRIOR SESSION AND EXTENSION GUIDANCE:
+account_state["prior_session"] may contain the prior session's return and
+participation quality for this symbol.
+
+- prior_session.session_return_pct > 3.0 with session_age_days == 1 means the
+  symbol had a strong day yesterday. Treat today's entry as a mature trend, not
+  a fresh setup. Require momentum_state == "accelerating" and volume_state of
+  "elevated" or "surge" before approving. Confidence at most "medium".
+- extended_above_recent_base plus pullback_in_uptrend is a late-trend dip-buy
+  pattern. Confidence "low" only; reject unless trend is bullish/confirmed,
+  volume is elevated or surge, and momentum is accelerating.
+- extended_above_recent_base alone: reduce confidence one level and prefer
+  smaller sizing.
 
 SHORT-TERM MOMENTUM GUIDANCE:
 account_state may contain momentum with:
   direction: "rising", "falling", or "flat"
   momentum_pct: percent change across last 5 one-minute bars
   price_vs_bars: percent difference between signal price and most recent bar close
+  momentum_acceleration_pct: last bar return minus average of prior 3 bars
+  momentum_state: "accelerating", "decelerating", "flat", or "insufficient_data"
 account_state may contain signal_confidence_hint "high" or "low" —
 use as your starting confidence before applying trend rules.
 
 - Rising momentum confirms the signal; lean confidence higher.
 - Falling momentum is a caution flag; lean confidence lower.
 - Flat momentum: no adjustment.
+
+MOMENTUM ACCELERATION GUIDANCE:
+- accelerating: momentum is building at signal time; supports approval when trend
+  and volume confirm.
+- decelerating: momentum peaked before signal arrival; treat as a caution flag.
+  Reduce confidence one level. Do not approve weak or gray-zone setups.
+- flat or insufficient_data: no adjustment.
+
+VOLUME CONFIRMATION GUIDANCE:
+account_state["momentum"] includes volume_surge_ratio and volume_state.
+
+- surge: institutional participation is more likely; supports approval when trend
+  and momentum confirm.
+- elevated: modestly supportive when other context agrees.
+- thin: move lacks buying pressure; reduce confidence. Reject marginal setups.
+- normal or insufficient_data: no adjustment.
 
 SESSION MOMENTUM GUIDANCE:
 account_state may contain session_momentum with:

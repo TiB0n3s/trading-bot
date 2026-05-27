@@ -251,6 +251,37 @@ def test_historical_trend_context_migration_creates_table():
         assert_true(expected <= table_columns(db_path, "historical_trend_context"), "historical trend columns")
 
 
+def test_entry_intelligence_migration_adds_columns():
+    with tempfile.TemporaryDirectory() as tmp:
+        db_path = Path(tmp) / "test.db"
+        make_db(db_path)
+        with sqlite3.connect(db_path) as con:
+            con.execute("CREATE TABLE trades (id INTEGER PRIMARY KEY)")
+        apply_migration(MIGRATIONS[4], db_path)
+
+        applied = apply_migration(MIGRATIONS[9], db_path)
+        assert_equal(applied, True, "apply")
+
+        decision_expected = {
+            "momentum_acceleration_pct",
+            "momentum_state",
+            "volume_surge_ratio",
+            "volume_state",
+            "extension_from_recent_base_pct",
+            "prior_session_return_pct",
+            "tape_label_at_signal",
+            "tape_bar_age_seconds",
+        }
+        feature_expected = {
+            "momentum_acceleration_pct",
+            "volume_surge_ratio",
+            "extension_from_recent_base_pct",
+            "prior_session_return_pct",
+        }
+        assert_true(decision_expected <= table_columns(db_path, "decision_snapshots"), "entry decision columns")
+        assert_true(feature_expected <= table_columns(db_path, "feature_snapshots"), "entry feature columns")
+
+
 if __name__ == "__main__":
     test_feature_audit_migration_is_idempotent()
     print("[OK] test_feature_audit_migration_is_idempotent")
@@ -270,4 +301,6 @@ if __name__ == "__main__":
     print("[OK] test_auto_buy_decision_snapshots_migration_creates_table")
     test_historical_trend_context_migration_creates_table()
     print("[OK] test_historical_trend_context_migration_creates_table")
-    print("\nAll 9 DB migration tests passed.")
+    test_entry_intelligence_migration_adds_columns()
+    print("[OK] test_entry_intelligence_migration_adds_columns")
+    print("\nAll 10 DB migration tests passed.")

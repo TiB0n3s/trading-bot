@@ -151,6 +151,7 @@ def build_intraday_state(
     return {
         "symbol": symbol.upper(),
         "bar_count": len(bars),
+        "latest_bar_timestamp": bars[-1].get("timestamp") if bars else None,
         "current_price": round(price, 4) if price else None,
         "latest_close": round(latest_close, 4) if latest_close else None,
         "return_5m_pct": ret_5m,

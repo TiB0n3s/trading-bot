@@ -12,7 +12,7 @@ EXPERIMENT_ROOT = ML_ROOT / "experiments"
 MODEL_ROOT = ML_ROOT / "models"
 MODEL_REGISTRY_PATH = MODEL_ROOT / "registry.json"
 
-FEATURE_VERSION = "feature_snapshots_v2"
+FEATURE_VERSION = "feature_snapshots_v3"
 
 MODEL_STATUSES = {
     "research",

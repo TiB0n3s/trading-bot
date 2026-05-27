@@ -93,6 +93,16 @@ def _summarize_context(ctx):
     elif rolling_direction == "falling":
         risks.append("rolling momentum falling")
 
+    prior_session = ctx.get("prior_session") or {}
+    prior_return = prior_session.get("session_return_pct")
+    prior_age = prior_session.get("session_age_days")
+    try:
+        prior_return_f = float(prior_return)
+    except (TypeError, ValueError):
+        prior_return_f = None
+    if prior_return_f is not None and prior_return_f > 3.0 and prior_age == 1:
+        risks.append(f"prior session strong day ({prior_return_f:.1f}%)")
+
     session = ctx.get("session_momentum") or {}
     session_label = session.get("trend_label")
     session_score = session.get("trend_score")
@@ -188,6 +198,7 @@ def build_intelligence_context(symbol, action, account_state):
         "live_features": _compact_dict(account_state.get("live_features")),
         "label_features": _compact_dict(account_state.get("label_features")),
         "rolling_momentum": _compact_dict(account_state.get("momentum")),
+        "prior_session": _compact_dict(account_state.get("prior_session")),
         "session_momentum": _compact_dict(account_state.get("session_momentum")),
         "session_momentum_gate": _compact_dict(account_state.get("session_momentum_gate")),
         "prediction": _compact_dict(account_state.get("prediction_gate")),

@@ -20,6 +20,7 @@ echo "=== Post-session review $(date -Iseconds) DATE=${TODAY} ==="
 "${PYTHON}" ops_check.py prediction-validation "${TODAY}"
 "${PYTHON}" ops_check.py auto-buy "${TODAY}"
 "${PYTHON}" auto_buy_outcome_report.py --date "${TODAY}"
+"${PYTHON}" entry_quality_report.py --date "${TODAY}"
 "${PYTHON}" ops_check.py decision-snapshots "${TODAY}"
 "${PYTHON}" ops_check.py policy-artifacts
 "${PYTHON}" analytics_report.py --date "${TODAY}"

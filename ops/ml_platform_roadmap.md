@@ -869,6 +869,13 @@ A model can only move from observe-only to paper-trading influence after it has:
 21. Started: route fixed-horizon label generation through
     `label_v1_builder.py`, which validates feature availability/staleness
     audit fields before delegating to the current label feature builder.
+22. Started: entry-intelligence instrumentation v1. The live signal path now
+    captures momentum acceleration, volume surge ratio, recent-base extension,
+    prior-session strong-day context, and fresh tape classification into
+    `decision_snapshots`; `feature_snapshots_v3` includes the new signal-time
+    training features; `entry_quality_report.py` runs post-session in
+    observe-only mode. Do not promote entry-quality hard gates until the report
+    has enough matched outcomes per bucket.
 
 Critical blockers before real training:
 

@@ -33,6 +33,8 @@ from position_intelligence import get_position_intelligence
 from bot_events import log_event
 from decision_snapshots import record_decision_snapshot
 from rolling_context import rolling_summary, rolling_symbol_context
+from prior_session_context import prior_session_context
+from market_intelligence.alpaca_tape import build_tape_context
 from decision_thresholds import PREDICTION_GATE_THRESHOLDS
 from strategy.strategy_engine import evaluate_strategy_observe_only
 from risk.account_risk import account_risk_snapshot
@@ -1738,6 +1740,16 @@ def _build_decision_context(symbol, action, account_state=None):
         "trend_strength": None,
         "momentum_direction": None,
         "momentum_pct": None,
+        "momentum_acceleration_pct": None,
+        "momentum_state": None,
+        "volume_surge_ratio": None,
+        "volume_state": None,
+        "extension_from_recent_base_pct": None,
+        "rolling_special_labels": None,
+        "prior_session_return_pct": None,
+        "prior_session_participated": None,
+        "tape_label_at_signal": None,
+        "tape_bar_age_seconds": None,
         "session_trend_label": None,
         "session_trend_score": None,
         "session_return_pct": None,
@@ -1771,6 +1783,26 @@ def _build_decision_context(symbol, action, account_state=None):
             momentum = account_state.get("momentum") or {}
             ctx["momentum_direction"] = momentum.get("direction")
             ctx["momentum_pct"] = momentum.get("momentum_pct")
+            ctx["momentum_acceleration_pct"] = momentum.get("momentum_acceleration_pct")
+            ctx["momentum_state"] = momentum.get("momentum_state")
+            ctx["volume_surge_ratio"] = momentum.get("volume_surge_ratio")
+            ctx["volume_state"] = momentum.get("volume_state")
+
+            rolling = account_state.get("rolling_momentum") or {}
+            ctx["extension_from_recent_base_pct"] = rolling.get("extension_from_recent_base_pct")
+            ctx["rolling_special_labels"] = json.dumps(
+                rolling.get("special_labels") or [],
+                sort_keys=True,
+            )
+
+            prior_session = account_state.get("prior_session") or {}
+            ctx["prior_session_return_pct"] = prior_session.get("session_return_pct")
+            if prior_session.get("participated") is not None:
+                ctx["prior_session_participated"] = 1 if prior_session.get("participated") else 0
+
+            tape = account_state.get("tape") or {}
+            ctx["tape_label_at_signal"] = tape.get("label")
+            ctx["tape_bar_age_seconds"] = tape.get("tape_bar_age_seconds")
 
             session_momentum = account_state.get("session_momentum") or {}
             ctx["session_trend_label"] = session_momentum.get("trend_label")
@@ -2534,6 +2566,44 @@ def get_momentum(symbol, price, premarket_bias=None):
         momentum_5m_pct = (short_last - short_first) / short_first * 100
         momentum_15m_pct = (last_close - first_close) / first_close * 100
         price_vs_bars = (price - last_close) / last_close * 100 if last_close > 0 else 0.0
+        momentum_acceleration_pct = None
+        momentum_state = "insufficient_data"
+        if len(bars) >= 5:
+            returns = []
+            for prev, cur in zip(bars[-5:-1], bars[-4:]):
+                prev_close = float(prev.c)
+                cur_close = float(cur.c)
+                if prev_close > 0:
+                    returns.append((cur_close - prev_close) / prev_close * 100)
+            if len(returns) >= 4:
+                last_return = returns[-1]
+                prior_avg = sum(returns[:-1]) / len(returns[:-1])
+                momentum_acceleration_pct = last_return - prior_avg
+                if momentum_acceleration_pct > 0.03:
+                    momentum_state = "accelerating"
+                elif momentum_acceleration_pct < -0.03:
+                    momentum_state = "decelerating"
+                else:
+                    momentum_state = "flat"
+
+        volume_surge_ratio = None
+        volume_state = "insufficient_data"
+        if len(bars) >= 11:
+            current_volume = float(getattr(bars[-1], "v", 0) or 0)
+            prior_volumes = [float(getattr(b, "v", 0) or 0) for b in bars[-11:-1]]
+            usable_volumes = [v for v in prior_volumes if v > 0]
+            if usable_volumes:
+                avg_volume = sum(usable_volumes) / len(usable_volumes)
+                if avg_volume > 0:
+                    volume_surge_ratio = current_volume / avg_volume
+                    if volume_surge_ratio >= 2.0:
+                        volume_state = "surge"
+                    elif volume_surge_ratio >= 1.5:
+                        volume_state = "elevated"
+                    elif volume_surge_ratio < 0.8:
+                        volume_state = "thin"
+                    else:
+                        volume_state = "normal"
 
         if momentum_5m_pct > 0.1:
             direction = "rising"
@@ -2580,6 +2650,14 @@ def get_momentum(symbol, price, premarket_bias=None):
             "momentum_pct": round(momentum_5m_pct, 3),   # preserve existing field name
             "momentum_5m_pct": round(momentum_5m_pct, 3),
             "momentum_15m_pct": round(momentum_15m_pct, 3),
+            "momentum_acceleration_pct": round(momentum_acceleration_pct, 4)
+            if momentum_acceleration_pct is not None
+            else None,
+            "momentum_state": momentum_state,
+            "volume_surge_ratio": round(volume_surge_ratio, 3)
+            if volume_surge_ratio is not None
+            else None,
+            "volume_state": volume_state,
             "price_vs_bars": round(price_vs_bars, 3),
             "bar_count": len(bars),
             "last_close": round(last_close, 4),
@@ -3506,6 +3584,52 @@ def process_signal(data):
     if age_seconds is not None:
         account_state["signal_age_seconds"] = round(age_seconds, 2)
 
+    if action == "buy":
+        premarket_bias = (_market_bias.get(symbol) or {}).get("bias")
+        try:
+            prior_session = prior_session_context(symbol)
+            if prior_session:
+                account_state["prior_session"] = prior_session
+        except Exception as e:
+            logger.warning(f"prior_session context unavailable for {symbol}: {e}")
+
+        try:
+            tape_ctx = build_tape_context(symbol, current_price=price)
+            classification = tape_ctx.get("classification") or {}
+            state = tape_ctx.get("state") or {}
+            bar_age_seconds = None
+            if state.get("latest_bar_timestamp"):
+                try:
+                    latest_ts = datetime.fromisoformat(
+                        str(state.get("latest_bar_timestamp")).replace("Z", "+00:00")
+                    )
+                    if latest_ts.tzinfo is None:
+                        latest_ts = latest_ts.replace(tzinfo=timezone.utc)
+                    bar_age_seconds = round(
+                        (
+                            datetime.now(timezone.utc)
+                            - latest_ts.astimezone(timezone.utc)
+                        ).total_seconds(),
+                        3,
+                    )
+                except Exception:
+                    bar_age_seconds = None
+            account_state["tape"] = {
+                **classification,
+                "ok": tape_ctx.get("ok"),
+                "bar_count": tape_ctx.get("bar_count"),
+                "tape_bar_age_seconds": bar_age_seconds,
+            }
+        except Exception as e:
+            logger.warning(f"fresh tape context unavailable for {symbol}: {e}")
+
+        momentum = get_momentum(symbol, price, premarket_bias=premarket_bias)
+        if momentum:
+            account_state["momentum"] = momentum
+            account_state["premarket_alignment_source"] = (
+                "live_tape" if premarket_bias is not None else "missing_bias"
+            )
+
     setup_obs = _build_setup_observation(symbol, action, price, account_state)
     account_state["setup_observation"] = setup_obs
 
@@ -4315,8 +4439,49 @@ def process_signal(data):
     action_hint = None
 
     if action == "buy":
+        if "prior_session" not in account_state:
+            try:
+                prior_session = prior_session_context(symbol)
+                if prior_session:
+                    account_state["prior_session"] = prior_session
+            except Exception as e:
+                logger.warning(f"prior_session context unavailable for {symbol}: {e}")
+
+        if "tape" not in account_state:
+            try:
+                tape_ctx = build_tape_context(symbol, current_price=price)
+                classification = tape_ctx.get("classification") or {}
+                state = tape_ctx.get("state") or {}
+                bar_age_seconds = None
+                if state.get("latest_bar_timestamp"):
+                    try:
+                        latest_ts = datetime.fromisoformat(
+                            str(state.get("latest_bar_timestamp")).replace("Z", "+00:00")
+                        )
+                        if latest_ts.tzinfo is None:
+                            latest_ts = latest_ts.replace(tzinfo=timezone.utc)
+                        bar_age_seconds = round(
+                            (
+                                datetime.now(timezone.utc)
+                                - latest_ts.astimezone(timezone.utc)
+                            ).total_seconds(),
+                            3,
+                        )
+                    except Exception:
+                        bar_age_seconds = None
+                account_state["tape"] = {
+                    **classification,
+                    "ok": tape_ctx.get("ok"),
+                    "bar_count": tape_ctx.get("bar_count"),
+                    "tape_bar_age_seconds": bar_age_seconds,
+                }
+            except Exception as e:
+                logger.warning(f"fresh tape context unavailable for {symbol}: {e}")
+
         premarket_bias = bias_entry.get("bias")
-        momentum = get_momentum(symbol, price, premarket_bias=premarket_bias)
+        momentum = account_state.get("momentum")
+        if not momentum:
+            momentum = get_momentum(symbol, price, premarket_bias=premarket_bias)
         if momentum:
             account_state["momentum"] = momentum
             # Record source so decision_snapshots can flag when bias was absent.
@@ -4361,7 +4526,6 @@ def process_signal(data):
                     f"Momentum confirms {symbol} BUY: direction={momentum['direction']} "
                     f"momentum_pct={momentum['momentum_pct']}% — confidence hint set to high"
                 )
-
     # Add-on momentum gate: for existing positions with high/very_high risk,
     # require rising short-term momentum before adding more exposure.
     # This prevents adding to already-held high-risk names when momentum is flat/falling.

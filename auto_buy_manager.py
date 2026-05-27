@@ -436,6 +436,40 @@ def risk_cross_check(symbol: str) -> tuple[bool, str, dict[str, Any]]:
     return True, "risk cross-check passed", {"correlation_exposure": cluster_checks}
 
 
+def market_session_label() -> tuple[str | None, str]:
+    """Return (trend_label, reason) for the overall market using QQQ then SPY as proxy.
+
+    Used by the session momentum gate to suppress strong_buy_candidate decisions
+    when the broad market is fading or in downtrend, regardless of individual scores.
+    """
+    for proxy in ("QQQ", "SPY"):
+        row = latest_session(proxy)
+        label = row.get("trend_label")
+        if label:
+            return label, f"market_proxy={proxy}"
+    return None, "no_market_proxy_available"
+
+
+SUPPRESSED_LABELS = {"fading", "downtrend"}
+
+
+def strong_buy_signals_today(symbol: str) -> int:
+    """Count strong_buy_candidate decisions for this symbol today without a filled order."""
+    with get_connection(DB_PATH) as con:
+        row = con.execute(
+            """
+            SELECT COUNT(*) AS n
+            FROM auto_buy_candidates
+            WHERE symbol = ?
+              AND substr(timestamp, 1, 10) = ?
+              AND decision = 'strong_buy_candidate'
+              AND order_submitted = 0
+            """,
+            (symbol.upper(), _today()),
+        ).fetchone()
+    return int(row["n"] or 0) if row else 0
+
+
 def write_app_buy_cooldown(symbol: str) -> None:
     with get_connection(DB_PATH) as con:
         con.execute(
@@ -585,6 +619,23 @@ def evaluate_auto_buy_candidate(
     if feature_vwap > 1.50:
         score -= 2
         reasons.append("feature_vwap_extended:-2")
+
+    # Momentum acceleration modifier — same thresholds as setup_engine._score_modifiers.
+    # feature_snapshots already computes this field every bar cycle.
+    mom_acc = _to_float(feature.get("momentum_acceleration_pct"))
+    if mom_acc is not None:
+        if mom_acc <= -0.05:
+            score -= 12
+            reasons.append(f"mom_strong_decel({mom_acc:.3f}):-12")
+        elif mom_acc <= -0.03:
+            score -= 8
+            reasons.append(f"mom_decel({mom_acc:.3f}):-8")
+        elif mom_acc >= 0.05:
+            score += 6
+            reasons.append(f"mom_strong_accel({mom_acc:.3f}):+6")
+        elif mom_acc >= 0.03:
+            score += 3
+            reasons.append(f"mom_accel({mom_acc:.3f}):+3")
 
     hard_block_reasons = []
     if bias == "avoid":
@@ -859,11 +910,19 @@ def symbols_for_scope(scope: str) -> list[str]:
     return INTERNAL_BAR_ONLY_SYMBOLS_LIST
 
 
+AUTO_BUY_MAX_SIGNALS_PER_SYMBOL = int(os.getenv("AUTO_BUY_MAX_SIGNALS_PER_SYMBOL", "2"))
+
+
 def build_candidates(scope: str) -> list[dict[str, Any]]:
     ctx = load_market_context()
     symbols_ctx = ctx.get("symbols") or {}
     held = held_symbols()
     candidates = []
+
+    # Market-level session gate: if the broad market (QQQ/SPY) is fading or in
+    # downtrend, cap all candidates at 'watch' regardless of individual scores.
+    mkt_label, mkt_reason = market_session_label()
+    market_suppressed = mkt_label in SUPPRESSED_LABELS
 
     for symbol in symbols_for_scope(scope):
         candidate = evaluate_auto_buy_candidate(
@@ -874,6 +933,28 @@ def build_candidates(scope: str) -> list[dict[str, Any]]:
             held=held,
             signal_source=SYMBOL_SIGNAL_SOURCE.get(symbol, "unknown"),
         )
+
+        # Downgrade strong_buy_candidate → watch when market session is suppressed.
+        if market_suppressed and candidate.get("decision") == "strong_buy_candidate":
+            candidate["decision"] = "watch"
+            candidate["severity"] = "medium"
+            candidate["hard_block_reason"] = (
+                (candidate.get("hard_block_reason") or "")
+                + f"; session_momentum_gate: {mkt_reason}={mkt_label}"
+            ).lstrip("; ")
+
+        # Per-symbol daily signal cap: if this symbol has already fired
+        # strong_buy_candidate twice today without a filled order, suppress it.
+        if candidate.get("decision") == "strong_buy_candidate":
+            prior_signals = strong_buy_signals_today(symbol)
+            if prior_signals >= AUTO_BUY_MAX_SIGNALS_PER_SYMBOL:
+                candidate["decision"] = "skip"
+                candidate["severity"] = "low"
+                candidate["hard_block_reason"] = (
+                    (candidate.get("hard_block_reason") or "")
+                    + f"; daily_signal_cap: {prior_signals}>={AUTO_BUY_MAX_SIGNALS_PER_SYMBOL} unfilled signals today"
+                ).lstrip("; ")
+
         candidates.append(candidate)
 
     candidates.sort(key=lambda item: (item.get("score") or 0), reverse=True)

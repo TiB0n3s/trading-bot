@@ -1018,6 +1018,11 @@ def main() -> int:
             order = maybe_execute_auto_buy(candidate, market_open=market_open, live_requested=args.live)
             if order:
                 submitted += 1
+        else:
+            candidate["live_block_reason"] = (
+                f"per-run auto-buy order cap reached: "
+                f"{submitted} >= {AUTO_BUY_MAX_ORDERS_PER_RUN}"
+            )
 
         log_candidate(candidate, live_buy_enabled=args.live and AUTO_BUY_LIVE_BUYS, order=order)
         log_event(

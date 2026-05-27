@@ -122,6 +122,16 @@ INTRA_SESSION_TAPE_DEGRADATION_START_HOUR_ET = int(
 INTRA_SESSION_TAPE_DEGRADATION_MIN_SETUP_SCORE = float(
     os.getenv("INTRA_SESSION_TAPE_DEGRADATION_MIN_SETUP_SCORE", "55")
 )
+
+ONE_BAR_CONFIRMATION_HOLD_ENABLED = os.getenv(
+    "ONE_BAR_CONFIRMATION_HOLD_ENABLED", "true"
+).strip().lower() in ("1", "true", "yes", "on")
+ONE_BAR_CONFIRMATION_EXTENSION_THRESHOLD_PCT = float(
+    os.getenv("ONE_BAR_CONFIRMATION_EXTENSION_THRESHOLD_PCT", "0.25")
+)
+ONE_BAR_CONFIRMATION_TIMEOUT_SECONDS = int(
+    os.getenv("ONE_BAR_CONFIRMATION_TIMEOUT_SECONDS", "75")
+)
 if PREDICTION_GATE_MODE not in ("off", "warn", "soft", "hard"):
     logger.warning(
         f"Invalid PREDICTION_GATE_MODE={PREDICTION_GATE_MODE!r}; defaulting to warn"
@@ -2468,6 +2478,96 @@ def _live_bias_override(symbol, bias_entry, trend, setup_obs, prediction_gate, m
         "confidence_adjustment": 0,
         "reason": "pre-market bias unchanged by live evidence",
     }
+
+
+def _one_bar_confirmation_hold(symbol: str, signal_price: float, account_state: dict) -> tuple[bool, str]:
+    """Wait for the next fresh 1-minute bar to confirm an extended/decelerating BUY.
+
+    Returns (allowed, reason). Fail-closed only when this specific hold condition
+    is triggered and the next bar does not open above the original signal price.
+    """
+    if not ONE_BAR_CONFIRMATION_HOLD_ENABLED:
+        return True, "one-bar confirmation disabled"
+
+    if signal_price is None:
+        return True, "missing signal price"
+
+    try:
+        signal_price_f = float(signal_price)
+    except Exception:
+        return True, f"invalid signal price={signal_price!r}"
+
+    if signal_price_f <= 0:
+        return True, f"nonpositive signal price={signal_price_f}"
+
+    momentum = (account_state or {}).get("momentum") or {}
+    momentum_state = momentum.get("momentum_state")
+
+    try:
+        price_vs_bars = float(momentum.get("price_vs_bars") or 0)
+    except Exception:
+        price_vs_bars = 0.0
+
+    if momentum_state != "decelerating":
+        return True, f"momentum_state={momentum_state}; hold not required"
+
+    if price_vs_bars <= ONE_BAR_CONFIRMATION_EXTENSION_THRESHOLD_PCT:
+        return True, (
+            f"price_vs_bars={price_vs_bars:.3f}% <= "
+            f"threshold={ONE_BAR_CONFIRMATION_EXTENSION_THRESHOLD_PCT:.3f}%; hold not required"
+        )
+
+    start_time = datetime.now(timezone.utc)
+    deadline = start_time.timestamp() + ONE_BAR_CONFIRMATION_TIMEOUT_SECONDS
+    seen_ts = None
+
+    tape = (account_state or {}).get("tape") or {}
+    latest_ts_raw = tape.get("tape_bar_age_seconds")
+    # tape_bar_age_seconds is only age, not timestamp; use polling below as source of truth.
+
+    reason_prefix = (
+        f"one_bar_hold required: momentum_state={momentum_state}; "
+        f"price_vs_bars={price_vs_bars:.3f}% > "
+        f"threshold={ONE_BAR_CONFIRMATION_EXTENSION_THRESHOLD_PCT:.3f}%; "
+        f"signal_price={signal_price_f:.4f}"
+    )
+
+    while datetime.now(timezone.utc).timestamp() < deadline:
+        try:
+            bars = list(api.get_bars(symbol, "1Min", limit=2, feed="iex"))
+        except TypeError:
+            bars = list(api.get_bars(symbol, "1Min", limit=2))
+        except Exception as e:
+            return False, f"{reason_prefix}; bar_fetch_error={e}"
+
+        if bars:
+            bar = bars[-1]
+            bar_ts = getattr(bar, "t", None) or getattr(bar, "timestamp", None)
+            bar_open = getattr(bar, "o", None) or getattr(bar, "open", None)
+
+            if seen_ts is None:
+                seen_ts = bar_ts
+            elif bar_ts != seen_ts:
+                try:
+                    bar_open_f = float(bar_open)
+                except Exception:
+                    return False, f"{reason_prefix}; next_bar_open_unavailable"
+
+                if bar_open_f > signal_price_f:
+                    return True, (
+                        f"{reason_prefix}; confirmed next_bar_open={bar_open_f:.4f} "
+                        f"> signal_price={signal_price_f:.4f}"
+                    )
+
+                return False, (
+                    f"{reason_prefix}; rejected next_bar_open={bar_open_f:.4f} "
+                    f"<= signal_price={signal_price_f:.4f}"
+                )
+
+        __import__("time").sleep(2)
+
+    return False, f"{reason_prefix}; timeout waiting for next 1m bar"
+
 
 def _session_momentum_is_fresh(session_momentum, max_age_minutes=5):
     """Return True when session momentum exists and was refreshed recently."""
@@ -5345,6 +5445,43 @@ def process_signal(data):
                             failure_reason=f"second_look: {second_look_reason}",
                         )
                     return
+
+                if action == "buy":
+                    one_bar_ok, one_bar_reason = _one_bar_confirmation_hold(
+                        symbol=symbol,
+                        signal_price=price,
+                        account_state=account_state,
+                    )
+                    account_state["one_bar_confirmation_hold"] = {
+                        "allowed": one_bar_ok,
+                        "reason": one_bar_reason,
+                    }
+
+                    if not one_bar_ok:
+                        logger.warning(
+                            f"One-bar confirmation hold blocked {symbol} BUY: "
+                            f"{one_bar_reason}"
+                        )
+                        log_rejection(
+                            symbol,
+                            action,
+                            "one_bar_confirmation_hold",
+                            one_bar_reason,
+                            price=price,
+                            account_state=account_state,
+                        )
+                        if dedupe_key:
+                            _mark_webhook_event_status(
+                                dedupe_key,
+                                "rejected",
+                                failure_reason=f"one_bar_confirmation_hold: {one_bar_reason}",
+                            )
+                        return
+
+                    logger.info(
+                        f"One-bar confirmation hold passed for {symbol} BUY: "
+                        f"{one_bar_reason}"
+                    )
 
                 client_order_id = _make_client_order_id(symbol, action, data)
                 logger.info(

@@ -159,12 +159,35 @@ def clamp(value: float, low: float = 0, high: float = 100) -> float:
     return max(low, min(high, float(value)))
 
 
+_NEGATION_WORDS = {"no", "not", "without", "reduces", "resolved", "eliminates", "avoids"}
+
+
+def has_negation_near(text: str, keyword: str, window: int = 4) -> bool:
+    """Return True if a negation word precedes keyword within window words.
+
+    Handles both single-word and multi-word keywords (e.g. 'supply chain risk').
+    Searches for the keyword token sequence and checks the preceding window.
+    """
+    words = text.lower().split()
+    kw_tokens = keyword.lower().split()
+    kw_len = len(kw_tokens)
+    for i in range(len(words) - kw_len + 1):
+        if words[i : i + kw_len] == kw_tokens:
+            context = words[max(0, i - window) : i]
+            if any(n in context for n in _NEGATION_WORDS):
+                return True
+    return False
+
+
 def text_score(text: str, words: set[str], per_hit: float = 8, cap: float = 40) -> float:
     t = text.lower()
     score = 0.0
     for word in words:
         if word in t:
-            score += per_hit
+            if has_negation_near(t, word):
+                score -= per_hit * 0.5  # negated phrase reduces rather than adds
+            else:
+                score += per_hit
     return clamp(score, 0, cap)
 
 
@@ -297,7 +320,11 @@ def score_event(event: dict[str, Any]) -> dict[str, Any]:
         expected_market_impact="neutral",
         trade_relevance="watch_only",
         time_horizon=str(event.get("time_horizon") or default_time_horizon(event_type)),
-        confidence=str(event.get("confidence") or infer_confidence(summary, bullish, bearish)),
+        confidence=str(event.get("confidence") or infer_confidence(
+            summary, bullish, bearish,
+            event_type=event_type,
+            net_score=bullish - bearish,
+        )),
         scoring_reason="; ".join(reason_bits),
     )
 
@@ -358,9 +385,17 @@ def default_time_horizon(event_type: str) -> str:
     return "days_to_weeks"
 
 
-def infer_confidence(summary: str, bullish: float, bearish: float) -> str:
-    if len(summary) < 40:
-        return "low"
-    if bullish >= 20 or bearish >= 20:
+def infer_confidence(
+    summary: str,
+    bullish: float,
+    bearish: float,
+    event_type: str = "",
+    net_score: float = 0,
+) -> str:
+    if event_type in ("earnings", "guidance") and (bullish >= 28 or bearish >= 28):
+        return "high"
+    if len(summary) >= 80 and (bullish >= 21 or bearish >= 21):
+        return "medium"
+    if len(summary) >= 40 and abs(net_score) >= 15:
         return "medium"
     return "low"

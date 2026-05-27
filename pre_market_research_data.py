@@ -43,13 +43,17 @@ INDEX_SYMBOLS = ("SPY", "QQQ", "IWM", "GLD")
 
 SECTOR_GROUPS = {
     "mega_cap_tech": ("AAPL", "MSFT", "NVDA", "META", "AMD", "GOOGL", "AVGO", "ASML"),
-    "semiconductors": ("NVDA", "AMD", "AVGO", "ASML", "CRDO"),
+    "semiconductors": ("NVDA", "AMD", "AVGO", "ASML", "CRDO", "TSM"),
+    "cloud_software": ("CRM", "OKTA", "ZS", "SNPS", "ADSK", "MDB", "ORCL", "NTAP", "DELL"),
     "energy": ("CVX", "XOM"),
-    "industrials": ("CAT", "LIN", "GE", "GEV", "HWM", "VRT"),
+    "industrials": ("CAT", "LIN", "GE", "GEV", "HWM", "VRT", "BE"),
     "defense": ("RKLB", "RTX", "LMT", "HWM"),
-    "healthcare_biotech": ("VRTX", "MRNA", "CRSP", "LLY", "ABBV", "MRK", "UNH"),
-    "consumer_retail": ("TSCO", "TSLA", "NFLX", "COST", "KO"),
-    "payments": ("V", "MA"),
+    "healthcare_biotech": ("VRTX", "MRNA", "CRSP", "LLY", "ABBV", "MRK", "UNH", "PFE"),
+    "consumer_retail": ("TSCO", "TSLA", "NFLX", "COST", "KO", "DKS", "BURL", "AMZN"),
+    "payments": ("V", "MA", "PYPL"),
+    "fintech_banking": ("SOFI", "JPM"),
+    "telecom_media": ("T", "VZ", "CMCSA"),
+    # SPY, QQQ, IWM, GLD are index/commodity ETFs — intentionally excluded from sector groups
 }
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
@@ -382,6 +386,20 @@ def classify_symbol(symbol, data, macro_sentiment):
             return {
                 "bias": "buy",
                 "reason": f"Positive recent trend without major tape weakness: {reason}",
+                "confidence": "low",
+                "fundamental_score": "neutral",
+                "risk_level": "medium",
+                "entry_quality": "good_on_pullbacks",
+                "avoid_type": None,
+            }
+
+        # Weak-buy: modest positive daily trend, tape not negative.
+        # Stays bias=neutral but upgrades entry_quality from conditional to
+        # good_on_pullbacks, reducing false hits from the conditional entry gate.
+        if daily is not None and daily >= 0.75 and (intra is None or intra >= -0.10):
+            return {
+                "bias": "neutral",
+                "reason": f"Modest positive trend — neutral bias, wait for pullback entry: {reason}",
                 "confidence": "low",
                 "fundamental_score": "neutral",
                 "risk_level": "medium",

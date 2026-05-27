@@ -15,6 +15,7 @@ echo "=== Post-session review $(date -Iseconds) DATE=${TODAY} ==="
 "${PYTHON}" rejected_signal_outcome_builder.py --date "${TODAY}"
 "${PYTHON}" ops_check.py rejected-outcomes "${TODAY}"
 "${PYTHON}" strong_day_participation_report.py --date "${TODAY}" --write-db
+"${PYTHON}" tradingview_alert_coverage_report.py --date "${TODAY}"
 "${PYTHON}" build_historical_trend_context.py --date "${TODAY}"
 "${PYTHON}" predict_symbol_outcomes.py --date "${TODAY}"
 "${PYTHON}" ops_check.py prediction-validation "${TODAY}"

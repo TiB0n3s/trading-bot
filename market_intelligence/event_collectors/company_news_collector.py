@@ -31,6 +31,15 @@ logger = logging.getLogger(__name__)
 # Use company/query names to reduce noisy ticker-only results.
 # Especially important for short tickers like V, MA, BE, GE.
 COMPANY_QUERY_NAMES = {
+    "ADSK": "Autodesk",
+    "BURL": "Burlington Stores",
+    "DELL": "Dell Technologies",
+    "DKS": "Dick's Sporting Goods",
+    "MDB": "MongoDB",
+    "NTAP": "NetApp",
+    "OKTA": "Okta",
+    "SNPS": "Synopsys",
+    "ZS": "Zscaler",
     "AAPL": "Apple",
     "SPY": "SPDR S&P 500 ETF",
     "QQQ": "Invesco QQQ",
@@ -72,6 +81,19 @@ COMPANY_QUERY_NAMES = {
     "ABBV": "AbbVie",
     "MRK": "Merck",
     "UNH": "UnitedHealth",
+    "AMZN": "Amazon",
+    "JPM": "JPMorgan Chase",
+    "TSM": "Taiwan Semiconductor Manufacturing",
+    "PYPL": "PayPal",
+    "SOFI": "SoFi Technologies",
+    "PFE": "Pfizer",
+    "CMCSA": "Comcast",
+    "T": "AT&T",
+    "VZ": "Verizon",
+    "F": "Ford Motor",
+    "HBAN": "Huntington Bancshares",
+    "KEY": "KeyCorp",
+    "KHC": "Kraft Heinz",
 }
 
 

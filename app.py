@@ -5203,20 +5203,35 @@ def process_signal(data):
 
     # Neutral-bias confidence gate: neutral market-bias signals have historically poor
     # expectancy (-$1.41/trade vs +$1.63 for buy-bias). Require high confidence to proceed.
+    # Exception: clean_momentum tape with elevated/surge volume has demonstrated positive
+    # short-horizon edge even in neutral-bias symbols; allow medium confidence through.
     if action == "buy" and decision.get("confidence") != "high":
         bias_entry = _market_bias.get(symbol) or {}
         if bias_entry.get("bias") == "neutral":
-            conf = decision.get("confidence")
-            logger.warning(
-                f"Neutral-bias confidence gate rejected {symbol} BUY: confidence={conf}"
+            tape = (account_state or {}).get("tape") or {}
+            tape_label = tape.get("label")
+            vol_state = ((account_state or {}).get("momentum") or {}).get("volume_state")
+            clean_tape_exception = (
+                tape_label == "clean_momentum"
+                and vol_state in ("elevated", "surge")
             )
-            log_rejection(
-                symbol, action, "confidence_gate",
-                f"neutral_bias requires confidence=high; got {conf} "
-                f"(reason: {decision.get('reason', '')})",
-                price=price, account_state=account_state,
-            )
-            return
+            if clean_tape_exception:
+                logger.info(
+                    f"Neutral-bias gate exception granted for {symbol}: "
+                    f"tape={tape_label} vol={vol_state} confidence={decision.get('confidence')}"
+                )
+            else:
+                conf = decision.get("confidence")
+                logger.warning(
+                    f"Neutral-bias confidence gate rejected {symbol} BUY: confidence={conf}"
+                )
+                log_rejection(
+                    symbol, action, "confidence_gate",
+                    f"neutral_bias requires confidence=high; got {conf} "
+                    f"(reason: {decision.get('reason', '')})",
+                    price=price, account_state=account_state,
+                )
+                return
 
     # Conditional entry quality gate: conditional setups have 17% win rate and -$1.41
     # expectancy. Require high confidence before allowing an entry.

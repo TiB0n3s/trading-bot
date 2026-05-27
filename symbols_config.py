@@ -31,6 +31,7 @@ INTERNAL_BAR_ONLY_SYMBOLS_LIST = [
     "MDB",
     "OKTA",
     "BURL",
+    "ASML",  # $1600+ share price; affordability gate always blocks at current account size
 ]
 
 INTERNAL_BAR_ONLY_SYMBOLS = set(INTERNAL_BAR_ONLY_SYMBOLS_LIST)

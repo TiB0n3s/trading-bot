@@ -128,6 +128,41 @@ POSITION_MANAGER_RETAINED_MIN_PROFIT_TO_PROTECT_PCT = float(
     os.getenv("POSITION_MANAGER_RETAINED_MIN_PROFIT_TO_PROTECT_PCT", "0.40")
 )
 
+# High-gain lock:
+# Protects already-earned open-position profit from excessive giveback.
+# Does not affect buys, sizing, hard-loss exits, or red-position exits.
+POSITION_MANAGER_HIGH_GAIN_LOCK_ENABLED = os.getenv(
+    "POSITION_MANAGER_HIGH_GAIN_LOCK_ENABLED", "true"
+).lower() in ("1", "true", "yes", "on")
+
+POSITION_MANAGER_LOCK_TIER1_PEAK_PCT = float(
+    os.getenv("POSITION_MANAGER_LOCK_TIER1_PEAK_PCT", "1.00")
+)
+POSITION_MANAGER_LOCK_TIER1_FLOOR_PCT = float(
+    os.getenv("POSITION_MANAGER_LOCK_TIER1_FLOOR_PCT", "0.30")
+)
+
+POSITION_MANAGER_LOCK_TIER2_PEAK_PCT = float(
+    os.getenv("POSITION_MANAGER_LOCK_TIER2_PEAK_PCT", "1.50")
+)
+POSITION_MANAGER_LOCK_TIER2_FLOOR_PCT = float(
+    os.getenv("POSITION_MANAGER_LOCK_TIER2_FLOOR_PCT", "0.60")
+)
+
+POSITION_MANAGER_LOCK_TIER3_PEAK_PCT = float(
+    os.getenv("POSITION_MANAGER_LOCK_TIER3_PEAK_PCT", "2.50")
+)
+POSITION_MANAGER_LOCK_TIER3_FLOOR_PCT = float(
+    os.getenv("POSITION_MANAGER_LOCK_TIER3_FLOOR_PCT", "1.00")
+)
+
+POSITION_MANAGER_LOCK_TIER4_PEAK_PCT = float(
+    os.getenv("POSITION_MANAGER_LOCK_TIER4_PEAK_PCT", "4.00")
+)
+POSITION_MANAGER_LOCK_TIER4_FLOOR_PCT = float(
+    os.getenv("POSITION_MANAGER_LOCK_TIER4_FLOOR_PCT", "1.75")
+)
+
 
 def now_utc():
     return datetime.now(timezone.utc)
@@ -269,6 +304,27 @@ def safe_float(value):
         return float(value)
     except (TypeError, ValueError):
         return None
+
+
+def high_gain_locked_profit_floor(peak_pl_pct):
+    """Return the locked minimum profit floor for a prior peak, or None."""
+    if not POSITION_MANAGER_HIGH_GAIN_LOCK_ENABLED:
+        return None
+
+    peak = safe_float(peak_pl_pct)
+    if peak is None:
+        return None
+
+    if peak >= POSITION_MANAGER_LOCK_TIER4_PEAK_PCT:
+        return POSITION_MANAGER_LOCK_TIER4_FLOOR_PCT
+    if peak >= POSITION_MANAGER_LOCK_TIER3_PEAK_PCT:
+        return POSITION_MANAGER_LOCK_TIER3_FLOOR_PCT
+    if peak >= POSITION_MANAGER_LOCK_TIER2_PEAK_PCT:
+        return POSITION_MANAGER_LOCK_TIER2_FLOOR_PCT
+    if peak >= POSITION_MANAGER_LOCK_TIER1_PEAK_PCT:
+        return POSITION_MANAGER_LOCK_TIER1_FLOOR_PCT
+
+    return None
 
 
 def retained_session_strength_state(session_momentum, current_pl_pct):
@@ -524,6 +580,7 @@ def evaluate_position(position, state, session_momentum=None):
     giveback_pct = peak["giveback_pct"]
     peak_pl_pct = peak["peak_pl_pct"]
     retained_strength = retained_session_strength_state(session_momentum, current_pl_pct)
+    locked_profit_floor = high_gain_locked_profit_floor(peak_pl_pct)
 
     # Full exit: losing and momentum/VWAP deteriorating.
     if current_pl_pct <= FULL_EXIT_LOSS_PCT:
@@ -606,6 +663,32 @@ def evaluate_position(position, state, session_momentum=None):
             reasons.append(f"profitable but momentum fading ({momentum_5m:.2f}%, {momentum_15m:.2f}%)")
 
     if (
+        action == "hold"
+        and locked_profit_floor is not None
+        and peak_pl_pct > 0
+        and current_pl_pct > 0
+        and current_pl_pct <= locked_profit_floor
+    ):
+        if retained_strength.get("retained") and not retained_strength.get("broken"):
+            action = "sell_partial"
+            sell_fraction = PARTIAL_SELL_PCT
+            severity = "medium"
+            reasons.append(
+                f"high_gain_lock_partial: peak {peak_pl_pct:.2f}% "
+                f"fell to {current_pl_pct:.2f}% <= floor {locked_profit_floor:.2f}%; "
+                "retained session strength intact"
+            )
+        else:
+            action = "sell_full"
+            sell_fraction = 1.0
+            severity = "high"
+            reasons.append(
+                f"high_gain_lock_full: peak {peak_pl_pct:.2f}% "
+                f"fell to {current_pl_pct:.2f}% <= floor {locked_profit_floor:.2f}%; "
+                "retained session strength absent or broken"
+            )
+
+    if (
         POSITION_MANAGER_PROFIT_CAPTURE_ENABLED
         and action in ("sell_partial", "sell_full")
         and not hard_full_exit
@@ -669,6 +752,8 @@ def evaluate_position(position, state, session_momentum=None):
         "vwap_dist_pct": round(vwap_dist_pct, 3) if vwap_dist_pct is not None else None,
         "session_momentum": session_momentum or {},
         "retained_session_strength": retained_strength,
+        "locked_profit_floor_pct": locked_profit_floor,
+        "high_gain_lock_enabled": POSITION_MANAGER_HIGH_GAIN_LOCK_ENABLED,
         "session_trend_label": retained_strength.get("session_label"),
         "session_trend_score": retained_strength.get("session_score"),
         "session_return_pct": retained_strength.get("session_return_pct"),

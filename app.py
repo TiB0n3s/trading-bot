@@ -1044,6 +1044,56 @@ def _successful_buys_today(symbol):
         logger.error(f"_successful_buys_today failed for {symbol}: {e}")
         return 0
 
+
+def _filled_buys_today(symbol):
+    """Count filled BUY orders for this symbol today (completed entries).
+
+    Used by the session trade-count gate to cap repeated re-entries.
+    Counts only filled/partially_filled rows so pending orders don't inflate the count.
+    """
+    try:
+        today = datetime.now(pytz.timezone("America/New_York")).strftime("%Y-%m-%d")
+        with get_connection(DB_PATH) as con:
+            row = con.execute("""
+                SELECT COUNT(*)
+                FROM trades
+                WHERE symbol = ?
+                  AND LOWER(action) = 'buy'
+                  AND approved = 1
+                  AND order_id IS NOT NULL
+                  AND order_status IN ('filled', 'partially_filled')
+                  AND timestamp LIKE ?
+            """, (symbol, f"{today}%")).fetchone()
+        return int(row[0] or 0)
+    except Exception as e:
+        logger.error(f"_filled_buys_today failed for {symbol}: {e}")
+        return 0
+
+
+def _has_open_position_db(symbol):
+    """Return True if trades.db shows a net-open filled position for symbol.
+
+    Used as a cheap pre-filter before the full account-state build.
+    Fail-open on any error so a DB hiccup never silently blocks a sell.
+    """
+    try:
+        with get_connection(DB_PATH) as con:
+            row = con.execute(
+                """
+                SELECT SUM(CASE WHEN LOWER(action)='buy'  THEN COALESCE(qty, 0)
+                               WHEN LOWER(action)='sell' THEN -COALESCE(qty, 0)
+                               ELSE 0 END) AS net_qty
+                FROM trades
+                WHERE symbol = ?
+                  AND order_id IS NOT NULL
+                  AND order_status IN ('filled', 'partially_filled')
+                """,
+                (symbol,),
+            ).fetchone()
+        return int(row["net_qty"] or 0) > 0
+    except Exception:
+        return True  # fail-open: never silently block a sell on DB error
+
 _last_order: dict = {}     # {(symbol, action): datetime in ET} — reset on restart
 _last_sell: dict = {}      # {symbol: (datetime in ET, price)} — last successful sell, for churn prevention
 _trend_table: dict = {}    # {symbol: {direction, strength, consecutive_count, last_signal, last_time}}
@@ -3528,6 +3578,18 @@ def process_signal(data):
         return
     logger.info(f"Processing {action.upper()} signal for {symbol} at {price}")
 
+    # Ghost sell pre-filter: skip account/context setup for sells with no tracked position.
+    # Fires before get_mock_account_state() to avoid two Alpaca API calls per orphaned signal.
+    # The Alpaca-backed check later in the flow remains as a safety backstop.
+    if action == "sell" and not _has_open_position_db(symbol):
+        log_rejection(symbol, action, "ghost_sell", "no open Alpaca position", price=price)
+        if dedupe_key:
+            _mark_webhook_event_status(
+                dedupe_key, "rejected",
+                failure_reason=format_rejection_reason("ghost_sell", "no open Alpaca position"),
+            )
+        return
+
     account_state = get_mock_account_state()
 
     # Observe-only rolling multi-day / extended-hours context.
@@ -4017,6 +4079,20 @@ def process_signal(data):
         if buys_today >= MAX_BUYS_PER_SYMBOL_PER_DAY:
             reason = f"successful_buys_today={buys_today} >= limit={MAX_BUYS_PER_SYMBOL_PER_DAY}"
             if _reject_current_signal("daily_symbol_buy_limit", reason):
+                return
+
+    # Session trade-count gate: cap filled entries per symbol per session to reduce churn
+    # on over-traded symbols (e.g. GE cycling in/out repeatedly).
+    # Configurable via SESSION_MAX_TRADE_COUNT env var; defaults to 3.
+    if action == "buy":
+        _session_trade_limit = int(os.getenv("SESSION_MAX_TRADE_COUNT", "3"))
+        filled_entries_today = _filled_buys_today(symbol)
+        if filled_entries_today >= _session_trade_limit:
+            reason = (
+                f"filled_entries_today={filled_entries_today} >= "
+                f"session_max={_session_trade_limit}"
+            )
+            if _reject_current_signal("session_trade_count", reason):
                 return
 
     # Hard pre-check: 4% per-symbol exposure cap (buy signals only)
@@ -5124,6 +5200,40 @@ def process_signal(data):
             price=price, account_state=account_state,
         )
         return
+
+    # Neutral-bias confidence gate: neutral market-bias signals have historically poor
+    # expectancy (-$1.41/trade vs +$1.63 for buy-bias). Require high confidence to proceed.
+    if action == "buy" and decision.get("confidence") != "high":
+        bias_entry = _market_bias.get(symbol) or {}
+        if bias_entry.get("bias") == "neutral":
+            conf = decision.get("confidence")
+            logger.warning(
+                f"Neutral-bias confidence gate rejected {symbol} BUY: confidence={conf}"
+            )
+            log_rejection(
+                symbol, action, "confidence_gate",
+                f"neutral_bias requires confidence=high; got {conf} "
+                f"(reason: {decision.get('reason', '')})",
+                price=price, account_state=account_state,
+            )
+            return
+
+    # Conditional entry quality gate: conditional setups have 17% win rate and -$1.41
+    # expectancy. Require high confidence before allowing an entry.
+    if action == "buy" and decision.get("confidence") != "high":
+        bias_entry = _market_bias.get(symbol) or {}
+        if bias_entry.get("entry_quality") == "conditional":
+            conf = decision.get("confidence")
+            logger.warning(
+                f"Conditional entry quality gate rejected {symbol} BUY: confidence={conf}"
+            )
+            log_rejection(
+                symbol, action, "confidence_gate",
+                f"conditional_entry_quality requires confidence=high; got {conf} "
+                f"(reason: {decision.get('reason', '')})",
+                price=price, account_state=account_state,
+            )
+            return
 
     if decision.get("approved"):
         try:

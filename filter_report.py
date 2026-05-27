@@ -27,6 +27,7 @@ KNOWN_LABELS = {
     "churn_window": "Sell→buy churn window",
     "churn_price": "Sell→buy churn price",
     "daily_symbol_buy_limit": "Daily symbol buy limit",
+    "session_trade_count": "Session trade-count gate",
     "exposure_cap": "Per-symbol exposure cap",
     "correlation_cap": "Correlation cluster cap",
     "trend_gate": "Trend gate",

@@ -74,13 +74,8 @@ def _build_setup_key(trend_bucket: str, vwap_bucket: str, rs_bucket: str) -> str
     return f"{trend_bucket}|{vwap_bucket}|{rs_bucket}"
 
 
-def classify_feature_snapshot(snapshot: dict[str, Any]) -> SetupResult:
-    """
-    Classify a feature snapshot into a named setup.
-
-    This version is tuned to the latest observed setup performance from
-    prediction_report.py.
-    """
+def _classify_base(snapshot: dict[str, Any]) -> SetupResult:
+    """Map trend/VWAP/RS buckets to a named setup. No modifier logic here."""
     trend_bucket = _trend_bucket(snapshot)
     vwap_bucket = bucket_vwap_distance(snapshot.get("distance_from_vwap"))
     rs_bucket = bucket_relative_strength(snapshot.get("relative_strength_5m"))
@@ -421,6 +416,99 @@ def classify_feature_snapshot(snapshot: dict[str, Any]) -> SetupResult:
     )
 
 
+def _score_modifiers(snapshot: dict[str, Any], base: SetupResult) -> SetupResult:
+    """
+    Apply deterministic score adjustments for fields not captured by the
+    base trend/VWAP/RS label: momentum acceleration, volume, extension from
+    recent base, and prior-session return.
+    """
+    delta = 0
+    notes: list[str] = []
+
+    acc = snapshot.get("momentum_acceleration_pct")
+    if acc is not None:
+        if acc <= -0.05:
+            delta -= 12
+            notes.append(f"strong_decel({acc:.3f})")
+        elif acc <= -0.03:
+            delta -= 8
+            notes.append(f"decel({acc:.3f})")
+        elif acc >= 0.05:
+            delta += 6
+            notes.append(f"strong_accel({acc:.3f})")
+        elif acc >= 0.03:
+            delta += 3
+            notes.append(f"accel({acc:.3f})")
+
+    vol = snapshot.get("volume_surge_ratio")
+    if vol is not None:
+        if vol >= 2.5:
+            delta += 8
+            notes.append(f"vol_surge({vol:.1f}x)")
+        elif vol >= 2.0:
+            delta += 5
+            notes.append(f"vol_elevated({vol:.1f}x)")
+        elif vol < 0.5:
+            delta -= 10
+            notes.append(f"vol_thin({vol:.1f}x)")
+        elif vol < 0.8:
+            delta -= 5
+            notes.append(f"vol_below_avg({vol:.1f}x)")
+
+    ext = snapshot.get("extension_from_recent_base_pct")
+    if ext is not None:
+        if ext >= 8.0:
+            delta -= 15
+            notes.append(f"overextended({ext:.1f}%)")
+        elif ext >= 5.0:
+            delta -= 10
+            notes.append(f"extended({ext:.1f}%)")
+        elif ext >= 3.0:
+            delta -= 5
+            notes.append(f"slightly_extended({ext:.1f}%)")
+
+    prior = snapshot.get("prior_session_return_pct")
+    if prior is not None:
+        if prior > 5.0:
+            delta -= 10
+            notes.append(f"prior_strong_day({prior:.1f}%)")
+        elif prior > 3.0:
+            delta -= 6
+            notes.append(f"prior_good_day({prior:.1f}%)")
+        elif prior > 1.5:
+            delta -= 3
+            notes.append(f"prior_up_day({prior:.1f}%)")
+
+    if delta == 0:
+        return base
+
+    new_score = max(0, min(100, base.setup_score + delta))
+    rationale = base.rationale + f" [modifiers: {'; '.join(notes)} → {delta:+d}]"
+    return SetupResult(
+        setup_label=base.setup_label,
+        recommendation=base.recommendation,
+        setup_score=new_score,
+        confidence=base.confidence,
+        trend_bucket=base.trend_bucket,
+        vwap_bucket=base.vwap_bucket,
+        rs_bucket=base.rs_bucket,
+        setup_key=base.setup_key,
+        rationale=rationale,
+        sample_basis=base.sample_basis,
+    )
+
+
+def classify_feature_snapshot(snapshot: dict[str, Any]) -> SetupResult:
+    """
+    Classify a feature snapshot into a named setup with score modifiers.
+
+    Base label is determined by trend/VWAP/RS buckets (tuned to observed
+    setup performance). Score is then adjusted for momentum acceleration,
+    volume, extension from recent base, and prior-session return.
+    """
+    return _score_modifiers(snapshot, _classify_base(snapshot))
+
+
 def load_snapshot_by_id(snapshot_id: int) -> dict[str, Any] | None:
     with get_connection(DB_PATH) as con:
         row = con.execute(
@@ -438,7 +526,11 @@ def load_snapshot_by_id(snapshot_id: int) -> dict[str, Any] | None:
                 ret_5m,
                 ret_15m,
                 bar_timeframe,
-                bar_count
+                bar_count,
+                momentum_acceleration_pct,
+                volume_surge_ratio,
+                extension_from_recent_base_pct,
+                prior_session_return_pct
             FROM feature_snapshots
             WHERE id = ?
             """,
@@ -465,7 +557,11 @@ def load_latest_snapshot_for_symbol(symbol: str) -> dict[str, Any] | None:
                 ret_5m,
                 ret_15m,
                 bar_timeframe,
-                bar_count
+                bar_count,
+                momentum_acceleration_pct,
+                volume_surge_ratio,
+                extension_from_recent_base_pct,
+                prior_session_return_pct
             FROM feature_snapshots
             WHERE symbol = ?
             ORDER BY id DESC

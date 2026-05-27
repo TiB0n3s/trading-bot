@@ -41,6 +41,11 @@ from risk.macro_policy import policy_from_market_context
 from data_layer.ledger import ledger_summary
 from alerts import alert_config_public
 from policy_artifacts import policy_artifact_status
+from prediction_cache import (
+    get_cached_prediction,
+    prediction_cache_status,
+    start_prediction_cache_loader,
+)
 from exceptions import ValidationError
 from rejection_categories import format_rejection_reason
 from runtime_config import (
@@ -51,6 +56,10 @@ from runtime_config import (
     CASH_SAFE_MAX_NEW_BUYS_PER_SYMBOL_PER_DAY,
     MAX_LIVE_ORDER_DOLLARS,
     CASH_SAFE_MAX_ORDER_DOLLARS,
+    DECISION_POLICY_LIVE_BLOCK,
+    DECISION_POLICY_LIVE_SIZE_DOWN,
+    decision_policy_live_authority_enabled,
+    public_decision_policy_config,
     is_cash_mode,
     is_cash_safe_mode,
     public_runtime_config,
@@ -229,6 +238,12 @@ try:
     logger.info("DB performance indexes initialized")
 except Exception as e:
     logger.error(f"DB performance index initialization failed: {e}")
+
+try:
+    start_prediction_cache_loader()
+    logger.info(f"Prediction cache loader started: {prediction_cache_status()}")
+except Exception as e:
+    logger.error(f"Prediction cache loader startup failed: {e}")
 
 def _startup_reconcile():
     try:
@@ -754,7 +769,21 @@ def evaluate_buy_opportunity(
     }
 
 
-def evaluate_prediction_gate(
+def _ml_prediction_compare_decision(prediction: dict | None) -> str | None:
+    if not prediction:
+        return None
+    try:
+        score = float(prediction.get("prediction_score"))
+    except Exception:
+        return "unknown"
+    if score >= 65:
+        return "support"
+    if score >= 45:
+        return "watch"
+    return "avoid"
+
+
+def evaluate_signal_quality_gate(
     *,
     trend_direction,
     trend_strength,
@@ -765,7 +794,14 @@ def evaluate_prediction_gate(
     momentum_pct,
     consecutive_buy_count,
     recent_favorable_setup=None,
+    ml_prediction=None,
 ):
+    """Evaluate the deterministic signal-quality gate.
+
+    Historical field names use `prediction_*` for this deterministic gate.
+    Actual ML/database predictions are exposed separately under `ml_prediction_*`
+    and are compare-only here.
+    """
     score = 0
     reasons = []
 
@@ -870,11 +906,45 @@ def evaluate_prediction_gate(
     else:
         decision = "block"
 
+    ml_compare_decision = _ml_prediction_compare_decision(ml_prediction)
+    ml_agrees = None
+    if ml_compare_decision:
+        deterministic_positive = decision == "pass"
+        ml_positive = ml_compare_decision == "support"
+        deterministic_negative = decision == "block"
+        ml_negative = ml_compare_decision == "avoid"
+        ml_agrees = (
+            (deterministic_positive and ml_positive)
+            or (deterministic_negative and ml_negative)
+            or (decision == "watch" and ml_compare_decision == "watch")
+        )
+
     return {
+        "gate_name": "deterministic_signal_quality_gate",
+        "prediction_field_note": (
+            "prediction_score/prediction_decision are legacy deterministic gate fields; "
+            "ml_prediction_* fields come from daily_symbol_predictions cache."
+        ),
         "prediction_score": score,
         "prediction_decision": decision,
         "prediction_reason": ",".join(reasons),
+        "deterministic_signal_quality_score": score,
+        "deterministic_signal_quality_decision": decision,
+        "deterministic_signal_quality_reason": ",".join(reasons),
+        "ml_prediction_score": (ml_prediction or {}).get("prediction_score"),
+        "ml_prediction_confidence": (ml_prediction or {}).get("confidence"),
+        "ml_prediction_sample_size": (ml_prediction or {}).get("sample_size"),
+        "ml_prediction_reason": (ml_prediction or {}).get("reason"),
+        "ml_prediction_provider": (ml_prediction or {}).get("provider"),
+        "ml_prediction_runtime_effect": "observe_only_compare",
+        "ml_prediction_compare_decision": ml_compare_decision,
+        "ml_prediction_agrees_with_gate": ml_agrees,
     }
+
+
+def evaluate_prediction_gate(**kwargs):
+    """Backward-compatible alias for the deterministic signal-quality gate."""
+    return evaluate_signal_quality_gate(**kwargs)
 
 WEBHOOK_SECRET = os.environ.get("WEBHOOK_SECRET", "changeme")
 
@@ -4303,8 +4373,9 @@ def process_signal(data):
         setup_obs = account_state.get("setup_observation") or {}
         momentum = account_state.get("momentum") or {}
         recent_favorable_setup = account_state.get("recent_favorable_setup")
+        ml_prediction = get_cached_prediction(symbol)
 
-        prediction_gate = evaluate_prediction_gate(
+        prediction_gate = evaluate_signal_quality_gate(
             trend_direction=trend.get("direction"),
             trend_strength=trend.get("strength"),
             market_bias=bias_entry.get("bias"),
@@ -4314,15 +4385,20 @@ def process_signal(data):
             momentum_pct=momentum.get("momentum_pct"),
             consecutive_buy_count=trend.get("consecutive_count") or 0,
             recent_favorable_setup=recent_favorable_setup,
+            ml_prediction=ml_prediction,
         )
 
         account_state["prediction_gate"] = prediction_gate
+        account_state["ml_prediction"] = ml_prediction or {}
 
         logger.info(
-            f"Prediction gate for {symbol} BUY: "
+            f"Signal quality gate for {symbol} BUY: "
             f"score={prediction_gate.get('prediction_score')} "
             f"decision={prediction_gate.get('prediction_decision')} "
-            f"reason={prediction_gate.get('prediction_reason')}"
+            f"reason={prediction_gate.get('prediction_reason')} "
+            f"ml_score={prediction_gate.get('ml_prediction_score')} "
+            f"ml_compare={prediction_gate.get('ml_prediction_compare_decision')} "
+            f"ml_agrees={prediction_gate.get('ml_prediction_agrees_with_gate')}"
         )
 
         buy_opportunity = evaluate_buy_opportunity(
@@ -4689,6 +4765,9 @@ def process_signal(data):
     )
     account_state["decision_policy"] = decision_policy
     claude_account_state["decision_policy"] = decision_policy
+    decision_policy_config = public_decision_policy_config()
+    account_state["decision_policy_authority"] = decision_policy_config
+    claude_account_state["decision_policy_authority"] = decision_policy_config
 
     logger.info(
         f"DECISION_POLICY {symbol} {action.upper()}: "
@@ -4699,7 +4778,15 @@ def process_signal(data):
         f"supports={decision_policy.get('supports')}"
     )
 
-    if action == "buy" and decision_policy.get("decision") == "block":
+    decision_policy_authority_enabled = decision_policy_live_authority_enabled()
+    decision_policy_live_block = DECISION_POLICY_LIVE_BLOCK and decision_policy_authority_enabled
+    decision_policy_live_size_down = DECISION_POLICY_LIVE_SIZE_DOWN and decision_policy_authority_enabled
+
+    if (
+        action == "buy"
+        and decision_policy_live_block
+        and decision_policy.get("decision") == "block"
+    ):
         reason = decision_policy.get("reason", "decision policy blocked setup")
         logger.warning(
             f"Decision policy gate blocked {symbol} BUY before Claude: {reason}"
@@ -4713,14 +4800,18 @@ def process_signal(data):
             account_state=account_state,
         )
         return
+    elif action == "buy" and decision_policy.get("decision") == "block":
+        logger.warning(
+            f"Decision policy block observed but not enforced for {symbol} BUY: "
+            f"authority_enabled={decision_policy_authority_enabled} "
+            f"live_block_enabled={DECISION_POLICY_LIVE_BLOCK} "
+            f"mode={decision_policy_config.get('authority_mode')} "
+            f"reason={decision_policy.get('reason')}"
+        )
 
     # Live decision-policy size-down:
     # This is intentionally one-way risk reduction. It can lower the max size
     # available to Claude/broker, but it cannot increase exposure.
-    decision_policy_live_size_down = os.getenv(
-        "DECISION_POLICY_LIVE_SIZE_DOWN", "true"
-    ).strip().lower() in ("1", "true", "yes", "on")
-
     if (
         action == "buy"
         and decision_policy_live_size_down
@@ -4787,6 +4878,14 @@ def process_signal(data):
                 "reduced_position_size_pct": reduced_limit,
                 "size_multiplier": size_multiplier,
             },
+        )
+    elif action == "buy" and decision_policy.get("decision") == "size_down":
+        logger.info(
+            f"Decision policy size_down observed but not enforced for {symbol} BUY: "
+            f"authority_enabled={decision_policy_authority_enabled} "
+            f"live_size_down_enabled={DECISION_POLICY_LIVE_SIZE_DOWN} "
+            f"mode={decision_policy_config.get('authority_mode')} "
+            f"reason={decision_policy.get('reason')}"
         )
 
     decision = evaluate_signal(data, claude_account_state)
@@ -5236,6 +5335,9 @@ def status():
     result["session_momentum_gate_enabled"] = ENFORCE_SESSION_MOMENTUM_GATE
     result["prediction_gate_mode"] = PREDICTION_GATE_MODE
     result["prediction_gate_thresholds"] = PREDICTION_GATE_THRESHOLDS
+    result["prediction_gate_name"] = "deterministic_signal_quality_gate"
+    result["ml_prediction_cache"] = prediction_cache_status()
+    result["decision_policy"] = public_decision_policy_config()
     result["strategy_engine_mode"] = STRATEGY_ENGINE_MODE
     result["execution_policy_mode"] = os.getenv("EXECUTION_POLICY_MODE", "compare").strip().lower()
     result["risk_policy_mode"] = RISK_POLICY_MODE

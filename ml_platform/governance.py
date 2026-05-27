@@ -405,6 +405,8 @@ POLICY_ARTIFACT_GOVERNANCE = {
     "required_manifest_fields": (
         "policy_artifact_files",
         "policy_artifact_state_hash",
+        "policy_artifact_registry_hash",
+        "policy_artifact_known_good_id",
         "policy_artifact_tracking_status",
     ),
     "required_status_fields": (
@@ -516,7 +518,15 @@ class DatasetManifest:
     override_tracking_status: str = "not_tracked"
     policy_artifact_files: dict[str, str | None] = field(default_factory=dict)
     policy_artifact_state_hash: str | None = None
+    policy_artifact_registry_hash: str | None = None
+    policy_artifact_known_good_id: str | None = None
     policy_artifact_tracking_status: str = "not_tracked"
+    pit_archive_coverage_status: str = "not_checked"
+    pit_archive_per_date: dict[str, str | None] = field(default_factory=dict)
+    pit_archive_missing_dates: list[str] = field(default_factory=list)
+    pit_archive_fallback_dates: list[str] = field(default_factory=list)
+    pit_archive_dates_without_full_artifacts: list[str] = field(default_factory=list)
+    pit_archive_coverage_pct: float | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -558,6 +568,24 @@ def _policy_artifact_hashes(project_root: Path) -> dict[str, str | None]:
     }
 
 
+def _policy_artifact_registry_hash(project_root: Path) -> str | None:
+    return _file_sha256(project_root / "data_archive" / "policy_artifacts" / "registry.json")
+
+
+def _policy_artifact_known_good_id(project_root: Path) -> str | None:
+    path = project_root / "data_archive" / "policy_artifacts" / "known_good.json"
+    if not path.exists():
+        return None
+    try:
+        data = json.loads(path.read_text())
+        if isinstance(data, dict):
+            value = data.get("artifact_set_id")
+            return str(value) if value else None
+    except Exception:
+        return None
+    return None
+
+
 def _table_exists(con: sqlite3.Connection, table: str) -> bool:
     row = con.execute(
         "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?",
@@ -575,6 +603,7 @@ def build_dataset_manifest(
     label_version: str = "label_taxonomy_v1",
     feature_version: str = FEATURE_VERSION,
     excluded_rows_reason_counts: dict[str, int] | None = None,
+    pit_coverage: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Build a read-only dataset manifest from current source DB metadata."""
     db_path = Path(db_path)
@@ -623,8 +652,12 @@ def build_dataset_manifest(
     policy_artifact_state_hash = hashlib.sha256(
         json.dumps(policy_artifact_files, sort_keys=True).encode("utf-8")
     ).hexdigest()
+    policy_artifact_registry_hash = _policy_artifact_registry_hash(project_root)
+    policy_artifact_known_good_id = _policy_artifact_known_good_id(project_root)
     policy_artifact_tracking_status = (
-        "hashed_current_files_only"
+        "registry_and_current_files_hashed"
+        if policy_artifact_registry_hash
+        else "hashed_current_files_only"
         if any(value is not None for value in policy_artifact_files.values())
         else "no_policy_artifacts_present"
     )
@@ -640,6 +673,8 @@ def build_dataset_manifest(
         "override_state_hash": override_state_hash,
         "override_tracking_status": override_tracking_status,
         "policy_artifact_state_hash": policy_artifact_state_hash,
+        "policy_artifact_registry_hash": policy_artifact_registry_hash,
+        "policy_artifact_known_good_id": policy_artifact_known_good_id,
         "policy_artifact_tracking_status": policy_artifact_tracking_status,
     }
     dataset_id = hashlib.sha256(
@@ -664,7 +699,17 @@ def build_dataset_manifest(
         override_tracking_status=override_tracking_status,
         policy_artifact_files=policy_artifact_files,
         policy_artifact_state_hash=policy_artifact_state_hash,
+        policy_artifact_registry_hash=policy_artifact_registry_hash,
+        policy_artifact_known_good_id=policy_artifact_known_good_id,
         policy_artifact_tracking_status=policy_artifact_tracking_status,
+        pit_archive_coverage_status=(pit_coverage or {}).get("status", "not_checked"),
+        pit_archive_per_date=(pit_coverage or {}).get("per_date", {}),
+        pit_archive_missing_dates=(pit_coverage or {}).get("missing_dates", []),
+        pit_archive_fallback_dates=(pit_coverage or {}).get("fallback_dates", []),
+        pit_archive_dates_without_full_artifacts=(pit_coverage or {}).get(
+            "dates_without_full_policy_artifacts", []
+        ),
+        pit_archive_coverage_pct=(pit_coverage or {}).get("coverage_pct"),
     )
     return manifest.to_dict()
 

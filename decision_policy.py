@@ -6,7 +6,9 @@ Purpose:
 - Convert intelligence_context + strategy_memory into one deterministic policy.
 - Runs before Claude.
 - Never loosens hard risk rules.
-- Can block poor BUY setups or tell Claude to size down.
+- Can only block poor BUY setups or tell Claude to size down when the app's
+  explicit decision-policy authority env settings allow it.
+- Never increases size, submits orders, or overrides hard gates.
 - SELL signals pass through.
 """
 
@@ -19,7 +21,8 @@ _HARD_GATE_CONTEXT_CHECKS = [
     # (account_state key path, condition_fn, block_reason)
     # Each check looks at account_state data that hard gates in app.py already enforce.
     # These checks make the policy self-contained for replay and audit; they do not
-    # change live behavior because the hard gates run before the policy is called.
+    # create new live authority. App hard gates are authoritative and should already
+    # have run before this policy is evaluated.
     (
         lambda s: s.get("daily_pnl_pct"),
         lambda v: v is not None and v < DAILY_LOSS_LIMIT_PCT,
@@ -90,7 +93,13 @@ def _worst_recommendation(recs):
     return max(recs, key=lambda r: priority.get(r, 0))
 
 
-def evaluate_decision_policy(symbol, action, intelligence_context=None, account_state=None):
+def evaluate_decision_policy(
+    symbol,
+    action,
+    intelligence_context=None,
+    account_state=None,
+    strategy_memory_override=None,
+):
     intelligence_context = intelligence_context or {}
     account_state = account_state or {}
 
@@ -99,6 +108,9 @@ def evaluate_decision_policy(symbol, action, intelligence_context=None, account_
             "decision": "allow",
             "size_multiplier": 1.0,
             "reason": "sell signal bypasses buy-side decision policy",
+            "authority_scope": "sell_passthrough_no_order_authority",
+            "can_increase_size": False,
+            "can_submit_orders": False,
             "evidence": [],
         }
 
@@ -108,6 +120,9 @@ def evaluate_decision_policy(symbol, action, intelligence_context=None, account_
             "decision": "block",
             "size_multiplier": 0.0,
             "reason": f"hard gate context in account_state: {hard_gate}",
+            "authority_scope": "hard_gate_mirror_for_replay_audit",
+            "can_increase_size": False,
+            "can_submit_orders": False,
             "evidence": [hard_gate],
             "risks": [hard_gate],
             "supports": [],
@@ -169,8 +184,11 @@ def evaluate_decision_policy(symbol, action, intelligence_context=None, account_
     elif session_gate.get("severity") in ("pass", "supportive"):
         supports.append("session momentum supportive")
 
-    # Learned/contextual memory.
-    memory = contextual_memory_for_signal(symbol, intelligence_context)
+    # Learned/contextual memory. strategy_memory_override injects a point-in-time
+    # archived dict instead of the live strategy_memory.json (used by replay tools).
+    memory = contextual_memory_for_signal(
+        symbol, intelligence_context, memory_override=strategy_memory_override
+    )
     memory_matches = memory.get("matches") or []
 
     recs = [m.get("recommendation") for m in memory_matches]
@@ -249,4 +267,7 @@ def evaluate_decision_policy(symbol, action, intelligence_context=None, account_
         "learned_min_score": learned_min_score,
         "worst_memory_recommendation": worst_rec,
         "memory_matches": memory_matches[:8],
+        "authority_scope": "conservative_buy_review",
+        "can_increase_size": False,
+        "can_submit_orders": False,
     }

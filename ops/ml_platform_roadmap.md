@@ -314,6 +314,14 @@ Remaining:
 - Prefer fixed-horizon labels for model training. Realized-PnL labels must carry
   `exit_policy_version` and `position_manager_version` because adaptive exit
   logic changes what "win" means over time.
+- `export_ml_dataset.py` defaults to complete fixed-horizon label rows only.
+  It excludes unlabeled/incomplete/near-close partial rows from the CSV while
+  preserving exclusion counts in the manifest. `--include-incomplete-labels` is
+  for audit exports, not training.
+- Initial feature-snapshot training targets are `ret_fwd_15m`, `ret_fwd_30m`,
+  `max_up_15m`, and `max_down_15m`. `ret_fwd_60m`,
+  `max_favorable_excursion`, and `max_adverse_excursion` should be added to the
+  feature-snapshot label schema before they are promoted as dataset targets.
 - Track class distribution for every target. Accuracy alone is not acceptable
   when labels are imbalanced.
 
@@ -374,9 +382,13 @@ without touching runtime trading.
 
 Current state:
 
-- `ml_platform.replay` and `python3 -m ml_platform.cli replay-decisions` define
-  the output contract for shadow replay. The command is scaffold-only today and
-  has no runtime effect.
+- `ml_platform.replay` and `python3 -m ml_platform.cli replay-decisions` are
+  read-only and have no runtime effect.
+- Replay v1 re-runs `evaluate_decision_policy()` against stored
+  `decision_snapshots.account_state_json`, joins changed decisions to realized
+  `matched_trades` or counterfactual `rejected_signal_outcomes`, and reports
+  friction-adjusted decision-delta estimates.
+- Hard-gate rejects and policy-relevant rejects are separated in the output.
 
 Required outputs:
 
@@ -389,6 +401,9 @@ Required outputs:
 - net simulated delta,
 - worst changed decision,
 - best changed decision.
+- recovered missed winners,
+- introduced losers,
+- changed rows with joined outcomes.
 
 Required inputs:
 
@@ -455,6 +470,11 @@ Problem:
   live runtime path.
 - These artifacts can block, size down, or alter live decision context before
   any future ML `PredictionProvider` exists.
+- `policy_artifacts.py` registers artifact sets, stores snapshot contents under
+  `data_archive/policy_artifacts/`, tracks a known-good pointer, and can roll
+  back runtime artifacts with temp-file replacement.
+- `run_after_close_learning.sh` registers the completed artifact set as
+  known-good after all learning steps finish.
 
 Governed artifacts:
 
@@ -467,19 +487,56 @@ Governed artifacts:
 Current controls:
 
 - `/status` exposes read-only hashes, mtimes, generated timestamps, and combined
-  state hash under `policy_artifacts`.
-- `dataset-manifest` includes policy artifact hashes and tracking status.
+  state hash under `policy_artifacts`, including registry and known-good status.
+- `dataset-manifest` includes policy artifact hashes, registry hash,
+  known-good artifact id, and tracking status.
 - `run_after_close_learning.sh` logs a critical `AFTER_CLOSE_LEARNING` bot event
   if the run fails before completion.
 - Policy artifact writes use temp-file plus `os.replace()` atomic replacement.
 - `POLICY_ARTIFACTS_ENABLED=false` makes live loaders return neutral/no learned
   policy influence without deleting artifact files.
+- `ops_check.py policy-artifacts` warns if registry entries or the known-good
+  pointer are missing.
 
 Remaining:
 
-- Add rollback tooling to restore the prior known-good artifact set.
-- Register these under the model registry as `policy_artifact` entries.
-- Add an ops check for stale or unexpectedly changed policy artifacts.
+- Consider mirroring policy artifact set ids into the model registry if model
+  and policy-artifact promotion workflows converge.
+- Add stricter stale/unexpected hash drift thresholds once normal nightly
+  artifact variance is observed.
+
+### Decision Policy Authority Layer
+
+Goal: keep `decision_policy.py` conservative, explicit, and reversible while it
+remains under paper-session review.
+
+Current state:
+
+- `decision_policy.py` runs before Claude and can return `block`, `size_down`,
+  or `allow` for BUY signals.
+- Live authority is explicit in env/status:
+  `DECISION_POLICY_AUTHORITY_MODE=paper_only`,
+  `DECISION_POLICY_LIVE_BLOCK=true`, and
+  `DECISION_POLICY_LIVE_SIZE_DOWN=true` by default.
+- `paper_only` means block/size-down authority applies to paper/dry-run modes
+  only. Cash modes observe the policy unless an operator explicitly sets
+  `DECISION_POLICY_AUTHORITY_MODE=all_modes`.
+- The policy exposes `can_increase_size=false` and `can_submit_orders=false`,
+  and unit tests assert it does not import/call broker order execution.
+- Hard-gate awareness is replay/audit mirroring from `account_state`; app hard
+  gates remain authoritative.
+
+Current warning:
+
+- `policy_backtest_summary.json` can report `policy_too_loose`. While that is
+  present, do not promote this layer. Treat it as conservative, paper-only, and
+  under review.
+
+Remaining:
+
+- Continue daily `policy_backtest.py --write-summary` until
+  `policy_too_loose` clears across multiple paper sessions.
+- Add stronger drift thresholds once normal paper-session variance is known.
 
 ### Promotion Governance Layer
 
@@ -548,12 +605,20 @@ Current state:
 
 - `ml_platform.serving` defines a dormant read-only `PredictionProvider`
   interface and SQLite implementation.
-- It is not imported by `app.py` yet.
+- `prediction_cache.py` is the runtime-safe loader. It preloads
+  `daily_symbol_predictions` into an in-memory dict keyed by symbol, refreshes
+  on a 60-second TTL outside webhook handling, and exposes memory-only reads to
+  `app.py`.
+- `/status` exposes prediction-cache age, symbol count, load duration, and
+  stale/error state.
+- The existing deterministic `prediction_gate` is now documented in code as the
+  deterministic signal-quality gate. Cached ML predictions are attached as
+  `ml_prediction_*` compare-only fields beside the deterministic gate output.
 
 Remaining:
 
-- After Tuesday, optionally expose provider output in `/status` only.
-- Keep all runtime influence off until paper evidence supports promotion.
+- Keep ML prediction runtime influence off until paper evidence supports
+  promotion. Compare deterministic-vs-ML agreement/divergence first.
 - Serving must degrade to no prediction if disabled, stale, missing, or failed;
   it must never block signal processing.
 - Prediction reads need an explicit latency budget before `app.py` integration:
@@ -753,9 +818,10 @@ A model can only move from observe-only to paper-trading influence after it has:
    `feature_age_seconds`, `source`, `is_stale`, and `staleness_reason` fields
    to `feature_snapshots_v2`.
 4. Add serving latency enforcement before any webhook-path provider import.
-5. Started: add policy-artifact rollback/registry entries for after-close
-   learning memory files. Current ops check surfaces stale/missing artifacts;
-   rollback tooling and registry entries remain.
+5. Done: add policy-artifact registry, known-good pointer, rollback command,
+   after-close failure alert, manifest registry hash/known-good id, and
+   `ops_check.py policy-artifacts` coverage for the after-close learning memory
+   files. Continue reviewing stale/unexpected hash drift thresholds.
 6. Started: add timestamped override history and dataset-manifest override
    hashes. Current point-in-time archive snapshots market context, override
    files, policy artifact hashes, and symbol-universe version.
@@ -765,8 +831,9 @@ A model can only move from observe-only to paper-trading influence after it has:
 8. Scope `app.py` decomposition as a multi-week mini-project.
 9. Done: add `rejected_signal_outcomes` schema target plus
    `rejected_signal_outcome_builder.py` and `ops_check.py rejected-outcomes`
-   coverage reporting. Continue collecting multiple paper sessions before
-   treating counterfactual labels as training-ready.
+   coverage/label-quality reporting. The post-session cron now runs the
+   builder daily before validation. Continue collecting multiple paper sessions
+   before treating counterfactual labels as training-ready.
 10. Done: define label v1 formally with fixed-horizon returns, excursion
     labels, classification labels, and exit-policy requirements.
 11. Done: add dataset manifest generation to dataset export flow.
@@ -774,9 +841,11 @@ A model can only move from observe-only to paper-trading influence after it has:
     report.
 13. Started: convert the similarity model into versioned model `v0` with
     research-only metadata.
-14. Done: build the initial read-only `replay-decisions` command. It re-runs
-    `decision_policy` against stored `decision_snapshots` account-state JSON
-    and reports drift without changing live behavior.
+14. Done: build read-only `replay-decisions` v1. It re-runs
+    `decision_policy` against stored `decision_snapshots` account-state JSON,
+    reports policy drift, joins changed decisions to realized/rejected outcomes,
+    estimates friction-adjusted decision deltas, and emits best/worst changed
+    decisions without changing live behavior.
 15. Add calibration and walk-forward evaluation.
 16. Started: define the first retraining-readiness report and 20-session review
     cadence.
@@ -792,14 +861,21 @@ A model can only move from observe-only to paper-trading influence after it has:
 Critical blockers before real training:
 
 1. Continue collecting and validating counterfactual outcomes for rejected
-   signals across multiple paper sessions.
-2. Continue validating fixed-horizon label v1 and version realized-exit labels
-   by exit logic before realized-PnL training claims.
-3. Implement purged/embargoed walk-forward validation.
-4. Continue point-in-time context archiving before using `strategy.trade_scorer`
+   signals across multiple paper sessions. Daily validation must keep rejected
+   row coverage complete, separate labeled/partial/pending/error rows, verify
+   all 5m/15m/30m/60m/EOD horizons where structurally available, preserve
+   action-aware MFE/MAE signs, and mark near-close rows as partial.
+2. Continue validating fixed-horizon label v1. Default training exports now use
+   complete fixed-horizon rows only, but 60m and action-aware MFE/MAE targets
+   still need to be added to the feature-snapshot label schema.
+3. Version realized-exit labels by exit logic before any realized-PnL training
+   claims. Do not mix trades across changing exit policies without explicit
+   `exit_policy_version` and `position_manager_version` controls.
+4. Implement purged/embargoed walk-forward validation.
+5. Continue point-in-time context archiving before using `strategy.trade_scorer`
    in historical replay; first archive command is staged, but replay selection
    logic is not yet implemented.
-5. Continue symbol-universe versioning and review remaining candidates:
+6. Continue symbol-universe versioning and review remaining candidates:
    F, HBAN, KEY, KHC, CRM, PDD, HPQ, BBY, DLTR, GPS, AEO, BKE.
 
 The biggest missing concept is auditability of what the bot knew at decision

@@ -88,6 +88,7 @@ python3 ops_check.py decision-snapshots 2026-05-26
 python3 ops_check.py policy-artifacts
 python3 ops_check.py retention
 python3 ops_check.py order-health 2026-05-26
+python3 prediction_cache.py preload --date 2026-05-26
 ```
 
 `rejection-summary` groups rejected trade rows by reason/category, symbol, and
@@ -115,6 +116,38 @@ artifact files, and `retention` prints the non-destructive hot/warm/cold table
 classification.
 `order-health` checks approved rows for order IDs/statuses, fill-event
 distribution, and imported Alpaca order status summaries.
+`prediction_cache.py preload` verifies that `daily_symbol_predictions` can be
+loaded into the TTL cache before the session. The Flask app also starts its own
+background cache refresher so webhook handling reads predictions from memory,
+not SQLite.
+
+Decision policy authority is visible in `/status` under `decision_policy`.
+Default authority is `paper_only`: `DECISION_POLICY_LIVE_BLOCK=true` and
+`DECISION_POLICY_LIVE_SIZE_DOWN=true` can affect paper/dry-run BUY review, but
+not cash modes unless `DECISION_POLICY_AUTHORITY_MODE=all_modes` is explicitly
+set. The policy cannot increase size or submit orders. If
+`ops_check.py policy-artifacts` shows `policy_backtest_recommendation=policy_too_loose`,
+keep the layer under review and do not promote it.
+
+## Policy Artifact Registry And Rollback
+
+After-close learning artifacts influence live decision context, so they are
+registered as `policy_artifact` sets:
+
+```bash
+cd ~/trading-bot
+python3 policy_artifacts.py status
+python3 policy_artifacts.py register --label manual_review --source operator --known-good
+python3 policy_artifacts.py rollback --dry-run
+python3 policy_artifacts.py rollback
+```
+
+`run_after_close_learning.sh` registers the completed artifact set and marks it
+known-good after all learning steps finish. If the after-close job fails before
+completion, it logs a critical `AFTER_CLOSE_LEARNING` bot event. Rollback
+restores the known-good snapshot with temp-file replacement. Dataset manifests
+include current artifact hashes, the registry hash, and the known-good artifact
+set id.
 
 
 ## Point-In-Time Context Archive
@@ -181,6 +214,14 @@ target table for counterfactual labels on rejected signals. Populate it with:
 python3 rejected_signal_outcome_builder.py --date YYYY-MM-DD
 python3 ops_check.py rejected-outcomes YYYY-MM-DD
 ```
+
+The post-session cron calls `run_post_session_review.sh`, and that wrapper plus
+`post_session_check.py` run the builder before validation. `ops_check.py
+rejected-outcomes` verifies rejected row coverage, complete/pending/partial/error
+label counts, 5m/15m/30m/60m/EOD horizon population, action-adjusted MFE/MAE
+signs, and near-close partial attribution. Near-close rows should be `partial`
+with `partial_reason = near_close_no_60m_window`, not silently treated as
+complete labels.
 
 The third tracked migration adds webhook-event lifecycle/status columns used by
 the app to record queue, start, finish, order, and failure metadata.
@@ -273,3 +314,10 @@ python3 export_ml_dataset.py \
   --output /tmp/ml_dataset_2026-05-26.csv \
   --manifest-output /tmp/ml_dataset_2026-05-26.manifest.json
 ```
+
+The default export is the training-safe path: only complete fixed-horizon rows
+are written to the CSV. Unlabeled rows and near-close partial horizons remain
+visible in the manifest as exclusion counts. Use `--include-incomplete-labels`
+for audit/reconciliation exports, not first-pass training. Realized-PnL labels
+are intentionally excluded from this export surface until they can be versioned
+by `exit_policy_version` and `position_manager_version`.

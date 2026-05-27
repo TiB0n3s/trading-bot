@@ -6,6 +6,10 @@ This script reads feature_snapshots and optional labels/context/predictions.
 It does not train models, write to SQLite, place orders, or affect runtime
 behavior.
 
+By default, exports are training-safe fixed-horizon rows only: incomplete,
+unlabeled, and near-close partial label rows are excluded from the CSV and
+counted in the manifest.
+
 Usage:
   python3 export_ml_dataset.py --date 2026-05-26 --output /tmp/ml_dataset.csv
   python3 export_ml_dataset.py --start-date 2026-05-20 --end-date 2026-05-26 --output /tmp/ml_dataset.csv
@@ -21,6 +25,7 @@ from pathlib import Path
 
 from db import DB_PATH
 from ml_platform.governance import build_dataset_manifest
+from ml_platform.pit_context import get_archive_root, pit_coverage_for_range
 
 
 BASE_COLUMNS = [
@@ -83,6 +88,23 @@ BASE_COLUMNS = [
     "prediction_confidence",
     "prediction_sample_size",
     "label_horizon_status",
+    "label_target_family",
+    "realized_exit_label_status",
+    "exit_policy_version",
+    "position_manager_version",
+]
+
+FIXED_HORIZON_TARGETS = [
+    "ret_fwd_15m",
+    "ret_fwd_30m",
+    "max_up_15m",
+    "max_down_15m",
+]
+
+FUTURE_FIXED_HORIZON_TARGETS = [
+    "ret_fwd_60m",
+    "max_favorable_excursion",
+    "max_adverse_excursion",
 ]
 
 
@@ -96,6 +118,17 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--manifest-output", help="Optional JSON dataset manifest output path")
     parser.add_argument("--query-version", default="ml_dataset_export_v1")
     parser.add_argument("--label-version", default="label_taxonomy_v1")
+    parser.add_argument(
+        "--include-incomplete-labels",
+        action="store_true",
+        help="Include unlabeled/partial/incomplete rows. Default excludes them for training safety.",
+    )
+    parser.add_argument(
+        "--label-scope",
+        choices=("fixed_horizon", "audit_all"),
+        default="fixed_horizon",
+        help="Default fixed_horizon keeps realized-PnL labels out of the export surface.",
+    )
     args = parser.parse_args()
 
     if args.date and (args.start_date or args.end_date):
@@ -215,7 +248,11 @@ def fetch_rows(args: argparse.Namespace) -> list[sqlite3.Row]:
                     WHEN ls.ret_fwd_30m IS NULL
                         THEN 'partial_near_close'
                     ELSE 'complete'
-                END AS label_horizon_status
+                END AS label_horizon_status,
+                'fixed_horizon_v1' AS label_target_family,
+                'excluded_not_training_target' AS realized_exit_label_status,
+                NULL AS exit_policy_version,
+                NULL AS position_manager_version
             FROM feature_snapshots fs
             LEFT JOIN labeled_setups ls
               ON ls.snapshot_id = fs.id
@@ -253,33 +290,68 @@ def _exclusion_counts(rows: list[sqlite3.Row]) -> dict[str, int]:
     return counts
 
 
+def training_rows(rows: list[sqlite3.Row], include_incomplete_labels: bool) -> list[sqlite3.Row]:
+    if include_incomplete_labels:
+        return rows
+    return [r for r in rows if (r["label_horizon_status"] or "unlabeled") == "complete"]
+
+
 def main() -> int:
     args = parse_args()
     rows = fetch_rows(args)
-    path = write_csv(rows, args.output)
     exclusion_counts = _exclusion_counts(rows)
+    export_rows = training_rows(rows, args.include_incomplete_labels)
+    path = write_csv(export_rows, args.output)
     manifest_path = None
     if args.manifest_output:
+        _start = args.date or args.start_date
+        _end = args.date or args.end_date
+        pit_cov = pit_coverage_for_range(
+            _start, _end,
+            archive_root=get_archive_root(Path(args.db_path).parent),
+        ) if _start and _end else None
         manifest = build_dataset_manifest(
             db_path=args.db_path,
-            start_date=args.date or args.start_date,
-            end_date=args.date or args.end_date,
+            start_date=_start,
+            end_date=_end,
             query_version=args.query_version,
             label_version=args.label_version,
             excluded_rows_reason_counts=exclusion_counts,
+            pit_coverage=pit_cov,
         )
+        manifest["source_row_count"] = manifest.get("row_count")
+        manifest["export_row_count"] = len(export_rows)
+        manifest["complete_horizon_rows"] = sum(
+            1 for r in rows if (r["label_horizon_status"] or "unlabeled") == "complete"
+        )
+        manifest["training_default_complete_horizon_only"] = not args.include_incomplete_labels
+        manifest["included_label_horizon_statuses"] = sorted(
+            {r["label_horizon_status"] or "unlabeled" for r in export_rows}
+        )
+        manifest["label_scope"] = args.label_scope
+        manifest["realized_exit_labels_included"] = False
+        manifest["realized_exit_label_policy"] = (
+            "Realized-PnL labels are excluded from this fixed-horizon training export. "
+            "Any future realized-exit export must include exit_policy_version and "
+            "position_manager_version and must not mix exit-policy versions without controls."
+        )
+        manifest["safe_training_targets"] = FIXED_HORIZON_TARGETS
+        manifest["future_fixed_horizon_targets_pending_schema"] = FUTURE_FIXED_HORIZON_TARGETS
         manifest_path = Path(args.manifest_output)
         manifest_path.parent.mkdir(parents=True, exist_ok=True)
         manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n")
 
-    labeled = sum(1 for r in rows if r["outcome_label"] is not None)
-    symbols = {r["symbol"] for r in rows}
+    labeled = sum(1 for r in export_rows if r["outcome_label"] is not None)
+    symbols = {r["symbol"] for r in export_rows}
 
     print("=== ML dataset export ===")
     print(f"output       : {path}")
-    print(f"rows         : {len(rows)}")
+    print(f"source_rows  : {len(rows)}")
+    print(f"export_rows  : {len(export_rows)}")
     print(f"labeled_rows : {labeled}")
     print(f"symbols      : {len(symbols)}")
+    print(f"label_scope  : {args.label_scope}")
+    print(f"complete_only: {not args.include_incomplete_labels}")
     for reason, n in sorted(exclusion_counts.items()):
         print(f"  {reason:<28} {n}")
     if manifest_path:

@@ -22,6 +22,9 @@ Recent completed roadmap items:
 - `retraining-readiness` reports current blockers and never promotes automatically.
 - `ml/models/similarity_v0/` is research-only metadata with no trained artifact.
 - `run_staged_tests.py` runs ahead-of-live staged integration tests separately from current behavior tests.
+- `replay-decisions` is a read-only decision-delta audit. It can join changed
+  replay decisions to realized `matched_trades` and counterfactual
+  `rejected_signal_outcomes`, but it must not affect runtime decisions.
 - `broker.py` has validation/unit coverage for core order-flow boundaries.
 - `broker.py` now polls for Alpaca bracket-order cancellation before market
   sells instead of assuming cancellation completes after a fixed sleep.
@@ -40,6 +43,15 @@ Recent completed roadmap items:
   before calling the broker.
 - `archive_context_state.py` snapshots market context, override hashes, policy
   artifact hashes, and symbol-universe version for future replay.
+- `policy_artifacts.py` registers after-close learning artifact sets, tracks a
+  known-good pointer, and can roll back runtime policy artifacts without
+  touching broker/order state.
+- Decision policy authority is explicit and paper-only by default:
+  `DECISION_POLICY_AUTHORITY_MODE=paper_only`,
+  `DECISION_POLICY_LIVE_BLOCK=true`, and
+  `DECISION_POLICY_LIVE_SIZE_DOWN=true`. Treat it as conservative, under
+  review, and not promoted while `policy_backtest_summary.json` says
+  `policy_too_loose`.
 - Migrations are manual before deploy/restore, but pending migrations are
   surfaced by `morning_check.py`, `ops_check.py premarket`, and
   `ops_check.py migration-status`.
@@ -49,6 +61,13 @@ Recent completed roadmap items:
 - Prediction gate mode defaults to warn-only until labeled paper-session
   outcomes justify promotion to hard blocking.
 - The prediction layer is observe-only and does not modify trade decisions.
+- `prediction_cache.py` is the only runtime-safe path for
+  `daily_symbol_predictions` in `app.py`: preload/background refresh outside
+  webhook handling, 60-second TTL, memory-only signal-path reads, fail-open to
+  no ML prediction.
+- The legacy `prediction_gate` fields in trades/snapshots are deterministic
+  signal-quality gate fields. Actual ML prediction values must use
+  `ml_prediction_*` names and remain compare-only until promoted explicitly.
 - The intelligence pipeline is staged for the next live paper-trading session.
 
 Current roadmap posture:
@@ -118,6 +137,13 @@ python3 export_ml_dataset.py --date 2026-05-26 --output /tmp/ml_dataset_2026-05-
 These commands are read-only with respect to `trades.db`, broker state, orders,
 position sizing, and risk controls. `similarity_v0` is metadata-only until an
 operator explicitly promotes a real artifact through review.
+
+Dataset exports default to complete fixed-horizon label rows only. Incomplete,
+unlabeled, and near-close partial rows are excluded from the CSV and counted in
+the manifest; `--include-incomplete-labels` is for audit exports only. Realized
+P&L is not a training target in the default export. Any future realized-exit
+label export must carry `exit_policy_version` and `position_manager_version`
+and must not mix exit-policy versions without explicit controls.
 
 Correct roadmap path:
 

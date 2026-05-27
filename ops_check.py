@@ -1256,8 +1256,13 @@ def migration_status_check():
 
 def rejected_outcomes_health(target_date):
     import sqlite3
+    from datetime import datetime, time, timedelta
+
+    import pytz
 
     db_path = BASE_DIR / "trades.db"
+    local_tz = pytz.timezone(os.getenv("TRADING_BOT_LOCAL_TZ", "America/Chicago"))
+    et = pytz.timezone("America/New_York")
 
     print()
     print("=" * 72)
@@ -1277,7 +1282,10 @@ def rejected_outcomes_health(target_date):
 
         rejected = con.execute(
             """
-            SELECT COUNT(*) AS n
+            SELECT
+                COUNT(*) AS n,
+                SUM(CASE WHEN LOWER(action) = 'buy' THEN 1 ELSE 0 END) AS buy_n,
+                SUM(CASE WHEN LOWER(action) = 'sell' THEN 1 ELSE 0 END) AS sell_n
             FROM trades
             WHERE substr(timestamp, 1, 10) = ?
               AND approved = 0
@@ -1287,7 +1295,7 @@ def rejected_outcomes_health(target_date):
               AND LOWER(action) IN ('buy', 'sell')
             """,
             (target_date,),
-        ).fetchone()["n"]
+        ).fetchone()
 
         outcomes = con.execute(
             """
@@ -1305,8 +1313,11 @@ def rejected_outcomes_health(target_date):
         ).fetchone()
 
         covered = int(outcomes["n"] or 0)
-        missing = int(rejected or 0) - covered
-        print(f"  rejected_rows          {int(rejected or 0):>8}")
+        rejected_total = int(rejected["n"] or 0)
+        missing = rejected_total - covered
+        print(f"  rejected_rows          {rejected_total:>8}")
+        print(f"  rejected_buy_rows      {int(rejected['buy_n'] or 0):>8}")
+        print(f"  rejected_sell_rows     {int(rejected['sell_n'] or 0):>8}")
         print(f"  outcome_rows           {covered:>8}")
         print(f"  missing_outcomes       {missing:>8}")
         print(f"  labeled                {int(outcomes['labeled'] or 0):>8}")
@@ -1341,6 +1352,38 @@ def rejected_outcomes_health(target_date):
             print("[INFO] partial rows may be near-close structural partials or pending forward bars")
 
         print()
+        print("Horizon completeness")
+        horizon_rows = con.execute(
+            """
+            SELECT
+                label_status,
+                COUNT(*) AS n,
+                SUM(CASE WHEN return_5m IS NOT NULL THEN 1 ELSE 0 END) AS has_5m,
+                SUM(CASE WHEN return_15m IS NOT NULL THEN 1 ELSE 0 END) AS has_15m,
+                SUM(CASE WHEN return_30m IS NOT NULL THEN 1 ELSE 0 END) AS has_30m,
+                SUM(CASE WHEN return_60m IS NOT NULL THEN 1 ELSE 0 END) AS has_60m,
+                SUM(CASE WHEN return_eod IS NOT NULL THEN 1 ELSE 0 END) AS has_eod,
+                SUM(CASE WHEN max_favorable_60m IS NOT NULL THEN 1 ELSE 0 END) AS has_mfe,
+                SUM(CASE WHEN max_adverse_60m IS NOT NULL THEN 1 ELSE 0 END) AS has_mae
+            FROM rejected_signal_outcomes
+            WHERE substr(timestamp, 1, 10) = ?
+            GROUP BY label_status
+            ORDER BY label_status
+            """,
+            (target_date,),
+        ).fetchall()
+        if horizon_rows:
+            for row in horizon_rows:
+                print(
+                    f"  {row['label_status']:<10} n={row['n']:>5} "
+                    f"5m={row['has_5m']:>5} 15m={row['has_15m']:>5} "
+                    f"30m={row['has_30m']:>5} 60m={row['has_60m']:>5} "
+                    f"eod={row['has_eod']:>5} mfe={row['has_mfe']:>5} mae={row['has_mae']:>5}"
+                )
+        else:
+            print("  none")
+
+        print()
         print("By action/status")
         rows = con.execute(
             """
@@ -1369,6 +1412,78 @@ def rejected_outcomes_health(target_date):
                 )
         else:
             print("  none")
+
+        invalid_labeled = con.execute(
+            """
+            SELECT COUNT(*) AS n
+            FROM rejected_signal_outcomes
+            WHERE substr(timestamp, 1, 10) = ?
+              AND label_status = 'labeled'
+              AND (
+                   return_5m IS NULL
+                OR return_15m IS NULL
+                OR return_30m IS NULL
+                OR return_60m IS NULL
+                OR return_eod IS NULL
+                OR max_favorable_60m IS NULL
+                OR max_adverse_60m IS NULL
+              )
+            """,
+            (target_date,),
+        ).fetchone()["n"]
+
+        bad_excursions = con.execute(
+            """
+            SELECT COUNT(*) AS n
+            FROM rejected_signal_outcomes
+            WHERE substr(timestamp, 1, 10) = ?
+              AND label_status IN ('labeled', 'partial')
+              AND (
+                   max_favorable_60m < -0.000001
+                OR max_adverse_60m > 0.000001
+              )
+            """,
+            (target_date,),
+        ).fetchone()["n"]
+
+        partial_rows = con.execute(
+            """
+            SELECT trade_id, timestamp, partial_reason, return_60m
+            FROM rejected_signal_outcomes
+            WHERE substr(timestamp, 1, 10) = ?
+              AND label_status = 'partial'
+            """,
+            (target_date,),
+        ).fetchall()
+
+        def parse_ts(value):
+            dt = datetime.fromisoformat(str(value))
+            if dt.tzinfo is None:
+                dt = local_tz.localize(dt)
+            return dt.astimezone(et)
+
+        bad_near_close = 0
+        bad_partial_60m = 0
+        for row in partial_rows:
+            try:
+                signal_dt = parse_ts(row["timestamp"])
+                close_dt = et.localize(datetime.combine(signal_dt.date(), time(16, 0)))
+                near_close = signal_dt + timedelta(minutes=60) > close_dt
+                if row["partial_reason"] == "near_close_no_60m_window" and not near_close:
+                    bad_near_close += 1
+                if row["partial_reason"] != "near_close_no_60m_window" and near_close:
+                    bad_near_close += 1
+                if row["partial_reason"] == "near_close_no_60m_window" and row["return_60m"] is not None:
+                    bad_partial_60m += 1
+            except Exception:
+                bad_near_close += 1
+
+        print()
+        print("Validation checks")
+        print(f"  labeled_missing_horizons     {int(invalid_labeled or 0):>6}")
+        print(f"  bad_action_adjusted_mfe_mae  {int(bad_excursions or 0):>6}")
+        print(f"  bad_near_close_partials      {bad_near_close:>6}")
+        print(f"  near_close_with_60m_return    {bad_partial_60m:>6}")
 
         print()
         print("Top rejection categories with outcomes")
@@ -1401,9 +1516,23 @@ def rejected_outcomes_health(target_date):
         else:
             print("  none")
 
+    failures = []
     if missing > 0:
+        failures.append("missing rejected outcome rows")
+    if int(outcomes["error"] or 0) > 0:
+        failures.append("error rows present")
+    if int(invalid_labeled or 0) > 0:
+        failures.append("labeled rows missing required horizons")
+    if int(bad_excursions or 0) > 0:
+        failures.append("action-adjusted MFE/MAE sign check failed")
+    if bad_near_close > 0 or bad_partial_60m > 0:
+        failures.append("near-close partial attribution failed")
+
+    if failures:
         print()
-        print("[WARN] rejected outcome coverage is incomplete")
+        print("[WARN] rejected outcome validation needs follow-up:")
+        for failure in failures:
+            print(f"  - {failure}")
         return False
 
     print()
@@ -1591,6 +1720,10 @@ def policy_artifact_health():
     print(f"enabled     : {status.get('enabled')}")
     print(f"effect      : {status.get('runtime_effect')}")
     print(f"state_hash  : {status.get('state_hash')}")
+    registry = status.get("registry") or {}
+    known_good = registry.get("known_good") or {}
+    print(f"registry    : entries={registry.get('entry_count', 0)} path={registry.get('registry_path')}")
+    print(f"known_good  : {known_good.get('artifact_set_id') or '-'}")
 
     ok = True
     now = datetime.now(timezone.utc)
@@ -1608,11 +1741,24 @@ def policy_artifact_health():
             f"  {name:<36} exists={str(exists):<5} age={age_s:>8} "
             f"generated_at={item.get('generated_at') or '-'} sha={str(item.get('sha256') or '-')[:12]}"
         )
+        if name == "policy_backtest_summary.json":
+            rec = item.get("recommendation")
+            if rec:
+                print(f"    policy_backtest_recommendation={rec} reason={item.get('reason') or '-'}")
+                if rec == "policy_too_loose":
+                    print("    [WARN] decision policy remains too loose; keep under review and do not promote")
         if not exists:
             ok = False
             print(f"    [WARN] missing policy artifact: {name}")
         elif age_hours is not None and age_hours > 72:
             print(f"    [WARN] artifact older than 72h: {name}")
+
+    if not registry.get("entry_count"):
+        ok = False
+        print("[WARN] no policy artifact registry entries found")
+    if not known_good.get("artifact_set_id"):
+        ok = False
+        print("[WARN] no known-good policy artifact pointer found")
 
     print()
     print("[OK] policy artifact check completed" if ok else "[WARN] policy artifact check found issues")

@@ -106,7 +106,7 @@ def get_strategy_memory():
     return _load_strategy_memory()
 
 
-def contextual_memory_for_signal(symbol, intelligence_context=None):
+def contextual_memory_for_signal(symbol, intelligence_context=None, memory_override=None):
     """
     Return symbol + contextual learned memory for the current signal.
 
@@ -120,8 +120,12 @@ def contextual_memory_for_signal(symbol, intelligence_context=None):
     - symbol_prediction_context
     - symbol_buy_opportunity_context
     - symbol_session_trend_context
+
+    memory_override: if provided, use this dict instead of loading from
+    strategy_memory.json. Used by replay tools to inject point-in-time
+    archived strategy memory rather than the current live file.
     """
-    mem = _load_strategy_memory()
+    mem = memory_override if memory_override is not None else _load_strategy_memory()
     if not mem:
         return {
             "available": False,

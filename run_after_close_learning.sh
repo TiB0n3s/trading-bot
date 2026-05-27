@@ -75,25 +75,10 @@ python3 strategy_brain_report.py
 
 echo
 echo "---- policy artifact hashes ----"
-python3 - <<'PY2'
-import hashlib
-from pathlib import Path
-
-files = [
-    "strategy_memory.json",
-    "portfolio_replacement_memory.json",
-    "excursion_memory.json",
-    "missed_opportunity_memory.json",
-    "policy_backtest_summary.json",
-]
-
-for name in files:
-    path = Path(name)
-    if not path.exists():
-        print(f"{name}: missing")
-        continue
-    print(f"{name}: sha256={hashlib.sha256(path.read_bytes()).hexdigest()} size={path.stat().st_size}")
-PY2
+python3 policy_artifacts.py register \
+    --label after_close_learning \
+    --source run_after_close_learning.sh \
+    --known-good
 
 
 python3 - <<'PY2'

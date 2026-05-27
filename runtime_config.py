@@ -61,6 +61,15 @@ CASH_SAFE_MAX_ORDER_DOLLARS = _env_float(
     min(MAX_LIVE_ORDER_DOLLARS, 500.0),
 )
 
+DECISION_POLICY_AUTHORITY_MODE = os.getenv(
+    "DECISION_POLICY_AUTHORITY_MODE", "paper_only"
+).strip().lower()
+if DECISION_POLICY_AUTHORITY_MODE not in {"disabled", "paper_only", "all_modes"}:
+    DECISION_POLICY_AUTHORITY_MODE = "paper_only"
+
+DECISION_POLICY_LIVE_BLOCK = _env_bool("DECISION_POLICY_LIVE_BLOCK", True)
+DECISION_POLICY_LIVE_SIZE_DOWN = _env_bool("DECISION_POLICY_LIVE_SIZE_DOWN", True)
+
 
 def is_cash_mode() -> bool:
     return EXECUTION_MODE in {"cash_safe", "cash_full"}
@@ -84,6 +93,32 @@ def max_order_dollars() -> float:
     return float("inf")
 
 
+def decision_policy_live_authority_enabled() -> bool:
+    if DECISION_POLICY_AUTHORITY_MODE == "disabled":
+        return False
+    if DECISION_POLICY_AUTHORITY_MODE == "paper_only":
+        return EXECUTION_MODE in {"paper", "dry_run"}
+    return True
+
+
+def public_decision_policy_config() -> dict:
+    authority_enabled = decision_policy_live_authority_enabled()
+    return {
+        "authority_mode": DECISION_POLICY_AUTHORITY_MODE,
+        "authority_enabled_for_execution_mode": authority_enabled,
+        "live_block_enabled": DECISION_POLICY_LIVE_BLOCK and authority_enabled,
+        "live_size_down_enabled": DECISION_POLICY_LIVE_SIZE_DOWN and authority_enabled,
+        "default_authority_mode": "paper_only",
+        "paper_only_under_review": True,
+        "can_increase_size": False,
+        "can_submit_orders": False,
+        "hard_gate_behavior": (
+            "Decision policy mirrors hard-gate context from account_state for replay/audit. "
+            "It must not override app hard gates."
+        ),
+    }
+
+
 def public_runtime_config() -> dict:
     return {
         "execution_mode": EXECUTION_MODE,
@@ -96,4 +131,5 @@ def public_runtime_config() -> dict:
         ),
         "max_live_order_dollars": MAX_LIVE_ORDER_DOLLARS if is_cash_mode() else None,
         "cash_safe_max_order_dollars": CASH_SAFE_MAX_ORDER_DOLLARS if is_cash_safe_mode() else None,
+        "decision_policy": public_decision_policy_config(),
     }

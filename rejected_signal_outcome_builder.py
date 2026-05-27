@@ -124,6 +124,11 @@ def excursion_60m(rows: list[dict], signal_price: float, signal_dt: datetime, ac
         favorable = max_up
         adverse = max_down
 
+    if favorable is not None:
+        favorable = max(0.0, float(favorable))
+    if adverse is not None:
+        adverse = min(0.0, float(adverse))
+
     return favorable, adverse
 
 
@@ -370,6 +375,7 @@ def build(target_date: str, limit: int | None = None, symbol: str | None = None)
             counts["error"] += 1
             error_outcome = {
                 "label_status": "error",
+                "partial_reason": "exception",
                 "return_5m": None,
                 "return_15m": None,
                 "return_30m": None,

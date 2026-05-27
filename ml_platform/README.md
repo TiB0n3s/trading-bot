@@ -16,7 +16,7 @@ python3 -m ml_platform.cli governance-contract
 python3 -m ml_platform.cli dataset-manifest --start-date 2026-05-20 --end-date 2026-05-26
 python3 -m ml_platform.cli label-taxonomy
 python3 -m ml_platform.cli model-card-template --model-id similarity_v0
-python3 -m ml_platform.cli replay-decisions --start-date 2026-05-01 --end-date 2026-05-26 --candidate-model similarity_v0
+python3 -m ml_platform.cli replay-decisions --start-date 2026-05-01 --end-date 2026-05-26 --candidate-model similarity_v0 --friction-bps 10
 python3 -m ml_platform.cli staged-readiness --start-date 2026-05-26 --end-date 2026-05-26 --candidate-model similarity_v0 --prediction-symbol AAPL
 python3 -m ml_platform.cli env-policy
 python3 -m ml_platform.cli get-prediction --date 2026-05-26 --symbol AAPL
@@ -28,6 +28,10 @@ python3 -m ml_platform.cli list-models
 - No model serving.
 - `serving.py` is a read-only provider scaffold only; it is not imported by runtime.
 - `staged.py` composes ahead-of-live integration evidence only; it is not imported by runtime.
+- `replay.py` is read-only. It joins changed replay decisions to
+  `matched_trades` and `rejected_signal_outcomes` when available, then reports
+  avoided losers, missed winners, recovered missed winners, introduced losers,
+  friction-adjusted simulated delta, and best/worst changed decisions.
 - No runtime decision changes.
 - No writes to `trades.db`.
 - No broker/order calls.
@@ -67,10 +71,11 @@ The second hard rule is counterfactual coverage: a model trained only on
 approved trades is selection-biased and cannot claim to know which rejected
 signals were worth taking.
 
-Before runtime integration, the serving layer has a hard SLA: target 25 ms,
+Runtime prediction integration must use `prediction_cache.py`: target 25 ms,
 hard timeout 50 ms, in-memory TTL cache loaded outside the webhook path, and
 fail-open to no prediction. Provider failure must never block signal
-processing.
+processing. `daily_symbol_predictions` values are compare-only beside the
+deterministic signal-quality gate until validation says otherwise.
 
 ## Existing Policy Artifacts
 
@@ -84,12 +89,18 @@ runtime decisions:
 - `policy_backtest_summary.json`
 
 These are governed as `policy_artifact` inputs. Their hashes are included in
-dataset manifests, and `/status` exposes their current hashes/mtimes under
+dataset manifests, and `/status` exposes their current hashes/mtimes,
+generated timestamps, registry state, and known-good pointer under
 `policy_artifacts`.
 
 Policy artifact writes use atomic temp-file replacement, and
 `POLICY_ARTIFACTS_ENABLED=false` makes live loaders return neutral state without
 deleting the artifact files.
+
+```bash
+python3 policy_artifacts.py register --label manual_review --source operator --known-good
+python3 policy_artifacts.py rollback --dry-run
+```
 
 ## Brain Integration
 

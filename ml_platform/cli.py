@@ -33,6 +33,13 @@ from ml_platform.readiness import retraining_readiness_report
 from ml_platform.replay import replay_decisions_scaffold, replay_decisions_v1
 from ml_platform.serving import SQLitePredictionProvider
 from ml_platform.staged import staged_ml_integration_report, write_staged_report
+from ml_platform.pit_context import get_archive_root, pit_coverage_for_range, select_pit_context
+from ml_platform.validation import (
+    EMBARGO_DEFAULT_DAYS,
+    N_FOLDS_DEFAULT,
+    PURGE_DEFAULT_DAYS,
+    walk_forward_split_report,
+)
 
 
 def main() -> int:
@@ -101,6 +108,8 @@ def main() -> int:
     replay.add_argument("--policy", default="current")
     replay.add_argument("--candidate-model", default="similarity_v0")
     replay.add_argument("--db-path", default=str(DB_PATH))
+    replay.add_argument("--friction-bps", type=float, default=10.0)
+    replay.add_argument("--max-changed-rows", type=int, default=50)
     replay.add_argument("--output")
 
     staged = sub.add_parser("staged-readiness", help="Print staged observe-only ML integration report")
@@ -115,6 +124,41 @@ def main() -> int:
     pred = sub.add_parser("get-prediction", help="Read one observe-only prediction")
     pred.add_argument("--date", required=True)
     pred.add_argument("--symbol", required=True)
+
+    pit = sub.add_parser(
+        "pit-context-coverage",
+        help="Show point-in-time context archive coverage for a date range",
+    )
+    pit.add_argument("--start-date", required=True)
+    pit.add_argument("--end-date", required=True)
+    pit.add_argument("--db-path", default=str(DB_PATH))
+    pit.add_argument("--output")
+
+    wf = sub.add_parser(
+        "walk-forward-splits",
+        help="Build purged walk-forward fold specs and row counts",
+    )
+    wf.add_argument("--db-path", default=str(DB_PATH))
+    wf.add_argument("--start-date", required=True)
+    wf.add_argument("--end-date", required=True)
+    wf.add_argument("--n-folds", type=int, default=N_FOLDS_DEFAULT)
+    wf.add_argument("--purge-days", type=int, default=PURGE_DEFAULT_DAYS)
+    wf.add_argument("--embargo-days", type=int, default=EMBARGO_DEFAULT_DAYS)
+    wf.add_argument("--min-train-days", type=int, default=15)
+    wf.add_argument("--output")
+
+    leak = sub.add_parser(
+        "leakage-report",
+        help="Symbol/date leakage audit for walk-forward splits",
+    )
+    leak.add_argument("--db-path", default=str(DB_PATH))
+    leak.add_argument("--start-date", required=True)
+    leak.add_argument("--end-date", required=True)
+    leak.add_argument("--n-folds", type=int, default=N_FOLDS_DEFAULT)
+    leak.add_argument("--purge-days", type=int, default=PURGE_DEFAULT_DAYS)
+    leak.add_argument("--embargo-days", type=int, default=EMBARGO_DEFAULT_DAYS)
+    leak.add_argument("--min-train-days", type=int, default=15)
+    leak.add_argument("--output")
 
     args = parser.parse_args()
 
@@ -249,6 +293,8 @@ def main() -> int:
             end_date=args.end_date,
             policy=args.policy,
             db_path=args.db_path,
+            max_changed_rows=args.max_changed_rows,
+            friction_bps=args.friction_bps,
         )
         if args.output:
             output_path = Path(args.output)
@@ -277,6 +323,38 @@ def main() -> int:
         provider = SQLitePredictionProvider()
         prediction = provider.get_prediction(args.date, args.symbol)
         print(json.dumps(prediction.to_dict() if prediction else None, indent=2, sort_keys=True))
+        return 0
+
+    if args.command == "pit-context-coverage":
+        result = pit_coverage_for_range(
+            args.start_date,
+            args.end_date,
+            archive_root=get_archive_root(Path(args.db_path).parent),
+        )
+        if args.output:
+            output_path = Path(args.output)
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+            output_path.write_text(json.dumps(result, indent=2, sort_keys=True) + "\n")
+            print(f"Wrote PIT context coverage to {output_path}")
+        print(json.dumps(result, indent=2, sort_keys=True))
+        return 0
+
+    if args.command in ("walk-forward-splits", "leakage-report"):
+        result = walk_forward_split_report(
+            db_path=args.db_path,
+            start_date=args.start_date,
+            end_date=args.end_date,
+            n_folds=args.n_folds,
+            purge_days=args.purge_days,
+            embargo_days=args.embargo_days,
+            min_train_days=args.min_train_days,
+        )
+        if args.output:
+            output_path = Path(args.output)
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+            output_path.write_text(json.dumps(result, indent=2, sort_keys=True) + "\n")
+            print(f"Wrote walk-forward split report to {output_path}")
+        print(json.dumps(result, indent=2, sort_keys=True))
         return 0
 
     parser.error(f"unknown command {args.command}")

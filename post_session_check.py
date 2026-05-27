@@ -275,6 +275,8 @@ def main():
     checks.append(run_cmd("Position Review", [sys.executable, "position_review.py"]))
     checks.append(run_cmd("Drawdown Report", [sys.executable, "drawdown_report.py", target_date]))
     checks.append(run_cmd("Analytics Report", [sys.executable, "analytics_report.py", "--date", target_date]))
+    checks.append(run_cmd("Rejected Outcome Builder", [sys.executable, "rejected_signal_outcome_builder.py", "--date", target_date]))
+    checks.append(run_cmd("Rejected Outcome Validation", [sys.executable, "ops_check.py", "rejected-outcomes", target_date]))
     checks.append(run_cmd("Strong-Day Participation", [sys.executable, "strong_day_participation_report.py", "--date", target_date, "--write-db"]))
     checks.append(run_cmd("Prediction Validation", [sys.executable, "prediction_validation_report.py", "--date", target_date]))
 

@@ -86,6 +86,57 @@ def test_near_close_partial_reason():
 
     assert_equal(outcome["label_status"], "partial", "status")
     assert_equal(outcome["partial_reason"], "near_close_no_60m_window", "partial reason")
+    assert_equal(outcome["return_60m"], None, "near-close 60m")
+
+
+def test_missing_forward_bars_partial_reason():
+    outcome = compute_outcome(
+        {
+            "timestamp": "2026-05-26T09:35:00-04:00",
+            "action": "buy",
+            "signal_price": 100.0,
+        },
+        [
+            {"timestamp": "2026-05-26T09:40:00-04:00", "close": 101.0, "high": 101.2, "low": 99.9},
+            {"timestamp": "2026-05-26T09:50:00-04:00", "close": 102.0, "high": 102.3, "low": 100.5},
+        ],
+    )
+
+    assert_equal(outcome["label_status"], "partial", "status")
+    assert_equal(outcome["partial_reason"], "missing_forward_bars", "partial reason")
+    assert_close(outcome["return_5m"], 1.0, "5m return")
+    assert_close(outcome["return_15m"], 2.0, "15m return")
+    assert_equal(outcome["return_30m"], None, "30m return")
+
+
+def test_excursions_are_action_adjusted_and_sign_bounded():
+    buy_outcome = compute_outcome(
+        {
+            "timestamp": "2026-05-26T08:35:00-05:00",
+            "action": "buy",
+            "signal_price": 100.0,
+        },
+        [
+            {"timestamp": "2026-05-26T09:40:00-04:00", "close": 99.0, "high": 99.5, "low": 98.0},
+            {"timestamp": "2026-05-26T10:35:00-04:00", "close": 98.5, "high": 99.4, "low": 97.0},
+        ],
+    )
+    sell_outcome = compute_outcome(
+        {
+            "timestamp": "2026-05-26T08:35:00-05:00",
+            "action": "sell",
+            "signal_price": 100.0,
+        },
+        [
+            {"timestamp": "2026-05-26T09:40:00-04:00", "close": 101.0, "high": 102.0, "low": 100.5},
+            {"timestamp": "2026-05-26T10:35:00-04:00", "close": 101.5, "high": 103.0, "low": 100.6},
+        ],
+    )
+
+    assert_equal(buy_outcome["max_favorable_60m"], 0.0, "buy no-favorable mfe")
+    assert_close(buy_outcome["max_adverse_60m"], -3.0, "buy adverse")
+    assert_equal(sell_outcome["max_favorable_60m"], 0.0, "sell no-favorable mfe")
+    assert_close(sell_outcome["max_adverse_60m"], -3.0, "sell adverse")
 
 
 def main():
@@ -93,6 +144,8 @@ def main():
         test_buy_outcome_uses_raw_forward_returns,
         test_sell_outcome_is_action_adjusted,
         test_near_close_partial_reason,
+        test_missing_forward_bars_partial_reason,
+        test_excursions_are_action_adjusted_and_sign_bounded,
     ]
 
     for test in tests:

@@ -73,6 +73,13 @@ def build_archive_payload(archive_reason: str) -> dict[str, Any]:
         }
         for name in POLICY_ARTIFACT_FILES
     }
+    # Full JSON content of policy artifacts for point-in-time replay.
+    # strategy_memory.json is read by evaluate_decision_policy at replay time;
+    # archiving its content lets replay use the version that existed at decision time.
+    policy_artifacts_full = {
+        name: _load_json(BASE_DIR / name)
+        for name in POLICY_ARTIFACT_FILES
+    }
     state_hash_payload = {
         "runtime_files": {name: item["sha256"] for name, item in files.items()},
         "policy_artifacts": policy_artifacts,
@@ -84,6 +91,7 @@ def build_archive_payload(archive_reason: str) -> dict[str, Any]:
         "symbol_universe_version": SYMBOL_UNIVERSE_VERSION,
         "runtime_files": files,
         "policy_artifacts": policy_artifacts,
+        "policy_artifacts_full": policy_artifacts_full,
         "state_hash": hashlib.sha256(
             json.dumps(state_hash_payload, sort_keys=True).encode("utf-8")
         ).hexdigest(),

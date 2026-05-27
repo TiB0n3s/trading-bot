@@ -60,8 +60,10 @@ These modules are used by cron jobs and Tuesday readiness workflows.
 ## Naming Risks To Resolve After Tuesday
 
 - Root `setup_classifier.py` and `strategy/setup_classifier.py` coexist.
-- The live deterministic `prediction_gate` name can be confused with
-  observe-only `daily_symbol_predictions`.
+- The live deterministic `prediction_gate` legacy fields are now documented as
+  deterministic signal-quality fields. Actual ML/database predictions are
+  surfaced separately as `ml_prediction_*` compare-only fields from
+  `prediction_cache.py`.
 - Some SQL access remains in `app.py` rather than `db.py`/`data_layer`.
 
 ## Post-Tuesday Integration Targets

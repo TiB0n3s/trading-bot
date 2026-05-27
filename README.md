@@ -467,6 +467,7 @@ ml_platform/replay.py
 ml_platform/serving.py
 ml_platform/staged.py
 ml/models/similarity_v0/
+prediction_cache.py
 run_staged_tests.py
 tests/staged/
 
@@ -486,8 +487,39 @@ python3 -m ml_platform.cli retraining-readiness \
   --output /tmp/retraining_readiness_2026-05-26.json
 
 The staged readiness report composes dataset profile, dataset manifest, brain
-feature manifest, replay contract, prediction-provider contract, retraining
-readiness, and promotion gates. It reports `runtime_effect: none`.
+feature manifest, replay decision-delta audit, prediction-provider contract,
+retraining readiness, and promotion gates. It reports `runtime_effect: none`.
+
+`prediction_cache.py` is the runtime-safe bridge for observe-only ML prediction
+reads. It preloads `daily_symbol_predictions` into an in-memory dict keyed by
+symbol, refreshes on a 60-second TTL, and exposes memory-only lookups to the
+webhook path. The serving contract remains target 25 ms / hard timeout 50 ms,
+fail-open to no prediction. The existing deterministic `prediction_gate` is now
+documented as the deterministic signal-quality gate; cached ML predictions are
+recorded beside it as `ml_prediction_*` compare-only fields.
+
+`python3 -m ml_platform.cli replay-decisions` is read-only. It re-runs
+`decision_policy` against stored `decision_snapshots`, joins changed decisions
+to realized `matched_trades` or counterfactual `rejected_signal_outcomes`, and
+reports avoided losers, missed winners, recovered missed winners, introduced
+losers, friction-adjusted simulated delta, and best/worst changed decisions.
+
+Runtime learning artifacts are governed as policy artifacts:
+`strategy_memory.json`, `portfolio_replacement_memory.json`,
+`excursion_memory.json`, `missed_opportunity_memory.json`, and
+`policy_backtest_summary.json`. `policy_artifacts.py register` snapshots the
+current set, `--known-good` advances the rollback pointer, and
+`policy_artifacts.py rollback` restores the known-good set. `/status`,
+`ops_check.py policy-artifacts`, and dataset manifests expose artifact hashes,
+registry hash, known-good id, mtimes, generated timestamps, and runtime effect.
+
+Decision policy authority is explicit and conservative. Defaults are
+`DECISION_POLICY_AUTHORITY_MODE=paper_only`, `DECISION_POLICY_LIVE_BLOCK=true`,
+and `DECISION_POLICY_LIVE_SIZE_DOWN=true`, which means block/size-down authority
+is available in paper/dry-run modes only. The policy never increases size,
+submits orders, or overrides hard gates; it can only reduce risk before Claude
+when the explicit authority settings allow it. If `policy_backtest_summary.json`
+reports `policy_too_loose`, keep this layer under review and do not promote it.
 
 `similarity_v0` is metadata-only. It has no trained artifact, no runtime import,
 and no authority to place orders, loosen risk controls, or change sizing.
@@ -504,6 +536,19 @@ python3 export_ml_dataset.py \
 Dataset manifests include DB hash, query version, label version, feature
 version, row/symbol counts, git SHA, override-file hashes, and policy-artifact
 hashes. They are intended for auditability, not promotion by themselves.
+
+By default, `export_ml_dataset.py` writes only complete fixed-horizon label
+rows. Incomplete, unlabeled, and near-close partial rows are excluded from the
+CSV and counted in the manifest under `excluded_rows_reason_counts`. Use
+`--include-incomplete-labels` only for audit exports, not first-pass training.
+Realized-PnL labels are not part of the default training export; any future
+realized-exit label export must carry `exit_policy_version` and
+`position_manager_version`.
+
+Initial safe training targets are fixed-horizon fields such as `ret_fwd_15m`,
+`ret_fwd_30m`, `max_up_15m`, and `max_down_15m`. `ret_fwd_60m`,
+`max_favorable_excursion`, and `max_adverse_excursion` remain pending for the
+feature-snapshot label schema.
 
 Feature leakage fields now live in `feature_snapshots` and are exported in ML
 datasets:

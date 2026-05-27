@@ -316,7 +316,8 @@ def place_order(
                     return None
         if side == "buy":
             stop_price = round(current_price * (1 - stop_loss_pct / 100), 2)
-            take_price = round(current_price * (1 + take_profit_pct / 100), 2)
+            # take_profit_pct=0 means position_manager owns exits; only SL backstop needed.
+            take_price = round(current_price * (1 + take_profit_pct / 100), 2) if take_profit_pct > 0 else None
         else:
             stop_price = round(current_price * (1 + stop_loss_pct / 100), 2)
             take_price = round(current_price * (1 - take_profit_pct / 100), 2)
@@ -343,17 +344,29 @@ def place_order(
             except Exception as e:
                 logger.warning(f"EXECUTION_POLICY_COMPARE bracket failed for {symbol}: {e}")
         if side == "buy":
-            order = api.submit_order(
-                symbol=symbol,
-                qty=qty,
-                side=side,
-                type="market",
-                time_in_force="day",
-                order_class="bracket",
-                stop_loss={"stop_price": stop_price},
-                take_profit={"limit_price": take_price},
-                client_order_id=client_order_id,
-            )
+            if take_price is not None:
+                order = api.submit_order(
+                    symbol=symbol,
+                    qty=qty,
+                    side=side,
+                    type="market",
+                    time_in_force="day",
+                    order_class="bracket",
+                    stop_loss={"stop_price": stop_price},
+                    take_profit={"limit_price": take_price},
+                    client_order_id=client_order_id,
+                )
+            else:
+                order = api.submit_order(
+                    symbol=symbol,
+                    qty=qty,
+                    side=side,
+                    type="market",
+                    time_in_force="day",
+                    order_class="oto",
+                    stop_loss={"stop_price": stop_price},
+                    client_order_id=client_order_id,
+                )
         else:
             order = api.submit_order(
                 symbol=symbol,
@@ -363,7 +376,10 @@ def place_order(
                 time_in_force="day",
                 client_order_id=client_order_id,
             )
-        logger.info(f"Order placed: {side.upper()} {qty} shares of {symbol} | Stop: {stop_price} | Target: {take_price}")
+        logger.info(
+            f"Order placed: {side.upper()} {qty} shares of {symbol} | Stop: {stop_price}"
+            + (f" | Target: {take_price}" if take_price is not None else " | No TP (position_manager exits)")
+        )
         return {
             "order_id": order.id,
             "client_order_id": getattr(order, "client_order_id", client_order_id),

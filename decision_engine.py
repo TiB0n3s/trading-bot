@@ -34,19 +34,26 @@ account_state includes trend_table keyed by symbol. Each entry has:
   last_signal: most recent action
 
 - bullish/confirmed: prefer approval, confidence "high", position_size_pct 2.5,
-  take_profit_pct 2.5, stop_loss_pct 1.0
+  take_profit_pct 0, stop_loss_pct 2.0
 - bullish/developing: approve normally, confidence "high" or "medium",
-  take_profit_pct 1.5, stop_loss_pct 1.5
+  take_profit_pct 0, stop_loss_pct 1.75
 - No trend data for symbol: treat as neutral; approve cautiously, confidence "medium"
 
 STOP/TAKE-PROFIT CALIBRATION:
-Start from the trend-based TP/SL above, then adjust for symbol characteristics:
-- High-beta symbols (TSLA, NVDA, AMD, META): widen SL by 0.25-0.5% to absorb noise;
-  do not widen TP unless momentum is strongly rising.
-- Broad ETFs (SPY, QQQ, IWM, GLD): tighter SL acceptable (0.5-0.75%);
-  TP can be modest (1.0-1.5%) on developing trends.
-- If session_elapsed_minutes < 20 or minutes_until_close < 45: prefer tighter TP
-  and slightly wider SL to account for early choppiness or end-of-session risk.
+take_profit_pct must always be 0 for buy signals. Exits are managed by position_manager.py,
+which monitors session momentum, profit giveback, and VWAP continuously. The bracket TP
+leg is not used; setting it non-zero would conflict with position_manager exits.
+
+stop_loss_pct is a safety-net backstop for fast adverse moves or position_manager service
+downtime — not a tight exit target. Set it wide enough that normal intraday volatility
+will not trigger it before position_manager has a chance to act:
+- High-beta symbols (TSLA, NVDA, AMD, META, RKLB, CRDO): stop_loss_pct 2.0-2.5
+- Broad ETFs (SPY, QQQ, IWM, GLD): stop_loss_pct 1.0-1.5
+- Standard equities: stop_loss_pct 1.5-2.0 (default 1.75)
+- If session_elapsed_minutes < 20: widen SL by 0.25% to absorb open choppiness.
+- risk_level "very_high": broker halves qty automatically; SL width does not change.
+- avg_loss_pct worse than -1.5% in symbol_history: widen to 2.0-2.5% to avoid
+  being stopped into the same large-loss pattern.
 
 ROLLING MOMENTUM GUIDANCE:
 account_state may contain rolling_momentum with:
@@ -248,7 +255,7 @@ When the signal symbol already has an open position:
 SESSION TIMING GUIDANCE:
 account_state includes session_elapsed_minutes and minutes_until_close.
 
-- minutes_until_close < 20: reject new buys; not enough session time for bracket to work.
+- minutes_until_close < 20: reject new buys; not enough session time for position_manager to manage the trade safely.
 - minutes_until_close 20-45: apply normal rules but reject marginal or conditional setups.
 - session_elapsed_minutes < 15: early open; price action is wide; reduce confidence
   on weak or developing setups; prefer confirmed trends.
@@ -290,8 +297,8 @@ Always respond with this exact JSON format:
     "approved": true or false,
     "reason": "your reason here",
     "position_size_pct": 1.5,
-    "stop_loss_pct": 0.5,
-    "take_profit_pct": 1.5,
+    "stop_loss_pct": 1.75,
+    "take_profit_pct": 0,
     "confidence": "high"
 }
 
@@ -393,10 +400,10 @@ def evaluate_signal(signal_data, account_state):
         return json.loads(response_clean)
     except json.JSONDecodeError as e:
         logger.error(f'JSON parse error: {e} | Raw response: {response_text}')
-        return {'approved': False, 'reason': 'Parse error - rejecting for safety', 'position_size_pct': 0, 'stop_loss_pct': 0, 'take_profit_pct': 0, 'confidence': 'low'}
+        return {'approved': False, 'reason': 'Parse error - rejecting for safety', 'position_size_pct': 0, 'stop_loss_pct': 1.75, 'take_profit_pct': 0, 'confidence': 'low'}
     except Exception as e:
         logger.error(f'Decision engine error: {e}')
-        return {'approved': False, 'reason': f'Engine error: {str(e)}', 'position_size_pct': 0, 'stop_loss_pct': 0, 'take_profit_pct': 0, 'confidence': 'low'}
+        return {'approved': False, 'reason': f'Engine error: {str(e)}', 'position_size_pct': 0, 'stop_loss_pct': 1.75, 'take_profit_pct': 0, 'confidence': 'low'}
 
 def get_mock_account_state():
     from broker import api, get_account

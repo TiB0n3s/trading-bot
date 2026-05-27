@@ -5060,8 +5060,8 @@ def process_signal(data):
                     symbol=symbol,
                     action=action,
                     position_size_pct=adjusted_position_size_pct,
-                    stop_loss_pct=decision.get("stop_loss_pct", 0.5),
-                    take_profit_pct=decision.get("take_profit_pct", 1.5),
+                    stop_loss_pct=decision.get("stop_loss_pct", 1.75),
+                    take_profit_pct=decision.get("take_profit_pct", 0),
                     risk_level=account_state.get("risk_level"),
                     client_order_id=client_order_id,
                 )

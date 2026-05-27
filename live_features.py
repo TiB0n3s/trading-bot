@@ -58,7 +58,7 @@ from feature_engine import compute_feature_snapshot
 from macro_risk import get_macro_risk
 from market_time import is_trading_day, market_session, now_et
 from symbols_config import APPROVED_SYMBOLS
-from setup_engine import classify_setup
+from setup_engine import classify_feature_snapshot as classify_setup
 
 logger = logging.getLogger("live_features")
 logging.basicConfig(

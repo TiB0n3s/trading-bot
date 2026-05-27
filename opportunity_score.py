@@ -7,6 +7,8 @@ This is active in paper trading. It converts the bot's existing context into a
 
 from __future__ import annotations
 
+from datetime import datetime
+
 
 def _num(value, default=0.0):
     try:
@@ -19,6 +21,29 @@ def _num(value, default=0.0):
 
 def _lower(value):
     return str(value or "").strip().lower()
+
+
+def _trend_staleness_hours(last_time_str):
+    """Return age in hours for a 'YYYY-MM-DD HH:MM:SS' timestamp, or None."""
+    if not last_time_str:
+        return None
+    try:
+        delta = datetime.now() - datetime.strptime(str(last_time_str), "%Y-%m-%d %H:%M:%S")
+        return delta.total_seconds() / 3600.0
+    except Exception:
+        return None
+
+
+def _apply_trend_staleness(direction, strength, last_time_str):
+    """Downgrade trend strength when last signal is stale."""
+    age_hours = _trend_staleness_hours(last_time_str)
+    if age_hours is None:
+        return direction, strength
+    if age_hours > 24:
+        return "neutral", "weak"
+    if age_hours > 4 and strength == "confirmed":
+        return direction, "developing"
+    return direction, strength
 
 
 def _current_position_for(symbol, account_state):
@@ -49,6 +74,7 @@ def score_buy_opportunity(symbol, signal_data, account_state):
     direction = _lower(trend.get("direction"))
     strength = _lower(trend.get("strength"))
     count = int(_num(trend.get("consecutive_count"), 0))
+    direction, strength = _apply_trend_staleness(direction, strength, trend.get("last_time"))
 
     if direction == "bullish" and strength == "confirmed":
         score += 25

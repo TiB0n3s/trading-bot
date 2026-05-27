@@ -74,7 +74,7 @@ def _build_setup_key(trend_bucket: str, vwap_bucket: str, rs_bucket: str) -> str
     return f"{trend_bucket}|{vwap_bucket}|{rs_bucket}"
 
 
-def classify_setup(snapshot: dict[str, Any]) -> SetupResult:
+def classify_feature_snapshot(snapshot: dict[str, Any]) -> SetupResult:
     """
     Classify a feature snapshot into a named setup.
 
@@ -497,7 +497,7 @@ def main() -> int:
         print("No matching snapshot found.")
         return 1
 
-    result = classify_setup(snapshot)
+    result = classify_feature_snapshot(snapshot)
 
     out = {
         "snapshot": snapshot,

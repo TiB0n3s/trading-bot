@@ -2419,6 +2419,7 @@ def _evaluate_session_momentum_gate(session_momentum, prediction_gate, setup_obs
 
     session_hard_negative = session_label == "downtrend" or session_score <= -5
     session_soft_negative = session_label == "fading" or session_score <= -2
+    session_reversal = session_label == "reversal_attempt"
 
     # Hard-negative session tape blocks unless the setup is explicitly boosted.
     if session_hard_negative and setup_action != "boost":
@@ -2449,6 +2450,20 @@ def _evaluate_session_momentum_gate(session_momentum, prediction_gate, setup_obs
                 f"session_label={session_label} score={session_score} "
                 f"prediction_score={prediction_score} trend={trend_direction}/{trend_strength} "
                 f"setup_action={setup_action}"
+            ),
+        }
+
+    # Reversal attempt: session is negative overall but short-term showing lift.
+    # Allow through but flag for cautious sizing — don't treat it like a clean pass.
+    if session_reversal:
+        return {
+            "would_block": False,
+            "severity": "reversal_caution",
+            "size_hint": "reduce",
+            "reason": (
+                f"session_label=reversal_attempt score={session_score} "
+                f"prediction_score={prediction_score} trend={trend_direction}/{trend_strength} "
+                f"setup_action={setup_action} — allow with caution sizing"
             ),
         }
 
@@ -4311,6 +4326,10 @@ def process_signal(data):
         momentum = get_momentum(symbol, price, premarket_bias=premarket_bias)
         if momentum:
             account_state["momentum"] = momentum
+            # Record source so decision_snapshots can flag when bias was absent.
+            account_state["premarket_alignment_source"] = (
+                "live_tape" if premarket_bias is not None else "missing_bias"
+            )
 
             alignment = momentum.get("premarket_alignment")
             action_hint = momentum.get("action_hint")
@@ -4526,6 +4545,12 @@ def process_signal(data):
                     f"Session momentum gate observe-only for {symbol} BUY: "
                     f"{session_gate.get('severity')} {reason}"
                 )
+        elif session_gate.get("severity") == "reversal_caution":
+            logger.info(
+                f"Session reversal_attempt for {symbol} BUY — caution sizing flagged: "
+                f"{session_gate.get('reason')}"
+            )
+            account_state["session_gate_size_hint"] = "reduce"
 
     if STRATEGY_ENGINE_MODE == "observe":
         try:
@@ -4677,11 +4702,8 @@ def process_signal(data):
             except Exception:
                 score_f = None
 
-            # strategy_memory uses a 0-100 score scale. Some opportunity scores
-            # are 0-10, so normalize when needed.
-            normalized_score = None
-            if score_f is not None:
-                normalized_score = score_f * 10 if score_f <= 10 else score_f
+            # opportunity_score.py already outputs 0-100; pass through unchanged.
+            normalized_score = score_f
 
             logger.info(
                 f"STRATEGY_MEMORY {symbol} BUY: "

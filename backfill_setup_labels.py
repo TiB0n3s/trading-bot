@@ -4,7 +4,7 @@ from __future__ import annotations
 import sqlite3
 
 from db import DB_PATH, get_connection
-from setup_engine import classify_setup
+from setup_engine import classify_feature_snapshot as classify_setup
 
 
 def load_rows_missing_setup(limit: int = 5000) -> list[sqlite3.Row]:

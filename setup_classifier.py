@@ -11,9 +11,28 @@ This is intentionally deterministic:
 
 from __future__ import annotations
 
+from datetime import datetime
+
 
 def _clamp(value, low=0, high=100):
     return max(low, min(high, value))
+
+
+def _apply_trend_staleness(direction, strength, last_time_str):
+    """Downgrade trend strength when last signal is stale."""
+    if not last_time_str:
+        return direction, strength
+    try:
+        age_hours = (
+            datetime.now() - datetime.strptime(str(last_time_str), "%Y-%m-%d %H:%M:%S")
+        ).total_seconds() / 3600.0
+    except Exception:
+        return direction, strength
+    if age_hours > 24:
+        return "neutral", "weak"
+    if age_hours > 4 and strength == "confirmed":
+        return direction, "developing"
+    return direction, strength
 
 
 def _to_float(value):
@@ -48,6 +67,7 @@ def classify_setup(
     direction = trend.get("direction")
     strength = trend.get("strength")
     consecutive_count = int(trend.get("consecutive_count") or 0)
+    direction, strength = _apply_trend_staleness(direction, strength, trend.get("last_time"))
 
     # Trend structure
     if direction == "bullish" and strength == "confirmed":
@@ -253,6 +273,10 @@ def classify_setup(
                 f"weak setup score {score} without bullish/confirmed + buy bias + rising momentum"
             )
 
+    premarket_alignment_source = (
+        "live_tape" if premarket_alignment is not None else "missing_bias"
+    )
+
     return {
         "score": score,
         "label": label,
@@ -261,6 +285,7 @@ def classify_setup(
         "should_block": should_block,
         "block_reason": block_reason,
         "reasons": reasons[:10],
+        "premarket_alignment_source": premarket_alignment_source,
         "inputs": {
             "trend_direction": direction,
             "trend_strength": strength,
@@ -270,6 +295,7 @@ def classify_setup(
             "momentum_15m_pct": momentum_15m,
             "price_vs_bars": price_vs_bars,
             "premarket_alignment": premarket_alignment,
+            "premarket_alignment_source": premarket_alignment_source,
             "market_bias": market_bias,
             "fundamental_score": fundamental_score,
             "risk_level": risk_level,

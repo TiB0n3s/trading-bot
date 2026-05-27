@@ -14,13 +14,13 @@ from pathlib import Path
 from typing import Any
 
 from db import DB_PATH
-from setup_engine import classify_setup
+from setup_engine import classify_feature_snapshot as classify_setup
 
 
 BRAIN_FEATURE_VERSION = "bot_brain_features_v1"
 
 BRAIN_LOGIC_SOURCES = {
-    "setup_engine": "setup_engine.classify_setup",
+    "setup_engine": "setup_engine.classify_feature_snapshot",
     "context": "daily_symbol_context",
     "events": "daily_symbol_events aggregate count",
     "predictions": "daily_symbol_predictions observe-only rows",

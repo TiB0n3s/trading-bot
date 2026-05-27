@@ -146,6 +146,24 @@ def _bar_close(bar: Any) -> float | None:
     return _safe_float(getattr(bar, "c", None))
 
 
+def _bar_high(bar: Any) -> float | None:
+    return _safe_float(getattr(bar, "h", None))
+
+
+def _bar_low(bar: Any) -> float | None:
+    return _safe_float(getattr(bar, "l", None))
+
+
+def _bar_typical_price(bar: Any) -> float | None:
+    """Typical price (H+L+C)/3 — standard VWAP numerator."""
+    h = _bar_high(bar)
+    lo = _bar_low(bar)
+    c = _bar_close(bar)
+    if h is None or lo is None or c is None:
+        return None
+    return (h + lo + c) / 3.0
+
+
 def _bar_volume(bar: Any) -> float:
     return _safe_float(getattr(bar, "v", None)) or 0.0
 
@@ -155,11 +173,11 @@ def _compute_vwap(bars: list[Any]) -> float | None:
     total_v = 0.0
 
     for bar in bars:
-        close = _bar_close(bar)
+        tp = _bar_typical_price(bar)
         volume = _bar_volume(bar)
-        if close is None or volume <= 0:
+        if tp is None or volume <= 0:
             continue
-        total_pv += close * volume
+        total_pv += tp * volume
         total_v += volume
 
     if total_v <= 0:

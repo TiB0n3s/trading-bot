@@ -348,8 +348,9 @@ def outcome_for_context(con, market_date: str, symbol: str):
     except Exception:
         hist_outcomes = []
 
-    # Combine live matched trades and learning-only reconstructed outcomes.
-    closed_rows = list(matched) + list(hist_outcomes)
+    # Prefer live matched_trades; only fall back to historical_trade_outcomes when
+    # no live match rows exist for this date (avoids double-counting the same exit).
+    closed_rows = list(matched) if matched else list(hist_outcomes)
 
     closed = len(closed_rows)
     pnl = sum(float(r["realized_pnl"] or 0) for r in closed_rows)

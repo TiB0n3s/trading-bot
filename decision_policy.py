@@ -62,21 +62,8 @@ def _to_float(value):
 
 
 def _normalize_score(value):
-    """
-    Normalize score to 0-100.
-
-    Current buy_opportunity_score is usually on a 0-16-ish scale.
-    Some other scores may already be 0-100.
-    """
-    score = _to_float(value)
-    if score is None:
-        return None
-
-    # Existing buy_opportunity_score range is roughly 0-16.
-    if score <= 20:
-        return score * 6.25
-
-    return score
+    """Pass through a 0-100 score. opportunity_score.py already clamps to 0-100."""
+    return _to_float(value)
 
 
 def _worst_recommendation(recs):

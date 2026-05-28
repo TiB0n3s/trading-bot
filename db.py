@@ -367,6 +367,9 @@ def ensure_decision_snapshots_table(db_path: Path | str = DB_PATH) -> None:
     entry_migration = next(
         m for m in MIGRATIONS if m.migration_id == "20260527_010_entry_intelligence_fields"
     )
+    setup_score_migration = next(
+        m for m in MIGRATIONS if m.migration_id == "20260527_011_setup_score_rationale"
+    )
     ensure_migration_table(db_path)
     with get_connection(db_path) as con:
         table_exists = con.execute(
@@ -390,6 +393,13 @@ def ensure_decision_snapshots_table(db_path: Path | str = DB_PATH) -> None:
             for row in con.execute("PRAGMA table_info(decision_snapshots)").fetchall()
         }
         for statement in entry_migration.statements:
+            alter = statement.strip().split()
+            if len(alter) >= 6 and alter[2] == "decision_snapshots":
+                column = alter[5]
+                if column not in existing_cols:
+                    con.execute(statement)
+                    existing_cols.add(column)
+        for statement in setup_score_migration.statements:
             alter = statement.strip().split()
             if len(alter) >= 6 and alter[2] == "decision_snapshots":
                 column = alter[5]

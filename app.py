@@ -132,6 +132,13 @@ ONE_BAR_CONFIRMATION_EXTENSION_THRESHOLD_PCT = float(
 ONE_BAR_CONFIRMATION_TIMEOUT_SECONDS = int(
     os.getenv("ONE_BAR_CONFIRMATION_TIMEOUT_SECONDS", "75")
 )
+
+# Minimum market_value (USD) for a position to count toward the macro position cap.
+# Positions below this floor are residual/micro lots and should not consume a slot.
+MACRO_POSITION_COUNT_FLOOR = float(
+    os.getenv("MACRO_POSITION_COUNT_FLOOR", "500.0")
+)
+
 if PREDICTION_GATE_MODE not in ("off", "warn", "soft", "hard"):
     logger.warning(
         f"Invalid PREDICTION_GATE_MODE={PREDICTION_GATE_MODE!r}; defaulting to warn"
@@ -4281,7 +4288,15 @@ def process_signal(data):
 
         max_new_positions = macro_risk.get("max_new_positions", 8)
         open_count = account_state.get("open_position_count", 0)
-        if open_count >= max_new_positions:
+        _open_positions_list = account_state.get("open_positions") or []
+        if _open_positions_list:
+            effective_count = sum(
+                1 for p in _open_positions_list
+                if float(p.get("market_value") or 0) >= MACRO_POSITION_COUNT_FLOOR
+            )
+        else:
+            effective_count = open_count
+        if effective_count >= max_new_positions:
             # Enrich observe-only macro-position-limit logging with the latest
             # session momentum snapshot. The main session_momentum block runs
             # later in the pipeline, but macro_position_limit rejects before that,
@@ -4318,7 +4333,7 @@ def process_signal(data):
             if weakest:
                 replacement_hint = "observe_only"
                 reason = (
-                    f"open_position_count={open_count} >= macro max_new_positions={max_new_positions}; "
+                    f"open_position_count={open_count} effective={effective_count} >= macro max_new_positions={max_new_positions}; "
                     f"candidate={symbol} session={candidate_session_label}/{candidate_session_score} "
                     f"return={candidate_return}% vwap_dist={candidate_vwap}%; "
                     f"weakest_holding={weakest.get('symbol')} "
@@ -4327,7 +4342,7 @@ def process_signal(data):
                 )
             else:
                 reason = (
-                    f"open_position_count={open_count} >= macro max_new_positions={max_new_positions}; "
+                    f"open_position_count={open_count} effective={effective_count} >= macro max_new_positions={max_new_positions}; "
                     f"candidate={symbol} session={candidate_session_label}/{candidate_session_score} "
                     f"return={candidate_return}% vwap_dist={candidate_vwap}%; "
                     f"weakest_holding=unknown"
@@ -5816,6 +5831,7 @@ def status():
     result["intra_session_tape_degradation_enabled"] = INTRA_SESSION_TAPE_DEGRADATION_ENABLED
     result["one_bar_confirmation_hold_enabled"] = ONE_BAR_CONFIRMATION_HOLD_ENABLED
     result["prediction_soft_avoid_min_sample_size"] = PREDICTION_SOFT_AVOID_MIN_SAMPLE_SIZE
+    result["macro_position_count_floor"] = MACRO_POSITION_COUNT_FLOOR
     result["risk_policy_mode"] = RISK_POLICY_MODE
     result["portfolio_rotation"] = {
         "mode": os.getenv("PORTFOLIO_REPLACEMENT_MODE", "observe_only").strip().lower(),

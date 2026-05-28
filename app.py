@@ -5813,6 +5813,9 @@ def status():
     result["decision_policy"] = public_decision_policy_config()
     result["strategy_engine_mode"] = STRATEGY_ENGINE_MODE
     result["execution_policy_mode"] = os.getenv("EXECUTION_POLICY_MODE", "compare").strip().lower()
+    result["intra_session_tape_degradation_enabled"] = INTRA_SESSION_TAPE_DEGRADATION_ENABLED
+    result["one_bar_confirmation_hold_enabled"] = ONE_BAR_CONFIRMATION_HOLD_ENABLED
+    result["prediction_soft_avoid_min_sample_size"] = PREDICTION_SOFT_AVOID_MIN_SAMPLE_SIZE
     result["risk_policy_mode"] = RISK_POLICY_MODE
     result["portfolio_rotation"] = {
         "mode": os.getenv("PORTFOLIO_REPLACEMENT_MODE", "observe_only").strip().lower(),

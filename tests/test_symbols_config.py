@@ -41,6 +41,7 @@ EXPECTED_INTERNAL_ONLY = {
     "MDB",
     "OKTA",
     "BURL",
+    "ASML",
 }
 
 

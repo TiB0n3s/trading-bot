@@ -756,7 +756,7 @@ def _render_affordability_section(strong):
             "  Note: symbols with primary_blocker=affordability were rejected before Claude."
         )
         print(
-            "  The pre-Claude affordability gate uses a conservative estimate (1.5% * macro_mult)."
+            "  The pre-Claude affordability gate now checks whether buying_power can buy at least 1 share at the signal price."
         )
         print(
             "  High-priced symbols (e.g. ASML, AMD, COST) may fail at reduced macro multipliers."

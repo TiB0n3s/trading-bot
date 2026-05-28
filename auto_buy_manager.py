@@ -638,16 +638,40 @@ def evaluate_auto_buy_candidate(
             reasons.append(f"mom_accel({mom_acc:.3f}):+3")
 
     hard_block_reasons = []
+
+    # A symbol can occasionally buck its own fading/downtrend session label when
+    # the full-session return and relative-strength snapshot are strongly positive.
+    # In that case, keep the score penalties already applied above, but avoid an
+    # unconditional hard block so the candidate can be ranked normally.
+    bucking_negative_tape = (
+        label in ("downtrend", "fading")
+        and session_return >= AUTO_BUY_BUCKING_TAPE_MIN_SESSION_RETURN_PCT
+        and relative_strength >= AUTO_BUY_BUCKING_TAPE_MIN_RELATIVE_STRENGTH
+    )
+    if bucking_negative_tape:
+        reasons.append(
+            f"bucking_{label}_tape:"
+            f"session_return={session_return:.3f}% "
+            f"relative_strength={relative_strength:.3f}"
+        )
+
     if bias == "avoid":
         hard_block_reasons.append(f"bias_avoid:{avoid_type or 'unspecified'}")
     if setup_rec == "avoid":
         hard_block_reasons.append("setup_avoid")
     if label in ("downtrend", "fading"):
-        hard_block_reasons.append(f"negative_session:{label}")
+        if not bucking_negative_tape:
+            hard_block_reasons.append(f"negative_session:{label}")
     if m15 < -0.20:
-        hard_block_reasons.append(f"15m_falling:{m15:.3f}")
+        if not bucking_negative_tape:
+            hard_block_reasons.append(f"15m_falling:{m15:.3f}")
+        else:
+            reasons.append(f"15m_falling_soft:{m15:.3f}")
     if m30 < -0.35:
-        hard_block_reasons.append(f"30m_falling:{m30:.3f}")
+        if not bucking_negative_tape:
+            hard_block_reasons.append(f"30m_falling:{m30:.3f}")
+        else:
+            reasons.append(f"30m_falling_soft:{m30:.3f}")
     hard_block_reason = "; ".join(hard_block_reasons) if hard_block_reasons else None
 
     if hard_block_reasons:
@@ -911,6 +935,13 @@ def symbols_for_scope(scope: str) -> list[str]:
 
 
 AUTO_BUY_MAX_SIGNALS_PER_SYMBOL = int(os.getenv("AUTO_BUY_MAX_SIGNALS_PER_SYMBOL", "2"))
+
+AUTO_BUY_BUCKING_TAPE_MIN_SESSION_RETURN_PCT = float(
+    os.getenv("AUTO_BUY_BUCKING_TAPE_MIN_SESSION_RETURN_PCT", "2.0")
+)
+AUTO_BUY_BUCKING_TAPE_MIN_RELATIVE_STRENGTH = float(
+    os.getenv("AUTO_BUY_BUCKING_TAPE_MIN_RELATIVE_STRENGTH", "0.30")
+)
 
 
 def build_candidates(scope: str) -> list[dict[str, Any]]:

@@ -249,3 +249,35 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+def test_bucking_fading_tape_does_not_hard_block():
+    candidate = evaluate_auto_buy_candidate(
+        symbol="MDB",
+        session={
+            "trend_label": "fading",
+            "trend_score": -3,
+            "session_return_pct": 7.17,
+            "momentum_5m_pct": 0.10,
+            "momentum_15m_pct": -0.30,
+            "momentum_30m_pct": -0.50,
+            "distance_from_vwap_pct": 0.50,
+        },
+        feature={
+            "setup_recommendation": "watch",
+            "setup_label": "bucking_tape_test",
+            "setup_score": 55,
+            "relative_strength_5m": 0.45,
+            "ret_5m": 0.20,
+            "ret_15m": -0.10,
+            "distance_from_vwap": 0.50,
+            "momentum_acceleration_pct": 0.04,
+        },
+        context={"bias": "buy", "entry_quality": "good_on_pullbacks", "risk_level": "low"},
+        held=set(),
+        signal_source="internal_bar_only",
+    )
+
+    assert candidate["hard_block_reason"] is None
+    assert "bucking_fading_tape" in candidate["reason"]
+    assert "15m_falling_soft" in candidate["reason"]
+    assert "30m_falling_soft" in candidate["reason"]

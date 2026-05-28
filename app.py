@@ -4915,13 +4915,13 @@ def process_signal(data):
         # After midday, require stronger setup quality when live tape is fading/downtrend.
         if INTRA_SESSION_TAPE_DEGRADATION_ENABLED:
             try:
-                now_et = datetime.now(timezone.utc).astimezone(ET)
+                _tape_now_et = datetime.now(timezone.utc).astimezone(ET)
                 session_label = (account_state.get("session_momentum") or {}).get("trend_label")
                 setup_score_raw = setup_obs.get("setup_score")
                 setup_score = float(setup_score_raw) if setup_score_raw is not None else None
 
                 if (
-                    now_et.hour >= INTRA_SESSION_TAPE_DEGRADATION_START_HOUR_ET
+                    _tape_now_et.hour >= INTRA_SESSION_TAPE_DEGRADATION_START_HOUR_ET
                     and session_label in ("fading", "downtrend")
                     and (
                         setup_score is None

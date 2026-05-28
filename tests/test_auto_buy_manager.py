@@ -229,26 +229,6 @@ def test_log_auto_buy_order_writes_canonical_trade_row():
         assert_equal(row[7], "strong_buy_candidate", "recommendation")
 
 
-def main():
-    tests = [
-        test_strong_internal_candidate_scores_as_buy_candidate,
-        test_held_symbol_is_skipped,
-        test_negative_session_blocks_candidate,
-        test_early_session_buffer_skips_collection,
-        test_live_buy_requires_market_open_and_env_flag,
-        test_log_auto_buy_order_writes_canonical_trade_row,
-    ]
-
-    for test in tests:
-        test()
-        print(f"[OK] {test.__name__}")
-
-    print()
-    print(f"All {len(tests)} auto-buy manager tests passed.")
-
-
-if __name__ == "__main__":
-    main()
 
 def test_bucking_fading_tape_does_not_hard_block():
     candidate = evaluate_auto_buy_candidate(
@@ -281,3 +261,26 @@ def test_bucking_fading_tape_does_not_hard_block():
     assert "bucking_fading_tape" in candidate["reason"]
     assert "15m_falling_soft" in candidate["reason"]
     assert "30m_falling_soft" in candidate["reason"]
+
+
+def main():
+    tests = [
+        test_strong_internal_candidate_scores_as_buy_candidate,
+        test_held_symbol_is_skipped,
+        test_negative_session_blocks_candidate,
+        test_early_session_buffer_skips_collection,
+        test_live_buy_requires_market_open_and_env_flag,
+        test_bucking_fading_tape_does_not_hard_block,
+        test_log_auto_buy_order_writes_canonical_trade_row,
+    ]
+
+    for test in tests:
+        test()
+        print(f"[OK] {test.__name__}")
+
+    print()
+    print(f"All {len(tests)} auto-buy manager tests passed.")
+
+
+if __name__ == "__main__":
+    main()

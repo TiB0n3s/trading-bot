@@ -18,6 +18,7 @@ import argparse
 import json
 import logging
 import os
+import time
 import sys
 from collections import Counter
 from datetime import date, datetime, timedelta, timezone
@@ -36,6 +37,29 @@ from alerts import send_alert
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 OUTPUT_FILE = SCRIPT_DIR / "market_context.json"
+
+PRE_MARKET_ALPACA_SYMBOL_SLEEP_SECONDS = float(
+    os.getenv("PRE_MARKET_ALPACA_SYMBOL_SLEEP_SECONDS", "0.35")
+)
+PRE_MARKET_ALPACA_MAX_SYMBOLS = int(
+    os.getenv("PRE_MARKET_ALPACA_MAX_SYMBOLS", "0")
+)
+
+PRE_MARKET_ALPACA_FETCH_DAILY_BARS = os.getenv(
+    "PRE_MARKET_ALPACA_FETCH_DAILY_BARS", "true"
+).strip().lower() in ("1", "true", "yes", "on")
+PRE_MARKET_ALPACA_FETCH_MINUTE_BARS = os.getenv(
+    "PRE_MARKET_ALPACA_FETCH_MINUTE_BARS", "true"
+).strip().lower() in ("1", "true", "yes", "on")
+PRE_MARKET_ALPACA_SKIP_MINUTE_IF_DAILY_FAILS = os.getenv(
+    "PRE_MARKET_ALPACA_SKIP_MINUTE_IF_DAILY_FAILS", "true"
+).strip().lower() in ("1", "true", "yes", "on")
+PRE_MARKET_ALPACA_DAILY_LOOKBACK_DAYS = int(
+    os.getenv("PRE_MARKET_ALPACA_DAILY_LOOKBACK_DAYS", "7")
+)
+PRE_MARKET_ALPACA_MINUTE_LOOKBACK_HOURS = float(
+    os.getenv("PRE_MARKET_ALPACA_MINUTE_LOOKBACK_HOURS", "3")
+)
 ENV_FILE = Path("/etc/trading-bot.env")
 
 SYMBOLS = APPROVED_SYMBOLS_LIST
@@ -129,57 +153,68 @@ def get_recent_bars(symbol):
 
     now = datetime.now(timezone.utc)
 
-    try:
-        daily_start = (now - timedelta(days=10)).isoformat()
-        daily_bars = list(api.get_bars(symbol, "1Day", start=daily_start, feed="iex"))
-        if len(daily_bars) >= 2:
-            prev = daily_bars[-2]
-            last = daily_bars[-1]
-            out["daily_pct"] = pct_change(float(prev.c), float(last.c))
-            out["last_price"] = float(last.c)
-        elif len(daily_bars) == 1:
-            out["last_price"] = float(daily_bars[-1].c)
+    daily_failed = False
 
-        recent_daily = daily_bars[-5:]
-        daily_supports = sorted((float(b.l) for b in recent_daily), reverse=True)
-        daily_resistances = sorted((float(b.h) for b in recent_daily))
-        out["support_levels"] = unique_price_levels(daily_supports)
-        out["resistance_levels"] = unique_price_levels(daily_resistances)
-    except Exception as e:
-        out["error"] = f"daily bars failed: {e}"
+    if PRE_MARKET_ALPACA_FETCH_DAILY_BARS:
+        try:
+            daily_start = (now - timedelta(days=PRE_MARKET_ALPACA_DAILY_LOOKBACK_DAYS)).isoformat()
+            daily_bars = list(api.get_bars(symbol, "1Day", start=daily_start, feed="iex"))
+            if len(daily_bars) >= 2:
+                prev = daily_bars[-2]
+                last = daily_bars[-1]
+                out["daily_pct"] = pct_change(float(prev.c), float(last.c))
+                out["last_price"] = float(last.c)
+            elif len(daily_bars) == 1:
+                out["last_price"] = float(daily_bars[-1].c)
 
-    try:
-        minute_start = (now - timedelta(hours=8)).isoformat()
-        minute_bars = list(api.get_bars(symbol, "1Min", start=minute_start, feed="iex"))
-        minute_bars = minute_bars[-120:]
-        out["bar_count_1m"] = len(minute_bars)
+            recent_daily = daily_bars[-5:]
+            daily_supports = sorted((float(b.l) for b in recent_daily), reverse=True)
+            daily_resistances = sorted((float(b.h) for b in recent_daily))
+            out["support_levels"] = unique_price_levels(daily_supports)
+            out["resistance_levels"] = unique_price_levels(daily_resistances)
+        except Exception as e:
+            daily_failed = True
+            out["error"] = f"daily bars failed: {e}"
 
-        if len(minute_bars) >= 2:
-            first = float(minute_bars[0].c)
-            last = float(minute_bars[-1].c)
-            out["intraday_pct"] = pct_change(first, last)
-            out["last_price"] = last
+    should_fetch_minute = PRE_MARKET_ALPACA_FETCH_MINUTE_BARS and not (
+        daily_failed and PRE_MARKET_ALPACA_SKIP_MINUTE_IF_DAILY_FAILS
+    )
 
-        if len(minute_bars) >= 30:
-            first_30 = float(minute_bars[-30].c)
-            last_30 = float(minute_bars[-1].c)
-            out["momentum_30m_pct"] = pct_change(first_30, last_30)
+    if should_fetch_minute:
+        try:
+            minute_start = (now - timedelta(hours=PRE_MARKET_ALPACA_MINUTE_LOOKBACK_HOURS)).isoformat()
+            minute_bars = list(api.get_bars(symbol, "1Min", start=minute_start, feed="iex"))
+            minute_bars = minute_bars[-120:]
+            out["bar_count_1m"] = len(minute_bars)
 
-        if minute_bars:
-            minute_support = min(float(b.l) for b in minute_bars)
-            minute_resistance = max(float(b.h) for b in minute_bars)
-            out["support_levels"] = unique_price_levels(
-                [minute_support] + out["support_levels"]
-            )
-            out["resistance_levels"] = unique_price_levels(
-                [minute_resistance] + out["resistance_levels"]
-            )
+            if len(minute_bars) >= 2:
+                first = float(minute_bars[0].c)
+                last = float(minute_bars[-1].c)
+                out["intraday_pct"] = pct_change(first, last)
+                out["last_price"] = last
 
-    except Exception as e:
-        if out["error"]:
-            out["error"] += f"; minute bars failed: {e}"
-        else:
-            out["error"] = f"minute bars failed: {e}"
+            if len(minute_bars) >= 30:
+                first_30 = float(minute_bars[-30].c)
+                last_30 = float(minute_bars[-1].c)
+                out["momentum_30m_pct"] = pct_change(first_30, last_30)
+
+            if minute_bars:
+                minute_support = min(float(b.l) for b in minute_bars)
+                minute_resistance = max(float(b.h) for b in minute_bars)
+                out["support_levels"] = unique_price_levels(
+                    [minute_support] + out["support_levels"]
+                )
+                out["resistance_levels"] = unique_price_levels(
+                    [minute_resistance] + out["resistance_levels"]
+                )
+
+        except Exception as e:
+            if out["error"]:
+                out["error"] += f"; minute bars failed: {e}"
+            else:
+                out["error"] = f"minute bars failed: {e}"
+    elif PRE_MARKET_ALPACA_FETCH_MINUTE_BARS and daily_failed:
+        out["minute_fetch_skipped"] = "daily_failed"
 
     if out["last_price"]:
         last_price = float(out["last_price"])
@@ -594,13 +629,17 @@ def main():
     today = args.date or date.today().isoformat()
 
     symbols = SYMBOLS[: args.max_symbols] if args.max_symbols else SYMBOLS
+    if PRE_MARKET_ALPACA_MAX_SYMBOLS > 0:
+        symbols = symbols[:PRE_MARKET_ALPACA_MAX_SYMBOLS]
     event_enrichment = load_event_enrichment(today)
 
     logger.info(f"Running no-Claude data research for {len(symbols)} symbols")
     logger.info(f"Loaded event enrichment for {len(event_enrichment)} symbols")
 
     market_data = {}
-    for sym in symbols:
+    for i, sym in enumerate(symbols):
+        if i > 0 and PRE_MARKET_ALPACA_SYMBOL_SLEEP_SECONDS > 0:
+            time.sleep(PRE_MARKET_ALPACA_SYMBOL_SLEEP_SECONDS)
         market_data[sym] = get_recent_bars(sym)
 
     macro_sentiment, macro_regime, risk_multiplier, max_new_positions, block_new_buys, macro_summary = classify_macro(market_data)

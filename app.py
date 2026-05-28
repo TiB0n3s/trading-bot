@@ -72,6 +72,8 @@ from symbols_config import (
     CORRELATION_CLUSTERS,
     CLUSTER_EXPOSURE_LIMITS,
     PRICE_RANGES,
+    SYMBOL_MAX_SPREAD_PCT,
+    IEX_THIN_SYMBOLS,
 )
 from market_time import now_et, is_market_hours, market_session, expected_market_context_date
 from db import init_db_performance_indexes
@@ -134,6 +136,21 @@ ONE_BAR_CONFIRMATION_EXTENSION_THRESHOLD_PCT = float(
 ONE_BAR_CONFIRMATION_TIMEOUT_SECONDS = int(
     os.getenv("ONE_BAR_CONFIRMATION_TIMEOUT_SECONDS", "75")
 )
+
+# Tape exception for the neutral-bias confidence gate.
+# When true, accelerating momentum + elevated/surge volume + clean_momentum tape
+# overrides a stale neutral pre-market classification and allows medium confidence through.
+TAPE_EXCEPTION_ENABLED = os.getenv(
+    "TAPE_EXCEPTION_ENABLED", "true"
+).strip().lower() in ("1", "true", "yes", "on")
+
+# Open-momentum fast lane for the trend confirmation gate.
+# When true, surge volume + accelerating momentum within the first 60 minutes
+# bypasses the consecutive-count requirement on buy-bias symbols.
+# gap_up_chase_risk exclusion prevents firing on extended gap-up chases.
+OPEN_MOMENTUM_FAST_LANE_ENABLED = os.getenv(
+    "OPEN_MOMENTUM_FAST_LANE_ENABLED", "true"
+).strip().lower() in ("1", "true", "yes", "on")
 
 # Minimum market_value (USD) for a position to count toward the macro position cap.
 # Positions below this floor are residual/micro lots and should not consume a slot.
@@ -1867,6 +1884,7 @@ def _build_decision_context(symbol, action, account_state=None):
             ctx["momentum_state"] = momentum.get("momentum_state")
             ctx["volume_surge_ratio"] = momentum.get("volume_surge_ratio")
             ctx["volume_state"] = momentum.get("volume_state")
+            ctx["volume_note"] = momentum.get("volume_note")
 
             rolling = account_state.get("rolling_momentum") or {}
             ctx["extension_from_recent_base_pct"] = rolling.get("extension_from_recent_base_pct")
@@ -2543,7 +2561,7 @@ def _one_bar_confirmation_hold(symbol: str, signal_price: float, account_state: 
 
     while datetime.now(timezone.utc).timestamp() < deadline:
         try:
-            bars = list(api.get_bars(symbol, "1Min", limit=2, feed="iex"))
+            bars = list(api.get_bars(symbol, "1Min", limit=2, feed="sip"))
         except TypeError:
             bars = list(api.get_bars(symbol, "1Min", limit=2))
         except Exception as e:
@@ -2715,7 +2733,9 @@ def _cluster_exposure(symbol, balance):
 def get_momentum(symbol, price, premarket_bias=None):
     try:
         start = (datetime.now(timezone.utc) - timedelta(minutes=20)).isoformat()
-        bars = list(api.get_bars(symbol, '1Min', start=start, feed='iex'))
+        # SIP = consolidated tape (NYSE/NASDAQ/all venues). IEX captures only a
+        # fraction of volume for high-volume names, making surge detection unreliable.
+        bars = list(api.get_bars(symbol, '1Min', start=start, feed='sip'))
 
         if len(bars) < 2:
             return None
@@ -2828,6 +2848,7 @@ def get_momentum(symbol, price, premarket_bias=None):
             if volume_surge_ratio is not None
             else None,
             "volume_state": volume_state,
+            "volume_note": "iex_thin" if symbol in IEX_THIN_SYMBOLS else None,
             "price_vs_bars": round(price_vs_bars, 3),
             "bar_count": len(bars),
             "last_close": round(last_close, 4),
@@ -3434,7 +3455,7 @@ def _pre_order_safety_check(symbol, action, signal_price, account_state):
     try:
         spread_check = _validate_spread_with_retry(
             symbol,
-            max_spread_pct=MAX_BID_ASK_SPREAD_PCT,
+            max_spread_pct=SYMBOL_MAX_SPREAD_PCT.get(symbol, MAX_BID_ASK_SPREAD_PCT),
             suspect_spread_pct=2.00,
             retry_count=3,
             retry_delay_sec=0.35,
@@ -4467,6 +4488,34 @@ def process_signal(data):
         )
         account_state["fast_lane_buy_flip"] = fast_lane_buy_flip
 
+        # Open-momentum fast lane: surge volume + accelerating momentum in the
+        # first 60 minutes of session bypasses the consecutive-count gate on
+        # buy-bias symbols. Pre-market research is stale by open; a confirmed
+        # momentum move with institutional volume is a stronger real-time signal.
+        _om_momentum = account_state.get("momentum") or {}
+        _om_bias = (_market_bias.get(symbol) or {}).get("bias")
+        _om_special_labels = (account_state.get("rolling_momentum") or {}).get("special_labels") or []
+        session_elapsed_minutes = (
+            current_et.hour * 60 + current_et.minute - MARKET_OPEN_MINUTES
+        )
+        _om_volume_state = _om_momentum.get("volume_state")
+        # IEX captures only a fraction of consolidated volume for high-volume names;
+        # requiring "surge" on IEX data would structurally exclude those symbols.
+        # For IEX-thin symbols, any non-thin volume reading is sufficient — the
+        # accelerating momentum and buy-bias gates remain the primary filters.
+        _om_volume_ok = (
+            symbol in IEX_THIN_SYMBOLS
+            and _om_volume_state in ("normal", "elevated", "surge")
+        ) or _om_volume_state == "surge"
+        open_momentum_fast_lane = OPEN_MOMENTUM_FAST_LANE_ENABLED and (
+            0 <= session_elapsed_minutes <= 60
+            and _om_momentum.get("momentum_state") == "accelerating"
+            and _om_volume_ok
+            and _om_bias == "buy"
+            and "gap_up_chase_risk" not in _om_special_labels
+        )
+        account_state["open_momentum_fast_lane"] = open_momentum_fast_lane
+
         logger.info(
             f"Trend confirmation BUY for {symbol}: "
             f"required={required_buy_confirmations} "
@@ -4476,10 +4525,19 @@ def process_signal(data):
             f"last_signal={last_signal} "
             f"flip_event={trend.get('flip_event')} "
             f"fast_lane_buy_flip={fast_lane_buy_flip} "
+            f"open_momentum_fast_lane={open_momentum_fast_lane} "
+            f"(elapsed={session_elapsed_minutes}min momentum={_om_momentum.get('momentum_state')} "
+            f"vol={_om_volume_state} vol_ok={_om_volume_ok} iex_thin={symbol in IEX_THIN_SYMBOLS} bias={_om_bias}) "
             f"adaptive_reason={adaptive_confirmation.get('reason')}"
         )
+        if open_momentum_fast_lane and consecutive_count < required_buy_confirmations:
+            logger.info(
+                f"Open-momentum fast lane granted for {symbol}: "
+                f"elapsed={session_elapsed_minutes}min count={consecutive_count} "
+                f"momentum={_om_momentum.get('momentum_state')} vol={_om_volume_state} iex_thin={symbol in IEX_THIN_SYMBOLS}"
+            )
 
-        if not fast_lane_buy_flip and consecutive_count < required_buy_confirmations:
+        if not (fast_lane_buy_flip or open_momentum_fast_lane) and consecutive_count < required_buy_confirmations:
             reason = (
                 f"consecutive_buy_count={consecutive_count} "
                 f"< required={required_buy_confirmations} "
@@ -5352,27 +5410,35 @@ def process_signal(data):
 
     # Neutral-bias confidence gate: neutral market-bias signals have historically poor
     # expectancy (-$1.41/trade vs +$1.63 for buy-bias). Require high confidence to proceed.
-    # Exception: clean_momentum tape with elevated/surge volume has demonstrated positive
-    # short-horizon edge even in neutral-bias symbols; allow medium confidence through.
+    # Exception (TAPE_EXCEPTION_ENABLED): accelerating momentum + elevated/surge volume +
+    # clean_momentum tape overrides a stale neutral pre-market classification. Pre-market
+    # research runs hours before the open; by mid-session a confirmed ETF momentum move
+    # with clean tape is a stronger real-time signal than the stale neutral classification.
     if action == "buy" and decision.get("confidence") != "high":
         bias_entry = _market_bias.get(symbol) or {}
         if bias_entry.get("bias") == "neutral":
+            momentum_ctx = (account_state or {}).get("momentum") or {}
             tape = (account_state or {}).get("tape") or {}
             tape_label = tape.get("label")
-            vol_state = ((account_state or {}).get("momentum") or {}).get("volume_state")
-            clean_tape_exception = (
-                tape_label == "clean_momentum"
+            vol_state = momentum_ctx.get("volume_state")
+            momentum_state = momentum_ctx.get("momentum_state")
+            tape_exception = TAPE_EXCEPTION_ENABLED and (
+                momentum_state == "accelerating"
                 and vol_state in ("elevated", "surge")
+                and tape_label == "clean_momentum"
             )
-            if clean_tape_exception:
+            if tape_exception:
                 logger.info(
                     f"Neutral-bias gate exception granted for {symbol}: "
-                    f"tape={tape_label} vol={vol_state} confidence={decision.get('confidence')}"
+                    f"momentum_state={momentum_state} vol={vol_state} tape={tape_label} "
+                    f"confidence={decision.get('confidence')}"
                 )
             else:
                 conf = decision.get("confidence")
                 logger.warning(
-                    f"Neutral-bias confidence gate rejected {symbol} BUY: confidence={conf}"
+                    f"Neutral-bias confidence gate rejected {symbol} BUY: confidence={conf} "
+                    f"(momentum_state={momentum_state} vol={vol_state} tape={tape_label} "
+                    f"tape_exception_enabled={TAPE_EXCEPTION_ENABLED})"
                 )
                 log_rejection(
                     symbol, action, "confidence_gate",
@@ -5834,6 +5900,8 @@ def status():
     result["one_bar_confirmation_hold_enabled"] = ONE_BAR_CONFIRMATION_HOLD_ENABLED
     result["prediction_soft_avoid_min_sample_size"] = PREDICTION_SOFT_AVOID_MIN_SAMPLE_SIZE
     result["macro_position_count_floor"] = MACRO_POSITION_COUNT_FLOOR
+    result["tape_exception_enabled"] = TAPE_EXCEPTION_ENABLED
+    result["open_momentum_fast_lane_enabled"] = OPEN_MOMENTUM_FAST_LANE_ENABLED
     result["risk_policy_mode"] = RISK_POLICY_MODE
     result["portfolio_rotation"] = {
         "mode": os.getenv("PORTFOLIO_REPLACEMENT_MODE", "observe_only").strip().lower(),

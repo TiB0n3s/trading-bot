@@ -454,7 +454,7 @@ SUPPRESSED_LABELS = {"fading", "downtrend"}
 
 
 def strong_buy_signals_today(symbol: str) -> int:
-    """Count strong_buy_candidate decisions for this symbol today without a filled order."""
+    """Count strong_buy_candidate signals that were actually submitted today."""
     with get_connection(DB_PATH) as con:
         row = con.execute(
             """
@@ -463,7 +463,7 @@ def strong_buy_signals_today(symbol: str) -> int:
             WHERE symbol = ?
               AND substr(timestamp, 1, 10) = ?
               AND decision = 'strong_buy_candidate'
-              AND order_submitted = 0
+              AND order_submitted = 1
             """,
             (symbol.upper(), _today()),
         ).fetchone()
@@ -639,21 +639,39 @@ def evaluate_auto_buy_candidate(
 
     hard_block_reasons = []
 
-    # A symbol can occasionally buck its own fading/downtrend session label when
-    # the full-session return and relative-strength snapshot are strongly positive.
-    # In that case, keep the score penalties already applied above, but avoid an
-    # unconditional hard block so the candidate can be ranked normally.
-    bucking_negative_tape = (
-        label in ("downtrend", "fading")
-        and session_return >= AUTO_BUY_BUCKING_TAPE_MIN_SESSION_RETURN_PCT
+    volume_ratio = _to_float(feature.get("volume_ratio_5m"), 0) or 0
+
+    # A symbol can occasionally buck its own fading/downtrend session label via two paths:
+    # 1. Full-session: strong session return + relative strength confirm sustained divergence.
+    # 2. Acceleration: real-time momentum surge with volume confirms an intraday impulse
+    #    early in the move (lower session_return bar, but acceleration + volume required).
+    _bucking_full_session = (
+        session_return >= AUTO_BUY_BUCKING_TAPE_MIN_SESSION_RETURN_PCT
         and relative_strength >= AUTO_BUY_BUCKING_TAPE_MIN_RELATIVE_STRENGTH
     )
+    _bucking_acceleration = (
+        mom_acc is not None
+        and mom_acc >= AUTO_BUY_BUCKING_TAPE_MIN_ACCEL_PCT
+        and volume_ratio >= AUTO_BUY_BUCKING_TAPE_MIN_VOLUME_RATIO
+        and session_return >= AUTO_BUY_BUCKING_TAPE_MIN_EARLY_SESSION_RETURN_PCT
+    )
+    bucking_negative_tape = label in ("downtrend", "fading") and (
+        _bucking_full_session or _bucking_acceleration
+    )
     if bucking_negative_tape:
-        reasons.append(
-            f"bucking_{label}_tape:"
-            f"session_return={session_return:.3f}% "
-            f"relative_strength={relative_strength:.3f}"
-        )
+        if _bucking_acceleration and not _bucking_full_session:
+            reasons.append(
+                f"bucking_{label}_tape(accel):"
+                f"mom_acc={mom_acc:.3f} "
+                f"volume_ratio={volume_ratio:.2f} "
+                f"session_return={session_return:.3f}%"
+            )
+        else:
+            reasons.append(
+                f"bucking_{label}_tape:"
+                f"session_return={session_return:.3f}% "
+                f"relative_strength={relative_strength:.3f}"
+            )
 
     if bias == "avoid":
         hard_block_reasons.append(f"bias_avoid:{avoid_type or 'unspecified'}")
@@ -941,6 +959,15 @@ AUTO_BUY_BUCKING_TAPE_MIN_SESSION_RETURN_PCT = float(
 )
 AUTO_BUY_BUCKING_TAPE_MIN_RELATIVE_STRENGTH = float(
     os.getenv("AUTO_BUY_BUCKING_TAPE_MIN_RELATIVE_STRENGTH", "0.30")
+)
+AUTO_BUY_BUCKING_TAPE_MIN_ACCEL_PCT = float(
+    os.getenv("AUTO_BUY_BUCKING_TAPE_MIN_ACCEL_PCT", "0.04")
+)
+AUTO_BUY_BUCKING_TAPE_MIN_VOLUME_RATIO = float(
+    os.getenv("AUTO_BUY_BUCKING_TAPE_MIN_VOLUME_RATIO", "1.8")
+)
+AUTO_BUY_BUCKING_TAPE_MIN_EARLY_SESSION_RETURN_PCT = float(
+    os.getenv("AUTO_BUY_BUCKING_TAPE_MIN_EARLY_SESSION_RETURN_PCT", "0.75")
 )
 
 

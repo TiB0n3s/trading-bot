@@ -183,7 +183,7 @@ def get_bar_series(
             start=start.isoformat(),
             end=end.isoformat(),
             adjustment="raw",
-            feed="iex",
+            feed="sip",
         ).df
 
         if bars is None or bars.empty:

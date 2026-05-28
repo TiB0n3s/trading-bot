@@ -3696,6 +3696,92 @@ def _count_second_look_blocks_today(symbol):
         logger.warning(f"Failed to count second-look blocks for {symbol}: {e}")
         return 0
 
+
+def _allow_medium_confidence_momentum_override(
+    symbol: str,
+    action: str,
+    decision: dict,
+    account_state: dict,
+    trend: dict,
+    setup_obs: dict,
+) -> tuple[bool, str]:
+    """Allow medium Claude confidence only when deterministic evidence is exceptional.
+
+    This does not override parse errors, low confidence, setup-policy blocks/errors,
+    second-look, cooldown, churn, affordability, or broker safety.
+    """
+    try:
+        if action != "buy":
+            return False, "not_buy"
+
+        if (decision or {}).get("confidence") != "medium":
+            return False, "not_medium_confidence"
+
+        trend = trend or {}
+        account_state = account_state or {}
+        setup_obs = setup_obs or {}
+
+        trend_direction = trend.get("direction") or account_state.get("trend_direction")
+        trend_strength = trend.get("strength") or account_state.get("trend_strength")
+        momentum_direction = (
+            account_state.get("momentum_direction")
+            or (account_state.get("momentum") or {}).get("direction")
+        )
+        session = account_state.get("session_momentum") or {}
+        session_label = session.get("trend_label") or account_state.get("session_trend_label")
+
+        prediction = account_state.get("prediction_gate") or {}
+        prediction_decision = (
+            prediction.get("prediction_decision")
+            or prediction.get("decision")
+            or account_state.get("prediction_decision")
+        )
+        prediction_score_raw = (
+            prediction.get("prediction_score")
+            or prediction.get("score")
+            or account_state.get("prediction_score")
+        )
+
+        setup_action = (
+            setup_obs.get("policy_action")
+            or setup_obs.get("setup_policy_action")
+            or account_state.get("setup_policy_action")
+        )
+
+        if setup_action in ("block", "error"):
+            return False, f"setup_action={setup_action}"
+
+        try:
+            prediction_score = float(prediction_score_raw)
+        except Exception:
+            return False, "prediction_score_missing"
+
+        checks = {
+            "trend_direction": trend_direction == "bullish",
+            "trend_strength": trend_strength == "confirmed",
+            "momentum_direction": momentum_direction == "rising",
+            "session_label": session_label == "strong_uptrend",
+            "prediction_decision": prediction_decision == "pass",
+            "prediction_score": prediction_score >= 8,
+        }
+
+        if not all(checks.values()):
+            failed = ",".join(k for k, ok in checks.items() if not ok)
+            return False, f"failed={failed}"
+
+        reason = (
+            "medium confidence allowed by deterministic momentum override: "
+            f"trend={trend_direction}/{trend_strength}; "
+            f"momentum={momentum_direction}; "
+            f"session={session_label}; "
+            f"prediction={prediction_decision}/{prediction_score:g}; "
+            f"setup_action={setup_action}"
+        )
+        return True, reason
+
+    except Exception as e:
+        return False, f"override_error={e}"
+
 def process_signal(data):
     dedupe_key = data.get("_dedupe_key")
     ...
@@ -5435,18 +5521,37 @@ def process_signal(data):
                 )
             else:
                 conf = decision.get("confidence")
-                logger.warning(
-                    f"Neutral-bias confidence gate rejected {symbol} BUY: confidence={conf} "
-                    f"(momentum_state={momentum_state} vol={vol_state} tape={tape_label} "
-                    f"tape_exception_enabled={TAPE_EXCEPTION_ENABLED})"
+                medium_ok, medium_reason = _allow_medium_confidence_momentum_override(
+                    symbol=symbol,
+                    action=action,
+                    decision=decision,
+                    account_state=account_state,
+                    trend=trend,
+                    setup_obs=setup_obs,
                 )
-                log_rejection(
-                    symbol, action, "confidence_gate",
-                    f"neutral_bias requires confidence=high; got {conf} "
-                    f"(reason: {decision.get('reason', '')})",
-                    price=price, account_state=account_state,
-                )
-                return
+                if medium_ok:
+                    logger.warning(
+                        f"Neutral-bias confidence gate override granted for {symbol}: "
+                        f"confidence={conf}; {medium_reason}"
+                    )
+                    account_state["confidence_gate_medium_override"] = {
+                        "gate": "neutral_bias",
+                        "reason": medium_reason,
+                    }
+                else:
+                    logger.warning(
+                        f"Neutral-bias confidence gate rejected {symbol} BUY: confidence={conf} "
+                        f"(momentum_state={momentum_state} vol={vol_state} tape={tape_label} "
+                        f"tape_exception_enabled={TAPE_EXCEPTION_ENABLED}; "
+                        f"override_reject={medium_reason})"
+                    )
+                    log_rejection(
+                        symbol, action, "confidence_gate",
+                        f"neutral_bias requires confidence=high; got {conf} "
+                        f"(reason: {decision.get('reason', '')})",
+                        price=price, account_state=account_state,
+                    )
+                    return
 
     # Conditional entry quality gate: conditional setups have 17% win rate and -$1.41
     # expectancy. Require high confidence before allowing an entry.
@@ -5454,16 +5559,35 @@ def process_signal(data):
         bias_entry = _market_bias.get(symbol) or {}
         if bias_entry.get("entry_quality") == "conditional":
             conf = decision.get("confidence")
-            logger.warning(
-                f"Conditional entry quality gate rejected {symbol} BUY: confidence={conf}"
+            medium_ok, medium_reason = _allow_medium_confidence_momentum_override(
+                symbol=symbol,
+                action=action,
+                decision=decision,
+                account_state=account_state,
+                trend=trend,
+                setup_obs=setup_obs,
             )
-            log_rejection(
-                symbol, action, "confidence_gate",
-                f"conditional_entry_quality requires confidence=high; got {conf} "
-                f"(reason: {decision.get('reason', '')})",
-                price=price, account_state=account_state,
-            )
-            return
+            if medium_ok:
+                logger.warning(
+                    f"Conditional entry quality gate override granted for {symbol}: "
+                    f"confidence={conf}; {medium_reason}"
+                )
+                account_state["confidence_gate_medium_override"] = {
+                    "gate": "conditional_entry_quality",
+                    "reason": medium_reason,
+                }
+            else:
+                logger.warning(
+                    f"Conditional entry quality gate rejected {symbol} BUY: "
+                    f"confidence={conf}; override_reject={medium_reason}"
+                )
+                log_rejection(
+                    symbol, action, "confidence_gate",
+                    f"conditional_entry_quality requires confidence=high; got {conf} "
+                    f"(reason: {decision.get('reason', '')})",
+                    price=price, account_state=account_state,
+                )
+                return
 
     if decision.get("approved"):
         try:

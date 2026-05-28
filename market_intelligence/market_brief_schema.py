@@ -109,6 +109,17 @@ def normalize_symbol_entry(symbol: str, entry: dict[str, Any] | None) -> dict[st
         "support_levels": entry.get("support_levels") if isinstance(entry.get("support_levels"), list) else [],
         "resistance_levels": entry.get("resistance_levels") if isinstance(entry.get("resistance_levels"), list) else [],
         "notes": normalize_string(entry.get("notes")),
+
+        # Event-enrichment fields; observe-only metadata for reporting/scoring.
+        "event_catalyst_score_raw": entry.get("event_catalyst_score_raw"),
+        "consumer_appetite_score": entry.get("consumer_appetite_score"),
+        "revenue_impact_score": entry.get("revenue_impact_score"),
+        "profit_potential_score": entry.get("profit_potential_score"),
+        "margin_risk_score": entry.get("margin_risk_score"),
+        "supply_chain_risk_score": entry.get("supply_chain_risk_score"),
+        "materials_risk_score": entry.get("materials_risk_score"),
+        "competitive_risk_score": entry.get("competitive_risk_score"),
+        "execution_risk_score": entry.get("execution_risk_score"),
     }
 
 
@@ -140,6 +151,11 @@ def normalize_market_context(raw: dict[str, Any], approved_symbols: list[str] | 
         "index_state": raw.get("index_state") if isinstance(raw.get("index_state"), dict) else {},
         "sector_state": raw.get("sector_state") if isinstance(raw.get("sector_state"), dict) else {},
         "macro_events": raw.get("macro_events") if isinstance(raw.get("macro_events"), list) else [],
+
+        # Context quality metadata.
+        "data_only": raw.get("data_only"),
+        "source_quality": raw.get("source_quality"),
+        "event_enrichment_count": raw.get("event_enrichment_count"),
 
         "symbols": symbols,
         "source": raw.get("source"),

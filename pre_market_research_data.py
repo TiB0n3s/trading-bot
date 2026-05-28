@@ -462,6 +462,96 @@ def build_symbol_evidence(data, classification, macro_sentiment, macro_regime):
     }
 
 
+def load_event_enrichment(market_date: str) -> dict:
+    """Read event-aggregated daily_symbol_context rows for market_date.
+
+    This is read-only. It enriches market_context.json with already-computed
+    intelligence scores but does not create events or affect trading directly.
+    """
+    try:
+        from db import DB_PATH, get_connection
+        from market_intelligence.intelligence_store import init_intelligence_tables
+
+        init_intelligence_tables()
+        with get_connection(DB_PATH) as con:
+            rows = con.execute(
+                """
+                SELECT symbol,
+                       catalyst_score,
+                       consumer_appetite_score,
+                       revenue_impact_score,
+                       profit_potential_score,
+                       margin_risk_score,
+                       supply_chain_risk_score,
+                       materials_risk_score,
+                       competitive_risk_score,
+                       execution_risk_score
+                FROM daily_symbol_context
+                WHERE market_date = ?
+                """,
+                (market_date,),
+            ).fetchall()
+
+        out = {}
+        for r in rows:
+            out[r["symbol"]] = {
+                "catalyst_score": r["catalyst_score"],
+                "consumer_appetite_score": r["consumer_appetite_score"],
+                "revenue_impact_score": r["revenue_impact_score"],
+                "profit_potential_score": r["profit_potential_score"],
+                "margin_risk_score": r["margin_risk_score"],
+                "supply_chain_risk_score": r["supply_chain_risk_score"],
+                "materials_risk_score": r["materials_risk_score"],
+                "competitive_risk_score": r["competitive_risk_score"],
+                "execution_risk_score": r["execution_risk_score"],
+            }
+        return out
+    except Exception as e:
+        logger.warning(f"Event enrichment load failed for {market_date}: {e}")
+        return {}
+
+
+def apply_event_enrichment(symbol_entry: dict, enrichment: dict) -> None:
+    """Overlay event aggregate scores onto one market-context symbol entry."""
+    if not enrichment:
+        return
+
+    applied = False
+    for key, value in enrichment.items():
+        if value is None:
+            continue
+
+        if key == "catalyst_score":
+            try:
+                raw_score = float(value)
+                symbol_entry["event_catalyst_score_raw"] = round(raw_score, 2)
+                # market_context catalyst_score is normalized/clamped to 0-10.
+                symbol_entry["catalyst_score"] = round(max(0.0, min(10.0, raw_score / 10.0)), 2)
+            except Exception:
+                symbol_entry["event_catalyst_score_raw"] = value
+            applied = True
+            continue
+
+        symbol_entry[key] = value
+        applied = True
+
+    if not applied:
+        return
+
+    catalyst_score = enrichment.get("catalyst_score")
+    if catalyst_score is not None:
+        try:
+            catalyst_f = float(catalyst_score)
+            catalysts = symbol_entry.setdefault("key_catalysts", [])
+            note = f"Event-enriched catalyst score {catalyst_f:.2f} from daily_symbol_context."
+            if note not in catalysts:
+                catalysts.insert(0, note)
+            symbol_entry["notes"] = "event_enriched"
+        except Exception:
+            pass
+
+
+
 def should_write_live(build_output):
     if not build_output:
         return True
@@ -504,8 +594,10 @@ def main():
     today = args.date or date.today().isoformat()
 
     symbols = SYMBOLS[: args.max_symbols] if args.max_symbols else SYMBOLS
+    event_enrichment = load_event_enrichment(today)
 
     logger.info(f"Running no-Claude data research for {len(symbols)} symbols")
+    logger.info(f"Loaded event enrichment for {len(event_enrichment)} symbols")
 
     market_data = {}
     for sym in symbols:
@@ -525,7 +617,9 @@ def main():
     template["macro_summary"] = macro_summary
     template["index_state"] = build_index_state(market_data)
     template["sector_state"] = build_sector_state(market_data)
-    template["data_only"] = True
+    template["data_only"] = len(event_enrichment) == 0
+    template["source_quality"] = "event_enriched" if event_enrichment else "data_only"
+    template["event_enrichment_count"] = len(event_enrichment)
 
     symbols_out = template.get("symbols", {})
 
@@ -548,6 +642,7 @@ def main():
                 "last_price": safe_round(market_data[sym].get("last_price"), 4),
                 "bar_count_1m": market_data[sym].get("bar_count_1m", 0),
             }
+            apply_event_enrichment(symbols_out[sym], event_enrichment.get(sym) or {})
         else:
             symbols_out[sym].update({
                 "bias": "neutral",

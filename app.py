@@ -5,6 +5,7 @@ import logging
 import hashlib
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone, timedelta
+from zoneinfo import ZoneInfo
 import pytz
 import time
 from setup_policy import evaluate_setup_policy
@@ -102,6 +103,7 @@ logging.basicConfig(
         logging.StreamHandler()
     ]
 )
+ET = ZoneInfo("America/New_York")
 logger = logging.getLogger(__name__)
 
 app = Flask(__name__)

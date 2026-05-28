@@ -29,6 +29,7 @@ from db import DB_PATH
 from ml_platform.config import FEATURE_VERSION
 from ml_platform.governance import build_dataset_manifest
 from ml_platform.pit_context import get_archive_root, pit_coverage_for_range
+from symbols_config import SYMBOL_UNIVERSE_VERSION
 
 
 QUERY_VERSION = "ml_dataset_builder_v1"
@@ -456,6 +457,7 @@ def build_training_dataset(config: DatasetBuildConfig) -> DatasetBuildResult:
     manifest["stale_feature_snapshot_count"] = pit_contract.get(
         "stale_feature_snapshot_count", 0
     )
+    manifest["symbol_universe_version"] = SYMBOL_UNIVERSE_VERSION
 
     labeled_rows = sum(1 for r in rows if r.get("outcome_label") is not None)
     symbols = {r["symbol"] for r in rows if r.get("symbol")}

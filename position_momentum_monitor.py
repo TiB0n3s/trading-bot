@@ -21,8 +21,7 @@ from datetime import datetime, timedelta
 from typing import Any
 from pathlib import Path
 from db import get_connection
-from broker import place_order
-from alpaca_trade_api.rest import REST
+from broker import api as broker_api, place_order
 
 from runtime_config import get_alpaca_base_url
 from market_time import now_et, is_market_hours
@@ -59,12 +58,9 @@ POSITION_MOMENTUM_SELL_CANDIDATES_ONLY = _env_bool("POSITION_MOMENTUM_SELL_CANDI
 # decisions into sell_candidate decisions.
 POSITION_MOMENTUM_USE_SELL_PRESSURE = _env_bool("POSITION_MOMENTUM_USE_SELL_PRESSURE", False)
 
-def build_api() -> REST:
-    return REST(
-        key_id=os.environ.get("ALPACA_API_KEY", ""),
-        secret_key=os.environ.get("ALPACA_SECRET_KEY", ""),
-        base_url=get_alpaca_base_url(),
-    )
+def build_api():
+    """Return the shared broker Alpaca client so position checks use the same runtime path as order/account logic."""
+    return broker_api
 
 def _to_float(value: Any, default: float = 0.0) -> float:
     try:

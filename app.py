@@ -1481,15 +1481,15 @@ def _load_market_context():
         symbols = ctx.get("symbols") or {}
         for sym, entry in symbols.items():
             if isinstance(entry, dict) and entry.get("bias") in ("buy", "avoid", "neutral"):
-                _market_bias[sym] = {
-                    "bias": entry["bias"],
-                    "reason": entry.get("reason", ""),
-                    "confidence": entry.get("confidence", ""),
-                    "fundamental_score": entry.get("fundamental_score"),
-                    "risk_level": entry.get("risk_level"),
-                    "entry_quality": entry.get("entry_quality"),
-                    "avoid_type": entry.get("avoid_type"),
-                }
+                enriched_entry = dict(entry)
+                enriched_entry.setdefault("bias", entry["bias"])
+                enriched_entry.setdefault("reason", "")
+                enriched_entry.setdefault("confidence", "")
+                enriched_entry.setdefault("fundamental_score", None)
+                enriched_entry.setdefault("risk_level", None)
+                enriched_entry.setdefault("entry_quality", None)
+                enriched_entry.setdefault("avoid_type", None)
+                _market_bias[sym] = enriched_entry
         avoid_count = sum(1 for v in _market_bias.values() if v["bias"] == "avoid")
         buy_count = sum(1 for v in _market_bias.values() if v["bias"] == "buy")
         neutral_count = sum(1 for v in _market_bias.values() if v["bias"] == "neutral")

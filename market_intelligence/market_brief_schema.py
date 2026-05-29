@@ -34,6 +34,61 @@ VALID_AVOID_TYPE = {None, "soft", "hard"}
 VALID_MACRO_REGIME = {"risk_on", "normal", "caution", "mixed", "defensive", "risk_off", "capital_preservation"}
 
 
+
+LEARNING_ENRICHMENT_FIELDS = (
+    "prior_session_market_date",
+    "prior_session_session_return_pct",
+    "prior_session_mfe_pct",
+    "prior_session_max_favorable_excursion_pct",
+    "prior_session_participated",
+    "prior_session_participation_quality",
+    "prior_session_prediction_score",
+    "prior_session_trend_label",
+    "prior_session_timing_score",
+
+    "session_momentum_label",
+    "session_momentum_score",
+    "session_return_pct",
+    "session_momentum_5m_pct",
+    "session_momentum_15m_pct",
+    "session_momentum_30m_pct",
+    "session_distance_from_vwap_pct",
+    "session_momentum_reason",
+    "session_momentum_upgrade",
+    "session_momentum_upgrade_reason",
+
+    "prediction_score",
+    "prediction_confidence",
+    "prediction_expected_pnl",
+    "prediction_expected_win_rate",
+    "prediction_sample_size",
+    "prediction_timing_score",
+    "prediction_recommended_entry_timing",
+    "prediction_recommended_exit_timing",
+    "prediction_trend_score",
+    "prediction_trend_label",
+    "prediction_trend_regime",
+    "prediction_trend_confidence",
+    "prediction_reason",
+
+    "strategy_memory_trades",
+    "strategy_memory_wins",
+    "strategy_memory_losses",
+    "strategy_memory_win_rate",
+    "strategy_memory_pnl",
+    "strategy_memory_expectancy",
+    "strategy_memory_avg_pnl_pct",
+)
+
+
+def learning_enrichment_fields(entry: dict[str, Any]) -> dict[str, Any]:
+    """Preserve optional learning/enrichment fields in market_context symbols."""
+    out = {}
+    for key in LEARNING_ENRICHMENT_FIELDS:
+        if key in entry:
+            out[key] = entry.get(key)
+    return out
+
 def clamp_score(value: Any, default: int | None = None) -> int | None:
     try:
         v = int(float(value))
@@ -86,7 +141,7 @@ def normalize_symbol_entry(symbol: str, entry: dict[str, Any] | None) -> dict[st
     if avoid_type not in VALID_AVOID_TYPE:
         avoid_type = None
 
-    return {
+    normalized = {
         # Existing live-compatible fields
         "bias": bias,
         "reason": normalize_string(entry.get("reason")) or "no detail provided",
@@ -121,6 +176,9 @@ def normalize_symbol_entry(symbol: str, entry: dict[str, Any] | None) -> dict[st
         "competitive_risk_score": entry.get("competitive_risk_score"),
         "execution_risk_score": entry.get("execution_risk_score"),
     }
+
+    normalized.update(learning_enrichment_fields(entry))
+    return normalized
 
 
 def normalize_market_context(raw: dict[str, Any], approved_symbols: list[str] | set[str]) -> dict[str, Any]:
@@ -176,6 +234,11 @@ def schema_quality_summary(ctx: dict[str, Any]) -> dict[str, Any]:
         "liquidity_quality",
         "volume_context",
         "price_location",
+        "prediction_score",
+        "prediction_expected_pnl",
+        "strategy_memory_expectancy",
+        "session_momentum_label",
+        "prior_session_session_return_pct",
     ]
 
     coverage = {}

@@ -98,6 +98,7 @@ def _rebuild_symbols(
     event_enrichment: dict,
     macro_sentiment: str,
     macro_regime: str,
+    market_date: str,
 ) -> dict:
     """Re-classify each symbol; return updated symbols dict."""
     symbols_out = existing_context.get("symbols") or {}
@@ -151,6 +152,7 @@ def rebuild_market_context(market_date: str) -> dict:
         event_enrichment,
         macro_sentiment,
         macro_regime,
+        market_date,
     )
 
     now_et_str = datetime.now(timezone(timedelta(hours=-4))).isoformat(timespec="seconds")

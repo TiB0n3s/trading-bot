@@ -214,6 +214,7 @@ def normalize_market_context(raw: dict[str, Any], approved_symbols: list[str] | 
         "data_only": raw.get("data_only"),
         "source_quality": raw.get("source_quality"),
         "event_enrichment_count": raw.get("event_enrichment_count"),
+        "intraday_refresh_at": raw.get("intraday_refresh_at"),
 
         "symbols": symbols,
         "source": raw.get("source"),

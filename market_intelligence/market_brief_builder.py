@@ -193,6 +193,7 @@ def build_market_brief(
         "data_only": raw.get("data_only"),
         "source_quality": raw.get("source_quality"),
         "event_enrichment_count": raw.get("event_enrichment_count"),
+        "intraday_refresh_at": raw.get("intraday_refresh_at"),
         "symbols": merge_symbol_research(raw.get("symbols")),
         "source": source,
         "format": "rich_market_brief_v1",

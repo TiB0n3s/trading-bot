@@ -3782,6 +3782,55 @@ def _allow_medium_confidence_momentum_override(
     except Exception as e:
         return False, f"override_error={e}"
 
+def _weekly_symbol_performance(symbol: str) -> dict:
+    """Return current-week realized symbol performance for Claude/account_state context."""
+    try:
+        with get_connection(DB_PATH) as con:
+            row = con.execute(
+                """
+                SELECT
+                    COUNT(*) AS trades,
+                    SUM(CASE WHEN realized_pnl > 0 THEN 1 ELSE 0 END) AS wins,
+                    SUM(CASE WHEN realized_pnl < 0 THEN 1 ELSE 0 END) AS losses,
+                    SUM(COALESCE(realized_pnl, 0)) AS pnl,
+                    AVG(realized_pnl) AS expectancy,
+                    AVG(realized_pnl_pct) AS avg_pnl_pct
+                FROM matched_trades
+                WHERE symbol = ?
+                  AND entry_timestamp >= date('now','weekday 1','-7 days')
+                """,
+                (symbol,),
+            ).fetchone()
+
+        trades = int(row["trades"] or 0) if row else 0
+        wins = int(row["wins"] or 0) if row else 0
+        losses = int(row["losses"] or 0) if row else 0
+        pnl = float(row["pnl"] or 0.0) if row else 0.0
+        expectancy = float(row["expectancy"] or 0.0) if row else 0.0
+        avg_pnl_pct = float(row["avg_pnl_pct"] or 0.0) if row else 0.0
+        win_rate = wins / trades if trades else 0.0
+
+        label = "neutral"
+        if trades >= 3 and expectancy > 0 and win_rate >= 0.75:
+            label = "strong_weekly_boost"
+        elif trades >= 2 and expectancy > 0 and win_rate >= 0.50:
+            label = "weekly_boost"
+        elif trades >= 2 and (expectancy < 0 or win_rate < 0.35):
+            label = "weekly_penalty"
+
+        return {
+            "label": label,
+            "trades": trades,
+            "wins": wins,
+            "losses": losses,
+            "win_rate": round(win_rate, 4),
+            "pnl": round(pnl, 2),
+            "expectancy": round(expectancy, 2),
+            "avg_pnl_pct": round(avg_pnl_pct, 4),
+        }
+    except Exception as e:
+        return {"label": "error", "error": str(e)}
+
 def process_signal(data):
     dedupe_key = data.get("_dedupe_key")
     ...
@@ -5435,6 +5484,10 @@ def process_signal(data):
             f"mode={decision_policy_config.get('authority_mode')} "
             f"reason={decision_policy.get('reason')}"
         )
+
+    weekly_perf = _weekly_symbol_performance(symbol)
+    account_state["weekly_symbol_performance"] = weekly_perf
+    claude_account_state["weekly_symbol_performance"] = weekly_perf
 
     decision = evaluate_signal(data, claude_account_state)
 

@@ -826,6 +826,86 @@ def prediction_from_matches(target_ctx, matches):
     }
 
 
+def weekly_symbol_performance(market_date: str, symbol: str, db_path: Path | str = DB_PATH) -> dict:
+    """Return bounded current-week symbol performance modifier.
+
+    Uses realized matched trades from the current week up to market_date.
+    This is a soft modifier only; it must not override hard risk controls.
+    """
+    try:
+        with get_connection(db_path) as con:
+            row = con.execute(
+                """
+                SELECT
+                    COUNT(*) AS trades,
+                    SUM(CASE WHEN realized_pnl > 0 THEN 1 ELSE 0 END) AS wins,
+                    SUM(CASE WHEN realized_pnl < 0 THEN 1 ELSE 0 END) AS losses,
+                    SUM(COALESCE(realized_pnl, 0)) AS pnl,
+                    AVG(realized_pnl) AS expectancy,
+                    AVG(realized_pnl_pct) AS avg_pnl_pct
+                FROM matched_trades
+                WHERE symbol = ?
+                  AND entry_timestamp >= date(?, 'weekday 1', '-7 days')
+                  AND entry_timestamp < date(?, '+1 day')
+                """,
+                (symbol, market_date, market_date),
+            ).fetchone()
+
+        trades = int(row["trades"] or 0) if row else 0
+        wins = int(row["wins"] or 0) if row else 0
+        losses = int(row["losses"] or 0) if row else 0
+        pnl = float(row["pnl"] or 0.0) if row else 0.0
+        expectancy = float(row["expectancy"] or 0.0) if row else 0.0
+        avg_pnl_pct = float(row["avg_pnl_pct"] or 0.0) if row else 0.0
+        win_rate = (wins / trades) if trades else 0.0
+
+        label = "neutral"
+        modifier = 0.0
+
+        if trades >= 3 and expectancy > 0 and win_rate >= 0.75:
+            label = "strong_weekly_boost"
+            modifier = 6.0
+        elif trades >= 2 and expectancy > 0 and win_rate >= 0.50:
+            label = "weekly_boost"
+            modifier = 4.0
+        elif trades >= 2 and (expectancy < 0 or win_rate < 0.35):
+            label = "weekly_penalty"
+            modifier = -6.0
+
+        reason = (
+            f"weekly_symbol_performance={label}; "
+            f"trades={trades}; wins={wins}; losses={losses}; "
+            f"win_rate={win_rate:.1%}; pnl=${pnl:+.2f}; "
+            f"expectancy=${expectancy:+.2f}; modifier={modifier:+.1f}"
+        )
+
+        return {
+            "label": label,
+            "modifier": modifier,
+            "trades": trades,
+            "wins": wins,
+            "losses": losses,
+            "win_rate": win_rate,
+            "pnl": pnl,
+            "expectancy": expectancy,
+            "avg_pnl_pct": avg_pnl_pct,
+            "reason": reason,
+        }
+
+    except Exception as e:
+        return {
+            "label": "error",
+            "modifier": 0.0,
+            "trades": 0,
+            "wins": 0,
+            "losses": 0,
+            "win_rate": 0.0,
+            "pnl": 0.0,
+            "expectancy": 0.0,
+            "avg_pnl_pct": 0.0,
+            "reason": f"weekly_symbol_performance_error={e}",
+        }
+
 def predict_symbol(market_date: str, symbol: str, db_path: Path | str = DB_PATH) -> dict:
     init_prediction_tables(db_path)
 
@@ -866,13 +946,34 @@ def predict_symbol(market_date: str, symbol: str, db_path: Path | str = DB_PATH)
     base_score = float(pred.get("prediction_score") or 50.0)
     timing_score = float(timing.get("timing_score") or 50.0)
     trend_score = float(trend.get("trend_score") or 50.0)
-    blended_score = round(clamp((base_score * 0.70) + (timing_score * 0.15) + (trend_score * 0.15)), 2)
+    weekly = weekly_symbol_performance(market_date, symbol, db_path=db_path)
+
+    pre_weekly_score = round(
+        clamp((base_score * 0.70) + (timing_score * 0.15) + (trend_score * 0.15)),
+        2,
+    )
+    weekly_modifier = float(weekly.get("modifier") or 0.0)
+    blended_score = round(clamp(pre_weekly_score + weekly_modifier), 2)
     pred["prediction_score"] = blended_score
+
+    weekly_reason = weekly.get("reason")
+    if weekly_modifier:
+        pred["reason"] = (
+            f"{pred.get('reason', '')} "
+            f"Weekly performance modifier applied: {weekly_reason}. "
+        ).strip()
+    else:
+        pred["reason"] = (
+            f"{pred.get('reason', '')} "
+            f"Weekly performance neutral: {weekly_reason}. "
+        ).strip()
 
     combined_raw = pred["raw"]
     combined_raw["timing_lesson"] = timing
     combined_raw["trend_lesson"] = trend
     combined_raw["base_prediction_score_before_timing_trend_blend"] = base_score
+    combined_raw["prediction_score_before_weekly_modifier"] = pre_weekly_score
+    combined_raw["weekly_symbol_performance"] = weekly
 
     return {
         "market_date": market_date,

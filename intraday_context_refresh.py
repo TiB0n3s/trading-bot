@@ -61,6 +61,7 @@ from pre_market_research_data import (  # noqa: E402
     build_sector_state,
     load_event_enrichment,
     apply_event_enrichment,
+    enrich_with_session_context,
     safe_round,
     PRE_MARKET_ALPACA_SYMBOL_SLEEP_SECONDS,
 )
@@ -119,6 +120,7 @@ def _rebuild_symbols(
             "bar_count_1m": data.get("bar_count_1m", 0),
         }
         apply_event_enrichment(entry, event_enrichment.get(sym) or {})
+        entry = enrich_with_session_context(sym, entry, market_date)
         symbols_out[sym] = entry
 
     return symbols_out

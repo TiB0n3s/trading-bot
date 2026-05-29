@@ -29,6 +29,9 @@
 5 8 * * 1-5 cd /home/tradingbot/trading-bot && set -a && . /etc/trading-bot.env && set +a && /home/tradingbot/trading-bot/venv/bin/python collect_and_score_events.py --date $(date +\%F) --max-per-symbol 2 --apply-context --predict --output /tmp/events_$(date +\%F).auto.json >> /home/tradingbot/trading-bot/event_collection.log 2>&1
 10 8 * * 1-5 cd /home/tradingbot/trading-bot && set -a && . /etc/trading-bot.env && set +a && TARGET_DATE=$(/home/tradingbot/trading-bot/venv/bin/python next_trading_date.py) && /home/tradingbot/trading-bot/venv/bin/python prediction_cache.py preload --date "$TARGET_DATE" >> /home/tradingbot/trading-bot/prediction_cache.log 2>&1
 
+# Intraday context refresh — price reclassification + event enrichment + session learning
+*/45 9-15 * * 1-5 set -a && . /etc/trading-bot.env && set +a && /home/tradingbot/trading-bot/venv/bin/python /home/tradingbot/trading-bot/intraday_context_refresh.py >> /home/tradingbot/trading-bot/intraday_refresh.log 2>&1
+
 0 16 * * 1-5 cd /home/tradingbot/trading-bot && set -a && . /etc/trading-bot.env && set +a && /home/tradingbot/trading-bot/venv/bin/python daily_summary.py >> daily_summary.log 2>&1
 
 5 16 * * 5 cd /home/tradingbot/trading-bot && set -a && . /etc/trading-bot.env && set +a && /home/tradingbot/trading-bot/venv/bin/python daily_summary.py --week >> daily_summary.log 2>&1

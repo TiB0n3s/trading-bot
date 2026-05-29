@@ -320,6 +320,59 @@ Use symbol_history as a prior on conviction — real outcomes, not predictions:
 - avg_loss_pct worse than -1.5%: losses on this symbol tend to run large; prefer
   a wider SL or reject marginal setups to avoid being stopped into a large loss.
 
+INTRADAY CONTEXT ENRICHMENT GUIDANCE:
+account_state["market_bias_context"] may contain session learning fields written by the
+intraday context refresh (intraday_context_refresh.py), which runs every 45 minutes during
+market hours. These fields supplement the morning pre-market classification with live data:
+
+Session momentum (from session_momentum.py, written at refresh time):
+- session_momentum_label: trend label for the symbol's intraday session
+  ("strong_uptrend", "developing_uptrend", "flat", "developing_downtrend", "strong_downtrend")
+- session_return_pct: symbol's return from session open to now
+- session_momentum_score: numeric score for the trend label
+- session_momentum_5m_pct / 15m_pct / 30m_pct: short-term momentum windows
+- session_distance_from_vwap_pct: deviation from intraday VWAP
+
+Prior session (yesterday's outcome for this symbol):
+- prior_session_session_return_pct: yesterday's full-session return
+- prior_session_mfe_pct: max favorable excursion yesterday
+- prior_session_participated: whether the bot held a position yesterday
+- prior_session_prediction_score: experience model score from yesterday
+- prior_session_trend_label: trend label at prior session close
+
+Experience model prediction (from prediction_cache.py):
+- prediction_score: experience model score for today's setup (higher = more favorable)
+- prediction_trend_label: predicted trend direction ("bullish_momentum", "bearish_pressure", "neutral_drift", etc.)
+- prediction_confidence: confidence in the prediction ("high", "medium", "low")
+- prediction_expected_pnl / prediction_expected_win_rate: predicted outcome quality
+- prediction_sample_size: number of historical setups this prediction is based on
+
+Strategy memory (bot's own live P&L history for this symbol):
+- strategy_memory_expectancy: average $ outcome per trade (positive = edge)
+- strategy_memory_win_rate: fraction of completed trades that were profitable
+- strategy_memory_trades / wins / losses: raw counts
+- strategy_memory_pnl: cumulative P&L for this symbol
+
+How to use these fields:
+- Use as supporting context, not as hard gates. They inform conviction, not approval.
+- A positive session_momentum_label ("strong_uptrend" or "developing_uptrend") confirms
+  the intraday thesis; gives modest confidence support when other signals agree.
+- A negative session_momentum_label ("strong_downtrend") should reduce confidence one
+  level even if the morning bias was buy; the market has moved against the thesis.
+- prediction_trend_label "bearish_pressure" should reduce confidence one level on buy signals.
+- prediction_trend_label "bullish_momentum" with prediction_confidence "high" and
+  prediction_sample_size >= 10 is meaningful positive prior; may support higher confidence
+  when trend, momentum, and market bias also agree.
+- strategy_memory_expectancy negative with strategy_memory_trades >= 5: symbol has
+  historically underperformed for this bot; prefer smaller sizing or reject marginal setups.
+- strategy_memory_win_rate >= 0.65 with trades >= 5: bot has an edge on this symbol
+  in recent conditions; can slightly increase conviction when other signals agree.
+- prior_session_session_return_pct strongly negative (< -2%): prior session was a loss;
+  apply caution unless today's session momentum is clearly positive.
+- These fields may be absent (None or missing) if the intraday refresh has not yet run
+  today or if session data is unavailable. Absence is not a negative signal — treat it
+  as unknown context and rely on morning classification and live gates.
+
 DECISION CONSISTENCY RULES:
 - If reasoning says "defer", "wait", "hold off", or "lacks conviction", approved MUST be false.
 - Do not say "approve" in the reason unless approved is true.

@@ -1,20 +1,22 @@
+import logging
 import os
 import time
-import logging
 from typing import Any
+
 import alpaca_trade_api as tradeapi
+
 from exceptions import BrokerError, ValidationError
+from execution.order_policy import (
+    calculate_bracket_prices,
+    calculate_buy_qty,
+    cash_order_cap_check,
+)
 from runtime_config import (
     EXECUTION_MODE,
     LIVE_TRADING_ENABLED,
     get_alpaca_base_url,
     is_cash_mode,
     max_order_dollars,
-)
-from execution.order_policy import (
-    calculate_buy_qty,
-    calculate_bracket_prices,
-    cash_order_cap_check,
 )
 
 logger = logging.getLogger(__name__)
@@ -26,13 +28,37 @@ if EXECUTION_POLICY_MODE not in ("off", "compare"):
     )
     EXECUTION_POLICY_MODE = "compare"
 
-ALPACA_API_KEY = os.environ.get("ALPACA_API_KEY", "")
-ALPACA_SECRET_KEY = os.environ.get("ALPACA_SECRET_KEY", "")
-ALPACA_BASE_URL = get_alpaca_base_url()
 SELL_CANCEL_POLL_ATTEMPTS = int(os.getenv("SELL_CANCEL_POLL_ATTEMPTS", "5"))
 SELL_CANCEL_POLL_SLEEP_SECONDS = float(os.getenv("SELL_CANCEL_POLL_SLEEP_SECONDS", "0.5"))
 
-api = tradeapi.REST(ALPACA_API_KEY, ALPACA_SECRET_KEY, ALPACA_BASE_URL)
+
+class _LazyAlpacaAPI:
+    """Defers tradeapi.REST construction until the first attribute access.
+
+    Callers continue to use ``from broker import api`` and ``api.xxx()``
+    unchanged. Tests can replace ``broker.api`` with a mock before any
+    attribute is accessed, avoiding import-time credential requirements.
+    """
+
+    _instance: "tradeapi.REST | None" = None
+
+    def _get(self) -> "tradeapi.REST":
+        if self._instance is None:
+            self._instance = tradeapi.REST(
+                os.environ.get("ALPACA_API_KEY", ""),
+                os.environ.get("ALPACA_SECRET_KEY", ""),
+                get_alpaca_base_url(),
+            )
+        return self._instance
+
+    def __getattr__(self, name: str):
+        return getattr(self._get(), name)
+
+    def __repr__(self) -> str:
+        return f"<_LazyAlpacaAPI initialized={self._instance is not None}>"
+
+
+api = _LazyAlpacaAPI()
 
 
 def _normalize_symbol(symbol: str) -> str:
@@ -187,7 +213,7 @@ def place_order(
                 f"LIVE GUARD: refusing {action.upper()} {symbol} because "
                 f"EXECUTION_MODE={EXECUTION_MODE} but LIVE_TRADING_ENABLED is false"
             )
-            return None        
+            return None
         account = get_account()
         if not account:
             logger.error("Cannot place order - account unavailable")
@@ -237,7 +263,7 @@ def place_order(
                         f"{[getattr(o, 'id', '?') for o in remaining_orders]}"
                     )
                     return None
-                
+
                 refreshed = api.get_position(symbol)
                 available_qty = int(float(refreshed.qty))
 

@@ -1,0 +1,20 @@
+[project]
+name = "trading-bot"
+version = "0.1.0"
+requires-python = ">=3.11"
+
+[tool.ruff]
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I"]
+ignore = [
+    "E501",  # line too long — enforced by line-length for new code; legacy lines excluded
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["F811"]  # redefined-while-unused (common in test fixtures/parametrize)
+
+[tool.mypy]
+ignore_missing_imports = true
+python_version = "3.11"

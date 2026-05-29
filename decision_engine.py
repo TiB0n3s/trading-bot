@@ -1,12 +1,20 @@
-import os
 import json
 import logging
+
 from anthropic import Anthropic
+
 from symbols_config import APPROVED_SYMBOLS_CSV
-from pnl import get_daily_realized_pnl
 
 logger = logging.getLogger(__name__)
-client = Anthropic()
+
+_client: Anthropic | None = None
+
+
+def _get_client() -> Anthropic:
+    global _client
+    if _client is None:
+        _client = Anthropic()
+    return _client
 
 TRADING_RULES = '''
 You are a risk-aware trading decision engine working as the final synthesis layer
@@ -475,7 +483,7 @@ def evaluate_signal(signal_data, account_state):
         )
         prompt = 'Evaluate this signal: ' + json.dumps(signal_data) + ' Account: ' + json.dumps(account_state)
         response_text = ""
-        message = client.messages.create(
+        message = _get_client().messages.create(
             model='claude-haiku-4-5-20251001',
             max_tokens=1000,
             system=TRADING_RULES,

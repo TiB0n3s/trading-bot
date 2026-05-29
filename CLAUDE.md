@@ -152,6 +152,37 @@ observe-only
 → warn-only
 → soft modifier
 → possible live gate later
+Typed Config Layer
+
+The `config/` package provides frozen dataclasses and factory functions for all
+env-var-driven configuration. The rule is:
+
+  **One pattern only: module-level singleton via factory.**
+
+Each consuming module creates its own singleton at module level:
+
+    from config.signal import load_signal_config
+    from config.risk import load_risk_config
+
+    _signal_cfg = load_signal_config()
+    _risk_cfg = load_risk_config()
+
+Tests call the factory directly with overrides — they never touch module singletons:
+
+    cfg = load_signal_config(prediction_gate_mode="block")
+
+Do not mix these three patterns in the same codebase:
+
+  - `from config import signal_cfg`  ← removed; was a shared package singleton
+  - `load_signal_config()` inline    ← factory call, fine in tests/scripts
+  - `os.getenv("PREDICTION_GATE_MODE", "warn")`  ← raw read; eliminate on contact
+
+When adding a new env var:
+  1. Add a typed field to the appropriate dataclass in `config/`.
+  2. Add validation in `__post_init__` using `_check()`.
+  3. Add the `env_*` read to the factory's `kwargs` dict.
+  4. Remove the raw `os.getenv` call from the consuming module.
+
 Environment
 
 Production path:

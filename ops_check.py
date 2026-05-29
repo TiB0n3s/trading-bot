@@ -198,6 +198,35 @@ def check_market_context_file():
     print(f"max_pos     : {data.get('max_new_positions')}")
     print(f"block_buys  : {data.get('block_new_buys')}")
 
+    # Intraday refresh staleness check — only meaningful during market hours.
+    from datetime import datetime, timezone, timedelta
+    intraday_refresh_at = data.get("intraday_refresh_at")
+    print(f"intraday_refresh_at : {intraday_refresh_at or 'not present'}")
+    now_utc = datetime.now(timezone.utc)
+    et_offset = timedelta(hours=-4)  # EDT; close enough for a staleness gate
+    now_et = now_utc + et_offset
+    market_open_et = now_et.replace(hour=9, minute=30, second=0, microsecond=0)
+    market_close_et = now_et.replace(hour=16, minute=0, second=0, microsecond=0)
+    is_market_hours = now_et.weekday() < 5 and market_open_et <= now_et <= market_close_et
+    INTRADAY_REFRESH_STALE_MINUTES = 90
+    if is_market_hours:
+        if not intraday_refresh_at:
+            print(f"[WARN] intraday_refresh_at absent during market hours — intraday_context_refresh.py may not have run yet")
+        else:
+            try:
+                refresh_dt = datetime.fromisoformat(intraday_refresh_at).astimezone(timezone.utc)
+                age_minutes = (now_utc - refresh_dt).total_seconds() / 60
+                if age_minutes > INTRADAY_REFRESH_STALE_MINUTES:
+                    print(f"[WARN] intraday_refresh_at is {age_minutes:.0f} min old (>{INTRADAY_REFRESH_STALE_MINUTES} min) — refresh may be silently failing")
+                    ok = False
+                else:
+                    print(f"[OK] intraday_refresh_at is {age_minutes:.0f} min old (within {INTRADAY_REFRESH_STALE_MINUTES} min)")
+            except Exception as e:
+                print(f"[WARN] could not parse intraday_refresh_at '{intraday_refresh_at}': {e}")
+    else:
+        if intraday_refresh_at:
+            print(f"[OK] intraday_refresh_at present (staleness check skipped outside market hours)")
+
     if not isinstance(symbols, dict) or not symbols:
         print("[FAIL] symbols is empty or not an object")
         return False

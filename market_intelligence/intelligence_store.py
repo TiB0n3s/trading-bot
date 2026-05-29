@@ -561,39 +561,116 @@ def update_daily_context_from_events(market_date: str, symbol: str | None = None
             skipped += 1
             continue
 
+        now = datetime.now().isoformat(timespec="seconds")
+
         with get_connection(db_path) as con:
-            con.execute(
+            existing = con.execute(
                 """
-                UPDATE daily_symbol_context
-                SET
-                    catalyst_score = ?,
-                    consumer_appetite_score = ?,
-                    revenue_impact_score = ?,
-                    profit_potential_score = ?,
-                    margin_risk_score = ?,
-                    supply_chain_risk_score = ?,
-                    materials_risk_score = ?,
-                    competitive_risk_score = ?,
-                    execution_risk_score = ?,
-                    updated_at = ?
+                SELECT id
+                FROM daily_symbol_context
                 WHERE market_date = ?
                   AND symbol = ?
                 """,
-                (
-                    agg.get("catalyst_score"),
-                    agg.get("consumer_appetite_score"),
-                    agg.get("revenue_impact_score"),
-                    agg.get("profit_potential_score"),
-                    agg.get("margin_risk_score"),
-                    agg.get("supply_chain_risk_score"),
-                    agg.get("materials_risk_score"),
-                    agg.get("competitive_risk_score"),
-                    agg.get("execution_risk_score"),
-                    datetime.now().isoformat(timespec="seconds"),
-                    market_date,
-                    sym,
-                ),
-            )
+                (market_date, sym),
+            ).fetchone()
+
+            if existing:
+                con.execute(
+                    """
+                    UPDATE daily_symbol_context
+                    SET
+                        catalyst_score = ?,
+                        consumer_appetite_score = ?,
+                        revenue_impact_score = ?,
+                        profit_potential_score = ?,
+                        margin_risk_score = ?,
+                        supply_chain_risk_score = ?,
+                        materials_risk_score = ?,
+                        competitive_risk_score = ?,
+                        execution_risk_score = ?,
+                        updated_at = ?
+                    WHERE market_date = ?
+                      AND symbol = ?
+                    """,
+                    (
+                        agg.get("catalyst_score"),
+                        agg.get("consumer_appetite_score"),
+                        agg.get("revenue_impact_score"),
+                        agg.get("profit_potential_score"),
+                        agg.get("margin_risk_score"),
+                        agg.get("supply_chain_risk_score"),
+                        agg.get("materials_risk_score"),
+                        agg.get("competitive_risk_score"),
+                        agg.get("execution_risk_score"),
+                        now,
+                        market_date,
+                        sym,
+                    ),
+                )
+            else:
+                con.execute(
+                    """
+                    INSERT INTO daily_symbol_context (
+                        market_date,
+                        symbol,
+                        source,
+                        macro_sentiment,
+                        macro_regime,
+                        risk_multiplier,
+                        max_new_positions,
+                        block_new_buys,
+                        bias,
+                        confidence,
+                        fundamental_score,
+                        risk_level,
+                        entry_quality,
+                        avoid_type,
+                        reason,
+                        catalyst_score,
+                        consumer_appetite_score,
+                        revenue_impact_score,
+                        profit_potential_score,
+                        margin_risk_score,
+                        supply_chain_risk_score,
+                        materials_risk_score,
+                        competitive_risk_score,
+                        execution_risk_score,
+                        raw_json,
+                        created_at,
+                        updated_at
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        market_date,
+                        sym,
+                        "event_aggregate_seed",
+                        "mixed",
+                        "caution",
+                        0.75,
+                        6,
+                        0,
+                        "neutral",
+                        "low",
+                        "neutral",
+                        "medium",
+                        "conditional",
+                        None,
+                        "Seeded from event aggregates; market context builder should enrich full context.",
+                        agg.get("catalyst_score"),
+                        agg.get("consumer_appetite_score"),
+                        agg.get("revenue_impact_score"),
+                        agg.get("profit_potential_score"),
+                        agg.get("margin_risk_score"),
+                        agg.get("supply_chain_risk_score"),
+                        agg.get("materials_risk_score"),
+                        agg.get("competitive_risk_score"),
+                        agg.get("execution_risk_score"),
+                        json.dumps(agg),
+                        now,
+                        now,
+                    ),
+                )
 
         updated += 1
         summaries.append(agg)

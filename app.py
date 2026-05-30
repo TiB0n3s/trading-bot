@@ -45,7 +45,9 @@ from services.live_signal_processor import (
 from services.signal_pipeline import SignalPipelineDeps
 from services.signal_models import SignalRuntimeState
 from services.startup_service import StartupDeps, StartupService
-from services import trend_context_service
+from services.market_context_service import MarketContextService
+from services.symbol_override_service import SymbolOverrideService
+from services.trend_state_service import TrendStateService
 from services import trade_audit_service
 from services.setup_context_service import (
     SetupContextDeps,
@@ -465,9 +467,29 @@ _last_sell: dict = {}      # {symbol: (datetime in ET, price)} — last successf
 _trend_table: dict = {}    # {symbol: {direction, strength, consecutive_count, last_signal, last_time}}
 _signal_history: dict = {} # {symbol: [action, ...]} most recent first, max 10 — internal
 _market_bias: dict = {}    # {symbol: {bias, reason, confidence}} — populated from market_context.json
-_market_context_mtime: float = 0  # last seen mtime of market_context.json, used for lazy refresh
 _symbol_overrides: dict = {}
-_symbol_overrides_mtime: float = 0
+
+_symbol_override_service = SymbolOverrideService(
+    path=Path(__file__).parent / "symbol_overrides.json",
+    overrides=_symbol_overrides,
+    log=logger,
+)
+_market_context_service = MarketContextService(
+    path=Path(__file__).parent / "market_context.json",
+    market_bias=_market_bias,
+    expected_market_context_date=expected_market_context_date,
+    log=logger,
+)
+_trend_state_service = TrendStateService(
+    approved_symbols=APPROVED_SYMBOLS,
+    signal_history=_signal_history,
+    trend_table=_trend_table,
+    trades_repo=trades_repo,
+    market_bias=_market_bias,
+    symbol_market_alignment_map=SYMBOL_MARKET_ALIGNMENT,
+    load_market_context=lambda: _market_context_service.load(),
+    log=logger,
+)
 
 
 def _load_symbol_overrides():
@@ -478,72 +500,16 @@ def _load_symbol_overrides():
       - buy_disabled: block BUY only
       - sell_only: block BUY only, allow SELL
     """
-    global _symbol_overrides_mtime, _symbol_overrides
-
-    path = Path(__file__).parent / "symbol_overrides.json"
-    default = {
-        "disabled_symbols": [],
-        "buy_disabled": [],
-        "sell_only": [],
-        "notes": {},
-    }
-
-    if not path.exists():
-        _symbol_overrides = default
-        return
-
-    try:
-        current_mtime = path.stat().st_mtime
-        if current_mtime <= _symbol_overrides_mtime:
-            return
-
-        raw = json.loads(path.read_text())
-
-        _symbol_overrides = {
-            "disabled_symbols": [s.upper() for s in raw.get("disabled_symbols", [])],
-            "buy_disabled": [s.upper() for s in raw.get("buy_disabled", [])],
-            "sell_only": [s.upper() for s in raw.get("sell_only", [])],
-            "notes": raw.get("notes", {}) if isinstance(raw.get("notes", {}), dict) else {},
-        }
-        _symbol_overrides_mtime = current_mtime
-
-        logger.info(
-            "Symbol overrides loaded: "
-            f"disabled={len(_symbol_overrides['disabled_symbols'])}, "
-            f"buy_disabled={len(_symbol_overrides['buy_disabled'])}, "
-            f"sell_only={len(_symbol_overrides['sell_only'])}"
-        )
-
-    except Exception as e:
-        logger.error(f"_load_symbol_overrides failed: {e}")
-        _symbol_overrides = default
+    _symbol_override_service.load()
 
 
 def _symbol_override_block(symbol, action):
     """Return a reason string if a symbol override blocks this signal, else None."""
-    _load_symbol_overrides()
-
-    disabled = set(_symbol_overrides.get("disabled_symbols", []))
-    buy_disabled = set(_symbol_overrides.get("buy_disabled", []))
-    sell_only = set(_symbol_overrides.get("sell_only", []))
-    notes = _symbol_overrides.get("notes", {}) or {}
-
-    note = notes.get(symbol) or ""
-
-    if symbol in disabled:
-        return f"symbol disabled by operator override" + (f" — {note}" if note else "")
-
-    if action == "buy" and symbol in buy_disabled:
-        return f"BUY disabled by operator override" + (f" — {note}" if note else "")
-
-    if action == "buy" and symbol in sell_only:
-        return f"symbol in sell_only mode by operator override" + (f" — {note}" if note else "")
-
-    return None
+    return _symbol_override_service.block_reason(symbol, action)
 
 
 def _compute_trend(recent_actions: list) -> dict:
-    return trend_context_service.compute_trend(recent_actions)
+    return _trend_state_service.compute_trend(recent_actions)
 
 def _build_trend_table():
     """Build trend table for every approved symbol.
@@ -552,42 +518,7 @@ def _build_trend_table():
     signal history from trades.db where available. This ensures /status and
     trend-gate logic can see all approved symbols, not only symbols with DB history.
     """
-    try:
-        # Start with every approved symbol so the table is complete.
-        for sym in APPROVED_SYMBOLS:
-            _signal_history.setdefault(sym, [])
-            _trend_table[sym] = {
-                "direction": "neutral",
-                "strength": "weak",
-                "consecutive_count": 0,
-                "last_signal": None,
-                "last_time": None,
-            }
-
-        approved = sorted(APPROVED_SYMBOLS)
-        rows = trades_repo.recent_signal_history(approved)
-
-        history = {}
-        last_time = {}
-
-        for sym, act, ts in rows:
-            if sym not in APPROVED_SYMBOLS:
-                continue
-            history.setdefault(sym, []).append(act)
-            last_time.setdefault(sym, ts)
-
-        for sym in APPROVED_SYMBOLS:
-            actions = history.get(sym, [])
-            _signal_history[sym] = actions[:10]
-            entry = _compute_trend(actions)
-            entry["last_time"] = last_time.get(sym)
-            _trend_table[sym] = entry
-
-        logger.info(
-            f"Trend table built for {len(_trend_table)}/{len(APPROVED_SYMBOLS)} approved symbols"
-        )
-    except Exception as e:
-        logger.error(f"_build_trend_table failed: {e}")
+    _trend_state_service.build_table()
 
 def _hydrate_cooldowns():
     try:
@@ -680,58 +611,14 @@ def _refresh_signal_history(symbol):
     represent a legitimate signal that Claude evaluated — the bot filtered them
     on output quality, not on input validity.
     """
-    try:
-        rows = trades_repo.recent_actions_for_trend(symbol)
-        _signal_history[symbol] = [r[0] for r in rows]
-    except Exception as e:
-        logger.warning(f"_refresh_signal_history failed for {symbol}: {e}")
+    _trend_state_service.refresh_signal_history(symbol)
 
 
 def _load_market_context():
     """Load same-day pre-market research into _market_bias.
     Lazy-refreshes when market_context.json mtime changes so the bot picks up
     each day's cron output without a service restart."""
-    global _market_context_mtime
-    path = Path(__file__).parent / "market_context.json"
-    if not path.exists():
-        return
-    try:
-        current_mtime = path.stat().st_mtime
-        if current_mtime <= _market_context_mtime:
-            return
-        _market_context_mtime = current_mtime
-        ctx = json.loads(path.read_text())
-        market_date = ctx.get("market_date")
-        expected_date = expected_market_context_date().isoformat()
-        _market_bias.clear()
-        if market_date != expected_date:
-            logger.warning(
-                "market_context.json is stale "
-                f"(market_date={market_date}, expected={expected_date}) — cleared market bias"
-            )
-            return
-        symbols = ctx.get("symbols") or {}
-        for sym, entry in symbols.items():
-            if isinstance(entry, dict) and entry.get("bias") in ("buy", "avoid", "neutral"):
-                enriched_entry = dict(entry)
-                enriched_entry.setdefault("bias", entry["bias"])
-                enriched_entry.setdefault("reason", "")
-                enriched_entry.setdefault("confidence", "")
-                enriched_entry.setdefault("fundamental_score", None)
-                enriched_entry.setdefault("risk_level", None)
-                enriched_entry.setdefault("entry_quality", None)
-                enriched_entry.setdefault("avoid_type", None)
-                _market_bias[sym] = enriched_entry
-        avoid_count = sum(1 for v in _market_bias.values() if v["bias"] == "avoid")
-        buy_count = sum(1 for v in _market_bias.values() if v["bias"] == "buy")
-        neutral_count = sum(1 for v in _market_bias.values() if v["bias"] == "neutral")
-        macro = ctx.get("macro_sentiment", "unknown")
-        logger.info(
-            f"Market bias loaded for {len(_market_bias)} symbols "
-            f"(buy={buy_count}, avoid={avoid_count}, neutral={neutral_count}, macro={macro})"
-        )
-    except Exception as e:
-        logger.error(f"_load_market_context failed: {e}")
+    _market_context_service.load()
 
 def _make_dedupe_key(data):
     return dedupe_service.make_dedupe_key(data)
@@ -879,15 +766,7 @@ def _required_sell_confirmations(symbol, account_state=None):
 
 def _symbol_market_alignment(symbol):
     try:
-        return trend_context_service.symbol_market_alignment(
-            symbol,
-            symbol_market_alignment_map=SYMBOL_MARKET_ALIGNMENT,
-            market_bias=_market_bias,
-            trend_table=_trend_table,
-            signal_history=_signal_history,
-            load_market_context=_load_market_context,
-            refresh_signal_history=_refresh_signal_history,
-        )
+        return _trend_state_service.symbol_market_alignment(symbol)
 
     except Exception as e:
         logger.error(f"_symbol_market_alignment failed for {symbol}: {e}")
@@ -1739,15 +1618,11 @@ def _evaluate_preflight(runtime_state: SignalRuntimeState):
 
 
 def _update_trend_history(symbol: str, action: str) -> None:
-    trend_context_service.update_signal_trend_history(
-        symbol=symbol,
-        action=action,
-        signal_history=_signal_history,
-        trend_table=_trend_table,
-        refresh_signal_history=_refresh_signal_history,
-        now=datetime.now,
+    _trend_state_service.update_history(
+        symbol,
+        action,
         compute_trend_func=_compute_trend,
-        log=logger,
+        refresh_signal_history=_refresh_signal_history,
     )
 
 

@@ -584,12 +584,6 @@ def _filled_buys_today(symbol):
         return 0
 
 
-def _has_open_position_db(symbol):
-    try:
-        return trades_repo.has_open_position(symbol)
-    except Exception:
-        return True  # fail-open: never silently block a sell on DB error
-
 _last_order: dict = {}     # {(symbol, action): datetime in ET} — reset on restart
 _last_sell: dict = {}      # {symbol: (datetime in ET, price)} — last successful sell, for churn prevention
 _trend_table: dict = {}    # {symbol: {direction, strength, consecutive_count, last_signal, last_time}}
@@ -1885,7 +1879,30 @@ def _build_context_runtime(runtime_state: SignalRuntimeState):
     )
 
 
-def _legacy_process_signal(data, *, runtime_state=None, context_runtime=None):
+def _evaluate_preflight(runtime_state: SignalRuntimeState):
+    preflight = PreflightService(
+        PreflightDeps(
+            now_et=now_et,
+            is_market_hours=is_market_hours,
+            assert_position_exists=broker_service.assert_position_exists,
+            get_position=get_position,
+            read_cooldown=_read_cooldown,
+            read_recent_sell=_read_recent_sell,
+            is_duplicate_webhook=_is_duplicate_webhook,
+            adaptive_churn_reentry_allowed=_adaptive_churn_reentry_allowed,
+            successful_buys_today=_successful_buys_today,
+            filled_buys_today=_filled_buys_today,
+            cluster_exposure=_cluster_exposure,
+            max_buys_per_symbol_per_day=MAX_BUYS_PER_SYMBOL_PER_DAY,
+            session_max_trade_count=int(os.getenv("SESSION_MAX_TRADE_COUNT", "3")),
+            webhook_dedupe_seconds=WEBHOOK_DEDUPE_SECONDS,
+            daily_loss_limit_pct=DAILY_LOSS_LIMIT_PCT,
+        )
+    )
+    return preflight.evaluate(runtime_state)
+
+
+def _legacy_process_signal(data, *, runtime_state=None, context_runtime=None, preflight_result=None):
     if runtime_state is None or context_runtime is None:
         symbol, action = normalize_signal_identity(data)
         try:
@@ -1905,10 +1922,17 @@ def _legacy_process_signal(data, *, runtime_state=None, context_runtime=None):
         )
         runtime_state = _build_runtime_state(signal_context)
         context_runtime = _build_context_runtime(runtime_state)
-    return _legacy_process_signal_with_context(data, runtime_state, context_runtime)
+    if preflight_result is None:
+        preflight_result = _evaluate_preflight(runtime_state)
+    return _legacy_process_signal_with_context(
+        data,
+        runtime_state,
+        context_runtime,
+        preflight_result,
+    )
 
 
-def _legacy_process_signal_with_context(data, runtime_state, context_runtime):
+def _legacy_process_signal_with_context(data, runtime_state, context_runtime, preflight_result):
     dedupe_key = data.get("_dedupe_key")
     ...
     symbol = runtime_state.symbol
@@ -2241,35 +2265,8 @@ def _legacy_process_signal_with_context(data, runtime_state, context_runtime):
         f"trend={_trend_table[symbol]}"
     )
 
-    preflight = PreflightService(
-        PreflightDeps(
-            now_et=now_et,
-            is_market_hours=is_market_hours,
-            assert_position_exists=broker_service.assert_position_exists,
-            get_position=get_position,
-            read_cooldown=_read_cooldown,
-            read_recent_sell=_read_recent_sell,
-            is_duplicate_webhook=_is_duplicate_webhook,
-            adaptive_churn_reentry_allowed=_adaptive_churn_reentry_allowed,
-            successful_buys_today=_successful_buys_today,
-            filled_buys_today=_filled_buys_today,
-            cluster_exposure=_cluster_exposure,
-            max_buys_per_symbol_per_day=MAX_BUYS_PER_SYMBOL_PER_DAY,
-            session_max_trade_count=int(os.getenv("SESSION_MAX_TRADE_COUNT", "3")),
-            webhook_dedupe_seconds=WEBHOOK_DEDUPE_SECONDS,
-            daily_loss_limit_pct=DAILY_LOSS_LIMIT_PCT,
-        )
-    )
-    preflight_result = preflight.evaluate(runtime_state)
     current_et = preflight_result.metadata.get("current_et") or now_et()
     existing_position = preflight_result.metadata.get("existing_position")
-    if not preflight_result.allowed:
-        if _reject_current_signal(
-            preflight_result.rejection_category,
-            preflight_result.rejection_reason,
-            level=preflight_result.metadata.get("log_level", "warning"),
-        ):
-            return
 
     # Sell discipline gate:
     # Prevent normal TradingPilotAI SELL alerts from closing positions too early.
@@ -3612,7 +3609,7 @@ def _build_signal_pipeline(app_container: ApplicationContainer | None = None):
             legacy_processor=_legacy_process_signal,
             build_runtime_state=_build_runtime_state,
             build_context_runtime=_build_context_runtime,
-            has_open_position_db=_has_open_position_db,
+            evaluate_preflight=_evaluate_preflight,
             log_rejection=log_rejection,
             mark_webhook_event_status=(
                 lambda dedupe_key, status, **kwargs: _trade_audit_recorder().record_webhook_status(

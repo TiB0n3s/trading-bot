@@ -12,6 +12,7 @@ sys.path.insert(0, str(ROOT))
 
 from services.signal_pipeline import SignalPipeline, SignalPipelineDeps
 from services.observability import metrics_snapshot, reset_metrics
+from services.preflight_service import PreflightResult
 from services.signal_models import SignalRuntimeState
 
 
@@ -29,12 +30,16 @@ class FakeLogger:
     def __init__(self):
         self.warnings = []
         self.infos = []
+        self.errors = []
 
     def warning(self, message):
         self.warnings.append(message)
 
     def info(self, message):
         self.infos.append(message)
+
+    def error(self, message):
+        self.errors.append(message)
 
 
 class Recorder:
@@ -58,9 +63,18 @@ class Recorder:
         self.calls.append(("build_context_runtime", runtime_state.symbol, runtime_state.action))
         return {"context_runtime": runtime_state.symbol}
 
-    def has_open_position_db(self, symbol):
-        self.calls.append(("has_open_position_db", symbol))
-        return symbol != "MSFT"
+    def evaluate_preflight(self, runtime_state):
+        self.calls.append(("evaluate_preflight", runtime_state.symbol, runtime_state.action))
+        if runtime_state.symbol == "MSFT" and runtime_state.action == "sell":
+            return PreflightResult(
+                allowed=False,
+                rejection_category="ghost_sell",
+                rejection_reason="no open Alpaca position",
+            )
+        return PreflightResult(
+            allowed=True,
+            metadata={"existing_position": {"symbol": runtime_state.symbol}},
+        )
 
     def log_rejection(self, *args, **kwargs):
         self.calls.append(("log_rejection", args, kwargs))
@@ -77,7 +91,7 @@ def _pipeline(recorder=None, logger=None):
             legacy_processor=recorder.legacy_processor,
             build_runtime_state=recorder.build_runtime_state,
             build_context_runtime=recorder.build_context_runtime,
-            has_open_position_db=recorder.has_open_position_db,
+            evaluate_preflight=recorder.evaluate_preflight,
             log_rejection=recorder.log_rejection,
             mark_webhook_event_status=recorder.mark_webhook_event_status,
             logger=logger,
@@ -119,11 +133,17 @@ def test_ghost_sell_is_rejected_before_legacy_processor():
     assert_true(result.context is not None, "context returned")
     assert_equal(
         [call[0] for call in recorder.calls],
-        ["has_open_position_db", "log_rejection", "mark_webhook_event_status"],
+        [
+            "build_runtime_state",
+            "build_context_runtime",
+            "evaluate_preflight",
+            "log_rejection",
+            "mark_webhook_event_status",
+        ],
         "call order",
     )
-    assert_equal(recorder.calls[1][1][:4], ("MSFT", "sell", "ghost_sell", "no open Alpaca position"), "rejection")
-    assert_equal(recorder.calls[2][1][1], "rejected", "dedupe status")
+    assert_equal(recorder.calls[3][1][:4], ("MSFT", "sell", "ghost_sell", "no open Alpaca position"), "rejection")
+    assert_equal(recorder.calls[4][1][1], "rejected", "dedupe status")
 
 
 def test_valid_signal_runs_legacy_execution_stage_once():
@@ -136,12 +156,13 @@ def test_valid_signal_runs_legacy_execution_stage_once():
     assert_equal(result.execution.status, "handled_by_legacy_processor", "execution status")
     assert_equal(
         [call[0] for call in recorder.calls],
-        ["build_runtime_state", "build_context_runtime", "legacy"],
+        ["build_runtime_state", "build_context_runtime", "evaluate_preflight", "legacy"],
         "call order",
     )
-    assert_equal(recorder.calls[2][1]["symbol"], "AAPL", "legacy symbol normalized")
-    assert_true("runtime_state" in recorder.calls[2][2], "runtime state passed to legacy")
-    assert_true("context_runtime" in recorder.calls[2][2], "context runtime passed to legacy")
+    assert_equal(recorder.calls[3][1]["symbol"], "AAPL", "legacy symbol normalized")
+    assert_true("runtime_state" in recorder.calls[3][2], "runtime state passed to legacy")
+    assert_true("context_runtime" in recorder.calls[3][2], "context runtime passed to legacy")
+    assert_true("preflight_result" in recorder.calls[3][2], "preflight result passed to legacy")
     timing = metrics_snapshot()["pipeline_stage_timing"]
     for stage in ("normalize", "preflight", "runtime_state", "context_runtime", "legacy_live_execution"):
         assert_true(stage in timing, f"{stage} timing recorded")

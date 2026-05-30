@@ -14,6 +14,7 @@ from exceptions import ValidationError
 from rejection_categories import format_rejection_reason
 from services.execution_service import ExecutionService
 from services.observability import stage_timer
+from services.preflight_service import PreflightResult
 from services.signal_models import PipelineResult, SignalContext, SignalRuntimeState
 
 
@@ -22,7 +23,7 @@ class SignalPipelineDeps:
     legacy_processor: Callable[..., None]
     build_runtime_state: Callable[[SignalContext], SignalRuntimeState]
     build_context_runtime: Callable[[SignalRuntimeState], Any]
-    has_open_position_db: Callable[[str], bool]
+    evaluate_preflight: Callable[[SignalRuntimeState], PreflightResult]
     log_rejection: Callable[..., None]
     mark_webhook_event_status: Callable[..., None]
     logger: object
@@ -55,15 +56,38 @@ class SignalPipeline:
                 )
             return PipelineResult(handled=True, error=exc)
 
-        with stage_timer("preflight"):
-            preflight_handled = self.preflight(context)
-        if preflight_handled:
-            return PipelineResult(handled=True, context=context)
-
         with stage_timer("runtime_state"):
             runtime_state = self.deps.build_runtime_state(context)
         with stage_timer("context_runtime"):
             context_runtime = self.deps.build_context_runtime(runtime_state)
+        with stage_timer("preflight"):
+            preflight_result = self.deps.evaluate_preflight(runtime_state)
+        if not preflight_result.allowed:
+            category = preflight_result.rejection_category or "preflight"
+            reason = preflight_result.rejection_reason or "preflight rejected signal"
+            level = preflight_result.metadata.get("log_level", "warning")
+            message = f"{category} blocked {context.symbol} {context.action.upper()}: {reason}"
+            if level == "info":
+                self.deps.logger.info(message)
+            elif level == "error":
+                self.deps.logger.error(message)
+            else:
+                self.deps.logger.warning(message)
+            self.deps.log_rejection(
+                context.symbol,
+                context.action,
+                category,
+                reason,
+                price=context.price,
+                account_state=runtime_state.account_state,
+            )
+            if context.dedupe_key:
+                self.deps.mark_webhook_event_status(
+                    context.dedupe_key,
+                    "rejected",
+                    failure_reason=format_rejection_reason(category, reason),
+                )
+            return PipelineResult(handled=True, context=context)
 
         # The real trading decisions are still owned by the legacy processor
         # until those branches are fully extracted. Runtime/context are prepared
@@ -73,6 +97,7 @@ class SignalPipeline:
                 context,
                 runtime_state=runtime_state,
                 context_runtime=context_runtime,
+                preflight_result=preflight_result,
             )
         self.deps.logger.info(
             "signal_pipeline_decision "
@@ -109,24 +134,3 @@ class SignalPipeline:
             symbol=symbol,
             price=price,
         )
-
-    def preflight(self, context: SignalContext) -> bool:
-        if context.action == "sell" and not self.deps.has_open_position_db(context.symbol):
-            self.deps.log_rejection(
-                context.symbol,
-                context.action,
-                "ghost_sell",
-                "no open Alpaca position",
-                price=context.price,
-            )
-            if context.dedupe_key:
-                self.deps.mark_webhook_event_status(
-                    context.dedupe_key,
-                    "rejected",
-                    failure_reason=format_rejection_reason(
-                        "ghost_sell",
-                        "no open Alpaca position",
-                    ),
-                )
-            return True
-        return False

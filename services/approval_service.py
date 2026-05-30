@@ -45,6 +45,12 @@ class LegacyStageOutcome:
     metadata: dict[str, Any] = field(default_factory=dict)
 
 
+@dataclass(frozen=True)
+class LegacyRejectionAdapter:
+    reject_current_signal: Callable[..., bool]
+    reject_approval_decision: Callable[..., bool]
+
+
 def deterministic_rejection(
     *,
     category: str,
@@ -334,10 +340,6 @@ def run_legacy_claude_and_confidence(
         )
 
     if approval_decision.category:
-        log.warning(
-            f"{approval_decision.category} rejected {symbol} {action.upper()}: "
-            f"{approval_decision.reason}"
-        )
         return LegacyClaudeOutcome(rejected=True, approval=approval_decision)
 
     return LegacyClaudeOutcome(decision=decision)

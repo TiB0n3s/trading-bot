@@ -186,7 +186,7 @@ def run_legacy_approved_order_path(
     place_order: Callable[..., dict[str, Any] | None],
     execution_rejection_decision: Callable[[ExecutionOutcome], Any],
     deterministic_rejection: Callable[..., Any],
-    reject_approval_decision: Callable[..., Any],
+    rejection_adapter: Any,
     log_trade: Callable[..., Any],
     record_webhook_status: Callable[..., Any],
     write_cooldown: Callable[[str, str, Any], Any],
@@ -249,7 +249,9 @@ def run_legacy_approved_order_path(
             order_result = execution.order_result
 
             if execution.rejection_category:
-                reject_approval_decision(approval=execution_rejection_decision(execution))
+                rejection_adapter.reject_approval_decision(
+                    execution_rejection_decision(execution)
+                )
                 return True
 
             if order_result:
@@ -276,8 +278,8 @@ def run_legacy_approved_order_path(
             log.exception(
                 f"APPROVED ORDER PATH CRASHED for {symbol} {action.upper()}: {exc}"
             )
-            reject_approval_decision(
-                approval=deterministic_rejection(
+            rejection_adapter.reject_approval_decision(
+                deterministic_rejection(
                     category="order_path_exception",
                     reason=str(exc),
                     source="execution",

@@ -27,6 +27,7 @@ from services.policies import entry_policy, execution_policy, sizing_policy
 from services.policy_controls import public_policy_control_config
 from services.approval_service import (
     ApprovalDecision,
+    LegacyRejectionAdapter,
     deterministic_rejection,
     execution_rejection_decision,
     setup_policy_rejection,
@@ -528,24 +529,6 @@ def evaluate_prediction_gate(**kwargs):
     return entry_policy.evaluate_prediction_gate(**kwargs)
 
 WEBHOOK_SECRET = os.environ.get("WEBHOOK_SECRET", "changeme")
-
-def _reject_current_signal(category, reason, level="warning"):
-    if level == "error":
-        logger.error(f"{category} blocked {symbol} {action.upper()}: {reason}")
-    elif level == "info":
-        logger.info(f"{category} blocked {symbol} {action.upper()}: {reason}")
-    else:
-        logger.warning(f"{category} blocked {symbol} {action.upper()}: {reason}")
-
-    log_rejection(
-        symbol,
-        action,
-        category,
-        reason,
-        price=price,
-        account_state=account_state,
-    )
-    return True
 
 def _webhook_dedupe_key(symbol, action, price):
     """Build a loose duplicate key for near-identical TradingView alerts.
@@ -1988,6 +1971,41 @@ def _legacy_reject_approval_decision(
     )
 
 
+def _legacy_rejection_adapter(
+    *,
+    symbol: str,
+    action: str,
+    price,
+    account_state: dict,
+    dedupe_key: str | None,
+) -> LegacyRejectionAdapter:
+    return LegacyRejectionAdapter(
+        reject_current_signal=(
+            lambda category, reason, level="warning": _legacy_reject_current_signal(
+                symbol=symbol,
+                action=action,
+                price=price,
+                account_state=account_state,
+                dedupe_key=dedupe_key,
+                category=category,
+                reason=reason,
+                level=level,
+            ).rejected
+        ),
+        reject_approval_decision=(
+            lambda approval, level="warning": _legacy_reject_approval_decision(
+                symbol=symbol,
+                action=action,
+                price=price,
+                account_state=account_state,
+                dedupe_key=dedupe_key,
+                approval=approval,
+                level=level,
+            ).rejected
+        ),
+    )
+
+
 def _legacy_check_stale_signal(
     *,
     data: dict,
@@ -2351,7 +2369,7 @@ def _legacy_run_final_approval_gates(
     price,
     account_state: dict,
     context_runtime,
-    dedupe_key: str | None,
+    rejection_adapter: LegacyRejectionAdapter,
 ) -> _LegacyApprovalGateResult:
     outcome = run_legacy_final_approval_gates(
         signal=data,
@@ -2375,17 +2393,8 @@ def _legacy_run_final_approval_gates(
         log=logger,
     )
     if outcome.rejected and outcome.approval:
-        result = _legacy_reject_approval_decision(
-            symbol=symbol,
-            action=action,
-            price=price,
-            account_state=account_state,
-            dedupe_key=dedupe_key,
-            approval=outcome.approval,
-        )
         return _LegacyApprovalGateResult(
-            rejected=result.rejected,
-            response=result.response,
+            rejected=rejection_adapter.reject_approval_decision(outcome.approval),
             claude_account_state=outcome.claude_account_state,
         )
 
@@ -2402,6 +2411,7 @@ def _legacy_run_claude_and_confidence(
     price,
     account_state: dict,
     claude_account_state: dict,
+    rejection_adapter: LegacyRejectionAdapter,
 ) -> _LegacyClaudeStageResult:
     def _medium_confidence_override_adapter(*, decision, account_state):
         return _allow_medium_confidence_momentum_override(
@@ -2428,15 +2438,9 @@ def _legacy_run_claude_and_confidence(
         log=logger,
     )
     if outcome.rejected and outcome.approval:
-        log_rejection(
-            symbol,
-            action,
-            outcome.approval.category,
-            outcome.approval.reason,
-            price=price,
-            account_state=account_state,
+        return _LegacyClaudeStageResult(
+            rejected=rejection_adapter.reject_approval_decision(outcome.approval)
         )
-        return _LegacyClaudeStageResult(rejected=True)
 
     return _LegacyClaudeStageResult(decision=outcome.decision)
 
@@ -2451,6 +2455,7 @@ def _legacy_run_approved_order_path(
     dedupe_key: str | None,
     current_et,
     decision: dict,
+    rejection_adapter: LegacyRejectionAdapter,
 ) -> _LegacyStageResult:
     rejected = run_legacy_approved_order_path(
         signal=data,
@@ -2473,17 +2478,7 @@ def _legacy_run_approved_order_path(
         place_order=place_order,
         execution_rejection_decision=execution_rejection_decision,
         deterministic_rejection=deterministic_rejection,
-        reject_approval_decision=(
-            lambda approval, level="warning": _legacy_reject_approval_decision(
-                symbol=symbol,
-                action=action,
-                price=price,
-                account_state=account_state,
-                dedupe_key=dedupe_key,
-                approval=approval,
-                level=level,
-            )
-        ),
+        rejection_adapter=rejection_adapter,
         log_trade=log_trade,
         record_webhook_status=(
             lambda **kwargs: _trade_audit_recorder().record_webhook_status(**kwargs)
@@ -2569,7 +2564,7 @@ def _legacy_run_macro_position_gate(
     context_runtime,
     current_et,
     macro_risk: dict,
-    dedupe_key: str | None,
+    rejection_adapter: LegacyRejectionAdapter,
 ) -> _LegacyStageResult:
     outcome = run_legacy_macro_position_gate(
         symbol=symbol,
@@ -2591,15 +2586,9 @@ def _legacy_run_macro_position_gate(
         log=logger,
     )
     if outcome.rejected and outcome.approval:
-        result = _legacy_reject_approval_decision(
-            symbol=symbol,
-            action=action,
-            price=price,
-            account_state=account_state,
-            dedupe_key=dedupe_key,
-            approval=outcome.approval,
+        return _LegacyStageResult(
+            rejected=rejection_adapter.reject_approval_decision(outcome.approval)
         )
-        return _LegacyStageResult(rejected=result.rejected, response=result.response)
     return _LEGACY_STAGE_CONTINUE
 
 
@@ -2611,7 +2600,7 @@ def _legacy_run_trend_confirmation_gate(
     account_state: dict,
     context_runtime,
     current_et,
-    dedupe_key: str | None,
+    rejection_adapter: LegacyRejectionAdapter,
 ) -> _LegacyStageResult:
     outcome = run_legacy_trend_confirmation_gate(
         symbol=symbol,
@@ -2629,15 +2618,9 @@ def _legacy_run_trend_confirmation_gate(
         log=logger,
     )
     if outcome.rejected and outcome.approval:
-        result = _legacy_reject_approval_decision(
-            symbol=symbol,
-            action=action,
-            price=price,
-            account_state=account_state,
-            dedupe_key=dedupe_key,
-            approval=outcome.approval,
+        return _LegacyStageResult(
+            rejected=rejection_adapter.reject_approval_decision(outcome.approval)
         )
-        return _LegacyStageResult(rejected=result.rejected, response=result.response)
     return _LEGACY_STAGE_CONTINUE
 
 
@@ -2649,7 +2632,7 @@ def _legacy_run_entry_sanity_gates(
     account_state: dict,
     bias_entry: dict,
     existing_position,
-    dedupe_key: str | None,
+    rejection_adapter: LegacyRejectionAdapter,
 ) -> _LegacyStageResult:
     outcome = run_legacy_entry_sanity_gates(
         symbol=symbol,
@@ -2660,15 +2643,9 @@ def _legacy_run_entry_sanity_gates(
         apply_market_bias_context=context_builder_apply_market_bias_context,
     )
     if outcome.rejected and outcome.approval:
-        result = _legacy_reject_approval_decision(
-            symbol=symbol,
-            action=action,
-            price=price,
-            account_state=account_state,
-            dedupe_key=dedupe_key,
-            approval=outcome.approval,
+        return _LegacyStageResult(
+            rejected=rejection_adapter.reject_approval_decision(outcome.approval)
         )
-        return _LegacyStageResult(rejected=result.rejected, response=result.response)
     return _LEGACY_STAGE_CONTINUE
 
 
@@ -2679,7 +2656,7 @@ def _legacy_run_prediction_bias_session_gate(
     price,
     account_state: dict,
     context_runtime,
-    dedupe_key: str | None,
+    rejection_adapter: LegacyRejectionAdapter,
 ) -> _LegacyStageResult:
     outcome = run_legacy_prediction_bias_session_gate(
         symbol=symbol,
@@ -2706,15 +2683,9 @@ def _legacy_run_prediction_bias_session_gate(
         log=logger,
     )
     if outcome.rejected and outcome.approval:
-        result = _legacy_reject_approval_decision(
-            symbol=symbol,
-            action=action,
-            price=price,
-            account_state=account_state,
-            dedupe_key=dedupe_key,
-            approval=outcome.approval,
+        return _LegacyStageResult(
+            rejected=rejection_adapter.reject_approval_decision(outcome.approval)
         )
-        return _LegacyStageResult(rejected=result.rejected, response=result.response)
     return _LEGACY_STAGE_CONTINUE
 
 
@@ -2724,7 +2695,7 @@ def _legacy_run_intra_session_tape_degradation_gate(
     action: str,
     price,
     account_state: dict,
-    dedupe_key: str | None,
+    rejection_adapter: LegacyRejectionAdapter,
 ) -> _LegacyStageResult:
     outcome = run_legacy_intra_session_tape_degradation_gate(
         symbol=symbol,
@@ -2737,15 +2708,9 @@ def _legacy_run_intra_session_tape_degradation_gate(
         log=logger,
     )
     if outcome.rejected and outcome.approval:
-        result = _legacy_reject_approval_decision(
-            symbol=symbol,
-            action=action,
-            price=price,
-            account_state=account_state,
-            dedupe_key=dedupe_key,
-            approval=outcome.approval,
+        return _LegacyStageResult(
+            rejected=rejection_adapter.reject_approval_decision(outcome.approval)
         )
-        return _LegacyStageResult(rejected=result.rejected, response=result.response)
     return _LEGACY_STAGE_CONTINUE
 
 
@@ -2789,31 +2754,13 @@ def _legacy_process_signal_with_context(data, runtime_state, context_runtime, pr
     account_state = runtime_state.account_state
     built_context = context_runtime.built
     setup_obs = built_context.setup.data
-
-    def _reject_current_signal(category, reason, level="warning"):
-        result = _legacy_reject_current_signal(
-            symbol=symbol,
-            action=action,
-            price=price,
-            account_state=account_state,
-            dedupe_key=dedupe_key,
-            category=category,
-            reason=reason,
-            level=level,
-        )
-        return result.rejected
-
-    def _reject_approval_decision(approval: ApprovalDecision, level="warning"):
-        result = _legacy_reject_approval_decision(
-            symbol=symbol,
-            action=action,
-            price=price,
-            account_state=account_state,
-            dedupe_key=dedupe_key,
-            approval=approval,
-            level=level,
-        )
-        return result.rejected
+    rejection_adapter = _legacy_rejection_adapter(
+        symbol=symbol,
+        action=action,
+        price=price,
+        account_state=account_state,
+        dedupe_key=dedupe_key,
+    )
 
     stale_result = _legacy_check_stale_signal(
         data=data,
@@ -2888,7 +2835,7 @@ def _legacy_process_signal_with_context(data, runtime_state, context_runtime, pr
         context_runtime=context_runtime,
         current_et=current_et,
         macro_risk=macro_risk,
-        dedupe_key=dedupe_key,
+        rejection_adapter=rejection_adapter,
     )
     if macro_gate_result.rejected:
         return macro_gate_result.response
@@ -2900,7 +2847,7 @@ def _legacy_process_signal_with_context(data, runtime_state, context_runtime, pr
         account_state=account_state,
         context_runtime=context_runtime,
         current_et=current_et,
-        dedupe_key=dedupe_key,
+        rejection_adapter=rejection_adapter,
     )
     if trend_gate_result.rejected:
         return trend_gate_result.response
@@ -2913,7 +2860,7 @@ def _legacy_process_signal_with_context(data, runtime_state, context_runtime, pr
         account_state=account_state,
         bias_entry=bias_entry,
         existing_position=existing_position,
-        dedupe_key=dedupe_key,
+        rejection_adapter=rejection_adapter,
     )
     if entry_sanity_result.rejected:
         return entry_sanity_result.response
@@ -2933,7 +2880,10 @@ def _legacy_process_signal_with_context(data, runtime_state, context_runtime, pr
                     unrealized_pct,
                 )
                 if continuation_reason:
-                    if _reject_current_signal("sell_continuation_check", continuation_reason):
+                    if rejection_adapter.reject_current_signal(
+                        "sell_continuation_check",
+                        continuation_reason,
+                    ):
                         return
         except Exception as e:
             logger.warning(
@@ -2952,7 +2902,7 @@ def _legacy_process_signal_with_context(data, runtime_state, context_runtime, pr
         price=price,
         account_state=account_state,
         context_runtime=context_runtime,
-        dedupe_key=dedupe_key,
+        rejection_adapter=rejection_adapter,
     )
     if prediction_gate_result.rejected:
         return prediction_gate_result.response
@@ -2962,7 +2912,7 @@ def _legacy_process_signal_with_context(data, runtime_state, context_runtime, pr
         action=action,
         price=price,
         account_state=account_state,
-        dedupe_key=dedupe_key,
+        rejection_adapter=rejection_adapter,
     )
     if tape_degradation_result.rejected:
         return tape_degradation_result.response
@@ -2981,7 +2931,7 @@ def _legacy_process_signal_with_context(data, runtime_state, context_runtime, pr
         price=price,
         account_state=account_state,
         context_runtime=context_runtime,
-        dedupe_key=dedupe_key,
+        rejection_adapter=rejection_adapter,
     )
     if final_gate_result.rejected:
         return final_gate_result.response
@@ -2994,6 +2944,7 @@ def _legacy_process_signal_with_context(data, runtime_state, context_runtime, pr
         price=price,
         account_state=account_state,
         claude_account_state=claude_account_state,
+        rejection_adapter=rejection_adapter,
     )
     if claude_result.rejected:
         return claude_result.response
@@ -3007,6 +2958,7 @@ def _legacy_process_signal_with_context(data, runtime_state, context_runtime, pr
         dedupe_key=dedupe_key,
         current_et=current_et,
         decision=decision,
+        rejection_adapter=rejection_adapter,
     )
     if order_path_result.rejected:
         return order_path_result.response

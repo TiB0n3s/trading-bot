@@ -4,6 +4,7 @@ import json
 import logging
 import hashlib
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass
 from datetime import datetime, timezone, timedelta
 from zoneinfo import ZoneInfo
 import pytz
@@ -1904,95 +1905,216 @@ def _evaluate_preflight(runtime_state: SignalRuntimeState):
     return preflight.evaluate(runtime_state)
 
 
-def _legacy_process_signal(data, *, runtime_state=None, context_runtime=None, preflight_result=None):
-    if runtime_state is None or context_runtime is None:
-        symbol, action = normalize_signal_identity(data)
-        try:
-            price = float(data.get("price", 0))
-        except Exception:
-            price = data.get("price", 0)
-        normalized_signal = dict(data)
-        normalized_signal["symbol"] = symbol
-        normalized_signal["action"] = action
-        normalized_signal["price"] = price
-        signal_context = SignalContext(
-            raw_signal=normalized_signal,
-            dedupe_key=normalized_signal.get("_dedupe_key"),
-            action=action,
-            symbol=symbol,
-            price=price,
+@dataclass(frozen=True)
+class _LegacyStageResult:
+    rejected: bool = False
+    response: object | None = None
+
+
+_LEGACY_STAGE_CONTINUE = _LegacyStageResult()
+
+
+def _legacy_reject_current_signal(
+    *,
+    symbol: str,
+    action: str,
+    price,
+    account_state: dict,
+    dedupe_key: str | None,
+    category: str,
+    reason: str,
+    level: str = "warning",
+) -> _LegacyStageResult:
+    if level == "error":
+        logger.error(f"{category} blocked {symbol} {action.upper()}: {reason}")
+    elif level == "info":
+        logger.info(f"{category} blocked {symbol} {action.upper()}: {reason}")
+    else:
+        logger.warning(f"{category} blocked {symbol} {action.upper()}: {reason}")
+
+    log_rejection(
+        symbol,
+        action,
+        category,
+        reason,
+        price=price,
+        account_state=account_state,
+    )
+
+    if dedupe_key:
+        _trade_audit_recorder().record_webhook_status(
+            dedupe_key=dedupe_key,
+            status="rejected",
+            failure_reason=format_rejection_reason(category, reason),
         )
-        runtime_state = _build_runtime_state(signal_context)
-        context_runtime = _build_context_runtime(runtime_state)
-    if preflight_result is None:
-        preflight_result = _evaluate_preflight(runtime_state)
-    return _legacy_process_signal_with_context(
-        data,
-        runtime_state,
-        context_runtime,
-        preflight_result,
+
+    return _LegacyStageResult(rejected=True)
+
+
+def _legacy_reject_approval_decision(
+    *,
+    symbol: str,
+    action: str,
+    price,
+    account_state: dict,
+    dedupe_key: str | None,
+    approval: ApprovalDecision,
+    level: str = "warning",
+) -> _LegacyStageResult:
+    return _legacy_reject_current_signal(
+        symbol=symbol,
+        action=action,
+        price=price,
+        account_state=account_state,
+        dedupe_key=dedupe_key,
+        category=approval.category or "approval_rejection",
+        reason=approval.reason,
+        level=level,
     )
 
 
-def _legacy_process_signal_with_context(data, runtime_state, context_runtime, preflight_result):
-    dedupe_key = data.get("_dedupe_key")
-    ...
-    symbol = runtime_state.symbol
-    action = runtime_state.action
-    price = data.get("price", 0)
-    logger.info(f"Processing {action.upper()} signal for {symbol} at {price}")
-
-    account_state = runtime_state.account_state
-    built_context = context_runtime.built
-    setup_obs = built_context.setup.data
-
-    def _reject_current_signal(category, reason, level="warning"):
-        if level == "error":
-            logger.error(f"{category} blocked {symbol} {action.upper()}: {reason}")
-        elif level == "info":
-            logger.info(f"{category} blocked {symbol} {action.upper()}: {reason}")
-        else:
-            logger.warning(f"{category} blocked {symbol} {action.upper()}: {reason}")
-
-        log_rejection(
-            symbol,
-            action,
-            category,
-            reason,
-            price=price,
-            account_state=account_state,
-        )
-
-        if dedupe_key:
-            _trade_audit_recorder().record_webhook_status(
-                dedupe_key=dedupe_key,
-                status="rejected",
-                failure_reason=format_rejection_reason(category, reason),
-            )
-
-        return True
-
-    def _reject_approval_decision(approval: ApprovalDecision, level="warning"):
-        return _reject_current_signal(
-            approval.category or "approval_rejection",
-            approval.reason,
-            level=level,
-        )
-
+def _legacy_check_stale_signal(
+    *,
+    data: dict,
+    symbol: str,
+    action: str,
+    price,
+    account_state: dict,
+    dedupe_key: str | None,
+) -> _LegacyStageResult:
     is_stale, age_seconds, stale_reason = _is_signal_stale(data)
     if is_stale:
-        if _reject_approval_decision(
-            deterministic_rejection(
+        return _legacy_reject_approval_decision(
+            symbol=symbol,
+            action=action,
+            price=price,
+            account_state=account_state,
+            dedupe_key=dedupe_key,
+            approval=deterministic_rejection(
                 category="stale_signal",
                 reason=stale_reason,
                 metadata={"age_seconds": age_seconds},
-            )
-        ):
-            return
+            ),
+        )
 
     if age_seconds is not None:
         account_state["signal_age_seconds"] = round(age_seconds, 2)
 
+    return _LEGACY_STAGE_CONTINUE
+
+
+def _legacy_check_cash_safe_gates(
+    *,
+    symbol: str,
+    action: str,
+    price,
+    account_state: dict,
+    dedupe_key: str | None,
+) -> _LegacyStageResult:
+    if action != "buy" or not is_cash_safe_mode():
+        return _LEGACY_STAGE_CONTINUE
+
+    if symbol not in CASH_SAFE_SYMBOLS:
+        reason = f"{symbol} not allowed in cash_safe symbols {sorted(CASH_SAFE_SYMBOLS)}"
+        return _legacy_reject_approval_decision(
+            symbol=symbol,
+            action=action,
+            price=price,
+            account_state=account_state,
+            dedupe_key=dedupe_key,
+            approval=deterministic_rejection(
+                category="cash_safe_symbol",
+                reason=reason,
+                metadata={"cash_safe_symbols": sorted(CASH_SAFE_SYMBOLS)},
+            ),
+        )
+
+    open_count = account_state.get("open_position_count", 0)
+    if open_count >= CASH_SAFE_MAX_OPEN_POSITIONS:
+        reason = (
+            f"open_position_count={open_count} >= cash_safe max "
+            f"{CASH_SAFE_MAX_OPEN_POSITIONS}"
+        )
+        return _legacy_reject_approval_decision(
+            symbol=symbol,
+            action=action,
+            price=price,
+            account_state=account_state,
+            dedupe_key=dedupe_key,
+            approval=deterministic_rejection(
+                category="cash_safe_position_limit",
+                reason=reason,
+                metadata={
+                    "open_position_count": open_count,
+                    "max_open_positions": CASH_SAFE_MAX_OPEN_POSITIONS,
+                },
+            ),
+        )
+
+    try:
+        buys_today = trades_repo.cash_safe_buys_today(symbol)
+    except Exception as e:
+        logger.error(f"Cash-safe daily buy check failed for {symbol}: {e}")
+        buys_today = 999
+
+    if buys_today >= CASH_SAFE_MAX_NEW_BUYS_PER_SYMBOL_PER_DAY:
+        reason = (
+            f"buys_today={buys_today} >= cash_safe per-symbol daily max "
+            f"{CASH_SAFE_MAX_NEW_BUYS_PER_SYMBOL_PER_DAY}"
+        )
+        return _legacy_reject_approval_decision(
+            symbol=symbol,
+            action=action,
+            price=price,
+            account_state=account_state,
+            dedupe_key=dedupe_key,
+            approval=deterministic_rejection(
+                category="cash_safe_daily_symbol_limit",
+                reason=reason,
+                metadata={
+                    "buys_today": buys_today,
+                    "max_buys_per_symbol": CASH_SAFE_MAX_NEW_BUYS_PER_SYMBOL_PER_DAY,
+                },
+            ),
+        )
+
+    return _LEGACY_STAGE_CONTINUE
+
+
+def _legacy_check_symbol_override(
+    *,
+    symbol: str,
+    action: str,
+    price,
+    account_state: dict,
+    dedupe_key: str | None,
+) -> _LegacyStageResult:
+    override_reason = _symbol_override_block(symbol, action)
+    if not override_reason:
+        return _LEGACY_STAGE_CONTINUE
+
+    return _legacy_reject_approval_decision(
+        symbol=symbol,
+        action=action,
+        price=price,
+        account_state=account_state,
+        dedupe_key=dedupe_key,
+        approval=deterministic_rejection(
+            category="symbol_override",
+            reason=override_reason,
+        ),
+    )
+
+
+def _legacy_apply_setup_stage(
+    *,
+    symbol: str,
+    action: str,
+    price,
+    account_state: dict,
+    dedupe_key: str | None,
+    setup_obs: dict,
+) -> _LegacyStageResult:
     if (
         action == "buy"
         and ENFORCE_SETUP_POLICY_BLOCKS
@@ -2041,81 +2163,62 @@ def _legacy_process_signal_with_context(data, runtime_state, context_runtime, pr
                 f"{account_state['setup_policy_override']['reason']}"
             )
         else:
-            if _reject_approval_decision(
-                setup_policy_rejection(
+            return _legacy_reject_approval_decision(
+                symbol=symbol,
+                action=action,
+                price=price,
+                account_state=account_state,
+                dedupe_key=dedupe_key,
+                approval=setup_policy_rejection(
                     reason,
                     metadata={"setup_label": setup_label},
-                )
-            ):
-                return
+                ),
+            )
 
-    # Degraded-setup size cap: when build_snapshot() fails entirely the bot has
-    # no setup label, no score, and no classification data.  Unknown setups have
-    # historically lost at a higher rate, so cap position size materially rather
-    # than letting Claude assign a full-size buy on missing data.
-    #
-    # Strong-context exception: confirmed or developing bullish trend allows 1.0%
-    # cap instead of 0.75%, letting the trade proceed at a reduced but not
-    # minimal size if the trend context is positive.
-    #
-    # Bad-context examples that do NOT qualify: neutral trend, non-bullish, missing data.
     if action == "buy" and setup_obs.get("setup_policy_action") == "error":
-        _deg_trend = _trend_table.get(symbol) or {}
-        _deg_trend_dir = _deg_trend.get("direction")
-        _deg_trend_str = _deg_trend.get("strength")
-        _has_strong_context = (
-            _deg_trend_dir == "bullish"
-            and _deg_trend_str in ("confirmed", "developing")
+        deg_trend = _trend_table.get(symbol) or {}
+        deg_trend_dir = deg_trend.get("direction")
+        deg_trend_str = deg_trend.get("strength")
+        has_strong_context = (
+            deg_trend_dir == "bullish"
+            and deg_trend_str in ("confirmed", "developing")
         )
-        _deg_cap = 1.0 if _has_strong_context else 0.75
+        deg_cap = 1.0 if has_strong_context else 0.75
         apply_size_cap(
             account_state,
-            cap_pct=_deg_cap,
+            cap_pct=deg_cap,
             state_key="setup_degraded",
             payload={
                 "reason": setup_obs.get("setup_unknown_reason") or "build_snapshot_failed",
-                "size_cap_pct": _deg_cap,
-                "has_strong_context": _has_strong_context,
-                "trend_direction": _deg_trend_dir,
-                "trend_strength": _deg_trend_str,
+                "size_cap_pct": deg_cap,
+                "has_strong_context": has_strong_context,
+                "trend_direction": deg_trend_dir,
+                "trend_strength": deg_trend_str,
             },
         )
         logger.warning(
-            f"Degraded setup (error) for {symbol}: size capped at {_deg_cap}%, "
-            f"strong_context={_has_strong_context} "
-            f"({_deg_trend_dir}/{_deg_trend_str}), "
+            f"Degraded setup (error) for {symbol}: size capped at {deg_cap}%, "
+            f"strong_context={has_strong_context} "
+            f"({deg_trend_dir}/{deg_trend_str}), "
             f"reason={setup_obs.get('setup_unknown_reason')}"
         )
 
-    # Unrecognized label cap: taxonomy drift (new or misspelled setup_label) currently
-    # passes as "neutral" action but represents unknown territory.  Apply a mild size
-    # reduction so it behaves like degraded-lite rather than a known-good neutral setup.
     if action == "buy" and is_unrecognized_setup_label(setup_obs):
-        _unrecog_cap = _env_float("UNRECOGNIZED_LABEL_SIZE_CAP_PCT", 0.85)
+        unrecog_cap = _env_float("UNRECOGNIZED_LABEL_SIZE_CAP_PCT", 0.85)
         apply_size_cap(
             account_state,
-            cap_pct=_unrecog_cap,
+            cap_pct=unrecog_cap,
             state_key="unrecognized_label_cap",
             payload={
                 "setup_unknown_reason": setup_obs.get("setup_unknown_reason"),
-                "cap_pct": _unrecog_cap,
+                "cap_pct": unrecog_cap,
             },
         )
         logger.warning(
             f"Unrecognized setup label size cap for {symbol}: "
-            f"{setup_obs.get('setup_unknown_reason')} → {_unrecog_cap}%"
+            f"{setup_obs.get('setup_unknown_reason')} → {unrecog_cap}%"
         )
 
-    # Late rollover entry gate:
-    # Blocks GEV-style late buys where price has already run, is extended
-    # above VWAP, and intermediate session momentum is rolling over.
-    #
-    # Example blocked pattern:
-    # setup_label=late_strength_near_vwap_risk
-    # session_return_pct > 1.5
-    # session_distance_from_vwap_pct > 1.0
-    # session_momentum_15m_pct < 0
-    # session_momentum_30m_pct < 0
     if action == "buy":
         setup_label = setup_obs.get("setup_label") or ""
 
@@ -2138,18 +2241,16 @@ def _legacy_process_signal_with_context(data, runtime_state, context_runtime, pr
                 f"15m={session_m15_pct:.3f}%, "
                 f"30m={session_m30_pct:.3f}%"
             )
-            if _reject_current_signal("late_rollover_entry", reason):
-                return
+            return _legacy_reject_current_signal(
+                symbol=symbol,
+                action=action,
+                price=price,
+                account_state=account_state,
+                dedupe_key=dedupe_key,
+                category="late_rollover_entry",
+                reason=reason,
+            )
 
-    # Late-after-quote-delay gate:
-    # If repeated second-look quote-quality checks blocked earlier entries,
-    # avoid finally buying later when the clean part of the move may be gone.
-    #
-    # This targets LMT-style entries:
-    # - multiple earlier second-look spread blocks
-    # - current setup is weaker / transitional
-    # - session has already moved meaningfully
-    # - prediction is watch/neutral rather than a clean pass
     if action == "buy":
         second_look_blocks = _count_second_look_blocks_today(symbol)
         setup_label = setup_obs.get("setup_label") or ""
@@ -2179,84 +2280,141 @@ def _legacy_process_signal_with_context(data, runtime_state, context_runtime, pr
                 f"session_score={session_score:.1f}, "
                 f"session_return={session_return_pct:.3f}%"
             )
-            if _reject_current_signal("late_after_quote_delay", reason):
-                return
-
-    if action == "buy" and is_cash_safe_mode():
-        if symbol not in CASH_SAFE_SYMBOLS:
-            reason = f"{symbol} not allowed in cash_safe symbols {sorted(CASH_SAFE_SYMBOLS)}"
-            if _reject_approval_decision(
-                deterministic_rejection(
-                    category="cash_safe_symbol",
-                    reason=reason,
-                    metadata={"cash_safe_symbols": sorted(CASH_SAFE_SYMBOLS)},
-                )
-            ):
-                return
-
-        open_count = account_state.get("open_position_count", 0)
-        if open_count >= CASH_SAFE_MAX_OPEN_POSITIONS:
-            reason = (
-                f"open_position_count={open_count} >= cash_safe max "
-                f"{CASH_SAFE_MAX_OPEN_POSITIONS}"
+            return _legacy_reject_current_signal(
+                symbol=symbol,
+                action=action,
+                price=price,
+                account_state=account_state,
+                dedupe_key=dedupe_key,
+                category="late_after_quote_delay",
+                reason=reason,
             )
-            if _reject_approval_decision(
-                deterministic_rejection(
-                    category="cash_safe_position_limit",
-                    reason=reason,
-                    metadata={
-                        "open_position_count": open_count,
-                        "max_open_positions": CASH_SAFE_MAX_OPEN_POSITIONS,
-                    },
-                )
-            ):
-                return
 
-        try:
-            buys_today = trades_repo.cash_safe_buys_today(symbol)
-        except Exception as e:
-            logger.error(f"Cash-safe daily buy check failed for {symbol}: {e}")
-            buys_today = 999
+    return _LEGACY_STAGE_CONTINUE
 
-        if buys_today >= CASH_SAFE_MAX_NEW_BUYS_PER_SYMBOL_PER_DAY:
-            reason = (
-                f"buys_today={buys_today} >= cash_safe per-symbol daily max "
-                f"{CASH_SAFE_MAX_NEW_BUYS_PER_SYMBOL_PER_DAY}"
-            )
-            if _reject_approval_decision(
-                deterministic_rejection(
-                    category="cash_safe_daily_symbol_limit",
-                    reason=reason,
-                    metadata={
-                        "buys_today": buys_today,
-                        "max_buys_per_symbol": CASH_SAFE_MAX_NEW_BUYS_PER_SYMBOL_PER_DAY,
-                    },
-                )
-            ):
-                return
 
-    # Operator symbol overrides: quick no-code control during live sessions.
-    override_reason = _symbol_override_block(symbol, action)
-    if override_reason:
-        if _reject_approval_decision(
-            deterministic_rejection(
-                category="symbol_override",
-                reason=override_reason,
-            )
-        ):
-            return
-
-    # Update trend table with this incoming signal before any pre-checks
-    # (Stage C: refresh from trades.db first so all workers see the same history)
-    _now_ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+def _legacy_update_trend_history(symbol: str, action: str) -> None:
+    # Stage C: refresh from trades.db first so all workers see the same history.
+    now_ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     _refresh_signal_history(symbol)
     _signal_history.setdefault(symbol, []).insert(0, action)
     _signal_history[symbol] = _signal_history[symbol][:10]
-    _trend_table[symbol] = {**_compute_trend(_signal_history[symbol]), "last_time": _now_ts}
+    _trend_table[symbol] = {**_compute_trend(_signal_history[symbol]), "last_time": now_ts}
     logger.debug(
         f"Trend history update for {symbol}: history={_signal_history[symbol]} "
         f"trend={_trend_table[symbol]}"
     )
+
+
+def _legacy_process_signal(data, *, runtime_state=None, context_runtime=None, preflight_result=None):
+    if runtime_state is None or context_runtime is None:
+        symbol, action = normalize_signal_identity(data)
+        try:
+            price = float(data.get("price", 0))
+        except Exception:
+            price = data.get("price", 0)
+        normalized_signal = dict(data)
+        normalized_signal["symbol"] = symbol
+        normalized_signal["action"] = action
+        normalized_signal["price"] = price
+        signal_context = SignalContext(
+            raw_signal=normalized_signal,
+            dedupe_key=normalized_signal.get("_dedupe_key"),
+            action=action,
+            symbol=symbol,
+            price=price,
+        )
+        runtime_state = _build_runtime_state(signal_context)
+        context_runtime = _build_context_runtime(runtime_state)
+    if preflight_result is None:
+        preflight_result = _evaluate_preflight(runtime_state)
+    return _legacy_process_signal_with_context(
+        data,
+        runtime_state,
+        context_runtime,
+        preflight_result,
+    )
+
+
+def _legacy_process_signal_with_context(data, runtime_state, context_runtime, preflight_result):
+    dedupe_key = data.get("_dedupe_key")
+    symbol = runtime_state.symbol
+    action = runtime_state.action
+    price = data.get("price", 0)
+    logger.info(f"Processing {action.upper()} signal for {symbol} at {price}")
+
+    account_state = runtime_state.account_state
+    built_context = context_runtime.built
+    setup_obs = built_context.setup.data
+
+    def _reject_current_signal(category, reason, level="warning"):
+        result = _legacy_reject_current_signal(
+            symbol=symbol,
+            action=action,
+            price=price,
+            account_state=account_state,
+            dedupe_key=dedupe_key,
+            category=category,
+            reason=reason,
+            level=level,
+        )
+        return result.rejected
+
+    def _reject_approval_decision(approval: ApprovalDecision, level="warning"):
+        result = _legacy_reject_approval_decision(
+            symbol=symbol,
+            action=action,
+            price=price,
+            account_state=account_state,
+            dedupe_key=dedupe_key,
+            approval=approval,
+            level=level,
+        )
+        return result.rejected
+
+    stale_result = _legacy_check_stale_signal(
+        data=data,
+        symbol=symbol,
+        action=action,
+        price=price,
+        account_state=account_state,
+        dedupe_key=dedupe_key,
+    )
+    if stale_result.rejected:
+        return stale_result.response
+
+    setup_stage_result = _legacy_apply_setup_stage(
+        symbol=symbol,
+        action=action,
+        price=price,
+        account_state=account_state,
+        dedupe_key=dedupe_key,
+        setup_obs=setup_obs,
+    )
+    if setup_stage_result.rejected:
+        return setup_stage_result.response
+
+    cash_safe_result = _legacy_check_cash_safe_gates(
+        symbol=symbol,
+        action=action,
+        price=price,
+        account_state=account_state,
+        dedupe_key=dedupe_key,
+    )
+    if cash_safe_result.rejected:
+        return cash_safe_result.response
+
+    symbol_override_result = _legacy_check_symbol_override(
+        symbol=symbol,
+        action=action,
+        price=price,
+        account_state=account_state,
+        dedupe_key=dedupe_key,
+    )
+    if symbol_override_result.rejected:
+        return symbol_override_result.response
+
+    _legacy_update_trend_history(symbol, action)
 
     current_et = preflight_result.metadata.get("current_et") or now_et()
     existing_position = preflight_result.metadata.get("existing_position")

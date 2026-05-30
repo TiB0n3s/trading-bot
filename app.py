@@ -19,7 +19,7 @@ from services.positions_service import build_positions_payload
 from services.debug_symbol_service import build_debug_symbol_payload
 from services import dedupe_service
 from services.observability import metrics_snapshot
-from services.policies import entry_policy, execution_policy, sizing_policy
+from services.policies import entry_policy, sizing_policy
 from services.policy_controls import public_policy_control_config
 from services.context_builder import (
     ContextAssemblyDeps,
@@ -40,6 +40,7 @@ from services.symbol_override_service import SymbolOverrideService
 from services.trend_state_service import TrendStateService
 from services.momentum_service import MomentumService
 from services.execution_adapters import ExecutionAdapterService
+from services.portfolio_rotation_service import PortfolioRotationService
 from services import trade_audit_service
 from services.setup_context_service import (
     SetupContextDeps,
@@ -1049,200 +1050,39 @@ PORTFOLIO_ROTATION_ALLOWED_ENTRY_QUALITIES = {
     if s.strip()
 }
 
-
-
-def _portfolio_rotation_count_today():
-    try:
-        return trades_repo.portfolio_rotation_count_today()
-    except Exception as e:
-        logger.error(f"_portfolio_rotation_count_today failed: {e}")
-        return 999
-
-
-def _rotation_candidate_score(symbol, account_state):
-    """Score a capped BUY candidate for portfolio rotation without calling Claude."""
-    score = 0
-    reasons = []
-
-    trend = _trend_table.get(symbol) or {}
-    direction = trend.get("direction")
-    strength = trend.get("strength")
-
-    if direction == "bullish" and strength == "confirmed":
-        score += 8
-        reasons.append("bullish/confirmed")
-    elif direction == "bullish" and strength == "developing":
-        score += 6
-        reasons.append("bullish/developing")
-    else:
-        return 0, f"trend not eligible ({direction}/{strength})"
-
-    bias = _market_bias.get(symbol) or {}
-    market_bias = bias.get("bias")
-    risk_level = (bias.get("risk_level") or "medium").lower()
-    entry_quality = (bias.get("entry_quality") or "").lower()
-
-    if market_bias == "avoid":
-        return 0, "market_bias=avoid"
-
-    if market_bias == "buy":
-        score += 3
-        reasons.append("buy bias")
-    elif market_bias == "neutral":
-        score += 1
-        reasons.append("neutral bias")
-
-    if risk_level not in PORTFOLIO_ROTATION_ALLOWED_RISK_LEVELS:
-        return 0, f"risk_level={risk_level} not allowed"
-    score += 2
-    reasons.append(f"risk={risk_level}")
-
-    if entry_quality not in PORTFOLIO_ROTATION_ALLOWED_ENTRY_QUALITIES:
-        return 0, f"entry_quality={entry_quality or 'missing'} not allowed"
-    score += 3
-    reasons.append(f"entry={entry_quality}")
-
-    momentum = account_state.get("momentum") or {}
-    if momentum.get("direction") == "rising":
-        score += 2
-        reasons.append("rising momentum")
-    elif momentum.get("direction") == "falling":
-        score -= 2
-        reasons.append("falling momentum")
-
-    return score, ", ".join(reasons)
-
-
-def _weakest_rotation_holding(candidate_symbol):
-    """Return the weakest replaceable Alpaca long position, or None."""
-    try:
-        positions = broker_service.list_positions()
-    except Exception as e:
-        logger.error(f"_weakest_rotation_holding failed to fetch positions: {e}")
-        return None
-
-    candidates = []
-
-    for pos in positions:
-        try:
-            sym = str(pos.symbol).upper()
-
-            if sym == candidate_symbol:
-                continue
-
-            if sym in PORTFOLIO_ROTATION_EXCLUDED_SYMBOLS:
-                continue
-
-            qty = float(pos.qty)
-            if qty <= 0:
-                continue
-
-            plpc = float(pos.unrealized_plpc) * 100.0
-            current_price = float(pos.current_price)
-
-            entry_ctx = _open_entry_context(sym) or {}
-            holding_minutes = entry_ctx.get("holding_minutes")
-
-            if holding_minutes is not None and holding_minutes < PORTFOLIO_ROTATION_MIN_HOLD_MINUTES:
-                continue
-
-            if plpc > PORTFOLIO_ROTATION_MAX_WEAK_PLPC:
-                continue
-
-            trend = _trend_table.get(sym) or {}
-
-            candidates.append({
-                "symbol": sym,
-                "qty": qty,
-                "current_price": current_price,
-                "unrealized_plpc": round(plpc, 3),
-                "trend_direction": trend.get("direction"),
-                "trend_strength": trend.get("strength"),
-                "holding_minutes": holding_minutes,
-            })
-        except Exception as e:
-            logger.warning(f"_weakest_rotation_holding skipped a position: {e}")
-
-    if not candidates:
-        return None
-
-    return sorted(
-        candidates,
-        key=lambda x: (
-            x["unrealized_plpc"],
-            x["holding_minutes"] if x["holding_minutes"] is not None else 999999,
+_portfolio_rotation_service = PortfolioRotationService(
+    broker_service=broker_service,
+    trades_repo=trades_repo,
+    trend_table=_trend_table,
+    market_bias=_market_bias,
+    open_entry_context=_open_entry_context,
+    log_trade=(
+        lambda signal, decision, order, account_state=None: _trade_audit_recorder().record_execution(
+            signal=signal,
+            decision=decision,
+            order=order,
+            account_state=account_state,
         )
-    )[0]
-
-
-def _try_portfolio_rotation(candidate_symbol, candidate_price, account_state, now_dt):
-    return execution_policy.try_portfolio_rotation(
-        candidate_symbol=candidate_symbol,
-        candidate_price=candidate_price,
-        account_state=account_state,
-        now_dt=now_dt,
-        enabled=PORTFOLIO_ROTATION_ENABLED,
-        max_per_day=PORTFOLIO_ROTATION_MAX_PER_DAY,
-        min_candidate_score=PORTFOLIO_ROTATION_MIN_CANDIDATE_SCORE,
-        rotation_count_today=_portfolio_rotation_count_today,
-        rotation_candidate_score=_rotation_candidate_score,
-        weakest_rotation_holding=_weakest_rotation_holding,
-        place_order=broker_service.place_order,
-        log_trade=(
-            lambda signal, decision, order, account_state=None: _trade_audit_recorder().record_execution(
-                signal=signal,
-                decision=decision,
-                order=order,
-                account_state=account_state,
-            )
-        ),
-        last_order=_last_order,
-        write_cooldown=_write_cooldown,
-        last_sell=_last_sell,
-        write_recent_sell=_write_recent_sell,
-        logger=logger,
-    )
-
-def _get_weakest_position_context(account_state):
-    """
-    Observe-only helper.
-
-    Finds the weakest currently held position using available account_state
-    position data. This does not trade. It only enriches macro position limit
-    rejection reasons so we can evaluate future replacement logic.
-    """
-    positions = account_state.get("open_positions") or account_state.get("positions") or []
-
-    weakest = None
-
-    for p in positions:
-        try:
-            symbol = p.get("symbol")
-            unrealized_plpc = float(
-                p.get("unrealized_plpc")
-                or p.get("unrealized_pl_pct")
-                or p.get("unrealized_plpc_pct")
-                or 0
-            )
-            market_value = float(p.get("market_value") or 0)
-
-            # Lower score is worse. We heavily penalize red positions.
-            weakness_score = unrealized_plpc
-
-            item = {
-                "symbol": symbol,
-                "unrealized_plpc": unrealized_plpc,
-                "market_value": market_value,
-                "weakness_score": weakness_score,
-            }
-
-            if weakest is None or weakness_score < weakest["weakness_score"]:
-                weakest = item
-
-        except Exception:
-            continue
-
-    return weakest
+    ),
+    last_order=_last_order,
+    write_cooldown=_write_cooldown,
+    last_sell=_last_sell,
+    write_recent_sell=_write_recent_sell,
+    enabled=PORTFOLIO_ROTATION_ENABLED,
+    max_per_day=PORTFOLIO_ROTATION_MAX_PER_DAY,
+    min_candidate_score=PORTFOLIO_ROTATION_MIN_CANDIDATE_SCORE,
+    min_hold_minutes=PORTFOLIO_ROTATION_MIN_HOLD_MINUTES,
+    max_weak_plpc=PORTFOLIO_ROTATION_MAX_WEAK_PLPC,
+    excluded_symbols=PORTFOLIO_ROTATION_EXCLUDED_SYMBOLS,
+    allowed_risk_levels=PORTFOLIO_ROTATION_ALLOWED_RISK_LEVELS,
+    allowed_entry_qualities=PORTFOLIO_ROTATION_ALLOWED_ENTRY_QUALITIES,
+    log=logger,
+)
+_portfolio_rotation_count_today = _portfolio_rotation_service.count_today
+_rotation_candidate_score = _portfolio_rotation_service.candidate_score
+_weakest_rotation_holding = _portfolio_rotation_service.weakest_rotation_holding
+_try_portfolio_rotation = _portfolio_rotation_service.try_rotation
+_get_weakest_position_context = _portfolio_rotation_service.weakest_position_context
 
 def _count_second_look_blocks_today(symbol):
     try:

@@ -41,6 +41,26 @@ class _StrategyResult:
         }
 
 
+def _process_live(raw_signal):
+    """Exercise LiveSignalProcessor.process directly, after normalizing inputs."""
+    pipeline = _app._build_signal_pipeline()
+    context = pipeline.normalize(raw_signal)
+    runtime_state = pipeline.deps.build_runtime_state(context)
+    context_runtime = pipeline.deps.build_context_runtime(runtime_state)
+    preflight_result = pipeline.deps.evaluate_preflight(runtime_state)
+    if not preflight_result.allowed:
+        raise AssertionError(
+            "test fixture hit preflight before LiveSignalProcessor: "
+            f"{preflight_result.rejection_category} {preflight_result.rejection_reason}"
+        )
+    return pipeline.deps.live_signal_processor.process(
+        context,
+        runtime_state,
+        context_runtime,
+        preflight_result,
+    )
+
+
 def _approved_downstream(**overrides):
     base = {
         "app.get_mock_account_state": MagicMock(return_value=_account(open_position_count=0)),
@@ -86,12 +106,26 @@ def test_successful_approved_buy_submits_order_and_logs_trade():
             "app._write_cooldown": write_cooldown,
         }
     )):
-        _app.process_signal(_buy(_dedupe_key="buy-ok"))
+        _process_live(_buy(_dedupe_key="buy-ok"))
 
     assert_true(place_order.called, "broker order submitted")
     assert_true(write_cooldown.called, "cooldown written")
     assert_true(log_trade.called, "trade logged")
     assert_equal(log_trade.call_args.kwargs["decision"]["approved"], True, "logged approval")
+
+
+def test_stale_signal_rejection_stops_before_approval():
+    evaluate_signal = MagicMock()
+    with _Env(**_approved_downstream(
+        **{
+            "app._is_signal_stale": MagicMock(return_value=(True, 999.0, "too old")),
+            "app.evaluate_signal": evaluate_signal,
+        }
+    )) as env:
+        _process_live(_buy())
+
+    assert_equal(env.rejection_category(), "stale_signal", "category")
+    assert_true(not evaluate_signal.called, "approval not called")
 
 
 def test_second_look_rejection_blocks_order_submission():
@@ -103,7 +137,7 @@ def test_second_look_rejection_blocks_order_submission():
             "app.broker_service.place_order": place_order,
         }
     )) as env:
-        _app.process_signal(_buy(_dedupe_key="second-look"))
+        _process_live(_buy(_dedupe_key="second-look"))
 
     assert_equal(env.rejection_category(), "second_look", "category")
     assert_true(not place_order.called, "broker order not submitted")
@@ -120,7 +154,7 @@ def test_broker_order_failure_marks_decision_unapproved_and_submit_failed():
             "services.trade_audit_service.TradeAuditService.record_webhook_status": mark_status,
         }
     )):
-        _app.process_signal(_buy(_dedupe_key="broker-fail"))
+        _process_live(_buy(_dedupe_key="broker-fail"))
 
     assert_true(log_trade.called, "failed order still logged")
     assert_equal(log_trade.call_args.kwargs["decision"]["approved"], False, "decision flipped")
@@ -141,7 +175,7 @@ def test_claude_low_confidence_rejection_never_submits_order():
             "app.broker_service.place_order": place_order,
         }
     )) as env:
-        _app.process_signal(_buy())
+        _process_live(_buy())
 
     assert_equal(env.rejection_category(), "confidence_gate", "category")
     assert_true(not place_order.called, "broker order not submitted")
@@ -174,7 +208,7 @@ def test_weak_prediction_degraded_setup_sets_heavy_size_cap_before_claude():
             "app.evaluate_signal": MagicMock(side_effect=_capture_decision),
         }
     )):
-        _app.process_signal(_buy())
+        _process_live(_buy())
 
     assert_equal(captured["weak_prediction_setup_gate"]["triggered"], True, "weak gate")
     assert_equal(captured["max_position_size_pct_override"], 0.5, "size cap")
@@ -199,7 +233,7 @@ def test_unrecognized_setup_label_sets_size_cap_before_claude():
             "app.evaluate_signal": MagicMock(side_effect=_capture_decision),
         }
     )):
-        _app.process_signal(_buy())
+        _process_live(_buy())
 
     assert_equal(captured["unrecognized_label_cap"]["cap_pct"], 0.85, "unrecognized cap")
     assert_equal(captured["max_position_size_pct_override"], 0.85, "size cap")
@@ -218,7 +252,7 @@ def test_session_hard_negative_rejection_when_enforced():
                 ),
             }
         )) as env:
-            _app.process_signal(_buy())
+            _process_live(_buy())
 
     assert_equal(env.rejection_category(), "session_momentum_gate", "category")
 
@@ -236,7 +270,7 @@ def test_strategy_weak_score_sets_size_cap_before_claude():
             "app.evaluate_signal": MagicMock(side_effect=_capture_decision),
         }
     )):
-        _app.process_signal(_buy())
+        _process_live(_buy())
 
     assert_equal(captured["strategy_score_size_cap"]["cap_pct"], 0.70, "strategy weak cap")
 
@@ -267,7 +301,7 @@ def test_buy_opportunity_cap_reduces_submitted_size():
             "app.broker_service.place_order": place_order,
         }
     )):
-        _app.process_signal(_buy())
+        _process_live(_buy())
 
     assert_equal(place_order.call_args.kwargs["position_size_pct"], 1.0, "watch cap")
 
@@ -307,7 +341,7 @@ def test_successful_approved_sell_submits_order_and_records_recent_sell():
                 "app._write_recent_sell": write_recent_sell,
             }
         )):
-            _app.process_signal(_sell())
+            _process_live(_sell())
 
     assert_true(place_order.called, "sell order submitted")
     assert_true(write_recent_sell.called, "recent sell written")
@@ -333,7 +367,7 @@ def test_portfolio_rotation_path_continues_after_slot_freed():
                 "app.evaluate_signal": MagicMock(return_value={"approved": False, "confidence": "medium", "reason": "stop"}),
             }
         )) as env:
-            _app.process_signal(_buy())
+            _process_live(_buy())
 
     assert_true(not env.rejected(), "rotation path did not reject at macro limit")
 
@@ -341,6 +375,7 @@ def test_portfolio_rotation_path_continues_after_slot_freed():
 def main():
     tests = [
         test_successful_approved_buy_submits_order_and_logs_trade,
+        test_stale_signal_rejection_stops_before_approval,
         test_second_look_rejection_blocks_order_submission,
         test_broker_order_failure_marks_decision_unapproved_and_submit_failed,
         test_claude_low_confidence_rejection_never_submits_order,

@@ -48,7 +48,7 @@ from services.preflight_service import (
 from services.sizing_service import apply_final_sizing, apply_size_cap, build_conviction_stack
 from services.execution_service import execute_order
 from services.signal_pipeline import SignalPipelineDeps
-from services.signal_models import SignalRuntimeState
+from services.signal_models import SignalContext, SignalRuntimeState
 from services import trend_context_service
 from services import trade_audit_service
 from services.setup_context_service import (
@@ -1867,27 +1867,56 @@ def _adaptive_churn_reentry_allowed(symbol, signal_price, last_sell_price, accou
     )
 
 
-def _legacy_process_signal(data):
-    dedupe_key = data.get("_dedupe_key")
-    ...
+def _build_runtime_state(signal_context: SignalContext) -> SignalRuntimeState:
     _load_market_context()
-    symbol, action = normalize_signal_identity(data)
-    price = data.get("price", 0)
-    logger.info(f"Processing {action.upper()} signal for {symbol} at {price}")
-
-    account_state = get_mock_account_state()
-    runtime_state = SignalRuntimeState(
-        raw_signal=data,
-        symbol=symbol,
-        action=action,
+    return SignalRuntimeState(
+        raw_signal=signal_context.raw_signal,
+        symbol=signal_context.symbol,
+        action=signal_context.action,
         received_at=datetime.now(timezone.utc),
-        account_state=account_state,
+        account_state=get_mock_account_state(),
     )
 
-    context_runtime = build_legacy_signal_context(
+
+def _build_context_runtime(runtime_state: SignalRuntimeState):
+    return build_legacy_signal_context(
         runtime_state,
         _context_assembly_deps(),
     )
+
+
+def _legacy_process_signal(data, *, runtime_state=None, context_runtime=None):
+    if runtime_state is None or context_runtime is None:
+        symbol, action = normalize_signal_identity(data)
+        try:
+            price = float(data.get("price", 0))
+        except Exception:
+            price = data.get("price", 0)
+        normalized_signal = dict(data)
+        normalized_signal["symbol"] = symbol
+        normalized_signal["action"] = action
+        normalized_signal["price"] = price
+        signal_context = SignalContext(
+            raw_signal=normalized_signal,
+            dedupe_key=normalized_signal.get("_dedupe_key"),
+            action=action,
+            symbol=symbol,
+            price=price,
+        )
+        runtime_state = _build_runtime_state(signal_context)
+        context_runtime = _build_context_runtime(runtime_state)
+    return _legacy_process_signal_with_context(data, runtime_state, context_runtime)
+
+
+def _legacy_process_signal_with_context(data, runtime_state, context_runtime):
+    dedupe_key = data.get("_dedupe_key")
+    ...
+    symbol = runtime_state.symbol
+    action = runtime_state.action
+    price = data.get("price", 0)
+    logger.info(f"Processing {action.upper()} signal for {symbol} at {price}")
+
+    account_state = runtime_state.account_state
     built_context = context_runtime.built
     setup_obs = built_context.setup.data
 
@@ -3581,6 +3610,8 @@ def _build_signal_pipeline(app_container: ApplicationContainer | None = None):
     return app_container.build_signal_pipeline(
         SignalPipelineDeps(
             legacy_processor=_legacy_process_signal,
+            build_runtime_state=_build_runtime_state,
+            build_context_runtime=_build_context_runtime,
             has_open_position_db=_has_open_position_db,
             log_rejection=log_rejection,
             mark_webhook_event_status=(

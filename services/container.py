@@ -13,13 +13,10 @@ from typing import Callable
 
 import broker
 from repositories import context_repo, cooldown_repo, rejections_repo, snapshots_repo, trades_repo
-from services.approval_service import ApprovalService
 from services.broker_service import BrokerService
-from services.context_builder import ContextBuilder
 from services.execution_service import ExecutionService
 from services.market_data_service import MarketDataService
 from services.signal_pipeline import SignalPipeline, SignalPipelineDeps
-from services.sizing_service import SizingService
 from services.tape_service import TapeService
 
 
@@ -76,9 +73,5 @@ class ApplicationContainer:
     def build_signal_pipeline(self, deps: SignalPipelineDeps) -> SignalPipeline:
         return SignalPipeline(
             deps,
-            context_builder=ContextBuilder(),
-            approval_service=ApprovalService(),
-            sizing_service=SizingService(),
             execution_service=ExecutionService(deps.legacy_processor),
         )
-

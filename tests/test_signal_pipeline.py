@@ -5,12 +5,14 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
+from datetime import datetime
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from services.signal_pipeline import SignalPipeline, SignalPipelineDeps
 from services.observability import metrics_snapshot, reset_metrics
+from services.signal_models import SignalRuntimeState
 
 
 def assert_equal(actual, expected, label):
@@ -39,8 +41,22 @@ class Recorder:
     def __init__(self):
         self.calls = []
 
-    def legacy_processor(self, signal):
-        self.calls.append(("legacy", dict(signal)))
+    def legacy_processor(self, signal, **kwargs):
+        self.calls.append(("legacy", dict(signal), kwargs))
+
+    def build_runtime_state(self, context):
+        self.calls.append(("build_runtime_state", context.symbol, context.action))
+        return SignalRuntimeState(
+            raw_signal=context.raw_signal,
+            symbol=context.symbol,
+            action=context.action,
+            received_at=datetime.now(),
+            account_state={"test": True},
+        )
+
+    def build_context_runtime(self, runtime_state):
+        self.calls.append(("build_context_runtime", runtime_state.symbol, runtime_state.action))
+        return {"context_runtime": runtime_state.symbol}
 
     def has_open_position_db(self, symbol):
         self.calls.append(("has_open_position_db", symbol))
@@ -59,6 +75,8 @@ def _pipeline(recorder=None, logger=None):
     return SignalPipeline(
         SignalPipelineDeps(
             legacy_processor=recorder.legacy_processor,
+            build_runtime_state=recorder.build_runtime_state,
+            build_context_runtime=recorder.build_context_runtime,
             has_open_position_db=recorder.has_open_position_db,
             log_rejection=recorder.log_rejection,
             mark_webhook_event_status=recorder.mark_webhook_event_status,
@@ -116,11 +134,22 @@ def test_valid_signal_runs_legacy_execution_stage_once():
 
     assert_true(result.execution is not None, "execution result")
     assert_equal(result.execution.status, "handled_by_legacy_processor", "execution status")
-    assert_equal([call[0] for call in recorder.calls], ["legacy"], "call order")
-    assert_equal(recorder.calls[0][1]["symbol"], "AAPL", "legacy symbol normalized")
+    assert_equal(
+        [call[0] for call in recorder.calls],
+        ["build_runtime_state", "build_context_runtime", "legacy"],
+        "call order",
+    )
+    assert_equal(recorder.calls[2][1]["symbol"], "AAPL", "legacy symbol normalized")
+    assert_true("runtime_state" in recorder.calls[2][2], "runtime state passed to legacy")
+    assert_true("context_runtime" in recorder.calls[2][2], "context runtime passed to legacy")
     timing = metrics_snapshot()["pipeline_stage_timing"]
-    for stage in ("normalize", "preflight", "context_build", "approval", "sizing", "execution"):
+    for stage in ("normalize", "preflight", "runtime_state", "context_runtime", "legacy_live_execution"):
         assert_true(stage in timing, f"{stage} timing recorded")
+    for placeholder_stage in ("context_build", "approval", "sizing", "execution"):
+        assert_true(
+            placeholder_stage not in timing,
+            f"{placeholder_stage} placeholder timing should not be recorded",
+        )
 
 
 def main():

@@ -1,23 +1,27 @@
-"""Deterministic signal pipeline orchestration."""
+"""Deterministic signal pipeline orchestration.
+
+The live trading context is still assembled by the legacy processor during the
+current migration. This pipeline owns only the real outer stages today:
+normalization, preflight, and delegation to the legacy live signal path.
+"""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Callable
+from typing import Any, Callable
 
 from exceptions import ValidationError
 from rejection_categories import format_rejection_reason
-from services.approval_service import ApprovalService
-from services.context_builder import ContextBuilder
 from services.execution_service import ExecutionService
 from services.observability import stage_timer
-from services.signal_models import PipelineResult, SignalContext
-from services.sizing_service import SizingService
+from services.signal_models import PipelineResult, SignalContext, SignalRuntimeState
 
 
 @dataclass(frozen=True)
 class SignalPipelineDeps:
-    legacy_processor: Callable[[dict], None]
+    legacy_processor: Callable[..., None]
+    build_runtime_state: Callable[[SignalContext], SignalRuntimeState]
+    build_context_runtime: Callable[[SignalRuntimeState], Any]
     has_open_position_db: Callable[[str], bool]
     log_rejection: Callable[..., None]
     mark_webhook_event_status: Callable[..., None]
@@ -28,15 +32,9 @@ class SignalPipeline:
     def __init__(
         self,
         deps: SignalPipelineDeps,
-        context_builder: ContextBuilder | None = None,
-        approval_service: ApprovalService | None = None,
-        sizing_service: SizingService | None = None,
         execution_service: ExecutionService | None = None,
     ):
         self.deps = deps
-        self.context_builder = context_builder or ContextBuilder()
-        self.approval_service = approval_service or ApprovalService()
-        self.sizing_service = sizing_service or SizingService()
         self.execution_service = execution_service or ExecutionService(deps.legacy_processor)
 
     def run(self, raw_signal: dict) -> PipelineResult:
@@ -62,25 +60,28 @@ class SignalPipeline:
         if preflight_handled:
             return PipelineResult(handled=True, context=context)
 
-        with stage_timer("context_build"):
-            decision_context = self.context_builder.build(context)
-        with stage_timer("approval"):
-            approval = self.approval_service.evaluate(decision_context)
-        with stage_timer("sizing"):
-            sizing = self.sizing_service.size(approval)
-        with stage_timer("execution"):
-            execution = self.execution_service.execute_legacy(context)
+        with stage_timer("runtime_state"):
+            runtime_state = self.deps.build_runtime_state(context)
+        with stage_timer("context_runtime"):
+            context_runtime = self.deps.build_context_runtime(runtime_state)
+
+        # The real trading decisions are still owned by the legacy processor
+        # until those branches are fully extracted. Runtime/context are prepared
+        # here to create the next safe ownership seam.
+        with stage_timer("legacy_live_execution"):
+            execution = self.execution_service.execute_legacy(
+                context,
+                runtime_state=runtime_state,
+                context_runtime=context_runtime,
+            )
         self.deps.logger.info(
             "signal_pipeline_decision "
             f"symbol={context.symbol} action={context.action} "
-            f"approval={approval.approved} approval_reason={approval.reason} "
-            f"sizing_pct={sizing.position_size_pct} execution_status={execution.status}"
+            f"execution_status={execution.status}"
         )
         return PipelineResult(
             handled=True,
             context=context,
-            approval=approval,
-            sizing=sizing,
             execution=execution,
         )
 

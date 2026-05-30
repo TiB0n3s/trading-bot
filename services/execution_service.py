@@ -166,10 +166,10 @@ class ExecutionService:
     def __init__(self, legacy_processor: Callable[[dict], None] | None = None):
         self.legacy_processor = legacy_processor
 
-    def execute_legacy(self, signal: SignalContext) -> ExecutionResult:
+    def execute_legacy(self, signal: SignalContext, **kwargs) -> ExecutionResult:
         if self.legacy_processor is None:
             raise RuntimeError("legacy_processor is not configured")
-        self.legacy_processor(signal.raw_signal)
+        self.legacy_processor(signal.raw_signal, **kwargs)
         return ExecutionResult(submitted=False, status="handled_by_legacy_processor")
 
     def execute_order(self, **kwargs) -> ExecutionOutcome:

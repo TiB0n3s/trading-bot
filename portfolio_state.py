@@ -1,15 +1,10 @@
 import logging
-import sqlite3
 from collections import defaultdict
 from datetime import date
-from pathlib import Path
 from pnl import get_daily_realized_pnl
 from market_time import now_et
 
 logger = logging.getLogger(__name__)
-
-DB_PATH = Path(__file__).parent / "trades.db"
-
 
 def _session_time_context():
     """Return trading-window elapsed/remaining minutes for Claude context."""
@@ -81,7 +76,7 @@ def get_open_positions(broker_client):
     return positions_out, unrealized_pnl
 
 
-def get_realized_pnl_today(db_path=DB_PATH, target_date=None):
+def get_realized_pnl_today(db_path=None, target_date=None):
     return get_daily_realized_pnl(target_date=target_date)
 
 
@@ -126,7 +121,7 @@ def _portfolio_stress(positions, balance):
         return {"portfolio_heat": "neutral"}
 
 
-def build_account_state(broker_client=None, get_account_func=None, db_path=DB_PATH, **kwargs):
+def build_account_state(broker_client=None, get_account_func=None, db_path=None, **kwargs):
     """Canonical runtime account state used by app.py and decision_engine.py."""
     if broker_client is None:
         broker_client = kwargs.get("api")

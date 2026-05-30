@@ -7,6 +7,7 @@ rows; callers own persistence and side effects.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from typing import Any, Callable
 
 from services.signal_models import ApprovalResult, DecisionContext
@@ -731,6 +732,357 @@ def run_legacy_entry_sanity_gates(
                     },
                 ),
             )
+
+    return LegacyStageOutcome()
+
+
+def run_legacy_prediction_bias_session_gate(
+    *,
+    symbol: str,
+    action: str,
+    execution_mode: str,
+    account_state: dict[str, Any],
+    context_runtime: Any,
+    evaluate_signal_quality_gate: Callable[..., dict[str, Any]],
+    get_cached_prediction: Callable[[str], dict[str, Any] | None],
+    ml_prediction_bucket: Callable[[Any], str],
+    evaluate_buy_opportunity: Callable[..., dict[str, Any]],
+    required_buy_confirmations: Callable[[str, dict[str, Any] | None], dict[str, Any]],
+    live_bias_override: Callable[..., dict[str, Any]],
+    evaluate_session_momentum_gate: Callable[..., dict[str, Any]],
+    apply_size_cap: Callable[..., Any],
+    env_float: Callable[[str, float], float],
+    prediction_soft_avoid_min_sample_size: int,
+    enforce_prediction_blocks: bool,
+    enforce_prediction_watch_in_cash: bool,
+    prediction_gate_mode: str,
+    is_cash_mode: Callable[[], bool],
+    enforce_session_momentum_gate: bool,
+    is_degraded_setup: Callable[[dict[str, Any]], bool],
+    log: Any,
+) -> LegacyStageOutcome:
+    if action != "buy":
+        return LegacyStageOutcome()
+
+    trend = context_runtime.deps.trend_table.get(symbol) or {}
+    bias_entry = context_runtime.deps.market_bias.get(symbol) or {}
+    setup_obs = account_state.get("setup_observation") or {}
+    prediction_obs = context_runtime.build_prediction_observation(
+        trend=trend,
+        bias_entry=bias_entry,
+        evaluate_signal_quality_gate=evaluate_signal_quality_gate,
+        get_cached_prediction=get_cached_prediction,
+        ml_prediction_bucket=ml_prediction_bucket,
+    )
+    prediction_gate = prediction_obs.data
+
+    ml_score_raw = prediction_gate.get("ml_prediction_score")
+    ml_sample = int(prediction_gate.get("ml_prediction_sample_size") or 0)
+    setup_action = setup_obs.get("setup_policy_action")
+    setup_label = setup_obs.get("setup_label")
+
+    is_weak_ml_bucket = (
+        ml_score_raw is not None
+        and float(ml_score_raw) < 45
+        and ml_sample >= prediction_soft_avoid_min_sample_size
+    )
+    is_degraded_setup_now = is_degraded_setup(setup_obs)
+
+    if is_weak_ml_bucket and is_degraded_setup_now:
+        reason = (
+            f"ml_prediction_score={float(ml_score_raw):.1f} (weak_below_45); "
+            f"ml_sample_size={ml_sample}; "
+            f"setup_policy_action={setup_action}; "
+            f"setup_label={setup_label!r}"
+        )
+        apply_size_cap(
+            account_state,
+            cap_pct=0.5,
+            state_key="weak_prediction_setup_gate",
+            payload={
+                "triggered": True,
+                "ml_score": ml_score_raw,
+                "ml_sample_size": ml_sample,
+                "setup_action": setup_action,
+                "setup_label": setup_label,
+                "size_cap_pct": 0.5,
+                "reason": reason,
+            },
+        )
+        log.warning(
+            f"Weak-prediction + degraded-setup gate for {symbol}: "
+            f"size capped at 0.5%; {reason}"
+        )
+    else:
+        account_state["weak_prediction_setup_gate"] = {
+            "triggered": False,
+            "ml_score": ml_score_raw,
+            "ml_sample_size": ml_sample,
+            "is_weak_ml": is_weak_ml_bucket,
+            "is_degraded_setup": is_degraded_setup_now,
+        }
+
+    ml_confidence = prediction_gate.get("ml_prediction_confidence") or ""
+    is_confident_weak_prediction = (
+        is_weak_ml_bucket
+        and ml_confidence in ("medium", "high")
+        and not is_degraded_setup_now
+        and setup_action not in ("boost",)
+    )
+    if is_confident_weak_prediction:
+        pred_only_cap = env_float("PREDICTION_CONFIDENT_WEAK_SIZE_CAP_PCT", 0.80)
+        apply_size_cap(
+            account_state,
+            cap_pct=pred_only_cap,
+            state_key="prediction_confident_weak_cap",
+            payload={
+                "ml_score": ml_score_raw,
+                "ml_confidence": ml_confidence,
+                "cap_pct": pred_only_cap,
+            },
+        )
+        log.info(
+            f"Prediction confident-weak size cap for {symbol}: "
+            f"score={ml_score_raw} confidence={ml_confidence} → {pred_only_cap}%"
+        )
+
+    context_runtime.build_buy_opportunity_observation(
+        trend=trend,
+        bias_entry=bias_entry,
+        evaluate_buy_opportunity=evaluate_buy_opportunity,
+        required_buy_confirmations=required_buy_confirmations,
+        prediction_gate=prediction_gate,
+        log_prefix="BUY opportunity",
+    )
+
+    prediction_decision = prediction_gate.get("prediction_decision")
+
+    bias_override = live_bias_override(
+        symbol=symbol,
+        bias_entry=bias_entry,
+        trend=trend,
+        setup_obs=setup_obs,
+        prediction_gate=prediction_gate,
+        momentum=account_state.get("momentum") or {},
+    )
+
+    account_state["market_bias_effective"] = bias_override.get("effective_bias")
+    account_state["market_bias_override_reason"] = bias_override.get("reason")
+
+    effective_bias = bias_override.get("effective_bias")
+    allow_buy_from_bias = bool(bias_override.get("allow_buy"))
+
+    if effective_bias == "avoid_hard":
+        reason = (
+            f"effective_bias={effective_bias} "
+            f"confidence={bias_entry.get('confidence','')} "
+            f"reason={bias_override.get('reason')}; "
+            f"context_reason={bias_entry.get('reason','')}"
+        )
+        return LegacyStageOutcome(
+            rejected=True,
+            approval=live_bias_rejection(
+                "market_bias_avoid",
+                reason,
+                metadata=bias_override,
+            ),
+        )
+
+    if effective_bias == "avoid_soft" and not allow_buy_from_bias:
+        ml_prediction = account_state.get("ml_prediction") or {}
+        prediction_sample_size = int(
+            prediction_gate.get("ml_prediction_sample_size")
+            or ml_prediction.get("sample_size")
+            or 0
+        )
+        reason = (
+            f"effective_bias={effective_bias}; "
+            f"{bias_override.get('reason')}; "
+            f"prediction_sample_size={prediction_sample_size}; "
+            f"min_sample_size={prediction_soft_avoid_min_sample_size}; "
+            f"context_reason={bias_entry.get('reason','')}"
+        )
+        if prediction_sample_size >= prediction_soft_avoid_min_sample_size:
+            return LegacyStageOutcome(
+                rejected=True,
+                approval=live_bias_rejection(
+                    "soft_avoid_prediction_gate",
+                    reason,
+                    metadata=bias_override,
+                ),
+            )
+
+        log.warning(f"Soft-avoid prediction gate not enforced for {symbol}: {reason}")
+        account_state["soft_avoid_prediction_gate_bypassed"] = True
+        account_state["soft_avoid_prediction_gate_bypass_reason"] = reason
+
+    if effective_bias == "live_override_neutral" and not allow_buy_from_bias:
+        reason = (
+            f"effective_bias={effective_bias}; "
+            f"{bias_override.get('reason')}; "
+            f"context_reason={bias_entry.get('reason','')}"
+        )
+        return LegacyStageOutcome(
+            rejected=True,
+            approval=live_bias_rejection(
+                "live_bias_downgrade",
+                reason,
+                metadata=bias_override,
+            ),
+        )
+
+    if effective_bias == "live_override_buy":
+        log.info(
+            f"Live evidence overrode pre-market bias for {symbol} BUY: "
+            f"{bias_override.get('reason')}"
+        )
+
+    should_block_prediction = (
+        (enforce_prediction_blocks and prediction_decision == "block")
+        or (
+            enforce_prediction_watch_in_cash
+            and is_cash_mode()
+            and prediction_decision == "watch"
+        )
+    )
+
+    prediction_would_block = (
+        prediction_decision == "block"
+        or (
+            is_cash_mode()
+            and prediction_decision == "watch"
+        )
+    )
+
+    if prediction_gate_mode == "warn" and prediction_would_block:
+        log.warning(
+            f"Prediction gate warn-only for {symbol} BUY: "
+            f"mode={execution_mode} prediction_gate_mode={prediction_gate_mode} "
+            f"score={prediction_gate.get('prediction_score')} "
+            f"decision={prediction_decision} "
+            f"reason={prediction_gate.get('prediction_reason')}"
+        )
+
+    if should_block_prediction:
+        reason = (
+            f"mode={execution_mode} prediction_gate_mode={prediction_gate_mode} "
+            f"score={prediction_gate.get('prediction_score')} "
+            f"decision={prediction_decision} "
+            f"reason={prediction_gate.get('prediction_reason')}"
+        )
+        return LegacyStageOutcome(
+            rejected=True,
+            approval=prediction_gate_rejection(reason, metadata=prediction_gate),
+        )
+
+    session_gate = evaluate_session_momentum_gate(
+        session_momentum=account_state.get("session_momentum") or {},
+        prediction_gate=prediction_gate,
+        setup_obs=setup_obs,
+        trend=trend,
+    )
+    account_state["session_momentum_gate"] = session_gate
+
+    if session_gate.get("would_block"):
+        reason = session_gate.get("reason", "session momentum gate")
+        if enforce_session_momentum_gate:
+            return LegacyStageOutcome(
+                rejected=True,
+                approval=session_momentum_rejection(reason, metadata=session_gate),
+            )
+        log.info(
+            f"Session momentum gate observe-only for {symbol} BUY: "
+            f"{session_gate.get('severity')} {reason}"
+        )
+    elif session_gate.get("severity") == "reversal_caution":
+        log.info(
+            f"Session reversal_attempt for {symbol} BUY — caution sizing flagged: "
+            f"{session_gate.get('reason')}"
+        )
+        account_state["session_gate_size_hint"] = "reduce"
+
+    severity = session_gate.get("severity")
+    session_cap = None
+    if severity == "soft_negative":
+        session_cap = env_float("SESSION_SOFT_NEGATIVE_SIZE_CAP_PCT", 0.80)
+    elif severity == "reversal_caution":
+        session_cap = env_float("SESSION_REVERSAL_CAUTION_SIZE_CAP_PCT", 0.90)
+    elif severity == "hard_negative" and not enforce_session_momentum_gate:
+        session_cap = env_float("SESSION_HARD_NEGATIVE_SIZE_CAP_PCT", 0.65)
+    if session_cap is not None:
+        apply_size_cap(
+            account_state,
+            cap_pct=session_cap,
+            state_key="session_momentum_size_cap",
+            payload={"severity": severity, "cap_pct": session_cap},
+        )
+        log.info(
+            f"Session momentum size cap for {symbol}: severity={severity} → {session_cap}%"
+        )
+
+    return LegacyStageOutcome()
+
+
+def run_legacy_intra_session_tape_degradation_gate(
+    *,
+    symbol: str,
+    action: str,
+    account_state: dict[str, Any],
+    enabled: bool,
+    start_hour_et: int,
+    min_setup_score: float,
+    et_timezone: Any,
+    log: Any,
+) -> LegacyStageOutcome:
+    if action != "buy" or not enabled:
+        return LegacyStageOutcome()
+
+    try:
+        tape_now_et = datetime.now(timezone.utc).astimezone(et_timezone)
+        setup_obs = account_state.get("setup_observation") or {}
+        session_label = (account_state.get("session_momentum") or {}).get("trend_label")
+        setup_score_raw = setup_obs.get("setup_score")
+        setup_score = float(setup_score_raw) if setup_score_raw is not None else None
+
+        if (
+            tape_now_et.hour >= start_hour_et
+            and session_label in ("fading", "downtrend")
+            and (
+                setup_score is None
+                or setup_score < min_setup_score
+            )
+        ):
+            reason = (
+                f"session_label={session_label}; "
+                f"setup_score={setup_score}; "
+                f"min_setup_score={min_setup_score}; "
+                f"start_hour_et={start_hour_et}"
+            )
+            account_state["intra_session_tape_degradation"] = {
+                "would_block": True,
+                "reason": reason,
+                "setup_score": setup_score,
+                "min_setup_score": min_setup_score,
+                "session_label": session_label,
+            }
+            return LegacyStageOutcome(
+                rejected=True,
+                approval=deterministic_rejection(
+                    category="intra_session_tape_degradation",
+                    reason=reason,
+                    metadata=account_state["intra_session_tape_degradation"],
+                ),
+            )
+
+        account_state["intra_session_tape_degradation"] = {
+            "would_block": False,
+            "setup_score": setup_score,
+            "min_setup_score": min_setup_score,
+            "session_label": session_label,
+        }
+    except Exception as exc:
+        log.warning(f"Intra-session tape degradation gate skipped for {symbol}: {exc}")
+        account_state["intra_session_tape_degradation_error"] = str(exc)
 
     return LegacyStageOutcome()
 

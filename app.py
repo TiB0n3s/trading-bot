@@ -36,6 +36,7 @@ from services.approval_service import (
     trend_confirmation_rejection,
     run_legacy_claude_and_confidence,
     run_legacy_final_approval_gates,
+    run_legacy_macro_position_gate,
 )
 from services.context_builder import (
     ContextAssemblyDeps,
@@ -2559,6 +2560,49 @@ def _legacy_hydrate_strategy_context(
     )
 
 
+def _legacy_run_macro_position_gate(
+    *,
+    symbol: str,
+    action: str,
+    price,
+    account_state: dict,
+    context_runtime,
+    current_et,
+    macro_risk: dict,
+    dedupe_key: str | None,
+) -> _LegacyStageResult:
+    outcome = run_legacy_macro_position_gate(
+        symbol=symbol,
+        action=action,
+        price=price,
+        account_state=account_state,
+        context_runtime=context_runtime,
+        current_et=current_et,
+        macro_risk=macro_risk,
+        macro_position_count_floor=MACRO_POSITION_COUNT_FLOOR,
+        get_latest_session_momentum=get_latest_session_momentum,
+        session_momentum_is_fresh=_session_momentum_is_fresh,
+        weakest_position_context=_get_weakest_position_context,
+        evaluate_buy_opportunity=evaluate_buy_opportunity,
+        required_buy_confirmations=_required_buy_confirmations,
+        try_portfolio_rotation=_try_portfolio_rotation,
+        get_account_state=get_mock_account_state,
+        sleep=time.sleep,
+        log=logger,
+    )
+    if outcome.rejected and outcome.approval:
+        result = _legacy_reject_approval_decision(
+            symbol=symbol,
+            action=action,
+            price=price,
+            account_state=account_state,
+            dedupe_key=dedupe_key,
+            approval=outcome.approval,
+        )
+        return _LegacyStageResult(rejected=result.rejected, response=result.response)
+    return _LEGACY_STAGE_CONTINUE
+
+
 def _legacy_process_signal(data, *, runtime_state=None, context_runtime=None, preflight_result=None):
     if runtime_state is None or context_runtime is None:
         symbol, action = normalize_signal_identity(data)
@@ -2690,142 +2734,18 @@ def _legacy_process_signal_with_context(data, runtime_state, context_runtime, pr
         context_runtime=context_runtime,
     )
 
-    if action == "buy":
-        if macro_risk.get("block_new_buys"):
-            reason = macro_risk.get("reason", "macro regime blocks new buys")
-            if _reject_current_signal("macro_risk", reason):
-                return
-
-        max_new_positions = macro_risk.get("max_new_positions", 8)
-        open_count = account_state.get("open_position_count", 0)
-        _open_positions_list = account_state.get("open_positions") or []
-        if _open_positions_list:
-            effective_count = sum(
-                1 for p in _open_positions_list
-                if float(p.get("market_value") or 0) >= MACRO_POSITION_COUNT_FLOOR
-            )
-        else:
-            effective_count = open_count
-        if effective_count >= max_new_positions:
-            # Enrich observe-only macro-position-limit logging with the latest
-            # session momentum snapshot. The main session_momentum block runs
-            # later in the pipeline, but macro_position_limit rejects before that,
-            # so account_state will not have these fields yet.
-            candidate_session = None
-            try:
-                candidate_session = get_latest_session_momentum(symbol)
-                if candidate_session and not _session_momentum_is_fresh(candidate_session):
-                    candidate_session = None
-            except Exception as e:
-                logger.warning(f"macro_position_limit session lookup failed for {symbol}: {e}")
-                candidate_session = None
-
-            if candidate_session:
-                account_state["session_momentum"] = candidate_session
-
-            def _session_value(key, fallback_key=None):
-                if candidate_session and candidate_session.get(key) is not None:
-                    return candidate_session.get(key)
-                if fallback_key:
-                    return account_state.get(fallback_key)
-                return None
-
-            candidate_session_score = _session_value("trend_score", "session_trend_score")
-            candidate_session_label = _session_value("trend_label", "session_trend_label")
-            candidate_return = _session_value("session_return_pct", "session_return_pct")
-            candidate_vwap = _session_value(
-                "distance_from_vwap_pct",
-                "session_distance_from_vwap_pct",
-            )
-
-            weakest = _get_weakest_position_context(account_state)
-
-            if weakest:
-                replacement_hint = "observe_only"
-                reason = (
-                    f"open_position_count={open_count} effective={effective_count} >= macro max_new_positions={max_new_positions}; "
-                    f"candidate={symbol} session={candidate_session_label}/{candidate_session_score} "
-                    f"return={candidate_return}% vwap_dist={candidate_vwap}%; "
-                    f"weakest_holding={weakest.get('symbol')} "
-                    f"plpc={weakest.get('unrealized_plpc'):.2f}% "
-                    f"replacement_hint={replacement_hint}"
-                )
-            else:
-                reason = (
-                    f"open_position_count={open_count} effective={effective_count} >= macro max_new_positions={max_new_positions}; "
-                    f"candidate={symbol} session={candidate_session_label}/{candidate_session_score} "
-                    f"return={candidate_return}% vwap_dist={candidate_vwap}%; "
-                    f"weakest_holding=unknown"
-                )
-            # Direct observe-only BUY opportunity score for macro_position_limit rejects.
-            # This refreshes the candidate score after candidate_session is loaded,
-            # so replacement intelligence uses live session momentum.
-            if True:
-                try:
-                    trend = _trend_table.get(symbol) or {}
-                    bias_entry = _market_bias.get(symbol) or {}
-                    macro_limit_opportunity_obs = context_runtime.build_buy_opportunity_observation(
-                        trend=trend,
-                        bias_entry=bias_entry,
-                        evaluate_buy_opportunity=evaluate_buy_opportunity,
-                        required_buy_confirmations=_required_buy_confirmations,
-                        log_prefix="BUY opportunity macro-limit",
-                    )
-                    macro_limit_buy_opportunity = macro_limit_opportunity_obs.data
-
-                    macro_buy_score = macro_limit_buy_opportunity.get("buy_opportunity_score")
-                    macro_buy_rec = macro_limit_buy_opportunity.get("buy_opportunity_recommendation")
-
-                    # Add score/rec directly to rejection reason as a durable fallback for reporting.
-                    reason = (
-                        f"{reason}; buy_score={macro_buy_score}; "
-                        f"buy_rec={macro_buy_rec}"
-                    )
-                except Exception as e:
-                    logger.warning(f"BUY opportunity macro-limit scoring failed for {symbol}: {e}")
-
-            # Portfolio rotation: if the macro position cap is full, attempt to
-            # sell the weakest eligible holding before rejecting a strong candidate.
-            rotated, rotation_reason, rotation_info = _try_portfolio_rotation(
-                symbol,
-                price,
-                account_state,
-                current_et,
-            )
-
-            if rotated:
-                account_state["portfolio_rotation"] = rotation_info
-                logger.warning(
-                    f"Portfolio rotation submitted for {symbol}: {rotation_reason}; "
-                    "waiting briefly for Alpaca position state to refresh"
-                )
-
-                time.sleep(2)
-                refreshed_state = get_mock_account_state() or {}
-                refreshed_open_count = refreshed_state.get("open_position_count", open_count)
-
-                if refreshed_open_count < max_new_positions:
-                    account_state.update(refreshed_state)
-                    logger.warning(
-                        f"Portfolio rotation freed a slot for {symbol}: "
-                        f"open_position_count {open_count} -> {refreshed_open_count}; "
-                        "continuing BUY pipeline"
-                    )
-                else:
-                    pending_reason = (
-                        f"rotation_pending: {rotation_reason}; "
-                        f"open_position_count still {refreshed_open_count} >= "
-                        f"macro max_new_positions={max_new_positions}; original_reason={reason}"
-                    )
-                    logger.warning(
-                        f"Portfolio rotation pending for {symbol}: {pending_reason}"
-                    )
-                    if _reject_current_signal("portfolio_rotation_pending", pending_reason):
-                        return
-            else:
-                reason = f"{reason}; rotation_not_taken={rotation_reason}"
-                if _reject_current_signal("macro_position_limit", reason):
-                    return
+    macro_gate_result = _legacy_run_macro_position_gate(
+        symbol=symbol,
+        action=action,
+        price=price,
+        account_state=account_state,
+        context_runtime=context_runtime,
+        current_et=current_et,
+        macro_risk=macro_risk,
+        dedupe_key=dedupe_key,
+    )
+    if macro_gate_result.rejected:
+        return macro_gate_result.response
 
     # Trend confirmation gate: require confirmed indicator-state transitions before allowing signals through.
     if action == "buy":

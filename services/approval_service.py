@@ -37,6 +37,13 @@ class LegacyApprovalGateOutcome:
     claude_account_state: dict[str, Any] | None = None
 
 
+@dataclass(frozen=True)
+class LegacyStageOutcome:
+    rejected: bool = False
+    approval: ApprovalDecision | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+
 def deterministic_rejection(
     *,
     category: str,
@@ -333,6 +340,176 @@ def run_legacy_claude_and_confidence(
         return LegacyClaudeOutcome(rejected=True, approval=approval_decision)
 
     return LegacyClaudeOutcome(decision=decision)
+
+
+def run_legacy_macro_position_gate(
+    *,
+    symbol: str,
+    action: str,
+    price: Any,
+    account_state: dict[str, Any],
+    context_runtime: Any,
+    current_et: Any,
+    macro_risk: dict[str, Any],
+    macro_position_count_floor: float,
+    get_latest_session_momentum: Callable[[str], dict[str, Any] | None],
+    session_momentum_is_fresh: Callable[[dict[str, Any]], bool],
+    weakest_position_context: Callable[[dict[str, Any]], dict[str, Any] | None],
+    evaluate_buy_opportunity: Callable[..., dict[str, Any]],
+    required_buy_confirmations: Callable[[str, dict[str, Any] | None], dict[str, Any]],
+    try_portfolio_rotation: Callable[..., tuple[bool, str, dict[str, Any]]],
+    get_account_state: Callable[[], dict[str, Any]],
+    sleep: Callable[[float], None],
+    log: Any,
+) -> LegacyStageOutcome:
+    if action != "buy":
+        return LegacyStageOutcome()
+
+    if macro_risk.get("block_new_buys"):
+        return LegacyStageOutcome(
+            rejected=True,
+            approval=deterministic_rejection(
+                category="macro_risk",
+                reason=macro_risk.get("reason", "macro regime blocks new buys"),
+                metadata=macro_risk,
+            ),
+        )
+
+    max_new_positions = macro_risk.get("max_new_positions", 8)
+    open_count = account_state.get("open_position_count", 0)
+    open_positions = account_state.get("open_positions") or []
+    if open_positions:
+        effective_count = sum(
+            1 for position in open_positions
+            if float(position.get("market_value") or 0) >= macro_position_count_floor
+        )
+    else:
+        effective_count = open_count
+
+    if effective_count < max_new_positions:
+        return LegacyStageOutcome()
+
+    candidate_session = None
+    try:
+        candidate_session = get_latest_session_momentum(symbol)
+        if candidate_session and not session_momentum_is_fresh(candidate_session):
+            candidate_session = None
+    except Exception as exc:
+        log.warning(f"macro_position_limit session lookup failed for {symbol}: {exc}")
+        candidate_session = None
+
+    if candidate_session:
+        account_state["session_momentum"] = candidate_session
+
+    def session_value(key: str, fallback_key: str | None = None):
+        if candidate_session and candidate_session.get(key) is not None:
+            return candidate_session.get(key)
+        if fallback_key:
+            return account_state.get(fallback_key)
+        return None
+
+    candidate_session_score = session_value("trend_score", "session_trend_score")
+    candidate_session_label = session_value("trend_label", "session_trend_label")
+    candidate_return = session_value("session_return_pct", "session_return_pct")
+    candidate_vwap = session_value(
+        "distance_from_vwap_pct",
+        "session_distance_from_vwap_pct",
+    )
+
+    weakest = weakest_position_context(account_state)
+
+    if weakest:
+        replacement_hint = "observe_only"
+        reason = (
+            f"open_position_count={open_count} effective={effective_count} >= macro max_new_positions={max_new_positions}; "
+            f"candidate={symbol} session={candidate_session_label}/{candidate_session_score} "
+            f"return={candidate_return}% vwap_dist={candidate_vwap}%; "
+            f"weakest_holding={weakest.get('symbol')} "
+            f"plpc={weakest.get('unrealized_plpc'):.2f}% "
+            f"replacement_hint={replacement_hint}"
+        )
+    else:
+        reason = (
+            f"open_position_count={open_count} effective={effective_count} >= macro max_new_positions={max_new_positions}; "
+            f"candidate={symbol} session={candidate_session_label}/{candidate_session_score} "
+            f"return={candidate_return}% vwap_dist={candidate_vwap}%; "
+            f"weakest_holding=unknown"
+        )
+
+    try:
+        macro_limit_opportunity_obs = context_runtime.build_buy_opportunity_observation(
+            trend=context_runtime.deps.trend_table.get(symbol) or {},
+            bias_entry=context_runtime.deps.market_bias.get(symbol) or {},
+            evaluate_buy_opportunity=evaluate_buy_opportunity,
+            required_buy_confirmations=required_buy_confirmations,
+            log_prefix="BUY opportunity macro-limit",
+        )
+        macro_limit_buy_opportunity = macro_limit_opportunity_obs.data
+        macro_buy_score = macro_limit_buy_opportunity.get("buy_opportunity_score")
+        macro_buy_rec = macro_limit_buy_opportunity.get("buy_opportunity_recommendation")
+        reason = (
+            f"{reason}; buy_score={macro_buy_score}; "
+            f"buy_rec={macro_buy_rec}"
+        )
+    except Exception as exc:
+        log.warning(f"BUY opportunity macro-limit scoring failed for {symbol}: {exc}")
+
+    rotated, rotation_reason, rotation_info = try_portfolio_rotation(
+        symbol,
+        price,
+        account_state,
+        current_et,
+    )
+
+    if rotated:
+        account_state["portfolio_rotation"] = rotation_info
+        log.warning(
+            f"Portfolio rotation submitted for {symbol}: {rotation_reason}; "
+            "waiting briefly for Alpaca position state to refresh"
+        )
+
+        sleep(2)
+        refreshed_state = get_account_state() or {}
+        refreshed_open_count = refreshed_state.get("open_position_count", open_count)
+
+        if refreshed_open_count < max_new_positions:
+            account_state.update(refreshed_state)
+            log.warning(
+                f"Portfolio rotation freed a slot for {symbol}: "
+                f"open_position_count {open_count} -> {refreshed_open_count}; "
+                "continuing BUY pipeline"
+            )
+            return LegacyStageOutcome()
+
+        pending_reason = (
+            f"rotation_pending: {rotation_reason}; "
+            f"open_position_count still {refreshed_open_count} >= "
+            f"macro max_new_positions={max_new_positions}; original_reason={reason}"
+        )
+        log.warning(f"Portfolio rotation pending for {symbol}: {pending_reason}")
+        return LegacyStageOutcome(
+            rejected=True,
+            approval=deterministic_rejection(
+                category="portfolio_rotation_pending",
+                reason=pending_reason,
+                metadata={"rotation_info": rotation_info},
+            ),
+        )
+
+    reason = f"{reason}; rotation_not_taken={rotation_reason}"
+    return LegacyStageOutcome(
+        rejected=True,
+        approval=deterministic_rejection(
+            category="macro_position_limit",
+            reason=reason,
+            metadata={
+                "open_position_count": open_count,
+                "effective_count": effective_count,
+                "max_new_positions": max_new_positions,
+                "rotation_reason": rotation_reason,
+            },
+        ),
+    )
 
 
 def run_legacy_final_approval_gates(

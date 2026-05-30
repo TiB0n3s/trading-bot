@@ -55,6 +55,7 @@ TESTS = [
     "tests/test_auto_buy_manager.py",
     "tests/test_market_context_schema.py",
     "tests/test_setup_policy.py",
+    "tests/test_setup_engine_service.py",
     "tests/test_decision_policy.py",
     "tests/test_prediction_cache_service.py",
     "tests/test_prediction_cache.py",

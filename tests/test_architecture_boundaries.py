@@ -141,7 +141,6 @@ TEMPORARY_DB_ACCESS_ALLOWLIST = {
     "prediction_validation_report.py",
     "rejected_signal_outcome_builder.py",
     "session_gate_report.py",
-    "setup_engine.py",
     "signal_event_builder.py",
     "signal_outcome_builder.py",
     "signal_timing_lesson_report.py",

@@ -1912,6 +1912,13 @@ class _LegacyStageResult:
     response: object | None = None
 
 
+@dataclass(frozen=True)
+class _LegacyClaudeStageResult:
+    rejected: bool = False
+    decision: dict | None = None
+    response: object | None = None
+
+
 _LEGACY_STAGE_CONTINUE = _LegacyStageResult()
 
 
@@ -2327,6 +2334,68 @@ def _legacy_check_sell_discipline(
         logger.warning(f"Sell discipline check failed for {symbol}; fail-open for SELL safety: {e}")
 
     return _LEGACY_STAGE_CONTINUE
+
+
+def _legacy_run_claude_and_confidence(
+    *,
+    data: dict,
+    symbol: str,
+    action: str,
+    price,
+    account_state: dict,
+    claude_account_state: dict,
+) -> _LegacyClaudeStageResult:
+    weekly_perf = _weekly_symbol_performance(symbol)
+    account_state["weekly_symbol_performance"] = weekly_perf
+    claude_account_state["weekly_symbol_performance"] = weekly_perf
+
+    def _medium_confidence_override_adapter(*, decision, account_state):
+        return _allow_medium_confidence_momentum_override(
+            symbol=symbol,
+            action=action,
+            decision=decision,
+            account_state=account_state,
+            trend=_trend_table.get(symbol) or {},
+            setup_obs=account_state.get("setup_observation") or {},
+        )
+
+    approval_decision = evaluate_approval_decision(
+        signal=data,
+        action=action,
+        claude_account_state=claude_account_state,
+        evaluate_signal=evaluate_signal,
+        cash_safe_mode=is_cash_safe_mode(),
+        market_bias=_market_bias.get(symbol) or {},
+        account_state=account_state,
+        medium_confidence_override=_medium_confidence_override_adapter,
+        tape_exception_enabled=TAPE_EXCEPTION_ENABLED,
+    )
+    decision = dict(approval_decision.claude_payload or {})
+
+    if (approval_decision.metadata or {}).get("raw_decision", {}).get("approved") and decision.get(
+        "_consistency_guard_triggered"
+    ):
+        logger.warning(
+            f"Decision consistency guard flipped {symbol} BUY to rejected: "
+            f"approved=true but reason indicated deferral"
+        )
+
+    if approval_decision.category:
+        logger.warning(
+            f"{approval_decision.category} rejected {symbol} {action.upper()}: "
+            f"{approval_decision.reason}"
+        )
+        log_rejection(
+            symbol,
+            action,
+            approval_decision.category,
+            approval_decision.reason,
+            price=price,
+            account_state=account_state,
+        )
+        return _LegacyClaudeStageResult(rejected=True)
+
+    return _LegacyClaudeStageResult(decision=decision)
 
 
 def _legacy_process_signal(data, *, runtime_state=None, context_runtime=None, preflight_result=None):
@@ -3560,57 +3629,18 @@ def _legacy_process_signal_with_context(data, runtime_state, context_runtime, pr
             f"dominant={account_state['dominant_limiter']}"
         )
 
-    weekly_perf = _weekly_symbol_performance(symbol)
-    account_state["weekly_symbol_performance"] = weekly_perf
-    claude_account_state["weekly_symbol_performance"] = weekly_perf
-
-    def _medium_confidence_override_adapter(*, decision, account_state):
-        return _allow_medium_confidence_momentum_override(
-            symbol=symbol,
-            action=action,
-            decision=decision,
-            account_state=account_state,
-            trend=_trend_table.get(symbol) or {},
-            setup_obs=account_state.get("setup_observation") or {},
-        )
-
-    approval_decision = evaluate_approval_decision(
-        signal=data,
+    claude_result = _legacy_run_claude_and_confidence(
+        data=data,
+        symbol=symbol,
         action=action,
-        claude_account_state=claude_account_state,
-        evaluate_signal=evaluate_signal,
-        cash_safe_mode=is_cash_safe_mode(),
-        market_bias=_market_bias.get(symbol) or {},
+        price=price,
         account_state=account_state,
-        medium_confidence_override=_medium_confidence_override_adapter,
-        tape_exception_enabled=TAPE_EXCEPTION_ENABLED,
+        claude_account_state=claude_account_state,
     )
-    decision = dict(approval_decision.claude_payload or {})
-
-    if (approval_decision.metadata or {}).get("raw_decision", {}).get("approved") and decision.get(
-        "_consistency_guard_triggered"
-    ):
-        logger.warning(
-            f"Decision consistency guard flipped {symbol} BUY to rejected: "
-            f"approved=true but reason indicated deferral"
-        )
-
+    if claude_result.rejected:
+        return claude_result.response
+    decision = dict(claude_result.decision or {})
     order_result = None
-
-    if approval_decision.category:
-        logger.warning(
-            f"{approval_decision.category} rejected {symbol} {action.upper()}: "
-            f"{approval_decision.reason}"
-        )
-        log_rejection(
-            symbol,
-            action,
-            approval_decision.category,
-            approval_decision.reason,
-            price=price,
-            account_state=account_state,
-        )
-        return
 
     if decision.get("approved"):
         try:

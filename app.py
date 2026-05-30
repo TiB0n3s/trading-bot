@@ -12,10 +12,7 @@ from setup_policy import evaluate_setup_policy
 from pathlib import Path
 from live_features import build_snapshot
 from flask import Flask, abort
-from api.debug_routes import DebugRouteDeps, create_debug_blueprint
-from api.request_services import RequestAuthService, ResponseFactory, WebhookPayloadParser
-from api.status_routes import StatusRouteDeps, create_status_blueprint
-from api.webhook_routes import WebhookRouteDeps, create_webhook_blueprint
+from api.register_routes import RouteRegistrationDeps, register_routes
 from services.container import ApplicationContainer
 from services.status_service import build_status_payload
 from services.positions_service import build_positions_payload
@@ -292,38 +289,32 @@ def run_startup_tasks(app_container: ApplicationContainer | None = None) -> None
 
 
 def _register_routes(flask_app: Flask, app_container: ApplicationContainer) -> None:
-    """Register HTTP blueprints against a Flask app instance."""
-    auth = RequestAuthService(validate_secret=validate_secret)
-    responses = ResponseFactory()
-
-    flask_app.register_blueprint(create_webhook_blueprint(WebhookRouteDeps(
-        auth=auth,
-        parser=WebhookPayloadParser(APPROVED_SYMBOLS, PRICE_RANGES, logger),
-        responses=responses,
-        make_dedupe_key=_make_dedupe_key,
-        record_webhook_event=_record_webhook_event,
-        mark_webhook_event_status=(
-            lambda dedupe_key, status, **kwargs: _trade_audit_recorder().record_webhook_status(
-                dedupe_key=dedupe_key,
-                status=status,
-                **kwargs,
-            )
+    register_routes(
+        flask_app,
+        RouteRegistrationDeps(
+            validate_secret=validate_secret,
+            approved_symbols=APPROVED_SYMBOLS,
+            price_ranges=PRICE_RANGES,
+            logger=logger,
+            make_dedupe_key=_make_dedupe_key,
+            record_webhook_event=_record_webhook_event,
+            mark_webhook_event_status=(
+                lambda dedupe_key, status, **kwargs: _trade_audit_recorder().record_webhook_status(
+                    dedupe_key=dedupe_key,
+                    status=status,
+                    **kwargs,
+                )
+            ),
+            submit_signal=lambda data: app_container.signal_executor_factory().submit(
+                process_signal,
+                data,
+            ),
+            health_payload=health_payload,
+            status_payload=status_payload,
+            positions_payload=positions_payload,
+            debug_symbol_payload=debug_symbol_payload,
         ),
-        submit_signal=lambda data: app_container.signal_executor_factory().submit(process_signal, data),
-        logger=logger,
-    )))
-    flask_app.register_blueprint(create_status_blueprint(StatusRouteDeps(
-        auth=auth,
-        responses=responses,
-        health_payload=health_payload,
-        status_payload=status_payload,
-        positions_payload=positions_payload,
-    )))
-    flask_app.register_blueprint(create_debug_blueprint(DebugRouteDeps(
-        auth=auth,
-        responses=responses,
-        debug_symbol_payload=debug_symbol_payload,
-    )))
+    )
 
 
 def create_app(

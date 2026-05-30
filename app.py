@@ -50,6 +50,7 @@ from services.preflight_service import (
 )
 from services.sizing_service import apply_final_sizing, apply_size_cap, build_conviction_stack
 from services.execution_service import execute_order
+from services import legacy_signal_stages
 from services.signal_pipeline import SignalPipelineDeps
 from services.signal_models import SignalContext, SignalRuntimeState
 from services import trend_context_service
@@ -1982,23 +1983,20 @@ def _legacy_check_stale_signal(
     account_state: dict,
     dedupe_key: str | None,
 ) -> _LegacyStageResult:
-    is_stale, age_seconds, stale_reason = _is_signal_stale(data)
-    if is_stale:
+    decision = legacy_signal_stages.check_stale_signal(
+        raw_signal=data,
+        parse_stale_signal=_is_signal_stale,
+    )
+    account_state.update(decision.account_state_updates)
+    if decision.rejected and decision.approval:
         return _legacy_reject_approval_decision(
             symbol=symbol,
             action=action,
             price=price,
             account_state=account_state,
             dedupe_key=dedupe_key,
-            approval=deterministic_rejection(
-                category="stale_signal",
-                reason=stale_reason,
-                metadata={"age_seconds": age_seconds},
-            ),
+            approval=decision.approval,
         )
-
-    if age_seconds is not None:
-        account_state["signal_age_seconds"] = round(age_seconds, 2)
 
     return _LEGACY_STAGE_CONTINUE
 
@@ -2011,71 +2009,25 @@ def _legacy_check_cash_safe_gates(
     account_state: dict,
     dedupe_key: str | None,
 ) -> _LegacyStageResult:
-    if action != "buy" or not is_cash_safe_mode():
-        return _LEGACY_STAGE_CONTINUE
-
-    if symbol not in CASH_SAFE_SYMBOLS:
-        reason = f"{symbol} not allowed in cash_safe symbols {sorted(CASH_SAFE_SYMBOLS)}"
+    decision = legacy_signal_stages.check_cash_safe_gates(
+        symbol=symbol,
+        action=action,
+        account_state=account_state,
+        cash_safe_mode=is_cash_safe_mode(),
+        cash_safe_symbols=CASH_SAFE_SYMBOLS,
+        max_open_positions=CASH_SAFE_MAX_OPEN_POSITIONS,
+        max_new_buys_per_symbol_per_day=CASH_SAFE_MAX_NEW_BUYS_PER_SYMBOL_PER_DAY,
+        cash_safe_buys_today=trades_repo.cash_safe_buys_today,
+        log=logger,
+    )
+    if decision.rejected and decision.approval:
         return _legacy_reject_approval_decision(
             symbol=symbol,
             action=action,
             price=price,
             account_state=account_state,
             dedupe_key=dedupe_key,
-            approval=deterministic_rejection(
-                category="cash_safe_symbol",
-                reason=reason,
-                metadata={"cash_safe_symbols": sorted(CASH_SAFE_SYMBOLS)},
-            ),
-        )
-
-    open_count = account_state.get("open_position_count", 0)
-    if open_count >= CASH_SAFE_MAX_OPEN_POSITIONS:
-        reason = (
-            f"open_position_count={open_count} >= cash_safe max "
-            f"{CASH_SAFE_MAX_OPEN_POSITIONS}"
-        )
-        return _legacy_reject_approval_decision(
-            symbol=symbol,
-            action=action,
-            price=price,
-            account_state=account_state,
-            dedupe_key=dedupe_key,
-            approval=deterministic_rejection(
-                category="cash_safe_position_limit",
-                reason=reason,
-                metadata={
-                    "open_position_count": open_count,
-                    "max_open_positions": CASH_SAFE_MAX_OPEN_POSITIONS,
-                },
-            ),
-        )
-
-    try:
-        buys_today = trades_repo.cash_safe_buys_today(symbol)
-    except Exception as e:
-        logger.error(f"Cash-safe daily buy check failed for {symbol}: {e}")
-        buys_today = 999
-
-    if buys_today >= CASH_SAFE_MAX_NEW_BUYS_PER_SYMBOL_PER_DAY:
-        reason = (
-            f"buys_today={buys_today} >= cash_safe per-symbol daily max "
-            f"{CASH_SAFE_MAX_NEW_BUYS_PER_SYMBOL_PER_DAY}"
-        )
-        return _legacy_reject_approval_decision(
-            symbol=symbol,
-            action=action,
-            price=price,
-            account_state=account_state,
-            dedupe_key=dedupe_key,
-            approval=deterministic_rejection(
-                category="cash_safe_daily_symbol_limit",
-                reason=reason,
-                metadata={
-                    "buys_today": buys_today,
-                    "max_buys_per_symbol": CASH_SAFE_MAX_NEW_BUYS_PER_SYMBOL_PER_DAY,
-                },
-            ),
+            approval=decision.approval,
         )
 
     return _LEGACY_STAGE_CONTINUE
@@ -2089,21 +2041,22 @@ def _legacy_check_symbol_override(
     account_state: dict,
     dedupe_key: str | None,
 ) -> _LegacyStageResult:
-    override_reason = _symbol_override_block(symbol, action)
-    if not override_reason:
-        return _LEGACY_STAGE_CONTINUE
-
-    return _legacy_reject_approval_decision(
+    decision = legacy_signal_stages.apply_symbol_overrides(
         symbol=symbol,
         action=action,
-        price=price,
-        account_state=account_state,
-        dedupe_key=dedupe_key,
-        approval=deterministic_rejection(
-            category="symbol_override",
-            reason=override_reason,
-        ),
+        symbol_override_block=_symbol_override_block,
     )
+    if decision.rejected and decision.approval:
+        return _legacy_reject_approval_decision(
+            symbol=symbol,
+            action=action,
+            price=price,
+            account_state=account_state,
+            dedupe_key=dedupe_key,
+            approval=decision.approval,
+        )
+
+    return _LEGACY_STAGE_CONTINUE
 
 
 def _legacy_apply_setup_stage(

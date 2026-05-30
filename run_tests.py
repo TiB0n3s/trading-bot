@@ -78,6 +78,7 @@ TESTS = [
     "tests/test_architecture_boundaries.py",
     "tests/test_signal_pipeline.py",
     "tests/test_preflight_service.py",
+    "tests/test_legacy_signal_stages.py",
     "tests/test_context_approval_sizing_services.py",
     "tests/test_sizing_ownership.py",
     "tests/test_execution_service.py",

@@ -142,7 +142,6 @@ TEMPORARY_DB_ACCESS_ALLOWLIST = {
     "prediction_cache.py",
     "prediction_report.py",
     "prediction_validation_report.py",
-    "prior_session_context.py",
     "rejected_signal_outcome_builder.py",
     "session_gate_report.py",
     "setup_engine.py",

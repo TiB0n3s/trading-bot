@@ -39,6 +39,7 @@ from services.market_context_service import MarketContextService
 from services.symbol_override_service import SymbolOverrideService
 from services.trend_state_service import TrendStateService
 from services.momentum_service import MomentumService
+from services.execution_adapters import ExecutionAdapterService
 from services import trade_audit_service
 from services.setup_context_service import (
     SetupContextDeps,
@@ -1003,135 +1004,21 @@ def _sell_continuation_delay_reason(account_state, trend, unrealized_pct):
     return None
 
 
-def _compute_spread_pct(bid, ask):
-    bid_f = _safe_float(bid)
-    ask_f = _safe_float(ask)
-
-    if bid_f is None or ask_f is None:
-        return None
-    if bid_f <= 0 or ask_f <= 0:
-        return None
-    if ask_f <= bid_f:
-        return 0.0
-
-    mid = (bid_f + ask_f) / 2.0
-    if mid <= 0:
-        return None
-
-    return ((ask_f - bid_f) / mid) * 100.0
-
-
-def _fetch_quote_snapshot(symbol):
-    """
-    Return a normalized quote snapshot.
-
-    Adapt the body to your existing quote source if needed.
-    Expected output keys:
-      - bid
-      - ask
-      - spread_pct
-    """
-    quote = market_data_service.get_latest_quote(symbol)
-
-    bid = getattr(quote, "bid_price", None)
-    ask = getattr(quote, "ask_price", None)
-
-    return {
-        "bid": _safe_float(bid),
-        "ask": _safe_float(ask),
-        "spread_pct": _compute_spread_pct(bid, ask),
-    }
-
-
-def _validate_spread_with_retry(
-    symbol,
-    max_spread_pct=0.10,
-    suspect_spread_pct=2.00,
-    retry_count=3,
-    retry_delay_sec=0.35,
-):
-    """
-    Returns:
-      {
-        "ok": bool,
-        "reason": str | None,
-        "bid": float | None,
-        "ask": float | None,
-        "spread_pct": float | None,
-        "attempts": int,
-        "suspect_quote": bool,
-      }
-    """
-    last = {
-        "bid": None,
-        "ask": None,
-        "spread_pct": None,
-        "attempts": 0,
-        "suspect_quote": False,
-        "ok": False,
-        "reason": "second_look: quote unavailable",
-    }
-
-    total_attempts = max(1, retry_count)
-
-    for attempt in range(1, total_attempts + 1):
-        snap = _fetch_quote_snapshot(symbol)
-        spread_pct = snap["spread_pct"]
-
-        last.update(
-            {
-                "bid": snap["bid"],
-                "ask": snap["ask"],
-                "spread_pct": spread_pct,
-                "attempts": attempt,
-            }
-        )
-
-        if spread_pct is None:
-            if attempt < total_attempts:
-                time.sleep(retry_delay_sec)
-                continue
-            last["reason"] = "second_look: quote unavailable"
-            return last
-
-        if spread_pct <= max_spread_pct:
-            last["ok"] = True
-            last["reason"] = None
-            return last
-
-        if spread_pct > suspect_spread_pct:
-            last["suspect_quote"] = True
-            if attempt < total_attempts:
-                logger.warning(
-                    f"Second-look suspect quote for {symbol}: "
-                    f"spread {spread_pct:.3f}% on attempt {attempt}/{total_attempts} "
-                    f"(bid={snap['bid']:.4f}, ask={snap['ask']:.4f}) — retrying"
-                )
-                time.sleep(retry_delay_sec)
-                continue
-
-            last["reason"] = (
-                f"second_look: suspect quote persisted after {attempt} attempts; "
-                f"bid/ask spread {spread_pct:.3f}% exceeds suspect threshold "
-                f"{suspect_spread_pct:.3f}% "
-                f"(bid={snap['bid']:.4f}, ask={snap['ask']:.4f})"
-            )
-            return last
-
-        last["reason"] = (
-            f"second_look: bid/ask spread {spread_pct:.3f}% exceeds max "
-            f"{max_spread_pct:.3f}% "
-            f"(bid={snap['bid']:.4f}, ask={snap['ask']:.4f})"
-        )
-        return last
-
-    return last
-
-
 # Second-look safety thresholds.
 # These are env-tunable so paper/live behavior can be adjusted without code edits.
 MAX_SIGNAL_PRICE_DRIFT_PCT = float(os.environ.get("MAX_SIGNAL_PRICE_DRIFT_PCT", "0.35"))
 MAX_BID_ASK_SPREAD_PCT = float(os.environ.get("MAX_BID_ASK_SPREAD_PCT", "0.10"))
+
+_execution_adapter_service = ExecutionAdapterService(
+    market_data_service=market_data_service,
+    broker_service=broker_service,
+    symbol_max_spread_pct=SYMBOL_MAX_SPREAD_PCT,
+    max_bid_ask_spread_pct=MAX_BID_ASK_SPREAD_PCT,
+    max_signal_price_drift_pct=MAX_SIGNAL_PRICE_DRIFT_PCT,
+    log=logger,
+)
+_validate_spread_with_retry = _execution_adapter_service.validate_spread_with_retry
+_pre_order_safety_check = _execution_adapter_service.pre_order_safety_check
 
 PORTFOLIO_ROTATION_ENABLED = os.environ.get("PORTFOLIO_ROTATION_ENABLED", "false").lower().strip() in (
     "1", "true", "yes", "on"
@@ -1313,21 +1200,6 @@ def _try_portfolio_rotation(candidate_symbol, candidate_price, account_state, no
         write_cooldown=_write_cooldown,
         last_sell=_last_sell,
         write_recent_sell=_write_recent_sell,
-        logger=logger,
-    )
-
-def _pre_order_safety_check(symbol, action, signal_price, account_state):
-    return execution_policy.pre_order_safety_check(
-        symbol=symbol,
-        action=action,
-        signal_price=signal_price,
-        account_state=account_state,
-        market_data_service=market_data_service,
-        broker_service=broker_service,
-        validate_spread_with_retry=_validate_spread_with_retry,
-        symbol_max_spread_pct=SYMBOL_MAX_SPREAD_PCT,
-        max_bid_ask_spread_pct=MAX_BID_ASK_SPREAD_PCT,
-        max_signal_price_drift_pct=MAX_SIGNAL_PRICE_DRIFT_PCT,
         logger=logger,
     )
 

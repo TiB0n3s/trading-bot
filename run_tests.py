@@ -85,6 +85,7 @@ TESTS = [
     "tests/test_context_approval_sizing_services.py",
     "tests/test_sizing_ownership.py",
     "tests/test_execution_service.py",
+    "tests/test_execution_adapters.py",
     "tests/test_trade_audit_service.py",
     "tests/test_live_signal_characterization.py",
     "tests/test_phase7_observability.py",

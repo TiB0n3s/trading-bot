@@ -51,6 +51,7 @@ from services.preflight_service import (
 )
 from services.sizing_service import apply_final_sizing, apply_size_cap, build_conviction_stack
 from services.execution_service import execute_order, run_legacy_approved_order_path
+from services.live_signal_processor import LiveSignalProcessor, LiveSignalProcessorDeps
 from services import legacy_signal_stages
 from services.signal_pipeline import SignalPipelineDeps
 from services.signal_models import SignalContext, SignalRuntimeState
@@ -2714,6 +2715,183 @@ def _legacy_run_intra_session_tape_degradation_gate(
     return _LEGACY_STAGE_CONTINUE
 
 
+def _allow_medium_confidence_momentum_override(
+    symbol: str,
+    action: str,
+    decision: dict,
+    account_state: dict,
+    trend: dict,
+    setup_obs: dict,
+) -> tuple[bool, str]:
+    """Allow medium Claude confidence only when deterministic evidence is exceptional."""
+    try:
+        if action != "buy":
+            return False, "not_buy"
+
+        if (decision or {}).get("confidence") != "medium":
+            return False, "not_medium_confidence"
+
+        trend = trend or {}
+        account_state = account_state or {}
+        setup_obs = setup_obs or {}
+
+        trend_direction = trend.get("direction") or account_state.get("trend_direction")
+        trend_strength = trend.get("strength") or account_state.get("trend_strength")
+        momentum_direction = (
+            account_state.get("momentum_direction")
+            or (account_state.get("momentum") or {}).get("direction")
+        )
+        session = account_state.get("session_momentum") or {}
+        session_label = session.get("trend_label") or account_state.get("session_trend_label")
+
+        prediction = account_state.get("prediction_gate") or {}
+        prediction_decision = (
+            prediction.get("prediction_decision")
+            or prediction.get("decision")
+            or account_state.get("prediction_decision")
+        )
+        prediction_score_raw = (
+            prediction.get("prediction_score")
+            or prediction.get("score")
+            or account_state.get("prediction_score")
+        )
+
+        setup_action = (
+            setup_obs.get("policy_action")
+            or setup_obs.get("setup_policy_action")
+            or account_state.get("setup_policy_action")
+        )
+
+        if setup_action in ("block", "error"):
+            return False, f"setup_action={setup_action}"
+
+        try:
+            prediction_score = float(prediction_score_raw)
+        except Exception:
+            return False, "prediction_score_missing"
+
+        checks = {
+            "trend_direction": trend_direction == "bullish",
+            "trend_strength": trend_strength == "confirmed",
+            "momentum_direction": momentum_direction == "rising",
+            "session_label": session_label == "strong_uptrend",
+            "prediction_decision": prediction_decision == "pass",
+            "prediction_score": prediction_score >= 8,
+        }
+
+        if not all(checks.values()):
+            failed = ",".join(k for k, ok in checks.items() if not ok)
+            return False, f"failed={failed}"
+
+        reason = (
+            "medium confidence allowed by deterministic momentum override: "
+            f"trend={trend_direction}/{trend_strength}; "
+            f"momentum={momentum_direction}; "
+            f"session={session_label}; "
+            f"prediction={prediction_decision}/{prediction_score:g}; "
+            f"setup_action={setup_action}"
+        )
+        return True, reason
+
+    except Exception as e:
+        return False, f"override_error={e}"
+
+
+def _build_live_signal_processor() -> LiveSignalProcessor:
+    return LiveSignalProcessor(
+        LiveSignalProcessorDeps(
+            log=logger,
+            log_rejection=log_rejection,
+            record_webhook_status=(
+                lambda **kwargs: _trade_audit_recorder().record_webhook_status(**kwargs)
+            ),
+            parse_stale_signal=_is_signal_stale,
+            is_cash_safe_mode=is_cash_safe_mode,
+            cash_safe_symbols=CASH_SAFE_SYMBOLS,
+            cash_safe_max_open_positions=CASH_SAFE_MAX_OPEN_POSITIONS,
+            cash_safe_max_new_buys_per_symbol_per_day=CASH_SAFE_MAX_NEW_BUYS_PER_SYMBOL_PER_DAY,
+            cash_safe_buys_today=trades_repo.cash_safe_buys_today,
+            symbol_override_block=_symbol_override_block,
+            enforce_setup_policy_blocks=ENFORCE_SETUP_POLICY_BLOCKS,
+            apply_size_cap=apply_size_cap,
+            trend_table=_trend_table,
+            env_float=_env_float,
+            is_unrecognized_setup_label=is_unrecognized_setup_label,
+            count_second_look_blocks_today=_count_second_look_blocks_today,
+            apply_market_bias_context=context_builder_apply_market_bias_context,
+            update_trend_history=_legacy_update_trend_history,
+            sell_continuation_delay_reason=_sell_continuation_delay_reason,
+            hydrate_pre_macro_context=_legacy_hydrate_pre_macro_context,
+            hydrate_session_context=_legacy_hydrate_session_context,
+            hydrate_buy_momentum_context=_legacy_hydrate_buy_momentum_context,
+            hydrate_strategy_context=_legacy_hydrate_strategy_context,
+            macro_position_count_floor=MACRO_POSITION_COUNT_FLOOR,
+            get_latest_session_momentum=get_latest_session_momentum,
+            session_momentum_is_fresh=_session_momentum_is_fresh,
+            weakest_position_context=_get_weakest_position_context,
+            evaluate_buy_opportunity=evaluate_buy_opportunity,
+            required_buy_confirmations=_required_buy_confirmations,
+            try_portfolio_rotation=_try_portfolio_rotation,
+            get_account_state=get_mock_account_state,
+            sleep=time.sleep,
+            required_sell_confirmations=_required_sell_confirmations,
+            is_fast_lane_buy_flip=is_fast_lane_buy_flip,
+            is_fast_lane_sell_flip=is_fast_lane_sell_flip,
+            market_open_minutes=MARKET_OPEN_MINUTES,
+            open_momentum_fast_lane_enabled=OPEN_MOMENTUM_FAST_LANE_ENABLED,
+            iex_thin_symbols=IEX_THIN_SYMBOLS,
+            adaptive_buy_confirmation_enabled=ADAPTIVE_BUY_CONFIRMATION_ENABLED,
+            execution_mode=EXECUTION_MODE,
+            evaluate_signal_quality_gate=evaluate_signal_quality_gate,
+            get_cached_prediction=get_cached_prediction,
+            ml_prediction_bucket=_ml_prediction_bucket,
+            live_bias_override=entry_policy.live_bias_override,
+            evaluate_session_momentum_gate=entry_policy.evaluate_session_momentum_gate,
+            prediction_soft_avoid_min_sample_size=PREDICTION_SOFT_AVOID_MIN_SAMPLE_SIZE,
+            enforce_prediction_blocks=ENFORCE_PREDICTION_BLOCKS,
+            enforce_prediction_watch_in_cash=ENFORCE_PREDICTION_WATCH_IN_CASH,
+            prediction_gate_mode=PREDICTION_GATE_MODE,
+            is_cash_mode=is_cash_mode,
+            enforce_session_momentum_gate=ENFORCE_SESSION_MOMENTUM_GATE,
+            is_degraded_setup=is_degraded_setup,
+            intra_session_tape_degradation_enabled=INTRA_SESSION_TAPE_DEGRADATION_ENABLED,
+            intra_session_tape_degradation_start_hour_et=INTRA_SESSION_TAPE_DEGRADATION_START_HOUR_ET,
+            intra_session_tape_degradation_min_setup_score=INTRA_SESSION_TAPE_DEGRADATION_MIN_SETUP_SCORE,
+            et_timezone=ET,
+            score_buy_opportunity=score_buy_opportunity,
+            memory_for_signal=memory_for_signal,
+            build_intelligence_context=build_intelligence_context,
+            evaluate_decision_policy=evaluate_decision_policy,
+            public_decision_policy_config=public_decision_policy_config,
+            decision_policy_live_authority_enabled=decision_policy_live_authority_enabled,
+            decision_policy_live_block_enabled=DECISION_POLICY_LIVE_BLOCK,
+            decision_policy_live_size_down_enabled=DECISION_POLICY_LIVE_SIZE_DOWN,
+            build_conviction_stack=build_conviction_stack,
+            compute_dominant_limiter=sizing_policy.compute_dominant_limiter,
+            log_event=log_event,
+            weekly_symbol_performance=_weekly_symbol_performance,
+            medium_confidence_override=_allow_medium_confidence_momentum_override,
+            evaluate_signal=evaluate_signal,
+            tape_exception_enabled=TAPE_EXCEPTION_ENABLED,
+            market_bias=_market_bias,
+            apply_final_sizing=apply_final_sizing,
+            apply_buy_opportunity_sizing=lambda **kwargs: (
+                sizing_policy.apply_buy_opportunity_sizing(**kwargs, log=logger)
+            ),
+            execute_order=execute_order,
+            pre_order_safety_check=_pre_order_safety_check,
+            one_bar_confirmation_hold=_one_bar_confirmation_hold,
+            make_client_order_id=_make_client_order_id,
+            place_order=place_order,
+            log_trade=log_trade,
+            write_cooldown=_write_cooldown,
+            write_recent_sell=_write_recent_sell,
+            last_order=_last_order,
+            last_sell=_last_sell,
+        )
+    )
+
+
 def _legacy_process_signal(data, *, runtime_state=None, context_runtime=None, preflight_result=None):
     if runtime_state is None or context_runtime is None:
         symbol, action = normalize_signal_identity(data)
@@ -2745,223 +2923,19 @@ def _legacy_process_signal(data, *, runtime_state=None, context_runtime=None, pr
 
 
 def _legacy_process_signal_with_context(data, runtime_state, context_runtime, preflight_result):
-    dedupe_key = data.get("_dedupe_key")
-    symbol = runtime_state.symbol
-    action = runtime_state.action
-    price = data.get("price", 0)
-    logger.info(f"Processing {action.upper()} signal for {symbol} at {price}")
-
-    account_state = runtime_state.account_state
-    built_context = context_runtime.built
-    setup_obs = built_context.setup.data
-    rejection_adapter = _legacy_rejection_adapter(
-        symbol=symbol,
-        action=action,
-        price=price,
-        account_state=account_state,
-        dedupe_key=dedupe_key,
+    context = SignalContext(
+        raw_signal=data,
+        dedupe_key=data.get("_dedupe_key"),
+        action=runtime_state.action,
+        symbol=runtime_state.symbol,
+        price=data.get("price", 0),
     )
-
-    stale_result = _legacy_check_stale_signal(
-        data=data,
-        symbol=symbol,
-        action=action,
-        price=price,
-        account_state=account_state,
-        dedupe_key=dedupe_key,
+    return _build_live_signal_processor().process(
+        context,
+        runtime_state,
+        context_runtime,
+        preflight_result,
     )
-    if stale_result.rejected:
-        return stale_result.response
-
-    setup_stage_result = _legacy_apply_setup_stage(
-        symbol=symbol,
-        action=action,
-        price=price,
-        account_state=account_state,
-        dedupe_key=dedupe_key,
-        setup_obs=setup_obs,
-    )
-    if setup_stage_result.rejected:
-        return setup_stage_result.response
-
-    cash_safe_result = _legacy_check_cash_safe_gates(
-        symbol=symbol,
-        action=action,
-        price=price,
-        account_state=account_state,
-        dedupe_key=dedupe_key,
-    )
-    if cash_safe_result.rejected:
-        return cash_safe_result.response
-
-    symbol_override_result = _legacy_check_symbol_override(
-        symbol=symbol,
-        action=action,
-        price=price,
-        account_state=account_state,
-        dedupe_key=dedupe_key,
-    )
-    if symbol_override_result.rejected:
-        return symbol_override_result.response
-
-    _legacy_update_trend_history(symbol, action)
-
-    current_et = preflight_result.metadata.get("current_et") or now_et()
-    existing_position = preflight_result.metadata.get("existing_position")
-
-    sell_discipline_result = _legacy_check_sell_discipline(
-        symbol=symbol,
-        action=action,
-        price=price,
-        account_state=account_state,
-        dedupe_key=dedupe_key,
-        existing_position=existing_position,
-    )
-    if sell_discipline_result.rejected:
-        return sell_discipline_result.response
-
-    macro_risk = _legacy_hydrate_pre_macro_context(
-        symbol=symbol,
-        action=action,
-        account_state=account_state,
-        context_runtime=context_runtime,
-    )
-
-    macro_gate_result = _legacy_run_macro_position_gate(
-        symbol=symbol,
-        action=action,
-        price=price,
-        account_state=account_state,
-        context_runtime=context_runtime,
-        current_et=current_et,
-        macro_risk=macro_risk,
-        rejection_adapter=rejection_adapter,
-    )
-    if macro_gate_result.rejected:
-        return macro_gate_result.response
-
-    trend_gate_result = _legacy_run_trend_confirmation_gate(
-        symbol=symbol,
-        action=action,
-        price=price,
-        account_state=account_state,
-        context_runtime=context_runtime,
-        current_et=current_et,
-        rejection_adapter=rejection_adapter,
-    )
-    if trend_gate_result.rejected:
-        return trend_gate_result.response
-
-    bias_entry = _market_bias.get(symbol) or {}
-    entry_sanity_result = _legacy_run_entry_sanity_gates(
-        symbol=symbol,
-        action=action,
-        price=price,
-        account_state=account_state,
-        bias_entry=bias_entry,
-        existing_position=existing_position,
-        rejection_adapter=rejection_adapter,
-    )
-    if entry_sanity_result.rejected:
-        return entry_sanity_result.response
-
-    _legacy_hydrate_session_context(context_runtime=context_runtime)
-
-    if action == "sell" and existing_position:
-        try:
-            avg_entry = float(existing_position.get("avg_entry") or 0)
-            current_price = float(existing_position.get("current_price") or price or 0)
-            qty = float(existing_position.get("qty") or 0)
-            if avg_entry > 0 and current_price > 0 and qty > 0:
-                unrealized_pct = (current_price - avg_entry) / avg_entry * 100.0
-                continuation_reason = _sell_continuation_delay_reason(
-                    account_state,
-                    _trend_table.get(symbol) or {},
-                    unrealized_pct,
-                )
-                if continuation_reason:
-                    if rejection_adapter.reject_current_signal(
-                        "sell_continuation_check",
-                        continuation_reason,
-                    ):
-                        return
-        except Exception as e:
-            logger.warning(
-                f"Sell continuation check failed for {symbol}; fail-open for SELL safety: {e}"
-            )
-
-    _legacy_hydrate_buy_momentum_context(
-        symbol=symbol,
-        action=action,
-        account_state=account_state,
-        context_runtime=context_runtime,
-    )
-    prediction_gate_result = _legacy_run_prediction_bias_session_gate(
-        symbol=symbol,
-        action=action,
-        price=price,
-        account_state=account_state,
-        context_runtime=context_runtime,
-        rejection_adapter=rejection_adapter,
-    )
-    if prediction_gate_result.rejected:
-        return prediction_gate_result.response
-
-    tape_degradation_result = _legacy_run_intra_session_tape_degradation_gate(
-        symbol=symbol,
-        action=action,
-        price=price,
-        account_state=account_state,
-        rejection_adapter=rejection_adapter,
-    )
-    if tape_degradation_result.rejected:
-        return tape_degradation_result.response
-
-    _legacy_hydrate_strategy_context(
-        symbol=symbol,
-        action=action,
-        account_state=account_state,
-        context_runtime=context_runtime,
-    )
-
-    final_gate_result = _legacy_run_final_approval_gates(
-        data=data,
-        symbol=symbol,
-        action=action,
-        price=price,
-        account_state=account_state,
-        context_runtime=context_runtime,
-        rejection_adapter=rejection_adapter,
-    )
-    if final_gate_result.rejected:
-        return final_gate_result.response
-    claude_account_state = final_gate_result.claude_account_state or dict(account_state)
-
-    claude_result = _legacy_run_claude_and_confidence(
-        data=data,
-        symbol=symbol,
-        action=action,
-        price=price,
-        account_state=account_state,
-        claude_account_state=claude_account_state,
-        rejection_adapter=rejection_adapter,
-    )
-    if claude_result.rejected:
-        return claude_result.response
-    decision = dict(claude_result.decision or {})
-    order_path_result = _legacy_run_approved_order_path(
-        data=data,
-        symbol=symbol,
-        action=action,
-        price=price,
-        account_state=account_state,
-        dedupe_key=dedupe_key,
-        current_et=current_et,
-        decision=decision,
-        rejection_adapter=rejection_adapter,
-    )
-    if order_path_result.rejected:
-        return order_path_result.response
 
 
 def _build_signal_pipeline(app_container: ApplicationContainer | None = None):

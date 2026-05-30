@@ -69,6 +69,7 @@ class LiveSignalProcessorDeps:
     env_float: Callable[[str, float], float]
     is_unrecognized_setup_label: Callable[[dict[str, Any]], bool]
     count_second_look_blocks_today: Callable[[str], int]
+    apply_market_bias_context: Callable[..., Any]
     update_trend_history: Callable[[str, str], Any]
     sell_continuation_delay_reason: Callable[..., str | None]
     hydrate_pre_macro_context: Callable[..., dict[str, Any]]
@@ -835,7 +836,7 @@ class LiveSignalProcessor:
 
     def run_entry_sanity_gates(self, **kwargs):
         outcome = run_legacy_entry_sanity_gates(
-            apply_market_bias_context=lambda **_kwargs: None,
+            apply_market_bias_context=self.deps.apply_market_bias_context,
             **{
                 k: v
                 for k, v in kwargs.items()
@@ -937,6 +938,17 @@ class LiveSignalProcessor:
         )
 
     def run_claude_and_confidence(self, **kwargs):
+        def medium_confidence_override(*, decision, account_state):
+            symbol = kwargs["symbol"]
+            return self.deps.medium_confidence_override(
+                symbol=symbol,
+                action=kwargs["action"],
+                decision=decision,
+                account_state=account_state,
+                trend=self.deps.trend_table.get(symbol) or {},
+                setup_obs=account_state.get("setup_observation") or {},
+            )
+
         outcome = run_legacy_claude_and_confidence(
             signal=kwargs["data"],
             symbol=kwargs["symbol"],
@@ -944,7 +956,7 @@ class LiveSignalProcessor:
             account_state=kwargs["account_state"],
             claude_account_state=kwargs["claude_account_state"],
             weekly_symbol_performance=self.deps.weekly_symbol_performance,
-            medium_confidence_override=self.deps.medium_confidence_override,
+            medium_confidence_override=medium_confidence_override,
             evaluate_signal=self.deps.evaluate_signal,
             cash_safe_mode=self.deps.is_cash_safe_mode(),
             market_bias=self.deps.market_bias.get(kwargs["symbol"]) or {},

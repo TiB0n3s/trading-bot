@@ -17,6 +17,16 @@ def _bind_runtime(runtime):
     )
 
 
+def _trend_table_state():
+    service = globals().get("_trend_state_service")
+    return getattr(service, "trend_table", globals().get("_trend_table", {}))
+
+
+def _market_bias_state():
+    service = globals().get("_market_context_service")
+    return getattr(service, "market_bias", globals().get("_market_bias", {}))
+
+
 def build_status_payload(runtime):
     _bind_runtime(runtime)
     result = {
@@ -129,8 +139,8 @@ def build_status_payload(runtime):
                 cap_hit = bool(pct_of_balance is not None and pct_of_balance >= 4.0)
                 if cap_hit:
                     symbols_at_cap.append(p.symbol)
-                trend = _trend_table.get(p.symbol) or {}
-                bias_entry = _market_bias.get(p.symbol) or {}
+                trend = _trend_table_state().get(p.symbol) or {}
+                bias_entry = _market_bias_state().get(p.symbol) or {}
                 pos_list.append({
                     "symbol":          p.symbol,
                     "qty":             float(p.qty),
@@ -271,12 +281,12 @@ def build_status_payload(runtime):
 
         trend_blocked = [
             {"symbol": sym, "direction": t.get("direction"), "strength": t.get("strength")}
-            for sym, t in _trend_table.items()
+            for sym, t in _trend_table_state().items()
             if sym in APPROVED_SYMBOLS and t.get("direction") in ("neutral", "bearish")
         ]
 
         bias_avoid = sorted(
-            sym for sym, entry in _market_bias.items()
+            sym for sym, entry in _market_bias_state().items()
             if (entry or {}).get("bias") == "avoid"
         )
 
@@ -297,7 +307,7 @@ def build_status_payload(runtime):
     try:
         result["trend_table_summary"] = {}
         for sym in sorted(APPROVED_SYMBOLS):
-            t = _trend_table.get(sym)
+            t = _trend_table_state().get(sym)
             if not t:
                 result["trend_table_summary"][sym] = None
                 continue

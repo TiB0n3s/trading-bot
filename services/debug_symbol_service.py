@@ -17,6 +17,24 @@ def _bind_runtime(runtime):
     )
 
 
+def _trend_table_state():
+    service = globals().get("_trend_state_service")
+    return getattr(service, "trend_table", globals().get("_trend_table", {}))
+
+
+def _market_bias_state():
+    service = globals().get("_market_context_service")
+    return getattr(service, "market_bias", globals().get("_market_bias", {}))
+
+
+def _load_market_bias_state():
+    service = globals().get("_market_context_service")
+    if service is not None:
+        service.load()
+    else:
+        _load_market_context()
+
+
 def build_debug_symbol_payload(runtime, symbol):
     _bind_runtime(runtime)
     symbol = symbol.upper()
@@ -27,7 +45,7 @@ def build_debug_symbol_payload(runtime, symbol):
             "approved_symbols": sorted(APPROVED_SYMBOLS),
         }, 400
 
-    _load_market_context()
+    _load_market_bias_state()
 
     now_et_value = now_et()
     market_hours_open = is_market_hours(now_et_value)
@@ -66,7 +84,7 @@ def build_debug_symbol_payload(runtime, symbol):
     try:
         result["trend_table_summary"] = {}
         for sym in sorted(APPROVED_SYMBOLS):
-            t = _trend_table.get(sym)
+            t = _trend_table_state().get(sym)
             if not t:
                 result["trend_table_summary"][sym] = None
                 continue
@@ -96,7 +114,7 @@ def build_debug_symbol_payload(runtime, symbol):
 
     # Market context
     try:
-        result["market_bias"] = _market_bias.get(symbol)
+        result["market_bias"] = _market_bias_state().get(symbol)
     except Exception as e:
         result["market_bias_error"] = str(e)
 
@@ -167,7 +185,12 @@ def build_debug_symbol_payload(runtime, symbol):
 
     # Observe-only market alignment
     try:
-        result["market_alignment"] = _symbol_market_alignment(symbol)
+        service = globals().get("_trend_state_service")
+        result["market_alignment"] = (
+            service.symbol_market_alignment(symbol)
+            if service is not None
+            else _symbol_market_alignment(symbol)
+        )
     except Exception as e:
         result["market_alignment_error"] = str(e)
 
@@ -186,7 +209,12 @@ def build_debug_symbol_payload(runtime, symbol):
     # High-level buy block reasons
     buy_blocks = []
 
-    override_reason = _symbol_override_block(symbol, "buy")
+    override_service = globals().get("_symbol_override_service")
+    override_reason = (
+        override_service.block_reason(symbol, "buy")
+        if override_service is not None
+        else _symbol_override_block(symbol, "buy")
+    )
     if override_reason:
         buy_blocks.append("symbol_override")
 

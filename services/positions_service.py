@@ -17,6 +17,30 @@ def _bind_runtime(runtime):
     )
 
 
+def _trend_table_state():
+    service = globals().get("_trend_state_service")
+    return getattr(service, "trend_table", globals().get("_trend_table", {}))
+
+
+def _market_bias_state():
+    service = globals().get("_market_context_service")
+    return getattr(service, "market_bias", globals().get("_market_bias", {}))
+
+
+def _market_context_summary():
+    service = globals().get("_market_context_service")
+    if service is not None:
+        service.load()
+        return service.file_summary()
+
+    _load_market_context()
+    ctx_path = Path(__file__).parent / "market_context.json"
+    if ctx_path.exists():
+        ctx = json.loads(ctx_path.read_text())
+        return ctx.get("market_date"), ctx.get("macro_sentiment")
+    return None, None
+
+
 def build_positions_payload(runtime):
     _bind_runtime(runtime)
     result = {"timestamp": datetime.now().isoformat()}
@@ -53,8 +77,8 @@ def build_positions_payload(runtime):
                 unrealized_pl = float(p.unrealized_pl)
                 unrealized_pl_pct = float(p.unrealized_plpc) * 100
                 exposure_pct = (market_value / balance * 100) if balance else None
-                trend = _trend_table.get(p.symbol) or {}
-                bias_entry = _market_bias.get(p.symbol) or {}
+                trend = _trend_table_state().get(p.symbol) or {}
+                bias_entry = _market_bias_state().get(p.symbol) or {}
                 entry_ctx = _open_entry_context(p.symbol) or {}
 
                 positions_list.append({
@@ -100,12 +124,7 @@ def build_positions_payload(runtime):
     market_context_date = None
     macro_sentiment = None
     try:
-        _load_market_context()  # opportunistic lazy refresh
-        ctx_path = Path(__file__).parent / "market_context.json"
-        if ctx_path.exists():
-            ctx = json.loads(ctx_path.read_text())
-            market_context_date = ctx.get("market_date")
-            macro_sentiment = ctx.get("macro_sentiment")
+        market_context_date, macro_sentiment = _market_context_summary()
     except Exception as e:
         logger.error(f"/positions market_context read error: {e}")
 

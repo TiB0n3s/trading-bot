@@ -663,6 +663,78 @@ def run_legacy_trend_confirmation_gate(
     return LegacyStageOutcome()
 
 
+def run_legacy_entry_sanity_gates(
+    *,
+    symbol: str,
+    action: str,
+    account_state: dict[str, Any],
+    bias_entry: dict[str, Any],
+    existing_position: Any,
+    apply_market_bias_context: Callable[..., Any],
+) -> LegacyStageOutcome:
+    if action != "buy":
+        return LegacyStageOutcome()
+
+    if bias_entry:
+        fundamental_score = bias_entry.get("fundamental_score")
+        if fundamental_score in ("bearish", "strong_bearish"):
+            return LegacyStageOutcome(
+                rejected=True,
+                approval=deterministic_rejection(
+                    category="fundamental_score",
+                    reason=f"fundamental_score={fundamental_score}",
+                    metadata={"bias_entry": bias_entry},
+                ),
+            )
+
+    apply_market_bias_context(
+        action=action,
+        account_state=account_state,
+        bias_entry=bias_entry,
+    )
+
+    if bias_entry:
+        entry_quality = bias_entry.get("entry_quality")
+        if entry_quality in ("do_not_chase", "avoid_chasing"):
+            reason = (
+                f"entry_quality={entry_quality} "
+                f"risk_level={bias_entry.get('risk_level') or '-'}"
+            )
+            return LegacyStageOutcome(
+                rejected=True,
+                approval=deterministic_rejection(
+                    category="chase_prevention",
+                    reason=reason,
+                    metadata={"bias_entry": bias_entry},
+                ),
+            )
+
+    if existing_position:
+        risk_level = account_state.get("risk_level")
+        momentum = account_state.get("momentum") or {}
+        momentum_direction = momentum.get("direction")
+
+        if risk_level in ("high", "very_high") and momentum_direction != "rising":
+            reason = (
+                f"existing position with risk_level={risk_level} "
+                f"and momentum_direction={momentum_direction or 'unknown'}"
+            )
+            return LegacyStageOutcome(
+                rejected=True,
+                approval=deterministic_rejection(
+                    category="addon_momentum_gate",
+                    reason=reason,
+                    metadata={
+                        "risk_level": risk_level,
+                        "momentum": momentum,
+                        "symbol": symbol,
+                    },
+                ),
+            )
+
+    return LegacyStageOutcome()
+
+
 def run_legacy_final_approval_gates(
     *,
     signal: dict[str, Any],

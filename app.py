@@ -36,6 +36,7 @@ from services.approval_service import (
     trend_confirmation_rejection,
     run_legacy_claude_and_confidence,
     run_legacy_final_approval_gates,
+    run_legacy_entry_sanity_gates,
     run_legacy_macro_position_gate,
     run_legacy_trend_confirmation_gate,
 )
@@ -2642,6 +2643,37 @@ def _legacy_run_trend_confirmation_gate(
     return _LEGACY_STAGE_CONTINUE
 
 
+def _legacy_run_entry_sanity_gates(
+    *,
+    symbol: str,
+    action: str,
+    price,
+    account_state: dict,
+    bias_entry: dict,
+    existing_position,
+    dedupe_key: str | None,
+) -> _LegacyStageResult:
+    outcome = run_legacy_entry_sanity_gates(
+        symbol=symbol,
+        action=action,
+        account_state=account_state,
+        bias_entry=bias_entry,
+        existing_position=existing_position,
+        apply_market_bias_context=context_builder_apply_market_bias_context,
+    )
+    if outcome.rejected and outcome.approval:
+        result = _legacy_reject_approval_decision(
+            symbol=symbol,
+            action=action,
+            price=price,
+            account_state=account_state,
+            dedupe_key=dedupe_key,
+            approval=outcome.approval,
+        )
+        return _LegacyStageResult(rejected=result.rejected, response=result.response)
+    return _LEGACY_STAGE_CONTINUE
+
+
 def _legacy_process_signal(data, *, runtime_state=None, context_runtime=None, preflight_result=None):
     if runtime_state is None or context_runtime is None:
         symbol, action = normalize_signal_identity(data)
@@ -2798,31 +2830,18 @@ def _legacy_process_signal_with_context(data, runtime_state, context_runtime, pr
     if trend_gate_result.rejected:
         return trend_gate_result.response
 
-    # Fundamental score gate: block buys when manual/pre-market research flags weak fundamentals
     bias_entry = _market_bias.get(symbol) or {}
-
-    if action == "buy":
-        if bias_entry:
-            fundamental_score = bias_entry.get("fundamental_score")
-            if fundamental_score in ("bearish", "strong_bearish"):
-                reason = f"fundamental_score={fundamental_score}"
-                if _reject_current_signal("fundamental_score", reason):
-                    return
-
-        _legacy_apply_market_bias_context(
-            action=action,
-            account_state=account_state,
-            bias_entry=bias_entry,
-        )
-
-        # Chase prevention gate
-        if action == "buy":
-            if bias_entry:
-                eq = bias_entry.get("entry_quality")
-                if eq in ("do_not_chase", "avoid_chasing"):
-                    reason = f"entry_quality={eq} risk_level={bias_entry.get('risk_level') or '-'}"
-                    if _reject_current_signal("chase_prevention", reason):
-                        return
+    entry_sanity_result = _legacy_run_entry_sanity_gates(
+        symbol=symbol,
+        action=action,
+        price=price,
+        account_state=account_state,
+        bias_entry=bias_entry,
+        existing_position=existing_position,
+        dedupe_key=dedupe_key,
+    )
+    if entry_sanity_result.rejected:
+        return entry_sanity_result.response
 
     _legacy_hydrate_session_context(context_runtime=context_runtime)
 
@@ -2852,22 +2871,6 @@ def _legacy_process_signal_with_context(data, runtime_state, context_runtime, pr
         account_state=account_state,
         context_runtime=context_runtime,
     )
-    # Add-on momentum gate: for existing positions with high/very_high risk,
-    # require rising short-term momentum before adding more exposure.
-    # This prevents adding to already-held high-risk names when momentum is flat/falling.
-    if action == "buy" and existing_position:
-        risk_level = account_state.get("risk_level")
-        momentum = account_state.get("momentum") or {}
-        momentum_direction = momentum.get("direction")
-
-        if risk_level in ("high", "very_high") and momentum_direction != "rising":
-            reason = (
-                f"existing position with risk_level={risk_level} "
-                f"and momentum_direction={momentum_direction or 'unknown'}"
-            )
-            if _reject_current_signal("addon_momentum_gate", reason):
-                return
-
     # Prediction gate: score buy quality after macro, bias, setup, and momentum are populated.
     if action == "buy":
         trend = _trend_table.get(symbol) or {}

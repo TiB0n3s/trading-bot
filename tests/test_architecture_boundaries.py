@@ -119,7 +119,6 @@ TEMPORARY_DB_ACCESS_ALLOWLIST = {
     "intelligence_prediction_report.py",
     "label_features.py",
     "label_v1_builder.py",
-    "live_features.py",
     "live_score_monitor.py",
     "market_alignment_report.py",
     "market_intelligence/experience_model.py",
@@ -175,8 +174,8 @@ APPROVED_MARKET_DATA_ACCESS = {
     "services/execution_adapters.py",
     "services/momentum_service.py",
     "services/pre_market_research_service.py",
+    "services/live_features_service.py",
     "services/session_momentum_service.py",
-    "live_features.py",
 }
 
 TEMPORARY_MARKET_DATA_ACCESS_ALLOWLIST = {

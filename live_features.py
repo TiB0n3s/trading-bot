@@ -6,7 +6,7 @@ import json
 import logging
 import os
 import sys
-from datetime import datetime, timedelta
+from datetime import datetime
 from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -52,15 +52,8 @@ load_env_file()
 import pytz
 
 from strategy_constants import SYMBOL_MARKET_ALIGNMENT
-from db import get_connection, DB_PATH
-from feature_engine import compute_feature_snapshot
-from macro_risk import get_macro_risk
-from market_time import is_trading_day, market_session, now_et
-from prior_session_context import prior_session_context
-from rolling_context import rolling_symbol_context
-from services.market_data_service import market_data_service
-from symbols_config import APPROVED_SYMBOLS
-from setup_engine import classify_feature_snapshot as classify_setup
+from market_time import is_trading_day, now_et
+from services.live_features_service import build_default_live_features_service
 
 logger = logging.getLogger("live_features")
 logging.basicConfig(
@@ -70,9 +63,17 @@ logging.basicConfig(
 
 MARKET_CONTEXT_FILE = BASE_DIR / "market_context.json"
 ET = pytz.timezone("America/New_York")
-_BAR_CACHE: dict[tuple[str, str], tuple[list[float], list[float]]] = {}
-# Tracks which feed was used for each (symbol, session) cache key.
-_BAR_FEED_USED: dict[tuple[str, str], str] = {}
+_live_features_service = None
+
+
+def get_live_features_service():
+    global _live_features_service
+    if _live_features_service is None:
+        _live_features_service = build_default_live_features_service(
+            base_dir=BASE_DIR,
+            logger=logger,
+        )
+    return _live_features_service
 
 
 def add_feature_audit_fields(snapshot: dict) -> dict:
@@ -107,26 +108,7 @@ def benchmark_for(symbol: str) -> str:
 
 
 def recent_actions(symbol: str, limit: int = 10) -> list[str]:
-    with get_connection(DB_PATH) as con:
-        rows = con.execute(
-            """
-            SELECT action
-            FROM trades
-            WHERE symbol = ?
-              AND action IS NOT NULL
-              AND (
-                    approved = 1
-                 OR rejection_reason LIKE 'confidence_gate:%'
-                 OR rejection_reason LIKE 'trend_gate:%'
-                 OR rejection_reason LIKE 'trend_confirmation:%'
-              )
-            ORDER BY timestamp DESC
-            LIMIT ?
-            """,
-            (symbol, limit),
-        ).fetchall()
-
-    return [r["action"] for r in rows]
+    return get_live_features_service().recent_actions(symbol, limit)
 
 
 def compute_trend(recent_actions_list: list[str]) -> dict:
@@ -167,242 +149,22 @@ def get_bar_series(
     min_bars_needed: int = 16,
     target_bars: int = 30,
 ) -> tuple[list[float], list[float], str, int]:
-    cache_key = (symbol, session)
-    if cache_key in _BAR_CACHE:
-        return _BAR_CACHE[cache_key]
-
-    end = datetime.now(ET)
-
-    timeframe = "1Min" if session == "open" else "5Min"
-    lookbacks = (90, 180, 360) if timeframe == "1Min" else (300, 600, 1200)
-
-    for window_minutes in lookbacks:
-        start = end - timedelta(minutes=window_minutes)
-        barset = market_data_service.get_barset_with_fallback(
-            symbol,
-            timeframe,
-            start=start.isoformat(),
-            end=end.isoformat(),
-            adjustment="raw",
-            feed="sip",
-        )
-        feed_used = market_data_service.get_feed_used(symbol) or "sip"
-        bars = barset.df
-
-        if bars is None or bars.empty:
-            continue
-
-        if "symbol" in bars.columns:
-            bars = bars[bars["symbol"] == symbol]
-
-        closes = [float(x) for x in bars["close"].tolist()]
-        volumes = [float(x) for x in bars["volume"].tolist()]
-
-        if len(closes) >= min_bars_needed:
-            result = (closes[-target_bars:], volumes[-target_bars:], timeframe, len(closes))
-            _BAR_CACHE[cache_key] = result
-            _BAR_FEED_USED[cache_key] = feed_used
-            logger.info(
-                f"{symbol}: using {timeframe} bars ({feed_used}), "
-                f"got {len(closes)} bars from {window_minutes}m lookback"
-            )
-            return result
-
-        logger.info(
-            f"{symbol}: only {len(closes)} {timeframe} bars from {window_minutes}m lookback; retrying wider window"
-        )
-
-    raise RuntimeError(
-        f"Not enough {timeframe} bars for {symbol} even after widened lookback"
+    return get_live_features_service().get_bar_series(
+        symbol,
+        session=session,
+        min_bars_needed=min_bars_needed,
+        target_bars=target_bars,
     )
 
 
 def build_snapshot(symbol: str) -> dict:
-    symbol = symbol.upper().strip()
-    if symbol not in APPROVED_SYMBOLS:
-        raise ValueError(f"{symbol} is not in APPROVED_SYMBOLS")
-
-    session = market_session()
-    benchmark_symbol = benchmark_for(symbol)
-
-    closes, volumes, timeframe, bar_count = get_bar_series(symbol, session=session)
-    benchmark_closes, _, _, _ = get_bar_series(benchmark_symbol, session=session)
-
-    ctx = load_market_context()
-    symbol_ctx = (ctx.get("symbols") or {}).get(symbol) or {}
-    macro = get_macro_risk(BASE_DIR)
-    trend = trend_for(symbol)
-
-    snapshot = compute_feature_snapshot(
-        symbol=symbol,
-        benchmark_symbol=benchmark_symbol,
-        closes=closes,
-        volumes=volumes,
-        benchmark_closes=benchmark_closes,
-        market_session=session,
-        macro_regime=macro.get("macro_regime"),
-        market_bias=symbol_ctx.get("bias"),
-        trend_direction=trend.get("direction"),
-        trend_strength=trend.get("strength"),
-    )
-
-    snapshot["timestamp"] = datetime.now(ET).isoformat()
-    snapshot["bar_timeframe"] = timeframe
-    snapshot["bar_count"] = bar_count
-    snapshot["bar_feed_used"] = _BAR_FEED_USED.get((symbol, session), "sip")
-
-    if len(closes) >= 5:
-        returns = []
-        for prev, cur in zip(closes[-5:-1], closes[-4:]):
-            if prev > 0:
-                returns.append((cur - prev) / prev * 100)
-        if len(returns) >= 4:
-            snapshot["momentum_acceleration_pct"] = round(
-                returns[-1] - (sum(returns[:-1]) / len(returns[:-1])),
-                4,
-            )
-
-    if len(volumes) >= 11:
-        current_volume = float(volumes[-1] or 0)
-        prior_volumes = [float(v or 0) for v in volumes[-11:-1]]
-        usable = [v for v in prior_volumes if v > 0]
-        if usable:
-            avg_volume = sum(usable) / len(usable)
-            if avg_volume > 0:
-                snapshot["volume_surge_ratio"] = round(current_volume / avg_volume, 3)
-
-    try:
-        rolling = rolling_symbol_context(symbol) or {}
-        snapshot["extension_from_recent_base_pct"] = rolling.get("extension_from_recent_base_pct")
-    except Exception:
-        snapshot["extension_from_recent_base_pct"] = None
-
-    try:
-        prior = prior_session_context(symbol) or {}
-        snapshot["prior_session_return_pct"] = prior.get("session_return_pct")
-    except Exception:
-        snapshot["prior_session_return_pct"] = None
-    
-    setup = classify_setup(snapshot)
-    snapshot["setup_label"] = setup.setup_label
-    snapshot["setup_recommendation"] = setup.recommendation
-    snapshot["setup_score"] = setup.setup_score
-    snapshot["setup_confidence"] = setup.confidence
-    snapshot["setup_key"] = setup.setup_key
-    snapshot["setup_rationale"] = setup.rationale
-
-    return add_feature_audit_fields(snapshot)
+    return get_live_features_service().build_snapshot(symbol)
 
 def insert_snapshot(snapshot: dict) -> None:
-    with get_connection(DB_PATH) as con:
-        con.execute(
-            """
-            INSERT INTO feature_snapshots (
-                timestamp,
-                symbol,
-                last_price,
-                ret_1m,
-                ret_5m,
-                ret_15m,
-                range_pos_15m,
-                distance_from_5m_high,
-                distance_from_5m_low,
-                distance_from_vwap,
-                volume_ratio_5m,
-                benchmark_symbol,
-                benchmark_ret_5m,
-                relative_strength_5m,
-                spread_pct,
-                market_session,
-                macro_regime,
-                market_bias,
-                trend_direction,
-                trend_strength,
-                feature_available_at,
-                feature_generated_at,
-                feature_age_seconds,
-                source,
-                is_stale,
-                staleness_reason,
-                bar_timeframe,
-                bar_count,
-                setup_label,
-                setup_recommendation,
-                setup_score,
-                setup_confidence,
-                setup_key,
-                momentum_acceleration_pct,
-                volume_surge_ratio,
-                extension_from_recent_base_pct,
-                prior_session_return_pct
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                snapshot.get("timestamp"),
-                snapshot.get("symbol"),
-                snapshot.get("last_price"),
-                snapshot.get("ret_1m"),
-                snapshot.get("ret_5m"),
-                snapshot.get("ret_15m"),
-                snapshot.get("range_pos_15m"),
-                snapshot.get("distance_from_5m_high"),
-                snapshot.get("distance_from_5m_low"),
-                snapshot.get("distance_from_vwap"),
-                snapshot.get("volume_ratio_5m"),
-                snapshot.get("benchmark_symbol"),
-                snapshot.get("benchmark_ret_5m"),
-                snapshot.get("relative_strength_5m"),
-                snapshot.get("spread_pct"),
-                snapshot.get("market_session"),
-                snapshot.get("macro_regime"),
-                snapshot.get("market_bias"),
-                snapshot.get("trend_direction"),
-                snapshot.get("trend_strength"),
-                snapshot.get("feature_available_at"),
-                snapshot.get("feature_generated_at"),
-                snapshot.get("feature_age_seconds"),
-                snapshot.get("source"),
-                snapshot.get("is_stale"),
-                snapshot.get("staleness_reason"),
-                snapshot.get("bar_timeframe"),
-                snapshot.get("bar_count"),
-                snapshot.get("setup_label"),
-                snapshot.get("setup_recommendation"),
-                snapshot.get("setup_score"),
-                snapshot.get("setup_confidence"),
-                snapshot.get("setup_key"),
-                snapshot.get("momentum_acceleration_pct"),
-                snapshot.get("volume_surge_ratio"),
-                snapshot.get("extension_from_recent_base_pct"),
-                snapshot.get("prior_session_return_pct"),
-            ),
-        )
+    get_live_features_service().insert_snapshot(snapshot)
 
 def collect_all_symbols(write: bool = False, stdout: bool = False) -> tuple[int, int]:
-    global _BAR_CACHE
-    _BAR_CACHE = {}
-
-    success = 0
-    failed = 0
-
-    for symbol in sorted(APPROVED_SYMBOLS):
-        try:
-            snapshot = build_snapshot(symbol)
-
-            if stdout:
-                print(json.dumps(snapshot, sort_keys=True))
-
-            if write:
-                insert_snapshot(snapshot)
-
-            success += 1
-            logger.info(f"{symbol}: snapshot collected")
-        except Exception as e:
-            failed += 1
-            logger.error(f"{symbol}: snapshot failed: {e}")
-
-    logger.info(f"feature snapshot collection complete: success={success} failed={failed}")
-    return success, failed
+    return get_live_features_service().collect_all_symbols(write=write, stdout=stdout)
 
 def main() -> int:
     parser = argparse.ArgumentParser()

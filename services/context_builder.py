@@ -1,4 +1,4 @@
-"""Context-building stage interfaces and legacy extraction helpers."""
+"""Context-building stage interfaces and context extraction helpers."""
 
 from __future__ import annotations
 
@@ -91,7 +91,7 @@ class BuiltSignalContext:
 class ContextAssemblyDeps:
     """Runtime dependencies for signal context assembly.
 
-    This keeps context ownership in the service layer while allowing the legacy
+    This keeps context ownership in the service layer while allowing the live
     path to pass existing functions during migration.
     """
 
@@ -106,10 +106,10 @@ class ContextAssemblyDeps:
     log: Any
 
 
-class LegacySignalContextRuntime:
-    """Behavior-preserving context owner for the legacy signal path.
+class SignalContextRuntime:
+    """Behavior-preserving context owner for the live signal path.
 
-    The legacy processor still owns enforcement during the migration, but this
+    The live processor still owns enforcement during the migration, but this
     runtime owns context assembly and keeps the latest BuiltSignalContext view.
     """
 
@@ -330,11 +330,11 @@ class LegacySignalContextRuntime:
         self.refresh()
 
 
-def build_legacy_signal_context(
+def build_signal_context_runtime(
     state: SignalRuntimeState,
     deps: ContextAssemblyDeps,
-) -> LegacySignalContextRuntime:
-    return LegacySignalContextRuntime(state, deps)
+) -> SignalContextRuntime:
+    return SignalContextRuntime(state, deps)
 
 
 def _latest_tape_bar_age_seconds(tape_state: dict[str, Any]) -> float | None:
@@ -402,10 +402,10 @@ def build_initial_signal_context(
     state: SignalRuntimeState,
     deps: ContextAssemblyDeps,
 ) -> BuiltSignalContext:
-    """Populate the first context slice needed by legacy policy gates.
+    """Populate the first context slice needed by policy gates.
 
     This is intentionally behavior-preserving: it mutates state.account_state in
-    the same shape the legacy body expects, then returns a typed BuiltSignalContext
+    the same shape the live signal flow expects, then returns a typed BuiltSignalContext
     for downstream migration.
     """
 
@@ -729,7 +729,7 @@ def build_market_alignment_observation(
 
 
 def hydrate_pre_macro_context(
-    context_runtime: LegacySignalContextRuntime,
+    context_runtime: SignalContextRuntime,
     *,
     get_macro_risk: Callable[[Any], dict[str, Any]],
     base_dir: Any,
@@ -783,7 +783,7 @@ def apply_market_bias_context(
         account_state["entry_quality"] = bias_entry["entry_quality"]
 
 
-def hydrate_buy_momentum_context(context_runtime: LegacySignalContextRuntime) -> None:
+def hydrate_buy_momentum_context(context_runtime: SignalContextRuntime) -> None:
     state = context_runtime.state
     if state.action != "buy":
         return
@@ -835,7 +835,7 @@ def hydrate_buy_momentum_context(context_runtime: LegacySignalContextRuntime) ->
 
 
 def hydrate_strategy_context(
-    context_runtime: LegacySignalContextRuntime,
+    context_runtime: SignalContextRuntime,
     *,
     strategy_engine_mode: str,
     evaluate_strategy_observe_only: Callable[..., Any],

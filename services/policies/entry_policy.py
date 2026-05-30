@@ -202,7 +202,7 @@ def evaluate_signal_quality_gate(
     return {
         "gate_name": "deterministic_signal_quality_gate",
         "prediction_field_note": (
-            "prediction_score/prediction_decision are legacy deterministic gate fields; "
+            "prediction_score/prediction_decision are deterministic gate fields; "
             "ml_prediction_* fields come from daily_symbol_predictions cache."
         ),
         "prediction_score": score,

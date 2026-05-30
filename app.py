@@ -27,7 +27,7 @@ from services.policy_controls import public_policy_control_config
 from services.context_builder import (
     ContextAssemblyDeps,
     apply_market_bias_context as context_builder_apply_market_bias_context,
-    build_legacy_signal_context,
+    build_signal_context_runtime,
 )
 from services.preflight_service import (
     PreflightDeps,
@@ -149,7 +149,7 @@ container = ApplicationContainer.create_default(
     signal_executor_factory=lambda: _get_signal_executor(),
 )
 
-# Compatibility aliases while legacy orchestration is still being reduced.
+# Compatibility aliases while service orchestration is wired.
 broker_service = container.broker_service
 market_data_service = container.market_data_service
 tape_service = container.tape_service
@@ -1184,7 +1184,7 @@ def _parse_signal_timestamp(data):
       - alert_time
       - alert_timestamp
 
-    If no timestamp is present, return None so legacy alerts continue to work.
+    If no timestamp is present, return None so alerts continue to work.
     """
     raw = (
         data.get("timestamp")
@@ -1831,7 +1831,7 @@ def _update_trend_history(symbol: str, action: str) -> None:
     )
 
 
-def _legacy_hydrate_pre_macro_context(
+def _hydrate_pre_macro_context(
     *,
     symbol: str,
     action: str,
@@ -1846,7 +1846,7 @@ def _legacy_hydrate_pre_macro_context(
     )
 
 
-def _legacy_apply_market_bias_context(
+def _apply_market_bias_context(
     *,
     action: str,
     account_state: dict,
@@ -1859,14 +1859,14 @@ def _legacy_apply_market_bias_context(
     )
 
 
-def _legacy_hydrate_session_context(*, context_runtime) -> None:
+def _hydrate_session_context(*, context_runtime) -> None:
     context_runtime.hydrate_session_context(
         get_latest_session_momentum=get_latest_session_momentum,
         session_momentum_is_fresh=_session_momentum_is_fresh,
     )
 
 
-def _legacy_hydrate_buy_momentum_context(
+def _hydrate_buy_momentum_context(
     *,
     symbol: str,
     action: str,
@@ -1876,7 +1876,7 @@ def _legacy_hydrate_buy_momentum_context(
     context_runtime.hydrate_buy_momentum_context()
 
 
-def _legacy_hydrate_strategy_context(
+def _hydrate_strategy_context(
     *,
     symbol: str,
     action: str,
@@ -2007,10 +2007,10 @@ def _build_live_signal_processor() -> LiveSignalProcessor:
             apply_market_bias_context=context_builder_apply_market_bias_context,
             update_trend_history=_update_trend_history,
             sell_continuation_delay_reason=_sell_continuation_delay_reason,
-            hydrate_pre_macro_context=_legacy_hydrate_pre_macro_context,
-            hydrate_session_context=_legacy_hydrate_session_context,
-            hydrate_buy_momentum_context=_legacy_hydrate_buy_momentum_context,
-            hydrate_strategy_context=_legacy_hydrate_strategy_context,
+            hydrate_pre_macro_context=_hydrate_pre_macro_context,
+            hydrate_session_context=_hydrate_session_context,
+            hydrate_buy_momentum_context=_hydrate_buy_momentum_context,
+            hydrate_strategy_context=_hydrate_strategy_context,
             macro_position_count_floor=MACRO_POSITION_COUNT_FLOOR,
             get_latest_session_momentum=get_latest_session_momentum,
             session_momentum_is_fresh=_session_momentum_is_fresh,
@@ -2100,7 +2100,7 @@ def _build_signal_pipeline(app_container: ApplicationContainer | None = None):
             build_context_runtime=(
                 lambda runtime_state: live_build_context_runtime(
                     runtime_state,
-                    build_signal_context=build_legacy_signal_context,
+                    build_signal_context=build_signal_context_runtime,
                     context_deps=_context_assembly_deps(),
                 )
             ),

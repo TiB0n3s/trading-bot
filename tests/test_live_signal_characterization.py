@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Characterization tests for legacy signal execution branches."""
+"""Characterization tests for live signal execution branches."""
 
 from __future__ import annotations
 
@@ -355,7 +355,7 @@ def main():
     for test in tests:
         test()
         print(f"[OK] {test.__name__}")
-    print(f"\nAll {len(tests)} legacy characterization tests passed.")
+    print(f"\nAll {len(tests)} live signal characterization tests passed.")
 
 
 if __name__ == "__main__":

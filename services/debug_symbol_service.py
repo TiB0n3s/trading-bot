@@ -1,7 +1,7 @@
 """Runtime-bound payload builder extracted from app.py.
 
 This is an interim boundary: route code calls this service while the service
-resolves legacy runtime dependencies from the Flask composition module.
+resolves runtime dependencies from the Flask composition module.
 """
 
 from __future__ import annotations

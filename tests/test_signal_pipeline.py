@@ -129,7 +129,7 @@ def test_normalize_preserves_original_and_returns_typed_context():
     assert_equal(context.symbol, "AAPL", "normalized symbol")
     assert_equal(context.price, 199.25, "normalized price")
     assert_equal(context.dedupe_key, "abc", "dedupe key")
-    assert_equal(context.raw_signal["action"], "buy", "legacy payload action")
+    assert_equal(context.raw_signal["action"], "buy", "normalized payload action")
 
 
 def test_invalid_payload_is_rejected_before_live_signal_processor():

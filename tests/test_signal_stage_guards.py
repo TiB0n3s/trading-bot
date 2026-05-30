@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Unit tests for legacy signal stage seams."""
+"""Unit tests for signal stage guard seams."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from services.legacy_signal_stages import (
+from services.signal_stage_guards import (
     apply_symbol_overrides,
     check_cash_safe_gates,
     check_stale_signal,

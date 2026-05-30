@@ -8,7 +8,7 @@ import os
 from typing import Any, Callable
 
 from rejection_categories import format_rejection_reason
-from services import legacy_signal_stages
+from services import signal_stage_guards
 from services.approval_service import (
     ApprovalDecision,
     RejectionAdapter,
@@ -504,7 +504,7 @@ class LiveSignalProcessor:
         )
 
     def check_stale_signal(self, *, data, symbol, action, price, account_state, dedupe_key):
-        decision = legacy_signal_stages.check_stale_signal(
+        decision = signal_stage_guards.check_stale_signal(
             raw_signal=data,
             parse_stale_signal=self.deps.parse_stale_signal,
         )
@@ -522,7 +522,7 @@ class LiveSignalProcessor:
         return StageResult()
 
     def check_cash_safe_gates(self, *, symbol, action, price, account_state, dedupe_key):
-        decision = legacy_signal_stages.check_cash_safe_gates(
+        decision = signal_stage_guards.check_cash_safe_gates(
             symbol=symbol,
             action=action,
             account_state=account_state,
@@ -548,7 +548,7 @@ class LiveSignalProcessor:
         return StageResult()
 
     def check_symbol_override(self, *, symbol, action, price, account_state, dedupe_key):
-        decision = legacy_signal_stages.apply_symbol_overrides(
+        decision = signal_stage_guards.apply_symbol_overrides(
             symbol=symbol,
             action=action,
             symbol_override_block=self.deps.symbol_override_block,

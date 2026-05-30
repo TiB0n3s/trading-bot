@@ -129,7 +129,7 @@ def test_approval_service_converts_low_confidence_to_category():
     assert_equal(result.category, "confidence_gate", "category")
 
 
-def test_sizing_service_preserves_legacy_sell_default_size():
+def test_sizing_service_preserves_sell_default_size():
     decision = {"position_size_pct": 0}
     sizing = apply_final_sizing(
         symbol="AAPL",
@@ -176,7 +176,7 @@ def main():
         test_context_builder_sanitizes_claude_context,
         test_initial_context_builder_hydrates_buy_context,
         test_approval_service_converts_low_confidence_to_category,
-        test_sizing_service_preserves_legacy_sell_default_size,
+        test_sizing_service_preserves_sell_default_size,
         test_apply_size_cap_keeps_tightest_cap,
         test_conviction_stack_sets_dominant_limiter,
     ]

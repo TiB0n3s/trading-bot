@@ -56,6 +56,7 @@ TESTS = [
     "tests/test_market_context_schema.py",
     "tests/test_setup_policy.py",
     "tests/test_decision_policy.py",
+    "tests/test_prediction_cache_service.py",
     "tests/test_prediction_cache.py",
     "tests/test_market_data_service.py",
     "tests/test_rejected_signal_outcomes.py",

@@ -2086,6 +2086,37 @@ def setup_breakdown(target_date: str) -> bool:
             for r in hour_rows:
                 print(f"  {r['hour_et']:>5} {r['signals']:>7} {r['approved']:>8}")
 
+        # --- SIP/IEX feed failure breakdown ---
+        # Counts setup errors whose unknown_reason contains "subscription" — the
+        # signature of the SIP data-subscription failure that plagued 2026-05-29.
+        # After the IEX fallback is in place this count should drop to ~0.
+        print()
+        feed_rows = con.execute("""
+            SELECT
+                CASE
+                    WHEN setup_unknown_reason LIKE '%subscription%'
+                      OR setup_policy_reason LIKE '%subscription%'
+                        THEN 'sip_subscription_failure'
+                    WHEN setup_policy_action = 'error' THEN 'other_snapshot_error'
+                    WHEN setup_unknown_reason IS NOT NULL THEN 'label_unknown'
+                    ELSE 'no_error'
+                END AS error_category,
+                COUNT(*) AS signals,
+                SUM(approved) AS approved
+            FROM trades
+            WHERE date(timestamp) = ?
+              AND action = 'buy'
+            GROUP BY error_category
+            ORDER BY signals DESC
+        """, (target_date,)).fetchall()
+
+        if feed_rows:
+            print(f"  Feed/setup error breakdown:")
+            print(f"  {'error_category':<30} {'signals':>7} {'approved':>8}")
+            print(f"  {'-'*30} {'-'*7} {'-'*8}")
+            for r in feed_rows:
+                print(f"  {r['error_category']:<30} {r['signals']:>7} {r['approved']:>8}")
+
         # --- Matched-trade P&L by setup_policy_action ---
         print()
         pnl_rows = con.execute("""
@@ -2287,6 +2318,97 @@ def setup_breakdown(target_date: str) -> bool:
         return True
 
 
+def peak_bucket_report(target_date: str | None = None) -> bool:
+    """Realized P&L broken down by MFE (peak profit) bucket.
+
+    Buckets: <0.30%, 0.30-0.60%, 0.60-1.00%, 1.00%+
+    Provides a before/after read on how well peak profit is being captured.
+    Run with no date for all-time history; run with a date for a single session.
+    Requires mfe_pct to be populated (python3 trade_matcher.py).
+    """
+    import sqlite3
+
+    db_path = BASE_DIR / "trades.db"
+    if not db_path.exists():
+        print("[WARN] trades.db not found")
+        return False
+
+    where_clause = "WHERE mfe_pct IS NOT NULL"
+    params: tuple = ()
+    label = "all sessions"
+
+    if target_date:
+        where_clause += " AND DATE(exit_timestamp) = ?"
+        params = (target_date,)
+        label = target_date
+
+    with sqlite3.connect(f"file:{db_path}?mode=ro", uri=True) as con:
+        con.row_factory = sqlite3.Row
+
+        print(f"\n=== Peak Bucket → Realized P&L Report ({label}) ===\n")
+
+        rows = con.execute(f"""
+            SELECT
+                CASE
+                    WHEN mfe_pct >= 1.00 THEN '1.00%+'
+                    WHEN mfe_pct >= 0.60 THEN '0.60-1.00%'
+                    WHEN mfe_pct >= 0.30 THEN '0.30-0.60%'
+                    ELSE '<0.30%'
+                END AS peak_bucket,
+                COUNT(*) AS trades,
+                ROUND(AVG(realized_pnl_pct), 3) AS avg_pnl,
+                ROUND(100.0 * SUM(won) / COUNT(*), 1) AS win_rate,
+                ROUND(AVG(mfe_pct), 3) AS avg_mfe,
+                ROUND(AVG(capture_ratio), 3) AS avg_capture,
+                SUM(CASE WHEN realized_pnl_pct < 0 THEN 1 ELSE 0 END) AS exits_below_zero,
+                SUM(CASE WHEN mfe_pct >= 0.30 AND realized_pnl_pct <= 0
+                         THEN 1 ELSE 0 END) AS winner_became_loser
+            FROM matched_trades
+            {where_clause}
+            GROUP BY peak_bucket
+            ORDER BY
+                CASE peak_bucket
+                    WHEN '1.00%+'     THEN 1
+                    WHEN '0.60-1.00%' THEN 2
+                    WHEN '0.30-0.60%' THEN 3
+                    ELSE 4
+                END
+        """, params).fetchall()
+
+        if not rows:
+            print(f"  No matched trades with MFE data for {label}.")
+            print("  Run: python3 trade_matcher.py")
+            return True
+
+        print(
+            f"  {'peak_bucket':<12} {'trades':>6} {'avg_mfe%':>9} {'avg_pnl%':>9} "
+            f"{'win%':>6} {'avg_cap':>8} {'<0':>4} {'wbl':>4}"
+        )
+        print(
+            f"  {'-'*12} {'-'*6} {'-'*9} {'-'*9} {'-'*6} {'-'*8} {'-'*4} {'-'*4}"
+        )
+        for r in rows:
+            avg_mfe_s = f"{r['avg_mfe']:>9.3f}" if r["avg_mfe"] is not None else f"{'—':>9}"
+            avg_pnl_s = f"{r['avg_pnl']:>9.3f}" if r["avg_pnl"] is not None else f"{'—':>9}"
+            avg_cap_s = f"{r['avg_capture']:>8.3f}" if r["avg_capture"] is not None else f"{'—':>8}"
+            print(
+                f"  {r['peak_bucket']:<12} {r['trades']:>6} {avg_mfe_s} {avg_pnl_s} "
+                f"{r['win_rate']:>6.1f} {avg_cap_s} {r['exits_below_zero']:>4} "
+                f"{r['winner_became_loser']:>4}"
+            )
+
+        total = con.execute(f"""
+            SELECT COUNT(*) AS n, SUM(CASE WHEN mfe_pct IS NOT NULL THEN 1 ELSE 0 END) AS with_mfe
+            FROM matched_trades
+            {where_clause.replace('WHERE mfe_pct IS NOT NULL', 'WHERE 1=1')}
+        """, params).fetchone()
+
+        if total:
+            print(f"\n  Total matched trades: {total['n']}  |  With MFE data: {total['with_mfe']}")
+        print()
+        return True
+
+
 def winner_became_loser(target_date: str) -> bool:
     """Report closed trades where MFE >= 0.40% but realized P&L ended negative.
 
@@ -2480,6 +2602,10 @@ def main():
 
     if command == "winner-became-loser":
         return 0 if winner_became_loser(target_date) else 1
+
+    if command == "peak-bucket-report":
+        date_arg = sys.argv[2] if len(sys.argv) > 2 else None
+        return 0 if peak_bucket_report(date_arg) else 1
 
     if command == "premarket":
         checks = []

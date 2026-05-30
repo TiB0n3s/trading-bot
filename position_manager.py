@@ -180,6 +180,22 @@ BAD_ENTRY_CONTAINMENT_MAX_PEAK_PCT = float(
     os.getenv("POSITION_MANAGER_BAD_ENTRY_CONTAINMENT_MAX_PEAK_PCT", "0.15")
 )
 
+# Peak-aware breakeven lock.
+# The floor that the current P&L must not fall below rises with the peak,
+# so trades that have demonstrated real profit cannot fully round-trip.
+# Strong entries (3 tiers): more room at each level.
+PEAK_LOCK_TIER1_PEAK_PCT = float(os.getenv("POSITION_MANAGER_PEAK_LOCK_TIER1_PEAK_PCT", "0.30"))
+PEAK_LOCK_TIER1_FLOOR_PCT = float(os.getenv("POSITION_MANAGER_PEAK_LOCK_TIER1_FLOOR_PCT", "0.10"))
+PEAK_LOCK_TIER2_PEAK_PCT = float(os.getenv("POSITION_MANAGER_PEAK_LOCK_TIER2_PEAK_PCT", "0.60"))
+PEAK_LOCK_TIER2_FLOOR_PCT = float(os.getenv("POSITION_MANAGER_PEAK_LOCK_TIER2_FLOOR_PCT", "0.20"))
+PEAK_LOCK_TIER3_PEAK_PCT = float(os.getenv("POSITION_MANAGER_PEAK_LOCK_TIER3_PEAK_PCT", "1.00"))
+PEAK_LOCK_TIER3_FLOOR_PCT = float(os.getenv("POSITION_MANAGER_PEAK_LOCK_TIER3_FLOOR_PCT", "0.30"))
+# Weak entries (2 tiers): faster ratchet once meaningfully green.
+WEAK_PEAK_LOCK_TIER1_PEAK_PCT = float(os.getenv("POSITION_MANAGER_WEAK_PEAK_LOCK_TIER1_PEAK_PCT", "0.30"))
+WEAK_PEAK_LOCK_TIER1_FLOOR_PCT = float(os.getenv("POSITION_MANAGER_WEAK_PEAK_LOCK_TIER1_FLOOR_PCT", "0.10"))
+WEAK_PEAK_LOCK_TIER2_PEAK_PCT = float(os.getenv("POSITION_MANAGER_WEAK_PEAK_LOCK_TIER2_PEAK_PCT", "0.50"))
+WEAK_PEAK_LOCK_TIER2_FLOOR_PCT = float(os.getenv("POSITION_MANAGER_WEAK_PEAK_LOCK_TIER2_FLOOR_PCT", "0.15"))
+
 # Quality-split exit thresholds:
 # Strong entries get more room — looser giveback tolerance and higher threshold
 # before taking partial profits. Weak entries are managed more tightly once green.
@@ -613,6 +629,32 @@ def is_weak_entry_context(entry_ctx):
     return False
 
 
+def peak_aware_breakeven_floor(peak_pl_pct: float, weak_entry: bool) -> float:
+    """Dynamic breakeven floor that rises with peak P&L.
+
+    A trade that has demonstrated real profit should not be allowed to fully
+    round-trip.  For peaks below the lowest tier, returns the static flat
+    floor so existing behavior is unchanged.
+
+    Strong entries (more room):  0.30% → 0.10,  0.60% → 0.20,  1.00% → 0.30
+    Weak entries (faster ratchet): 0.30% → 0.10,  0.50% → 0.15
+    """
+    if weak_entry:
+        if peak_pl_pct >= WEAK_PEAK_LOCK_TIER2_PEAK_PCT:
+            return WEAK_PEAK_LOCK_TIER2_FLOOR_PCT
+        if peak_pl_pct >= WEAK_PEAK_LOCK_TIER1_PEAK_PCT:
+            return WEAK_PEAK_LOCK_TIER1_FLOOR_PCT
+        return WEAK_SETUP_BREAKEVEN_LOCK_FLOOR_PCT
+    else:
+        if peak_pl_pct >= PEAK_LOCK_TIER3_PEAK_PCT:
+            return PEAK_LOCK_TIER3_FLOOR_PCT
+        if peak_pl_pct >= PEAK_LOCK_TIER2_PEAK_PCT:
+            return PEAK_LOCK_TIER2_FLOOR_PCT
+        if peak_pl_pct >= PEAK_LOCK_TIER1_PEAK_PCT:
+            return PEAK_LOCK_TIER1_FLOOR_PCT
+        return BREAKEVEN_LOCK_FLOOR_PCT
+
+
 def is_bad_entry_containment(entry_ctx, peak_pl_pct):
     """
     Return (True, reason) when a weak entry never showed constructive
@@ -732,16 +774,18 @@ def evaluate_position(position, state, session_momentum=None):
         else MIN_PROFIT_PARTIAL_PCT
     )
 
+    # Peak-aware breakeven lock:
+    # Trigger arms at the lowest tier (0.30%) — closes the gap where trades
+    # peaking between 0.30% and 0.50% had no protection.  The floor rises with
+    # the peak so a trade that already showed +0.70% cannot round-trip to zero.
+    # hard_full_exit = True prevents the continuation-delay check from
+    # overriding this protection on subsequent position-manager cycles.
     breakeven_trigger = (
-        WEAK_SETUP_BREAKEVEN_LOCK_TRIGGER_PCT
+        WEAK_PEAK_LOCK_TIER1_PEAK_PCT    # 0.30 — lowest weak tier
         if weak_entry_context
-        else BREAKEVEN_LOCK_TRIGGER_PCT
+        else PEAK_LOCK_TIER1_PEAK_PCT    # 0.30 — lowest strong tier
     )
-    breakeven_floor = (
-        WEAK_SETUP_BREAKEVEN_LOCK_FLOOR_PCT
-        if weak_entry_context
-        else BREAKEVEN_LOCK_FLOOR_PCT
-    )
+    breakeven_floor = peak_aware_breakeven_floor(peak_pl_pct, weak_entry_context)
 
     if (
         action == "hold"
@@ -751,10 +795,11 @@ def evaluate_position(position, state, session_momentum=None):
         action = "sell_full"
         sell_fraction = 1.0
         severity = "high"
+        hard_full_exit = True
         reasons.append(
-            f"profit_lock_breakeven_stop: peak {peak_pl_pct:.2f}% >= "
-            f"trigger {breakeven_trigger:.2f}%, current {current_pl_pct:.2f}% <= "
-            f"floor {breakeven_floor:.2f}%, weak_entry_context={weak_entry_context}"
+            f"peak_aware_breakeven_lock: peak {peak_pl_pct:.2f}% >= "
+            f"tier_min {breakeven_trigger:.2f}%, current {current_pl_pct:.2f}% <= "
+            f"floor {breakeven_floor:.2f}%, weak_entry={weak_entry_context}"
         )
 
     if action == "sell_full" and not hard_full_exit:

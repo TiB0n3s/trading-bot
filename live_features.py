@@ -71,6 +71,8 @@ logging.basicConfig(
 MARKET_CONTEXT_FILE = BASE_DIR / "market_context.json"
 ET = pytz.timezone("America/New_York")
 _BAR_CACHE: dict[tuple[str, str], tuple[list[float], list[float]]] = {}
+# Tracks which feed was used for each (symbol, session) cache key.
+_BAR_FEED_USED: dict[tuple[str, str], str] = {}
 
 
 def add_feature_audit_fields(snapshot: dict) -> dict:
@@ -176,15 +178,34 @@ def get_bar_series(
 
     for window_minutes in lookbacks:
         start = end - timedelta(minutes=window_minutes)
+        feed_used = "sip"
 
-        bars = api.get_bars(
-            symbol,
-            timeframe,
-            start=start.isoformat(),
-            end=end.isoformat(),
-            adjustment="raw",
-            feed="sip",
-        ).df
+        try:
+            bars = api.get_bars(
+                symbol,
+                timeframe,
+                start=start.isoformat(),
+                end=end.isoformat(),
+                adjustment="raw",
+                feed="sip",
+            ).df
+        except Exception as e:
+            err_lower = str(e).lower()
+            if any(kw in err_lower for kw in ("subscription", "not permitted", "forbidden", "403")):
+                logger.warning(
+                    f"{symbol}: SIP feed unavailable ({type(e).__name__}: {e}); falling back to IEX"
+                )
+                feed_used = "iex"
+                bars = api.get_bars(
+                    symbol,
+                    timeframe,
+                    start=start.isoformat(),
+                    end=end.isoformat(),
+                    adjustment="raw",
+                    feed="iex",
+                ).df
+            else:
+                raise
 
         if bars is None or bars.empty:
             continue
@@ -198,8 +219,10 @@ def get_bar_series(
         if len(closes) >= min_bars_needed:
             result = (closes[-target_bars:], volumes[-target_bars:], timeframe, len(closes))
             _BAR_CACHE[cache_key] = result
+            _BAR_FEED_USED[cache_key] = feed_used
             logger.info(
-                f"{symbol}: using {timeframe} bars, got {len(closes)} bars from {window_minutes}m lookback"
+                f"{symbol}: using {timeframe} bars ({feed_used}), "
+                f"got {len(closes)} bars from {window_minutes}m lookback"
             )
             return result
 
@@ -244,6 +267,7 @@ def build_snapshot(symbol: str) -> dict:
     snapshot["timestamp"] = datetime.now(ET).isoformat()
     snapshot["bar_timeframe"] = timeframe
     snapshot["bar_count"] = bar_count
+    snapshot["bar_feed_used"] = _BAR_FEED_USED.get((symbol, session), "sip")
 
     if len(closes) >= 5:
         returns = []

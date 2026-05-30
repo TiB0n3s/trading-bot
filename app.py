@@ -14,7 +14,7 @@ from live_features import build_snapshot
 from flask import Flask, abort
 from api.register_routes import RouteRegistrationDeps, register_routes
 from services.container import ApplicationContainer
-from services.status_service import build_status_payload
+from services.status_service import build_health_payload, build_status_payload
 from services.positions_service import build_positions_payload
 from services.debug_symbol_service import build_debug_symbol_payload
 from services import dedupe_service
@@ -305,10 +305,13 @@ def _register_routes(flask_app: Flask, app_container: ApplicationContainer) -> N
                 process_signal,
                 data,
             ),
-            health_payload=health_payload,
-            status_payload=status_payload,
-            positions_payload=positions_payload,
-            debug_symbol_payload=debug_symbol_payload,
+            health_payload=lambda: build_health_payload(sys.modules[__name__]),
+            status_payload=lambda: build_status_payload(sys.modules[__name__]),
+            positions_payload=lambda: build_positions_payload(sys.modules[__name__]),
+            debug_symbol_payload=lambda symbol: build_debug_symbol_payload(
+                sys.modules[__name__],
+                symbol,
+            ),
         ),
     )
 
@@ -1349,90 +1352,6 @@ def _build_signal_pipeline(app_container: ApplicationContainer | None = None):
 
 def process_signal(data):
     return _build_signal_pipeline().run(data)
-
-
-def health_payload():
-    account = broker_service.get_account()
-    return {
-        "status": "online",
-        "timestamp": datetime.now().isoformat(),
-        "account": account
-    }
-
-def _market_session():
-    return market_session()
-
-def _session_momentum_summary():
-    try:
-        return context_repo.session_momentum_summary()
-    except Exception as e:
-        logger.warning(f"session momentum summary unavailable: {e}")
-        return {}
-
-
-def _session_momentum_snapshot(limit=40):
-    try:
-        return context_repo.session_momentum_snapshot(limit=limit)
-    except Exception as e:
-        logger.warning(f"session momentum snapshot unavailable: {e}")
-        return []
-
-def _latest_session_momentum_for_symbol(symbol):
-    """Return latest session momentum for one symbol."""
-    try:
-        row = get_latest_session_momentum(symbol)
-        return dict(row) if row else None
-    except Exception as e:
-        logger.warning(f"session momentum unavailable for {symbol}: {e}")
-        return None
-
-
-def _symbol_intelligence_snapshot(market_date=None):
-    """Return observe-only daily prediction rows for /status visibility."""
-    market_date = market_date or expected_market_context_date().isoformat()
-    try:
-        rows = context_repo.symbol_intelligence_rows(market_date)
-        symbols = {}
-        for row in rows:
-            item = dict(row)
-            symbol = item.pop("symbol")
-            item["prediction_confidence"] = item.pop("confidence", None)
-            item["prediction_reason"] = item.pop("reason", None)
-            item["prediction_decision"] = "observe_only"
-            symbols[symbol] = item
-
-        return {
-            "available": bool(symbols),
-            "market_date": market_date,
-            "symbol_count": len(symbols),
-            "observe_only": True,
-            "symbols": symbols,
-        }
-    except Exception as e:
-        logger.warning(f"symbol intelligence unavailable: {e}")
-        return {
-            "available": False,
-            "market_date": market_date,
-            "observe_only": True,
-            "error": str(e),
-            "symbols": {},
-            "symbol_count": 0,
-        }
-
-
-def _symbol_intelligence_for_symbol(symbol, market_date=None):
-    snapshot = _symbol_intelligence_snapshot(market_date=market_date)
-    return (snapshot.get("symbols") or {}).get(symbol.upper())
-
-
-def status_payload():
-    return build_status_payload(sys.modules[__name__])
-
-def positions_payload():
-    return build_positions_payload(sys.modules[__name__])
-
-def debug_symbol_payload(symbol):
-    return build_debug_symbol_payload(sys.modules[__name__], symbol)
 
 app.extensions["application_container"] = container
 _register_routes(app, container)

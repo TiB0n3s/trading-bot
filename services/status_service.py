@@ -27,6 +27,83 @@ def _market_bias_state():
     return getattr(service, "market_bias", globals().get("_market_bias", {}))
 
 
+def build_health_payload(runtime):
+    _bind_runtime(runtime)
+    account = broker_service.get_account()
+    return {
+        "status": "online",
+        "timestamp": datetime.now().isoformat(),
+        "account": account,
+    }
+
+
+def _market_session():
+    return market_session()
+
+
+def _session_momentum_summary():
+    try:
+        return context_repo.session_momentum_summary()
+    except Exception as exc:
+        logger.warning(f"session momentum summary unavailable: {exc}")
+        return {}
+
+
+def _session_momentum_snapshot(limit=40):
+    try:
+        return context_repo.session_momentum_snapshot(limit=limit)
+    except Exception as exc:
+        logger.warning(f"session momentum snapshot unavailable: {exc}")
+        return []
+
+
+def _latest_session_momentum_for_symbol(symbol):
+    try:
+        row = get_latest_session_momentum(symbol)
+        return dict(row) if row else None
+    except Exception as exc:
+        logger.warning(f"session momentum unavailable for {symbol}: {exc}")
+        return None
+
+
+def _symbol_intelligence_snapshot(market_date=None):
+    market_date = market_date or expected_market_context_date().isoformat()
+    try:
+        rows = context_repo.symbol_intelligence_rows(market_date)
+        symbols = {}
+        for row in rows:
+            item = dict(row)
+            symbol = item.pop("symbol")
+            item["prediction_confidence"] = item.pop("confidence", None)
+            item["prediction_reason"] = item.pop("reason", None)
+            item["prediction_decision"] = "observe_only"
+            symbols[symbol] = item
+
+        return {
+            "available": bool(symbols),
+            "market_date": market_date,
+            "symbol_count": len(symbols),
+            "observe_only": True,
+            "symbols": symbols,
+        }
+    except Exception as exc:
+        logger.warning(f"symbol intelligence unavailable: {exc}")
+        return {
+            "available": False,
+            "market_date": market_date,
+            "observe_only": True,
+            "error": str(exc),
+            "symbols": {},
+            "symbol_count": 0,
+        }
+
+
+def symbol_intelligence_for_symbol(runtime, symbol, market_date=None):
+    _bind_runtime(runtime)
+    snapshot = _symbol_intelligence_snapshot(market_date=market_date)
+    return (snapshot.get("symbols") or {}).get(symbol.upper())
+
+
 def build_status_payload(runtime):
     _bind_runtime(runtime)
     result = {

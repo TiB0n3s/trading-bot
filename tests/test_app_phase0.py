@@ -92,9 +92,11 @@ def test_status_route_snapshot():
     flask_app = _app.create_app()
     flask_app.testing = True
     patches = {
-        "app._session_momentum_summary": MagicMock(return_value={}),
-        "app._session_momentum_snapshot": MagicMock(return_value=[]),
-        "app._symbol_intelligence_snapshot": MagicMock(return_value={"available": False, "symbols": {}}),
+        "services.status_service._session_momentum_summary": MagicMock(return_value={}),
+        "services.status_service._session_momentum_snapshot": MagicMock(return_value=[]),
+        "services.status_service._symbol_intelligence_snapshot": MagicMock(
+            return_value={"available": False, "symbols": {}}
+        ),
         "app.policy_artifact_status": MagicMock(return_value={"available": False}),
         "app.get_macro_risk": MagicMock(return_value={"macro_regime": "normal", "max_new_positions": 8}),
         "app.rolling_summary": MagicMock(return_value={"available": False}),
@@ -165,7 +167,7 @@ def test_debug_symbol_route_snapshot():
         "app.get_macro_risk": MagicMock(return_value={"macro_regime": "normal"}),
         "app.rolling_symbol_context": MagicMock(return_value=None),
         "app._symbol_market_alignment": MagicMock(return_value={}),
-        "app._symbol_intelligence_for_symbol": MagicMock(return_value=None),
+        "services.debug_symbol_service.symbol_intelligence_for_symbol": MagicMock(return_value=None),
         "app._required_buy_confirmations": MagicMock(return_value={"required_buy_confirmations": 3}),
         "app._required_sell_confirmations": MagicMock(return_value={"required_sell_confirmations": 2}),
     }

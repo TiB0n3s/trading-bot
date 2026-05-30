@@ -6,6 +6,8 @@ resolves runtime dependencies from the Flask composition module.
 
 from __future__ import annotations
 
+from services.status_service import symbol_intelligence_for_symbol
+
 
 def _bind_runtime(runtime):
     globals().update(
@@ -196,7 +198,7 @@ def build_debug_symbol_payload(runtime, symbol):
 
     # Observe-only daily prediction intelligence
     try:
-        result["symbol_intelligence"] = _symbol_intelligence_for_symbol(symbol)
+        result["symbol_intelligence"] = symbol_intelligence_for_symbol(runtime, symbol)
     except Exception as e:
         result["symbol_intelligence_error"] = str(e)
 

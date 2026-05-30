@@ -256,12 +256,64 @@ def test_api_cannot_import_broker_directly():
     _assert_no_import("api", {"broker"}, "api broker boundary")
 
 
+def test_app_cannot_import_sqlite3():
+    imports = _imports(ROOT / "app.py")
+    assert_true("sqlite3" not in imports, "app.py sqlite3 boundary")
+
+
+def test_app_cannot_call_broker_directly():
+    imports = _imports(ROOT / "app.py")
+    calls = _calls(ROOT / "app.py")
+    violations = []
+    for module in imports:
+        if module == "broker" or module.startswith("broker."):
+            violations.append(f"imports {module}")
+    for call in calls:
+        if call.startswith("broker.") or call.startswith("api."):
+            violations.append(f"calls {call}")
+    assert_true(not violations, f"app.py broker boundary: {violations}")
+
+
+def test_api_cannot_import_runtime_infra_directly():
+    _assert_no_import(
+        "api",
+        {
+            "broker",
+            "repositories",
+            "services.market_data_service",
+            "services.broker_service",
+        },
+        "api runtime infra boundary",
+    )
+
+
 def test_repositories_cannot_import_flask():
     _assert_no_import("repositories", {"flask"}, "repository Flask boundary")
 
 
+def test_repositories_cannot_import_broker():
+    _assert_no_import(
+        "repositories",
+        {"broker", "alpaca_trade_api"},
+        "repository broker boundary",
+    )
+
+
 def test_policies_cannot_import_routes():
     _assert_no_import("services/policies", {"api"}, "policy route boundary")
+
+
+def test_policies_cannot_import_runtime_services():
+    _assert_no_import(
+        "services/policies",
+        {"services.broker_service", "services.market_data_service"},
+        "policy runtime service boundary",
+    )
+
+
+def test_live_signal_processor_cannot_import_flask():
+    imports = _imports(ROOT / "services/live_signal_processor.py")
+    assert_true("flask" not in imports, "live signal processor Flask boundary")
 
 
 def test_direct_db_access_is_approved_or_tracked():
@@ -294,8 +346,14 @@ def test_market_data_access_is_approved_or_tracked():
 def main():
     tests = [
         test_api_cannot_import_broker_directly,
+        test_app_cannot_import_sqlite3,
+        test_app_cannot_call_broker_directly,
+        test_api_cannot_import_runtime_infra_directly,
         test_repositories_cannot_import_flask,
+        test_repositories_cannot_import_broker,
         test_policies_cannot_import_routes,
+        test_policies_cannot_import_runtime_services,
+        test_live_signal_processor_cannot_import_flask,
         test_direct_db_access_is_approved_or_tracked,
         test_direct_broker_access_is_approved_or_tracked,
         test_market_data_access_is_approved_or_tracked,

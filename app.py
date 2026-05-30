@@ -2260,15 +2260,15 @@ def _legacy_apply_setup_stage(
 
 
 def _legacy_update_trend_history(symbol: str, action: str) -> None:
-    # Stage C: refresh from trades.db first so all workers see the same history.
-    now_ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    _refresh_signal_history(symbol)
-    _signal_history.setdefault(symbol, []).insert(0, action)
-    _signal_history[symbol] = _signal_history[symbol][:10]
-    _trend_table[symbol] = {**_compute_trend(_signal_history[symbol]), "last_time": now_ts}
-    logger.debug(
-        f"Trend history update for {symbol}: history={_signal_history[symbol]} "
-        f"trend={_trend_table[symbol]}"
+    trend_context_service.update_signal_trend_history(
+        symbol=symbol,
+        action=action,
+        signal_history=_signal_history,
+        trend_table=_trend_table,
+        refresh_signal_history=_refresh_signal_history,
+        now=datetime.now,
+        compute_trend_func=_compute_trend,
+        log=logger,
     )
 
 

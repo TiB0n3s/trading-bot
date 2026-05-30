@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any, Callable
 
 from indicator_state import compute_indicator_state
@@ -100,3 +101,31 @@ def symbol_market_alignment(
         "aligned_for_buy": aligned,
         "reason": "; ".join(reasons),
     }
+
+
+def update_signal_trend_history(
+    *,
+    symbol: str,
+    action: str,
+    signal_history: dict[str, list[str]],
+    trend_table: dict[str, dict[str, Any]],
+    refresh_signal_history: Callable[[str], None],
+    now: Callable[[], datetime],
+    compute_trend_func: Callable[[list], dict[str, Any]] = compute_trend,
+    log: Any = None,
+) -> dict[str, Any]:
+    """Refresh and append the incoming signal to the in-memory trend table."""
+    now_ts = now().strftime("%Y-%m-%d %H:%M:%S")
+    refresh_signal_history(symbol)
+    signal_history.setdefault(symbol, []).insert(0, action)
+    signal_history[symbol] = signal_history[symbol][:10]
+    trend_table[symbol] = {
+        **compute_trend_func(signal_history[symbol]),
+        "last_time": now_ts,
+    }
+    if log:
+        log.debug(
+            f"Trend history update for {symbol}: history={signal_history[symbol]} "
+            f"trend={trend_table[symbol]}"
+        )
+    return trend_table[symbol]

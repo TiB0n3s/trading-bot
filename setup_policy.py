@@ -32,6 +32,7 @@ NEUTRAL_LABELS = {
     "late_strength_near_vwap_risk",
     "far_below_vwap_weakness",
     "stable_near_vwap_strength",
+    "near_vwap_neutral_fade_risk",
 }
 
 
@@ -70,6 +71,7 @@ def evaluate_setup_policy(setup_label: str | None) -> dict[str, Any]:
             "setup_confidence_adjustment": 0,
             "setup_size_multiplier": SETUP_POLICY_DEFAULTS["neutral_size_multiplier"],
             "reason": f"setup_policy:neutral:unknown_label:{label}",
+            "setup_unknown_reason": f"unrecognized_label:{label}",
         }
 
     return {
@@ -77,4 +79,5 @@ def evaluate_setup_policy(setup_label: str | None) -> dict[str, Any]:
         "setup_confidence_adjustment": 0,
         "setup_size_multiplier": SETUP_POLICY_DEFAULTS["neutral_size_multiplier"],
         "reason": f"setup_policy:neutral:{label or 'unknown'}",
+        "setup_unknown_reason": "setup_label_missing" if not label else None,
     }

@@ -387,6 +387,7 @@ def _build_setup_observation(symbol, action, price, account_state):
             "setup_confidence": None,
             "setup_key": None,
             "setup_rationale": None,
+            "setup_unknown_reason": None,
         }
 
     try:
@@ -414,10 +415,14 @@ def _build_setup_observation(symbol, action, price, account_state):
             "setup_confidence": snapshot.get("setup_confidence"),
             "setup_key": snapshot.get("setup_key"),
             "setup_rationale": snapshot.get("setup_rationale"),
+            "setup_unknown_reason": setup_policy.get("setup_unknown_reason"),
         }
 
     except Exception as e:
-        logger.warning(f"setup observe-only snapshot failed for {symbol}: {e}")
+        unknown_reason = f"{type(e).__name__}:{str(e)[:200]}"
+        logger.warning(
+            f"setup observe-only snapshot failed for {symbol}: {unknown_reason}"
+        )
         return {
             "setup_label": None,
             "setup_policy_action": "error",
@@ -428,7 +433,22 @@ def _build_setup_observation(symbol, action, price, account_state):
             "setup_confidence": None,
             "setup_key": None,
             "setup_rationale": None,
+            "setup_unknown_reason": unknown_reason,
         }
+
+def _ml_prediction_bucket(score) -> str:
+    """Map a raw ML prediction_score to the reporting bucket name."""
+    if score is None:
+        return "unknown"
+    s = float(score)
+    if s >= 55:
+        return "high_55_plus"
+    if s >= 50:
+        return "mid_50_55"
+    if s >= 45:
+        return "low_45_50"
+    return "weak_below_45"
+
 
 def _is_favorable_setup_label(setup_label: str | None) -> bool:
     return setup_label in {
@@ -1719,6 +1739,9 @@ def log_trade(signal, decision, order, account_state=None):
             "setup_policy_reason",
             "setup_confidence_adjustment",
             "setup_size_multiplier",
+            "setup_unknown_reason",
+            "ml_prediction_score",
+            "ml_prediction_bucket",
             "buy_opportunity_score",
             "buy_opportunity_recommendation",
             "buy_opportunity_reason",
@@ -1775,6 +1798,9 @@ def log_trade(signal, decision, order, account_state=None):
             setup_obs.get("setup_policy_reason"),
             setup_obs.get("setup_confidence_adjustment"),
             setup_obs.get("setup_size_multiplier"),
+            setup_obs.get("setup_unknown_reason"),
+            prediction_gate.get("ml_prediction_score"),
+            _ml_prediction_bucket(prediction_gate.get("ml_prediction_score")),
             (account_state or {}).get("buy_opportunity", {}).get("buy_opportunity_score"),
             (account_state or {}).get("buy_opportunity", {}).get("buy_opportunity_recommendation"),
             (account_state or {}).get("buy_opportunity", {}).get("buy_opportunity_reason"),
@@ -1971,6 +1997,9 @@ def log_rejection(symbol, action, category, reason, price=None, account_state=No
         "setup_policy_reason",
         "setup_confidence_adjustment",
         "setup_size_multiplier",
+        "setup_unknown_reason",
+        "ml_prediction_score",
+        "ml_prediction_bucket",
         "trader_brain_score",
         "trader_brain_setup_type",
         "trader_brain_approved",
@@ -2016,6 +2045,9 @@ def log_rejection(symbol, action, category, reason, price=None, account_state=No
         setup_obs.get("setup_policy_reason"),
         setup_obs.get("setup_confidence_adjustment"),
         setup_obs.get("setup_size_multiplier"),
+        setup_obs.get("setup_unknown_reason"),
+        prediction_gate.get("ml_prediction_score"),
+        _ml_prediction_bucket(prediction_gate.get("ml_prediction_score")),
         trader_brain.get("score"),
         trader_brain.get("setup_type"),
         1 if trader_brain.get("approved_by_scorer") is True else 0 if trader_brain.get("approved_by_scorer") is False else None,
@@ -4027,6 +4059,43 @@ def process_signal(data):
             if _reject_current_signal("setup_policy", reason):
                 return
 
+    # Degraded-setup size cap: when build_snapshot() fails entirely the bot has
+    # no setup label, no score, and no classification data.  Unknown setups have
+    # historically lost at a higher rate, so cap position size materially rather
+    # than letting Claude assign a full-size buy on missing data.
+    #
+    # Strong-context exception: confirmed or developing bullish trend allows 1.0%
+    # cap instead of 0.75%, letting the trade proceed at a reduced but not
+    # minimal size if the trend context is positive.
+    #
+    # Bad-context examples that do NOT qualify: neutral trend, non-bullish, missing data.
+    if action == "buy" and setup_obs.get("setup_policy_action") == "error":
+        _deg_trend = _trend_table.get(symbol) or {}
+        _deg_trend_dir = _deg_trend.get("direction")
+        _deg_trend_str = _deg_trend.get("strength")
+        _has_strong_context = (
+            _deg_trend_dir == "bullish"
+            and _deg_trend_str in ("confirmed", "developing")
+        )
+        _deg_cap = 1.0 if _has_strong_context else 0.75
+        _current_cap = account_state.get("max_position_size_pct_override")
+        account_state["max_position_size_pct_override"] = (
+            min(float(_current_cap), _deg_cap) if _current_cap is not None else _deg_cap
+        )
+        account_state["setup_degraded"] = {
+            "reason": setup_obs.get("setup_unknown_reason") or "build_snapshot_failed",
+            "size_cap_pct": _deg_cap,
+            "has_strong_context": _has_strong_context,
+            "trend_direction": _deg_trend_dir,
+            "trend_strength": _deg_trend_str,
+        }
+        logger.warning(
+            f"Degraded setup (error) for {symbol}: size capped at {_deg_cap}%, "
+            f"strong_context={_has_strong_context} "
+            f"({_deg_trend_dir}/{_deg_trend_str}), "
+            f"reason={setup_obs.get('setup_unknown_reason')}"
+        )
+
     # Late rollover entry gate:
     # Blocks GEV-style late buys where price has already run, is extended
     # above VWAP, and intermediate session momentum is rolling over.
@@ -4973,6 +5042,70 @@ def process_signal(data):
             f"ml_compare={prediction_gate.get('ml_prediction_compare_decision')} "
             f"ml_agrees={prediction_gate.get('ml_prediction_agrees_with_gate')}"
         )
+
+        # ── Weak-prediction + degraded-setup gate (Phase 2, Step 6) ──────────
+        # Conservative first promotion: only the weakest ML bucket (score < 45)
+        # combined with an unknown/error setup triggers a heavy size cap.
+        #
+        # Conditions that must BOTH be true:
+        #   1. ml_prediction_score < 45  (weak_below_45 bucket)
+        #   2. setup is degraded         (build_snapshot failed OR setup_label is None)
+        #   3. sufficient sample size    (≥ PREDICTION_SOFT_AVOID_MIN_SAMPLE_SIZE)
+        #      — prevents acting on near-zero-sample priors
+        #
+        # Mid buckets (45-50, 50-55) are observe-only; high_55_plus is a
+        # tie-breaker only.  Do not change those conditions without validating
+        # a full session of bucket-level P&L data first.
+        _ml_score_raw = prediction_gate.get("ml_prediction_score")
+        _ml_sample = int(prediction_gate.get("ml_prediction_sample_size") or 0)
+        _setup_action = setup_obs.get("setup_policy_action")
+        _setup_label_now = setup_obs.get("setup_label")
+
+        _is_weak_ml_bucket = (
+            _ml_score_raw is not None
+            and float(_ml_score_raw) < 45
+            and _ml_sample >= PREDICTION_SOFT_AVOID_MIN_SAMPLE_SIZE
+        )
+        _is_degraded_setup_now = (
+            _setup_action == "error"
+            or (
+                _setup_label_now is None
+                and _setup_action not in ("not_applicable",)
+            )
+        )
+
+        if _is_weak_ml_bucket and _is_degraded_setup_now:
+            _wpsg_reason = (
+                f"ml_prediction_score={float(_ml_score_raw):.1f} (weak_below_45); "
+                f"ml_sample_size={_ml_sample}; "
+                f"setup_policy_action={_setup_action}; "
+                f"setup_label={_setup_label_now!r}"
+            )
+            _existing_cap = account_state.get("max_position_size_pct_override")
+            account_state["max_position_size_pct_override"] = (
+                min(float(_existing_cap), 0.5) if _existing_cap is not None else 0.5
+            )
+            account_state["weak_prediction_setup_gate"] = {
+                "triggered": True,
+                "ml_score": _ml_score_raw,
+                "ml_sample_size": _ml_sample,
+                "setup_action": _setup_action,
+                "setup_label": _setup_label_now,
+                "size_cap_pct": 0.5,
+                "reason": _wpsg_reason,
+            }
+            logger.warning(
+                f"Weak-prediction + degraded-setup gate for {symbol}: "
+                f"size capped at 0.5%; {_wpsg_reason}"
+            )
+        else:
+            account_state["weak_prediction_setup_gate"] = {
+                "triggered": False,
+                "ml_score": _ml_score_raw,
+                "ml_sample_size": _ml_sample,
+                "is_weak_ml": _is_weak_ml_bucket,
+                "is_degraded_setup": _is_degraded_setup_now,
+            }
 
         buy_opportunity = evaluate_buy_opportunity(
             trend=trend,

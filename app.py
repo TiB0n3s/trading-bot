@@ -39,6 +39,7 @@ from services.approval_service import (
 )
 from services.context_builder import (
     ContextAssemblyDeps,
+    apply_market_bias_context as context_builder_apply_market_bias_context,
     build_legacy_signal_context,
 )
 from services.preflight_service import (
@@ -2504,22 +2505,12 @@ def _legacy_hydrate_pre_macro_context(
     account_state: dict,
     context_runtime,
 ) -> dict:
-    """Populate non-authoritative context required before macro-position gates."""
-    if action == "buy" and "buy_opportunity" not in account_state:
-        try:
-            context_runtime.build_buy_opportunity_observation(
-                trend=_trend_table.get(symbol) or {},
-                bias_entry=_market_bias.get(symbol) or {},
-                evaluate_buy_opportunity=evaluate_buy_opportunity,
-                required_buy_confirmations=_required_buy_confirmations,
-                log_prefix="BUY opportunity pre-macro",
-            )
-        except Exception as e:
-            logger.warning(f"BUY opportunity pre-macro scoring failed for {symbol}: {e}")
-
-    macro_risk = get_macro_risk(Path(__file__).parent)
-    account_state["macro_risk"] = macro_risk
-    return macro_risk
+    return context_runtime.hydrate_pre_macro_context(
+        get_macro_risk=get_macro_risk,
+        base_dir=Path(__file__).parent,
+        evaluate_buy_opportunity=evaluate_buy_opportunity,
+        required_buy_confirmations=_required_buy_confirmations,
+    )
 
 
 def _legacy_apply_market_bias_context(
@@ -2528,26 +2519,15 @@ def _legacy_apply_market_bias_context(
     account_state: dict,
     bias_entry: dict,
 ) -> None:
-    """Inject market-bias metadata without making an approval decision."""
-    if action != "buy" or not bias_entry:
-        return
-
-    bias = bias_entry.get("bias")
-    account_state["market_bias_original"] = bias
-    account_state["market_bias"] = bias
-    account_state["avoid_type"] = bias_entry.get("avoid_type")
-    account_state["soft_avoid_reason"] = bias_entry.get("reason", "")
-
-    if bias_entry.get("fundamental_score"):
-        account_state["fundamental_score"] = bias_entry["fundamental_score"]
-    if bias_entry.get("risk_level"):
-        account_state["risk_level"] = bias_entry["risk_level"]
-    if bias_entry.get("entry_quality"):
-        account_state["entry_quality"] = bias_entry["entry_quality"]
+    context_builder_apply_market_bias_context(
+        action=action,
+        account_state=account_state,
+        bias_entry=bias_entry,
+    )
 
 
 def _legacy_hydrate_session_context(*, context_runtime) -> None:
-    context_runtime.build_session_momentum_observation(
+    context_runtime.hydrate_session_context(
         get_latest_session_momentum=get_latest_session_momentum,
         session_momentum_is_fresh=_session_momentum_is_fresh,
     )
@@ -2560,51 +2540,7 @@ def _legacy_hydrate_buy_momentum_context(
     account_state: dict,
     context_runtime,
 ) -> None:
-    if action != "buy":
-        return
-
-    context_runtime.hydrate_buy_live_context(only_missing=True)
-    momentum = account_state.get("momentum")
-    if not momentum:
-        return
-
-    alignment = momentum.get("premarket_alignment")
-    action_hint = momentum.get("action_hint")
-
-    if alignment == "contradicted":
-        account_state["signal_confidence_hint"] = "low"
-        logger.warning(
-            f"Pre-market alignment contradicted for {symbol} BUY: "
-            f"bias={momentum.get('premarket_bias')} "
-            f"5m={momentum.get('momentum_5m_pct')}% "
-            f"15m={momentum.get('momentum_15m_pct')}% "
-            f"hint={action_hint} — confidence hint set to low"
-        )
-
-    elif alignment == "confirmed":
-        account_state["signal_confidence_hint"] = "high"
-        logger.info(
-            f"Pre-market alignment confirmed for {symbol} BUY: "
-            f"bias={momentum.get('premarket_bias')} "
-            f"5m={momentum.get('momentum_5m_pct')}% "
-            f"15m={momentum.get('momentum_15m_pct')}% "
-            f"hint={action_hint} — confidence hint set to high"
-        )
-
-    elif momentum["direction"] == "falling" and momentum["momentum_pct"] < -0.15:
-        account_state["signal_confidence_hint"] = "low"
-        logger.warning(
-            f"Momentum caution for {symbol} BUY: direction={momentum['direction']} "
-            f"momentum_pct={momentum['momentum_pct']}% last_close={momentum['last_close']} "
-            f"— downgrading confidence hint to low"
-        )
-
-    elif momentum["direction"] == "rising":
-        account_state["signal_confidence_hint"] = "high"
-        logger.info(
-            f"Momentum confirms {symbol} BUY: direction={momentum['direction']} "
-            f"momentum_pct={momentum['momentum_pct']}% — confidence hint set to high"
-        )
+    context_runtime.hydrate_buy_momentum_context()
 
 
 def _legacy_hydrate_strategy_context(
@@ -2614,58 +2550,13 @@ def _legacy_hydrate_strategy_context(
     account_state: dict,
     context_runtime,
 ) -> None:
-    if STRATEGY_ENGINE_MODE != "observe":
-        return
-
-    try:
-        strategy_trend = _trend_table.get(symbol) or {}
-        strategy_momentum = account_state.get("momentum") or {}
-        strategy_alignment = context_runtime.build_market_alignment_observation(
-            symbol_market_alignment=_symbol_market_alignment,
-        ).data
-
-        strategy_result = evaluate_strategy_observe_only(
-            symbol=symbol,
-            action=action,
-            account_state=account_state,
-            trend=strategy_trend,
-            momentum=strategy_momentum,
-            market_alignment=strategy_alignment,
-            tape=account_state.get("tape") or {},
-        )
-        strategy_observation = strategy_result.to_dict()
-        account_state["strategy_observation"] = strategy_observation
-
-        trader_brain = strategy_observation.get("trader_brain") or {}
-        logger.info(
-            f"Strategy observe for {symbol} {action.upper()}: "
-            f"score={trader_brain.get('score')} "
-            f"approved_by_scorer={trader_brain.get('approved_by_scorer')} "
-            f"setup={trader_brain.get('setup_type')} "
-            f"reason={trader_brain.get('reason')}"
-        )
-
-        if action == "buy":
-            _tb_score = float(trader_brain.get("score") or 0)
-            _strat_cap = None
-            if _tb_score < 40:
-                _strat_cap = _env_float("STRATEGY_SCORE_LOW_SIZE_CAP_PCT", 0.70)
-            elif _tb_score < 55:
-                _strat_cap = _env_float("STRATEGY_SCORE_BELOW_THRESHOLD_SIZE_CAP_PCT", 0.85)
-            if _strat_cap is not None:
-                apply_size_cap(
-                    account_state,
-                    cap_pct=_strat_cap,
-                    state_key="strategy_score_size_cap",
-                    payload={"score": _tb_score, "cap_pct": _strat_cap},
-                )
-                logger.info(
-                    f"Strategy score size cap for {symbol}: "
-                    f"score={_tb_score:.1f} → {_strat_cap}%"
-                )
-
-    except Exception as e:
-        logger.warning(f"Strategy observe failed for {symbol} {action.upper()}: {e}")
+    context_runtime.hydrate_strategy_context(
+        strategy_engine_mode=STRATEGY_ENGINE_MODE,
+        evaluate_strategy_observe_only=evaluate_strategy_observe_only,
+        symbol_market_alignment=_symbol_market_alignment,
+        apply_size_cap=apply_size_cap,
+        env_float=_env_float,
+    )
 
 
 def _legacy_process_signal(data, *, runtime_state=None, context_runtime=None, preflight_result=None):

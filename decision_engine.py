@@ -502,7 +502,10 @@ def evaluate_signal(signal_data, account_state):
         return {'approved': False, 'reason': f'Engine error: {str(e)}', 'position_size_pct': 0, 'stop_loss_pct': 1.75, 'take_profit_pct': 0, 'confidence': 'low'}
 
 def get_mock_account_state():
-    from broker import api, get_account
     from portfolio_state import build_account_state
+    from services.broker_service import broker_service
 
-    return build_account_state(api=api, get_account_func=get_account)
+    return build_account_state(
+        broker_client=broker_service,
+        get_account_func=broker_service.get_account,
+    )

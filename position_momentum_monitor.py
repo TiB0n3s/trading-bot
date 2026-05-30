@@ -21,9 +21,8 @@ from datetime import datetime, timedelta
 from typing import Any
 from pathlib import Path
 from db import get_connection
-from broker import api as broker_api, place_order
+from services.broker_service import broker_service
 
-from runtime_config import get_alpaca_base_url
 from market_time import now_et, is_market_hours
 from session_momentum import get_latest_session_momentum
 
@@ -59,8 +58,8 @@ POSITION_MOMENTUM_SELL_CANDIDATES_ONLY = _env_bool("POSITION_MOMENTUM_SELL_CANDI
 POSITION_MOMENTUM_USE_SELL_PRESSURE = _env_bool("POSITION_MOMENTUM_USE_SELL_PRESSURE", False)
 
 def build_api():
-    """Return the shared broker Alpaca client so position checks use the same runtime path as order/account logic."""
-    return broker_api
+    """Return the shared broker service for account/order access."""
+    return broker_service
 
 def _to_float(value: Any, default: float = 0.0) -> float:
     try:
@@ -869,7 +868,7 @@ def maybe_execute_auto_sell(position, decision, market_open: bool) -> dict[str, 
         f"sell_qty={sell_qty}/{position_qty}"
     )
 
-    order = place_order(
+    order = broker_service.place_order(
         symbol=symbol,
         action="sell",
         position_size_pct=0,
@@ -997,8 +996,8 @@ def main() -> int:
     print(f"  candidates_only: {POSITION_MOMENTUM_SELL_CANDIDATES_ONLY}")
     print()
 
-    api = build_api()
-    positions = api.list_positions()
+    broker = build_api()
+    positions = broker.list_positions()
     init_position_momentum_table()
     init_position_momentum_actions_table()
 

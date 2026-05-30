@@ -1,7 +1,7 @@
 import sqlite3
 import logging
 from db import get_connection
-from broker import api
+from services.broker_service import broker_service
 
 logging.basicConfig(
     level=logging.INFO,
@@ -24,7 +24,7 @@ def poll_fills():
         for row in rows:
             checked += 1
             try:
-                order = api.get_order(row["order_id"])
+                order = broker_service.get_order(row["order_id"])
                 new_status = order.status
                 fill_price = float(order.filled_avg_price) if order.filled_avg_price else None
 

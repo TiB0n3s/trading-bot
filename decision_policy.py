@@ -14,7 +14,7 @@ Purpose:
 
 from __future__ import annotations
 
-from config import DAILY_LOSS_LIMIT_PCT
+from strategy_constants import DAILY_LOSS_LIMIT_PCT
 from strategy_memory import contextual_memory_for_signal
 
 _HARD_GATE_CONTEXT_CHECKS = [

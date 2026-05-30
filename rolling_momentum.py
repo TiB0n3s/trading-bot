@@ -23,7 +23,7 @@ from pathlib import Path
 
 import pytz
 
-from broker import api
+from services.market_data_service import market_data_service
 from symbols_config import APPROVED_SYMBOLS_LIST
 from market_time import now_et
 
@@ -86,14 +86,12 @@ def fetch_minute_bars(symbol):
     end = datetime.now(timezone.utc)
     start = end - timedelta(days=LOOKBACK_CALENDAR_DAYS)
 
-    bars = list(
-        api.get_bars(
-            symbol,
-            "1Min",
-            start=start.isoformat(),
-            end=end.isoformat(),
-            feed=DATA_FEED,
-        )
+    bars = market_data_service.get_bars_with_fallback(
+        symbol,
+        "1Min",
+        start=start.isoformat(),
+        end=end.isoformat(),
+        feed=DATA_FEED,
     )
 
     out = []

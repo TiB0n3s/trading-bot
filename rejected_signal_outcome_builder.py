@@ -189,12 +189,12 @@ def compute_outcome(row: dict, bars: list[dict]) -> dict:
 
 
 def fetch_forward_bars(symbol: str, timestamp: str) -> list[dict]:
-    from broker import api
+    from services.market_data_service import market_data_service
 
     signal_dt = parse_trade_timestamp(timestamp)
     end_dt = max(signal_dt + timedelta(minutes=65), market_close_for(signal_dt))
 
-    bars = api.get_bars(
+    bars = market_data_service.get_barset_with_fallback(
         symbol,
         "1Min",
         start=signal_dt.isoformat(),
@@ -223,12 +223,12 @@ def fetch_forward_bars(symbol: str, timestamp: str) -> list[dict]:
 
 
 def fetch_day_bars(symbol: str, target_date: str) -> list[dict]:
-    from broker import api
+    from services.market_data_service import market_data_service
 
     start_dt = market_open_for_date(target_date)
     end_dt = market_close_for_date(target_date) + timedelta(minutes=1)
 
-    bars = api.get_bars(
+    bars = market_data_service.get_barset_with_fallback(
         symbol,
         "1Min",
         start=start_dt.isoformat(),

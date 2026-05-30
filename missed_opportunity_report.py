@@ -23,7 +23,7 @@ from pathlib import Path
 
 import pytz
 
-from broker import api
+from services.market_data_service import market_data_service
 from db import DB_PATH, get_connection
 from policy_artifacts import atomic_write_json
 
@@ -63,7 +63,13 @@ def fetch_forward_bars(symbol, ts_utc, minutes=75):
     start = ts_utc.isoformat()
     end = (ts_utc + timedelta(minutes=minutes + 5)).isoformat()
 
-    bars = list(api.get_bars(symbol, "1Min", start=start, end=end, feed="iex"))
+    bars = market_data_service.get_bars_with_fallback(
+        symbol,
+        "1Min",
+        start=start,
+        end=end,
+        feed="iex",
+    )
     out = []
 
     for b in bars:

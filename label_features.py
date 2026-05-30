@@ -50,8 +50,8 @@ load_env_file()
 
 import pytz
 
-from broker import api
 from db import DB_PATH, get_connection
+from services.market_data_service import market_data_service
 
 logger = logging.getLogger("label_features")
 logging.basicConfig(
@@ -79,7 +79,7 @@ def fetch_forward_bars(symbol: str, ts: str) -> list[dict]:
     snapshot_dt = parse_ts(ts)
     end_dt = snapshot_dt + timedelta(minutes=35)
 
-    bars = api.get_bars(
+    bars = market_data_service.get_barset_with_fallback(
         symbol,
         "1Min",
         start=snapshot_dt.isoformat(),

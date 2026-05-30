@@ -20,11 +20,11 @@ from datetime import datetime
 
 import pytz
 
-from broker import place_order
 from bot_events import log_event
 from db import DB_PATH, get_connection
 from decision_snapshots import record_decision_snapshot
 from intelligence_freshness import freshness_for_file
+from services.broker_service import broker_service
 
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -326,7 +326,7 @@ def main():
     symbol = decision.get("symbol_to_sell")
     print(f"Submitting live sell for weakest holding: {symbol}")
 
-    result = place_order(symbol, "sell", 0, 0, 0)
+    result = broker_service.place_order(symbol, "sell", 0, 0, 0)
     print(f"sell_result={result}")
     trade_id = log_rotation_sell(decision, result)
     record_rotation_snapshot(decision, result, trade_id)

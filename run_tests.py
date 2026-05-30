@@ -56,6 +56,7 @@ TESTS = [
     "tests/test_setup_policy.py",
     "tests/test_decision_policy.py",
     "tests/test_prediction_cache.py",
+    "tests/test_market_data_service.py",
     "tests/test_rejected_signal_outcomes.py",
     "tests/test_label_v1_builder.py",
     "tests/test_export_ml_dataset.py",
@@ -72,6 +73,10 @@ TESTS = [
     "tests/test_position_manager.py",
     "tests/test_trade_matcher.py",
     "tests/test_live_bias_override.py",
+    "tests/test_app_phase0.py",
+    "tests/test_architecture_boundaries.py",
+    "tests/test_signal_pipeline.py",
+    "tests/test_phase7_observability.py",
     "tests/test_macro_risk.py",
     "tests/test_pnl.py",
 ]

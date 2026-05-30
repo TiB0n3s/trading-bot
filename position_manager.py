@@ -23,9 +23,10 @@ from pathlib import Path
 
 import pytz
 
-from broker import api
 from db import DB_PATH, get_connection
 from bot_events import log_event
+from services.broker_service import broker_service
+from services.market_data_service import market_data_service
 from session_momentum import get_latest_session_momentum
 
 
@@ -312,7 +313,13 @@ def get_entry_context(symbol):
 def fetch_intraday_bars(symbol, minutes=60):
     start = (now_utc() - timedelta(minutes=minutes + 5)).isoformat()
     # Keep requests bounded so one slow symbol does not stall the full position review.
-    bars = list(api.get_bars(symbol, "1Min", start=start, feed="iex", limit=minutes + 10))
+    bars = market_data_service.get_bars_with_fallback(
+        symbol,
+        "1Min",
+        start=start,
+        feed="iex",
+        limit=minutes + 10,
+    )
 
     out = []
     for b in bars:
@@ -1120,9 +1127,7 @@ def submit_exit(decision):
         return {"submitted": False, "reason": "qty <= 0"}
 
     if action == "sell_full":
-        # Use existing broker script pathway indirectly by importing here.
-        from broker import place_order
-        order = place_order(symbol, "sell", 0, 0, 0)
+        order = broker_service.place_order(symbol, "sell", 0, 0, 0)
         return {"submitted": bool(order), "order": order}
 
     if action == "sell_partial":
@@ -1130,8 +1135,7 @@ def submit_exit(decision):
         if sell_qty < 1:
             if not PROMOTE_UNEXECUTABLE_PARTIALS:
                 return {"submitted": False, "reason": "partial sell qty < 1"}
-            from broker import place_order
-            order = place_order(symbol, "sell", 0, 0, 0)
+            order = broker_service.place_order(symbol, "sell", 0, 0, 0)
             return {
                 "submitted": bool(order),
                 "order": order,
@@ -1139,17 +1143,11 @@ def submit_exit(decision):
                 "reason": "partial sell qty < 1; promoted to full exit",
             }
 
-        open_orders = api.list_orders(status="open", symbols=[symbol])
+        open_orders = broker_service.list_open_orders(symbol)
         for o in open_orders:
-            api.cancel_order(o.id)
+            broker_service.cancel_order(o.id)
 
-        order = api.submit_order(
-            symbol=symbol,
-            qty=sell_qty,
-            side="sell",
-            type="market",
-            time_in_force="day",
-        )
+        order = broker_service.submit_market_sell(symbol, sell_qty)
 
         return {
             "submitted": True,
@@ -1208,7 +1206,7 @@ def main():
     state = load_state()
 
     try:
-        positions = api.list_positions()
+        positions = broker_service.list_positions()
     except Exception as e:
         raise SystemExit(f"Failed to fetch Alpaca positions: {e}")
 

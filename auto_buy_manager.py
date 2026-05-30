@@ -254,9 +254,9 @@ def load_market_context() -> dict[str, Any]:
 
 def held_symbols() -> set[str]:
     try:
-        from broker import api
+        from services.broker_service import broker_service
 
-        return {p.symbol.upper() for p in api.list_positions()}
+        return {p.symbol.upper() for p in broker_service.list_positions()}
     except Exception:
         return set()
 
@@ -384,18 +384,18 @@ def app_approved_buys_today(symbol: str) -> int:
 
 
 def broker_positions_and_balance() -> tuple[list[dict[str, Any]], float]:
-    from broker import api
+    from services.broker_service import broker_service
 
     positions = []
-    for p in api.list_positions():
+    for p in broker_service.list_positions():
         positions.append({
             "symbol": p.symbol.upper(),
             "qty": getattr(p, "qty", None),
             "current_price": getattr(p, "current_price", None),
             "market_value": getattr(p, "market_value", None),
         })
-    account = api.get_account()
-    balance = _to_float(getattr(account, "equity", None), 0) or 0.0
+    account = broker_service.get_account() or {}
+    balance = _to_float(account.get("balance"), 0) or 0.0
     return positions, balance
 
 
@@ -922,9 +922,9 @@ def maybe_execute_auto_buy(candidate: dict[str, Any], market_open: bool, live_re
         candidate["live_block_reason"] = risk_reason
         return None
 
-    from broker import place_order
+    from services.broker_service import broker_service
 
-    order = place_order(
+    order = broker_service.place_order(
         symbol=candidate["symbol"],
         action="buy",
         position_size_pct=AUTO_BUY_POSITION_SIZE_PCT,

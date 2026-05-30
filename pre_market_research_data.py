@@ -104,7 +104,7 @@ def load_env_if_needed():
 
 load_env_if_needed()
 
-from broker import api  # noqa: E402
+from services.market_data_service import market_data_service  # noqa: E402
 
 
 def pct_change(old, new):
@@ -159,7 +159,9 @@ def get_recent_bars(symbol):
     if PRE_MARKET_ALPACA_FETCH_DAILY_BARS:
         try:
             daily_start = (now - timedelta(days=PRE_MARKET_ALPACA_DAILY_LOOKBACK_DAYS)).isoformat()
-            daily_bars = list(api.get_bars(symbol, "1Day", start=daily_start, feed="iex"))
+            daily_bars = market_data_service.get_bars_with_fallback(
+                symbol, "1Day", start=daily_start, feed="iex"
+            )
             if len(daily_bars) >= 2:
                 prev = daily_bars[-2]
                 last = daily_bars[-1]
@@ -184,7 +186,9 @@ def get_recent_bars(symbol):
     if should_fetch_minute:
         try:
             minute_start = (now - timedelta(hours=PRE_MARKET_ALPACA_MINUTE_LOOKBACK_HOURS)).isoformat()
-            minute_bars = list(api.get_bars(symbol, "1Min", start=minute_start, feed="iex"))
+            minute_bars = market_data_service.get_bars_with_fallback(
+                symbol, "1Min", start=minute_start, feed="iex"
+            )
             minute_bars = minute_bars[-120:]
             out["bar_count_1m"] = len(minute_bars)
 

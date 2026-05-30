@@ -9,24 +9,11 @@ This module does not place orders, approve trades, reject trades, or write to DB
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from broker import api
 from market_intelligence.intraday_state import build_intraday_state
 from market_intelligence.tape_reader import classify_tape
-
-
-def _bar_to_dict(bar: Any) -> dict[str, Any]:
-    """Convert an Alpaca bar object into the dict shape expected by intraday_state."""
-    return {
-        "open": float(getattr(bar, "o", 0) or 0),
-        "high": float(getattr(bar, "h", 0) or 0),
-        "low": float(getattr(bar, "l", 0) or 0),
-        "close": float(getattr(bar, "c", 0) or 0),
-        "volume": float(getattr(bar, "v", 0) or 0),
-        "timestamp": str(getattr(bar, "t", "")),
-    }
+from services.market_data_service import bar_to_dict, market_data_service
 
 
 def fetch_recent_bars(
@@ -40,11 +27,13 @@ def fetch_recent_bars(
 
     Uses IEX by default because paper accounts often reject recent SIP access.
     """
-    symbol = symbol.upper()
-    start = (datetime.now(timezone.utc) - timedelta(minutes=lookback_minutes)).isoformat()
-
-    bars = list(api.get_bars(symbol, timeframe, start=start, feed=feed))
-    return [_bar_to_dict(b) for b in bars]
+    bars = market_data_service.get_recent_bar_dicts(
+        symbol,
+        lookback_minutes=lookback_minutes,
+        timeframe=timeframe,
+        feed=feed,
+    )
+    return [bar_to_dict(b) if not isinstance(b, dict) else b for b in bars]
 
 
 def build_tape_context(

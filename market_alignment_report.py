@@ -15,7 +15,7 @@ from datetime import datetime
 
 import pytz
 
-from config import APPROVED_SYMBOLS, SYMBOL_MARKET_ALIGNMENT
+from strategy_constants import APPROVED_SYMBOLS, SYMBOL_MARKET_ALIGNMENT
 from app import _compute_trend
 from db import DB_PATH, get_connection
 

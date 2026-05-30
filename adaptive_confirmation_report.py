@@ -9,7 +9,7 @@ Usage:
   python3 adaptive_confirmation_report.py
 """
 
-from config import APPROVED_SYMBOLS, ADAPTIVE_BUY_CONFIRMATION_ENABLED
+from strategy_constants import APPROVED_SYMBOLS, ADAPTIVE_BUY_CONFIRMATION_ENABLED
 from app import (
     _load_market_context,
     _market_bias,

@@ -77,7 +77,7 @@ def load_env_file(path=ENV_FILE):
 reexec_under_venv_if_available()
 load_env_file()
 
-from broker import api
+from services.market_data_service import market_data_service
 from db import DB_PATH, get_connection
 from symbols_config import APPROVED_SYMBOLS_LIST, SYMBOL_SIGNAL_SOURCE
 
@@ -177,13 +177,13 @@ def session_window_utc(date_str):
 
 def fetch_session_bars(symbol, date_str):
     start_utc, end_utc = session_window_utc(date_str)
-    bars = list(api.get_bars(
+    bars = market_data_service.get_bars_with_fallback(
         symbol,
         "1Min",
         start=start_utc.isoformat(),
         end=end_utc.isoformat(),
         feed="iex",
-    ))
+    )
     out = []
     for b in bars:
         bt = b.t

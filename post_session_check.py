@@ -46,7 +46,7 @@ def _load_env_file(path=ENV_FILE):
 _reexec_under_venv_if_available()
 _load_env_file()
 
-from broker import api
+from services.broker_service import broker_service
 from trade_matcher import rebuild_matched_trades
 from db import DB_PATH, get_connection
 
@@ -123,7 +123,7 @@ def check_reconciliation():
     print("\n── Alpaca vs DB Reconciliation ─────────────────────")
 
     try:
-        alpaca_positions = api.list_positions()
+        alpaca_positions = broker_service.list_positions()
         alpaca = {p.symbol: float(p.qty) for p in alpaca_positions}
     except Exception as e:
         fail(f"Could not fetch Alpaca positions: {e}")

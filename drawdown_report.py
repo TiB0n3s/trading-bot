@@ -12,7 +12,7 @@ from collections import defaultdict
 from datetime import date
 from pathlib import Path
 
-from broker import api
+from services.broker_service import broker_service
 from trade_matcher import rebuild_matched_trades
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -88,7 +88,7 @@ def main():
 
     unrealized = []
     try:
-        positions = api.list_positions()
+        positions = broker_service.list_positions()
         for p in positions:
             qty = float(p.qty)
             avg = float(p.avg_entry_price)

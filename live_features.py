@@ -51,14 +51,14 @@ load_env_file()
 
 import pytz
 
-from broker import api
-from config import SYMBOL_MARKET_ALIGNMENT
+from strategy_constants import SYMBOL_MARKET_ALIGNMENT
 from db import get_connection, DB_PATH
 from feature_engine import compute_feature_snapshot
 from macro_risk import get_macro_risk
 from market_time import is_trading_day, market_session, now_et
 from prior_session_context import prior_session_context
 from rolling_context import rolling_symbol_context
+from services.market_data_service import market_data_service
 from symbols_config import APPROVED_SYMBOLS
 from setup_engine import classify_feature_snapshot as classify_setup
 
@@ -178,34 +178,16 @@ def get_bar_series(
 
     for window_minutes in lookbacks:
         start = end - timedelta(minutes=window_minutes)
-        feed_used = "sip"
-
-        try:
-            bars = api.get_bars(
-                symbol,
-                timeframe,
-                start=start.isoformat(),
-                end=end.isoformat(),
-                adjustment="raw",
-                feed="sip",
-            ).df
-        except Exception as e:
-            err_lower = str(e).lower()
-            if any(kw in err_lower for kw in ("subscription", "not permitted", "forbidden", "403")):
-                logger.warning(
-                    f"{symbol}: SIP feed unavailable ({type(e).__name__}: {e}); falling back to IEX"
-                )
-                feed_used = "iex"
-                bars = api.get_bars(
-                    symbol,
-                    timeframe,
-                    start=start.isoformat(),
-                    end=end.isoformat(),
-                    adjustment="raw",
-                    feed="iex",
-                ).df
-            else:
-                raise
+        barset = market_data_service.get_barset_with_fallback(
+            symbol,
+            timeframe,
+            start=start.isoformat(),
+            end=end.isoformat(),
+            adjustment="raw",
+            feed="sip",
+        )
+        feed_used = market_data_service.get_feed_used(symbol) or "sip"
+        bars = barset.df
 
         if bars is None or bars.empty:
             continue

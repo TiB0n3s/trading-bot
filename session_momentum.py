@@ -63,10 +63,8 @@ def load_env_file(path: Path = ENV_FILE) -> bool:
 
 load_env_file()
 
-from alpaca_trade_api.rest import REST
-
 from db import get_connection
-from runtime_config import get_alpaca_base_url
+from services.market_data_service import market_data_service
 from symbols_config import APPROVED_SYMBOLS_LIST
 
 logger = logging.getLogger("session_momentum")
@@ -262,11 +260,11 @@ def classify_session_momentum(
     }
 
 
-def build_session_momentum(api: REST, symbol: str) -> dict[str, Any]:
+def build_session_momentum(api: Any, symbol: str) -> dict[str, Any]:
     symbol = symbol.upper()
     start = (datetime.now(timezone.utc) - timedelta(minutes=LOOKBACK_MINUTES)).isoformat()
 
-    bars = list(api.get_bars(symbol, "1Min", start=start, feed="iex"))
+    bars = market_data_service.get_bars_with_fallback(symbol, "1Min", start=start, feed="iex")
     bars = [b for b in bars if _bar_close(b) is not None]
 
     if not bars:
@@ -494,21 +492,11 @@ def get_latest_session_momentum(symbol: str) -> dict[str, Any] | None:
     return dict(row) if row else None
 
 
-def refresh_symbol(api: REST, symbol: str) -> dict[str, Any]:
+def refresh_symbol(api: Any, symbol: str) -> dict[str, Any]:
     init_session_momentum_table()
     row = build_session_momentum(api, symbol)
     upsert_session_momentum(row)
     return get_latest_session_momentum(symbol) or row
-
-
-def build_api() -> REST:
-    import os
-
-    return REST(
-        key_id=os.environ.get("ALPACA_API_KEY", ""),
-        secret_key=os.environ.get("ALPACA_SECRET_KEY", ""),
-        base_url=get_alpaca_base_url(),
-    )
 
 
 def print_row(row: dict[str, Any]) -> None:
@@ -541,7 +529,7 @@ def main() -> int:
 
     logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 
-    api = build_api()
+    api = None
 
     symbols = APPROVED_SYMBOLS_LIST if args.all else [args.symbol.upper()]
 

@@ -27,7 +27,7 @@ def _session_time_context():
         return {"session_elapsed_minutes": None, "minutes_until_close": None}
 
 
-def get_account_snapshot(api, get_account_func):
+def get_account_snapshot(broker_client, get_account_func):
     """Return canonical account snapshot from Alpaca."""
     snapshot = {
         "balance": 10000.00,
@@ -49,13 +49,13 @@ def get_account_snapshot(api, get_account_func):
     return snapshot
 
 
-def get_open_positions(api):
+def get_open_positions(broker_client):
     """Return canonical open-position list and unrealized P&L."""
     positions_out = []
     unrealized_pnl = 0.0
 
     try:
-        positions = api.list_positions()
+        positions = broker_client.list_positions()
         for p in positions:
             try:
                 qty = float(p.qty)
@@ -126,10 +126,12 @@ def _portfolio_stress(positions, balance):
         return {"portfolio_heat": "neutral"}
 
 
-def build_account_state(api, get_account_func, db_path=DB_PATH):
+def build_account_state(broker_client=None, get_account_func=None, db_path=DB_PATH, **kwargs):
     """Canonical runtime account state used by app.py and decision_engine.py."""
-    account = get_account_snapshot(api, get_account_func)
-    positions, unrealized_pnl = get_open_positions(api)
+    if broker_client is None:
+        broker_client = kwargs.get("api")
+    account = get_account_snapshot(broker_client, get_account_func)
+    positions, unrealized_pnl = get_open_positions(broker_client)
     realized_pnl = get_realized_pnl_today(db_path=db_path)
 
     portfolio_value = account.get("portfolio_value") or account.get("balance") or 0

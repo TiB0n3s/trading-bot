@@ -52,7 +52,7 @@ def load_env_file(path=ENV_FILE):
 
 load_env_file()
 
-from config import APPROVED_SYMBOLS
+from strategy_constants import APPROVED_SYMBOLS
 from db_migrations import status as migration_status
 from broker import get_account
 from market_time import expected_market_context_date

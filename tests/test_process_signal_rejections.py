@@ -539,8 +539,7 @@ def test_trend_confirmation_blocks_buy_insufficient_consecutive():
 
 def test_trend_confirmation_blocks_sell_non_bearish():
     """SELL where direction != bearish is rejected (no fast-lane)."""
-    _fake_pos = MagicMock()
-    with patch.object(_app.api, "get_position", return_value=_fake_pos):
+    with patch.object(_app.broker_service, "assert_position_exists", MagicMock()):
         with _Env(**{
             "app.get_mock_account_state": MagicMock(return_value=_account()),
             "app._compute_trend": MagicMock(
@@ -616,8 +615,7 @@ def test_sell_profit_threshold_blocks_small_profit_without_bearish_pressure():
     """SELL on a small-profit position is blocked without confirmed bearish trend."""
     exit_price = _PRICE * 1.002  # +0.2% → below 0.5% threshold
     existing_position = {"qty": 10, "current_price": exit_price, "avg_entry": _PRICE}
-    _fake_pos = MagicMock()
-    with patch.object(_app.api, "get_position", return_value=_fake_pos):
+    with patch.object(_app.broker_service, "assert_position_exists", MagicMock()):
         with _Env(**{
             "app.get_position": MagicMock(return_value=existing_position),
             "app.get_mock_account_state": MagicMock(return_value=_account()),
@@ -645,8 +643,7 @@ def test_sell_discipline_blocks_small_red_position_without_bearish():
     """SELL on a small-red position is blocked without confirmed bearish trend."""
     exit_price = _PRICE * 0.996  # -0.4% → in the [-0.75, 0) range
     existing_position = {"qty": 10, "current_price": exit_price, "avg_entry": _PRICE}
-    _fake_pos = MagicMock()
-    with patch.object(_app.api, "get_position", return_value=_fake_pos):
+    with patch.object(_app.broker_service, "assert_position_exists", MagicMock()):
         with _Env(**{
             "app.get_position": MagicMock(return_value=existing_position),
             "app.get_mock_account_state": MagicMock(return_value=_account()),

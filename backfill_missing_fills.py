@@ -42,7 +42,7 @@ def _load_env_if_needed():
 
 _load_env_if_needed()
 
-from broker import api  # noqa: E402  (env must be loaded before broker import)
+from services.broker_service import broker_service  # noqa: E402  (env must be loaded first)
 
 
 def find_missing_rows():
@@ -91,7 +91,7 @@ def main():
     for r in rows:
         oid = r["order_id"]
         try:
-            order = api.get_order(oid)
+            order = broker_service.get_order(oid)
         except Exception as e:
             print(f"  id={r['id']} {r['symbol']:<5} {r['action']:<4} order={oid[:8]}: ERROR querying Alpaca — {e}")
             errors += 1

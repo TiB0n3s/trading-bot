@@ -1,7 +1,7 @@
 from symbols_config import APPROVED_SYMBOLS, PRICE_RANGES
 import os
 """
-Central trading bot configuration.
+Central trading bot configuration (legacy constants moved here).
 
 Keep static strategy constants here so app.py, parsers, reports, and docs
 do not drift over time.
@@ -84,4 +84,3 @@ SYMBOL_MARKET_ALIGNMENT = {
     "MRK":  {"cluster": "large_cap_healthcare", "benchmark": "SPY"},
     "UNH":  {"cluster": "large_cap_healthcare", "benchmark": "SPY"},
 }
-

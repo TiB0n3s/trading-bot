@@ -1,7 +1,7 @@
 import json
 from pathlib import Path
 
-from config import MAX_OPEN_POSITIONS
+from strategy_constants import MAX_OPEN_POSITIONS
 
 DEFAULT_MACRO_RISK = {
     "macro_regime": "normal",

@@ -1,6 +1,5 @@
 import os
 import json
-import sqlite3
 import logging
 import hashlib
 from concurrent.futures import ThreadPoolExecutor
@@ -11,9 +10,21 @@ import time
 from setup_policy import evaluate_setup_policy
 from pathlib import Path
 from live_features import build_snapshot
-from flask import Flask, request, jsonify, abort
+from flask import Flask, abort
+from api.debug_routes import DebugRouteDeps, create_debug_blueprint
+from api.request_services import RequestAuthService, ResponseFactory, WebhookPayloadParser
+from api.status_routes import StatusRouteDeps, create_status_blueprint
+from api.webhook_routes import WebhookRouteDeps, create_webhook_blueprint
+from services.container import ApplicationContainer
+from services import dedupe_service
+from services.observability import metrics_snapshot
+from services.policies import entry_policy, execution_policy, sizing_policy
+from services.policy_controls import public_policy_control_config
+from services.signal_pipeline import SignalPipelineDeps
+from services import trend_context_service
+from services import trade_audit_service
+from repositories import context_repo, cooldown_repo, trades_repo
 from indicator_state import (
-    compute_indicator_state,
     is_fast_lane_buy_flip,
     is_fast_lane_sell_flip,
 )
@@ -23,7 +34,6 @@ from session_momentum import (
 )
 from decision_engine import evaluate_signal, get_mock_account_state
 from opportunity_score import score_buy_opportunity
-from broker import place_order, get_account, get_position, api
 from macro_risk import get_macro_risk
 from setup_classifier import classify_setup
 from strategy_memory import memory_for_signal
@@ -32,10 +42,8 @@ from decision_policy import evaluate_decision_policy
 from intelligence_snapshot import get_intelligence_snapshot
 from position_intelligence import get_position_intelligence
 from bot_events import log_event
-from decision_snapshots import record_decision_snapshot
 from rolling_context import rolling_summary, rolling_symbol_context
 from prior_session_context import prior_session_context
-from market_intelligence.alpaca_tape import build_tape_context
 from decision_thresholds import PREDICTION_GATE_THRESHOLDS
 from strategy.strategy_engine import evaluate_strategy_observe_only
 from risk.account_risk import account_risk_snapshot
@@ -79,13 +87,12 @@ from market_time import now_et, is_market_hours, market_session, expected_market
 from db import init_db_performance_indexes
 from db import (
     DB_PATH,
-    get_connection,
     ensure_recent_favorable_setups_table,
     upsert_recent_favorable_setup,
     get_recent_favorable_setup,
     prune_recent_favorable_setups,
 )
-from config import (
+from strategy_constants import (
     MARKET_OPEN_MINUTES,
     MARKET_CLOSE_MINUTES,
     DAILY_LOSS_LIMIT_PCT,
@@ -109,6 +116,15 @@ ET = ZoneInfo("America/New_York")
 logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
+container = ApplicationContainer.create_default(
+    logger=logger,
+    signal_executor_factory=lambda: _get_signal_executor(),
+)
+
+# Compatibility aliases while legacy orchestration is still being reduced.
+broker_service = container.broker_service
+market_data_service = container.market_data_service
+tape_service = container.tape_service
 
 DB_PATH = Path(__file__).parent / "trades.db"
 _START_TIME = datetime.now(timezone.utc)
@@ -195,104 +211,141 @@ ENFORCE_ADAPTIVE_CHURN_REENTRY = os.getenv(
     "true"
 ).strip().lower() in ("1", "true", "yes", "on")
 SIGNAL_WORKER_COUNT = int(os.environ.get("SIGNAL_WORKER_COUNT", "3"))
-_signal_executor = ThreadPoolExecutor(
-    max_workers=SIGNAL_WORKER_COUNT,
-    thread_name_prefix="signal-worker",
-)
+_signal_executor = None
+_STARTUP_TASKS_RAN = False
+
+
+def _get_signal_executor() -> ThreadPoolExecutor:
+    """Create the signal worker pool lazily instead of at module import."""
+    global _signal_executor
+    if _signal_executor is None:
+        _signal_executor = ThreadPoolExecutor(
+            max_workers=SIGNAL_WORKER_COUNT,
+            thread_name_prefix="signal-worker",
+        )
+    return _signal_executor
 
 def _init_db():
-    with get_connection(DB_PATH) as con:
-        con.execute("""
-            CREATE TABLE IF NOT EXISTS trades (
-                id                INTEGER PRIMARY KEY AUTOINCREMENT,
-                timestamp         TEXT NOT NULL,
-                symbol            TEXT,
-                action            TEXT,
-                signal_price      REAL,
-                approved          INTEGER,
-                rejection_reason  TEXT,
-                confidence        TEXT,
-                position_size_pct REAL,
-                stop_loss_pct     REAL,
-                take_profit_pct   REAL,
-                order_id          TEXT,
-                order_status      TEXT,
-                qty               INTEGER,
-                fill_price        REAL
-            )
-        """)
-        # Operational state tables — persisted across restarts and shared between
-        # gunicorn workers (Stage A: schema + startup hydration; Stage B will add
-        # the write-through paths so cooldowns / recent_sells stay in sync at runtime).
-        con.execute("""
-            CREATE TABLE IF NOT EXISTS cooldowns (
-                symbol          TEXT NOT NULL,
-                action          TEXT NOT NULL,
-                last_order_time TEXT NOT NULL,
-                PRIMARY KEY (symbol, action)
-            )
-        """)
-        con.execute("""
-            CREATE TABLE IF NOT EXISTS recent_sells (
-                symbol          TEXT PRIMARY KEY,
-                last_sell_time  TEXT NOT NULL,
-                last_sell_price REAL NOT NULL
-            )
-        """)
+    context_repo.init_core_tables(DB_PATH)
 
-        con.execute("""
-            CREATE TABLE IF NOT EXISTS webhook_events (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                dedupe_key TEXT UNIQUE NOT NULL,
-                received_at TEXT NOT NULL,
-                symbol TEXT,
-                action TEXT,
-                signal_price REAL,
-                source TEXT,
-                payload_json TEXT,
-                status TEXT DEFAULT 'received',
-                queued_at TEXT,
-                started_at TEXT,
-                finished_at TEXT,
-                order_id TEXT,
-                client_order_id TEXT,
-                failure_reason TEXT
-            )
-        """)
+def run_startup_tasks() -> None:
+    """Execute non-critical startup tasks. Call explicitly from an entrypoint
+    or from tests by passing run_startup=True to `create_app()` when safe.
+    """
+    global _STARTUP_TASKS_RAN
+    try:
+        _init_db()
+    except Exception as e:
+        logger.error(f"DB init failed during startup: {e}")
 
-        con.execute("""
-            CREATE TABLE IF NOT EXISTS recent_webhooks (
-                dedupe_key      TEXT PRIMARY KEY,
-                symbol          TEXT NOT NULL,
-                action          TEXT NOT NULL,
-                signal_price    REAL,
-                first_seen      TEXT NOT NULL
-            )
-        """)
+    RECENT_FAVORABLE_SETUP_TTL_MINUTES = 15
 
-_init_db()
+    try:
+        ensure_recent_favorable_setups_table()
+        prune_recent_favorable_setups(RECENT_FAVORABLE_SETUP_TTL_MINUTES)
+    except Exception as e:
+        logger.error(f"Recent favorable setups init failed: {e}")
 
-RECENT_FAVORABLE_SETUP_TTL_MINUTES = 15
+    try:
+        init_session_momentum_table()
+    except Exception as e:
+        logger.error(f"Session momentum table initialization failed: {e}")
 
-ensure_recent_favorable_setups_table()
-prune_recent_favorable_setups(RECENT_FAVORABLE_SETUP_TTL_MINUTES)
+    try:
+        init_db_performance_indexes()
+        logger.info("DB performance indexes initialized")
+    except Exception as e:
+        logger.error(f"DB performance index initialization failed: {e}")
 
-try:
-    init_session_momentum_table()
-except Exception as e:
-    logger.error(f"Session momentum table initialization failed: {e}")
+    try:
+        start_prediction_cache_loader()
+        logger.info(f"Prediction cache loader started: {prediction_cache_status()}")
+    except Exception as e:
+        logger.error(f"Prediction cache loader startup failed: {e}")
 
-try:
-    init_db_performance_indexes()
-    logger.info("DB performance indexes initialized")
-except Exception as e:
-    logger.error(f"DB performance index initialization failed: {e}")
+    try:
+        _get_signal_executor()
+    except Exception as e:
+        logger.error(f"Signal executor startup failed: {e}")
 
-try:
-    start_prediction_cache_loader()
-    logger.info(f"Prediction cache loader started: {prediction_cache_status()}")
-except Exception as e:
-    logger.error(f"Prediction cache loader startup failed: {e}")
+    try:
+        _startup_reconcile()
+    except Exception as e:
+        logger.error(f"Startup reconciliation hook failed: {e}")
+
+    try:
+        _load_symbol_overrides()
+    except Exception as e:
+        logger.error(f"Symbol override startup load failed: {e}")
+
+    try:
+        _build_trend_table()
+    except Exception as e:
+        logger.error(f"Trend-table startup build failed: {e}")
+
+    try:
+        _hydrate_cooldowns()
+    except Exception as e:
+        logger.error(f"Cooldown startup hydration failed: {e}")
+
+    try:
+        _hydrate_recent_sells()
+    except Exception as e:
+        logger.error(f"Recent-sell startup hydration failed: {e}")
+
+    try:
+        _load_market_context()
+    except Exception as e:
+        logger.error(f"Market-context startup load failed: {e}")
+
+    _STARTUP_TASKS_RAN = True
+
+
+def _register_routes(flask_app: Flask, app_container: ApplicationContainer) -> None:
+    """Register HTTP blueprints against a Flask app instance."""
+    auth = RequestAuthService(validate_secret=validate_secret)
+    responses = ResponseFactory()
+
+    flask_app.register_blueprint(create_webhook_blueprint(WebhookRouteDeps(
+        auth=auth,
+        parser=WebhookPayloadParser(APPROVED_SYMBOLS, PRICE_RANGES, logger),
+        responses=responses,
+        make_dedupe_key=_make_dedupe_key,
+        record_webhook_event=_record_webhook_event,
+        mark_webhook_event_status=_mark_webhook_event_status,
+        submit_signal=lambda data: app_container.signal_executor_factory().submit(process_signal, data),
+        logger=logger,
+    )))
+    flask_app.register_blueprint(create_status_blueprint(StatusRouteDeps(
+        auth=auth,
+        responses=responses,
+        health_payload=health_payload,
+        status_payload=status_payload,
+        positions_payload=positions_payload,
+    )))
+    flask_app.register_blueprint(create_debug_blueprint(DebugRouteDeps(
+        auth=auth,
+        responses=responses,
+        debug_symbol_payload=debug_symbol_payload,
+    )))
+
+
+def create_app(
+    run_startup: bool = False,
+    app_container: ApplicationContainer | None = None,
+) -> Flask:
+    """Application factory.
+
+    Returns a new Flask app instance with the module's routes registered.
+    When `run_startup` is True, execute non-critical startup tasks explicitly.
+    """
+    app_container = app_container or container
+    if run_startup:
+        run_startup_tasks()
+    flask_app = Flask(__name__)
+    flask_app.extensions["application_container"] = app_container
+    _register_routes(flask_app, app_container)
+    return flask_app
 
 def _startup_reconcile():
     try:
@@ -303,7 +356,7 @@ def _startup_reconcile():
 
         # 2. Fetch Alpaca positions
         try:
-            alpaca_positions = api.list_positions()
+            alpaca_positions = broker_service.list_positions()
             alpaca_symbols = {p.symbol for p in alpaca_positions}
         except Exception as e:
             logger.error(f"Startup reconciliation: failed to fetch Alpaca positions: {e}")
@@ -313,20 +366,7 @@ def _startup_reconcile():
         # 3. Query DB for symbols with a net open position (more filled buys than sells)
         db_symbols = set()
         try:
-            with get_connection(DB_PATH) as con:
-                rows = con.execute("""
-                    SELECT symbol,
-                        SUM(CASE
-                                WHEN LOWER(action) = 'buy'  THEN COALESCE(qty, 0)
-                                WHEN LOWER(action) = 'sell' THEN -COALESCE(qty, 0)
-                                ELSE 0
-                            END) AS net_qty
-                    FROM trades
-                    WHERE order_id IS NOT NULL
-                      AND order_status IN ('filled', 'partially_filled')
-                    GROUP BY symbol
-                    HAVING net_qty > 0
-                """).fetchall()
+            rows = context_repo.startup_db_open_symbols()
             db_symbols = {row["symbol"] for row in rows if row["symbol"]}
         except Exception as e:
             logger.error(f"Startup reconciliation: failed to query trades.db: {e}")
@@ -347,8 +387,6 @@ def _startup_reconcile():
         )
     except Exception as e:
         logger.error(f"Startup reconciliation failed unexpectedly: {e}")
-
-_startup_reconcile()
 
 def _observe_setup_policy(setup_label: str | None) -> dict:
     """
@@ -437,17 +475,7 @@ def _build_setup_observation(symbol, action, price, account_state):
         }
 
 def _ml_prediction_bucket(score) -> str:
-    """Map a raw ML prediction_score to the reporting bucket name."""
-    if score is None:
-        return "unknown"
-    s = float(score)
-    if s >= 55:
-        return "high_55_plus"
-    if s >= 50:
-        return "mid_50_55"
-    if s >= 45:
-        return "low_45_50"
-    return "weak_below_45"
+    return entry_policy.ml_prediction_bucket(score)
 
 
 def _is_favorable_setup_label(setup_label: str | None) -> bool:
@@ -510,42 +538,27 @@ def _env_float(name: str, default: float) -> float:
 
 
 def _get_bars_with_fallback(symbol: str, timeframe: str, **kwargs):
-    """Fetch bars using SIP as primary feed, IEX as automatic fallback on subscription errors."""
-    feed = kwargs.pop("feed", "sip")
-    try:
-        return list(api.get_bars(symbol, timeframe, feed=feed, **kwargs))
-    except Exception as e:
-        err_lower = str(e).lower()
-        if feed == "sip" and any(
-            kw in err_lower for kw in ("subscription", "not permitted", "forbidden", "403")
-        ):
-            logger.warning(
-                f"{symbol}: SIP feed unavailable ({type(e).__name__}); falling back to IEX"
-            )
-            return list(api.get_bars(symbol, timeframe, feed="iex", **kwargs))
-        raise
+    return market_data_service.get_bars_with_fallback(symbol, timeframe, **kwargs)
+
+
+def get_account():
+    return broker_service.get_account()
+
+
+def get_position(symbol):
+    return broker_service.get_position(symbol)
+
+
+def place_order(*args, **kwargs):
+    return broker_service.place_order(*args, **kwargs)
+
+
+def build_tape_context(*args, **kwargs):
+    return tape_service.build_tape_context(*args, **kwargs)
 
 
 def _compute_dominant_limiter(account_state: dict) -> str:
-    """Return the label of the source that set the tightest pre-execution size cap."""
-    caps = []
-    if (account_state.get("weak_prediction_setup_gate") or {}).get("triggered"):
-        caps.append(("weak_prediction_degraded", 0.50))
-    if account_state.get("setup_degraded"):
-        caps.append(("degraded_setup", account_state["setup_degraded"].get("size_cap_pct", 99)))
-    if account_state.get("unrecognized_label_cap"):
-        caps.append(("unrecognized_label", account_state["unrecognized_label_cap"].get("cap_pct", 99)))
-    if account_state.get("prediction_confident_weak_cap"):
-        caps.append(("prediction_confident_weak", account_state["prediction_confident_weak_cap"].get("cap_pct", 99)))
-    if account_state.get("session_momentum_size_cap"):
-        caps.append(("session_momentum", account_state["session_momentum_size_cap"].get("cap_pct", 99)))
-    if account_state.get("strategy_score_size_cap"):
-        caps.append(("strategy_brain", account_state["strategy_score_size_cap"].get("cap_pct", 99)))
-    if account_state.get("setup_policy_override"):
-        caps.append(("setup_policy_override", 0.75))
-    if not caps:
-        return "uncapped"
-    return min(caps, key=lambda x: x[1])[0]
+    return sizing_policy.compute_dominant_limiter(account_state)
 
 
 def _apply_buy_opportunity_sizing(
@@ -556,136 +569,14 @@ def _apply_buy_opportunity_sizing(
     risk_multiplier: float,
     account_state: dict,
 ) -> float:
-    """
-    Live adaptive BUY sizing.
-
-    This does not approve trades that would otherwise be rejected.
-    It only caps/reduces size on trades that already passed the existing gates.
-    Strong-conviction lift: when all positive signals align with no existing cap,
-    applies a modest size increase (default 1.10x, max 1.50%).
-    """
-    base_position_size_pct = float(base_position_size_pct or 0)
-    risk_multiplier = float(risk_multiplier or 1.0)
-    adjusted = base_position_size_pct * risk_multiplier
-
-    if action != "buy":
-        return adjusted
-
-    buy_opp = (account_state or {}).get("buy_opportunity") or {}
-
-    if not _buy_opportunity_sizing_enabled():
-        account_state["buy_opportunity_sizing"] = {
-            "enabled": False,
-            "original_pct": adjusted,
-            "final_pct": adjusted,
-            "reason": "BUY opportunity sizing disabled",
-        }
-        return adjusted
-
-    score_raw = buy_opp.get("buy_opportunity_score")
-    rec = buy_opp.get("buy_opportunity_recommendation")
-
-    try:
-        score = float(score_raw)
-    except Exception:
-        score = None
-
-    small_cap = _env_float("BUY_OPPORTUNITY_SMALL_CAP_PCT", 1.25)
-    watch_cap = _env_float("BUY_OPPORTUNITY_WATCH_CAP_PCT", 0.75)
-    avoid_cap = _env_float("BUY_OPPORTUNITY_AVOID_CAP_PCT", 0.50)
-
-    cap = None
-    bucket = "unscored"
-
-    if rec == "strong_buy_candidate" or (score is not None and score >= 10):
-        bucket = "strong_buy_candidate"
-        cap = None
-
-        # Strong-conviction lift: apply a modest size increase when all positive
-        # signals align and no pre-execution cap was already set by risk gates.
-        # Only runs when sizing is not already constrained.
-        _tb_score = float(
-            (account_state.get("strategy_observation") or {})
-            .get("trader_brain", {}).get("score") or 0
-        )
-        _smg_sev = (account_state.get("session_momentum_gate") or {}).get("severity")
-        _setup_act = (account_state.get("setup_observation") or {}).get("setup_policy_action")
-        _has_strong_context = (
-            _tb_score >= 70
-            and _smg_sev in ("pass", None)
-            and _setup_act in ("boost", "allow", "neutral")
-            and account_state.get("max_position_size_pct_override") is None
-        )
-        if _has_strong_context:
-            lift_mult = _env_float("BUY_OPPORTUNITY_STRONG_CONVICTION_LIFT_MULT", 1.10)
-            max_lift = _env_float("BUY_OPPORTUNITY_STRONG_CONVICTION_MAX_PCT", 1.50)
-            final_pct = min(adjusted * lift_mult, max_lift)
-            account_state["buy_opportunity_sizing"] = {
-                "enabled": True,
-                "bucket": "strong_buy_candidate_lift",
-                "score": score,
-                "recommendation": rec,
-                "original_pct": round(adjusted, 4),
-                "lift_mult": lift_mult,
-                "final_pct": round(final_pct, 4),
-                "reason": (
-                    f"strong_conviction_lift: score={score} tb={_tb_score:.0f} "
-                    f"session={_smg_sev} setup={_setup_act} "
-                    f"lift={lift_mult}x final={final_pct:.3f}"
-                ),
-            }
-            logger.info(
-                f"BUY strong-conviction lift for {symbol}: "
-                f"score={score} tb={_tb_score:.0f} {adjusted:.3f}% → {final_pct:.3f}%"
-            )
-            return final_pct
-
-    elif rec == "small_buy_candidate" or (score is not None and score >= 7):
-        bucket = "small_buy_candidate"
-        cap = small_cap
-    elif rec == "watch" or (score is not None and score >= 4):
-        bucket = "watch"
-        cap = watch_cap
-    elif rec == "avoid" or score is not None:
-        bucket = "avoid"
-        cap = avoid_cap
-    else:
-        # If the score is missing, do not alter size. Missing score should not
-        # silently penalize a trade while this layer is still new.
-        account_state["buy_opportunity_sizing"] = {
-            "enabled": True,
-            "bucket": bucket,
-            "score": score,
-            "recommendation": rec,
-            "original_pct": adjusted,
-            "final_pct": adjusted,
-            "reason": "BUY opportunity score missing; size unchanged",
-        }
-        return adjusted
-
-    final_pct = min(adjusted, cap) if cap is not None else adjusted
-
-    account_state["buy_opportunity_sizing"] = {
-        "enabled": True,
-        "bucket": bucket,
-        "score": score,
-        "recommendation": rec,
-        "original_pct": round(adjusted, 4),
-        "cap_pct": cap,
-        "final_pct": round(final_pct, 4),
-        "reason": (
-            f"BUY opportunity sizing bucket={bucket}, score={score}, "
-            f"rec={rec}, original={adjusted:.3f}, cap={cap}, final={final_pct:.3f}"
-        ),
-    }
-
-    logger.warning(
-        f"BUY opportunity sizing for {symbol}: "
-        f"bucket={bucket} score={score} rec={rec} "
-        f"original_pct={adjusted:.3f} cap={cap} final_pct={final_pct:.3f}"
+    return sizing_policy.apply_buy_opportunity_sizing(
+        symbol=symbol,
+        action=action,
+        base_position_size_pct=base_position_size_pct,
+        risk_multiplier=risk_multiplier,
+        account_state=account_state,
+        log=logger,
     )
-
-    return final_pct
 
 
 
@@ -701,236 +592,21 @@ def evaluate_buy_opportunity(
     recent_favorable_setup=None,
     adaptive_buy_confirmation=None,
 ):
-    """
-    Observe-only BUY opportunity score.
-
-    This does not approve/reject trades. It converts available evidence into an
-    explainable score so we can later use it for adaptive sizing and watch logic.
-    """
-    score = 0
-    reasons = []
-
-    trend = trend or {}
-    setup_obs = setup_obs or {}
-    bias_entry = bias_entry or {}
-    macro_risk = macro_risk or {}
-    session_momentum = session_momentum or {}
-    momentum = momentum or {}
-    prediction_gate = prediction_gate or {}
-    adaptive_buy_confirmation = adaptive_buy_confirmation or {}
-
-    trend_direction = trend.get("direction")
-    trend_strength = trend.get("strength")
-    consecutive_count = int(trend.get("consecutive_count") or 0)
-
-    if trend_direction == "bullish":
-        score += 2
-        reasons.append("bullish_trend:+2")
-    elif trend_direction == "bearish":
-        score -= 3
-        reasons.append("bearish_trend:-3")
-    else:
-        score -= 1
-        reasons.append("non_bullish_trend:-1")
-
-    if trend_strength == "confirmed":
-        score += 2
-        reasons.append("confirmed_trend:+2")
-    elif trend_strength == "developing":
-        score += 1
-        reasons.append("developing_trend:+1")
-    elif trend_strength == "weak":
-        score -= 1
-        reasons.append("weak_trend:-1")
-
-    if consecutive_count >= 4:
-        score += 2
-        reasons.append("4plus_buy_confirmations:+2")
-    elif consecutive_count >= 2:
-        score += 1
-        reasons.append("2plus_buy_confirmations:+1")
-
-    required_confirmations = int(
-        adaptive_buy_confirmation.get("required_buy_confirmations") or 3
+    return entry_policy.evaluate_buy_opportunity(
+        trend=trend,
+        setup_obs=setup_obs,
+        bias_entry=bias_entry,
+        macro_risk=macro_risk,
+        session_momentum=session_momentum,
+        momentum=momentum,
+        prediction_gate=prediction_gate,
+        recent_favorable_setup=recent_favorable_setup,
+        adaptive_buy_confirmation=adaptive_buy_confirmation,
     )
-    if required_confirmations == 2:
-        score += 1
-        reasons.append("adaptive_fast_lane:+1")
-    elif required_confirmations >= 4:
-        score -= 1
-        reasons.append("adaptive_caution_required4:-1")
-
-    session_label = session_momentum.get("trend_label")
-    session_score = float(session_momentum.get("trend_score") or 0)
-    session_15m = float(session_momentum.get("momentum_15m_pct") or 0)
-    session_30m = float(session_momentum.get("momentum_30m_pct") or 0)
-    session_vwap = float(session_momentum.get("distance_from_vwap_pct") or 0)
-
-    if session_label == "strong_uptrend" or session_score >= 6:
-        score += 3
-        reasons.append("strong_session_momentum:+3")
-    elif session_label == "developing_uptrend" or session_score >= 3:
-        score += 2
-        reasons.append("developing_session_momentum:+2")
-    elif session_label in ("fading", "downtrend") or session_score <= -3:
-        score -= 3
-        reasons.append("negative_session_momentum:-3")
-
-    if session_15m > 0 and session_30m > 0:
-        score += 2
-        reasons.append("15m_30m_positive:+2")
-    elif session_15m < 0 and session_30m < 0:
-        score -= 2
-        reasons.append("15m_30m_negative:-2")
-
-    if session_vwap > 0.25:
-        score += 1
-        reasons.append("above_vwap:+1")
-    elif session_vwap < -0.25:
-        score -= 1
-        reasons.append("below_vwap:-1")
-
-    setup_label = setup_obs.get("setup_label")
-    setup_action = setup_obs.get("setup_policy_action")
-
-    if setup_action == "boost":
-        score += 3
-        reasons.append("setup_boost:+3")
-    elif setup_action in ("allow", "neutral"):
-        score += 1
-        reasons.append("setup_allows:+1")
-    elif setup_action == "block":
-        score -= 4
-        reasons.append("setup_block:-4")
-
-    favorable_setups = {
-        "confirmed_near_vwap_recovery",
-        "near_vwap_weak_strength_followthrough",
-        "oversold_weak_bounce_watch",
-        "balanced_transition_state",
-    }
-
-    risky_setups = {
-        "avoid_stretched_above_vwap_strength",
-        "avoid_far_below_vwap_chase",
-        "avoid_below_vwap_weak_drift",
-        "below_vwap_neutral_drift_risk",
-        "late_strength_near_vwap_risk",
-        "above_vwap_strength_continuation",
-    }
-
-    if setup_label in favorable_setups:
-        score += 2
-        reasons.append(f"favorable_setup:{setup_label}:+2")
-    elif setup_label in risky_setups:
-        score -= 2
-        reasons.append(f"risky_setup:{setup_label}:-2")
-
-    if recent_favorable_setup:
-        score += 1
-        reasons.append("recent_favorable_setup:+1")
-
-    bias = bias_entry.get("bias")
-    risk_level = bias_entry.get("risk_level")
-    entry_quality = bias_entry.get("entry_quality")
-
-    if bias == "buy":
-        score += 2
-        reasons.append("market_bias_buy:+2")
-    elif bias == "avoid":
-        score -= 4
-        reasons.append("market_bias_avoid:-4")
-
-    if risk_level == "low":
-        score += 1
-        reasons.append("low_risk:+1")
-    elif risk_level == "high":
-        score -= 1
-        reasons.append("high_risk:-1")
-    elif risk_level == "very_high":
-        score -= 3
-        reasons.append("very_high_risk:-3")
-
-    if entry_quality in ("excellent", "good_on_pullbacks", "good_if_holds_gap", "good_if_breadth_holds"):
-        score += 2
-        reasons.append(f"good_entry_quality:{entry_quality}:+2")
-    elif entry_quality in ("tactical_only", "conditional", "hedge_only"):
-        score -= 1
-        reasons.append(f"limited_entry_quality:{entry_quality}:-1")
-    elif entry_quality in ("do_not_chase", "avoid_chasing", "poor"):
-        score -= 4
-        reasons.append(f"poor_entry_quality:{entry_quality}:-4")
-
-    macro_regime = macro_risk.get("macro_regime")
-    risk_multiplier = float(macro_risk.get("risk_multiplier") or 1.0)
-
-    if macro_regime in ("risk_on", "bullish"):
-        score += 2
-        reasons.append("macro_risk_on:+2")
-    elif macro_regime in ("caution", "mixed", "neutral"):
-        score += 0
-        reasons.append(f"macro_{macro_regime}:0")
-    elif macro_regime in ("defensive", "capital_preservation"):
-        score -= 3
-        reasons.append(f"macro_{macro_regime}:-3")
-
-    if risk_multiplier < 1.0:
-        score -= 1
-        reasons.append("macro_risk_multiplier_below_1:-1")
-
-    pred_score = prediction_gate.get("prediction_score")
-    pred_decision = prediction_gate.get("prediction_decision")
-    if pred_score is not None:
-        try:
-            pred_score = int(pred_score)
-            if pred_score >= 8:
-                score += 2
-                reasons.append("prediction_score>=8:+2")
-            elif pred_score >= 6:
-                score += 1
-                reasons.append("prediction_score>=6:+1")
-            elif pred_decision == "block":
-                score -= 3
-                reasons.append("prediction_block:-3")
-        except Exception:
-            pass
-
-    raw_momentum_direction = momentum.get("direction")
-    if raw_momentum_direction == "rising":
-        score += 1
-        reasons.append("short_momentum_rising:+1")
-    elif raw_momentum_direction == "falling":
-        score -= 1
-        reasons.append("short_momentum_falling:-1")
-
-    if score >= 10:
-        recommendation = "strong_buy_candidate"
-    elif score >= 7:
-        recommendation = "small_buy_candidate"
-    elif score >= 4:
-        recommendation = "watch"
-    else:
-        recommendation = "avoid"
-
-    return {
-        "buy_opportunity_score": score,
-        "buy_opportunity_recommendation": recommendation,
-        "buy_opportunity_reason": ",".join(reasons),
-    }
 
 
 def _ml_prediction_compare_decision(prediction: dict | None) -> str | None:
-    if not prediction:
-        return None
-    try:
-        score = float(prediction.get("prediction_score"))
-    except Exception:
-        return "unknown"
-    if score >= 65:
-        return "support"
-    if score >= 45:
-        return "watch"
-    return "avoid"
+    return entry_policy.ml_prediction_compare_decision(prediction)
 
 
 def evaluate_signal_quality_gate(
@@ -946,155 +622,23 @@ def evaluate_signal_quality_gate(
     recent_favorable_setup=None,
     ml_prediction=None,
 ):
-    """Evaluate the deterministic signal-quality gate.
-
-    Historical field names use `prediction_*` for this deterministic gate.
-    Actual ML/database predictions are exposed separately under `ml_prediction_*`
-    and are compare-only here.
-    """
-    score = 0
-    reasons = []
-
-    if trend_direction == "bullish":
-        score += 2
-        reasons.append("bullish_trend")
-    elif trend_direction == "neutral":
-        score += 0
-    else:
-        score -= 2
-        reasons.append("non_bullish_trend")
-
-    if trend_strength == "confirmed":
-        score += 2
-        reasons.append("confirmed_trend")
-    elif trend_strength == "developing":
-        score += 1
-        reasons.append("developing_trend")
-    else:
-        score -= 1
-        reasons.append("weak_trend")
-
-    if market_bias == "buy":
-        score += 2
-        reasons.append("market_bias_buy")
-    elif market_bias == "neutral":
-        score += 0
-    elif market_bias == "avoid":
-        score -= 3
-        reasons.append("market_bias_avoid")
-
-    if setup_policy_action == "boost":
-        score += 2
-        reasons.append("setup_policy_boost")
-    elif setup_policy_action == "neutral":
-        score += 0
-    elif setup_policy_action == "block":
-        score -= 4
-        reasons.append("setup_policy_block")
-
-    if setup_label in {
-        "confirmed_near_vwap_recovery",
-        "near_vwap_weak_strength_followthrough",
-        "oversold_weak_bounce_watch",
-    }:
-        score += 1
-        reasons.append("favorable_setup_label")
-    elif setup_label in {
-        "avoid_stretched_above_vwap_strength",
-        "avoid_far_below_vwap_chase",
-        "avoid_below_vwap_weak_drift",
-    }:
-        score -= 3
-        reasons.append("avoid_setup_label")
-
-    if recent_favorable_setup:
-        recent_label = recent_favorable_setup.get("setup_label")
-        recent_action = recent_favorable_setup.get("setup_policy_action")
-
-        if recent_action == "boost":
-            score += 1
-            reasons.append("recent_boost_memory")
-
-        if _is_favorable_setup_label(recent_label):
-            score += 1
-            reasons.append("recent_favorable_setup_memory")
-
-    if momentum_direction == "rising":
-        score += 1
-        reasons.append("rising_momentum")
-    elif momentum_direction == "falling":
-        score -= 1
-        reasons.append("falling_momentum")
-
-    try:
-        momentum_value = float(momentum_pct) if momentum_pct is not None else None
-    except (TypeError, ValueError):
-        momentum_value = None
-
-    if momentum_value is not None:
-        if momentum_value > 0.15:
-            score += 1
-            reasons.append("positive_momentum_pct")
-        elif momentum_value < -0.15:
-            score -= 1
-            reasons.append("negative_momentum_pct")
-
-    if consecutive_buy_count >= 3:
-        score += 2
-        reasons.append("three_plus_consecutive_buys")
-    elif consecutive_buy_count == 2:
-        score += 1
-        reasons.append("two_consecutive_buys")
-    elif consecutive_buy_count <= 0:
-        score -= 1
-        reasons.append("no_consecutive_buy_confirmation")
-
-    if score >= PREDICTION_GATE_THRESHOLDS["pass_min_score"]:
-        decision = "pass"
-    elif score >= PREDICTION_GATE_THRESHOLDS["watch_min_score"]:
-        decision = "watch"
-    else:
-        decision = "block"
-
-    ml_compare_decision = _ml_prediction_compare_decision(ml_prediction)
-    ml_agrees = None
-    if ml_compare_decision:
-        deterministic_positive = decision == "pass"
-        ml_positive = ml_compare_decision == "support"
-        deterministic_negative = decision == "block"
-        ml_negative = ml_compare_decision == "avoid"
-        ml_agrees = (
-            (deterministic_positive and ml_positive)
-            or (deterministic_negative and ml_negative)
-            or (decision == "watch" and ml_compare_decision == "watch")
-        )
-
-    return {
-        "gate_name": "deterministic_signal_quality_gate",
-        "prediction_field_note": (
-            "prediction_score/prediction_decision are legacy deterministic gate fields; "
-            "ml_prediction_* fields come from daily_symbol_predictions cache."
-        ),
-        "prediction_score": score,
-        "prediction_decision": decision,
-        "prediction_reason": ",".join(reasons),
-        "deterministic_signal_quality_score": score,
-        "deterministic_signal_quality_decision": decision,
-        "deterministic_signal_quality_reason": ",".join(reasons),
-        "ml_prediction_score": (ml_prediction or {}).get("prediction_score"),
-        "ml_prediction_confidence": (ml_prediction or {}).get("confidence"),
-        "ml_prediction_sample_size": (ml_prediction or {}).get("sample_size"),
-        "ml_prediction_reason": (ml_prediction or {}).get("reason"),
-        "ml_prediction_provider": (ml_prediction or {}).get("provider"),
-        "ml_prediction_runtime_effect": "observe_only_compare",
-        "ml_prediction_compare_decision": ml_compare_decision,
-        "ml_prediction_agrees_with_gate": ml_agrees,
-    }
+    return entry_policy.evaluate_signal_quality_gate(
+        trend_direction=trend_direction,
+        trend_strength=trend_strength,
+        market_bias=market_bias,
+        setup_label=setup_label,
+        setup_policy_action=setup_policy_action,
+        momentum_direction=momentum_direction,
+        momentum_pct=momentum_pct,
+        consecutive_buy_count=consecutive_buy_count,
+        recent_favorable_setup=recent_favorable_setup,
+        ml_prediction=ml_prediction,
+    )
 
 
 def evaluate_prediction_gate(**kwargs):
     """Backward-compatible alias for the deterministic signal-quality gate."""
-    return evaluate_signal_quality_gate(**kwargs)
+    return entry_policy.evaluate_prediction_gate(**kwargs)
 
 WEBHOOK_SECRET = os.environ.get("WEBHOOK_SECRET", "changeme")
 
@@ -1130,115 +674,36 @@ def _webhook_dedupe_key(symbol, action, price):
 
 
 def _is_duplicate_webhook(symbol, action, price):
-    """Return True if the same symbol/action/rounded-price arrived recently.
-
-    DB-backed so all gunicorn workers share dedupe state.
-    """
+    """Return True if the same symbol/action/rounded-price arrived recently."""
     try:
-        et = pytz.timezone("America/New_York")
-        now_et = datetime.now(et)
-        cutoff = now_et - timedelta(seconds=WEBHOOK_DEDUPE_SECONDS)
         key = _webhook_dedupe_key(symbol, action, price)
-
-        with get_connection(DB_PATH) as con:
-            # Opportunistic cleanup of old dedupe rows.
-            con.execute(
-                "DELETE FROM recent_webhooks WHERE first_seen < ?",
-                (cutoff.isoformat(),),
-            )
-
-            row = con.execute(
-                "SELECT first_seen FROM recent_webhooks WHERE dedupe_key = ?",
-                (key,),
-            ).fetchone()
-
-            if row:
-                return True
-
-            con.execute(
-                "INSERT OR REPLACE INTO recent_webhooks "
-                "(dedupe_key, symbol, action, signal_price, first_seen) "
-                "VALUES (?, ?, ?, ?, ?)",
-                (key, symbol, action, float(price), now_et.isoformat()),
-            )
-        return False
-
+        return cooldown_repo.recent_webhook_seen(
+            key, symbol, action, price, WEBHOOK_DEDUPE_SECONDS
+        )
     except Exception as e:
         logger.error(f"_is_duplicate_webhook failed for {symbol}/{action}: {e}")
         return False
 
 
 def _successful_buys_today(symbol):
-    """Count successful BUY orders for this symbol today.
-
-    Uses trades.db so the count is shared across all gunicorn workers.
-    Counts rows that have an order_id because those represent submitted orders,
-    including pending/filled states.
-    """
     try:
-        today = datetime.now(pytz.timezone("America/New_York")).strftime("%Y-%m-%d")
-        with get_connection(DB_PATH) as con:
-            row = con.execute("""
-                SELECT COUNT(*)
-                FROM trades
-                WHERE symbol = ?
-                  AND LOWER(action) = 'buy'
-                  AND approved = 1
-                  AND order_id IS NOT NULL
-                  AND timestamp LIKE ?
-            """, (symbol, f"{today}%")).fetchone()
-        return int(row[0] or 0)
+        return trades_repo.successful_buys_today(symbol)
     except Exception as e:
         logger.error(f"_successful_buys_today failed for {symbol}: {e}")
         return 0
 
 
 def _filled_buys_today(symbol):
-    """Count filled BUY orders for this symbol today (completed entries).
-
-    Used by the session trade-count gate to cap repeated re-entries.
-    Counts only filled/partially_filled rows so pending orders don't inflate the count.
-    """
     try:
-        today = datetime.now(pytz.timezone("America/New_York")).strftime("%Y-%m-%d")
-        with get_connection(DB_PATH) as con:
-            row = con.execute("""
-                SELECT COUNT(*)
-                FROM trades
-                WHERE symbol = ?
-                  AND LOWER(action) = 'buy'
-                  AND approved = 1
-                  AND order_id IS NOT NULL
-                  AND order_status IN ('filled', 'partially_filled')
-                  AND timestamp LIKE ?
-            """, (symbol, f"{today}%")).fetchone()
-        return int(row[0] or 0)
+        return trades_repo.filled_buys_today(symbol)
     except Exception as e:
         logger.error(f"_filled_buys_today failed for {symbol}: {e}")
         return 0
 
 
 def _has_open_position_db(symbol):
-    """Return True if trades.db shows a net-open filled position for symbol.
-
-    Used as a cheap pre-filter before the full account-state build.
-    Fail-open on any error so a DB hiccup never silently blocks a sell.
-    """
     try:
-        with get_connection(DB_PATH) as con:
-            row = con.execute(
-                """
-                SELECT SUM(CASE WHEN LOWER(action)='buy'  THEN COALESCE(qty, 0)
-                               WHEN LOWER(action)='sell' THEN -COALESCE(qty, 0)
-                               ELSE 0 END) AS net_qty
-                FROM trades
-                WHERE symbol = ?
-                  AND order_id IS NOT NULL
-                  AND order_status IN ('filled', 'partially_filled')
-                """,
-                (symbol,),
-            ).fetchone()
-        return int(row["net_qty"] or 0) > 0
+        return trades_repo.has_open_position(symbol)
     except Exception:
         return True  # fail-open: never silently block a sell on DB error
 
@@ -1324,27 +789,8 @@ def _symbol_override_block(symbol, action):
     return None
 
 
-_load_symbol_overrides()
-
 def _compute_trend(recent_actions: list) -> dict:
-    state = compute_indicator_state(
-        recent_actions,
-        buy_flip_min=2,
-        sell_flip_min=2,
-        confirmed_min=3,
-    )
-    return {
-        "direction": state["direction"],
-        "strength": state["strength"],
-        "consecutive_count": state["consecutive_count"],
-        "last_signal": state["last_signal"],
-        "flip_event": state["flip_event"],
-        "confirmed_entry": state["confirmed_entry"],
-        "confirmed_exit": state["confirmed_exit"],
-        "bullish_candidate": state["bullish_candidate"],
-        "bearish_candidate": state["bearish_candidate"],
-        "previous_opposite_count": state["previous_opposite_count"],
-    }
+    return trend_context_service.compute_trend(recent_actions)
 
 def _build_trend_table():
     """Build trend table for every approved symbol.
@@ -1366,20 +812,7 @@ def _build_trend_table():
             }
 
         approved = sorted(APPROVED_SYMBOLS)
-        placeholders = ",".join("?" for _ in approved)
-
-        with get_connection(DB_PATH) as con:
-            rows = con.execute(f"""
-                SELECT symbol, action, timestamp FROM (
-                    SELECT symbol, action, timestamp,
-                           ROW_NUMBER() OVER (PARTITION BY symbol ORDER BY timestamp DESC) AS rn
-                    FROM trades
-                    WHERE symbol IS NOT NULL
-                      AND action IS NOT NULL
-                      AND symbol IN ({placeholders})
-                ) WHERE rn <= 10
-                ORDER BY symbol, timestamp DESC
-            """, approved).fetchall()
+        rows = trades_repo.recent_signal_history(approved)
 
         history = {}
         last_time = {}
@@ -1403,19 +836,10 @@ def _build_trend_table():
     except Exception as e:
         logger.error(f"_build_trend_table failed: {e}")
 
-_build_trend_table()
-
 def _hydrate_cooldowns():
-    """Load active cooldowns from the cooldowns table into _last_order.
-
-    Filters out entries older than the 15-min window (those are already expired
-    and irrelevant). On startup this restores cooldown state across restarts and
-    — once Stage B writes are in place — across gunicorn workers.
-    """
     try:
         current_et = now_et()
-        with get_connection(DB_PATH) as con:
-            rows = con.execute("SELECT symbol, action, last_order_time FROM cooldowns").fetchall()
+        rows = cooldown_repo.cooldown_rows()
         loaded = 0
         for symbol, action, ts_str in rows:
             try:
@@ -1431,18 +855,10 @@ def _hydrate_cooldowns():
     except Exception as e:
         logger.error(f"_hydrate_cooldowns failed: {e}")
 
-_hydrate_cooldowns()
-
 def _hydrate_recent_sells():
-    """Load recent-sell state from the recent_sells table into _last_sell.
-
-    Filters to entries within the 30-min churn window. Restores churn-prevention
-    state across restarts and (Stage B) across workers.
-    """
     try:
         current_et = now_et()
-        with get_connection(DB_PATH) as con:
-            rows = con.execute("SELECT symbol, last_sell_time, last_sell_price FROM recent_sells").fetchall()
+        rows = cooldown_repo.recent_sell_rows()
         loaded = 0
         for symbol, ts_str, price in rows:
             try:
@@ -1458,19 +874,10 @@ def _hydrate_recent_sells():
     except Exception as e:
         logger.error(f"_hydrate_recent_sells failed: {e}")
 
-_hydrate_recent_sells()
-
 
 def _read_cooldown(symbol, action):
-    """Return last_order_time as a tz-aware datetime for (symbol, action), or None.
-    DB-backed read so all gunicorn workers see the same cooldown state."""
     try:
-        et = pytz.timezone("America/New_York")
-        with get_connection(DB_PATH) as con:
-            row = con.execute(
-                "SELECT last_order_time FROM cooldowns WHERE symbol = ? AND action = ?",
-                (symbol, action),
-            ).fetchone()
+        row = cooldown_repo.read_cooldown(symbol, action)
         if not row:
             return None
         ts = datetime.fromisoformat(row[0])
@@ -1483,15 +890,8 @@ def _read_cooldown(symbol, action):
 
 
 def _read_recent_sell(symbol):
-    """Return (timestamp, price) for the last sell on `symbol`, or None.
-    DB-backed read so all workers see the same churn-prevention state."""
     try:
-        et = pytz.timezone("America/New_York")
-        with get_connection(DB_PATH) as con:
-            row = con.execute(
-                "SELECT last_sell_time, last_sell_price FROM recent_sells WHERE symbol = ?",
-                (symbol,),
-            ).fetchone()
+        row = cooldown_repo.read_recent_sell(symbol)
         if not row:
             return None
         ts = datetime.fromisoformat(row[0])
@@ -1504,27 +904,15 @@ def _read_recent_sell(symbol):
 
 
 def _write_cooldown(symbol, action, ts):
-    """Persist a cooldown entry. INSERT OR REPLACE so the same (symbol, action)
-    pair is overwritten on subsequent orders."""
     try:
-        with get_connection(DB_PATH) as con:
-            con.execute(
-                "INSERT OR REPLACE INTO cooldowns (symbol, action, last_order_time) VALUES (?, ?, ?)",
-                (symbol, action, ts.isoformat()),
-            )
+        cooldown_repo.write_cooldown(symbol, action, ts.isoformat())
     except Exception as e:
         logger.error(f"_write_cooldown failed for {symbol}/{action}: {e}")
 
 
 def _write_recent_sell(symbol, ts, price):
-    """Persist a recent-sell entry. INSERT OR REPLACE so the symbol's prior
-    sell (if any) is overwritten by the new one."""
     try:
-        with get_connection(DB_PATH) as con:
-            con.execute(
-                "INSERT OR REPLACE INTO recent_sells (symbol, last_sell_time, last_sell_price) VALUES (?, ?, ?)",
-                (symbol, ts.isoformat(), price),
-            )
+        cooldown_repo.write_recent_sell(symbol, ts.isoformat(), price)
     except Exception as e:
         logger.error(f"_write_recent_sell failed for {symbol}: {e}")
 
@@ -1540,17 +928,7 @@ def _refresh_signal_history(symbol):
     on output quality, not on input validity.
     """
     try:
-        with get_connection(DB_PATH) as con:
-            rows = con.execute(
-                "SELECT action FROM trades "
-                "WHERE symbol = ? AND action IS NOT NULL "
-                "AND (approved = 1 "
-                "OR rejection_reason LIKE 'confidence_gate:%' "
-                "OR rejection_reason LIKE 'trend_gate:%' "
-                "OR rejection_reason LIKE 'trend_confirmation:%') "
-                "ORDER BY timestamp DESC LIMIT 10",
-                (symbol,),
-            ).fetchall()
+        rows = trades_repo.recent_actions_for_trend(symbol)
         _signal_history[symbol] = [r[0] for r in rows]
     except Exception as e:
         logger.warning(f"_refresh_signal_history failed for {symbol}: {e}")
@@ -1602,82 +980,15 @@ def _load_market_context():
     except Exception as e:
         logger.error(f"_load_market_context failed: {e}")
 
-_load_market_context()
-
 def _make_dedupe_key(data):
-    """Create a stable dedupe key for repeated webhook deliveries.
-
-    Prefer explicit alert IDs when TradingView provides them; otherwise fall back
-    to a deterministic hash of the normalized signal fields.
-    """
-    import hashlib
-
-    explicit = (
-        data.get("alert_id")
-        or data.get("id")
-        or data.get("uuid")
-        or data.get("webhook_id")
-    )
-    if explicit:
-        return f"explicit:{str(explicit).strip()}"
-
-    normalized = {
-        "symbol": str(data.get("symbol", "")).upper(),
-        "action": str(data.get("action", "")).lower(),
-        "price": str(data.get("price", "")),
-        "source": str(data.get("source", "")),
-        "timestamp": str(
-            data.get("timestamp")
-            or data.get("time")
-            or data.get("alert_time")
-            or data.get("alert_timestamp")
-            or ""
-        ),
-    }
-
-    raw = json.dumps(normalized, sort_keys=True, separators=(",", ":"))
-    return "hash:" + hashlib.sha256(raw.encode("utf-8")).hexdigest()
+    return dedupe_service.make_dedupe_key(data)
 
 
 def _record_webhook_event(dedupe_key, data):
-    """Persist webhook receipt.
-
-    Returns True if this is a new event, False if it is a duplicate inside the
-    active dedupe table.
-    """
-    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     try:
-        with get_connection(DB_PATH) as con:
-            con.execute(
-                """
-                DELETE FROM webhook_events
-                WHERE received_at < datetime('now', ?)
-                """,
-                (f"-{WEBHOOK_DEDUPE_SECONDS} seconds",),
-            )
-            con.execute(
-                """
-                INSERT INTO webhook_events (
-                    dedupe_key, received_at, symbol, action, signal_price, source,
-                    payload_json, status
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, 'received')
-                """,
-                (
-                    dedupe_key,
-                    timestamp,
-                    str(data.get("symbol", "")).upper(),
-                    str(data.get("action", "")).lower(),
-                    data.get("price"),
-                    data.get("source"),
-                    json.dumps(data, sort_keys=True),
-                ),
-            )
-        return True
-    except sqlite3.IntegrityError:
-        return False
+        return dedupe_service.record_webhook_event(dedupe_key, data, WEBHOOK_DEDUPE_SECONDS)
     except Exception as e:
         logger.error(f"Webhook dedupe persistence failed: {e}")
-        # Fail open so a DB hiccup does not drop a legitimate sell/risk-reducing signal.
         return True
 
 
@@ -1689,49 +1000,13 @@ def _mark_webhook_event_status(
     failure_reason=None,
 ):
     try:
-        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-
-        time_column = None
-        if status == "queued":
-            time_column = "queued_at"
-        elif status in ("processing", "started"):
-            time_column = "started_at"
-        elif status in (
-            "processed",
-            "rejected",
-            "submitted",
-            "submit_failed",
-            "duplicate_ignored",
-            "error",
-        ):
-            time_column = "finished_at"
-
-        assignments = ["status = ?"]
-        params = [status]
-
-        if time_column:
-            assignments.append(f"{time_column} = ?")
-            params.append(now)
-
-        if order_id is not None:
-            assignments.append("order_id = ?")
-            params.append(order_id)
-
-        if client_order_id is not None:
-            assignments.append("client_order_id = ?")
-            params.append(client_order_id)
-
-        if failure_reason is not None:
-            assignments.append("failure_reason = ?")
-            params.append(str(failure_reason)[:500])
-
-        params.append(dedupe_key)
-
-        with get_connection(DB_PATH) as con:
-            con.execute(
-                f"UPDATE webhook_events SET {', '.join(assignments)} WHERE dedupe_key = ?",
-                params,
-            )
+        dedupe_service.mark_webhook_event_status(
+            dedupe_key,
+            status,
+            order_id=order_id,
+            client_order_id=client_order_id,
+            failure_reason=failure_reason,
+        )
     except Exception as e:
         logger.warning(f"Failed to update webhook event status for {dedupe_key}: {e}")
 
@@ -1753,474 +1028,55 @@ def validate_secret(req):
         logger.warning("Secret accepted from query parameter; prefer X-Webhook-Secret or Authorization header")
 
 def log_trade(signal, decision, order, account_state=None):
-    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-
-    with open("signals.log", "a") as f:
-        line = (
-            f"{timestamp} | SIGNAL: {json.dumps(signal)} | "
-            f"DECISION: {json.dumps(decision)} | ORDER: {json.dumps(order)}"
-        )
-        f.write(line + "\n")
-
-    try:
-        approved = decision.get("approved", False)
-        order = order or {}
-        ctx = _build_decision_context(
-            signal.get("symbol"),
-            signal.get("action"),
-            account_state,
-        )
-        setup_obs = (account_state or {}).get("setup_observation") or {}
-        prediction_gate = (account_state or {}).get("prediction_gate") or {}
-        strategy_observation = (account_state or {}).get("strategy_observation") or {}
-        trader_brain = strategy_observation.get("trader_brain") or {}
-
-        columns = [
-            "timestamp",
-            "symbol",
-            "action",
-            "signal_price",
-            "approved",
-            "rejection_reason",
-            "confidence",
-            "position_size_pct",
-            "stop_loss_pct",
-            "take_profit_pct",
-            "order_id",
-            "order_status",
-            "qty",
-            "fill_price",
-            "macro_regime",
-            "risk_multiplier",
-            "market_bias",
-            "market_bias_effective",
-            "market_bias_override_reason",
-            "fundamental_score",
-            "risk_level",
-            "entry_quality",
-            "trend_direction",
-            "trend_strength",
-            "momentum_direction",
-            "momentum_pct",
-            "session_trend_label",
-            "session_trend_score",
-            "session_return_pct",
-            "session_momentum_5m_pct",
-            "session_momentum_15m_pct",
-            "session_momentum_30m_pct",
-            "session_distance_from_vwap_pct",
-            "session_momentum_reason",
-            "prediction_score",
-            "prediction_decision",
-            "prediction_reason",
-            "correlation_cluster",
-            "cluster_exposure_pct",
-            "setup_label",
-            "setup_policy_action",
-            "setup_policy_reason",
-            "setup_confidence_adjustment",
-            "setup_size_multiplier",
-            "setup_unknown_reason",
-            "ml_prediction_score",
-            "ml_prediction_bucket",
-            "buy_opportunity_score",
-            "buy_opportunity_recommendation",
-            "buy_opportunity_reason",
-            "trader_brain_score",
-            "trader_brain_setup_type",
-            "trader_brain_approved",
-            "trader_brain_reason",
-            "trader_brain_positive_factors",
-            "trader_brain_risk_factors",
-            "session_momentum_severity",
-            "effective_size_cap_pct",
-            "dominant_limiter",
-        ]
-
-        values = [
-            timestamp,
-            signal.get("symbol"),
-            signal.get("action"),
-            signal.get("price"),
-            1 if approved else 0,
-            None if approved else decision.get("reason"),
-            decision.get("confidence"),
-            decision.get("position_size_pct"),
-            decision.get("stop_loss_pct"),
-            decision.get("take_profit_pct"),
-            order.get("order_id"),
-            order.get("status"),
-            order.get("qty"),
-            order.get("fill_price"),
-            ctx["macro_regime"],
-            ctx["risk_multiplier"],
-            ctx["market_bias"],
-            ctx["market_bias_effective"],
-            ctx["market_bias_override_reason"],
-            ctx["fundamental_score"],
-            ctx["risk_level"],
-            ctx["entry_quality"],
-            ctx["trend_direction"],
-            ctx["trend_strength"],
-            ctx["momentum_direction"],
-            ctx["momentum_pct"],
-            ctx["session_trend_label"],
-            ctx["session_trend_score"],
-            ctx["session_return_pct"],
-            ctx["session_momentum_5m_pct"],
-            ctx["session_momentum_15m_pct"],
-            ctx["session_momentum_30m_pct"],
-            ctx["session_distance_from_vwap_pct"],
-            ctx["session_momentum_reason"],
-            prediction_gate.get("prediction_score"),
-            prediction_gate.get("prediction_decision"),
-            prediction_gate.get("prediction_reason"),
-            ctx["correlation_cluster"],
-            ctx["cluster_exposure_pct"],
-            setup_obs.get("setup_label"),
-            setup_obs.get("setup_policy_action"),
-            setup_obs.get("setup_policy_reason"),
-            setup_obs.get("setup_confidence_adjustment"),
-            setup_obs.get("setup_size_multiplier"),
-            setup_obs.get("setup_unknown_reason"),
-            prediction_gate.get("ml_prediction_score"),
-            _ml_prediction_bucket(prediction_gate.get("ml_prediction_score")),
-            (account_state or {}).get("buy_opportunity", {}).get("buy_opportunity_score"),
-            (account_state or {}).get("buy_opportunity", {}).get("buy_opportunity_recommendation"),
-            (account_state or {}).get("buy_opportunity", {}).get("buy_opportunity_reason"),
-            trader_brain.get("score"),
-            trader_brain.get("setup_type"),
-            1 if trader_brain.get("approved_by_scorer") is True else 0 if trader_brain.get("approved_by_scorer") is False else None,
-            trader_brain.get("reason"),
-            json.dumps(trader_brain.get("positive_factors") or [], sort_keys=True),
-            json.dumps(trader_brain.get("risk_factors") or [], sort_keys=True),
-            (account_state or {}).get("conviction_stack", {}).get("session_severity"),
-            (account_state or {}).get("conviction_stack", {}).get("effective_cap_pct"),
-            (account_state or {}).get("dominant_limiter"),
-        ]
-
-        placeholders = ", ".join(["?"] * len(values))
-        col_sql = ", ".join(columns)
-
-        with get_connection(DB_PATH) as con:
-            cur = con.execute(
-                f"INSERT INTO trades ({col_sql}) VALUES ({placeholders})",
-                values,
-            )
-            trade_id = cur.lastrowid
-
-        try:
-            record_decision_snapshot(
-                trade_id=trade_id,
-                timestamp=timestamp,
-                source="app.log_trade",
-                symbol=signal.get("symbol"),
-                action=signal.get("action"),
-                signal_price=signal.get("price"),
-                decision=decision,
-                order=order,
-                context=ctx,
-                account_state=account_state,
-                raw_signal=signal,
-                rejection_reason=None if approved else decision.get("reason"),
-            )
-        except Exception as snapshot_error:
-            logger.warning(f"decision snapshot write failed for {signal.get('symbol')}: {snapshot_error}")
-
-    except Exception as e:
-        logger.error(f"DB write failed for {signal.get('symbol')}: {e}")
+    return trade_audit_service.log_trade(
+        signal,
+        decision,
+        order,
+        account_state=account_state,
+        market_bias=_market_bias,
+        trend_table=_trend_table,
+        ml_prediction_bucket=_ml_prediction_bucket,
+        log=logger,
+    )
 
 
 def _build_decision_context(symbol, action, account_state=None):
-    """Snapshot the decision context for a symbol/action at call time.
-
-    Returns attribution fields. Fields whose source hasn't been computed yet
-    at call time return None — that's accurate for early pre-check rejections.
-    """
-    ctx = {
-        "macro_regime": None,
-        "risk_multiplier": None,
-        "market_bias": None,
-        "market_bias_effective": None,
-        "market_bias_override_reason": None,
-        "fundamental_score": None,
-        "risk_level": None,
-        "entry_quality": None,
-        "trend_direction": None,
-        "trend_strength": None,
-        "momentum_direction": None,
-        "momentum_pct": None,
-        "momentum_acceleration_pct": None,
-        "momentum_state": None,
-        "volume_surge_ratio": None,
-        "volume_state": None,
-        "extension_from_recent_base_pct": None,
-        "rolling_special_labels": None,
-        "prior_session_return_pct": None,
-        "prior_session_participated": None,
-        "tape_label_at_signal": None,
-        "tape_bar_age_seconds": None,
-        "session_trend_label": None,
-        "session_trend_score": None,
-        "session_return_pct": None,
-        "session_momentum_5m_pct": None,
-        "session_momentum_15m_pct": None,
-        "session_momentum_30m_pct": None,
-        "session_distance_from_vwap_pct": None,
-        "session_momentum_reason": None,
-        "correlation_cluster": None,
-        "cluster_exposure_pct": None,
-    }
-
-    try:
-        bias_entry = _market_bias.get(symbol) or {}
-        ctx["market_bias"] = bias_entry.get("bias")
-        ctx["fundamental_score"] = bias_entry.get("fundamental_score")
-        ctx["risk_level"] = bias_entry.get("risk_level")
-        ctx["entry_quality"] = bias_entry.get("entry_quality")
-
-        trend = _trend_table.get(symbol) or {}
-        ctx["trend_direction"] = trend.get("direction")
-        ctx["trend_strength"] = trend.get("strength")
-
-        if account_state:
-            macro = account_state.get("macro_risk") or {}
-            ctx["macro_regime"] = macro.get("macro_regime")
-            ctx["risk_multiplier"] = macro.get("risk_multiplier")
-            ctx["market_bias_effective"] = account_state.get("market_bias_effective")
-            ctx["market_bias_override_reason"] = account_state.get("market_bias_override_reason")
-
-            momentum = account_state.get("momentum") or {}
-            ctx["momentum_direction"] = momentum.get("direction")
-            ctx["momentum_pct"] = momentum.get("momentum_pct")
-            ctx["momentum_acceleration_pct"] = momentum.get("momentum_acceleration_pct")
-            ctx["momentum_state"] = momentum.get("momentum_state")
-            ctx["volume_surge_ratio"] = momentum.get("volume_surge_ratio")
-            ctx["volume_state"] = momentum.get("volume_state")
-            ctx["volume_note"] = momentum.get("volume_note")
-
-            rolling = account_state.get("rolling_momentum") or {}
-            ctx["extension_from_recent_base_pct"] = rolling.get("extension_from_recent_base_pct")
-            ctx["rolling_special_labels"] = json.dumps(
-                rolling.get("special_labels") or [],
-                sort_keys=True,
-            )
-
-            prior_session = account_state.get("prior_session") or {}
-            ctx["prior_session_return_pct"] = prior_session.get("session_return_pct")
-            if prior_session.get("participated") is not None:
-                ctx["prior_session_participated"] = 1 if prior_session.get("participated") else 0
-
-            tape = account_state.get("tape") or {}
-            ctx["tape_label_at_signal"] = tape.get("label")
-            ctx["tape_bar_age_seconds"] = tape.get("tape_bar_age_seconds")
-
-            session_momentum = account_state.get("session_momentum") or {}
-            ctx["session_trend_label"] = session_momentum.get("trend_label")
-            ctx["session_trend_score"] = session_momentum.get("trend_score")
-            ctx["session_return_pct"] = session_momentum.get("session_return_pct")
-            ctx["session_momentum_5m_pct"] = session_momentum.get("momentum_5m_pct")
-            ctx["session_momentum_15m_pct"] = session_momentum.get("momentum_15m_pct")
-            ctx["session_momentum_30m_pct"] = session_momentum.get("momentum_30m_pct")
-            ctx["session_distance_from_vwap_pct"] = session_momentum.get("distance_from_vwap_pct")
-            ctx["session_momentum_reason"] = session_momentum.get("reason")
-
-            corr = account_state.get("correlation_exposure") or []
-            if corr:
-                # If symbol is in multiple clusters, attribute to the highest-exposure one.
-                primary = max(corr, key=lambda c: c.get("exposure_pct", 0) or 0)
-                ctx["correlation_cluster"] = primary.get("cluster")
-                ctx["cluster_exposure_pct"] = primary.get("exposure_pct")
-
-    except Exception as e:
-        logger.warning(f"_build_decision_context partial failure for {symbol}: {e}")
-
-    return ctx
-
-def log_rejection(symbol, action, category, reason, price=None, account_state=None):
-    """Persist a pre-Claude rejection to trades.db so reports can count it."""
-    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    full_reason = format_rejection_reason(category, reason)
-    ctx = _build_decision_context(symbol, action, account_state)
-    setup_obs = (account_state or {}).get("setup_observation") or {}
-    prediction_gate = (account_state or {}).get("prediction_gate") or {}
-    strategy_observation = (account_state or {}).get("strategy_observation") or {}
-    trader_brain = strategy_observation.get("trader_brain") or {}
-
-    columns = [
-        "timestamp",
-        "symbol",
-        "action",
-        "signal_price",
-        "approved",
-        "rejection_reason",
-        "macro_regime",
-        "risk_multiplier",
-        "market_bias",
-        "market_bias_effective",
-        "market_bias_override_reason",
-        "fundamental_score",
-        "risk_level",
-        "entry_quality",
-        "trend_direction",
-        "trend_strength",
-        "momentum_direction",
-        "momentum_pct",
-        "session_trend_label",
-        "session_trend_score",
-        "session_return_pct",
-        "session_momentum_5m_pct",
-        "session_momentum_15m_pct",
-        "session_momentum_30m_pct",
-        "session_distance_from_vwap_pct",
-        "session_momentum_reason",
-        "prediction_score",
-        "prediction_decision",
-        "prediction_reason",
-        "correlation_cluster",
-        "cluster_exposure_pct",
-        "setup_label",
-        "setup_policy_action",
-        "setup_policy_reason",
-        "setup_confidence_adjustment",
-        "setup_size_multiplier",
-        "setup_unknown_reason",
-        "ml_prediction_score",
-        "ml_prediction_bucket",
-        "trader_brain_score",
-        "trader_brain_setup_type",
-        "trader_brain_approved",
-        "trader_brain_reason",
-        "trader_brain_positive_factors",
-        "trader_brain_risk_factors",
-        "session_momentum_severity",
-        "effective_size_cap_pct",
-        "dominant_limiter",
-    ]
-
-    values = [
-        timestamp,
+    return trade_audit_service.build_decision_context(
         symbol,
         action,
-        price,
-        0,
-        full_reason,
-        ctx["macro_regime"],
-        ctx["risk_multiplier"],
-        ctx["market_bias"],
-        ctx["market_bias_effective"],
-        ctx["market_bias_override_reason"],
-        ctx["fundamental_score"],
-        ctx["risk_level"],
-        ctx["entry_quality"],
-        ctx["trend_direction"],
-        ctx["trend_strength"],
-        ctx["momentum_direction"],
-        ctx["momentum_pct"],
-        ctx["session_trend_label"],
-        ctx["session_trend_score"],
-        ctx["session_return_pct"],
-        ctx["session_momentum_5m_pct"],
-        ctx["session_momentum_15m_pct"],
-        ctx["session_momentum_30m_pct"],
-        ctx["session_distance_from_vwap_pct"],
-        ctx["session_momentum_reason"],
-        prediction_gate.get("prediction_score"),
-        prediction_gate.get("prediction_decision"),
-        prediction_gate.get("prediction_reason"),
-        ctx["correlation_cluster"],
-        ctx["cluster_exposure_pct"],
-        setup_obs.get("setup_label"),
-        setup_obs.get("setup_policy_action"),
-        setup_obs.get("setup_policy_reason"),
-        setup_obs.get("setup_confidence_adjustment"),
-        setup_obs.get("setup_size_multiplier"),
-        setup_obs.get("setup_unknown_reason"),
-        prediction_gate.get("ml_prediction_score"),
-        _ml_prediction_bucket(prediction_gate.get("ml_prediction_score")),
-        trader_brain.get("score"),
-        trader_brain.get("setup_type"),
-        1 if trader_brain.get("approved_by_scorer") is True else 0 if trader_brain.get("approved_by_scorer") is False else None,
-        trader_brain.get("reason"),
-        json.dumps(trader_brain.get("positive_factors") or [], sort_keys=True),
-        json.dumps(trader_brain.get("risk_factors") or [], sort_keys=True),
-        (account_state or {}).get("conviction_stack", {}).get("session_severity"),
-        (account_state or {}).get("conviction_stack", {}).get("effective_cap_pct"),
-        (account_state or {}).get("dominant_limiter"),
-    ]
+        account_state,
+        market_bias=_market_bias,
+        trend_table=_trend_table,
+        log=logger,
+    )
 
-    placeholders = ", ".join(["?"] * len(values))
-    col_sql = ", ".join(columns)
-
-    try:
-        with get_connection(DB_PATH) as con:
-            cur = con.execute(
-                f"INSERT INTO trades ({col_sql}) VALUES ({placeholders})",
-                values,
-            )
-            trade_id = cur.lastrowid
-        try:
-            record_decision_snapshot(
-                trade_id=trade_id,
-                timestamp=timestamp,
-                source="app.log_rejection",
-                symbol=symbol,
-                action=action,
-                signal_price=price,
-                decision={"approved": False, "reason": full_reason},
-                order={},
-                context=ctx,
-                account_state=account_state,
-                raw_signal={"symbol": symbol, "action": action, "price": price},
-                rejection_reason=full_reason,
-            )
-        except Exception as snapshot_error:
-            logger.warning(f"decision snapshot write failed for {symbol}: {snapshot_error}")
-    except Exception as e:
-        logger.error(f"log_rejection DB write failed for {symbol}: {e}")
+def log_rejection(symbol, action, category, reason, price=None, account_state=None):
+    return trade_audit_service.log_rejection(
+        symbol,
+        action,
+        category,
+        reason,
+        price=price,
+        account_state=account_state,
+        market_bias=_market_bias,
+        trend_table=_trend_table,
+        ml_prediction_bucket=_ml_prediction_bucket,
+        log=logger,
+    )
 
 def _open_entry_context(symbol):
-    """Return the oldest currently-open buy lot context for a symbol.
-
-    Uses FIFO-style netting from trades.db to identify open buy lots, then returns
-    the oldest remaining open lot's decision context. Read-only helper for
-    /positions diagnostics.
-    """
+    """Return the oldest currently-open buy lot context for a symbol."""
     try:
-        with get_connection(DB_PATH) as con:
-            rows = con.execute("""
-                SELECT id, timestamp, symbol, action, qty, fill_price, signal_price,
-                       order_status, order_id,
-                       market_bias, risk_level, entry_quality,
-                       trend_direction, trend_strength,
-                       momentum_direction, momentum_pct,
-                       macro_regime, risk_multiplier,
-                       correlation_cluster, cluster_exposure_pct
-                FROM trades
-                WHERE symbol = ?
-                  AND order_id IS NOT NULL
-                  AND order_status IN ('filled', 'partially_filled')
-                  AND LOWER(action) IN ('buy', 'sell')
-                  AND qty IS NOT NULL
-                ORDER BY timestamp ASC, id ASC
-            """, (symbol,)).fetchall()
-
+        rows = trades_repo.open_entry_rows(symbol)
         lots = []
-
         for r in rows:
             qty = float(r["qty"] or 0)
             if qty <= 0:
                 continue
-
             action = (r["action"] or "").lower()
-
             if action == "buy":
-                lots.append({
-                    "remaining_qty": qty,
-                    "row": r,
-                })
+                lots.append({"remaining_qty": qty, "row": r})
                 continue
-
             if action == "sell":
                 remaining = qty
                 while remaining > 0 and lots:
@@ -2237,7 +1093,6 @@ def _open_entry_context(symbol):
 
         lot = open_lots[0]
         r = lot["row"]
-
         entry_ts = r["timestamp"]
         holding_minutes = None
         try:
@@ -2266,208 +1121,37 @@ def _open_entry_context(symbol):
             "entry_correlation_cluster": r["correlation_cluster"],
             "entry_cluster_exposure_pct": r["cluster_exposure_pct"],
         }
-
     except Exception as e:
         logger.error(f"_open_entry_context failed for {symbol}: {e}")
         return None
 
 
 def _required_buy_confirmations(symbol, account_state=None):
-    """Return observe-only adaptive BUY confirmation requirement.
-
-    This does not change trading behavior yet. It calculates what the future
-    adaptive trend-confirmation threshold would be based on macro, bias, risk,
-    entry quality, and market alignment.
-    """
-    account_state = account_state or {}
-
-    try:
-        symbol = symbol.upper()
-        _load_market_context()
-
-        bias_entry = _market_bias.get(symbol) or {}
-        market_bias = bias_entry.get("bias")
-        risk_level = bias_entry.get("risk_level")
-        entry_quality = bias_entry.get("entry_quality")
-
-        macro_risk = account_state.get("macro_risk") or get_macro_risk(Path(__file__).parent)
-        macro_regime = macro_risk.get("macro_regime")
-
-        alignment = account_state.get("market_alignment") or _symbol_market_alignment(symbol)
-        aligned_for_buy = alignment.get("aligned_for_buy")
-
-        required = 3
-        reasons = ["base requirement is 3 BUY confirmations"]
-
-        # Best-case fast lane: allow 2 BUY confirmations for clean, high-quality setups.
-        #
-        # This is intentionally narrow:
-        # - Never active in defensive/capital-preservation regimes.
-        # - Requires same-day market_bias=buy.
-        # - Requires low/medium symbol risk.
-        # - Requires clean entry quality.
-        # - Does not allow obvious benchmark/symbol avoid or bearish alignment.
-        setup_obs = account_state.get("setup_observation") or {}
-        setup_policy_action = setup_obs.get("setup_policy_action")
-        alignment_reason = str(alignment.get("reason", "")).lower()
-
-        alignment_hard_negative = (
-            "benchmark avoid" in alignment_reason
-            or "benchmark bearish" in alignment_reason
-            or "symbol avoid" in alignment_reason
-        )
-
-        # If setup observation is missing, do not automatically disqualify an otherwise
-        # clean pre-market fast-lane candidate. Missing setup data is treated as neutral,
-        # not as a block. Explicit setup_policy_action="block" still prevents fast lane.
-        setup_allows_fast_lane = setup_policy_action in (None, "", "boost", "allow", "neutral", "not_applicable")
-
-        fast_lane_eligible = (
-            macro_regime in ("risk_on", "bullish", "normal", "caution", "mixed", "neutral")
-            and market_bias == "buy"
-            and entry_quality in ("excellent", "good_on_pullbacks", "good_if_holds_gap", "good_if_breadth_holds")
-            and risk_level in ("low", "medium")
-            and setup_allows_fast_lane
-            and not alignment_hard_negative
-        )
-
-        if fast_lane_eligible:
-            required = 2
-            reasons.append(
-                "reduced to 2: clean buy-bias setup with low/medium risk and no hard benchmark conflict"
-            )
-
-        # Risk tightening.
-        if risk_level == "very_high":
-            required = max(required, 4)
-            reasons.append("raised to 4: very_high risk")
-
-        if entry_quality in ("tactical_only", "conditional"):
-            required = max(required, 3)
-            reasons.append(f"minimum 3: entry_quality={entry_quality}")
-
-        if entry_quality in ("do_not_chase", "avoid_chasing", "poor"):
-            required = max(required, 4)
-            reasons.append(f"raised to 4: entry_quality={entry_quality}")
-
-        if macro_regime in ("defensive", "capital_preservation"):
-            required = max(required, 4)
-            reasons.append(f"raised to 4: macro_regime={macro_regime}")
-
-        if aligned_for_buy is False:
-            if fast_lane_eligible:
-                reasons.append("kept at 2: fast-lane setup allowed despite soft alignment caution")
-            elif (
-                risk_level in ("high", "very_high")
-                or entry_quality in ("tactical_only", "conditional", "do_not_chase", "avoid_chasing", "poor")
-                or macro_regime in ("defensive", "capital_preservation")
-            ):
-                required = max(required, 4)
-                reasons.append("raised to 4: market alignment caution plus elevated symbol/setup risk")
-            else:
-                required = max(required, 3)
-                reasons.append("kept at 3: market alignment caution without elevated symbol/setup risk")
-
-        return {
-            "required_buy_confirmations": required,
-            "current_rule_required_buy_confirmations": 3,
-            "macro_regime": macro_regime,
-            "market_bias": market_bias,
-            "risk_level": risk_level,
-            "entry_quality": entry_quality,
-            "aligned_for_buy": aligned_for_buy,
-            "observe_only": True,
-            "reason": "; ".join(reasons),
-        }
-
-    except Exception as e:
-        logger.error(f"_required_buy_confirmations failed for {symbol}: {e}")
-        return {
-            "required_buy_confirmations": 3,
-            "current_rule_required_buy_confirmations": 3,
-            "observe_only": True,
-            "reason": f"adaptive confirmation error: {e}",
-        }
+    return entry_policy.required_buy_confirmations(
+        symbol,
+        account_state,
+        load_market_context=_load_market_context,
+        market_bias=_market_bias,
+        get_macro_risk=get_macro_risk,
+        base_dir=Path(__file__).parent,
+        symbol_market_alignment=_symbol_market_alignment,
+        log=logger,
+    )
 
 def _required_sell_confirmations(symbol, account_state=None):
-    return {
-        "required_sell_confirmations": 2,
-        "current_rule_required_sell_confirmations": 2,
-        "observe_only": False,
-        "reason": "base requirement is 2 SELL confirmations",
-    }
+    return entry_policy.required_sell_confirmations(symbol, account_state)
 
 def _symbol_market_alignment(symbol):
-    """Return observe-only market/benchmark alignment for a symbol.
-
-    This does not block trades. It gives /debug/symbol visibility into whether
-    a symbol's BUY signals are aligned with its benchmark/index context.
-    """
     try:
-        symbol = symbol.upper()
-        mapping = SYMBOL_MARKET_ALIGNMENT.get(symbol, {
-            "cluster": "unknown",
-            "benchmark": "SPY",
-        })
-
-        cluster = mapping.get("cluster", "unknown")
-        benchmark = mapping.get("benchmark", "SPY")
-
-        # Ensure market bias and trend state are fresh enough for diagnostics.
-        _load_market_context()
-        if benchmark not in _trend_table:
-            _refresh_signal_history(benchmark)
-            _trend_table[benchmark] = _compute_trend(_signal_history.get(benchmark, []))
-
-        symbol_bias_entry = _market_bias.get(symbol) or {}
-        benchmark_bias_entry = _market_bias.get(benchmark) or {}
-        benchmark_trend = _trend_table.get(benchmark) or {}
-
-        symbol_bias = symbol_bias_entry.get("bias")
-        benchmark_bias = benchmark_bias_entry.get("bias")
-        benchmark_direction = benchmark_trend.get("direction")
-        benchmark_strength = benchmark_trend.get("strength")
-
-        aligned = True
-        reasons = []
-
-        if symbol_bias == "avoid":
-            aligned = False
-            reasons.append(f"{symbol} market_bias is avoid")
-
-        if benchmark_bias == "avoid":
-            aligned = False
-            reasons.append(f"benchmark {benchmark} market_bias is avoid")
-
-        if benchmark_direction == "bearish":
-            aligned = False
-            reasons.append(f"benchmark {benchmark} trend is bearish")
-
-        if benchmark_direction == "neutral" and benchmark_strength == "weak":
-            # Not a hard failure yet — just a caution flag in observe-only mode.
-            reasons.append(f"benchmark {benchmark} trend is neutral/weak")
-
-        if aligned and not reasons:
-            reasons.append(
-                f"benchmark {benchmark} trend is {benchmark_direction}/{benchmark_strength} "
-                f"and symbol bias is {symbol_bias}"
-            )
-
-        return {
-            "cluster": cluster,
-            "benchmark": benchmark,
-            "benchmark_trend": {
-                "direction": benchmark_direction,
-                "strength": benchmark_strength,
-                "consecutive_count": benchmark_trend.get("consecutive_count"),
-            },
-            "benchmark_bias": benchmark_bias,
-            "symbol_bias": symbol_bias,
-            "symbol_risk_level": symbol_bias_entry.get("risk_level"),
-            "symbol_entry_quality": symbol_bias_entry.get("entry_quality"),
-            "aligned_for_buy": aligned,
-            "reason": "; ".join(reasons),
-        }
+        return trend_context_service.symbol_market_alignment(
+            symbol,
+            symbol_market_alignment_map=SYMBOL_MARKET_ALIGNMENT,
+            market_bias=_market_bias,
+            trend_table=_trend_table,
+            signal_history=_signal_history,
+            load_market_context=_load_market_context,
+            refresh_signal_history=_refresh_signal_history,
+        )
 
     except Exception as e:
         logger.error(f"_symbol_market_alignment failed for {symbol}: {e}")
@@ -2479,245 +1163,20 @@ def _symbol_market_alignment(symbol):
         }
 
 def _live_bias_override(symbol, bias_entry, trend, setup_obs, prediction_gate, momentum):
-    """
-    Convert pre-market bias into an effective intraday bias using live evidence.
-
-    This helper does not override hard risk controls. It only decides whether
-    a pre-market bias should remain active, soften, or be downgraded/upgraded
-    based on trend, setup, prediction score, and momentum.
-    """
-    bias_entry = bias_entry or {}
-    trend = trend or {}
-    setup_obs = setup_obs or {}
-    prediction_gate = prediction_gate or {}
-    momentum = momentum or {}
-
-    bias = bias_entry.get("bias")
-    avoid_type = (bias_entry.get("avoid_type") or "").lower()
-    fundamental_score = bias_entry.get("fundamental_score")
-    entry_quality = bias_entry.get("entry_quality")
-
-    trend_direction = trend.get("direction")
-    trend_strength = trend.get("strength")
-    consecutive_count = int(trend.get("consecutive_count") or 0)
-    last_signal = trend.get("last_signal")
-
-    setup_action = setup_obs.get("setup_policy_action")
-    setup_label = setup_obs.get("setup_label")
-
-    prediction_score = int(prediction_gate.get("prediction_score") or 0)
-    prediction_decision = prediction_gate.get("prediction_decision")
-
-    momentum_direction = momentum.get("direction")
-
-    # Hard avoid remains hard. This includes missing avoid_type, because
-    # parse_market_brief.py conservatively defaults avoid to hard unless
-    # the brief explicitly marks it soft.
-    if bias == "avoid" and avoid_type != "soft":
-        return {
-            "effective_bias": "avoid_hard",
-            "allow_buy": False,
-            "confidence_adjustment": -30,
-            "reason": "hard pre-market avoid remains active",
-        }
-
-    # Weak fundamentals should not be overridden by live tape alone.
-    if fundamental_score in ("bearish", "strong_bearish"):
-        return {
-            "effective_bias": "avoid_hard",
-            "allow_buy": False,
-            "confidence_adjustment": -30,
-            "reason": f"fundamental_score={fundamental_score} remains hard block",
-        }
-
-    # Poor/chase entry-quality remains a hard no. The existing chase gate should
-    # normally catch this too; this keeps attribution consistent.
-    if entry_quality in ("do_not_chase", "avoid_chasing", "poor"):
-        return {
-            "effective_bias": "avoid_hard",
-            "allow_buy": False,
-            "confidence_adjustment": -30,
-            "reason": f"entry_quality={entry_quality} remains hard block",
-        }
-
-    live_positive = (
-        trend_direction == "bullish"
-        and last_signal == "buy"
-        and consecutive_count >= 3
-        and momentum_direction == "rising"
-        and prediction_decision == "pass"
-        and prediction_score >= 6
-        and setup_action in ("boost", "allow", "neutral")
+    return entry_policy.live_bias_override(
+        symbol, bias_entry, trend, setup_obs, prediction_gate, momentum
     )
-
-    live_strong_positive = (
-        live_positive
-        and trend_strength in ("developing", "confirmed")
-        and prediction_score >= 8
-        and setup_action in ("boost", "allow")
-    )
-
-    live_negative = (
-        trend_direction == "bearish"
-        or momentum_direction == "falling"
-        or prediction_decision == "block"
-        or setup_action == "block"
-    )
-
-    if bias == "avoid" and avoid_type == "soft":
-        if live_strong_positive:
-            return {
-                "effective_bias": "live_override_buy",
-                "allow_buy": True,
-                "confidence_adjustment": -5,
-                "reason": (
-                    "soft avoid overridden by live confirmation: "
-                    f"trend={trend_direction}/{trend_strength}, "
-                    f"count={consecutive_count}, "
-                    f"setup={setup_label}, "
-                    f"setup_action={setup_action}, "
-                    f"prediction_score={prediction_score}, "
-                    f"momentum={momentum_direction}"
-                ),
-            }
-
-        return {
-            "effective_bias": "avoid_soft",
-            "allow_buy": False,
-            "confidence_adjustment": -15,
-            "reason": (
-                "soft avoid still active; requires stronger live confirmation: "
-                f"trend={trend_direction}/{trend_strength}, "
-                f"count={consecutive_count}, "
-                f"setup_action={setup_action}, "
-                f"prediction_score={prediction_score}, "
-                f"prediction_decision={prediction_decision}, "
-                f"momentum={momentum_direction}"
-            ),
-        }
-
-    if bias == "buy" and live_negative:
-        return {
-            "effective_bias": "live_override_neutral",
-            "allow_buy": False,
-            "confidence_adjustment": -20,
-            "reason": (
-                "pre-market buy downgraded by live evidence: "
-                f"trend={trend_direction}/{trend_strength}, "
-                f"setup_action={setup_action}, "
-                f"prediction_decision={prediction_decision}, "
-                f"momentum={momentum_direction}"
-            ),
-        }
-
-    if bias == "neutral" and live_strong_positive:
-        return {
-            "effective_bias": "live_override_buy",
-            "allow_buy": True,
-            "confidence_adjustment": 5,
-            "reason": (
-                "neutral pre-market bias upgraded by strong live evidence: "
-                f"trend={trend_direction}/{trend_strength}, "
-                f"setup={setup_label}, "
-                f"prediction_score={prediction_score}, "
-                f"momentum={momentum_direction}"
-            ),
-        }
-
-    return {
-        "effective_bias": bias or "neutral",
-        "allow_buy": bias != "avoid",
-        "confidence_adjustment": 0,
-        "reason": "pre-market bias unchanged by live evidence",
-    }
-
 
 def _one_bar_confirmation_hold(symbol: str, signal_price: float, account_state: dict) -> tuple[bool, str]:
-    """Wait for the next fresh 1-minute bar to confirm an extended/decelerating BUY.
-
-    Returns (allowed, reason). Fail-closed only when this specific hold condition
-    is triggered and the next bar does not open above the original signal price.
-    """
-    if not ONE_BAR_CONFIRMATION_HOLD_ENABLED:
-        return True, "one-bar confirmation disabled"
-
-    if signal_price is None:
-        return True, "missing signal price"
-
-    try:
-        signal_price_f = float(signal_price)
-    except Exception:
-        return True, f"invalid signal price={signal_price!r}"
-
-    if signal_price_f <= 0:
-        return True, f"nonpositive signal price={signal_price_f}"
-
-    momentum = (account_state or {}).get("momentum") or {}
-    momentum_state = momentum.get("momentum_state")
-
-    try:
-        price_vs_bars = float(momentum.get("price_vs_bars") or 0)
-    except Exception:
-        price_vs_bars = 0.0
-
-    if momentum_state != "decelerating":
-        return True, f"momentum_state={momentum_state}; hold not required"
-
-    if price_vs_bars <= ONE_BAR_CONFIRMATION_EXTENSION_THRESHOLD_PCT:
-        return True, (
-            f"price_vs_bars={price_vs_bars:.3f}% <= "
-            f"threshold={ONE_BAR_CONFIRMATION_EXTENSION_THRESHOLD_PCT:.3f}%; hold not required"
-        )
-
-    start_time = datetime.now(timezone.utc)
-    deadline = start_time.timestamp() + ONE_BAR_CONFIRMATION_TIMEOUT_SECONDS
-    seen_ts = None
-
-    tape = (account_state or {}).get("tape") or {}
-    latest_ts_raw = tape.get("tape_bar_age_seconds")
-    # tape_bar_age_seconds is only age, not timestamp; use polling below as source of truth.
-
-    reason_prefix = (
-        f"one_bar_hold required: momentum_state={momentum_state}; "
-        f"price_vs_bars={price_vs_bars:.3f}% > "
-        f"threshold={ONE_BAR_CONFIRMATION_EXTENSION_THRESHOLD_PCT:.3f}%; "
-        f"signal_price={signal_price_f:.4f}"
+    return entry_policy.one_bar_confirmation_hold(
+        symbol,
+        signal_price,
+        account_state,
+        enabled=ONE_BAR_CONFIRMATION_HOLD_ENABLED,
+        extension_threshold_pct=ONE_BAR_CONFIRMATION_EXTENSION_THRESHOLD_PCT,
+        timeout_seconds=ONE_BAR_CONFIRMATION_TIMEOUT_SECONDS,
+        get_bars_with_fallback=_get_bars_with_fallback,
     )
-
-    while datetime.now(timezone.utc).timestamp() < deadline:
-        try:
-            bars = _get_bars_with_fallback(symbol, "1Min", limit=2, feed="sip")
-        except Exception as e:
-            return False, f"{reason_prefix}; bar_fetch_error={e}"
-
-        if bars:
-            bar = bars[-1]
-            bar_ts = getattr(bar, "t", None) or getattr(bar, "timestamp", None)
-            bar_open = getattr(bar, "o", None) or getattr(bar, "open", None)
-
-            if seen_ts is None:
-                seen_ts = bar_ts
-            elif bar_ts != seen_ts:
-                try:
-                    bar_open_f = float(bar_open)
-                except Exception:
-                    return False, f"{reason_prefix}; next_bar_open_unavailable"
-
-                if bar_open_f > signal_price_f:
-                    return True, (
-                        f"{reason_prefix}; confirmed next_bar_open={bar_open_f:.4f} "
-                        f"> signal_price={signal_price_f:.4f}"
-                    )
-
-                return False, (
-                    f"{reason_prefix}; rejected next_bar_open={bar_open_f:.4f} "
-                    f"<= signal_price={signal_price_f:.4f}"
-                )
-
-        __import__("time").sleep(2)
-
-    return False, f"{reason_prefix}; timeout waiting for next 1m bar"
-
 
 def _session_momentum_is_fresh(session_momentum, max_age_minutes=5):
     """Return True when session momentum exists and was refreshed recently."""
@@ -2736,82 +1195,9 @@ def _session_momentum_is_fresh(session_momentum, max_age_minutes=5):
         return False
 
 def _evaluate_session_momentum_gate(session_momentum, prediction_gate, setup_obs, trend):
-    """
-    Return a session-momentum gate decision for BUY signals.
-
-    Observe/enforce behavior is controlled elsewhere by ENFORCE_SESSION_MOMENTUM_GATE.
-    """
-    session_momentum = session_momentum or {}
-    prediction_gate = prediction_gate or {}
-    setup_obs = setup_obs or {}
-    trend = trend or {}
-
-    session_label = session_momentum.get("trend_label")
-    session_score = int(session_momentum.get("trend_score") or 0)
-    prediction_score = int(prediction_gate.get("prediction_score") or 0)
-    setup_action = setup_obs.get("setup_policy_action")
-    trend_direction = trend.get("direction")
-    trend_strength = trend.get("strength")
-
-    session_hard_negative = session_label == "downtrend" or session_score <= -5
-    session_soft_negative = session_label == "fading" or session_score <= -2
-    session_reversal = session_label == "reversal_attempt"
-
-    # Hard-negative session tape blocks unless the setup is explicitly boosted.
-    if session_hard_negative and setup_action != "boost":
-        return {
-            "would_block": True,
-            "severity": "hard_negative",
-            "reason": (
-                f"session_label={session_label} score={session_score} "
-                f"setup_action={setup_action} prediction_score={prediction_score}"
-            ),
-        }
-
-    # Soft-negative session tape blocks weak/medium setups, but allows very strong
-    # prediction or confirmed+boost setups to continue.
-    if (
-        session_soft_negative
-        and prediction_score < 8
-        and not (
-            trend_direction == "bullish"
-            and trend_strength == "confirmed"
-            and setup_action == "boost"
-        )
-    ):
-        return {
-            "would_block": True,
-            "severity": "soft_negative",
-            "reason": (
-                f"session_label={session_label} score={session_score} "
-                f"prediction_score={prediction_score} trend={trend_direction}/{trend_strength} "
-                f"setup_action={setup_action}"
-            ),
-        }
-
-    # Reversal attempt: session is negative overall but short-term showing lift.
-    # Allow through but flag for cautious sizing — don't treat it like a clean pass.
-    if session_reversal:
-        return {
-            "would_block": False,
-            "severity": "reversal_caution",
-            "size_hint": "reduce",
-            "reason": (
-                f"session_label=reversal_attempt score={session_score} "
-                f"prediction_score={prediction_score} trend={trend_direction}/{trend_strength} "
-                f"setup_action={setup_action} — allow with caution sizing"
-            ),
-        }
-
-    return {
-        "would_block": False,
-        "severity": "pass",
-        "reason": (
-            f"session_label={session_label} score={session_score} "
-            f"prediction_score={prediction_score} trend={trend_direction}/{trend_strength} "
-            f"setup_action={setup_action}"
-        ),
-    }
+    return entry_policy.evaluate_session_momentum_gate(
+        session_momentum, prediction_gate, setup_obs, trend
+    )
 
 def _cluster_exposure(symbol, balance):
     """Return cluster exposure info for the symbol across current Alpaca positions."""
@@ -2820,7 +1206,7 @@ def _cluster_exposure(symbol, balance):
 
     results = []
     try:
-        positions = api.list_positions()
+        positions = broker_service.list_positions()
         position_values = {
             p.symbol: float(p.market_value)
             for p in positions
@@ -3179,7 +1565,7 @@ def _fetch_quote_snapshot(symbol):
       - ask
       - spread_pct
     """
-    quote = api.get_latest_quote(symbol)
+    quote = market_data_service.get_latest_quote(symbol)
 
     bid = getattr(quote, "bid_price", None)
     ask = getattr(quote, "ask_price", None)
@@ -3313,19 +1699,8 @@ PORTFOLIO_ROTATION_ALLOWED_ENTRY_QUALITIES = {
 
 
 def _portfolio_rotation_count_today():
-    """Count portfolio-rotation sell orders submitted today."""
     try:
-        today = datetime.now(pytz.timezone("America/New_York")).strftime("%Y-%m-%d")
-        with get_connection(DB_PATH) as con:
-            row = con.execute("""
-                SELECT COUNT(*)
-                FROM trades
-                WHERE timestamp LIKE ?
-                  AND approved = 1
-                  AND LOWER(action) = 'sell'
-                  AND confidence = 'rotation'
-            """, (f"{today}%",)).fetchone()
-        return int(row[0] or 0)
+        return trades_repo.portfolio_rotation_count_today()
     except Exception as e:
         logger.error(f"_portfolio_rotation_count_today failed: {e}")
         return 999
@@ -3388,7 +1763,7 @@ def _rotation_candidate_score(symbol, account_state):
 def _weakest_rotation_holding(candidate_symbol):
     """Return the weakest replaceable Alpaca long position, or None."""
     try:
-        positions = api.list_positions()
+        positions = broker_service.list_positions()
     except Exception as e:
         logger.error(f"_weakest_rotation_holding failed to fetch positions: {e}")
         return None
@@ -3448,206 +1823,40 @@ def _weakest_rotation_holding(candidate_symbol):
 
 
 def _try_portfolio_rotation(candidate_symbol, candidate_price, account_state, now_dt):
-    """Sell weakest eligible holding to free room for a stronger capped BUY."""
-    if not PORTFOLIO_ROTATION_ENABLED:
-        return False, "portfolio rotation disabled", {}
-
-    rotations_today = _portfolio_rotation_count_today()
-    if rotations_today >= PORTFOLIO_ROTATION_MAX_PER_DAY:
-        return False, f"daily rotation limit reached ({rotations_today}/{PORTFOLIO_ROTATION_MAX_PER_DAY})", {}
-
-    score, score_reason = _rotation_candidate_score(candidate_symbol, account_state)
-    if score < PORTFOLIO_ROTATION_MIN_CANDIDATE_SCORE:
-        return False, f"candidate score {score} < {PORTFOLIO_ROTATION_MIN_CANDIDATE_SCORE}: {score_reason}", {
-            "candidate_score": score,
-            "candidate_score_reason": score_reason,
-        }
-
-    weakest = _weakest_rotation_holding(candidate_symbol)
-    if not weakest:
-        return False, "no eligible weak holding found", {
-            "candidate_score": score,
-            "candidate_score_reason": score_reason,
-        }
-
-    sell_symbol = weakest["symbol"]
-    client_order_id = (
-        f"rotate-sell-{sell_symbol.lower()}-{candidate_symbol.lower()}-"
-        f"{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}"
+    return execution_policy.try_portfolio_rotation(
+        candidate_symbol=candidate_symbol,
+        candidate_price=candidate_price,
+        account_state=account_state,
+        now_dt=now_dt,
+        enabled=PORTFOLIO_ROTATION_ENABLED,
+        max_per_day=PORTFOLIO_ROTATION_MAX_PER_DAY,
+        min_candidate_score=PORTFOLIO_ROTATION_MIN_CANDIDATE_SCORE,
+        rotation_count_today=_portfolio_rotation_count_today,
+        rotation_candidate_score=_rotation_candidate_score,
+        weakest_rotation_holding=_weakest_rotation_holding,
+        place_order=place_order,
+        log_trade=log_trade,
+        last_order=_last_order,
+        write_cooldown=_write_cooldown,
+        last_sell=_last_sell,
+        write_recent_sell=_write_recent_sell,
+        logger=logger,
     )
-
-    logger.warning(
-        f"PORTFOLIO ROTATION triggered: candidate={candidate_symbol} score={score} "
-        f"reason={score_reason}; selling weakest={sell_symbol} "
-        f"plpc={weakest['unrealized_plpc']}% "
-        f"trend={weakest['trend_direction']}/{weakest['trend_strength']}"
-    )
-
-    order_result = place_order(
-        symbol=sell_symbol,
-        action="sell",
-        position_size_pct=0.0,
-        stop_loss_pct=0.0,
-        take_profit_pct=0.0,
-        risk_level=None,
-        client_order_id=client_order_id,
-    )
-
-    if not order_result:
-        return False, f"rotation sell failed for {sell_symbol}", {
-            "candidate_score": score,
-            "candidate_score_reason": score_reason,
-            "weakest": weakest,
-        }
-
-    decision = {
-        "approved": True,
-        "reason": (
-            f"portfolio_rotation: sold {sell_symbol} to free slot for "
-            f"{candidate_symbol} score={score}"
-        ),
-        "position_size_pct": 0.0,
-        "stop_loss_pct": 0.0,
-        "take_profit_pct": 0.0,
-        "confidence": "rotation",
-    }
-
-    signal = {
-        "symbol": sell_symbol,
-        "action": "sell",
-        "price": weakest["current_price"],
-        "source": "portfolio_rotation",
-        "rotation_candidate": candidate_symbol,
-        "rotation_candidate_price": candidate_price,
-    }
-
-    log_trade(signal, decision, order_result, account_state=account_state)
-
-    _last_order[(sell_symbol, "sell")] = now_dt
-    _write_cooldown(sell_symbol, "sell", now_dt)
-    _last_sell[sell_symbol] = (now_dt, weakest["current_price"])
-    _write_recent_sell(sell_symbol, now_dt, weakest["current_price"])
-
-    return True, f"submitted rotation sell for {sell_symbol}", {
-        "candidate_score": score,
-        "candidate_score_reason": score_reason,
-        "weakest": weakest,
-        "sell_order": order_result,
-    }
 
 def _pre_order_safety_check(symbol, action, signal_price, account_state):
-    """Final broker-adjacent safety check immediately before order placement.
-
-    Returns (ok: bool, reason: str).
-    """
-    if action != "buy":
-        return True, "sell signal bypasses buy-side second-look checks"
-
-    try:
-        latest_trade = api.get_latest_trade(symbol)
-        latest_price = float(latest_trade.price)
-    except Exception as e:
-        return False, f"failed to fetch latest trade for second-look check: {e}"
-
-    try:
-        signal_price_f = float(signal_price)
-    except (TypeError, ValueError):
-        return False, f"invalid signal_price for second-look check: {signal_price!r}"
-
-    if signal_price_f <= 0 or latest_price <= 0:
-        return False, f"invalid price values signal={signal_price_f} latest={latest_price}"
-
-    drift_pct = abs(latest_price - signal_price_f) / signal_price_f * 100
-    if drift_pct > MAX_SIGNAL_PRICE_DRIFT_PCT:
-        return (
-            False,
-            f"latest price drift {drift_pct:.3f}% exceeds max {MAX_SIGNAL_PRICE_DRIFT_PCT:.3f}% "
-            f"(signal={signal_price_f:.4f}, latest={latest_price:.4f})",
-        )
-
-    # Open-order duplicate protection.
-    try:
-        open_orders = api.list_orders(status="open", symbols=[symbol])
-        if open_orders:
-            return False, f"open broker order already exists for {symbol}"
-    except Exception as e:
-        return False, f"failed to check open orders for {symbol}: {e}"
-
-        # Bid/ask spread check. Fail-open only if quote retrieval is unsupported.
-    # For obviously broken quote snapshots, retry a few times before rejecting.
-    try:
-        spread_check = _validate_spread_with_retry(
-            symbol,
-            max_spread_pct=SYMBOL_MAX_SPREAD_PCT.get(symbol, MAX_BID_ASK_SPREAD_PCT),
-            suspect_spread_pct=2.00,
-            retry_count=3,
-            retry_delay_sec=0.35,
-        )
-
-        if not spread_check.get("ok"):
-            bid = spread_check.get("bid")
-            ask = spread_check.get("ask")
-            spread_pct = spread_check.get("spread_pct")
-            reason = spread_check.get("reason", "spread check failed")
-
-            try:
-                bid_f = float(bid) if bid is not None else None
-                ask_f = float(ask) if ask is not None else None
-            except (TypeError, ValueError):
-                bid_f = None
-                ask_f = None
-
-            # Buy-side stale-bid exception:
-            # If the bid is stale/way below market but the ask is close to the
-            # signal and latest trade, allow the order to continue.
-            if action == "buy" and ask_f and ask_f > 0:
-                ask_vs_signal_pct = abs(ask_f - signal_price_f) / signal_price_f * 100
-                ask_vs_latest_pct = abs(ask_f - latest_price) / latest_price * 100
-
-                if (
-                    spread_pct is not None
-                    and spread_pct > 2.0
-                    and ask_vs_signal_pct <= MAX_SIGNAL_PRICE_DRIFT_PCT
-                    and ask_vs_latest_pct <= MAX_SIGNAL_PRICE_DRIFT_PCT
-                ):
-                    logger.warning(
-                        f"Second-look stale-bid exception for {symbol} BUY: "
-                        f"spread={spread_pct:.3f}% but ask is sane "
-                        f"(bid={bid_f if bid_f is not None else 'n/a'}, "
-                        f"ask={ask_f:.4f}, "
-                        f"signal={signal_price_f:.4f}, latest={latest_price:.4f}, "
-                        f"ask_vs_signal={ask_vs_signal_pct:.3f}%, "
-                        f"ask_vs_latest={ask_vs_latest_pct:.3f}%)"
-                    )
-                else:
-                    return False, reason
-            else:
-                return False, reason
-
-    except Exception as e:
-        return True, f"spread check unavailable; fail-open: {e}"
-
-        account_state["second_look"] = {
-            "latest_price": round(latest_price, 4),
-            "price_drift_pct": round(drift_pct, 4),
-            "bid": round(spread_check["bid"], 4),
-            "ask": round(spread_check["ask"], 4),
-            "spread_pct": round(spread_check["spread_pct"], 4),
-            "attempts": spread_check["attempts"],
-            "suspect_quote": spread_check["suspect_quote"],
-        }
-
-    except AttributeError as e:
-        logger.warning(f"Second-look quote check unsupported for {symbol}: {e}")
-        account_state["second_look"] = {
-            "latest_price": round(latest_price, 4),
-            "price_drift_pct": round(drift_pct, 4),
-            "quote_check": "unsupported",
-        }
-    except Exception as e:
-        return False, f"failed quote/spread second-look check for {symbol}: {e}"
-
-    return True, "second-look checks passed"
+    return execution_policy.pre_order_safety_check(
+        symbol=symbol,
+        action=action,
+        signal_price=signal_price,
+        account_state=account_state,
+        market_data_service=market_data_service,
+        broker_service=broker_service,
+        validate_spread_with_retry=_validate_spread_with_retry,
+        symbol_max_spread_pct=SYMBOL_MAX_SPREAD_PCT,
+        max_bid_ask_spread_pct=MAX_BID_ASK_SPREAD_PCT,
+        max_signal_price_drift_pct=MAX_SIGNAL_PRICE_DRIFT_PCT,
+        logger=logger,
+    )
 
 def _get_weakest_position_context(account_state):
     """
@@ -3691,30 +1900,8 @@ def _get_weakest_position_context(account_state):
     return weakest
 
 def _count_second_look_blocks_today(symbol):
-    """
-    Count BUY signals for this symbol today that were rejected by second-look
-    quote-quality checks. Used to avoid chasing late entries after repeated
-    quote-quality delays.
-    """
-    today = datetime.now().strftime("%Y-%m-%d")
-
     try:
-        with get_connection(DB_PATH) as con:
-            row = con.execute(
-                """
-                SELECT COUNT(*) AS cnt
-                FROM trades
-                WHERE timestamp LIKE ?
-                  AND symbol = ?
-                  AND action = 'buy'
-                  AND approved = 0
-                  AND rejection_reason LIKE 'second_look:%'
-                """,
-                (f"{today}%", symbol),
-            ).fetchone()
-
-        return int(row["cnt"] or 0) if row else 0
-
+        return trades_repo.second_look_blocks_today(symbol)
     except Exception as e:
         logger.warning(f"Failed to count second-look blocks for {symbol}: {e}")
         return 0
@@ -3795,199 +1982,14 @@ def _adaptive_churn_reentry_allowed(symbol, signal_price, last_sell_price, accou
     )
 
 
-def _count_second_look_blocks_today(symbol):
-    today = datetime.now().strftime("%Y-%m-%d")
-
-    try:
-        with get_connection(DB_PATH) as con:
-            row = con.execute(
-                """
-                SELECT COUNT(*) AS cnt
-                FROM trades
-                WHERE timestamp LIKE ?
-                  AND symbol = ?
-                  AND action = 'buy'
-                  AND approved = 0
-                  AND rejection_reason LIKE 'second_look:%'
-                """,
-                (f"{today}%", symbol),
-            ).fetchone()
-
-        return int(row["cnt"] or 0) if row else 0
-
-    except Exception as e:
-        logger.warning(f"Failed to count second-look blocks for {symbol}: {e}")
-        return 0
-
-
-def _allow_medium_confidence_momentum_override(
-    symbol: str,
-    action: str,
-    decision: dict,
-    account_state: dict,
-    trend: dict,
-    setup_obs: dict,
-) -> tuple[bool, str]:
-    """Allow medium Claude confidence only when deterministic evidence is exceptional.
-
-    This does not override parse errors, low confidence, setup-policy blocks/errors,
-    second-look, cooldown, churn, affordability, or broker safety.
-    """
-    try:
-        if action != "buy":
-            return False, "not_buy"
-
-        if (decision or {}).get("confidence") != "medium":
-            return False, "not_medium_confidence"
-
-        trend = trend or {}
-        account_state = account_state or {}
-        setup_obs = setup_obs or {}
-
-        trend_direction = trend.get("direction") or account_state.get("trend_direction")
-        trend_strength = trend.get("strength") or account_state.get("trend_strength")
-        momentum_direction = (
-            account_state.get("momentum_direction")
-            or (account_state.get("momentum") or {}).get("direction")
-        )
-        session = account_state.get("session_momentum") or {}
-        session_label = session.get("trend_label") or account_state.get("session_trend_label")
-
-        prediction = account_state.get("prediction_gate") or {}
-        prediction_decision = (
-            prediction.get("prediction_decision")
-            or prediction.get("decision")
-            or account_state.get("prediction_decision")
-        )
-        prediction_score_raw = (
-            prediction.get("prediction_score")
-            or prediction.get("score")
-            or account_state.get("prediction_score")
-        )
-
-        setup_action = (
-            setup_obs.get("policy_action")
-            or setup_obs.get("setup_policy_action")
-            or account_state.get("setup_policy_action")
-        )
-
-        if setup_action in ("block", "error"):
-            return False, f"setup_action={setup_action}"
-
-        try:
-            prediction_score = float(prediction_score_raw)
-        except Exception:
-            return False, "prediction_score_missing"
-
-        checks = {
-            "trend_direction": trend_direction == "bullish",
-            "trend_strength": trend_strength == "confirmed",
-            "momentum_direction": momentum_direction == "rising",
-            "session_label": session_label == "strong_uptrend",
-            "prediction_decision": prediction_decision == "pass",
-            "prediction_score": prediction_score >= 8,
-        }
-
-        if not all(checks.values()):
-            failed = ",".join(k for k, ok in checks.items() if not ok)
-            return False, f"failed={failed}"
-
-        reason = (
-            "medium confidence allowed by deterministic momentum override: "
-            f"trend={trend_direction}/{trend_strength}; "
-            f"momentum={momentum_direction}; "
-            f"session={session_label}; "
-            f"prediction={prediction_decision}/{prediction_score:g}; "
-            f"setup_action={setup_action}"
-        )
-        return True, reason
-
-    except Exception as e:
-        return False, f"override_error={e}"
-
-def _weekly_symbol_performance(symbol: str) -> dict:
-    """Return current-week realized symbol performance for Claude/account_state context."""
-    try:
-        with get_connection(DB_PATH) as con:
-            row = con.execute(
-                """
-                SELECT
-                    COUNT(*) AS trades,
-                    SUM(CASE WHEN realized_pnl > 0 THEN 1 ELSE 0 END) AS wins,
-                    SUM(CASE WHEN realized_pnl < 0 THEN 1 ELSE 0 END) AS losses,
-                    SUM(COALESCE(realized_pnl, 0)) AS pnl,
-                    AVG(realized_pnl) AS expectancy,
-                    AVG(realized_pnl_pct) AS avg_pnl_pct
-                FROM matched_trades
-                WHERE symbol = ?
-                  AND entry_timestamp >= date('now','weekday 1','-7 days')
-                """,
-                (symbol,),
-            ).fetchone()
-
-        trades = int(row["trades"] or 0) if row else 0
-        wins = int(row["wins"] or 0) if row else 0
-        losses = int(row["losses"] or 0) if row else 0
-        pnl = float(row["pnl"] or 0.0) if row else 0.0
-        expectancy = float(row["expectancy"] or 0.0) if row else 0.0
-        avg_pnl_pct = float(row["avg_pnl_pct"] or 0.0) if row else 0.0
-        win_rate = wins / trades if trades else 0.0
-
-        label = "neutral"
-        if trades >= 3 and expectancy > 0 and win_rate >= 0.75:
-            label = "strong_weekly_boost"
-        elif trades >= 2 and expectancy > 0 and win_rate >= 0.50:
-            label = "weekly_boost"
-        elif trades >= 2 and (expectancy < 0 or win_rate < 0.35):
-            label = "weekly_penalty"
-
-        return {
-            "label": label,
-            "trades": trades,
-            "wins": wins,
-            "losses": losses,
-            "win_rate": round(win_rate, 4),
-            "pnl": round(pnl, 2),
-            "expectancy": round(expectancy, 2),
-            "avg_pnl_pct": round(avg_pnl_pct, 4),
-        }
-    except Exception as e:
-        return {"label": "error", "error": str(e)}
-
-def process_signal(data):
+def _legacy_process_signal(data):
     dedupe_key = data.get("_dedupe_key")
     ...
     _load_market_context()
-    try:
-        action = str(data.get("action", "")).strip().lower()
-        symbol = str(data.get("symbol", "")).strip().upper()
-        price = data.get("price", 0)
-        if action not in ("buy", "sell"):
-            raise ValidationError(f"invalid action={action!r}")
-        if not symbol:
-            raise ValidationError("missing symbol")
-    except ValidationError as e:
-        logger.warning(f"Invalid signal payload rejected: {e}")
-        if dedupe_key:
-            _mark_webhook_event_status(
-                dedupe_key,
-                "rejected",
-                failure_reason=format_rejection_reason("payload_validation", str(e)),
-            )
-        return
+    action = str(data.get("action", "")).strip().lower()
+    symbol = str(data.get("symbol", "")).strip().upper()
+    price = data.get("price", 0)
     logger.info(f"Processing {action.upper()} signal for {symbol} at {price}")
-
-    # Ghost sell pre-filter: skip account/context setup for sells with no tracked position.
-    # Fires before get_mock_account_state() to avoid two Alpaca API calls per orphaned signal.
-    # The Alpaca-backed check later in the flow remains as a safety backstop.
-    if action == "sell" and not _has_open_position_db(symbol):
-        log_rejection(symbol, action, "ghost_sell", "no open Alpaca position", price=price)
-        if dedupe_key:
-            _mark_webhook_event_status(
-                dedupe_key, "rejected",
-                failure_reason=format_rejection_reason("ghost_sell", "no open Alpaca position"),
-            )
-        return
 
     account_state = get_mock_account_state()
 
@@ -4313,21 +2315,7 @@ def process_signal(data):
             return
 
         try:
-            today = datetime.now().strftime("%Y-%m-%d")
-            con = sqlite3.connect(DB_PATH)
-            row = con.execute(
-                """
-                SELECT COUNT(*) FROM trades
-                WHERE timestamp LIKE ?
-                  AND symbol = ?
-                  AND action = 'buy'
-                  AND approved = 1
-                  AND order_id IS NOT NULL
-                """,
-                (f"{today}%", symbol),
-            ).fetchone()
-            con.close()
-            buys_today = int(row[0] or 0)
+            buys_today = trades_repo.cash_safe_buys_today(symbol)
         except Exception as e:
             logger.error(f"Cash-safe daily buy check failed for {symbol}: {e}")
             buys_today = 999
@@ -4412,7 +2400,7 @@ def process_signal(data):
 
     if action == "sell":
         try:
-            api.get_position(symbol)
+            broker_service.assert_position_exists(symbol)
         except Exception:
             if _reject_current_signal("ghost_sell", "no open Alpaca position"):
                 return
@@ -6190,142 +4178,46 @@ def process_signal(data):
     if dedupe_key:
         _mark_webhook_event_status(dedupe_key, "processed")
 
-@app.route("/webhook", methods=["POST"])
-def webhook():
-    validate_secret(request)
-    if not request.is_json:
-        logger.warning("Non-JSON payload received")
-        abort(400)
-    data = request.get_json()
-    if data is None:
-        logger.warning("Empty or unparseable JSON payload")
-        abort(400)
-    logger.info(f"Signal received: {data}")
-    action = data.get("action", "").lower()
-    symbol = data.get("symbol", "").upper()
-    price = data.get("price", 0)
-    if not action or not symbol:
-        logger.warning("Missing action or symbol")
-        abort(400)
-    if action not in ["buy", "sell"]:
-        logger.warning(f"Unknown action: {action}")
-        abort(400)
-    if symbol not in APPROVED_SYMBOLS:
-        logger.warning(f"Rejected unapproved symbol: {symbol}")
-        abort(400)
-    try:
-        price = float(price)
-    except (TypeError, ValueError):
-        logger.warning(f"Non-numeric price rejected: {price!r}")
-        abort(400)
-    if price <= 0:
-        logger.warning(f"Non-positive price rejected for {symbol}: {price}")
-        abort(400)
-    low, high = PRICE_RANGES[symbol]
-    if not (low * 0.8 <= price <= high * 1.2):
-        logger.warning(f"Price sanity check failed for {symbol}: {price} outside [{low * 0.8:.2f}, {high * 1.2:.2f}]")
-        abort(400)
 
-    dedupe_key = _make_dedupe_key(data)
-    is_new_event = _record_webhook_event(dedupe_key, data)
-
-    if not is_new_event:
-        logger.warning(
-            f"Duplicate webhook ignored: symbol={symbol} action={action} "
-            f"price={price} dedupe_key={dedupe_key[:24]}..."
+def _build_signal_pipeline(app_container: ApplicationContainer | None = None):
+    app_container = app_container or container
+    return app_container.build_signal_pipeline(
+        SignalPipelineDeps(
+            legacy_processor=_legacy_process_signal,
+            has_open_position_db=_has_open_position_db,
+            log_rejection=log_rejection,
+            mark_webhook_event_status=_mark_webhook_event_status,
+            logger=logger,
         )
-        return jsonify({
-            "status": "duplicate_ignored",
-            "symbol": symbol,
-            "action": action,
-            "price": price,
-            "timestamp": datetime.now().isoformat(),
-        }), 200
+    )
 
-    data["_dedupe_key"] = dedupe_key
-        
-    try:
-        data["_dedupe_key"] = dedupe_key
 
-        _mark_webhook_event_status(dedupe_key, "queued")
-        _signal_executor.submit(process_signal, data)
-    except Exception as e:
-        logger.error(f"Failed to submit signal to executor for {symbol} {action.upper()}: {e}")
-        _mark_webhook_event_status(
-            dedupe_key,
-            "error",
-            failure_reason=f"failed to queue signal: {e}",
-        )
-        return jsonify({
-            "status": "error",
-            "reason": "failed to queue signal",
-            "symbol": symbol,
-            "action": action,
-            "price": price,
-            "timestamp": datetime.now().isoformat(),
-        }), 503
+def process_signal(data):
+    return _build_signal_pipeline().run(data)
 
-    return jsonify({
-        "status": "received",
-        "queued": True,
-        "symbol": symbol,
-        "action": action,
-        "price": price,
-        "timestamp": datetime.now().isoformat(),
-    }), 200
 
-@app.route("/health", methods=["GET"])
-def health():
+def health_payload():
     account = get_account()
-    return jsonify({
+    return {
         "status": "online",
         "timestamp": datetime.now().isoformat(),
         "account": account
-    }), 200
+    }
 
 def _market_session():
     return market_session()
 
 def _session_momentum_summary():
-    """Return counts of latest session momentum labels across all tracked symbols."""
     try:
-        with get_connection(DB_PATH) as con:
-            rows = con.execute(
-                """
-                SELECT trend_label, COUNT(*) AS n
-                FROM session_momentum
-                GROUP BY trend_label
-                ORDER BY n DESC
-                """
-            ).fetchall()
-
-        return {
-            (r["trend_label"] or "unknown"): r["n"]
-            for r in rows
-        }
+        return context_repo.session_momentum_summary()
     except Exception as e:
         logger.warning(f"session momentum summary unavailable: {e}")
         return {}
 
 
 def _session_momentum_snapshot(limit=40):
-    """Return latest session momentum rows for status/debug visibility."""
     try:
-        with get_connection(DB_PATH) as con:
-            rows = con.execute(
-                """
-                SELECT symbol, updated_at, trend_label, trend_score,
-                       session_return_pct, momentum_5m_pct,
-                       momentum_15m_pct, momentum_30m_pct,
-                       distance_from_vwap_pct, reason
-                FROM session_momentum
-                ORDER BY symbol
-                LIMIT ?
-                """,
-                (limit,),
-            ).fetchall()
-
-        return [dict(r) for r in rows]
+        return context_repo.session_momentum_snapshot(limit=limit)
     except Exception as e:
         logger.warning(f"session momentum snapshot unavailable: {e}")
         return []
@@ -6344,38 +4236,7 @@ def _symbol_intelligence_snapshot(market_date=None):
     """Return observe-only daily prediction rows for /status visibility."""
     market_date = market_date or expected_market_context_date().isoformat()
     try:
-        with get_connection(DB_PATH) as con:
-            rows = con.execute(
-                """
-                SELECT
-                    symbol,
-                    prediction_score,
-                    probability_of_profit,
-                    probability_of_order,
-                    expected_pnl,
-                    expected_win_rate,
-                    confidence,
-                    sample_size,
-                    reason,
-                    timing_score,
-                    recommended_entry_timing,
-                    recommended_exit_timing,
-                    historical_timing_sample_size,
-                    timing_reason,
-                    trend_score,
-                    trend_label,
-                    trend_regime,
-                    trend_confidence,
-                    trend_similarity_sample_size,
-                    trend_reason,
-                    updated_at
-                FROM daily_symbol_predictions
-                WHERE market_date = ?
-                ORDER BY symbol
-                """,
-                (market_date,),
-            ).fetchall()
-
+        rows = context_repo.symbol_intelligence_rows(market_date)
         symbols = {}
         for row in rows:
             item = dict(row)
@@ -6409,10 +4270,7 @@ def _symbol_intelligence_for_symbol(symbol, market_date=None):
     return (snapshot.get("symbols") or {}).get(symbol.upper())
 
 
-@app.route("/status", methods=["GET"])
-def status():
-    validate_secret(request)
-
+def status_payload():
     result = {
         "timestamp": datetime.now().isoformat(),
         "execution_mode": EXECUTION_MODE,
@@ -6424,6 +4282,8 @@ def status():
     result["prediction_gate_name"] = "deterministic_signal_quality_gate"
     result["ml_prediction_cache"] = prediction_cache_status()
     result["decision_policy"] = public_decision_policy_config()
+    result["policy_controls"] = public_policy_control_config()
+    result["runtime_metrics"] = metrics_snapshot()
     result["strategy_engine_mode"] = STRATEGY_ENGINE_MODE
     result["execution_policy_mode"] = os.getenv("EXECUTION_POLICY_MODE", "compare").strip().lower()
     result["intra_session_tape_degradation_enabled"] = INTRA_SESSION_TAPE_DEGRADATION_ENABLED
@@ -6512,7 +4372,7 @@ def status():
     # Detailed positions (now with trend, market_bias, and exposure-cap signals)
     symbols_at_cap = []
     try:
-        alpaca_positions = api.list_positions()
+        alpaca_positions = broker_service.list_positions()
         pos_list = []
         for p in sorted(alpaca_positions, key=lambda x: -float(x.market_value)):
             try:
@@ -6549,7 +4409,7 @@ def status():
         for cluster_name, members in CORRELATION_CLUSTERS.items():
             value = 0.0
             held = []
-            for p in api.list_positions():
+            for p in broker_service.list_positions():
                 if p.symbol in members:
                     mv = float(p.market_value)
                     value += mv
@@ -6632,9 +4492,8 @@ def status():
         cooldowns = []
         churn = []
         try:
-            with get_connection(DB_PATH) as con:
-                cd_rows = con.execute("SELECT symbol, action, last_order_time FROM cooldowns").fetchall()
-                cs_rows = con.execute("SELECT symbol, last_sell_time FROM recent_sells").fetchall()
+            cd_rows = cooldown_repo.cooldown_rows()
+            cs_rows = cooldown_repo.recent_sell_rows()
             for sym, act, ts_str in cd_rows:
                 try:
                     ts = datetime.fromisoformat(ts_str)
@@ -6649,7 +4508,7 @@ def status():
                         })
                 except Exception:
                     pass
-            for sym, ts_str in cs_rows:
+            for sym, ts_str, *_ in cs_rows:
                 try:
                     ts = datetime.fromisoformat(ts_str)
                     if ts.tzinfo is None:
@@ -6720,25 +4579,7 @@ def status():
 
     # Today's signal counts from trades.db
     try:
-        today = datetime.now().strftime("%Y-%m-%d")
-        with get_connection(DB_PATH) as con:
-            counts = con.execute("""
-                SELECT
-                    COUNT(*)                                          AS total,
-                    SUM(approved)                                     AS approved,
-                    SUM(1 - approved)                                 AS rejected,
-                    SUM(CASE WHEN order_id IS NOT NULL THEN 1 END)    AS orders_placed,
-                    SUM(CASE WHEN approved=1 AND order_id IS NULL
-                             THEN 1 END)                              AS null_orders
-                FROM trades WHERE timestamp LIKE ?
-            """, (f"{today}%",)).fetchone()
-        result["today_signals"] = {
-            "total":         counts[0],
-            "approved":      counts[1] or 0,
-            "rejected":      counts[2] or 0,
-            "orders_placed": counts[3] or 0,
-            "null_orders":   counts[4] or 0,
-        }
+        result["today_signals"] = trades_repo.today_signal_counts()
     except Exception as e:
         logger.error(f"/status signal counts error: {e}")
 
@@ -6750,12 +4591,10 @@ def status():
             "error": str(e),
         }
 
-    return jsonify(result), 200
+    return result
 
 
-@app.route("/positions", methods=["GET"])
-def positions():
-    validate_secret(request)
+def positions_payload():
     result = {"timestamp": datetime.now().isoformat()}
 
     balance = 0.0
@@ -6781,7 +4620,7 @@ def positions():
     positions_list = []
     total_unrealized = 0.0
     try:
-        for p in api.list_positions():
+        for p in broker_service.list_positions():
             try:
                 qty = float(p.qty)
                 avg_entry = float(p.avg_entry_price)
@@ -6863,20 +4702,17 @@ def positions():
     except Exception as e:
         result["position_intelligence_error"] = str(e)
 
-    return jsonify(result), 200
+    return result
 
 
-@app.route("/debug/symbol/<symbol>", methods=["GET"])
-def debug_symbol(symbol):
-    validate_secret(request)
-
+def debug_symbol_payload(symbol):
     symbol = symbol.upper()
     if symbol not in APPROVED_SYMBOLS:
-        return jsonify({
+        return {
             "error": "symbol not approved",
             "symbol": symbol,
             "approved_symbols": sorted(APPROVED_SYMBOLS),
-        }), 400
+        }, 400
 
     _load_market_context()
 
@@ -7082,8 +4918,12 @@ def debug_symbol(symbol):
     result["would_block_buy_because"] = buy_blocks
     result["buy_would_pass_known_prechecks"] = len(buy_blocks) == 0
 
-    return jsonify(result), 200
+    return result, 200
+
+
+app.extensions["application_container"] = container
+_register_routes(app, container)
 
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000, debug=False)
+    create_app(run_startup=True).run(host="0.0.0.0", port=5000, debug=False)

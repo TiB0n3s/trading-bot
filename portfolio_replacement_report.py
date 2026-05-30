@@ -21,7 +21,7 @@ from pathlib import Path
 
 import pytz
 
-from broker import api
+from services.broker_service import broker_service
 from db import DB_PATH, get_connection
 from bot_events import log_event
 from policy_artifacts import atomic_write_json
@@ -57,7 +57,7 @@ def category(reason):
 def get_positions():
     rows = []
     try:
-        positions = api.list_positions()
+        positions = broker_service.list_positions()
     except Exception as e:
         return [], f"failed to fetch Alpaca positions: {e}"
 

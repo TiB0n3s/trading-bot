@@ -51,7 +51,6 @@ def _load_env_if_needed():
 
 _load_env_if_needed()
 
-from broker import api  # noqa: E402
 from pre_market_research_data import (  # noqa: E402
     get_recent_bars,
     classify_macro,

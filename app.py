@@ -44,6 +44,7 @@ from services.live_signal_processor import (
 )
 from services.signal_pipeline import SignalPipelineDeps
 from services.signal_models import SignalRuntimeState
+from services.startup_service import StartupDeps, StartupService
 from services import trend_context_service
 from services import trade_audit_service
 from services.setup_context_service import (
@@ -254,77 +255,37 @@ def _get_signal_executor() -> ThreadPoolExecutor:
         )
     return _signal_executor
 
-def _init_db():
-    context_repo.init_core_tables(DB_PATH)
+def _build_startup_service(app_container: ApplicationContainer | None = None) -> StartupService:
+    app_container = app_container or container
+    return StartupService(
+        StartupDeps(
+            container=app_container,
+            logger=logger,
+            init_core_tables=lambda: context_repo.init_core_tables(DB_PATH),
+            ensure_recent_favorable_setups_table=ensure_recent_favorable_setups_table,
+            prune_recent_favorable_setups=prune_recent_favorable_setups,
+            recent_favorable_setup_ttl_minutes=RECENT_FAVORABLE_SETUP_TTL_MINUTES,
+            init_session_momentum_table=init_session_momentum_table,
+            init_db_performance_indexes=init_db_performance_indexes,
+            start_prediction_cache_loader=start_prediction_cache_loader,
+            prediction_cache_status=prediction_cache_status,
+            get_signal_executor=_get_signal_executor,
+            load_symbol_overrides=_load_symbol_overrides,
+            build_trend_table=_build_trend_table,
+            hydrate_cooldowns=_hydrate_cooldowns,
+            hydrate_recent_sells=_hydrate_recent_sells,
+            load_market_context=_load_market_context,
+            env_get=os.environ.get,
+        )
+    )
 
-def run_startup_tasks() -> None:
+
+def run_startup_tasks(app_container: ApplicationContainer | None = None) -> None:
     """Execute non-critical startup tasks. Call explicitly from an entrypoint
     or from tests by passing run_startup=True to `create_app()` when safe.
     """
     global _STARTUP_TASKS_RAN
-    try:
-        _init_db()
-    except Exception as e:
-        logger.error(f"DB init failed during startup: {e}")
-
-    try:
-        ensure_recent_favorable_setups_table()
-        prune_recent_favorable_setups(RECENT_FAVORABLE_SETUP_TTL_MINUTES)
-    except Exception as e:
-        logger.error(f"Recent favorable setups init failed: {e}")
-
-    try:
-        init_session_momentum_table()
-    except Exception as e:
-        logger.error(f"Session momentum table initialization failed: {e}")
-
-    try:
-        init_db_performance_indexes()
-        logger.info("DB performance indexes initialized")
-    except Exception as e:
-        logger.error(f"DB performance index initialization failed: {e}")
-
-    try:
-        start_prediction_cache_loader()
-        logger.info(f"Prediction cache loader started: {prediction_cache_status()}")
-    except Exception as e:
-        logger.error(f"Prediction cache loader startup failed: {e}")
-
-    try:
-        _get_signal_executor()
-    except Exception as e:
-        logger.error(f"Signal executor startup failed: {e}")
-
-    try:
-        _startup_reconcile()
-    except Exception as e:
-        logger.error(f"Startup reconciliation hook failed: {e}")
-
-    try:
-        _load_symbol_overrides()
-    except Exception as e:
-        logger.error(f"Symbol override startup load failed: {e}")
-
-    try:
-        _build_trend_table()
-    except Exception as e:
-        logger.error(f"Trend-table startup build failed: {e}")
-
-    try:
-        _hydrate_cooldowns()
-    except Exception as e:
-        logger.error(f"Cooldown startup hydration failed: {e}")
-
-    try:
-        _hydrate_recent_sells()
-    except Exception as e:
-        logger.error(f"Recent-sell startup hydration failed: {e}")
-
-    try:
-        _load_market_context()
-    except Exception as e:
-        logger.error(f"Market-context startup load failed: {e}")
-
+    _build_startup_service(app_container).run()
     _STARTUP_TASKS_RAN = True
 
 
@@ -374,52 +335,11 @@ def create_app(
     """
     app_container = app_container or container
     if run_startup:
-        run_startup_tasks()
+        run_startup_tasks(app_container)
     flask_app = Flask(__name__)
     flask_app.extensions["application_container"] = app_container
     _register_routes(flask_app, app_container)
     return flask_app
-
-def _startup_reconcile():
-    try:
-        # 1. Check required env vars
-        for key in ("ANTHROPIC_API_KEY", "ALPACA_API_KEY", "ALPACA_SECRET_KEY"):
-            if not os.environ.get(key):
-                logger.error(f"Startup: missing required environment variable {key}")
-
-        # 2. Fetch Alpaca positions
-        try:
-            alpaca_positions = broker_service.list_positions()
-            alpaca_symbols = {p.symbol for p in alpaca_positions}
-        except Exception as e:
-            logger.error(f"Startup reconciliation: failed to fetch Alpaca positions: {e}")
-            alpaca_symbols = set()
-            alpaca_positions = []
-
-        # 3. Query DB for symbols with a net open position (more filled buys than sells)
-        db_symbols = set()
-        try:
-            rows = context_repo.startup_db_open_symbols()
-            db_symbols = {row["symbol"] for row in rows if row["symbol"]}
-        except Exception as e:
-            logger.error(f"Startup reconciliation: failed to query trades.db: {e}")
-
-        # 4. Compare and log discrepancies
-        in_alpaca_not_db = alpaca_symbols - db_symbols
-        in_db_not_alpaca = db_symbols - alpaca_symbols
-        for sym in sorted(in_alpaca_not_db):
-            logger.warning(f"Startup reconciliation: {sym} held in Alpaca but no open position tracked in trades.db")
-        for sym in sorted(in_db_not_alpaca):
-            logger.warning(f"Startup reconciliation: {sym} tracked as open in trades.db but not found in Alpaca positions")
-
-        # 5. Summary
-        discrepancies = len(in_alpaca_not_db) + len(in_db_not_alpaca)
-        logger.info(
-            f"Startup reconciliation: {len(alpaca_symbols)} positions in Alpaca, "
-            f"{len(db_symbols)} tracked in DB, {discrepancies} discrepancies"
-        )
-    except Exception as e:
-        logger.error(f"Startup reconciliation failed unexpectedly: {e}")
 
 def _ml_prediction_bucket(score) -> str:
     return entry_policy.ml_prediction_bucket(score)

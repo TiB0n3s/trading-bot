@@ -75,6 +75,7 @@ TESTS = [
     "tests/test_trade_matcher.py",
     "tests/test_live_bias_override.py",
     "tests/test_app_phase0.py",
+    "tests/test_startup_service.py",
     "tests/test_architecture_boundaries.py",
     "tests/test_signal_pipeline.py",
     "tests/test_preflight_service.py",

@@ -147,7 +147,6 @@ TEMPORARY_DB_ACCESS_ALLOWLIST = {
     "prior_session_context.py",
     "rejected_signal_outcome_builder.py",
     "session_gate_report.py",
-    "session_momentum.py",
     "setup_engine.py",
     "signal_event_builder.py",
     "signal_outcome_builder.py",
@@ -176,6 +175,7 @@ APPROVED_MARKET_DATA_ACCESS = {
     "services/market_data_service.py",
     "services/execution_adapters.py",
     "services/momentum_service.py",
+    "services/session_momentum_service.py",
     "live_features.py",
 }
 
@@ -189,7 +189,6 @@ TEMPORARY_MARKET_DATA_ACCESS_ALLOWLIST = {
     "pre_market_research_data.py",
     "rejected_signal_outcome_builder.py",
     "rolling_momentum.py",
-    "session_momentum.py",
     "services/policies/entry_policy.py",
     "services/policies/execution_policy.py",
     "strong_day_participation_report.py",

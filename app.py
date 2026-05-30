@@ -2306,6 +2306,76 @@ def _legacy_update_trend_history(symbol: str, action: str) -> None:
     )
 
 
+def _legacy_check_sell_discipline(
+    *,
+    symbol: str,
+    action: str,
+    price,
+    account_state: dict,
+    dedupe_key: str | None,
+    existing_position,
+) -> _LegacyStageResult:
+    if action != "sell" or not existing_position:
+        return _LEGACY_STAGE_CONTINUE
+
+    try:
+        avg_entry = float(existing_position.get("avg_entry") or 0)
+        current_price = float(existing_position.get("current_price") or price or 0)
+        qty = float(existing_position.get("qty") or 0)
+
+        min_profit_to_sell_pct = 0.50
+
+        if avg_entry > 0 and current_price > 0 and qty > 0:
+            unrealized_pct = (current_price - avg_entry) / avg_entry * 100
+
+            trend = _trend_table.get(symbol) or {}
+            direction = trend.get("direction")
+            strength = trend.get("strength")
+            consecutive_count = int(trend.get("consecutive_count") or 0)
+
+            confirmed_bearish = (
+                direction == "bearish"
+                and strength in ("developing", "confirmed")
+                and consecutive_count >= 2
+            )
+
+            if 0 <= unrealized_pct < min_profit_to_sell_pct and not confirmed_bearish:
+                reason = (
+                    f"profit {unrealized_pct:.2f}% below minimum sell threshold "
+                    f"{min_profit_to_sell_pct:.2f}% without confirmed bearish pressure "
+                    f"(trend={direction}/{strength}, count={consecutive_count})"
+                )
+                return _legacy_reject_current_signal(
+                    symbol=symbol,
+                    action=action,
+                    price=price,
+                    account_state=account_state,
+                    dedupe_key=dedupe_key,
+                    category="sell_profit_threshold",
+                    reason=reason,
+                )
+
+            if -0.75 < unrealized_pct < 0 and not confirmed_bearish:
+                reason = (
+                    f"small red position {unrealized_pct:.2f}% without confirmed bearish sell pressure "
+                    f"(trend={direction}/{strength}, count={consecutive_count})"
+                )
+                return _legacy_reject_current_signal(
+                    symbol=symbol,
+                    action=action,
+                    price=price,
+                    account_state=account_state,
+                    dedupe_key=dedupe_key,
+                    category="sell_discipline",
+                    reason=reason,
+                )
+
+    except Exception as e:
+        logger.warning(f"Sell discipline check failed for {symbol}; fail-open for SELL safety: {e}")
+
+    return _LEGACY_STAGE_CONTINUE
+
+
 def _legacy_process_signal(data, *, runtime_state=None, context_runtime=None, preflight_result=None):
     if runtime_state is None or context_runtime is None:
         symbol, action = normalize_signal_identity(data)
@@ -2419,59 +2489,16 @@ def _legacy_process_signal_with_context(data, runtime_state, context_runtime, pr
     current_et = preflight_result.metadata.get("current_et") or now_et()
     existing_position = preflight_result.metadata.get("existing_position")
 
-    # Sell discipline gate:
-    # Prevent normal TradingPilotAI SELL alerts from closing positions too early.
-    # Bracket stop-loss/take-profit exits are handled by Alpaca/fill_stream and
-    # do not go through this webhook sell path.
-    if action == "sell" and existing_position:
-        try:
-            avg_entry = float(existing_position.get("avg_entry") or 0)
-            current_price = float(existing_position.get("current_price") or price or 0)
-            qty = float(existing_position.get("qty") or 0)
-
-            # Minimum unrealized profit required before a normal SELL signal
-            # is allowed to take profit without stronger bearish confirmation.
-            min_profit_to_sell_pct = 0.50
-
-            if avg_entry > 0 and current_price > 0 and qty > 0:
-                unrealized_pct = (current_price - avg_entry) / avg_entry * 100
-
-                trend = _trend_table.get(symbol) or {}
-                direction = trend.get("direction")
-                strength = trend.get("strength")
-                consecutive_count = int(trend.get("consecutive_count") or 0)
-
-                confirmed_bearish = (
-                    direction == "bearish"
-                    and strength in ("developing", "confirmed")
-                    and consecutive_count >= 2
-                )
-
-                # Do not take tiny profits too early. Let the bracket target
-                # or a stronger move develop unless bearish pressure is confirmed.
-                if 0 <= unrealized_pct < min_profit_to_sell_pct:
-                    if not confirmed_bearish:
-                        reason = (
-                            f"profit {unrealized_pct:.2f}% below minimum sell threshold "
-                            f"{min_profit_to_sell_pct:.2f}% without confirmed bearish pressure "
-                            f"(trend={direction}/{strength}, count={consecutive_count})"
-                        )
-                        if _reject_current_signal("sell_profit_threshold", reason):
-                            return
-
-                # Do not close small red positions on weak/noisy sell alerts.
-                # Let them work unless bearish pressure is confirmed.
-                if -0.75 < unrealized_pct < 0:
-                    if not confirmed_bearish:
-                        reason = (
-                            f"small red position {unrealized_pct:.2f}% without confirmed bearish sell pressure "
-                            f"(trend={direction}/{strength}, count={consecutive_count})"
-                        )
-                        if _reject_current_signal("sell_discipline", reason):
-                            return
-
-        except Exception as e:
-            logger.warning(f"Sell discipline check failed for {symbol}; fail-open for SELL safety: {e}")
+    sell_discipline_result = _legacy_check_sell_discipline(
+        symbol=symbol,
+        action=action,
+        price=price,
+        account_state=account_state,
+        dedupe_key=dedupe_key,
+        existing_position=existing_position,
+    )
+    if sell_discipline_result.rejected:
+        return sell_discipline_result.response
 
     cooldown_key = (symbol, action)
 

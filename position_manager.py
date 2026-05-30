@@ -196,9 +196,16 @@ WEAK_PEAK_LOCK_TIER1_FLOOR_PCT = float(os.getenv("POSITION_MANAGER_WEAK_PEAK_LOC
 WEAK_PEAK_LOCK_TIER2_PEAK_PCT = float(os.getenv("POSITION_MANAGER_WEAK_PEAK_LOCK_TIER2_PEAK_PCT", "0.50"))
 WEAK_PEAK_LOCK_TIER2_FLOOR_PCT = float(os.getenv("POSITION_MANAGER_WEAK_PEAK_LOCK_TIER2_FLOOR_PCT", "0.15"))
 
-# Quality-split exit thresholds:
-# Strong entries get more room — looser giveback tolerance and higher threshold
-# before taking partial profits. Weak entries are managed more tightly once green.
+# Quality-split exit thresholds — three tiers:
+# Strong conviction: looser giveback tolerance, higher min-profit bar before partial exit.
+# Normal strong: standard room (60% giveback, 0.75% min).
+# Weak: managed tightly once green (40% giveback, 0.50% min).
+STRONG_CONVICTION_PROFIT_GIVEBACK_TRIGGER_PCT = float(
+    os.getenv("POSITION_MANAGER_STRONG_CONVICTION_GIVEBACK_TRIGGER_PCT", "70")
+)
+STRONG_CONVICTION_MIN_PROFIT_PARTIAL_PCT = float(
+    os.getenv("POSITION_MANAGER_STRONG_CONVICTION_MIN_PROFIT_PARTIAL_PCT", "1.0")
+)
 STRONG_ENTRY_PROFIT_GIVEBACK_TRIGGER_PCT = float(
     os.getenv("POSITION_MANAGER_STRONG_ENTRY_PROFIT_GIVEBACK_PCT", "60")
 )
@@ -629,6 +636,32 @@ def is_weak_entry_context(entry_ctx):
     return False
 
 
+def is_strong_conviction_entry(entry_ctx: dict) -> bool:
+    """Return True when entry had aligned strong signals — merits looser giveback tolerance.
+
+    Requires ALL of: mid-or-high ML bucket, strong buy-opportunity recommendation,
+    opportunity score >= 10, and non-degraded setup action.  If any signal is missing
+    or contradictory, conservative thresholds apply.
+    """
+    if not entry_ctx:
+        return False
+
+    ml_bucket = str(entry_ctx.get("entry_ml_prediction_bucket") or "").lower()
+    buy_opp_rec = str(entry_ctx.get("entry_buy_opportunity_recommendation") or "").lower()
+    setup_action = str(entry_ctx.get("entry_setup_policy_action") or "").lower()
+    try:
+        opp_score = float(entry_ctx.get("entry_buy_opportunity_score") or 0)
+    except Exception:
+        opp_score = 0.0
+
+    return (
+        ml_bucket in ("high_55_plus", "mid_50_55")
+        and buy_opp_rec == "strong_buy_candidate"
+        and opp_score >= 10
+        and setup_action in ("boost", "allow", "neutral")
+    )
+
+
 def peak_aware_breakeven_floor(peak_pl_pct: float, weak_entry: bool) -> float:
     """Dynamic breakeven floor that rises with peak P&L.
 
@@ -762,17 +795,24 @@ def evaluate_position(position, state, session_momentum=None):
     # round-trip back to breakeven/red, especially for weaker entry contexts.
     weak_entry_context = is_weak_entry_context(entry_ctx)
 
-    # Quality-split thresholds — weak entries managed more tightly once green.
-    giveback_trigger_pct = (
-        WEAK_ENTRY_PROFIT_GIVEBACK_TRIGGER_PCT
-        if weak_entry_context
-        else STRONG_ENTRY_PROFIT_GIVEBACK_TRIGGER_PCT
+    # Three-tier quality-split thresholds:
+    #   strong_conviction: all signals aligned → most room (70% giveback, 1.0% min)
+    #   normal strong:     standard room (60% giveback, 0.75% min)
+    #   weak:              managed tightly (40% giveback, 0.50% min)
+    # is_strong_conviction_entry is only evaluated when entry is NOT already weak.
+    strong_conviction_entry = (
+        is_strong_conviction_entry(entry_ctx) if not weak_entry_context else False
     )
-    min_profit_partial_pct = (
-        WEAK_ENTRY_MIN_PROFIT_PARTIAL_PCT
-        if weak_entry_context
-        else MIN_PROFIT_PARTIAL_PCT
-    )
+
+    if strong_conviction_entry:
+        giveback_trigger_pct = STRONG_CONVICTION_PROFIT_GIVEBACK_TRIGGER_PCT   # 70%
+        min_profit_partial_pct = STRONG_CONVICTION_MIN_PROFIT_PARTIAL_PCT       # 1.0%
+    elif weak_entry_context:
+        giveback_trigger_pct = WEAK_ENTRY_PROFIT_GIVEBACK_TRIGGER_PCT           # 40%
+        min_profit_partial_pct = WEAK_ENTRY_MIN_PROFIT_PARTIAL_PCT              # 0.50%
+    else:
+        giveback_trigger_pct = STRONG_ENTRY_PROFIT_GIVEBACK_TRIGGER_PCT         # 60%
+        min_profit_partial_pct = MIN_PROFIT_PARTIAL_PCT                          # 0.75%
 
     # Peak-aware breakeven lock:
     # Trigger arms at the lowest tier (0.30%) — closes the gap where trades

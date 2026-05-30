@@ -526,6 +526,28 @@ def _get_bars_with_fallback(symbol: str, timeframe: str, **kwargs):
         raise
 
 
+def _compute_dominant_limiter(account_state: dict) -> str:
+    """Return the label of the source that set the tightest pre-execution size cap."""
+    caps = []
+    if (account_state.get("weak_prediction_setup_gate") or {}).get("triggered"):
+        caps.append(("weak_prediction_degraded", 0.50))
+    if account_state.get("setup_degraded"):
+        caps.append(("degraded_setup", account_state["setup_degraded"].get("size_cap_pct", 99)))
+    if account_state.get("unrecognized_label_cap"):
+        caps.append(("unrecognized_label", account_state["unrecognized_label_cap"].get("cap_pct", 99)))
+    if account_state.get("prediction_confident_weak_cap"):
+        caps.append(("prediction_confident_weak", account_state["prediction_confident_weak_cap"].get("cap_pct", 99)))
+    if account_state.get("session_momentum_size_cap"):
+        caps.append(("session_momentum", account_state["session_momentum_size_cap"].get("cap_pct", 99)))
+    if account_state.get("strategy_score_size_cap"):
+        caps.append(("strategy_brain", account_state["strategy_score_size_cap"].get("cap_pct", 99)))
+    if account_state.get("setup_policy_override"):
+        caps.append(("setup_policy_override", 0.75))
+    if not caps:
+        return "uncapped"
+    return min(caps, key=lambda x: x[1])[0]
+
+
 def _apply_buy_opportunity_sizing(
     *,
     symbol: str,
@@ -539,6 +561,8 @@ def _apply_buy_opportunity_sizing(
 
     This does not approve trades that would otherwise be rejected.
     It only caps/reduces size on trades that already passed the existing gates.
+    Strong-conviction lift: when all positive signals align with no existing cap,
+    applies a modest size increase (default 1.10x, max 1.50%).
     """
     base_position_size_pct = float(base_position_size_pct or 0)
     risk_multiplier = float(risk_multiplier or 1.0)
@@ -576,6 +600,46 @@ def _apply_buy_opportunity_sizing(
     if rec == "strong_buy_candidate" or (score is not None and score >= 10):
         bucket = "strong_buy_candidate"
         cap = None
+
+        # Strong-conviction lift: apply a modest size increase when all positive
+        # signals align and no pre-execution cap was already set by risk gates.
+        # Only runs when sizing is not already constrained.
+        _tb_score = float(
+            (account_state.get("strategy_observation") or {})
+            .get("trader_brain", {}).get("score") or 0
+        )
+        _smg_sev = (account_state.get("session_momentum_gate") or {}).get("severity")
+        _setup_act = (account_state.get("setup_observation") or {}).get("setup_policy_action")
+        _has_strong_context = (
+            _tb_score >= 70
+            and _smg_sev in ("pass", None)
+            and _setup_act in ("boost", "allow", "neutral")
+            and account_state.get("max_position_size_pct_override") is None
+        )
+        if _has_strong_context:
+            lift_mult = _env_float("BUY_OPPORTUNITY_STRONG_CONVICTION_LIFT_MULT", 1.10)
+            max_lift = _env_float("BUY_OPPORTUNITY_STRONG_CONVICTION_MAX_PCT", 1.50)
+            final_pct = min(adjusted * lift_mult, max_lift)
+            account_state["buy_opportunity_sizing"] = {
+                "enabled": True,
+                "bucket": "strong_buy_candidate_lift",
+                "score": score,
+                "recommendation": rec,
+                "original_pct": round(adjusted, 4),
+                "lift_mult": lift_mult,
+                "final_pct": round(final_pct, 4),
+                "reason": (
+                    f"strong_conviction_lift: score={score} tb={_tb_score:.0f} "
+                    f"session={_smg_sev} setup={_setup_act} "
+                    f"lift={lift_mult}x final={final_pct:.3f}"
+                ),
+            }
+            logger.info(
+                f"BUY strong-conviction lift for {symbol}: "
+                f"score={score} tb={_tb_score:.0f} {adjusted:.3f}% → {final_pct:.3f}%"
+            )
+            return final_pct
+
     elif rec == "small_buy_candidate" or (score is not None and score >= 7):
         bucket = "small_buy_candidate"
         cap = small_cap
@@ -1768,6 +1832,9 @@ def log_trade(signal, decision, order, account_state=None):
             "trader_brain_reason",
             "trader_brain_positive_factors",
             "trader_brain_risk_factors",
+            "session_momentum_severity",
+            "effective_size_cap_pct",
+            "dominant_limiter",
         ]
 
         values = [
@@ -1827,6 +1894,9 @@ def log_trade(signal, decision, order, account_state=None):
             trader_brain.get("reason"),
             json.dumps(trader_brain.get("positive_factors") or [], sort_keys=True),
             json.dumps(trader_brain.get("risk_factors") or [], sort_keys=True),
+            (account_state or {}).get("conviction_stack", {}).get("session_severity"),
+            (account_state or {}).get("conviction_stack", {}).get("effective_cap_pct"),
+            (account_state or {}).get("dominant_limiter"),
         ]
 
         placeholders = ", ".join(["?"] * len(values))
@@ -2023,6 +2093,9 @@ def log_rejection(symbol, action, category, reason, price=None, account_state=No
         "trader_brain_reason",
         "trader_brain_positive_factors",
         "trader_brain_risk_factors",
+        "session_momentum_severity",
+        "effective_size_cap_pct",
+        "dominant_limiter",
     ]
 
     values = [
@@ -2071,6 +2144,9 @@ def log_rejection(symbol, action, category, reason, price=None, account_state=No
         trader_brain.get("reason"),
         json.dumps(trader_brain.get("positive_factors") or [], sort_keys=True),
         json.dumps(trader_brain.get("risk_factors") or [], sort_keys=True),
+        (account_state or {}).get("conviction_stack", {}).get("session_severity"),
+        (account_state or {}).get("conviction_stack", {}).get("effective_cap_pct"),
+        (account_state or {}).get("dominant_limiter"),
     ]
 
     placeholders = ", ".join(["?"] * len(values))
@@ -5494,13 +5570,15 @@ def process_signal(data):
             "ml_bucket": _ml_prediction_bucket(_cs_ml_raw),
             "effective_cap_pct": account_state.get("max_position_size_pct_override"),
         }
+        account_state["dominant_limiter"] = _compute_dominant_limiter(account_state)
         logger.info(
             f"Conviction stack for {symbol} BUY: "
             f"buy_opp={account_state['conviction_stack']['buy_opportunity']} "
             f"strategy={account_state['conviction_stack']['strategy_score']:.0f} "
             f"session={account_state['conviction_stack']['session_severity']} "
             f"ml_bucket={account_state['conviction_stack']['ml_bucket']} "
-            f"cap={account_state['conviction_stack']['effective_cap_pct']}"
+            f"cap={account_state['conviction_stack']['effective_cap_pct']} "
+            f"dominant={account_state['dominant_limiter']}"
         )
 
     # Pre-Claude affordability gate.

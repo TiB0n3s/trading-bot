@@ -415,6 +415,15 @@ MIGRATIONS: tuple[Migration, ...] = (
             "ALTER TABLE matched_trades ADD COLUMN capture_ratio REAL",
         ),
     ),
+    Migration(
+        migration_id="20260530_015_conviction_stack_fields",
+        description="Add conviction stack attribution fields to trades for interaction reporting.",
+        statements=(
+            "ALTER TABLE trades ADD COLUMN session_momentum_severity TEXT",
+            "ALTER TABLE trades ADD COLUMN effective_size_cap_pct REAL",
+            "ALTER TABLE trades ADD COLUMN dominant_limiter TEXT",
+        ),
+    ),
 )
 
 

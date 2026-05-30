@@ -2547,6 +2547,327 @@ def winner_became_loser(target_date: str) -> bool:
         return True
 
 
+def conviction_stack_report(target_date: str) -> bool:
+    """Show how conviction stack caps distributed and which source dominated on a given date."""
+    db_path = BASE_DIR / "trades.db"
+    if not db_path.exists():
+        print("[WARN] trades.db not found")
+        return False
+
+    import sqlite3
+    with sqlite3.connect(f"file:{db_path}?mode=ro", uri=True) as con:
+        con.row_factory = sqlite3.Row
+
+        print(f"\n=== Conviction Stack Report: {target_date} ===\n")
+
+        rows = con.execute("""
+            SELECT
+                effective_size_cap_pct,
+                dominant_limiter,
+                buy_opportunity_recommendation,
+                setup_policy_action,
+                session_momentum_severity,
+                trader_brain_score,
+                ml_prediction_bucket,
+                approved
+            FROM trades
+            WHERE date(timestamp) = ?
+              AND action = 'buy'
+            ORDER BY timestamp
+        """, (target_date,)).fetchall()
+
+        if not rows:
+            print(f"  No BUY signals for {target_date}.")
+            return True
+
+        total = len(rows)
+        approved = sum(1 for r in rows if r["approved"])
+        capped = sum(1 for r in rows if r["effective_size_cap_pct"] is not None)
+        uncapped = total - capped
+
+        print(f"  BUY signals: {total}  approved: {approved}  capped: {capped}  uncapped: {uncapped}\n")
+
+        # Section 1: Cap distribution
+        print("  Cap Distribution (max_position_size_pct_override before execution):")
+        print(f"  {'Cap Level':<20} {'Count':>6} {'Appr':>5} {'Appr%':>6}")
+        print(f"  {'-'*20} {'-'*6} {'-'*5} {'-'*6}")
+
+        cap_buckets = [
+            ("uncapped (None)", lambda r: r["effective_size_cap_pct"] is None),
+            ("1.25%+",          lambda r: r["effective_size_cap_pct"] is not None and float(r["effective_size_cap_pct"]) >= 1.25),
+            ("0.90–1.25%",      lambda r: r["effective_size_cap_pct"] is not None and 0.90 <= float(r["effective_size_cap_pct"]) < 1.25),
+            ("0.80–0.90%",      lambda r: r["effective_size_cap_pct"] is not None and 0.80 <= float(r["effective_size_cap_pct"]) < 0.90),
+            ("0.75–0.80%",      lambda r: r["effective_size_cap_pct"] is not None and 0.75 <= float(r["effective_size_cap_pct"]) < 0.80),
+            ("0.65–0.75%",      lambda r: r["effective_size_cap_pct"] is not None and 0.65 <= float(r["effective_size_cap_pct"]) < 0.75),
+            ("0.50–0.65%",      lambda r: r["effective_size_cap_pct"] is not None and 0.50 <= float(r["effective_size_cap_pct"]) < 0.65),
+            ("below 0.50%",     lambda r: r["effective_size_cap_pct"] is not None and float(r["effective_size_cap_pct"]) < 0.50),
+        ]
+
+        for label, pred in cap_buckets:
+            bucket_rows = [r for r in rows if pred(r)]
+            if not bucket_rows:
+                continue
+            n = len(bucket_rows)
+            appr = sum(1 for r in bucket_rows if r["approved"])
+            pct = f"{appr/n*100:.0f}%" if n else "—"
+            print(f"  {label:<20} {n:>6} {appr:>5} {pct:>6}")
+
+        # Section 2: Dominant limiter breakdown
+        print(f"\n  Dominant Limiter Breakdown (which source set the tightest pre-execution cap):")
+        print(f"  {'Limiter':<28} {'Count':>6} {'Appr':>5} {'Appr%':>6}")
+        print(f"  {'-'*28} {'-'*6} {'-'*5} {'-'*6}")
+
+        from collections import Counter
+        limiter_counts: Counter = Counter()
+        limiter_approved: Counter = Counter()
+        for r in rows:
+            lim = r["dominant_limiter"] or "unknown"
+            limiter_counts[lim] += 1
+            if r["approved"]:
+                limiter_approved[lim] += 1
+
+        for lim, n in limiter_counts.most_common():
+            appr = limiter_approved[lim]
+            pct = f"{appr/n*100:.0f}%" if n else "—"
+            flag = " ← dominant" if capped > 0 and n / max(capped, 1) > 0.40 and lim != "uncapped" else ""
+            print(f"  {lim:<28} {n:>6} {appr:>5} {pct:>6}{flag}")
+
+        # Section 3: Stacking analysis — top combos for capped trades
+        capped_rows = [r for r in rows if r["effective_size_cap_pct"] is not None]
+        if capped_rows:
+            print(f"\n  Cap Stacking: top combos among {len(capped_rows)} capped signals")
+            print(f"  {'dominant_limiter':<26} {'buy_opp':<20} {'setup_action':<12} {'N':>4} {'Appr':>5}")
+            print(f"  {'-'*26} {'-'*20} {'-'*12} {'-'*4} {'-'*5}")
+
+            combo_counts: Counter = Counter()
+            combo_approved: Counter = Counter()
+            for r in capped_rows:
+                key = (
+                    (r["dominant_limiter"] or "unknown")[:25],
+                    (r["buy_opportunity_recommendation"] or "—")[:19],
+                    (r["setup_policy_action"] or "—")[:11],
+                )
+                combo_counts[key] += 1
+                if r["approved"]:
+                    combo_approved[key] += 1
+
+            for combo, n in combo_counts.most_common(5):
+                appr = combo_approved[combo]
+                print(f"  {combo[0]:<26} {combo[1]:<20} {combo[2]:<12} {n:>4} {appr:>5}")
+
+        print()
+        return True
+
+
+def buy_opportunity_report(target_date: str) -> bool:
+    """Validate buy-opportunity sizing: bucket distribution, P&L correlation, cap dominance."""
+    db_path = BASE_DIR / "trades.db"
+    if not db_path.exists():
+        print("[WARN] trades.db not found")
+        return False
+
+    import sqlite3
+    with sqlite3.connect(f"file:{db_path}?mode=ro", uri=True) as con:
+        con.row_factory = sqlite3.Row
+
+        print(f"\n=== Buy-Opportunity Sizing Report: {target_date} ===\n")
+
+        # Section 1: Signal counts and approval rate by bucket
+        rows = con.execute("""
+            SELECT
+                buy_opportunity_recommendation AS rec,
+                COUNT(*) AS signals,
+                SUM(approved) AS approved,
+                AVG(CAST(approved AS REAL)) * 100 AS appr_pct,
+                MIN(buy_opportunity_score) AS min_score,
+                MAX(buy_opportunity_score) AS max_score,
+                AVG(buy_opportunity_score) AS avg_score
+            FROM trades
+            WHERE date(timestamp) = ?
+              AND action = 'buy'
+              AND buy_opportunity_recommendation IS NOT NULL
+            GROUP BY buy_opportunity_recommendation
+            ORDER BY AVG(buy_opportunity_score) DESC
+        """, (target_date,)).fetchall()
+
+        if not rows:
+            print(f"  No scored BUY signals for {target_date}.")
+            return True
+
+        print("  Signal Counts by Buy-Opportunity Bucket:")
+        print(f"  {'Bucket':<22} {'Signals':>8} {'Appr':>5} {'Appr%':>6} {'AvgScore':>9}")
+        print(f"  {'-'*22} {'-'*8} {'-'*5} {'-'*6} {'-'*9}")
+        for r in rows:
+            pct = f"{r['appr_pct']:.0f}%" if r["appr_pct"] is not None else "—"
+            avg_s = f"{r['avg_score']:.1f}" if r["avg_score"] is not None else "—"
+            print(f"  {(r['rec'] or '—'):<22} {r['signals']:>8} {(r['approved'] or 0):>5} {pct:>6} {avg_s:>9}")
+
+        # Section 2: Realized P&L correlation by bucket
+        pnl_rows = con.execute("""
+            SELECT
+                t.buy_opportunity_recommendation AS rec,
+                COUNT(mt.id) AS exits,
+                AVG(mt.realized_pnl_pct) AS avg_pnl,
+                SUM(CASE WHEN mt.realized_pnl_pct > 0 THEN 1 ELSE 0 END) AS wins,
+                AVG(mt.capture_ratio) AS avg_capture
+            FROM trades t
+            JOIN matched_trades mt
+              ON mt.symbol = t.symbol
+             AND ABS(julianday(mt.entry_timestamp) - julianday(t.timestamp)) < 0.01
+            WHERE date(t.timestamp) = ?
+              AND t.action = 'buy'
+              AND t.approved = 1
+              AND t.buy_opportunity_recommendation IS NOT NULL
+            GROUP BY t.buy_opportunity_recommendation
+            ORDER BY AVG(mt.realized_pnl_pct) DESC
+        """, (target_date,)).fetchall()
+
+        if pnl_rows:
+            print(f"\n  Realized P&L by Bucket (from matched_trades):")
+            print(f"  {'Bucket':<22} {'Exits':>6} {'AvgPnL':>8} {'WinRate':>8} {'AvgCap':>8}")
+            print(f"  {'-'*22} {'-'*6} {'-'*8} {'-'*8} {'-'*8}")
+            for r in pnl_rows:
+                avg_pnl_s = f"{r['avg_pnl']:+.3f}%" if r["avg_pnl"] is not None else "—"
+                win_rate_s = f"{r['wins']/r['exits']*100:.0f}%" if r["exits"] else "—"
+                cap_s = f"{r['avg_capture']:.3f}" if r["avg_capture"] is not None else "—"
+                print(f"  {(r['rec'] or '—'):<22} {r['exits']:>6} {avg_pnl_s:>8} {win_rate_s:>8} {cap_s:>8}")
+        else:
+            print(f"\n  No matched exit data yet for {target_date}.")
+
+        # Section 3: Cap dominance check
+        cap_rows = con.execute("""
+            SELECT
+                buy_opportunity_recommendation AS rec,
+                dominant_limiter,
+                COUNT(*) AS n
+            FROM trades
+            WHERE date(timestamp) = ?
+              AND action = 'buy'
+              AND buy_opportunity_recommendation IS NOT NULL
+            GROUP BY buy_opportunity_recommendation, dominant_limiter
+            ORDER BY rec, n DESC
+        """, (target_date,)).fetchall()
+
+        if cap_rows:
+            print(f"\n  Cap Dominance (buy_opportunity bucket vs actual dominant limiter):")
+            print(f"  {'Bucket':<22} {'Dominant Limiter':<28} {'Count':>6}")
+            print(f"  {'-'*22} {'-'*28} {'-'*6}")
+            for r in cap_rows:
+                print(f"  {(r['rec'] or '—'):<22} {(r['dominant_limiter'] or 'uncapped'):<28} {r['n']:>6}")
+
+        # Section 4: Double-counting flag
+        dc_rows = con.execute("""
+            SELECT COUNT(*) AS n
+            FROM trades
+            WHERE date(timestamp) = ?
+              AND action = 'buy'
+              AND setup_policy_action IN ('block', 'error')
+              AND buy_opportunity_recommendation = 'avoid'
+        """, (target_date,)).fetchone()
+        if dc_rows and dc_rows["n"]:
+            print(f"\n  ⚠ Double-penalized signals (setup block/error AND buy_opp avoid): {dc_rows['n']}")
+            print("    These trades are penalized by both setup_policy and buy_opportunity.")
+            print("    No action required — both signals are independently valid — but note the overlap.")
+
+        print()
+        return True
+
+
+def claude_context_audit(target_date: str) -> bool:
+    """Approval rate trend, rejection mix, and Claude confidence distribution around context changes."""
+    db_path = BASE_DIR / "trades.db"
+    if not db_path.exists():
+        print("[WARN] trades.db not found")
+        return False
+
+    import sqlite3
+    baseline_date = "2026-05-29"  # date before market_context_summary was added
+
+    with sqlite3.connect(f"file:{db_path}?mode=ro", uri=True) as con:
+        con.row_factory = sqlite3.Row
+
+        print(f"\n=== Claude Context Audit: {target_date} ===\n")
+        print(f"  Baseline: {baseline_date} (pre-market_context_summary). Target: {target_date}\n")
+
+        # Section 1: Approval rate by date (recent N sessions)
+        daily_rows = con.execute("""
+            SELECT
+                date(timestamp) AS day,
+                COUNT(*) AS total,
+                SUM(approved) AS approved,
+                AVG(CAST(approved AS REAL)) * 100 AS appr_pct
+            FROM trades
+            WHERE action = 'buy'
+              AND date(timestamp) >= date(?, '-14 days')
+            GROUP BY date(timestamp)
+            ORDER BY date(timestamp)
+        """, (target_date,)).fetchall()
+
+        if daily_rows:
+            print("  Daily BUY Approval Rate (last 14 days):")
+            print(f"  {'Date':<12} {'Total':>6} {'Appr':>5} {'Rate':>6}  Note")
+            print(f"  {'-'*12} {'-'*6} {'-'*5} {'-'*6}  {'-'*20}")
+            for r in daily_rows:
+                pct = f"{r['appr_pct']:.0f}%" if r["appr_pct"] is not None else "—"
+                note = ""
+                if r["day"] == baseline_date:
+                    note = "← pre-context-summary"
+                elif r["day"] > baseline_date:
+                    note = "post-context-summary"
+                print(f"  {r['day']:<12} {r['total']:>6} {(r['approved'] or 0):>5} {pct:>6}  {note}")
+
+        # Section 2: Rejection category mix for target_date
+        rej_rows = con.execute("""
+            SELECT
+                rejection_reason,
+                COUNT(*) AS n
+            FROM trades
+            WHERE date(timestamp) = ?
+              AND action = 'buy'
+              AND approved = 0
+              AND rejection_reason IS NOT NULL
+            ORDER BY n DESC
+            LIMIT 12
+        """, (target_date,)).fetchall()
+
+        if rej_rows:
+            print(f"\n  Top Rejection Reasons for {target_date}:")
+            print(f"  {'Reason (prefix)':<40} {'Count':>6}")
+            print(f"  {'-'*40} {'-'*6}")
+            for r in rej_rows:
+                reason = (r["rejection_reason"] or "")[:39]
+                print(f"  {reason:<40} {r['n']:>6}")
+
+        # Section 3: Claude confidence distribution for approved trades
+        conf_rows = con.execute("""
+            SELECT
+                confidence,
+                COUNT(*) AS n,
+                ROUND(COUNT(*) * 100.0 / SUM(COUNT(*)) OVER (), 1) AS pct
+            FROM trades
+            WHERE action = 'buy'
+              AND approved = 1
+              AND confidence IS NOT NULL
+              AND date(timestamp) >= date(?, '-30 days')
+            GROUP BY confidence
+            ORDER BY n DESC
+        """, (target_date,)).fetchall()
+
+        if conf_rows:
+            print(f"\n  Claude Confidence Distribution (approved BUYs, last 30 days):")
+            print(f"  {'Confidence':<14} {'Count':>6} {'Pct':>6}")
+            print(f"  {'-'*14} {'-'*6} {'-'*6}")
+            for r in conf_rows:
+                print(f"  {(r['confidence'] or '—'):<14} {r['n']:>6} {r['pct']:>5.1f}%")
+
+        print(
+            "\n  NOTE: Meaningful before/after comparison requires 5+ post-change sessions."
+            "\n  Check again after 2026-06-06 for statistically meaningful patterns."
+        )
+        print()
+        return True
+
+
 def main():
     env_loaded = load_env_file()
     print(f"env_file_loaded={env_loaded}")
@@ -2606,6 +2927,15 @@ def main():
     if command == "peak-bucket-report":
         date_arg = sys.argv[2] if len(sys.argv) > 2 else None
         return 0 if peak_bucket_report(date_arg) else 1
+
+    if command == "conviction-stack-report":
+        return 0 if conviction_stack_report(target_date) else 1
+
+    if command == "buy-opportunity-report":
+        return 0 if buy_opportunity_report(target_date) else 1
+
+    if command == "claude-context-audit":
+        return 0 if claude_context_audit(target_date) else 1
 
     if command == "premarket":
         checks = []

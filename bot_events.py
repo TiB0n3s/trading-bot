@@ -16,47 +16,21 @@ break trading execution.
 
 import argparse
 import json
-from datetime import datetime
-from pathlib import Path
 
-import pytz
+from services.bot_events_service import build_default_bot_events_service, now_s
 
-from db import DB_PATH, get_connection
+_bot_events_service = None
 
 
-ET = pytz.timezone("America/New_York")
-
-
-def now_s():
-    return datetime.now(ET).strftime("%Y-%m-%d %H:%M:%S")
+def get_bot_events_service():
+    global _bot_events_service
+    if _bot_events_service is None:
+        _bot_events_service = build_default_bot_events_service()
+    return _bot_events_service
 
 
 def init_bot_events_table():
-    with get_connection(DB_PATH) as con:
-        con.execute("""
-            CREATE TABLE IF NOT EXISTS bot_events (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                timestamp TEXT NOT NULL,
-                event_type TEXT NOT NULL,
-                symbol TEXT,
-                action TEXT,
-                decision TEXT,
-                severity TEXT,
-                reason TEXT,
-                source TEXT,
-                payload_json TEXT
-            )
-        """)
-
-        con.execute("""
-            CREATE INDEX IF NOT EXISTS idx_bot_events_timestamp
-            ON bot_events(timestamp)
-        """)
-
-        con.execute("""
-            CREATE INDEX IF NOT EXISTS idx_bot_events_type_symbol
-            ON bot_events(event_type, symbol)
-        """)
+    return get_bot_events_service().init_table()
 
 
 def log_event(
@@ -69,86 +43,25 @@ def log_event(
     source=None,
     payload=None,
 ):
-    """Insert one event into bot_events. Fail-open."""
-    try:
-        init_bot_events_table()
-
-        payload_json = None
-        if payload is not None:
-            try:
-                payload_json = json.dumps(payload, sort_keys=True, default=str)
-            except Exception:
-                payload_json = json.dumps({"unserializable_payload": str(payload)})
-
-        with get_connection(DB_PATH) as con:
-            con.execute("""
-                INSERT INTO bot_events (
-                    timestamp,
-                    event_type,
-                    symbol,
-                    action,
-                    decision,
-                    severity,
-                    reason,
-                    source,
-                    payload_json
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """, (
-                now_s(),
-                event_type,
-                symbol,
-                action,
-                decision,
-                severity,
-                reason,
-                source,
-                payload_json,
-            ))
-
-        return True
-
-    except Exception:
-        return False
+    return get_bot_events_service().log_event(
+        event_type=event_type,
+        symbol=symbol,
+        action=action,
+        decision=decision,
+        severity=severity,
+        reason=reason,
+        source=source,
+        payload=payload,
+    )
 
 
 def fetch_events(limit=50, event_type=None, symbol=None, since=None):
-    init_bot_events_table()
-
-    params = []
-    where = ["1=1"]
-
-    if event_type:
-        where.append("event_type = ?")
-        params.append(event_type)
-
-    if symbol:
-        where.append("symbol = ?")
-        params.append(symbol.upper())
-
-    if since:
-        where.append("timestamp >= ?")
-        params.append(since)
-
-    params.append(limit)
-
-    with get_connection(DB_PATH) as con:
-        return con.execute(f"""
-            SELECT
-                id,
-                timestamp,
-                event_type,
-                symbol,
-                action,
-                decision,
-                severity,
-                reason,
-                source,
-                payload_json
-            FROM bot_events
-            WHERE {' AND '.join(where)}
-            ORDER BY id DESC
-            LIMIT ?
-        """, params).fetchall()
+    return get_bot_events_service().fetch_events(
+        limit=limit,
+        event_type=event_type,
+        symbol=symbol,
+        since=since,
+    )
 
 
 def main():

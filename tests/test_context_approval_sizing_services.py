@@ -4,13 +4,20 @@
 from __future__ import annotations
 
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from services.approval_service import evaluate_approval_decision
-from services.context_builder import build_final_signal_context
+from services.context_builder import (
+    ContextAssemblyDeps,
+    build_final_signal_context,
+    build_initial_signal_context,
+)
+from services.setup_context_service import SetupContextDeps
+from services.signal_models import SignalRuntimeState
 from services.sizing_service import apply_final_sizing, apply_size_cap, build_conviction_stack
 
 
@@ -33,6 +40,73 @@ def test_context_builder_sanitizes_claude_context():
         3,
         "summary confirmations",
     )
+
+
+def test_initial_context_builder_hydrates_buy_context():
+    account_state = {}
+    state = SignalRuntimeState(
+        raw_signal={"symbol": "AAPL", "action": "buy", "price": 325.0},
+        symbol="AAPL",
+        action="buy",
+        received_at=datetime.now(timezone.utc),
+        account_state=account_state,
+    )
+
+    class _Log:
+        def info(self, *_args, **_kwargs):
+            pass
+
+        def warning(self, *_args, **_kwargs):
+            pass
+
+    built = build_initial_signal_context(
+        state,
+        ContextAssemblyDeps(
+            execution_mode="paper",
+            market_bias={"AAPL": {"bias": "buy"}},
+            trend_table={"AAPL": {"direction": "bullish"}},
+            rolling_symbol_context=lambda symbol: {"symbol": symbol, "special_labels": ["x"]},
+            prior_session_context=lambda symbol: {"symbol": symbol, "session_return_pct": 3.2},
+            build_tape_context=lambda symbol, current_price: {
+                "classification": {"label": "clean_momentum"},
+                "state": {"latest_bar_timestamp": datetime.now(timezone.utc).isoformat()},
+                "ok": True,
+                "bar_count": 12,
+            },
+            get_momentum=lambda symbol, price, premarket_bias=None: {
+                "direction": "rising",
+                "momentum_pct": 0.2,
+                "premarket_bias": premarket_bias,
+            },
+            setup_context_deps=SetupContextDeps(
+                build_snapshot=lambda symbol: {"setup_label": "clean"},
+                evaluate_setup_policy=lambda setup_label: {
+                    "setup_policy_action": "boost",
+                    "reason": "setup_policy:boost",
+                },
+                upsert_recent_favorable_setup=lambda **kwargs: None,
+                get_recent_favorable_setup=lambda **kwargs: {
+                    "setup_label": "clean",
+                    "setup_policy_action": "boost",
+                    "observed_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                },
+                now=datetime.now,
+                recent_favorable_setup_ttl_minutes=15,
+                log=_Log(),
+            ),
+            log=_Log(),
+        ),
+    )
+
+    assert_equal(account_state["execution_mode"], "paper", "execution mode")
+    assert_equal(account_state["prior_session"]["session_return_pct"], 3.2, "prior session")
+    assert_equal(account_state["tape"]["label"], "clean_momentum", "tape label")
+    assert_equal(account_state["tape"]["tape_bar_age_seconds"] is not None, True, "tape age")
+    assert_equal(account_state["momentum"]["premarket_bias"], "buy", "momentum bias")
+    assert_equal(account_state["premarket_alignment_source"], "live_tape", "alignment source")
+    assert_equal(account_state["setup_observation"]["setup_label"], "clean", "setup")
+    assert_equal(account_state["recent_favorable_setup"]["setup_label"], "clean", "recent setup")
+    assert_equal(built.setup.data["setup_label"], "clean", "built setup")
 
 
 def test_approval_service_converts_low_confidence_to_category():
@@ -100,6 +174,7 @@ def test_conviction_stack_sets_dominant_limiter():
 def main():
     tests = [
         test_context_builder_sanitizes_claude_context,
+        test_initial_context_builder_hydrates_buy_context,
         test_approval_service_converts_low_confidence_to_category,
         test_sizing_service_preserves_legacy_sell_default_size,
         test_apply_size_cap_keeps_tightest_cap,

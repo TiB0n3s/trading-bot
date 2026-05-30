@@ -119,9 +119,9 @@ def _base_patches(**overrides):
         ),
         "app.get_momentum": MagicMock(return_value=None),
         # Setup/signal history
-        "app._build_setup_observation": MagicMock(return_value={}),
-        "app._remember_favorable_setup": MagicMock(),
-        "app._get_recent_favorable_setup": MagicMock(return_value=None),
+        "services.context_builder.build_setup_observation": MagicMock(return_value={}),
+        "services.context_builder.remember_favorable_setup": MagicMock(),
+        "services.context_builder.get_recent_favorable_setup": MagicMock(return_value=None),
         "app._refresh_signal_history": MagicMock(),
         "app._compute_trend": MagicMock(
             return_value={

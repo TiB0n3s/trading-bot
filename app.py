@@ -24,8 +24,22 @@ from services import dedupe_service
 from services.observability import metrics_snapshot
 from services.policies import entry_policy, execution_policy, sizing_policy
 from services.policy_controls import public_policy_control_config
-from services.approval_service import evaluate_approval_decision
-from services.context_builder import build_final_signal_context
+from services.approval_service import (
+    ApprovalDecision,
+    decision_policy_rejection,
+    evaluate_approval_decision,
+    live_bias_rejection,
+    opportunity_score_rejection,
+    prediction_gate_rejection,
+    session_momentum_rejection,
+    setup_policy_rejection,
+    strategy_memory_rejection,
+    trend_confirmation_rejection,
+)
+from services.context_builder import (
+    ContextAssemblyDeps,
+    build_legacy_signal_context,
+)
 from services.preflight_service import (
     PreflightDeps,
     PreflightService,
@@ -37,6 +51,12 @@ from services.signal_pipeline import SignalPipelineDeps
 from services.signal_models import SignalRuntimeState
 from services import trend_context_service
 from services import trade_audit_service
+from services.setup_context_service import (
+    SetupContextDeps,
+    is_degraded_setup,
+    is_favorable_setup_label,
+    is_unrecognized_setup_label,
+)
 from repositories import context_repo, cooldown_repo, trades_repo
 from indicator_state import (
     is_fast_lane_buy_flip,
@@ -225,6 +245,7 @@ ENFORCE_ADAPTIVE_CHURN_REENTRY = os.getenv(
     "true"
 ).strip().lower() in ("1", "true", "yes", "on")
 SIGNAL_WORKER_COUNT = int(os.environ.get("SIGNAL_WORKER_COUNT", "3"))
+RECENT_FAVORABLE_SETUP_TTL_MINUTES = 15
 _signal_executor = None
 _STARTUP_TASKS_RAN = False
 
@@ -251,8 +272,6 @@ def run_startup_tasks() -> None:
         _init_db()
     except Exception as e:
         logger.error(f"DB init failed during startup: {e}")
-
-    RECENT_FAVORABLE_SETUP_TTL_MINUTES = 15
 
     try:
         ensure_recent_favorable_setups_table()
@@ -408,141 +427,8 @@ def _startup_reconcile():
     except Exception as e:
         logger.error(f"Startup reconciliation failed unexpectedly: {e}")
 
-def _observe_setup_policy(setup_label: str | None) -> dict:
-    """
-    Observe-only setup policy evaluation.
-
-    This computes what setup_policy.py *would* do, but does not change approval,
-    confidence, or position sizing yet.
-    """
-    try:
-        policy = evaluate_setup_policy(setup_label)
-    except Exception as e:
-        logger.warning(f"setup policy evaluation failed for label={setup_label!r}: {e}")
-        return {
-            "setup_policy_action": "error",
-            "setup_confidence_adjustment": 0,
-            "setup_size_multiplier": 1.0,
-            "reason": "setup_policy:error",
-        }
-
-    return policy
-
-def _build_setup_observation(symbol, action, price, account_state):
-    """
-    Observe-only setup snapshot + setup policy evaluation.
-
-    Returns a dict with setup fields. Fail-open: never blocks trading here.
-    """
-    if action != "buy":
-        return {
-            "setup_label": None,
-            "setup_policy_action": "not_applicable",
-            "setup_policy_reason": "setup_policy:not_applicable:sell",
-            "setup_confidence_adjustment": 0,
-            "setup_size_multiplier": 1.0,
-            "setup_score": None,
-            "setup_confidence": None,
-            "setup_key": None,
-            "setup_rationale": None,
-            "setup_unknown_reason": None,
-        }
-
-    try:
-        snapshot = build_snapshot(symbol)
-        setup_label = snapshot.get("setup_label")
-        setup_policy = _observe_setup_policy(setup_label)
-
-        logger.info(
-            "Setup policy evaluated: "
-            f"symbol={symbol} "
-            f"setup_label={setup_label} "
-            f"policy_action={setup_policy.get('setup_policy_action')} "
-            f"confidence_adjustment={setup_policy.get('setup_confidence_adjustment')} "
-            f"size_multiplier={setup_policy.get('setup_size_multiplier')} "
-            f"reason={setup_policy.get('reason')}"
-        )
-
-        return {
-            "setup_label": setup_label,
-            "setup_policy_action": setup_policy.get("setup_policy_action"),
-            "setup_policy_reason": setup_policy.get("reason"),
-            "setup_confidence_adjustment": setup_policy.get("setup_confidence_adjustment"),
-            "setup_size_multiplier": setup_policy.get("setup_size_multiplier"),
-            "setup_score": snapshot.get("setup_score"),
-            "setup_confidence": snapshot.get("setup_confidence"),
-            "setup_key": snapshot.get("setup_key"),
-            "setup_rationale": snapshot.get("setup_rationale"),
-            "setup_unknown_reason": setup_policy.get("setup_unknown_reason"),
-        }
-
-    except Exception as e:
-        unknown_reason = f"{type(e).__name__}:{str(e)[:200]}"
-        logger.warning(
-            f"setup observe-only snapshot failed for {symbol}: {unknown_reason}"
-        )
-        return {
-            "setup_label": None,
-            "setup_policy_action": "error",
-            "setup_policy_reason": f"setup_policy:error:{e}",
-            "setup_confidence_adjustment": 0,
-            "setup_size_multiplier": 1.0,
-            "setup_score": None,
-            "setup_confidence": None,
-            "setup_key": None,
-            "setup_rationale": None,
-            "setup_unknown_reason": unknown_reason,
-        }
-
 def _ml_prediction_bucket(score) -> str:
     return entry_policy.ml_prediction_bucket(score)
-
-
-def _is_favorable_setup_label(setup_label: str | None) -> bool:
-    return setup_label in {
-        "confirmed_near_vwap_recovery",
-        "near_vwap_weak_strength_followthrough",
-        "oversold_weak_bounce_watch",
-    }
-
-
-def _remember_favorable_setup(symbol: str, setup_obs: dict | None) -> None:
-    if not symbol or not setup_obs:
-        return
-
-    setup_label = setup_obs.get("setup_label")
-    setup_policy_action = setup_obs.get("setup_policy_action")
-
-    if setup_policy_action == "boost" or _is_favorable_setup_label(setup_label):
-        upsert_recent_favorable_setup(
-            symbol=symbol,
-            observed_at=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-            setup_label=setup_label,
-            setup_policy_action=setup_policy_action,
-        )
-
-
-def _get_recent_favorable_setup(symbol: str) -> dict | None:
-    row = get_recent_favorable_setup(
-        symbol=symbol,
-        ttl_minutes=RECENT_FAVORABLE_SETUP_TTL_MINUTES,
-    )
-    if not row:
-        return None
-
-    observed_at_raw = row["observed_at"]
-    try:
-        observed_at = datetime.strptime(observed_at_raw, "%Y-%m-%d %H:%M:%S")
-        age_minutes = round((datetime.now() - observed_at).total_seconds() / 60.0, 2)
-    except Exception:
-        age_minutes = None
-
-    return {
-        "setup_label": row["setup_label"],
-        "setup_policy_action": row["setup_policy_action"],
-        "observed_at": observed_at_raw,
-        "age_minutes": age_minutes,
-    }
 
 def _buy_opportunity_sizing_enabled() -> bool:
     return os.getenv("BUY_OPPORTUNITY_SIZING_ENABLED", "true").strip().lower() in (
@@ -996,6 +882,28 @@ def _trade_audit_recorder():
         ml_prediction_bucket=_ml_prediction_bucket,
         log=logger,
         mark_webhook_event_status=dedupe_service.mark_webhook_event_status,
+    )
+
+
+def _context_assembly_deps():
+    return ContextAssemblyDeps(
+        execution_mode=EXECUTION_MODE,
+        market_bias=_market_bias,
+        trend_table=_trend_table,
+        rolling_symbol_context=rolling_symbol_context,
+        prior_session_context=prior_session_context,
+        build_tape_context=build_tape_context,
+        get_momentum=get_momentum,
+        setup_context_deps=SetupContextDeps(
+            build_snapshot=build_snapshot,
+            evaluate_setup_policy=evaluate_setup_policy,
+            upsert_recent_favorable_setup=upsert_recent_favorable_setup,
+            get_recent_favorable_setup=get_recent_favorable_setup,
+            now=datetime.now,
+            recent_favorable_setup_ttl_minutes=RECENT_FAVORABLE_SETUP_TTL_MINUTES,
+            log=logger,
+        ),
+        log=logger,
     )
 
 def validate_secret(req):
@@ -1923,7 +1831,7 @@ def _adaptive_churn_reentry_allowed(symbol, signal_price, last_sell_price, accou
 
     favorable_setup = (
         setup_policy_action in ("boost", "allow")
-        or _is_favorable_setup_label(setup_label)
+        or is_favorable_setup_label(setup_label)
         or bool(recent_favorable_setup)
     )
 
@@ -1976,15 +1884,12 @@ def _legacy_process_signal(data):
         account_state=account_state,
     )
 
-    # Observe-only rolling multi-day / extended-hours context.
-    # This is advisory data for Claude and diagnostics; it does not hard-block trades.
-    try:
-        rolling_ctx = rolling_symbol_context(symbol)
-        if rolling_ctx:
-            account_state["rolling_momentum"] = rolling_ctx
-    except Exception as e:
-        logger.warning(f"rolling_momentum context unavailable for {symbol}: {e}")
-    account_state["execution_mode"] = EXECUTION_MODE
+    context_runtime = build_legacy_signal_context(
+        runtime_state,
+        _context_assembly_deps(),
+    )
+    built_context = context_runtime.built
+    setup_obs = built_context.setup.data
 
     def _reject_current_signal(category, reason, level="warning"):
         if level == "error":
@@ -2012,6 +1917,13 @@ def _legacy_process_signal(data):
 
         return True
 
+    def _reject_approval_decision(approval: ApprovalDecision, level="warning"):
+        return _reject_current_signal(
+            approval.category or "approval_rejection",
+            approval.reason,
+            level=level,
+        )
+
     is_stale, age_seconds, stale_reason = _is_signal_stale(data)
     if is_stale:
         logger.warning(
@@ -2029,65 +1941,6 @@ def _legacy_process_signal(data):
 
     if age_seconds is not None:
         account_state["signal_age_seconds"] = round(age_seconds, 2)
-
-    if action == "buy":
-        premarket_bias = (_market_bias.get(symbol) or {}).get("bias")
-        try:
-            prior_session = prior_session_context(symbol)
-            if prior_session:
-                account_state["prior_session"] = prior_session
-        except Exception as e:
-            logger.warning(f"prior_session context unavailable for {symbol}: {e}")
-
-        try:
-            tape_ctx = build_tape_context(symbol, current_price=price)
-            classification = tape_ctx.get("classification") or {}
-            state = tape_ctx.get("state") or {}
-            bar_age_seconds = None
-            if state.get("latest_bar_timestamp"):
-                try:
-                    latest_ts = datetime.fromisoformat(
-                        str(state.get("latest_bar_timestamp")).replace("Z", "+00:00")
-                    )
-                    if latest_ts.tzinfo is None:
-                        latest_ts = latest_ts.replace(tzinfo=timezone.utc)
-                    bar_age_seconds = round(
-                        (
-                            datetime.now(timezone.utc)
-                            - latest_ts.astimezone(timezone.utc)
-                        ).total_seconds(),
-                        3,
-                    )
-                except Exception:
-                    bar_age_seconds = None
-            account_state["tape"] = {
-                **classification,
-                "ok": tape_ctx.get("ok"),
-                "bar_count": tape_ctx.get("bar_count"),
-                "tape_bar_age_seconds": bar_age_seconds,
-            }
-        except Exception as e:
-            logger.warning(f"fresh tape context unavailable for {symbol}: {e}")
-
-        momentum = get_momentum(symbol, price, premarket_bias=premarket_bias)
-        if momentum:
-            account_state["momentum"] = momentum
-            account_state["premarket_alignment_source"] = (
-                "live_tape" if premarket_bias is not None else "missing_bias"
-            )
-
-    setup_obs = _build_setup_observation(symbol, action, price, account_state)
-    account_state["setup_observation"] = setup_obs
-
-    if action == "buy":
-        _remember_favorable_setup(symbol, setup_obs)
-        recent_favorable_setup = _get_recent_favorable_setup(symbol)
-        if recent_favorable_setup:
-            account_state["recent_favorable_setup"] = {
-                "setup_label": recent_favorable_setup.get("setup_label"),
-                "setup_policy_action": recent_favorable_setup.get("setup_policy_action"),
-                "age_minutes": recent_favorable_setup.get("age_minutes"),
-            }
 
     if (
         action == "buy"
@@ -2137,7 +1990,12 @@ def _legacy_process_signal(data):
                 f"{account_state['setup_policy_override']['reason']}"
             )
         else:
-            if _reject_current_signal("setup_policy", reason):
+            if _reject_approval_decision(
+                setup_policy_rejection(
+                    reason,
+                    metadata={"setup_label": setup_label},
+                )
+            ):
                 return
 
     # Degraded-setup size cap: when build_snapshot() fails entirely the bot has
@@ -2181,7 +2039,7 @@ def _legacy_process_signal(data):
     # Unrecognized label cap: taxonomy drift (new or misspelled setup_label) currently
     # passes as "neutral" action but represents unknown territory.  Apply a mild size
     # reduction so it behaves like degraded-lite rather than a known-good neutral setup.
-    if action == "buy" and (setup_obs.get("setup_unknown_reason") or "").startswith("unrecognized_label:"):
+    if action == "buy" and is_unrecognized_setup_label(setup_obs):
         _unrecog_cap = _env_float("UNRECOGNIZED_LABEL_SIZE_CAP_PCT", 0.85)
         apply_size_cap(
             account_state,
@@ -2446,31 +2304,12 @@ def _legacy_process_signal(data):
         try:
             trend = _trend_table.get(symbol) or {}
             bias_entry = _market_bias.get(symbol) or {}
-            setup_obs = account_state.get("setup_observation") or {}
-            momentum = account_state.get("momentum") or {}
-            recent_favorable_setup = account_state.get("recent_favorable_setup")
-
-            adaptive_confirmation = _required_buy_confirmations(symbol, account_state)
-            account_state["adaptive_buy_confirmation"] = adaptive_confirmation
-
-            early_buy_opportunity = evaluate_buy_opportunity(
+            context_runtime.build_buy_opportunity_observation(
                 trend=trend,
-                setup_obs=setup_obs,
                 bias_entry=bias_entry,
-                macro_risk=account_state.get("macro_risk") or {},
-                session_momentum=account_state.get("session_momentum") or {},
-                momentum=momentum,
-                prediction_gate={},
-                recent_favorable_setup=recent_favorable_setup,
-                adaptive_buy_confirmation=adaptive_confirmation,
-            )
-            account_state["buy_opportunity"] = early_buy_opportunity
-
-            logger.info(
-                f"BUY opportunity pre-macro for {symbol}: "
-                f"score={early_buy_opportunity.get('buy_opportunity_score')} "
-                f"recommendation={early_buy_opportunity.get('buy_opportunity_recommendation')} "
-                f"reason={early_buy_opportunity.get('buy_opportunity_reason')}"
+                evaluate_buy_opportunity=evaluate_buy_opportunity,
+                required_buy_confirmations=_required_buy_confirmations,
+                log_prefix="BUY opportunity pre-macro",
             )
         except Exception as e:
             logger.warning(f"BUY opportunity pre-macro scoring failed for {symbol}: {e}")
@@ -2553,25 +2392,14 @@ def _legacy_process_signal(data):
                 try:
                     trend = _trend_table.get(symbol) or {}
                     bias_entry = _market_bias.get(symbol) or {}
-                    setup_obs = account_state.get("setup_observation") or {}
-                    momentum = account_state.get("momentum") or {}
-                    recent_favorable_setup = account_state.get("recent_favorable_setup")
-
-                    adaptive_confirmation = _required_buy_confirmations(symbol, account_state)
-                    account_state["adaptive_buy_confirmation"] = adaptive_confirmation
-
-                    macro_limit_buy_opportunity = evaluate_buy_opportunity(
+                    macro_limit_opportunity_obs = context_runtime.build_buy_opportunity_observation(
                         trend=trend,
-                        setup_obs=setup_obs,
                         bias_entry=bias_entry,
-                        macro_risk=account_state.get("macro_risk") or {},
-                        session_momentum=account_state.get("session_momentum") or {},
-                        momentum=momentum,
-                        prediction_gate={},
-                        recent_favorable_setup=recent_favorable_setup,
-                        adaptive_buy_confirmation=adaptive_confirmation,
+                        evaluate_buy_opportunity=evaluate_buy_opportunity,
+                        required_buy_confirmations=_required_buy_confirmations,
+                        log_prefix="BUY opportunity macro-limit",
                     )
-                    account_state["buy_opportunity"] = macro_limit_buy_opportunity
+                    macro_limit_buy_opportunity = macro_limit_opportunity_obs.data
 
                     macro_buy_score = macro_limit_buy_opportunity.get("buy_opportunity_score")
                     macro_buy_rec = macro_limit_buy_opportunity.get("buy_opportunity_recommendation")
@@ -2580,13 +2408,6 @@ def _legacy_process_signal(data):
                     reason = (
                         f"{reason}; buy_score={macro_buy_score}; "
                         f"buy_rec={macro_buy_rec}"
-                    )
-
-                    logger.warning(
-                        f"BUY opportunity macro-limit for {symbol}: "
-                        f"score={macro_buy_score} "
-                        f"recommendation={macro_buy_rec} "
-                        f"reason={macro_limit_buy_opportunity.get('buy_opportunity_reason')}"
                     )
                 except Exception as e:
                     logger.warning(f"BUY opportunity macro-limit scoring failed for {symbol}: {e}")
@@ -2636,17 +2457,26 @@ def _legacy_process_signal(data):
 
     # Trend confirmation gate: require confirmed indicator-state transitions before allowing signals through.
     if action == "buy":
-        trend = _trend_table.get(symbol) or {}
-        direction = trend.get("direction")
-        strength = trend.get("strength")
-        consecutive_count = int(trend.get("consecutive_count") or 0)
-        last_signal = trend.get("last_signal")
-
-        adaptive_confirmation = _required_buy_confirmations(symbol, account_state)
-        required_buy_confirmations = int(
-            adaptive_confirmation.get("required_buy_confirmations") or 3
+        trend_obs = context_runtime.build_trend_confirmation_observation(
+            current_et=current_et,
+            required_buy_confirmations=_required_buy_confirmations,
+            required_sell_confirmations=_required_sell_confirmations,
+            is_fast_lane_buy_flip=is_fast_lane_buy_flip,
+            is_fast_lane_sell_flip=is_fast_lane_sell_flip,
+            market_open_minutes=MARKET_OPEN_MINUTES,
+            open_momentum_fast_lane_enabled=OPEN_MOMENTUM_FAST_LANE_ENABLED,
+            iex_thin_symbols=IEX_THIN_SYMBOLS,
         )
-        account_state["adaptive_buy_confirmation"] = adaptive_confirmation
+        trend = trend_obs.data
+        trend_confirmation = trend_obs.confirmation
+        direction = trend_obs.direction
+        strength = trend_obs.strength
+        consecutive_count = trend_obs.consecutive_count
+        last_signal = trend_obs.last_signal
+        adaptive_confirmation = trend_confirmation.get("adaptive_confirmation") or {}
+        required_buy_confirmations = int(
+            trend_confirmation.get("required_confirmations") or 3
+        )
 
         if direction != "bullish" or last_signal != "buy":
             reason = (
@@ -2658,39 +2488,10 @@ def _legacy_process_signal(data):
                 f"Trend confirmation BUY observe-only for {symbol}: {reason}"
             )
 
-        fast_lane_buy_flip = is_fast_lane_buy_flip(
-            trend,
-            required_buy_confirmations=required_buy_confirmations,
+        fast_lane_buy_flip = bool(trend_confirmation.get("fast_lane_buy_flip"))
+        open_momentum_fast_lane = bool(
+            trend_confirmation.get("open_momentum_fast_lane")
         )
-        account_state["fast_lane_buy_flip"] = fast_lane_buy_flip
-
-        # Open-momentum fast lane: surge volume + accelerating momentum in the
-        # first 60 minutes of session bypasses the consecutive-count gate on
-        # buy-bias symbols. Pre-market research is stale by open; a confirmed
-        # momentum move with institutional volume is a stronger real-time signal.
-        _om_momentum = account_state.get("momentum") or {}
-        _om_bias = (_market_bias.get(symbol) or {}).get("bias")
-        _om_special_labels = (account_state.get("rolling_momentum") or {}).get("special_labels") or []
-        session_elapsed_minutes = (
-            current_et.hour * 60 + current_et.minute - MARKET_OPEN_MINUTES
-        )
-        _om_volume_state = _om_momentum.get("volume_state")
-        # IEX captures only a fraction of consolidated volume for high-volume names;
-        # requiring "surge" on IEX data would structurally exclude those symbols.
-        # For IEX-thin symbols, any non-thin volume reading is sufficient — the
-        # accelerating momentum and buy-bias gates remain the primary filters.
-        _om_volume_ok = (
-            symbol in IEX_THIN_SYMBOLS
-            and _om_volume_state in ("normal", "elevated", "surge")
-        ) or _om_volume_state == "surge"
-        open_momentum_fast_lane = OPEN_MOMENTUM_FAST_LANE_ENABLED and (
-            0 <= session_elapsed_minutes <= 60
-            and _om_momentum.get("momentum_state") == "accelerating"
-            and _om_volume_ok
-            and _om_bias == "buy"
-            and "gap_up_chase_risk" not in _om_special_labels
-        )
-        account_state["open_momentum_fast_lane"] = open_momentum_fast_lane
 
         logger.info(
             f"Trend confirmation BUY for {symbol}: "
@@ -2702,15 +2503,22 @@ def _legacy_process_signal(data):
             f"flip_event={trend.get('flip_event')} "
             f"fast_lane_buy_flip={fast_lane_buy_flip} "
             f"open_momentum_fast_lane={open_momentum_fast_lane} "
-            f"(elapsed={session_elapsed_minutes}min momentum={_om_momentum.get('momentum_state')} "
-            f"vol={_om_volume_state} vol_ok={_om_volume_ok} iex_thin={symbol in IEX_THIN_SYMBOLS} bias={_om_bias}) "
+            f"(elapsed={trend_confirmation.get('session_elapsed_minutes')}min "
+            f"momentum={trend_confirmation.get('momentum_state')} "
+            f"vol={trend_confirmation.get('volume_state')} "
+            f"vol_ok={trend_confirmation.get('volume_ok')} "
+            f"iex_thin={trend_confirmation.get('iex_thin')} "
+            f"bias={trend_confirmation.get('bias')}) "
             f"adaptive_reason={adaptive_confirmation.get('reason')}"
         )
         if open_momentum_fast_lane and consecutive_count < required_buy_confirmations:
             logger.info(
                 f"Open-momentum fast lane granted for {symbol}: "
-                f"elapsed={session_elapsed_minutes}min count={consecutive_count} "
-                f"momentum={_om_momentum.get('momentum_state')} vol={_om_volume_state} iex_thin={symbol in IEX_THIN_SYMBOLS}"
+                f"elapsed={trend_confirmation.get('session_elapsed_minutes')}min "
+                f"count={consecutive_count} "
+                f"momentum={trend_confirmation.get('momentum_state')} "
+                f"vol={trend_confirmation.get('volume_state')} "
+                f"iex_thin={trend_confirmation.get('iex_thin')}"
             )
 
         if not (fast_lane_buy_flip or open_momentum_fast_lane) and consecutive_count < required_buy_confirmations:
@@ -2723,7 +2531,12 @@ def _legacy_process_signal(data):
             )
 
             if ADAPTIVE_BUY_CONFIRMATION_ENABLED:
-                if _reject_current_signal("trend_confirmation", reason):
+                if _reject_approval_decision(
+                    trend_confirmation_rejection(
+                        reason,
+                        metadata=trend_confirmation,
+                    )
+                ):
                     return
             else:
                 logger.info(
@@ -2731,17 +2544,26 @@ def _legacy_process_signal(data):
                 )
 
     if action == "sell":
-        trend = _trend_table.get(symbol) or {}
-        direction = trend.get("direction")
-        strength = trend.get("strength")
-        consecutive_count = int(trend.get("consecutive_count") or 0)
-        last_signal = trend.get("last_signal")
-
-        sell_confirmation = _required_sell_confirmations(symbol, account_state)
-        required_sell_confirmations = int(
-            sell_confirmation.get("required_sell_confirmations") or 2
+        trend_obs = context_runtime.build_trend_confirmation_observation(
+            current_et=current_et,
+            required_buy_confirmations=_required_buy_confirmations,
+            required_sell_confirmations=_required_sell_confirmations,
+            is_fast_lane_buy_flip=is_fast_lane_buy_flip,
+            is_fast_lane_sell_flip=is_fast_lane_sell_flip,
+            market_open_minutes=MARKET_OPEN_MINUTES,
+            open_momentum_fast_lane_enabled=OPEN_MOMENTUM_FAST_LANE_ENABLED,
+            iex_thin_symbols=IEX_THIN_SYMBOLS,
         )
-        account_state["sell_confirmation"] = sell_confirmation
+        trend = trend_obs.data
+        trend_confirmation = trend_obs.confirmation
+        direction = trend_obs.direction
+        strength = trend_obs.strength
+        consecutive_count = trend_obs.consecutive_count
+        last_signal = trend_obs.last_signal
+        sell_confirmation = trend_confirmation.get("sell_confirmation") or {}
+        required_sell_confirmations = int(
+            trend_confirmation.get("required_confirmations") or 2
+        )
 
         if direction != "bearish" or last_signal != "sell":
             reason = (
@@ -2749,14 +2571,15 @@ def _legacy_process_signal(data):
                 f"last_signal={last_signal} "
                 f"required={required_sell_confirmations}"
             )
-            if _reject_current_signal("trend_confirmation", reason):
+            if _reject_approval_decision(
+                trend_confirmation_rejection(
+                    reason,
+                    metadata=trend_confirmation,
+                )
+            ):
                 return
 
-        fast_lane_sell_flip = is_fast_lane_sell_flip(
-            trend,
-            required_sell_confirmations=required_sell_confirmations,
-        )
-        account_state["fast_lane_sell_flip"] = fast_lane_sell_flip
+        fast_lane_sell_flip = bool(trend_confirmation.get("fast_lane_sell_flip"))
 
         logger.info(
             f"Trend confirmation SELL for {symbol}: "
@@ -2777,7 +2600,12 @@ def _legacy_process_signal(data):
                 f"strength={strength} "
                 f"flip_event={trend.get('flip_event')}"
             )
-            if _reject_current_signal("trend_confirmation", reason):
+            if _reject_approval_decision(
+                trend_confirmation_rejection(
+                    reason,
+                    metadata=trend_confirmation,
+                )
+            ):
                 return
 
     # Fundamental score gate: block buys when manual/pre-market research flags weak fundamentals
@@ -2822,35 +2650,10 @@ def _legacy_process_signal(data):
     # Session-aware momentum context, observe-only.
     # This reads the latest state produced by session_momentum.py.
     # It does not fetch bars or block trading here.
-    try:
-        session_momentum = get_latest_session_momentum(symbol)
-
-        if session_momentum and _session_momentum_is_fresh(session_momentum):
-            account_state["session_momentum"] = session_momentum
-            logger.info(
-                f"Session momentum for {symbol}: "
-                f"label={session_momentum.get('trend_label')} "
-                f"score={session_momentum.get('trend_score')} "
-                f"session_return={session_momentum.get('session_return_pct')} "
-                f"5m={session_momentum.get('momentum_5m_pct')} "
-                f"15m={session_momentum.get('momentum_15m_pct')} "
-                f"30m={session_momentum.get('momentum_30m_pct')} "
-                f"vwap_dist={session_momentum.get('distance_from_vwap_pct')}"
-            )
-        else:
-            account_state["session_momentum"] = {
-                "trend_label": "insufficient_data",
-                "trend_score": 0,
-                "reason": "missing or stale session momentum",
-            }
-            logger.info(f"Session momentum unavailable/stale for {symbol}; using insufficient_data")
-    except Exception as e:
-        account_state["session_momentum"] = {
-            "trend_label": "insufficient_data",
-            "trend_score": 0,
-            "reason": f"session momentum read error: {e}",
-        }
-        logger.warning(f"Session momentum unavailable for {symbol}: {e}")
+    context_runtime.build_session_momentum_observation(
+        get_latest_session_momentum=get_latest_session_momentum,
+        session_momentum_is_fresh=_session_momentum_is_fresh,
+    )
 
     if action == "sell" and existing_position:
         try:
@@ -2877,56 +2680,9 @@ def _legacy_process_signal(data):
     action_hint = None
 
     if action == "buy":
-        if "prior_session" not in account_state:
-            try:
-                prior_session = prior_session_context(symbol)
-                if prior_session:
-                    account_state["prior_session"] = prior_session
-            except Exception as e:
-                logger.warning(f"prior_session context unavailable for {symbol}: {e}")
-
-        if "tape" not in account_state:
-            try:
-                tape_ctx = build_tape_context(symbol, current_price=price)
-                classification = tape_ctx.get("classification") or {}
-                state = tape_ctx.get("state") or {}
-                bar_age_seconds = None
-                if state.get("latest_bar_timestamp"):
-                    try:
-                        latest_ts = datetime.fromisoformat(
-                            str(state.get("latest_bar_timestamp")).replace("Z", "+00:00")
-                        )
-                        if latest_ts.tzinfo is None:
-                            latest_ts = latest_ts.replace(tzinfo=timezone.utc)
-                        bar_age_seconds = round(
-                            (
-                                datetime.now(timezone.utc)
-                                - latest_ts.astimezone(timezone.utc)
-                            ).total_seconds(),
-                            3,
-                        )
-                    except Exception:
-                        bar_age_seconds = None
-                account_state["tape"] = {
-                    **classification,
-                    "ok": tape_ctx.get("ok"),
-                    "bar_count": tape_ctx.get("bar_count"),
-                    "tape_bar_age_seconds": bar_age_seconds,
-                }
-            except Exception as e:
-                logger.warning(f"fresh tape context unavailable for {symbol}: {e}")
-
-        premarket_bias = bias_entry.get("bias")
+        context_runtime.hydrate_buy_live_context(only_missing=True)
         momentum = account_state.get("momentum")
-        if not momentum:
-            momentum = get_momentum(symbol, price, premarket_bias=premarket_bias)
         if momentum:
-            account_state["momentum"] = momentum
-            # Record source so decision_snapshots can flag when bias was absent.
-            account_state["premarket_alignment_source"] = (
-                "live_tape" if premarket_bias is not None else "missing_bias"
-            )
-
             alignment = momentum.get("premarket_alignment")
             action_hint = momentum.get("action_hint")
 
@@ -2985,35 +2741,14 @@ def _legacy_process_signal(data):
         trend = _trend_table.get(symbol) or {}
         bias_entry = _market_bias.get(symbol) or {}
         setup_obs = account_state.get("setup_observation") or {}
-        momentum = account_state.get("momentum") or {}
-        recent_favorable_setup = account_state.get("recent_favorable_setup")
-        ml_prediction = get_cached_prediction(symbol)
-
-        prediction_gate = evaluate_signal_quality_gate(
-            trend_direction=trend.get("direction"),
-            trend_strength=trend.get("strength"),
-            market_bias=bias_entry.get("bias"),
-            setup_label=setup_obs.get("setup_label"),
-            setup_policy_action=setup_obs.get("setup_policy_action"),
-            momentum_direction=momentum.get("direction"),
-            momentum_pct=momentum.get("momentum_pct"),
-            consecutive_buy_count=trend.get("consecutive_count") or 0,
-            recent_favorable_setup=recent_favorable_setup,
-            ml_prediction=ml_prediction,
+        prediction_obs = context_runtime.build_prediction_observation(
+            trend=trend,
+            bias_entry=bias_entry,
+            evaluate_signal_quality_gate=evaluate_signal_quality_gate,
+            get_cached_prediction=get_cached_prediction,
+            ml_prediction_bucket=_ml_prediction_bucket,
         )
-
-        account_state["prediction_gate"] = prediction_gate
-        account_state["ml_prediction"] = ml_prediction or {}
-
-        logger.info(
-            f"Signal quality gate for {symbol} BUY: "
-            f"score={prediction_gate.get('prediction_score')} "
-            f"decision={prediction_gate.get('prediction_decision')} "
-            f"reason={prediction_gate.get('prediction_reason')} "
-            f"ml_score={prediction_gate.get('ml_prediction_score')} "
-            f"ml_compare={prediction_gate.get('ml_prediction_compare_decision')} "
-            f"ml_agrees={prediction_gate.get('ml_prediction_agrees_with_gate')}"
-        )
+        prediction_gate = prediction_obs.data
 
         # ── Weak-prediction + degraded-setup gate (Phase 2, Step 6) ──────────
         # Conservative first promotion: only the weakest ML bucket (score < 45)
@@ -3038,14 +2773,7 @@ def _legacy_process_signal(data):
             and float(_ml_score_raw) < 45
             and _ml_sample >= PREDICTION_SOFT_AVOID_MIN_SAMPLE_SIZE
         )
-        _is_degraded_setup_now = (
-            _setup_action == "error"
-            or (setup_obs.get("setup_unknown_reason") or "").startswith("unrecognized_label:")
-            or (
-                _setup_label_now is None
-                and _setup_action not in ("not_applicable",)
-            )
-        )
+        _is_degraded_setup_now = is_degraded_setup(setup_obs)
 
         if _is_weak_ml_bucket and _is_degraded_setup_now:
             _wpsg_reason = (
@@ -3110,24 +2838,13 @@ def _legacy_process_signal(data):
                 f"score={_ml_score_raw} confidence={_ml_confidence} → {_pred_only_cap}%"
             )
 
-        buy_opportunity = evaluate_buy_opportunity(
+        context_runtime.build_buy_opportunity_observation(
             trend=trend,
-            setup_obs=setup_obs,
             bias_entry=bias_entry,
-            macro_risk=account_state.get("macro_risk") or {},
-            session_momentum=account_state.get("session_momentum") or {},
-            momentum=momentum,
+            evaluate_buy_opportunity=evaluate_buy_opportunity,
+            required_buy_confirmations=_required_buy_confirmations,
             prediction_gate=prediction_gate,
-            recent_favorable_setup=recent_favorable_setup,
-            adaptive_buy_confirmation=account_state.get("adaptive_buy_confirmation") or {},
-        )
-        account_state["buy_opportunity"] = buy_opportunity
-
-        logger.info(
-            f"BUY opportunity for {symbol}: "
-            f"score={buy_opportunity.get('buy_opportunity_score')} "
-            f"recommendation={buy_opportunity.get('buy_opportunity_recommendation')} "
-            f"reason={buy_opportunity.get('buy_opportunity_reason')}"
+            log_prefix="BUY opportunity",
         )
 
         prediction_decision = prediction_gate.get("prediction_decision")
@@ -3138,7 +2855,7 @@ def _legacy_process_signal(data):
             trend=trend,
             setup_obs=setup_obs,
             prediction_gate=prediction_gate,
-            momentum=momentum,
+            momentum=account_state.get("momentum") or {},
         )
 
         account_state["market_bias_effective"] = bias_override.get("effective_bias")
@@ -3154,7 +2871,13 @@ def _legacy_process_signal(data):
                 f"reason={bias_override.get('reason')}; "
                 f"context_reason={bias_entry.get('reason','')}"
             )
-            if _reject_current_signal("market_bias_avoid", reason):
+            if _reject_approval_decision(
+                live_bias_rejection(
+                    "market_bias_avoid",
+                    reason,
+                    metadata=bias_override,
+                )
+            ):
                 return
 
         if effective_bias == "avoid_soft" and not allow_buy_from_bias:
@@ -3171,7 +2894,13 @@ def _legacy_process_signal(data):
                 f"context_reason={bias_entry.get('reason','')}"
             )
             if prediction_sample_size >= PREDICTION_SOFT_AVOID_MIN_SAMPLE_SIZE:
-                if _reject_current_signal("soft_avoid_prediction_gate", reason):
+                if _reject_approval_decision(
+                    live_bias_rejection(
+                        "soft_avoid_prediction_gate",
+                        reason,
+                        metadata=bias_override,
+                    )
+                ):
                     return
             else:
                 logger.warning(
@@ -3186,7 +2915,13 @@ def _legacy_process_signal(data):
                 f"{bias_override.get('reason')}; "
                 f"context_reason={bias_entry.get('reason','')}"
             )
-            if _reject_current_signal("live_bias_downgrade", reason):
+            if _reject_approval_decision(
+                live_bias_rejection(
+                    "live_bias_downgrade",
+                    reason,
+                    metadata=bias_override,
+                )
+            ):
                 return
 
         if effective_bias == "live_override_buy":
@@ -3228,7 +2963,9 @@ def _legacy_process_signal(data):
                 f"decision={prediction_decision} "
                 f"reason={prediction_gate.get('prediction_reason')}"
             )
-            if _reject_current_signal("prediction_gate", reason):
+            if _reject_approval_decision(
+                prediction_gate_rejection(reason, metadata=prediction_gate)
+            ):
                 return
 
         session_gate = entry_policy.evaluate_session_momentum_gate(
@@ -3242,7 +2979,9 @@ def _legacy_process_signal(data):
         if session_gate.get("would_block"):
             reason = session_gate.get("reason", "session momentum gate")
             if ENFORCE_SESSION_MOMENTUM_GATE:
-                if _reject_current_signal("session_momentum_gate", reason):
+                if _reject_approval_decision(
+                    session_momentum_rejection(reason, metadata=session_gate)
+                ):
                     return
             else:
                 logger.info(
@@ -3325,13 +3064,9 @@ def _legacy_process_signal(data):
         try:
             strategy_trend = _trend_table.get(symbol) or {}
             strategy_momentum = account_state.get("momentum") or {}
-            strategy_alignment = account_state.get("market_alignment") or {}
-
-            if not strategy_alignment and action == "buy":
-                try:
-                    strategy_alignment = _symbol_market_alignment(symbol)
-                except Exception:
-                    strategy_alignment = {}
+            strategy_alignment = context_runtime.build_market_alignment_observation(
+                symbol_market_alignment=_symbol_market_alignment,
+            ).data
 
             strategy_result = evaluate_strategy_observe_only(
                 symbol=symbol,
@@ -3457,13 +3192,14 @@ def _legacy_process_signal(data):
                 logger.warning(
                     f"Strategy memory gate blocked {symbol} BUY before Claude: {reason}"
                 )
-                log_rejection(
-                    symbol,
-                    action,
-                    "strategy_memory",
-                    reason,
-                    price=price,
-                    account_state=account_state,
+                _reject_approval_decision(
+                    strategy_memory_rejection(
+                        reason,
+                        metadata={
+                            "strategy_memory": strategy_memory,
+                            "opportunity_score": opportunity,
+                        },
+                    )
                 )
                 return
 
@@ -3480,13 +3216,8 @@ def _legacy_process_signal(data):
             logger.warning(
                 f"Opportunity score gate blocked {symbol} BUY before Claude: {reason}"
             )
-            log_rejection(
-                symbol,
-                action,
-                "opportunity_score",
-                reason,
-                price=price,
-                account_state=account_state,
+            _reject_approval_decision(
+                opportunity_score_rejection(reason, metadata=opportunity)
             )
             return
 
@@ -3542,13 +3273,8 @@ def _legacy_process_signal(data):
         logger.warning(
             f"Decision policy gate blocked {symbol} BUY before Claude: {reason}"
         )
-        log_rejection(
-            symbol,
-            action,
-            "decision_policy",
-            reason,
-            price=price,
-            account_state=account_state,
+        _reject_approval_decision(
+            decision_policy_rejection(reason, metadata=decision_policy)
         )
         return
     elif action == "buy" and decision_policy.get("decision") == "block":
@@ -3647,9 +3373,7 @@ def _legacy_process_signal(data):
             compute_dominant_limiter=sizing_policy.compute_dominant_limiter,
         )
 
-    built_context = build_final_signal_context(
-        account_state=account_state,
-        trend_table=_trend_table,
+    built_context = context_runtime.refresh(
         intelligence_context=intelligence_context,
         claude_account_state=claude_account_state,
     )

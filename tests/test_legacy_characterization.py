@@ -156,7 +156,7 @@ def test_weak_prediction_degraded_setup_sets_heavy_size_cap_before_claude():
 
     with _Env(**_approved_downstream(
         **{
-            "app._build_setup_observation": MagicMock(
+            "services.context_builder.build_setup_observation": MagicMock(
                 return_value={
                     "setup_policy_action": "error",
                     "setup_label": None,
@@ -189,7 +189,7 @@ def test_unrecognized_setup_label_sets_size_cap_before_claude():
 
     with _Env(**_approved_downstream(
         **{
-            "app._build_setup_observation": MagicMock(
+            "services.context_builder.build_setup_observation": MagicMock(
                 return_value={
                     "setup_policy_action": "neutral",
                     "setup_label": "brand_new_label",

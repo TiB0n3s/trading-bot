@@ -23,6 +23,89 @@ class ApprovalDecision:
     metadata: dict[str, Any] = field(default_factory=dict)
 
 
+def deterministic_rejection(
+    *,
+    category: str,
+    reason: str,
+    source: str = "deterministic",
+    confidence: str | None = None,
+    metadata: dict[str, Any] | None = None,
+) -> ApprovalDecision:
+    return ApprovalDecision(
+        approved=False,
+        source=source,
+        confidence=confidence,
+        reason=reason,
+        category=category,
+        claude_payload=None,
+        metadata=metadata or {},
+    )
+
+
+def setup_policy_rejection(reason: str, metadata: dict[str, Any] | None = None) -> ApprovalDecision:
+    return deterministic_rejection(
+        category="setup_policy",
+        reason=reason,
+        metadata=metadata,
+    )
+
+
+def trend_confirmation_rejection(reason: str, metadata: dict[str, Any] | None = None) -> ApprovalDecision:
+    return deterministic_rejection(
+        category="trend_confirmation",
+        reason=reason,
+        metadata=metadata,
+    )
+
+
+def session_momentum_rejection(reason: str, metadata: dict[str, Any] | None = None) -> ApprovalDecision:
+    return deterministic_rejection(
+        category="session_momentum_gate",
+        reason=reason,
+        metadata=metadata,
+    )
+
+
+def prediction_gate_rejection(reason: str, metadata: dict[str, Any] | None = None) -> ApprovalDecision:
+    return deterministic_rejection(
+        category="prediction_gate",
+        reason=reason,
+        metadata=metadata,
+    )
+
+
+def live_bias_rejection(category: str, reason: str, metadata: dict[str, Any] | None = None) -> ApprovalDecision:
+    return deterministic_rejection(
+        category=category,
+        reason=reason,
+        metadata=metadata,
+    )
+
+
+def strategy_memory_rejection(reason: str, metadata: dict[str, Any] | None = None) -> ApprovalDecision:
+    return deterministic_rejection(
+        category="strategy_memory",
+        reason=reason,
+        metadata=metadata,
+    )
+
+
+def opportunity_score_rejection(reason: str, metadata: dict[str, Any] | None = None) -> ApprovalDecision:
+    return deterministic_rejection(
+        category="opportunity_score",
+        reason=reason,
+        metadata=metadata,
+    )
+
+
+def decision_policy_rejection(reason: str, metadata: dict[str, Any] | None = None) -> ApprovalDecision:
+    return deterministic_rejection(
+        category="decision_policy",
+        reason=reason,
+        metadata=metadata,
+    )
+
+
 def normalize_claude_decision(
     *,
     action: str,

@@ -166,6 +166,20 @@ POSITION_MANAGER_LOCK_TIER4_FLOOR_PCT = float(
     os.getenv("POSITION_MANAGER_LOCK_TIER4_FLOOR_PCT", "1.75")
 )
 
+# Bad-entry containment: tighter hard stop for weak entries (error/null setup
+# or weak ML bucket) that never showed constructive follow-through. Exits at
+# BAD_ENTRY_CONTAINMENT_LOSS_PCT instead of FULL_EXIT_LOSS_PCT when peak
+# favorable excursion never exceeded BAD_ENTRY_CONTAINMENT_MAX_PEAK_PCT.
+BAD_ENTRY_CONTAINMENT_ENABLED = os.getenv(
+    "POSITION_MANAGER_BAD_ENTRY_CONTAINMENT_ENABLED", "true"
+).lower() in ("1", "true", "yes", "on")
+BAD_ENTRY_CONTAINMENT_LOSS_PCT = float(
+    os.getenv("POSITION_MANAGER_BAD_ENTRY_CONTAINMENT_LOSS_PCT", "-0.65")
+)
+BAD_ENTRY_CONTAINMENT_MAX_PEAK_PCT = float(
+    os.getenv("POSITION_MANAGER_BAD_ENTRY_CONTAINMENT_MAX_PEAK_PCT", "0.15")
+)
+
 
 def now_utc():
     return datetime.now(timezone.utc)
@@ -199,7 +213,8 @@ def get_entry_context(symbol):
                     session_trend_label, session_trend_score,
                     prediction_score, prediction_decision,
                     setup_label, setup_policy_action,
-                    buy_opportunity_score, buy_opportunity_recommendation
+                    buy_opportunity_score, buy_opportunity_recommendation,
+                    ml_prediction_score, ml_prediction_bucket
                 FROM trades
                 WHERE symbol = ?
                   AND approved = 1
@@ -249,6 +264,8 @@ def get_entry_context(symbol):
             "entry_setup_policy_action": r["setup_policy_action"],
             "entry_buy_opportunity_score": r["buy_opportunity_score"],
             "entry_buy_opportunity_recommendation": r["buy_opportunity_recommendation"],
+            "entry_ml_prediction_score": r["ml_prediction_score"],
+            "entry_ml_prediction_bucket": r["ml_prediction_bucket"],
             "open_lot_qty": lots[0]["remaining"],
         }
 
@@ -551,10 +568,11 @@ def is_weak_entry_context(entry_ctx):
     if not entry_ctx:
         return False
 
-    setup_label = str(entry_ctx.get("setup_label") or "").lower()
-    prediction_decision = str(entry_ctx.get("prediction_decision") or "").lower()
-    buy_rec = str(entry_ctx.get("buy_opportunity_recommendation") or "").lower()
-    entry_quality = str(entry_ctx.get("entry_quality") or "").lower()
+    setup_label = str(entry_ctx.get("entry_setup_label") or "").lower()
+    setup_action = str(entry_ctx.get("entry_setup_policy_action") or "").lower()
+    prediction_decision = str(entry_ctx.get("entry_prediction_decision") or "").lower()
+    buy_rec = str(entry_ctx.get("entry_buy_opportunity_recommendation") or "").lower()
+    ml_bucket = str(entry_ctx.get("entry_ml_prediction_bucket") or "").lower()
 
     weak_tokens = (
         "fade_risk",
@@ -566,16 +584,48 @@ def is_weak_entry_context(entry_ctx):
     if any(token in setup_label for token in weak_tokens):
         return True
 
+    # Setup classification failed at entry time (SIP feed errors, snapshot errors, etc.)
+    if setup_action == "error":
+        return True
+
     if prediction_decision in ("watch", "caution"):
         return True
 
     if buy_rec in ("small_buy_candidate", "watch"):
         return True
 
-    if entry_quality in ("tactical_only", "conditional", "avoid_chasing", "do_not_chase"):
+    if ml_bucket == "weak_below_45":
         return True
 
     return False
+
+
+def is_bad_entry_containment(entry_ctx, peak_pl_pct):
+    """
+    Return (True, reason) when a weak entry never showed constructive
+    follow-through. Used to apply a tighter hard-stop threshold
+    (BAD_ENTRY_CONTAINMENT_LOSS_PCT) instead of FULL_EXIT_LOSS_PCT.
+
+    Criteria: entry context is weak (error setup, weak ML bucket, or weak
+    label tokens) AND peak favorable excursion never exceeded
+    BAD_ENTRY_CONTAINMENT_MAX_PEAK_PCT (i.e., the trade never worked).
+    """
+    if not BAD_ENTRY_CONTAINMENT_ENABLED:
+        return False, None
+
+    if not is_weak_entry_context(entry_ctx):
+        return False, None
+
+    if peak_pl_pct > BAD_ENTRY_CONTAINMENT_MAX_PEAK_PCT:
+        return False, None
+
+    setup_action = entry_ctx.get("entry_setup_policy_action") or "unknown"
+    ml_bucket = entry_ctx.get("entry_ml_prediction_bucket") or "unknown"
+    reason = (
+        f"bad_entry_containment: weak entry never showed follow-through "
+        f"(setup={setup_action}, ml_bucket={ml_bucket}, peak={peak_pl_pct:.2f}%)"
+    )
+    return True, reason
 
 
 def evaluate_position(position, state, session_momentum=None):
@@ -617,8 +667,22 @@ def evaluate_position(position, state, session_momentum=None):
     retained_strength = retained_session_strength_state(session_momentum, current_pl_pct)
     locked_profit_floor = high_gain_locked_profit_floor(peak_pl_pct)
 
+    # Bad-entry containment: tighter hard stop when a weak entry never showed
+    # constructive follow-through. Runs before the normal FULL_EXIT_LOSS_PCT
+    # check so it fires sooner on low-quality entries that go immediately wrong.
+    _bad_entry, _bad_entry_reason = is_bad_entry_containment(entry_ctx, peak_pl_pct)
+    if _bad_entry and current_pl_pct <= BAD_ENTRY_CONTAINMENT_LOSS_PCT:
+        action = "sell_full"
+        sell_fraction = 1.0
+        severity = "high"
+        hard_full_exit = True
+        reasons.append(
+            f"{_bad_entry_reason}, "
+            f"loss {current_pl_pct:.2f}% <= containment threshold {BAD_ENTRY_CONTAINMENT_LOSS_PCT:.2f}%"
+        )
+
     # Full exit: losing and momentum/VWAP deteriorating.
-    if current_pl_pct <= FULL_EXIT_LOSS_PCT:
+    if action == "hold" and current_pl_pct <= FULL_EXIT_LOSS_PCT:
         action = "sell_full"
         sell_fraction = 1.0
         severity = "high"

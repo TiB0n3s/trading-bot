@@ -77,6 +77,7 @@ TESTS = [
     "tests/test_app_phase0.py",
     "tests/test_startup_service.py",
     "tests/test_runtime_state_services.py",
+    "tests/test_momentum_service.py",
     "tests/test_architecture_boundaries.py",
     "tests/test_signal_pipeline.py",
     "tests/test_preflight_service.py",

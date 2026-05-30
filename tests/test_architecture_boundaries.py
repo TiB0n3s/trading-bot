@@ -180,6 +180,7 @@ TEMPORARY_BROKER_ACCESS_ALLOWLIST = {
 
 APPROVED_MARKET_DATA_ACCESS = {
     "services/market_data_service.py",
+    "services/momentum_service.py",
     "live_features.py",
 }
 

@@ -104,7 +104,6 @@ TEMPORARY_DB_ACCESS_ALLOWLIST = {
     "daily_summary.py",
     "data_layer/ledger.py",
     "decision_engine.py",
-    "decision_snapshots.py",
     "drawdown_report.py",
     "entry_quality_report.py",
     "event_attribution_report.py",

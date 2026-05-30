@@ -64,6 +64,7 @@ TESTS = [
     "tests/test_export_ml_dataset.py",
     "tests/test_ml_replay.py",
     "tests/test_policy_artifacts.py",
+    "tests/test_decision_snapshot_service.py",
     "tests/test_decision_snapshots.py",
     "tests/test_bot_events_service.py",
     "tests/test_retention_policy.py",

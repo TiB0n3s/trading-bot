@@ -497,7 +497,7 @@ def _get_recent_favorable_setup(symbol: str) -> dict | None:
     }
 
 def _buy_opportunity_sizing_enabled() -> bool:
-    return os.getenv("BUY_OPPORTUNITY_SIZING_ENABLED", "false").strip().lower() in (
+    return os.getenv("BUY_OPPORTUNITY_SIZING_ENABLED", "true").strip().lower() in (
         "1", "true", "yes", "on"
     )
 
@@ -507,6 +507,23 @@ def _env_float(name: str, default: float) -> float:
         return float(os.getenv(name, str(default)))
     except Exception:
         return default
+
+
+def _get_bars_with_fallback(symbol: str, timeframe: str, **kwargs):
+    """Fetch bars using SIP as primary feed, IEX as automatic fallback on subscription errors."""
+    feed = kwargs.pop("feed", "sip")
+    try:
+        return list(api.get_bars(symbol, timeframe, feed=feed, **kwargs))
+    except Exception as e:
+        err_lower = str(e).lower()
+        if feed == "sip" and any(
+            kw in err_lower for kw in ("subscription", "not permitted", "forbidden", "403")
+        ):
+            logger.warning(
+                f"{symbol}: SIP feed unavailable ({type(e).__name__}); falling back to IEX"
+            )
+            return list(api.get_bars(symbol, timeframe, feed="iex", **kwargs))
+        raise
 
 
 def _apply_buy_opportunity_sizing(
@@ -2593,9 +2610,7 @@ def _one_bar_confirmation_hold(symbol: str, signal_price: float, account_state: 
 
     while datetime.now(timezone.utc).timestamp() < deadline:
         try:
-            bars = list(api.get_bars(symbol, "1Min", limit=2, feed="sip"))
-        except TypeError:
-            bars = list(api.get_bars(symbol, "1Min", limit=2))
+            bars = _get_bars_with_fallback(symbol, "1Min", limit=2, feed="sip")
         except Exception as e:
             return False, f"{reason_prefix}; bar_fetch_error={e}"
 
@@ -2767,7 +2782,7 @@ def get_momentum(symbol, price, premarket_bias=None):
         start = (datetime.now(timezone.utc) - timedelta(minutes=20)).isoformat()
         # SIP = consolidated tape (NYSE/NASDAQ/all venues). IEX captures only a
         # fraction of volume for high-volume names, making surge detection unreliable.
-        bars = list(api.get_bars(symbol, '1Min', start=start, feed='sip'))
+        bars = _get_bars_with_fallback(symbol, '1Min', start=start, feed='sip')
 
         if len(bars) < 2:
             return None
@@ -4096,6 +4111,24 @@ def process_signal(data):
             f"reason={setup_obs.get('setup_unknown_reason')}"
         )
 
+    # Unrecognized label cap: taxonomy drift (new or misspelled setup_label) currently
+    # passes as "neutral" action but represents unknown territory.  Apply a mild size
+    # reduction so it behaves like degraded-lite rather than a known-good neutral setup.
+    if action == "buy" and (setup_obs.get("setup_unknown_reason") or "").startswith("unrecognized_label:"):
+        _unrecog_cap = _env_float("UNRECOGNIZED_LABEL_SIZE_CAP_PCT", 0.85)
+        _existing_cap = account_state.get("max_position_size_pct_override")
+        account_state["max_position_size_pct_override"] = (
+            min(float(_existing_cap), _unrecog_cap) if _existing_cap is not None else _unrecog_cap
+        )
+        account_state["unrecognized_label_cap"] = {
+            "setup_unknown_reason": setup_obs.get("setup_unknown_reason"),
+            "cap_pct": _unrecog_cap,
+        }
+        logger.warning(
+            f"Unrecognized setup label size cap for {symbol}: "
+            f"{setup_obs.get('setup_unknown_reason')} → {_unrecog_cap}%"
+        )
+
     # Late rollover entry gate:
     # Blocks GEV-style late buys where price has already run, is extended
     # above VWAP, and intermediate session momentum is rolling over.
@@ -5068,6 +5101,7 @@ def process_signal(data):
         )
         _is_degraded_setup_now = (
             _setup_action == "error"
+            or (setup_obs.get("setup_unknown_reason") or "").startswith("unrecognized_label:")
             or (
                 _setup_label_now is None
                 and _setup_action not in ("not_applicable",)
@@ -5106,6 +5140,34 @@ def process_signal(data):
                 "is_weak_ml": _is_weak_ml_bucket,
                 "is_degraded_setup": _is_degraded_setup_now,
             }
+
+        # Prediction-only size cap: weak ML bucket + confident sample, even when setup
+        # is known (not degraded). The stricter weak+degraded gate (0.5%) already covers
+        # the degraded case; this adds a lighter cap (0.8%) when the setup is readable
+        # but prediction is confidently negative.  Excluded when setup is "boost" since
+        # positive setup quality takes precedence.
+        _ml_confidence = prediction_gate.get("ml_prediction_confidence") or ""
+        _is_confident_weak_prediction = (
+            _is_weak_ml_bucket
+            and _ml_confidence in ("medium", "high")
+            and not _is_degraded_setup_now
+            and _setup_action not in ("boost",)
+        )
+        if _is_confident_weak_prediction:
+            _pred_only_cap = _env_float("PREDICTION_CONFIDENT_WEAK_SIZE_CAP_PCT", 0.80)
+            _existing = account_state.get("max_position_size_pct_override")
+            account_state["max_position_size_pct_override"] = (
+                min(float(_existing), _pred_only_cap) if _existing is not None else _pred_only_cap
+            )
+            account_state["prediction_confident_weak_cap"] = {
+                "ml_score": _ml_score_raw,
+                "ml_confidence": _ml_confidence,
+                "cap_pct": _pred_only_cap,
+            }
+            logger.info(
+                f"Prediction confident-weak size cap for {symbol}: "
+                f"score={_ml_score_raw} confidence={_ml_confidence} → {_pred_only_cap}%"
+            )
 
         buy_opportunity = evaluate_buy_opportunity(
             trend=trend,
@@ -5253,6 +5315,28 @@ def process_signal(data):
             )
             account_state["session_gate_size_hint"] = "reduce"
 
+        # Session momentum sizing — active regardless of ENFORCE_SESSION_MOMENTUM_GATE.
+        # Hard blocks stay gated behind the flag; sizing caps always apply so adverse
+        # momentum reduces exposure even in observe-only gate mode.
+        _smg_sev = session_gate.get("severity")
+        _smg_cap = None
+        if _smg_sev == "soft_negative":
+            _smg_cap = _env_float("SESSION_SOFT_NEGATIVE_SIZE_CAP_PCT", 0.80)
+        elif _smg_sev == "reversal_caution":
+            _smg_cap = _env_float("SESSION_REVERSAL_CAUTION_SIZE_CAP_PCT", 0.90)
+        elif _smg_sev == "hard_negative" and not ENFORCE_SESSION_MOMENTUM_GATE:
+            _smg_cap = _env_float("SESSION_HARD_NEGATIVE_SIZE_CAP_PCT", 0.65)
+        if _smg_cap is not None:
+            _existing = account_state.get("max_position_size_pct_override")
+            account_state["max_position_size_pct_override"] = (
+                min(float(_existing), _smg_cap) if _existing is not None else _smg_cap
+            )
+            account_state["session_momentum_size_cap"] = {
+                "severity": _smg_sev, "cap_pct": _smg_cap,
+            }
+            logger.info(
+                f"Session momentum size cap for {symbol}: severity={_smg_sev} → {_smg_cap}%"
+            )
 
         # Intra-session tape degradation gate.
         # After midday, require stronger setup quality when live tape is fading/downtrend.
@@ -5329,6 +5413,31 @@ def process_signal(data):
                 f"setup={trader_brain.get('setup_type')} "
                 f"reason={trader_brain.get('reason')}"
             )
+
+            # Strategy score sizing: promote trader_brain score from observe-only to
+            # live sizing.  Scores below the 55 "watchlist" threshold indicate the
+            # scorer sees net-negative conditions — apply a progressive cap.
+            # Scores >= 55 receive no additional cap (buy_opportunity handles those).
+            if action == "buy":
+                _tb_score = float(trader_brain.get("score") or 0)
+                _strat_cap = None
+                if _tb_score < 40:
+                    _strat_cap = _env_float("STRATEGY_SCORE_LOW_SIZE_CAP_PCT", 0.70)
+                elif _tb_score < 55:
+                    _strat_cap = _env_float("STRATEGY_SCORE_BELOW_THRESHOLD_SIZE_CAP_PCT", 0.85)
+                if _strat_cap is not None:
+                    _existing = account_state.get("max_position_size_pct_override")
+                    account_state["max_position_size_pct_override"] = (
+                        min(float(_existing), _strat_cap) if _existing is not None else _strat_cap
+                    )
+                    account_state["strategy_score_size_cap"] = {
+                        "score": _tb_score, "cap_pct": _strat_cap,
+                    }
+                    logger.info(
+                        f"Strategy score size cap for {symbol}: "
+                        f"score={_tb_score:.1f} → {_strat_cap}%"
+                    )
+
         except Exception as e:
             logger.warning(f"Strategy observe failed for {symbol} {action.upper()}: {e}")
 
@@ -5355,11 +5464,44 @@ def process_signal(data):
     # Claude-safe account state:
     # Keep observe-only diagnostics in /status, DB context, and reports,
     # but do not send them to Claude where they can behave like live gates.
+    # Raw gate objects (adaptive_buy_confirmation, market_alignment) are stripped
+    # and replaced with a lightweight summary so Claude has the key facts without
+    # being exposed to internal gate state that could create implicit live gates.
     claude_account_state = dict(account_state)
+    _ac_raw = account_state.get("adaptive_buy_confirmation") or {}
+    _ma_raw = account_state.get("market_alignment") or {}
     claude_account_state.pop("adaptive_buy_confirmation", None)
     claude_account_state.pop("adaptive_buy_confirmation_error", None)
     claude_account_state.pop("market_alignment", None)
     claude_account_state.pop("market_alignment_error", None)
+    claude_account_state["market_context_summary"] = {
+        "required_confirmations": _ac_raw.get("required_buy_confirmations"),
+        "confirmation_reasons": _ac_raw.get("reasons"),
+        "market_aligned": _ma_raw.get("aligned_for_buy"),
+        "alignment_reason": _ma_raw.get("reason"),
+    }
+
+    # Conviction stack diagnostic: single dict summarising which signals are active
+    # and what effective size cap results.  Logged for every BUY decision path.
+    if action == "buy":
+        _cs_ml_raw = (account_state.get("prediction_gate") or {}).get("ml_prediction_score")
+        account_state["conviction_stack"] = {
+            "buy_opportunity": (account_state.get("buy_opportunity") or {}).get("buy_opportunity_recommendation"),
+            "strategy_score": float(
+                (account_state.get("strategy_observation") or {}).get("trader_brain", {}).get("score") or 0
+            ),
+            "session_severity": (account_state.get("session_momentum_gate") or {}).get("severity"),
+            "ml_bucket": _ml_prediction_bucket(_cs_ml_raw),
+            "effective_cap_pct": account_state.get("max_position_size_pct_override"),
+        }
+        logger.info(
+            f"Conviction stack for {symbol} BUY: "
+            f"buy_opp={account_state['conviction_stack']['buy_opportunity']} "
+            f"strategy={account_state['conviction_stack']['strategy_score']:.0f} "
+            f"session={account_state['conviction_stack']['session_severity']} "
+            f"ml_bucket={account_state['conviction_stack']['ml_bucket']} "
+            f"cap={account_state['conviction_stack']['effective_cap_pct']}"
+        )
 
     # Pre-Claude affordability gate.
     # This is only a hard 1-share buying-power check. Macro risk and

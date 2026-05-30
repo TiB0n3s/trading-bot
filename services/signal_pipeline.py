@@ -19,7 +19,7 @@ from services.signal_models import ExecutionResult, PipelineResult, SignalContex
 
 @dataclass(frozen=True)
 class SignalPipelineDeps:
-    live_signal_processor: Callable[..., None]
+    live_signal_processor: Any
     build_runtime_state: Callable[[SignalContext], SignalRuntimeState]
     build_context_runtime: Callable[[SignalRuntimeState], Any]
     evaluate_preflight: Callable[[SignalRuntimeState], PreflightResult]
@@ -86,16 +86,14 @@ class SignalPipeline:
                 )
             return PipelineResult(handled=True, context=context)
 
-        # The live signal processor still owns the remaining orchestration while
-        # individual stages are migrated behind services.
         with stage_timer("live_signal_orchestration"):
-            self.deps.live_signal_processor(
-                context.raw_signal,
-                runtime_state=runtime_state,
-                context_runtime=context_runtime,
-                preflight_result=preflight_result,
+            result = self.deps.live_signal_processor.process(
+                context,
+                runtime_state,
+                context_runtime,
+                preflight_result,
             )
-            execution = ExecutionResult(
+            execution = result.execution if result and result.execution else ExecutionResult(
                 submitted=False,
                 status="handled_by_live_signal_processor",
             )

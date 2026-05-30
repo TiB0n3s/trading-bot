@@ -2942,7 +2942,7 @@ def _build_signal_pipeline(app_container: ApplicationContainer | None = None):
     app_container = app_container or container
     return app_container.build_signal_pipeline(
         SignalPipelineDeps(
-            live_signal_processor=_legacy_process_signal,
+            live_signal_processor=_build_live_signal_processor(),
             build_runtime_state=_build_runtime_state,
             build_context_runtime=_build_context_runtime,
             evaluate_preflight=_evaluate_preflight,

@@ -46,8 +46,27 @@ class Recorder:
     def __init__(self):
         self.calls = []
 
-    def live_signal_processor(self, signal, **kwargs):
-        self.calls.append(("live_signal", dict(signal), kwargs))
+    def process(self, context, runtime_state, context_runtime, preflight_result):
+        self.calls.append(
+            (
+                "live_signal",
+                dict(context.raw_signal),
+                {
+                    "runtime_state": runtime_state,
+                    "context_runtime": context_runtime,
+                    "preflight_result": preflight_result,
+                },
+            )
+        )
+        from services.signal_models import ExecutionResult, PipelineResult
+        return PipelineResult(
+            handled=True,
+            context=context,
+            execution=ExecutionResult(
+                submitted=False,
+                status="handled_by_live_signal_processor",
+            ),
+        )
 
     def build_runtime_state(self, context):
         self.calls.append(("build_runtime_state", context.symbol, context.action))
@@ -88,7 +107,7 @@ def _pipeline(recorder=None, logger=None):
     logger = logger or FakeLogger()
     return SignalPipeline(
         SignalPipelineDeps(
-            live_signal_processor=recorder.live_signal_processor,
+            live_signal_processor=recorder,
             build_runtime_state=recorder.build_runtime_state,
             build_context_runtime=recorder.build_context_runtime,
             evaluate_preflight=recorder.evaluate_preflight,

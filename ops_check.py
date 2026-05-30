@@ -1984,6 +1984,447 @@ def order_health(target_date):
     return ok
 
 
+def setup_breakdown(target_date: str) -> bool:
+    """Daily breakdown of setup classification quality for a given date.
+
+    Shows:
+      - Signal counts and approval rates by setup_policy_action
+      - Error/unknown breakdown by symbol and hour-of-day
+      - Matched-trade P&L bucketed by setup_policy_action
+    """
+    import sqlite3
+
+    db_path = BASE_DIR / "trades.db"
+    if not db_path.exists():
+        print("[WARN] trades.db not found")
+        return False
+
+    with sqlite3.connect(f"file:{db_path}?mode=ro", uri=True) as con:
+        con.row_factory = sqlite3.Row
+
+        print(f"\n=== Setup Classification Breakdown: {target_date} ===\n")
+
+        # --- Overview by setup_policy_action (BUY signals only) ---
+        rows = con.execute("""
+            SELECT
+                COALESCE(setup_policy_action, 'NULL') AS action,
+                COUNT(*) AS signals,
+                SUM(approved) AS approved,
+                SUM(CASE WHEN approved = 0 THEN 1 ELSE 0 END) AS rejected
+            FROM trades
+            WHERE date(timestamp) = ?
+              AND action = 'buy'
+            GROUP BY setup_policy_action
+            ORDER BY signals DESC
+        """, (target_date,)).fetchall()
+
+        if not rows:
+            print(f"  No BUY signals found for {target_date}.")
+        else:
+            print(f"  {'setup_policy_action':<28} {'signals':>7} {'approved':>8} {'rejected':>8}")
+            print(f"  {'-'*28} {'-'*7} {'-'*8} {'-'*8}")
+            for r in rows:
+                print(
+                    f"  {r['action']:<28} {r['signals']:>7} "
+                    f"{r['approved']:>8} {r['rejected']:>8}"
+                )
+
+        # --- Error / unknown by symbol ---
+        print()
+        err_rows = con.execute("""
+            SELECT
+                symbol,
+                COUNT(*) AS signals,
+                SUM(approved) AS approved,
+                COALESCE(setup_unknown_reason, setup_policy_reason, 'no_reason') AS reason
+            FROM trades
+            WHERE date(timestamp) = ?
+              AND action = 'buy'
+              AND (
+                  setup_policy_action = 'error'
+                  OR setup_unknown_reason IS NOT NULL
+              )
+            GROUP BY symbol, setup_unknown_reason, setup_policy_reason
+            ORDER BY signals DESC
+            LIMIT 20
+        """, (target_date,)).fetchall()
+
+        if err_rows:
+            print(f"  Error/unknown by symbol (top 20):")
+            print(f"  {'symbol':<8} {'signals':>7} {'approved':>8}  reason")
+            print(f"  {'-'*8} {'-'*7} {'-'*8}  {'-'*40}")
+            for r in err_rows:
+                reason = (r["reason"] or "")[:60]
+                print(
+                    f"  {r['symbol']:<8} {r['signals']:>7} {r['approved']:>8}  {reason}"
+                )
+        else:
+            print("  No error/unknown signals for this date.")
+
+        # --- Error / unknown by hour ---
+        print()
+        hour_rows = con.execute("""
+            SELECT
+                CAST(strftime('%H', timestamp) AS INTEGER) AS hour_et,
+                COUNT(*) AS signals,
+                SUM(approved) AS approved
+            FROM trades
+            WHERE date(timestamp) = ?
+              AND action = 'buy'
+              AND (
+                  setup_policy_action = 'error'
+                  OR setup_unknown_reason IS NOT NULL
+              )
+            GROUP BY hour_et
+            ORDER BY hour_et
+        """, (target_date,)).fetchall()
+
+        if hour_rows:
+            print(f"  Error/unknown by hour (ET):")
+            print(f"  {'hour':>5} {'signals':>7} {'approved':>8}")
+            print(f"  {'-'*5} {'-'*7} {'-'*8}")
+            for r in hour_rows:
+                print(f"  {r['hour_et']:>5} {r['signals']:>7} {r['approved']:>8}")
+
+        # --- Matched-trade P&L by setup_policy_action ---
+        print()
+        pnl_rows = con.execute("""
+            SELECT
+                COALESCE(setup_policy_action, 'NULL') AS spa,
+                COUNT(*) AS trades,
+                SUM(won) AS wins,
+                ROUND(AVG(realized_pnl_pct), 3) AS avg_pnl_pct,
+                ROUND(SUM(realized_pnl_pct), 2) AS total_pnl_pct
+            FROM matched_trades
+            WHERE date(entry_timestamp) = ?
+            GROUP BY setup_policy_action
+            ORDER BY trades DESC
+        """, (target_date,)).fetchall()
+
+        if pnl_rows:
+            print(f"  Matched-trade P&L by setup_policy_action:")
+            print(
+                f"  {'action':<28} {'trades':>6} {'wins':>5} "
+                f"{'avg_pnl%':>9} {'total_pnl%':>10}"
+            )
+            print(f"  {'-'*28} {'-'*6} {'-'*5} {'-'*9} {'-'*10}")
+            for r in pnl_rows:
+                print(
+                    f"  {r['spa']:<28} {r['trades']:>6} {r['wins']:>5} "
+                    f"{r['avg_pnl_pct']:>9} {r['total_pnl_pct']:>10}"
+                )
+        else:
+            print("  No matched trades for this date.")
+
+        # --- Approved BUY trades where setup was error/unknown, with P&L ---
+        print()
+        approved_unknown = con.execute("""
+            SELECT
+                mt.symbol,
+                mt.setup_policy_action,
+                COALESCE(mt.setup_unknown_reason, mt.setup_policy_reason, '') AS unknown_reason,
+                ROUND(mt.realized_pnl_pct, 3) AS pnl_pct,
+                mt.won,
+                mt.holding_minutes
+            FROM matched_trades mt
+            WHERE date(mt.entry_timestamp) = ?
+              AND (
+                  mt.setup_policy_action = 'error'
+                  OR mt.setup_unknown_reason IS NOT NULL
+              )
+            ORDER BY mt.entry_timestamp
+        """, (target_date,)).fetchall()
+
+        if approved_unknown:
+            print(f"  Approved buys with unknown/error setup (P&L detail):")
+            print(
+                f"  {'symbol':<8} {'action':<8} {'pnl%':>7} {'won':>4} "
+                f"{'hold_min':>9}  reason"
+            )
+            print(f"  {'-'*8} {'-'*8} {'-'*7} {'-'*4} {'-'*9}  {'-'*35}")
+            for r in approved_unknown:
+                reason = (r["unknown_reason"] or "")[:50]
+                print(
+                    f"  {r['symbol']:<8} {r['setup_policy_action']:<8} "
+                    f"{r['pnl_pct']:>7} {r['won']:>4} "
+                    f"{(r['holding_minutes'] or 0):>9.0f}  {reason}"
+                )
+        else:
+            print("  No matched trades with unknown/error setup for this date.")
+
+        # ── Prediction bucket breakdown (Step 8, Phase 2) ─────────────────
+        # Shows approved count, approval rate, and realized P&L by ML prediction
+        # bucket so we can track whether the weak-prediction gate is doing work.
+        #
+        # Reads from trades.ml_prediction_bucket (populated from
+        # daily_symbol_predictions cache at signal time).  Joins matched_trades
+        # for realized P&L.  Mid and low buckets are observe-only; only
+        # weak_below_45 has an active gate (size cap when setup is also degraded).
+
+        print()
+        print(f"  Prediction bucket breakdown (BUY signals):")
+
+        bucket_signal_rows = con.execute("""
+            SELECT
+                COALESCE(ml_prediction_bucket, 'unknown') AS bucket,
+                COUNT(*) AS signals,
+                SUM(approved) AS approved,
+                ROUND(100.0 * SUM(approved) / COUNT(*), 1) AS approval_rate_pct
+            FROM trades
+            WHERE date(timestamp) = ?
+              AND action = 'buy'
+            GROUP BY bucket
+            ORDER BY
+                CASE bucket
+                    WHEN 'high_55_plus'  THEN 1
+                    WHEN 'mid_50_55'     THEN 2
+                    WHEN 'low_45_50'     THEN 3
+                    WHEN 'weak_below_45' THEN 4
+                    ELSE 5
+                END
+        """, (target_date,)).fetchall()
+
+        bucket_pnl_rows = con.execute("""
+            SELECT
+                COALESCE(mt.ml_prediction_bucket, 'unknown') AS bucket,
+                COUNT(*) AS trades,
+                SUM(mt.won) AS wins,
+                ROUND(AVG(mt.realized_pnl_pct), 3) AS avg_pnl_pct,
+                ROUND(SUM(mt.realized_pnl_pct), 2) AS total_pnl_pct
+            FROM matched_trades mt
+            WHERE date(mt.entry_timestamp) = ?
+            GROUP BY bucket
+            ORDER BY
+                CASE bucket
+                    WHEN 'high_55_plus'  THEN 1
+                    WHEN 'mid_50_55'     THEN 2
+                    WHEN 'low_45_50'     THEN 3
+                    WHEN 'weak_below_45' THEN 4
+                    ELSE 5
+                END
+        """, (target_date,)).fetchall()
+
+        pnl_by_bucket = {r["bucket"]: r for r in bucket_pnl_rows}
+
+        if bucket_signal_rows:
+            print(
+                f"  {'bucket':<16} {'signals':>7} {'appr':>5} {'appr%':>6} "
+                f"{'trades':>6} {'wins':>5} {'avg_pnl%':>9} {'note'}"
+            )
+            print(
+                f"  {'-'*16} {'-'*7} {'-'*5} {'-'*6} "
+                f"{'-'*6} {'-'*5} {'-'*9} {'-'*20}"
+            )
+            for r in bucket_signal_rows:
+                bucket = r["bucket"]
+                pnl = pnl_by_bucket.get(bucket)
+                trades = pnl["trades"] if pnl else 0
+                wins = pnl["wins"] if pnl else 0
+                avg_pnl = pnl["avg_pnl_pct"] if pnl else None
+                avg_str = f"{avg_pnl:>9.3f}" if avg_pnl is not None else f"{'—':>9}"
+                note = (
+                    "ACTIVE gate" if bucket == "weak_below_45" else
+                    "observe only" if bucket in ("low_45_50", "mid_50_55") else
+                    "tie-breaker" if bucket == "high_55_plus" else ""
+                )
+                print(
+                    f"  {bucket:<16} {r['signals']:>7} {r['approved']:>5} "
+                    f"{r['approval_rate_pct']:>6} "
+                    f"{trades:>6} {wins:>5} {avg_str} {note}"
+                )
+        else:
+            print(f"  No BUY signals with ml_prediction_bucket data for {target_date}.")
+            print(f"  (Column added 2026-05-29; prior records will show 'unknown'.)")
+
+        # --- Capture ratio by exit type ---
+        # Shows how much of the maximum favorable excursion (MFE) was captured
+        # for each exit category.  MFE is sourced from position_momentum_checks
+        # at rebuild time.  'winners_became_losers' counts trades where MFE >=
+        # 0.40% but the position still closed negative.
+        print()
+        print(f"  Capture ratio by exit type:")
+
+        capture_rows = con.execute("""
+            SELECT
+                CASE
+                    WHEN exit_reason LIKE 'position_manager_full%'    THEN 'pm_full_exit'
+                    WHEN exit_reason LIKE 'position_manager_partial%'  THEN 'pm_partial_exit'
+                    WHEN exit_reason LIKE 'synthetic_bracket%'         THEN 'bracket_exit'
+                    ELSE COALESCE(SUBSTR(exit_reason, 1, 22), 'unknown')
+                END AS exit_type,
+                COUNT(*) AS n,
+                SUM(CASE WHEN mfe_pct IS NOT NULL THEN 1 ELSE 0 END) AS has_mfe,
+                ROUND(AVG(mfe_pct), 3) AS avg_mfe,
+                ROUND(AVG(realized_pnl_pct), 3) AS avg_pnl,
+                ROUND(AVG(capture_ratio), 3) AS avg_capture,
+                SUM(CASE WHEN mfe_pct >= 0.40 AND realized_pnl_pct <= 0 THEN 1 ELSE 0 END)
+                    AS winners_became_losers
+            FROM matched_trades
+            WHERE exit_timestamp IS NOT NULL
+              AND DATE(exit_timestamp) = ?
+            GROUP BY exit_type
+            ORDER BY n DESC
+        """, (target_date,)).fetchall()
+
+        if capture_rows:
+            print(
+                f"  {'exit_type':<22} {'n':>4} {'mfe_n':>5} "
+                f"{'avg_mfe%':>9} {'avg_pnl%':>9} {'avg_cap':>8} {'wbl':>4}"
+            )
+            print(f"  {'-'*22} {'-'*4} {'-'*5} {'-'*9} {'-'*9} {'-'*8} {'-'*4}")
+            for r in capture_rows:
+                avg_mfe_s = f"{r['avg_mfe']:>9.3f}" if r["avg_mfe"] is not None else f"{'—':>9}"
+                avg_pnl_s = f"{r['avg_pnl']:>9.3f}" if r["avg_pnl"] is not None else f"{'—':>9}"
+                avg_cap_s = f"{r['avg_capture']:>8.3f}" if r["avg_capture"] is not None else f"{'—':>8}"
+                print(
+                    f"  {r['exit_type']:<22} {r['n']:>4} {r['has_mfe']:>5} "
+                    f"{avg_mfe_s} {avg_pnl_s} {avg_cap_s} {r['winners_became_losers']:>4}"
+                )
+        else:
+            print(f"  No matched trades for {target_date}.")
+
+        print()
+        return True
+
+
+def winner_became_loser(target_date: str) -> bool:
+    """Report closed trades where MFE >= 0.40% but realized P&L ended negative.
+
+    Also shows 'poor capture' trades (MFE >= 0.40%, realized > 0, capture < 0.50)
+    so you can see where green positions faded before the exit fired.
+
+    MFE is derived from position_momentum_checks (stored in matched_trades after
+    trade_matcher.py rebuild).  Run `python3 trade_matcher.py` first.
+    """
+    import sqlite3
+
+    db_path = BASE_DIR / "trades.db"
+    if not db_path.exists():
+        print("[WARN] trades.db not found")
+        return False
+
+    MFE_THRESHOLD = 0.40
+
+    with sqlite3.connect(f"file:{db_path}?mode=ro", uri=True) as con:
+        con.row_factory = sqlite3.Row
+
+        print(f"\n=== Winner-Became-Loser Report: {target_date} ===\n")
+
+        # --- Summary stats for the day ---
+        summary = con.execute("""
+            SELECT
+                COUNT(*) AS total,
+                SUM(CASE WHEN mfe_pct IS NOT NULL THEN 1 ELSE 0 END) AS has_mfe,
+                SUM(CASE WHEN mfe_pct >= ? AND realized_pnl_pct <= 0 THEN 1 ELSE 0 END)
+                    AS true_wbl,
+                SUM(CASE WHEN mfe_pct >= ? AND realized_pnl_pct > 0
+                          AND (capture_ratio IS NULL OR capture_ratio < 0.50)
+                          THEN 1 ELSE 0 END) AS poor_capture
+            FROM matched_trades
+            WHERE DATE(exit_timestamp) = ?
+        """, (MFE_THRESHOLD, MFE_THRESHOLD, target_date)).fetchone()
+
+        if not summary or summary["total"] == 0:
+            print(f"  No matched trades for {target_date}. Run: python3 trade_matcher.py")
+            return True
+
+        print(
+            f"  Matched trades : {summary['total']}\n"
+            f"  With MFE data  : {summary['has_mfe']}\n"
+            f"  Winner→loser   : {summary['true_wbl']}  (MFE >= {MFE_THRESHOLD}%, realized <= 0)\n"
+            f"  Poor capture   : {summary['poor_capture']}  (MFE >= {MFE_THRESHOLD}%, capture < 0.50)\n"
+        )
+
+        # --- Winner-became-loser trades ---
+        wbl_rows = con.execute("""
+            SELECT
+                symbol, entry_timestamp, exit_timestamp,
+                holding_minutes, realized_pnl_pct, mfe_pct, capture_ratio,
+                setup_policy_action, exit_reason
+            FROM matched_trades
+            WHERE DATE(exit_timestamp) = ?
+              AND mfe_pct >= ?
+              AND realized_pnl_pct <= 0
+            ORDER BY realized_pnl_pct ASC
+        """, (target_date, MFE_THRESHOLD)).fetchall()
+
+        if wbl_rows:
+            print(f"  Winner-became-loser (MFE >= {MFE_THRESHOLD}%, realized <= 0):")
+            print(
+                f"  {'sym':<6} {'mfe%':>6} {'pnl%':>7} {'ratio':>7} "
+                f"{'hold':>7} {'setup':<12} exit_reason"
+            )
+            print(f"  {'-'*6} {'-'*6} {'-'*7} {'-'*7} {'-'*7} {'-'*12} {'-'*40}")
+            for r in wbl_rows:
+                ratio_s = f"{r['capture_ratio']:>7.3f}" if r["capture_ratio"] is not None else f"{'—':>7}"
+                exit_s = (r["exit_reason"] or "")[:50]
+                print(
+                    f"  {r['symbol']:<6} {r['mfe_pct']:>6.3f} {r['realized_pnl_pct']:>7.3f} "
+                    f"{ratio_s} {(r['holding_minutes'] or 0):>7.1f} "
+                    f"{(r['setup_policy_action'] or 'none'):<12} {exit_s}"
+                )
+        else:
+            print(f"  No winner-became-loser trades for {target_date}.")
+
+        # --- Poor capture trades ---
+        print()
+        poor_rows = con.execute("""
+            SELECT
+                symbol, holding_minutes, realized_pnl_pct, mfe_pct, capture_ratio,
+                setup_policy_action, exit_reason
+            FROM matched_trades
+            WHERE DATE(exit_timestamp) = ?
+              AND mfe_pct >= ?
+              AND realized_pnl_pct > 0
+              AND (capture_ratio IS NULL OR capture_ratio < 0.50)
+            ORDER BY capture_ratio ASC NULLS LAST
+        """, (target_date, MFE_THRESHOLD)).fetchall()
+
+        if poor_rows:
+            print(f"  Poor capture (MFE >= {MFE_THRESHOLD}%, realized > 0, capture < 0.50):")
+            print(
+                f"  {'sym':<6} {'mfe%':>6} {'pnl%':>7} {'ratio':>7} "
+                f"{'hold':>7} {'setup':<12} exit_reason"
+            )
+            print(f"  {'-'*6} {'-'*6} {'-'*7} {'-'*7} {'-'*7} {'-'*12} {'-'*40}")
+            for r in poor_rows:
+                ratio_s = f"{r['capture_ratio']:>7.3f}" if r["capture_ratio"] is not None else f"{'—':>7}"
+                exit_s = (r["exit_reason"] or "")[:50]
+                print(
+                    f"  {r['symbol']:<6} {r['mfe_pct']:>6.3f} {r['realized_pnl_pct']:>7.3f} "
+                    f"{ratio_s} {(r['holding_minutes'] or 0):>7.1f} "
+                    f"{(r['setup_policy_action'] or 'none'):<12} {exit_s}"
+                )
+        else:
+            print(f"  No poor-capture trades for {target_date}.")
+
+        # --- All matched trades today sorted by capture_ratio ---
+        print()
+        all_rows = con.execute("""
+            SELECT
+                symbol, realized_pnl_pct, mfe_pct, capture_ratio,
+                setup_policy_action
+            FROM matched_trades
+            WHERE DATE(exit_timestamp) = ?
+              AND mfe_pct IS NOT NULL
+            ORDER BY capture_ratio ASC NULLS FIRST
+        """, (target_date,)).fetchall()
+
+        if all_rows:
+            print(f"  All trades with MFE (sorted by capture ratio, worst first):")
+            print(f"  {'sym':<6} {'mfe%':>6} {'pnl%':>7} {'ratio':>7}  setup")
+            print(f"  {'-'*6} {'-'*6} {'-'*7} {'-'*7}  {'-'*14}")
+            for r in all_rows:
+                ratio_s = f"{r['capture_ratio']:>7.3f}" if r["capture_ratio"] is not None else f"{'—':>7}"
+                print(
+                    f"  {r['symbol']:<6} {r['mfe_pct']:>6.3f} {r['realized_pnl_pct']:>7.3f} "
+                    f"{ratio_s}  {r['setup_policy_action'] or 'none'}"
+                )
+
+        print()
+        return True
+
+
 def main():
     env_loaded = load_env_file()
     print(f"env_file_loaded={env_loaded}")
@@ -2033,6 +2474,12 @@ def main():
 
     if command == "migration-status":
         return 0 if migration_status_check() else 1
+
+    if command == "setup-breakdown":
+        return 0 if setup_breakdown(target_date) else 1
+
+    if command == "winner-became-loser":
+        return 0 if winner_became_loser(target_date) else 1
 
     if command == "premarket":
         checks = []

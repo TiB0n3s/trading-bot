@@ -180,6 +180,19 @@ BAD_ENTRY_CONTAINMENT_MAX_PEAK_PCT = float(
     os.getenv("POSITION_MANAGER_BAD_ENTRY_CONTAINMENT_MAX_PEAK_PCT", "0.15")
 )
 
+# Quality-split exit thresholds:
+# Strong entries get more room — looser giveback tolerance and higher threshold
+# before taking partial profits. Weak entries are managed more tightly once green.
+STRONG_ENTRY_PROFIT_GIVEBACK_TRIGGER_PCT = float(
+    os.getenv("POSITION_MANAGER_STRONG_ENTRY_PROFIT_GIVEBACK_PCT", "60")
+)
+WEAK_ENTRY_PROFIT_GIVEBACK_TRIGGER_PCT = float(
+    os.getenv("POSITION_MANAGER_WEAK_ENTRY_PROFIT_GIVEBACK_PCT", "40")
+)
+WEAK_ENTRY_MIN_PROFIT_PARTIAL_PCT = float(
+    os.getenv("POSITION_MANAGER_WEAK_ENTRY_MIN_PROFIT_PARTIAL_PCT", "0.50")
+)
+
 
 def now_utc():
     return datetime.now(timezone.utc)
@@ -706,6 +719,19 @@ def evaluate_position(position, state, session_momentum=None):
     # If a position has already moved favorably enough, do not allow it to
     # round-trip back to breakeven/red, especially for weaker entry contexts.
     weak_entry_context = is_weak_entry_context(entry_ctx)
+
+    # Quality-split thresholds — weak entries managed more tightly once green.
+    giveback_trigger_pct = (
+        WEAK_ENTRY_PROFIT_GIVEBACK_TRIGGER_PCT
+        if weak_entry_context
+        else STRONG_ENTRY_PROFIT_GIVEBACK_TRIGGER_PCT
+    )
+    min_profit_partial_pct = (
+        WEAK_ENTRY_MIN_PROFIT_PARTIAL_PCT
+        if weak_entry_context
+        else MIN_PROFIT_PARTIAL_PCT
+    )
+
     breakeven_trigger = (
         WEAK_SETUP_BREAKEVEN_LOCK_TRIGGER_PCT
         if weak_entry_context
@@ -745,21 +771,27 @@ def evaluate_position(position, state, session_momentum=None):
             reasons.append(delay_reason)
 
     # Partial exit: protect profit after favorable move and giveback.
-    if action == "hold" and peak_pl_pct >= MIN_PROFIT_PARTIAL_PCT and giveback_pct >= PROFIT_GIVEBACK_TRIGGER_PCT:
+    # Thresholds are quality-split: weak entries get tighter giveback and
+    # take partials earlier; strong entries get more room.
+    if action == "hold" and peak_pl_pct >= min_profit_partial_pct and giveback_pct >= giveback_trigger_pct:
         action = "sell_partial"
         sell_fraction = PARTIAL_SELL_PCT
         severity = "medium"
         reasons.append(
             f"profit giveback {giveback_pct:.1f}% from peak {peak_pl_pct:.2f}% "
-            f"after reaching min profit {MIN_PROFIT_PARTIAL_PCT:.2f}%"
+            f"after reaching min profit {min_profit_partial_pct:.2f}% "
+            f"(weak_entry={weak_entry_context})"
         )
 
-    if action == "hold" and current_pl_pct >= MIN_PROFIT_PARTIAL_PCT:
+    if action == "hold" and current_pl_pct >= min_profit_partial_pct:
         if momentum_5m is not None and momentum_15m is not None and momentum_5m < -0.15 and momentum_15m < 0:
             action = "sell_partial"
             sell_fraction = PARTIAL_SELL_PCT
             severity = "medium"
-            reasons.append(f"profitable but momentum fading ({momentum_5m:.2f}%, {momentum_15m:.2f}%)")
+            reasons.append(
+                f"profitable but momentum fading ({momentum_5m:.2f}%, {momentum_15m:.2f}%); "
+                f"min_profit={min_profit_partial_pct:.2f}% weak_entry={weak_entry_context}"
+            )
 
     if (
         action == "hold"
@@ -791,6 +823,7 @@ def evaluate_position(position, state, session_momentum=None):
         POSITION_MANAGER_PROFIT_CAPTURE_ENABLED
         and action in ("sell_partial", "sell_full")
         and not hard_full_exit
+        and not weak_entry_context  # weak entries: take profits when they appear, no delay
         and current_pl_pct > 0
         and retained_strength.get("retained")
         and not retained_strength.get("broken")

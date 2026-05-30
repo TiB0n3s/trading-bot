@@ -392,6 +392,29 @@ MIGRATIONS: tuple[Migration, ...] = (
             "ALTER TABLE decision_snapshots ADD COLUMN setup_rationale TEXT",
         ),
     ),
+    Migration(
+        migration_id="20260529_012_setup_unknown_reason",
+        description="Add setup_unknown_reason to trades for measurable unknown/error setup classification audit.",
+        statements=(
+            "ALTER TABLE trades ADD COLUMN setup_unknown_reason TEXT",
+        ),
+    ),
+    Migration(
+        migration_id="20260529_013_ml_prediction_bucket",
+        description="Add ml_prediction_score and ml_prediction_bucket to trades for daily prediction-bucket P&L reporting.",
+        statements=(
+            "ALTER TABLE trades ADD COLUMN ml_prediction_score REAL",
+            "ALTER TABLE trades ADD COLUMN ml_prediction_bucket TEXT",
+        ),
+    ),
+    Migration(
+        migration_id="20260529_014_matched_trades_mfe_capture_ratio",
+        description="Add mfe_pct and capture_ratio to matched_trades for capture-quality tracking.",
+        statements=(
+            "ALTER TABLE matched_trades ADD COLUMN mfe_pct REAL",
+            "ALTER TABLE matched_trades ADD COLUMN capture_ratio REAL",
+        ),
+    ),
 )
 
 

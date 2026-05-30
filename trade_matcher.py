@@ -51,6 +51,9 @@ ENTRY_CONTEXT_FIELDS = [
     "setup_policy_reason",
     "setup_confidence_adjustment",
     "setup_size_multiplier",
+    "setup_unknown_reason",
+    "ml_prediction_score",
+    "ml_prediction_bucket",
 
     "buy_opportunity_score",
     "buy_opportunity_recommendation",
@@ -284,6 +287,9 @@ def init_matched_trades_table():
             setup_policy_reason TEXT,
             setup_confidence_adjustment REAL,
             setup_size_multiplier REAL,
+            setup_unknown_reason TEXT,
+            ml_prediction_score REAL,
+            ml_prediction_bucket TEXT,
 
             buy_opportunity_score REAL,
             buy_opportunity_recommendation TEXT,
@@ -292,7 +298,9 @@ def init_matched_trades_table():
             exit_order_id TEXT,
             entry_source TEXT,
             signal_source TEXT,
-            match_source TEXT
+            match_source TEXT,
+            mfe_pct REAL,
+            capture_ratio REAL
         )
     """)
 
@@ -322,10 +330,15 @@ def init_matched_trades_table():
         "setup_policy_reason": "TEXT",
         "setup_confidence_adjustment": "REAL",
         "setup_size_multiplier": "REAL",
+        "setup_unknown_reason": "TEXT",
+        "ml_prediction_score": "REAL",
+        "ml_prediction_bucket": "TEXT",
         "buy_opportunity_score": "REAL",
         "buy_opportunity_recommendation": "TEXT",
         "buy_opportunity_reason": "TEXT",
         "signal_source": "TEXT",
+        "mfe_pct": "REAL",
+        "capture_ratio": "REAL",
     }
 
     for name, typ in add_columns.items():
@@ -480,6 +493,29 @@ def rebuild_matched_trades():
             f"INSERT INTO matched_trades ({col_sql}) VALUES ({placeholders})",
             values,
         )
+
+    # Compute MFE (maximum favorable excursion) from position_momentum_checks.
+    # Two passes: first populate mfe_pct, then derive capture_ratio from it.
+    con.execute("""
+        UPDATE matched_trades
+        SET mfe_pct = (
+            SELECT MAX(pmc.unrealized_plpc)
+            FROM position_momentum_checks pmc
+            WHERE pmc.symbol = matched_trades.symbol
+              AND pmc.timestamp >= matched_trades.entry_timestamp
+              AND pmc.timestamp <= matched_trades.exit_timestamp
+        )
+        WHERE entry_timestamp IS NOT NULL
+          AND exit_timestamp IS NOT NULL
+    """)
+    con.execute("""
+        UPDATE matched_trades
+        SET capture_ratio = CASE
+            WHEN mfe_pct IS NOT NULL AND mfe_pct > 0
+                THEN ROUND(realized_pnl_pct / mfe_pct, 3)
+            ELSE NULL
+        END
+    """)
 
     con.commit()
     con.close()

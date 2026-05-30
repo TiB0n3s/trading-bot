@@ -37,6 +37,7 @@ from services.approval_service import (
     run_legacy_claude_and_confidence,
     run_legacy_final_approval_gates,
     run_legacy_macro_position_gate,
+    run_legacy_trend_confirmation_gate,
 )
 from services.context_builder import (
     ContextAssemblyDeps,
@@ -2603,6 +2604,44 @@ def _legacy_run_macro_position_gate(
     return _LEGACY_STAGE_CONTINUE
 
 
+def _legacy_run_trend_confirmation_gate(
+    *,
+    symbol: str,
+    action: str,
+    price,
+    account_state: dict,
+    context_runtime,
+    current_et,
+    dedupe_key: str | None,
+) -> _LegacyStageResult:
+    outcome = run_legacy_trend_confirmation_gate(
+        symbol=symbol,
+        action=action,
+        current_et=current_et,
+        context_runtime=context_runtime,
+        required_buy_confirmations=_required_buy_confirmations,
+        required_sell_confirmations=_required_sell_confirmations,
+        is_fast_lane_buy_flip=is_fast_lane_buy_flip,
+        is_fast_lane_sell_flip=is_fast_lane_sell_flip,
+        market_open_minutes=MARKET_OPEN_MINUTES,
+        open_momentum_fast_lane_enabled=OPEN_MOMENTUM_FAST_LANE_ENABLED,
+        iex_thin_symbols=IEX_THIN_SYMBOLS,
+        adaptive_buy_confirmation_enabled=ADAPTIVE_BUY_CONFIRMATION_ENABLED,
+        log=logger,
+    )
+    if outcome.rejected and outcome.approval:
+        result = _legacy_reject_approval_decision(
+            symbol=symbol,
+            action=action,
+            price=price,
+            account_state=account_state,
+            dedupe_key=dedupe_key,
+            approval=outcome.approval,
+        )
+        return _LegacyStageResult(rejected=result.rejected, response=result.response)
+    return _LEGACY_STAGE_CONTINUE
+
+
 def _legacy_process_signal(data, *, runtime_state=None, context_runtime=None, preflight_result=None):
     if runtime_state is None or context_runtime is None:
         symbol, action = normalize_signal_identity(data)
@@ -2747,158 +2786,17 @@ def _legacy_process_signal_with_context(data, runtime_state, context_runtime, pr
     if macro_gate_result.rejected:
         return macro_gate_result.response
 
-    # Trend confirmation gate: require confirmed indicator-state transitions before allowing signals through.
-    if action == "buy":
-        trend_obs = context_runtime.build_trend_confirmation_observation(
-            current_et=current_et,
-            required_buy_confirmations=_required_buy_confirmations,
-            required_sell_confirmations=_required_sell_confirmations,
-            is_fast_lane_buy_flip=is_fast_lane_buy_flip,
-            is_fast_lane_sell_flip=is_fast_lane_sell_flip,
-            market_open_minutes=MARKET_OPEN_MINUTES,
-            open_momentum_fast_lane_enabled=OPEN_MOMENTUM_FAST_LANE_ENABLED,
-            iex_thin_symbols=IEX_THIN_SYMBOLS,
-        )
-        trend = trend_obs.data
-        trend_confirmation = trend_obs.confirmation
-        direction = trend_obs.direction
-        strength = trend_obs.strength
-        consecutive_count = trend_obs.consecutive_count
-        last_signal = trend_obs.last_signal
-        adaptive_confirmation = trend_confirmation.get("adaptive_confirmation") or {}
-        required_buy_confirmations = int(
-            trend_confirmation.get("required_confirmations") or 3
-        )
-
-        if direction != "bullish" or last_signal != "buy":
-            reason = (
-                f"direction={direction} "
-                f"last_signal={last_signal} "
-                f"required={required_buy_confirmations}"
-            )
-            logger.info(
-                f"Trend confirmation BUY observe-only for {symbol}: {reason}"
-            )
-
-        fast_lane_buy_flip = bool(trend_confirmation.get("fast_lane_buy_flip"))
-        open_momentum_fast_lane = bool(
-            trend_confirmation.get("open_momentum_fast_lane")
-        )
-
-        logger.info(
-            f"Trend confirmation BUY for {symbol}: "
-            f"required={required_buy_confirmations} "
-            f"count={consecutive_count} "
-            f"direction={direction} "
-            f"strength={strength} "
-            f"last_signal={last_signal} "
-            f"flip_event={trend.get('flip_event')} "
-            f"fast_lane_buy_flip={fast_lane_buy_flip} "
-            f"open_momentum_fast_lane={open_momentum_fast_lane} "
-            f"(elapsed={trend_confirmation.get('session_elapsed_minutes')}min "
-            f"momentum={trend_confirmation.get('momentum_state')} "
-            f"vol={trend_confirmation.get('volume_state')} "
-            f"vol_ok={trend_confirmation.get('volume_ok')} "
-            f"iex_thin={trend_confirmation.get('iex_thin')} "
-            f"bias={trend_confirmation.get('bias')}) "
-            f"adaptive_reason={adaptive_confirmation.get('reason')}"
-        )
-        if open_momentum_fast_lane and consecutive_count < required_buy_confirmations:
-            logger.info(
-                f"Open-momentum fast lane granted for {symbol}: "
-                f"elapsed={trend_confirmation.get('session_elapsed_minutes')}min "
-                f"count={consecutive_count} "
-                f"momentum={trend_confirmation.get('momentum_state')} "
-                f"vol={trend_confirmation.get('volume_state')} "
-                f"iex_thin={trend_confirmation.get('iex_thin')}"
-            )
-
-        if not (fast_lane_buy_flip or open_momentum_fast_lane) and consecutive_count < required_buy_confirmations:
-            reason = (
-                f"consecutive_buy_count={consecutive_count} "
-                f"< required={required_buy_confirmations} "
-                f"strength={strength} "
-                f"flip_event={trend.get('flip_event')} "
-                f"adaptive_reason={adaptive_confirmation.get('reason')}"
-            )
-
-            if ADAPTIVE_BUY_CONFIRMATION_ENABLED:
-                if _reject_approval_decision(
-                    trend_confirmation_rejection(
-                        reason,
-                        metadata=trend_confirmation,
-                    )
-                ):
-                    return
-            else:
-                logger.info(
-                    f"Trend confirmation BUY observe-only for {symbol}: {reason}"
-                )
-
-    if action == "sell":
-        trend_obs = context_runtime.build_trend_confirmation_observation(
-            current_et=current_et,
-            required_buy_confirmations=_required_buy_confirmations,
-            required_sell_confirmations=_required_sell_confirmations,
-            is_fast_lane_buy_flip=is_fast_lane_buy_flip,
-            is_fast_lane_sell_flip=is_fast_lane_sell_flip,
-            market_open_minutes=MARKET_OPEN_MINUTES,
-            open_momentum_fast_lane_enabled=OPEN_MOMENTUM_FAST_LANE_ENABLED,
-            iex_thin_symbols=IEX_THIN_SYMBOLS,
-        )
-        trend = trend_obs.data
-        trend_confirmation = trend_obs.confirmation
-        direction = trend_obs.direction
-        strength = trend_obs.strength
-        consecutive_count = trend_obs.consecutive_count
-        last_signal = trend_obs.last_signal
-        sell_confirmation = trend_confirmation.get("sell_confirmation") or {}
-        required_sell_confirmations = int(
-            trend_confirmation.get("required_confirmations") or 2
-        )
-
-        if direction != "bearish" or last_signal != "sell":
-            reason = (
-                f"direction={direction} "
-                f"last_signal={last_signal} "
-                f"required={required_sell_confirmations}"
-            )
-            if _reject_approval_decision(
-                trend_confirmation_rejection(
-                    reason,
-                    metadata=trend_confirmation,
-                )
-            ):
-                return
-
-        fast_lane_sell_flip = bool(trend_confirmation.get("fast_lane_sell_flip"))
-
-        logger.info(
-            f"Trend confirmation SELL for {symbol}: "
-            f"required={required_sell_confirmations} "
-            f"count={consecutive_count} "
-            f"direction={direction} "
-            f"strength={strength} "
-            f"last_signal={last_signal} "
-            f"flip_event={trend.get('flip_event')} "
-            f"fast_lane_sell_flip={fast_lane_sell_flip} "
-            f"sell_reason={sell_confirmation.get('reason')}"
-        )
-
-        if not fast_lane_sell_flip and consecutive_count < required_sell_confirmations:
-            reason = (
-                f"consecutive_sell_count={consecutive_count} "
-                f"< required={required_sell_confirmations} "
-                f"strength={strength} "
-                f"flip_event={trend.get('flip_event')}"
-            )
-            if _reject_approval_decision(
-                trend_confirmation_rejection(
-                    reason,
-                    metadata=trend_confirmation,
-                )
-            ):
-                return
+    trend_gate_result = _legacy_run_trend_confirmation_gate(
+        symbol=symbol,
+        action=action,
+        price=price,
+        account_state=account_state,
+        context_runtime=context_runtime,
+        current_et=current_et,
+        dedupe_key=dedupe_key,
+    )
+    if trend_gate_result.rejected:
+        return trend_gate_result.response
 
     # Fundamental score gate: block buys when manual/pre-market research flags weak fundamentals
     bias_entry = _market_bias.get(symbol) or {}

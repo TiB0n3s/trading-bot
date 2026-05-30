@@ -512,6 +512,157 @@ def run_legacy_macro_position_gate(
     )
 
 
+def run_legacy_trend_confirmation_gate(
+    *,
+    symbol: str,
+    action: str,
+    current_et: Any,
+    context_runtime: Any,
+    required_buy_confirmations: Callable[[str, dict[str, Any] | None], dict[str, Any]],
+    required_sell_confirmations: Callable[[str, dict[str, Any] | None], dict[str, Any]],
+    is_fast_lane_buy_flip: Callable[..., bool],
+    is_fast_lane_sell_flip: Callable[..., bool],
+    market_open_minutes: int,
+    open_momentum_fast_lane_enabled: bool,
+    iex_thin_symbols: set[str],
+    adaptive_buy_confirmation_enabled: bool,
+    log: Any,
+) -> LegacyStageOutcome:
+    if action not in ("buy", "sell"):
+        return LegacyStageOutcome()
+
+    trend_obs = context_runtime.build_trend_confirmation_observation(
+        current_et=current_et,
+        required_buy_confirmations=required_buy_confirmations,
+        required_sell_confirmations=required_sell_confirmations,
+        is_fast_lane_buy_flip=is_fast_lane_buy_flip,
+        is_fast_lane_sell_flip=is_fast_lane_sell_flip,
+        market_open_minutes=market_open_minutes,
+        open_momentum_fast_lane_enabled=open_momentum_fast_lane_enabled,
+        iex_thin_symbols=iex_thin_symbols,
+    )
+    trend = trend_obs.data
+    trend_confirmation = trend_obs.confirmation
+    direction = trend_obs.direction
+    strength = trend_obs.strength
+    consecutive_count = trend_obs.consecutive_count
+    last_signal = trend_obs.last_signal
+
+    if action == "buy":
+        adaptive_confirmation = trend_confirmation.get("adaptive_confirmation") or {}
+        required = int(trend_confirmation.get("required_confirmations") or 3)
+
+        if direction != "bullish" or last_signal != "buy":
+            reason = (
+                f"direction={direction} "
+                f"last_signal={last_signal} "
+                f"required={required}"
+            )
+            log.info(f"Trend confirmation BUY observe-only for {symbol}: {reason}")
+
+        fast_lane_buy_flip = bool(trend_confirmation.get("fast_lane_buy_flip"))
+        open_momentum_fast_lane = bool(
+            trend_confirmation.get("open_momentum_fast_lane")
+        )
+
+        log.info(
+            f"Trend confirmation BUY for {symbol}: "
+            f"required={required} "
+            f"count={consecutive_count} "
+            f"direction={direction} "
+            f"strength={strength} "
+            f"last_signal={last_signal} "
+            f"flip_event={trend.get('flip_event')} "
+            f"fast_lane_buy_flip={fast_lane_buy_flip} "
+            f"open_momentum_fast_lane={open_momentum_fast_lane} "
+            f"(elapsed={trend_confirmation.get('session_elapsed_minutes')}min "
+            f"momentum={trend_confirmation.get('momentum_state')} "
+            f"vol={trend_confirmation.get('volume_state')} "
+            f"vol_ok={trend_confirmation.get('volume_ok')} "
+            f"iex_thin={trend_confirmation.get('iex_thin')} "
+            f"bias={trend_confirmation.get('bias')}) "
+            f"adaptive_reason={adaptive_confirmation.get('reason')}"
+        )
+        if open_momentum_fast_lane and consecutive_count < required:
+            log.info(
+                f"Open-momentum fast lane granted for {symbol}: "
+                f"elapsed={trend_confirmation.get('session_elapsed_minutes')}min "
+                f"count={consecutive_count} "
+                f"momentum={trend_confirmation.get('momentum_state')} "
+                f"vol={trend_confirmation.get('volume_state')} "
+                f"iex_thin={trend_confirmation.get('iex_thin')}"
+            )
+
+        if not (fast_lane_buy_flip or open_momentum_fast_lane) and consecutive_count < required:
+            reason = (
+                f"consecutive_buy_count={consecutive_count} "
+                f"< required={required} "
+                f"strength={strength} "
+                f"flip_event={trend.get('flip_event')} "
+                f"adaptive_reason={adaptive_confirmation.get('reason')}"
+            )
+
+            if adaptive_buy_confirmation_enabled:
+                return LegacyStageOutcome(
+                    rejected=True,
+                    approval=trend_confirmation_rejection(
+                        reason,
+                        metadata=trend_confirmation,
+                    ),
+                )
+            log.info(f"Trend confirmation BUY observe-only for {symbol}: {reason}")
+
+        return LegacyStageOutcome()
+
+    sell_confirmation = trend_confirmation.get("sell_confirmation") or {}
+    required = int(trend_confirmation.get("required_confirmations") or 2)
+
+    if direction != "bearish" or last_signal != "sell":
+        reason = (
+            f"direction={direction} "
+            f"last_signal={last_signal} "
+            f"required={required}"
+        )
+        return LegacyStageOutcome(
+            rejected=True,
+            approval=trend_confirmation_rejection(
+                reason,
+                metadata=trend_confirmation,
+            ),
+        )
+
+    fast_lane_sell_flip = bool(trend_confirmation.get("fast_lane_sell_flip"))
+
+    log.info(
+        f"Trend confirmation SELL for {symbol}: "
+        f"required={required} "
+        f"count={consecutive_count} "
+        f"direction={direction} "
+        f"strength={strength} "
+        f"last_signal={last_signal} "
+        f"flip_event={trend.get('flip_event')} "
+        f"fast_lane_sell_flip={fast_lane_sell_flip} "
+        f"sell_reason={sell_confirmation.get('reason')}"
+    )
+
+    if not fast_lane_sell_flip and consecutive_count < required:
+        reason = (
+            f"consecutive_sell_count={consecutive_count} "
+            f"< required={required} "
+            f"strength={strength} "
+            f"flip_event={trend.get('flip_event')}"
+        )
+        return LegacyStageOutcome(
+            rejected=True,
+            approval=trend_confirmation_rejection(
+                reason,
+                metadata=trend_confirmation,
+            ),
+        )
+
+    return LegacyStageOutcome()
+
+
 def run_legacy_final_approval_gates(
     *,
     signal: dict[str, Any],

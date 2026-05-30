@@ -2398,6 +2398,137 @@ def _legacy_run_claude_and_confidence(
     return _LegacyClaudeStageResult(decision=decision)
 
 
+def _legacy_run_approved_order_path(
+    *,
+    data: dict,
+    symbol: str,
+    action: str,
+    price,
+    account_state: dict,
+    dedupe_key: str | None,
+    current_et,
+    decision: dict,
+) -> _LegacyStageResult:
+    order_result = None
+
+    if decision.get("approved"):
+        try:
+            approved_reason = decision.get("reason")
+            logger.info(f"APPROVED: {symbol} {action.upper()} - {approved_reason}")
+
+            risk_multiplier = float(account_state.get("macro_risk", {}).get("risk_multiplier", 1.0))
+            sizing_decision = apply_final_sizing(
+                symbol=symbol,
+                action=action,
+                decision=decision,
+                risk_multiplier=risk_multiplier,
+                account_state=account_state,
+                apply_buy_opportunity_sizing=lambda **kwargs: (
+                    sizing_policy.apply_buy_opportunity_sizing(**kwargs, log=logger)
+                ),
+                log=logger,
+            )
+            adjusted_position_size_pct = sizing_decision.final_size_pct
+            account_state["final_sizing"] = {
+                "requested_size_pct": sizing_decision.requested_size_pct,
+                "final_size_pct": sizing_decision.final_size_pct,
+                "dominant_limiter": sizing_decision.dominant_limiter,
+                "active_caps": [
+                    {"source": cap.source, "cap_pct": cap.cap_pct, "reason": cap.reason}
+                    for cap in sizing_decision.active_caps
+                ],
+                "conviction_stack": sizing_decision.conviction_stack,
+            }
+
+            execution = execute_order(
+                symbol=symbol,
+                action=action,
+                signal=data,
+                signal_price=price,
+                decision=decision,
+                account_state=account_state,
+                position_size_pct=adjusted_position_size_pct,
+                execution_mode=EXECUTION_MODE,
+                pre_order_safety_check=_pre_order_safety_check,
+                one_bar_confirmation_hold=_one_bar_confirmation_hold,
+                make_client_order_id=_make_client_order_id,
+                place_order=place_order,
+                log=logger,
+            )
+            account_state.update(execution.account_state_updates)
+            if execution.decision_updates:
+                decision.update(execution.decision_updates)
+            order_result = execution.order_result
+
+            if execution.rejection_category:
+                return _legacy_reject_approval_decision(
+                    symbol=symbol,
+                    action=action,
+                    price=price,
+                    account_state=account_state,
+                    dedupe_key=dedupe_key,
+                    approval=execution_rejection_decision(execution),
+                )
+
+            if order_result:
+                if EXECUTION_MODE == "dry_run":
+                    logger.info(f"DRY RUN ORDER RECORDED: {order_result}")
+                else:
+                    logger.info(f"ORDER PLACED: {order_result}")
+                    cooldown_key = (symbol, action)
+                    _last_order[cooldown_key] = current_et
+                    _write_cooldown(symbol, action, current_et)
+                    if action == "sell":
+                        _last_sell[symbol] = (current_et, price)
+                        _write_recent_sell(symbol, current_et, price)
+            else:
+                logger.error(f"Order placement failed for {symbol}")
+                if dedupe_key:
+                    _trade_audit_recorder().record_webhook_status(
+                        dedupe_key=dedupe_key,
+                        status="submit_failed",
+                        failure_reason=execution.failure_reason or "broker returned no order_result",
+                    )
+
+        except Exception as e:
+            logger.exception(
+                f"APPROVED ORDER PATH CRASHED for {symbol} {action.upper()}: {e}"
+            )
+            _legacy_reject_approval_decision(
+                symbol=symbol,
+                action=action,
+                price=price,
+                account_state=account_state,
+                dedupe_key=dedupe_key,
+                approval=deterministic_rejection(
+                    category="order_path_exception",
+                    reason=str(e),
+                    source="execution",
+                ),
+                level="error",
+            )
+            if dedupe_key:
+                _trade_audit_recorder().record_webhook_status(
+                    dedupe_key=dedupe_key,
+                    status="error",
+                    failure_reason=f"order_path_exception: {e}",
+                )
+            return _LegacyStageResult(rejected=True)
+
+    else:
+        rejected_reason = decision.get("reason")
+        logger.info(f"REJECTED: {symbol} {action.upper()} - {rejected_reason}")
+
+    log_trade(data, decision, order_result, account_state=account_state)
+    if dedupe_key:
+        _trade_audit_recorder().record_webhook_status(
+            dedupe_key=dedupe_key,
+            status="processed",
+        )
+
+    return _LEGACY_STAGE_CONTINUE
+
+
 def _legacy_process_signal(data, *, runtime_state=None, context_runtime=None, preflight_result=None):
     if runtime_state is None or context_runtime is None:
         symbol, action = normalize_signal_identity(data)
@@ -2521,8 +2652,6 @@ def _legacy_process_signal_with_context(data, runtime_state, context_runtime, pr
     )
     if sell_discipline_result.rejected:
         return sell_discipline_result.response
-
-    cooldown_key = (symbol, action)
 
     # Observe-only BUY opportunity score before macro position-limit checks.
     # This ensures macro_position_limit rejections still get scored for replacement intelligence.
@@ -3640,111 +3769,18 @@ def _legacy_process_signal_with_context(data, runtime_state, context_runtime, pr
     if claude_result.rejected:
         return claude_result.response
     decision = dict(claude_result.decision or {})
-    order_result = None
-
-    if decision.get("approved"):
-        try:
-            approved_reason = decision.get("reason")
-            logger.info(f"APPROVED: {symbol} {action.upper()} - {approved_reason}")
-
-            risk_multiplier = float(account_state.get("macro_risk", {}).get("risk_multiplier", 1.0))
-            sizing_decision = apply_final_sizing(
-                symbol=symbol,
-                action=action,
-                decision=decision,
-                risk_multiplier=risk_multiplier,
-                account_state=account_state,
-                apply_buy_opportunity_sizing=lambda **kwargs: (
-                    sizing_policy.apply_buy_opportunity_sizing(**kwargs, log=logger)
-                ),
-                log=logger,
-            )
-            adjusted_position_size_pct = sizing_decision.final_size_pct
-            account_state["final_sizing"] = {
-                "requested_size_pct": sizing_decision.requested_size_pct,
-                "final_size_pct": sizing_decision.final_size_pct,
-                "dominant_limiter": sizing_decision.dominant_limiter,
-                "active_caps": [
-                    {"source": cap.source, "cap_pct": cap.cap_pct, "reason": cap.reason}
-                    for cap in sizing_decision.active_caps
-                ],
-                "conviction_stack": sizing_decision.conviction_stack,
-            }
-
-            execution = execute_order(
-                symbol=symbol,
-                action=action,
-                signal=data,
-                signal_price=price,
-                decision=decision,
-                account_state=account_state,
-                position_size_pct=adjusted_position_size_pct,
-                execution_mode=EXECUTION_MODE,
-                pre_order_safety_check=_pre_order_safety_check,
-                one_bar_confirmation_hold=_one_bar_confirmation_hold,
-                make_client_order_id=_make_client_order_id,
-                place_order=place_order,
-                log=logger,
-            )
-            account_state.update(execution.account_state_updates)
-            if execution.decision_updates:
-                decision.update(execution.decision_updates)
-            order_result = execution.order_result
-
-            if execution.rejection_category:
-                if _reject_approval_decision(
-                    execution_rejection_decision(execution)
-                ):
-                    return
-
-            if order_result:
-                if EXECUTION_MODE == "dry_run":
-                    logger.info(f"DRY RUN ORDER RECORDED: {order_result}")
-                else:
-                    logger.info(f"ORDER PLACED: {order_result}")
-                    _last_order[cooldown_key] = current_et
-                    _write_cooldown(symbol, action, current_et)
-                    if action == "sell":
-                        _last_sell[symbol] = (current_et, price)
-                        _write_recent_sell(symbol, current_et, price)
-            else:
-                logger.error(f"Order placement failed for {symbol}")
-                if dedupe_key:
-                    _trade_audit_recorder().record_webhook_status(
-                        dedupe_key=dedupe_key,
-                        status="submit_failed",
-                        failure_reason=execution.failure_reason or "broker returned no order_result",
-                    )
-
-        except Exception as e:
-            logger.exception(
-                f"APPROVED ORDER PATH CRASHED for {symbol} {action.upper()}: {e}"
-            )
-            _reject_approval_decision(
-                deterministic_rejection(
-                    category="order_path_exception",
-                    reason=str(e),
-                    source="execution",
-                ),
-                level="error",
-            )
-            if dedupe_key:
-                _trade_audit_recorder().record_webhook_status(
-                    dedupe_key=dedupe_key,
-                    status="error",
-                    failure_reason=f"order_path_exception: {e}",
-                )
-            return
-
-    else:
-        rejected_reason = decision.get("reason")
-        logger.info(f"REJECTED: {symbol} {action.upper()} - {rejected_reason}")
-    log_trade(data, decision, order_result, account_state=account_state)
-    if dedupe_key:
-        _trade_audit_recorder().record_webhook_status(
-            dedupe_key=dedupe_key,
-            status="processed",
-        )
+    order_path_result = _legacy_run_approved_order_path(
+        data=data,
+        symbol=symbol,
+        action=action,
+        price=price,
+        account_state=account_state,
+        dedupe_key=dedupe_key,
+        current_et=current_et,
+        decision=decision,
+    )
+    if order_path_result.rejected:
+        return order_path_result.response
 
 
 def _build_signal_pipeline(app_container: ApplicationContainer | None = None):

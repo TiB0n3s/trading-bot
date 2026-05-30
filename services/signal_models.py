@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import datetime
 from typing import Any
 
 
@@ -61,3 +62,19 @@ class PipelineResult:
     sizing: SizingDecision | None = None
     execution: ExecutionResult | None = None
     error: Exception | None = None
+
+
+@dataclass
+class SignalRuntimeState:
+    raw_signal: dict[str, Any]
+    symbol: str
+    action: str
+    received_at: datetime
+    account_state: dict[str, Any]
+    decision_context: dict[str, Any] = field(default_factory=dict)
+    conviction_stack: dict[str, Any] = field(default_factory=dict)
+    rejection_reason: str | None = None
+    rejection_category: str | None = None
+    approved: bool = False
+    final_size_pct: float | None = None
+    order_result: dict[str, Any] | None = None

@@ -1,4 +1,5 @@
 import os
+import sys
 import json
 import logging
 import hashlib
@@ -16,11 +17,24 @@ from api.request_services import RequestAuthService, ResponseFactory, WebhookPay
 from api.status_routes import StatusRouteDeps, create_status_blueprint
 from api.webhook_routes import WebhookRouteDeps, create_webhook_blueprint
 from services.container import ApplicationContainer
+from services.status_service import build_status_payload
+from services.positions_service import build_positions_payload
+from services.debug_symbol_service import build_debug_symbol_payload
 from services import dedupe_service
 from services.observability import metrics_snapshot
 from services.policies import entry_policy, execution_policy, sizing_policy
 from services.policy_controls import public_policy_control_config
+from services.approval_service import evaluate_approval_decision
+from services.context_builder import build_final_signal_context
+from services.preflight_service import (
+    PreflightDeps,
+    PreflightService,
+    normalize_signal_identity,
+)
+from services.sizing_service import apply_final_sizing, apply_size_cap, build_conviction_stack
+from services.execution_service import execute_order
 from services.signal_pipeline import SignalPipelineDeps
+from services.signal_models import SignalRuntimeState
 from services import trend_context_service
 from services import trade_audit_service
 from repositories import context_repo, cooldown_repo, trades_repo
@@ -312,7 +326,13 @@ def _register_routes(flask_app: Flask, app_container: ApplicationContainer) -> N
         responses=responses,
         make_dedupe_key=_make_dedupe_key,
         record_webhook_event=_record_webhook_event,
-        mark_webhook_event_status=_mark_webhook_event_status,
+        mark_webhook_event_status=(
+            lambda dedupe_key, status, **kwargs: _trade_audit_recorder().record_webhook_status(
+                dedupe_key=dedupe_key,
+                status=status,
+                **kwargs,
+            )
+        ),
         submit_signal=lambda data: app_container.signal_executor_factory().submit(process_signal, data),
         logger=logger,
     )))
@@ -555,29 +575,6 @@ def place_order(*args, **kwargs):
 
 def build_tape_context(*args, **kwargs):
     return tape_service.build_tape_context(*args, **kwargs)
-
-
-def _compute_dominant_limiter(account_state: dict) -> str:
-    return sizing_policy.compute_dominant_limiter(account_state)
-
-
-def _apply_buy_opportunity_sizing(
-    *,
-    symbol: str,
-    action: str,
-    base_position_size_pct: float,
-    risk_multiplier: float,
-    account_state: dict,
-) -> float:
-    return sizing_policy.apply_buy_opportunity_sizing(
-        symbol=symbol,
-        action=action,
-        base_position_size_pct=base_position_size_pct,
-        risk_multiplier=risk_multiplier,
-        account_state=account_state,
-        log=logger,
-    )
-
 
 
 def evaluate_buy_opportunity(
@@ -992,23 +989,14 @@ def _record_webhook_event(dedupe_key, data):
         return True
 
 
-def _mark_webhook_event_status(
-    dedupe_key,
-    status,
-    order_id=None,
-    client_order_id=None,
-    failure_reason=None,
-):
-    try:
-        dedupe_service.mark_webhook_event_status(
-            dedupe_key,
-            status,
-            order_id=order_id,
-            client_order_id=client_order_id,
-            failure_reason=failure_reason,
-        )
-    except Exception as e:
-        logger.warning(f"Failed to update webhook event status for {dedupe_key}: {e}")
+def _trade_audit_recorder():
+    return trade_audit_service.TradeAuditService(
+        market_bias=_market_bias,
+        trend_table=_trend_table,
+        ml_prediction_bucket=_ml_prediction_bucket,
+        log=logger,
+        mark_webhook_event_status=dedupe_service.mark_webhook_event_status,
+    )
 
 def validate_secret(req):
     auth_header = req.headers.get("Authorization", "")
@@ -1028,15 +1016,11 @@ def validate_secret(req):
         logger.warning("Secret accepted from query parameter; prefer X-Webhook-Secret or Authorization header")
 
 def log_trade(signal, decision, order, account_state=None):
-    return trade_audit_service.log_trade(
-        signal,
-        decision,
-        order,
+    return _trade_audit_recorder().record_execution(
+        signal=signal,
+        decision=decision,
+        order=order,
         account_state=account_state,
-        market_bias=_market_bias,
-        trend_table=_trend_table,
-        ml_prediction_bucket=_ml_prediction_bucket,
-        log=logger,
     )
 
 
@@ -1051,17 +1035,13 @@ def _build_decision_context(symbol, action, account_state=None):
     )
 
 def log_rejection(symbol, action, category, reason, price=None, account_state=None):
-    return trade_audit_service.log_rejection(
-        symbol,
-        action,
-        category,
-        reason,
+    return _trade_audit_recorder().record_rejection(
+        symbol=symbol,
+        action=action,
+        category=category,
+        reason=reason,
         price=price,
         account_state=account_state,
-        market_bias=_market_bias,
-        trend_table=_trend_table,
-        ml_prediction_bucket=_ml_prediction_bucket,
-        log=logger,
     )
 
 def _open_entry_context(symbol):
@@ -1126,6 +1106,13 @@ def _open_entry_context(symbol):
         return None
 
 
+def _weekly_symbol_performance(symbol: str) -> dict:
+    try:
+        return trades_repo.weekly_symbol_performance(symbol)
+    except Exception as e:
+        return {"label": "error", "error": str(e)}
+
+
 def _required_buy_confirmations(symbol, account_state=None):
     return entry_policy.required_buy_confirmations(
         symbol,
@@ -1162,11 +1149,6 @@ def _symbol_market_alignment(symbol):
             "reason": f"alignment error: {e}",
         }
 
-def _live_bias_override(symbol, bias_entry, trend, setup_obs, prediction_gate, momentum):
-    return entry_policy.live_bias_override(
-        symbol, bias_entry, trend, setup_obs, prediction_gate, momentum
-    )
-
 def _one_bar_confirmation_hold(symbol: str, signal_price: float, account_state: dict) -> tuple[bool, str]:
     return entry_policy.one_bar_confirmation_hold(
         symbol,
@@ -1193,11 +1175,6 @@ def _session_momentum_is_fresh(session_momentum, max_age_minutes=5):
         return age.total_seconds() <= max_age_minutes * 60
     except Exception:
         return False
-
-def _evaluate_session_momentum_gate(session_momentum, prediction_gate, setup_obs, trend):
-    return entry_policy.evaluate_session_momentum_gate(
-        session_momentum, prediction_gate, setup_obs, trend
-    )
 
 def _cluster_exposure(symbol, balance):
     """Return cluster exposure info for the symbol across current Alpaca positions."""
@@ -1986,12 +1963,18 @@ def _legacy_process_signal(data):
     dedupe_key = data.get("_dedupe_key")
     ...
     _load_market_context()
-    action = str(data.get("action", "")).strip().lower()
-    symbol = str(data.get("symbol", "")).strip().upper()
+    symbol, action = normalize_signal_identity(data)
     price = data.get("price", 0)
     logger.info(f"Processing {action.upper()} signal for {symbol} at {price}")
 
     account_state = get_mock_account_state()
+    runtime_state = SignalRuntimeState(
+        raw_signal=data,
+        symbol=symbol,
+        action=action,
+        received_at=datetime.now(timezone.utc),
+        account_state=account_state,
+    )
 
     # Observe-only rolling multi-day / extended-hours context.
     # This is advisory data for Claude and diagnostics; it does not hard-block trades.
@@ -2021,9 +2004,9 @@ def _legacy_process_signal(data):
         )
 
         if dedupe_key:
-            _mark_webhook_event_status(
-                dedupe_key,
-                "rejected",
+            _trade_audit_recorder().record_webhook_status(
+                dedupe_key=dedupe_key,
+                status="rejected",
                 failure_reason=format_rejection_reason(category, reason),
             )
 
@@ -2142,7 +2125,12 @@ def _legacy_process_signal(data):
                     f"30m={session_m30:.3f}% vwap={session_vwap:.3f}%"
                 ),
             }
-            account_state["max_position_size_pct_override"] = 0.75
+            apply_size_cap(
+                account_state,
+                cap_pct=0.75,
+                state_key="setup_policy_size_cap",
+                payload={"cap_pct": 0.75, "source": "setup_policy_override"},
+            )
 
             logger.warning(
                 f"Setup policy override for {symbol}: "
@@ -2171,17 +2159,18 @@ def _legacy_process_signal(data):
             and _deg_trend_str in ("confirmed", "developing")
         )
         _deg_cap = 1.0 if _has_strong_context else 0.75
-        _current_cap = account_state.get("max_position_size_pct_override")
-        account_state["max_position_size_pct_override"] = (
-            min(float(_current_cap), _deg_cap) if _current_cap is not None else _deg_cap
+        apply_size_cap(
+            account_state,
+            cap_pct=_deg_cap,
+            state_key="setup_degraded",
+            payload={
+                "reason": setup_obs.get("setup_unknown_reason") or "build_snapshot_failed",
+                "size_cap_pct": _deg_cap,
+                "has_strong_context": _has_strong_context,
+                "trend_direction": _deg_trend_dir,
+                "trend_strength": _deg_trend_str,
+            },
         )
-        account_state["setup_degraded"] = {
-            "reason": setup_obs.get("setup_unknown_reason") or "build_snapshot_failed",
-            "size_cap_pct": _deg_cap,
-            "has_strong_context": _has_strong_context,
-            "trend_direction": _deg_trend_dir,
-            "trend_strength": _deg_trend_str,
-        }
         logger.warning(
             f"Degraded setup (error) for {symbol}: size capped at {_deg_cap}%, "
             f"strong_context={_has_strong_context} "
@@ -2194,14 +2183,15 @@ def _legacy_process_signal(data):
     # reduction so it behaves like degraded-lite rather than a known-good neutral setup.
     if action == "buy" and (setup_obs.get("setup_unknown_reason") or "").startswith("unrecognized_label:"):
         _unrecog_cap = _env_float("UNRECOGNIZED_LABEL_SIZE_CAP_PCT", 0.85)
-        _existing_cap = account_state.get("max_position_size_pct_override")
-        account_state["max_position_size_pct_override"] = (
-            min(float(_existing_cap), _unrecog_cap) if _existing_cap is not None else _unrecog_cap
+        apply_size_cap(
+            account_state,
+            cap_pct=_unrecog_cap,
+            state_key="unrecognized_label_cap",
+            payload={
+                "setup_unknown_reason": setup_obs.get("setup_unknown_reason"),
+                "cap_pct": _unrecog_cap,
+            },
         )
-        account_state["unrecognized_label_cap"] = {
-            "setup_unknown_reason": setup_obs.get("setup_unknown_reason"),
-            "cap_pct": _unrecog_cap,
-        }
         logger.warning(
             f"Unrecognized setup label size cap for {symbol}: "
             f"{setup_obs.get('setup_unknown_reason')} → {_unrecog_cap}%"
@@ -2336,24 +2326,6 @@ def _legacy_process_signal(data):
             )
             return
 
-    # Webhook duplicate protection: reject near-identical TradingView alerts
-    # received within a short window. This is separate from order cooldowns,
-    # which only start after a successful order.
-    if _is_duplicate_webhook(symbol, action, price):
-        logger.warning(
-            f"Duplicate webhook blocked for {symbol} {action.upper()} at {price}: "
-            f"same symbol/action/rounded-price within {WEBHOOK_DEDUPE_SECONDS}s"
-        )
-        log_rejection(
-            symbol,
-            action,
-            "duplicate_webhook",
-            f"same symbol/action/rounded-price within {WEBHOOK_DEDUPE_SECONDS}s",
-            price=price,
-            account_state=account_state,
-        )
-        return
-
     # Operator symbol overrides: quick no-code control during live sessions.
     override_reason = _symbol_override_block(symbol, action)
     if override_reason:
@@ -2382,31 +2354,35 @@ def _legacy_process_signal(data):
         f"trend={_trend_table[symbol]}"
     )
 
-    # Hard pre-check: market hours
-    current_et = now_et()
-    if not is_market_hours(current_et):
-        reason = f"outside market hours: {current_et.strftime('%Y-%m-%d %H:%M:%S %Z')}"
-        if _reject_current_signal("market_hours", reason, level="info"):
+    preflight = PreflightService(
+        PreflightDeps(
+            now_et=now_et,
+            is_market_hours=is_market_hours,
+            assert_position_exists=broker_service.assert_position_exists,
+            get_position=get_position,
+            read_cooldown=_read_cooldown,
+            read_recent_sell=_read_recent_sell,
+            is_duplicate_webhook=_is_duplicate_webhook,
+            adaptive_churn_reentry_allowed=_adaptive_churn_reentry_allowed,
+            successful_buys_today=_successful_buys_today,
+            filled_buys_today=_filled_buys_today,
+            cluster_exposure=_cluster_exposure,
+            max_buys_per_symbol_per_day=MAX_BUYS_PER_SYMBOL_PER_DAY,
+            session_max_trade_count=int(os.getenv("SESSION_MAX_TRADE_COUNT", "3")),
+            webhook_dedupe_seconds=WEBHOOK_DEDUPE_SECONDS,
+            daily_loss_limit_pct=DAILY_LOSS_LIMIT_PCT,
+        )
+    )
+    preflight_result = preflight.evaluate(runtime_state)
+    current_et = preflight_result.metadata.get("current_et") or now_et()
+    existing_position = preflight_result.metadata.get("existing_position")
+    if not preflight_result.allowed:
+        if _reject_current_signal(
+            preflight_result.rejection_category,
+            preflight_result.rejection_reason,
+            level=preflight_result.metadata.get("log_level", "warning"),
+        ):
             return
-
-    # Hard pre-check 2: circuit breaker (-3% daily loss limit)
-    # Applies to BUY signals only. SELL signals must remain allowed so the bot
-    # can reduce exposure and close risk during drawdowns.
-    daily_pnl_pct = account_state.get("daily_pnl_pct", 0.0)
-    if action == "buy" and daily_pnl_pct < DAILY_LOSS_LIMIT_PCT:
-        logger.error(f"Circuit breaker triggered for {symbol} BUY: daily P&L is {daily_pnl_pct:.2f}% (limit: -3.0%)")
-        log_rejection(symbol, action, "circuit_breaker", f"daily P&L {daily_pnl_pct:.2f}% < -3.0%", price=price, account_state=account_state)
-        return
-
-    if action == "sell":
-        try:
-            broker_service.assert_position_exists(symbol)
-        except Exception:
-            if _reject_current_signal("ghost_sell", "no open Alpaca position"):
-                return
-    existing_position = get_position(symbol)
-    if existing_position:
-        account_state["current_symbol_position"] = existing_position
 
     # Sell discipline gate:
     # Prevent normal TradingPilotAI SELL alerts from closing positions too early.
@@ -2462,108 +2438,7 @@ def _legacy_process_signal(data):
         except Exception as e:
             logger.warning(f"Sell discipline check failed for {symbol}; fail-open for SELL safety: {e}")
 
-    # Cooldown check: skip if same symbol+action had a successful order within 15 min
-    # (Stage B: DB-backed read so all workers see the same cooldown state)
     cooldown_key = (symbol, action)
-    last = _read_cooldown(symbol, action)
-    if last and (current_et - last).total_seconds() < 15 * 60:
-        mins_remaining = int(15 * 60 - (current_et - last).total_seconds()) // 60
-        reason = f"{mins_remaining}m remaining (last order {last.strftime('%H:%M')} ET)"
-        if _reject_current_signal("cooldown", reason):
-            return
-
-    # Sell→buy churn prevention: block buys that follow a recent sell on the same symbol
-    # (Stage B: DB-backed read so all workers see the same recent-sell state)
-    if action == "buy":
-        last_sell = _read_recent_sell(symbol)
-        if last_sell:
-            last_sell_time, last_sell_price = last_sell
-            elapsed_s = (current_et - last_sell_time).total_seconds()
-            if elapsed_s < 30 * 60:
-                mins_remaining = int(30 * 60 - elapsed_s) // 60
-                reason = f"sold at ${last_sell_price:.2f}, {mins_remaining}m remaining in 30-min window"
-                if _reject_current_signal("churn_window", reason):
-                    return
-            if last_sell_price > 0:
-                price_diff_pct = abs(price - last_sell_price) / last_sell_price * 100
-                if price_diff_pct < 0.5:
-                    allowed, adaptive_reason = _adaptive_churn_reentry_allowed(
-                        symbol=symbol,
-                        signal_price=price,
-                        last_sell_price=last_sell_price,
-                        account_state=account_state,
-                    )
-
-                    if allowed:
-                        account_state["adaptive_churn_reentry"] = {
-                            "allowed": True,
-                            "price_diff_pct": round(price_diff_pct, 4),
-                            "last_sell_price": last_sell_price,
-                            "reason": adaptive_reason,
-                        }
-                        logger.warning(
-                            f"Adaptive churn re-entry override for {symbol} BUY: "
-                            f"signal ${price:.2f} within {price_diff_pct:.2f}% of last sell "
-                            f"${last_sell_price:.2f}; {adaptive_reason}"
-                        )
-                    else:
-                        reason = (
-                            f"signal ${price:.2f} within {price_diff_pct:.2f}% of last sell "
-                            f"${last_sell_price:.2f}; {adaptive_reason}"
-                        )
-                        if _reject_current_signal("churn_price", reason):
-                            return
-
-    # Daily symbol buy limit: prevent repeated same-symbol accumulation from alert storms.
-    # Allows initial entry plus one add by default.
-    if action == "buy":
-        buys_today = _successful_buys_today(symbol)
-        if buys_today >= MAX_BUYS_PER_SYMBOL_PER_DAY:
-            reason = f"successful_buys_today={buys_today} >= limit={MAX_BUYS_PER_SYMBOL_PER_DAY}"
-            if _reject_current_signal("daily_symbol_buy_limit", reason):
-                return
-
-    # Session trade-count gate: cap filled entries per symbol per session to reduce churn
-    # on over-traded symbols (e.g. GE cycling in/out repeatedly).
-    # Configurable via SESSION_MAX_TRADE_COUNT env var; defaults to 3.
-    if action == "buy":
-        _session_trade_limit = int(os.getenv("SESSION_MAX_TRADE_COUNT", "3"))
-        filled_entries_today = _filled_buys_today(symbol)
-        if filled_entries_today >= _session_trade_limit:
-            reason = (
-                f"filled_entries_today={filled_entries_today} >= "
-                f"session_max={_session_trade_limit}"
-            )
-            if _reject_current_signal("session_trade_count", reason):
-                return
-
-    # Hard pre-check: 4% per-symbol exposure cap (buy signals only)
-    if action == "buy" and existing_position:
-        balance = account_state.get("balance", 0)
-        position_value = existing_position["qty"] * existing_position["current_price"]
-        if balance > 0:
-            exposure_pct = position_value / balance * 100
-            if exposure_pct >= 4.0:
-                reason = f"position ${position_value:.2f} = {exposure_pct:.2f}% of balance (limit 4.0%)"
-                if _reject_current_signal("exposure_cap", reason):
-                    return
-
-    # Correlation exposure cap: block buys when a correlated cluster is already full
-    if action == "buy":
-        balance = account_state.get("balance", 0)
-        cluster_checks = _cluster_exposure(symbol, balance)
-
-        for check in cluster_checks:
-            if check.get("limit_hit"):
-                reason = (
-                    f"{check['cluster']} exposure {check['exposure_pct']:.2f}% "
-                    f">= limit {check['limit_pct']:.2f}%"
-                )
-                if _reject_current_signal("correlation_cap", reason):
-                    return
-
-        if cluster_checks:
-            account_state["correlation_exposure"] = cluster_checks
 
     # Observe-only BUY opportunity score before macro position-limit checks.
     # This ensures macro_position_limit rejections still get scored for replacement intelligence.
@@ -3179,19 +3054,20 @@ def _legacy_process_signal(data):
                 f"setup_policy_action={_setup_action}; "
                 f"setup_label={_setup_label_now!r}"
             )
-            _existing_cap = account_state.get("max_position_size_pct_override")
-            account_state["max_position_size_pct_override"] = (
-                min(float(_existing_cap), 0.5) if _existing_cap is not None else 0.5
+            apply_size_cap(
+                account_state,
+                cap_pct=0.5,
+                state_key="weak_prediction_setup_gate",
+                payload={
+                    "triggered": True,
+                    "ml_score": _ml_score_raw,
+                    "ml_sample_size": _ml_sample,
+                    "setup_action": _setup_action,
+                    "setup_label": _setup_label_now,
+                    "size_cap_pct": 0.5,
+                    "reason": _wpsg_reason,
+                },
             )
-            account_state["weak_prediction_setup_gate"] = {
-                "triggered": True,
-                "ml_score": _ml_score_raw,
-                "ml_sample_size": _ml_sample,
-                "setup_action": _setup_action,
-                "setup_label": _setup_label_now,
-                "size_cap_pct": 0.5,
-                "reason": _wpsg_reason,
-            }
             logger.warning(
                 f"Weak-prediction + degraded-setup gate for {symbol}: "
                 f"size capped at 0.5%; {_wpsg_reason}"
@@ -3219,15 +3095,16 @@ def _legacy_process_signal(data):
         )
         if _is_confident_weak_prediction:
             _pred_only_cap = _env_float("PREDICTION_CONFIDENT_WEAK_SIZE_CAP_PCT", 0.80)
-            _existing = account_state.get("max_position_size_pct_override")
-            account_state["max_position_size_pct_override"] = (
-                min(float(_existing), _pred_only_cap) if _existing is not None else _pred_only_cap
+            apply_size_cap(
+                account_state,
+                cap_pct=_pred_only_cap,
+                state_key="prediction_confident_weak_cap",
+                payload={
+                    "ml_score": _ml_score_raw,
+                    "ml_confidence": _ml_confidence,
+                    "cap_pct": _pred_only_cap,
+                },
             )
-            account_state["prediction_confident_weak_cap"] = {
-                "ml_score": _ml_score_raw,
-                "ml_confidence": _ml_confidence,
-                "cap_pct": _pred_only_cap,
-            }
             logger.info(
                 f"Prediction confident-weak size cap for {symbol}: "
                 f"score={_ml_score_raw} confidence={_ml_confidence} → {_pred_only_cap}%"
@@ -3255,7 +3132,7 @@ def _legacy_process_signal(data):
 
         prediction_decision = prediction_gate.get("prediction_decision")
 
-        bias_override = _live_bias_override(
+        bias_override = entry_policy.live_bias_override(
             symbol=symbol,
             bias_entry=bias_entry,
             trend=trend,
@@ -3354,7 +3231,7 @@ def _legacy_process_signal(data):
             if _reject_current_signal("prediction_gate", reason):
                 return
 
-        session_gate = _evaluate_session_momentum_gate(
+        session_gate = entry_policy.evaluate_session_momentum_gate(
             session_momentum=account_state.get("session_momentum") or {},
             prediction_gate=prediction_gate,
             setup_obs=setup_obs,
@@ -3391,13 +3268,12 @@ def _legacy_process_signal(data):
         elif _smg_sev == "hard_negative" and not ENFORCE_SESSION_MOMENTUM_GATE:
             _smg_cap = _env_float("SESSION_HARD_NEGATIVE_SIZE_CAP_PCT", 0.65)
         if _smg_cap is not None:
-            _existing = account_state.get("max_position_size_pct_override")
-            account_state["max_position_size_pct_override"] = (
-                min(float(_existing), _smg_cap) if _existing is not None else _smg_cap
+            apply_size_cap(
+                account_state,
+                cap_pct=_smg_cap,
+                state_key="session_momentum_size_cap",
+                payload={"severity": _smg_sev, "cap_pct": _smg_cap},
             )
-            account_state["session_momentum_size_cap"] = {
-                "severity": _smg_sev, "cap_pct": _smg_cap,
-            }
             logger.info(
                 f"Session momentum size cap for {symbol}: severity={_smg_sev} → {_smg_cap}%"
             )
@@ -3490,13 +3366,12 @@ def _legacy_process_signal(data):
                 elif _tb_score < 55:
                     _strat_cap = _env_float("STRATEGY_SCORE_BELOW_THRESHOLD_SIZE_CAP_PCT", 0.85)
                 if _strat_cap is not None:
-                    _existing = account_state.get("max_position_size_pct_override")
-                    account_state["max_position_size_pct_override"] = (
-                        min(float(_existing), _strat_cap) if _existing is not None else _strat_cap
+                    apply_size_cap(
+                        account_state,
+                        cap_pct=_strat_cap,
+                        state_key="strategy_score_size_cap",
+                        payload={"score": _tb_score, "cap_pct": _strat_cap},
                     )
-                    account_state["strategy_score_size_cap"] = {
-                        "score": _tb_score, "cap_pct": _strat_cap,
-                    }
                     logger.info(
                         f"Strategy score size cap for {symbol}: "
                         f"score={_tb_score:.1f} → {_strat_cap}%"
@@ -3505,69 +3380,7 @@ def _legacy_process_signal(data):
         except Exception as e:
             logger.warning(f"Strategy observe failed for {symbol} {action.upper()}: {e}")
 
-    account_state["trend_table"] = _trend_table
-
-    final_setup_obs = account_state.get("setup_observation") or {}
-    final_prediction_gate = account_state.get("prediction_gate") or {}
-    final_session_momentum = account_state.get("session_momentum") or {}
-    final_session_gate = account_state.get("session_momentum_gate") or {}
-
-    logger.info(
-        f"Decision context for {symbol} {action.upper()}: "
-        f"setup={final_setup_obs.get('setup_label')}/"
-        f"{final_setup_obs.get('setup_policy_action')} "
-        f"prediction={final_prediction_gate.get('prediction_score')}/"
-        f"{final_prediction_gate.get('prediction_decision')} "
-        f"session={final_session_momentum.get('trend_label')}/"
-        f"{final_session_momentum.get('trend_score')} "
-        f"session_gate={final_session_gate.get('severity')}/"
-        f"{final_session_gate.get('would_block')} "
-        f"effective_bias={account_state.get('market_bias_effective')}"
-    )
-
-    # Claude-safe account state:
-    # Keep observe-only diagnostics in /status, DB context, and reports,
-    # but do not send them to Claude where they can behave like live gates.
-    # Raw gate objects (adaptive_buy_confirmation, market_alignment) are stripped
-    # and replaced with a lightweight summary so Claude has the key facts without
-    # being exposed to internal gate state that could create implicit live gates.
     claude_account_state = dict(account_state)
-    _ac_raw = account_state.get("adaptive_buy_confirmation") or {}
-    _ma_raw = account_state.get("market_alignment") or {}
-    claude_account_state.pop("adaptive_buy_confirmation", None)
-    claude_account_state.pop("adaptive_buy_confirmation_error", None)
-    claude_account_state.pop("market_alignment", None)
-    claude_account_state.pop("market_alignment_error", None)
-    claude_account_state["market_context_summary"] = {
-        "required_confirmations": _ac_raw.get("required_buy_confirmations"),
-        "confirmation_reasons": _ac_raw.get("reasons"),
-        "market_aligned": _ma_raw.get("aligned_for_buy"),
-        "alignment_reason": _ma_raw.get("reason"),
-    }
-
-    # Conviction stack diagnostic: single dict summarising which signals are active
-    # and what effective size cap results.  Logged for every BUY decision path.
-    if action == "buy":
-        _cs_ml_raw = (account_state.get("prediction_gate") or {}).get("ml_prediction_score")
-        account_state["conviction_stack"] = {
-            "buy_opportunity": (account_state.get("buy_opportunity") or {}).get("buy_opportunity_recommendation"),
-            "strategy_score": float(
-                (account_state.get("strategy_observation") or {}).get("trader_brain", {}).get("score") or 0
-            ),
-            "session_severity": (account_state.get("session_momentum_gate") or {}).get("severity"),
-            "ml_bucket": _ml_prediction_bucket(_cs_ml_raw),
-            "effective_cap_pct": account_state.get("max_position_size_pct_override"),
-        }
-        account_state["dominant_limiter"] = _compute_dominant_limiter(account_state)
-        logger.info(
-            f"Conviction stack for {symbol} BUY: "
-            f"buy_opp={account_state['conviction_stack']['buy_opportunity']} "
-            f"strategy={account_state['conviction_stack']['strategy_score']:.0f} "
-            f"session={account_state['conviction_stack']['session_severity']} "
-            f"ml_bucket={account_state['conviction_stack']['ml_bucket']} "
-            f"cap={account_state['conviction_stack']['effective_cap_pct']} "
-            f"dominant={account_state['dominant_limiter']}"
-        )
 
     # Pre-Claude affordability gate.
     # This is only a hard 1-share buying-power check. Macro risk and
@@ -3826,162 +3639,98 @@ def _legacy_process_signal(data):
             f"reason={decision_policy.get('reason')}"
         )
 
+    if action == "buy":
+        build_conviction_stack(
+            action=action,
+            account_state=account_state,
+            ml_prediction_bucket=_ml_prediction_bucket,
+            compute_dominant_limiter=sizing_policy.compute_dominant_limiter,
+        )
+
+    built_context = build_final_signal_context(
+        account_state=account_state,
+        trend_table=_trend_table,
+        intelligence_context=intelligence_context,
+        claude_account_state=claude_account_state,
+    )
+    claude_account_state = built_context.claude_account_state
+
+    summary = built_context.summary
+    logger.info(
+        f"Decision context for {symbol} {action.upper()}: "
+        f"setup={summary.get('setup_label')}/"
+        f"{summary.get('setup_policy_action')} "
+        f"prediction={summary.get('prediction_score')}/"
+        f"{summary.get('prediction_decision')} "
+        f"session={summary.get('session_trend_label')}/"
+        f"{summary.get('session_trend_score')} "
+        f"session_gate={summary.get('session_gate_severity')}/"
+        f"{summary.get('session_gate_would_block')} "
+        f"effective_bias={summary.get('effective_bias')}"
+    )
+
+    if action == "buy":
+        logger.info(
+            f"Conviction stack for {symbol} BUY: "
+            f"buy_opp={account_state['conviction_stack']['buy_opportunity']} "
+            f"strategy={account_state['conviction_stack']['strategy_score']:.0f} "
+            f"session={account_state['conviction_stack']['session_severity']} "
+            f"ml_bucket={account_state['conviction_stack']['ml_bucket']} "
+            f"cap={account_state['conviction_stack']['effective_cap_pct']} "
+            f"dominant={account_state['dominant_limiter']}"
+        )
+
     weekly_perf = _weekly_symbol_performance(symbol)
     account_state["weekly_symbol_performance"] = weekly_perf
     claude_account_state["weekly_symbol_performance"] = weekly_perf
 
-    decision = evaluate_signal(data, claude_account_state)
+    def _medium_confidence_override_adapter(*, decision, account_state):
+        return _allow_medium_confidence_momentum_override(
+            symbol=symbol,
+            action=action,
+            decision=decision,
+            account_state=account_state,
+            trend=_trend_table.get(symbol) or {},
+            setup_obs=account_state.get("setup_observation") or {},
+        )
 
-    # Safety normalization: if Claude approves but the reason says to defer/wait,
-    # force rejection. Prevents contradictory outputs like approved=true with
-    # "recommend deferring until momentum turns rising".
-    reason_text = str(decision.get("reason", "")).lower()
-    defer_phrases = (
-        "defer",
-        "wait",
-        "hold off",
-        "lacks sufficient conviction",
-        "not enough conviction",
-        "until momentum",
-        "momentum turns rising",
+    approval_decision = evaluate_approval_decision(
+        signal=data,
+        action=action,
+        claude_account_state=claude_account_state,
+        evaluate_signal=evaluate_signal,
+        cash_safe_mode=is_cash_safe_mode(),
+        market_bias=_market_bias.get(symbol) or {},
+        account_state=account_state,
+        medium_confidence_override=_medium_confidence_override_adapter,
+        tape_exception_enabled=TAPE_EXCEPTION_ENABLED,
     )
+    decision = dict(approval_decision.claude_payload or {})
 
-    if action == "buy" and decision.get("approved") and any(p in reason_text for p in defer_phrases):
+    if (approval_decision.metadata or {}).get("raw_decision", {}).get("approved") and decision.get(
+        "_consistency_guard_triggered"
+    ):
         logger.warning(
             f"Decision consistency guard flipped {symbol} BUY to rejected: "
             f"approved=true but reason indicated deferral"
         )
-        decision["approved"] = False
-        decision["confidence"] = "low"
-        decision["position_size_pct"] = 0
-        decision["reason"] = (
-            "Rejected by consistency guard: Claude reason indicated deferral/wait despite approved=true."
-        )
 
     order_result = None
 
-    # Confidence gate: reject low-confidence buy signals without placing an order.
-    # Persisted via log_rejection (Stage 5 categorization) so signal_history can
-    # distinguish "Claude evaluated but bot filtered" from hard-rule rejections.
-    if action == "buy" and is_cash_safe_mode() and decision.get("confidence") != "high":
+    if approval_decision.category:
         logger.warning(
-            f"Cash-safe confidence gate rejected {symbol} BUY: "
-            f"confidence={decision.get('confidence')}"
+            f"{approval_decision.category} rejected {symbol} {action.upper()}: "
+            f"{approval_decision.reason}"
         )
         log_rejection(
             symbol,
             action,
-            "cash_safe_confidence",
-            f"cash_safe requires confidence=high; got {decision.get('confidence')} "
-            f"(reason: {decision.get('reason', '')})",
+            approval_decision.category,
+            approval_decision.reason,
             price=price,
             account_state=account_state,
         )
         return
-
-    if action == "buy" and decision.get("confidence") == "low":
-        logger.warning(f"Low confidence BUY rejected for {symbol}: skipping order placement")
-        log_rejection(
-            symbol, action, "confidence_gate",
-            f"Claude returned confidence=low (reason: {decision.get('reason', '')})",
-            price=price, account_state=account_state,
-        )
-        return
-
-    # Neutral-bias confidence gate: neutral market-bias signals have historically poor
-    # expectancy (-$1.41/trade vs +$1.63 for buy-bias). Require high confidence to proceed.
-    # Exception (TAPE_EXCEPTION_ENABLED): accelerating momentum + elevated/surge volume +
-    # clean_momentum tape overrides a stale neutral pre-market classification. Pre-market
-    # research runs hours before the open; by mid-session a confirmed ETF momentum move
-    # with clean tape is a stronger real-time signal than the stale neutral classification.
-    if action == "buy" and decision.get("confidence") != "high":
-        bias_entry = _market_bias.get(symbol) or {}
-        if bias_entry.get("bias") == "neutral":
-            momentum_ctx = (account_state or {}).get("momentum") or {}
-            tape = (account_state or {}).get("tape") or {}
-            tape_label = tape.get("label")
-            vol_state = momentum_ctx.get("volume_state")
-            momentum_state = momentum_ctx.get("momentum_state")
-            tape_exception = TAPE_EXCEPTION_ENABLED and (
-                momentum_state == "accelerating"
-                and vol_state in ("elevated", "surge")
-                and tape_label == "clean_momentum"
-            )
-            if tape_exception:
-                logger.info(
-                    f"Neutral-bias gate exception granted for {symbol}: "
-                    f"momentum_state={momentum_state} vol={vol_state} tape={tape_label} "
-                    f"confidence={decision.get('confidence')}"
-                )
-            else:
-                conf = decision.get("confidence")
-                medium_ok, medium_reason = _allow_medium_confidence_momentum_override(
-                    symbol=symbol,
-                    action=action,
-                    decision=decision,
-                    account_state=account_state,
-                    trend=trend,
-                    setup_obs=setup_obs,
-                )
-                if medium_ok:
-                    logger.warning(
-                        f"Neutral-bias confidence gate override granted for {symbol}: "
-                        f"confidence={conf}; {medium_reason}"
-                    )
-                    account_state["confidence_gate_medium_override"] = {
-                        "gate": "neutral_bias",
-                        "reason": medium_reason,
-                    }
-                else:
-                    logger.warning(
-                        f"Neutral-bias confidence gate rejected {symbol} BUY: confidence={conf} "
-                        f"(momentum_state={momentum_state} vol={vol_state} tape={tape_label} "
-                        f"tape_exception_enabled={TAPE_EXCEPTION_ENABLED}; "
-                        f"override_reject={medium_reason})"
-                    )
-                    log_rejection(
-                        symbol, action, "confidence_gate",
-                        f"neutral_bias requires confidence=high; got {conf} "
-                        f"(reason: {decision.get('reason', '')})",
-                        price=price, account_state=account_state,
-                    )
-                    return
-
-    # Conditional entry quality gate: conditional setups have 17% win rate and -$1.41
-    # expectancy. Require high confidence before allowing an entry.
-    if action == "buy" and decision.get("confidence") != "high":
-        bias_entry = _market_bias.get(symbol) or {}
-        if bias_entry.get("entry_quality") == "conditional":
-            conf = decision.get("confidence")
-            medium_ok, medium_reason = _allow_medium_confidence_momentum_override(
-                symbol=symbol,
-                action=action,
-                decision=decision,
-                account_state=account_state,
-                trend=trend,
-                setup_obs=setup_obs,
-            )
-            if medium_ok:
-                logger.warning(
-                    f"Conditional entry quality gate override granted for {symbol}: "
-                    f"confidence={conf}; {medium_reason}"
-                )
-                account_state["confidence_gate_medium_override"] = {
-                    "gate": "conditional_entry_quality",
-                    "reason": medium_reason,
-                }
-            else:
-                logger.warning(
-                    f"Conditional entry quality gate rejected {symbol} BUY: "
-                    f"confidence={conf}; override_reject={medium_reason}"
-                )
-                log_rejection(
-                    symbol, action, "confidence_gate",
-                    f"conditional_entry_quality requires confidence=high; got {conf} "
-                    f"(reason: {decision.get('reason', '')})",
-                    price=price, account_state=account_state,
-                )
-                return
 
     if decision.get("approved"):
         try:
@@ -3989,146 +3738,69 @@ def _legacy_process_signal(data):
             logger.info(f"APPROVED: {symbol} {action.upper()} - {approved_reason}")
 
             risk_multiplier = float(account_state.get("macro_risk", {}).get("risk_multiplier", 1.0))
-            adjusted_position_size_pct = float(decision.get("position_size_pct", 1.0) or 1.0) * risk_multiplier
-
-            logger.info(
-                f"ORDER PATH START: {symbol} {action.upper()} "
-                f"exec_mode={EXECUTION_MODE} "
-                f"position_size_pct={decision.get('position_size_pct')} "
-                f"risk_multiplier={risk_multiplier} "
-                f"adjusted_position_size_pct={adjusted_position_size_pct:.3f}"
+            sizing_decision = apply_final_sizing(
+                symbol=symbol,
+                action=action,
+                decision=decision,
+                risk_multiplier=risk_multiplier,
+                account_state=account_state,
+                apply_buy_opportunity_sizing=lambda **kwargs: (
+                    sizing_policy.apply_buy_opportunity_sizing(**kwargs, log=logger)
+                ),
+                log=logger,
             )
+            adjusted_position_size_pct = sizing_decision.final_size_pct
+            account_state["final_sizing"] = {
+                "requested_size_pct": sizing_decision.requested_size_pct,
+                "final_size_pct": sizing_decision.final_size_pct,
+                "dominant_limiter": sizing_decision.dominant_limiter,
+                "active_caps": [
+                    {"source": cap.source, "cap_pct": cap.cap_pct, "reason": cap.reason}
+                    for cap in sizing_decision.active_caps
+                ],
+                "conviction_stack": sizing_decision.conviction_stack,
+            }
 
-            if EXECUTION_MODE == "dry_run":
+            execution = execute_order(
+                symbol=symbol,
+                action=action,
+                signal=data,
+                signal_price=price,
+                decision=decision,
+                account_state=account_state,
+                position_size_pct=adjusted_position_size_pct,
+                execution_mode=EXECUTION_MODE,
+                pre_order_safety_check=_pre_order_safety_check,
+                one_bar_confirmation_hold=_one_bar_confirmation_hold,
+                make_client_order_id=_make_client_order_id,
+                place_order=place_order,
+                log=logger,
+            )
+            account_state.update(execution.account_state_updates)
+            if execution.decision_updates:
+                decision.update(execution.decision_updates)
+            order_result = execution.order_result
+
+            if execution.rejection_category:
                 logger.warning(
-                    f"DRY RUN: order not submitted for {symbol} {action.upper()} "
-                    f"position_size_pct={adjusted_position_size_pct:.3f}"
+                    f"{execution.rejection_category} blocked {symbol} {action.upper()}: "
+                    f"{execution.rejection_reason}"
                 )
-                order_result = {
-                    "order_id": f"dry_run_{symbol}_{action}_{datetime.now().strftime('%Y%m%d_%H%M%S')}",
-                    "symbol": symbol,
-                    "side": action,
-                    "qty": 0,
-                    "stop_loss": None,
-                    "take_profit": None,
-                    "status": "dry_run",
-                }
-            else:
-                logger.info(f"SECOND LOOK START: {symbol} {action.upper()}")
-                ok, second_look_reason = _pre_order_safety_check(
-                    symbol=symbol,
-                    action=action,
-                    signal_price=price,
+                log_rejection(
+                    symbol,
+                    action,
+                    execution.rejection_category,
+                    execution.rejection_reason,
+                    price=price,
                     account_state=account_state,
                 )
-                logger.info(
-                    f"SECOND LOOK RESULT: {symbol} {action.upper()} "
-                    f"ok={ok} reason={second_look_reason}"
-                )
-
-                if not ok:
-                    logger.warning(
-                        f"Second-look safety check blocked {symbol} {action.upper()}: "
-                        f"{second_look_reason}"
+                if dedupe_key:
+                    _trade_audit_recorder().record_webhook_status(
+                        dedupe_key=dedupe_key,
+                        status="rejected",
+                        failure_reason=execution.failure_reason,
                     )
-                    log_rejection(
-                        symbol,
-                        action,
-                        "second_look",
-                        second_look_reason,
-                        price=price,
-                        account_state=account_state,
-                    )
-                    if dedupe_key:
-                        _mark_webhook_event_status(
-                            dedupe_key,
-                            "rejected",
-                            failure_reason=f"second_look: {second_look_reason}",
-                        )
-                    return
-
-                if action == "buy":
-                    one_bar_ok, one_bar_reason = _one_bar_confirmation_hold(
-                        symbol=symbol,
-                        signal_price=price,
-                        account_state=account_state,
-                    )
-                    account_state["one_bar_confirmation_hold"] = {
-                        "allowed": one_bar_ok,
-                        "reason": one_bar_reason,
-                    }
-
-                    if not one_bar_ok:
-                        logger.warning(
-                            f"One-bar confirmation hold blocked {symbol} BUY: "
-                            f"{one_bar_reason}"
-                        )
-                        log_rejection(
-                            symbol,
-                            action,
-                            "one_bar_confirmation_hold",
-                            one_bar_reason,
-                            price=price,
-                            account_state=account_state,
-                        )
-                        if dedupe_key:
-                            _mark_webhook_event_status(
-                                dedupe_key,
-                                "rejected",
-                                failure_reason=f"one_bar_confirmation_hold: {one_bar_reason}",
-                            )
-                        return
-
-                    logger.info(
-                        f"One-bar confirmation hold passed for {symbol} BUY: "
-                        f"{one_bar_reason}"
-                    )
-
-                client_order_id = _make_client_order_id(symbol, action, data)
-                logger.info(
-                    f"BROKER SUBMIT START: {symbol} {action.upper()} "
-                    f"client_order_id={client_order_id}"
-                )
-
-                if action == "buy" and decision.get("approved"):
-                    max_size_override = account_state.get("max_position_size_pct_override")
-                    if max_size_override is not None:
-                        try:
-                            original_size = float(decision.get("position_size_pct") or 0)
-                            capped_size = min(original_size, float(max_size_override))
-
-                            if capped_size < original_size:
-                                logger.warning(
-                                    f"Position size capped for {symbol}: "
-                                    f"{original_size:.2f}% -> {capped_size:.2f}% "
-                                    f"due to setup_policy_override"
-                                )
-                                decision["position_size_pct"] = capped_size
-                        except Exception as e:
-                            logger.warning(f"Failed to apply size override for {symbol}: {e}")
-
-                adjusted_position_size_pct = _apply_buy_opportunity_sizing(
-                    symbol=symbol,
-                    action=action,
-                    base_position_size_pct=decision.get("position_size_pct", 1.0),
-                    risk_multiplier=risk_multiplier,
-                    account_state=account_state,
-                )
-
-                order_result = place_order(
-                    symbol=symbol,
-                    action=action,
-                    position_size_pct=adjusted_position_size_pct,
-                    stop_loss_pct=decision.get("stop_loss_pct", 1.75),
-                    take_profit_pct=0,  # TP disabled; position_manager owns exits
-                    risk_level=account_state.get("risk_level"),
-                    client_order_id=client_order_id,
-                )
-
-                logger.info(
-                    f"BROKER SUBMIT RESULT: {symbol} {action.upper()} "
-                    f"order_result={order_result}"
-                )
+                return
 
             if order_result:
                 if EXECUTION_MODE == "dry_run":
@@ -4142,13 +3814,11 @@ def _legacy_process_signal(data):
                         _write_recent_sell(symbol, current_et, price)
             else:
                 logger.error(f"Order placement failed for {symbol}")
-                decision["approved"] = False
-                decision["reason"] = "order_submission_failed: broker returned no order_result"
                 if dedupe_key:
-                    _mark_webhook_event_status(
-                        dedupe_key,
-                        "submit_failed",
-                        failure_reason="broker returned no order_result",
+                    _trade_audit_recorder().record_webhook_status(
+                        dedupe_key=dedupe_key,
+                        status="submit_failed",
+                        failure_reason=execution.failure_reason or "broker returned no order_result",
                     )
 
         except Exception as e:
@@ -4164,9 +3834,9 @@ def _legacy_process_signal(data):
                 account_state=account_state,
             )
             if dedupe_key:
-                _mark_webhook_event_status(
-                    dedupe_key,
-                    "error",
+                _trade_audit_recorder().record_webhook_status(
+                    dedupe_key=dedupe_key,
+                    status="error",
                     failure_reason=f"order_path_exception: {e}",
                 )
             return
@@ -4176,7 +3846,10 @@ def _legacy_process_signal(data):
         logger.info(f"REJECTED: {symbol} {action.upper()} - {rejected_reason}")
     log_trade(data, decision, order_result, account_state=account_state)
     if dedupe_key:
-        _mark_webhook_event_status(dedupe_key, "processed")
+        _trade_audit_recorder().record_webhook_status(
+            dedupe_key=dedupe_key,
+            status="processed",
+        )
 
 
 def _build_signal_pipeline(app_container: ApplicationContainer | None = None):
@@ -4186,7 +3859,13 @@ def _build_signal_pipeline(app_container: ApplicationContainer | None = None):
             legacy_processor=_legacy_process_signal,
             has_open_position_db=_has_open_position_db,
             log_rejection=log_rejection,
-            mark_webhook_event_status=_mark_webhook_event_status,
+            mark_webhook_event_status=(
+                lambda dedupe_key, status, **kwargs: _trade_audit_recorder().record_webhook_status(
+                    dedupe_key=dedupe_key,
+                    status=status,
+                    **kwargs,
+                )
+            ),
             logger=logger,
         )
     )
@@ -4271,655 +3950,13 @@ def _symbol_intelligence_for_symbol(symbol, market_date=None):
 
 
 def status_payload():
-    result = {
-        "timestamp": datetime.now().isoformat(),
-        "execution_mode": EXECUTION_MODE,
-        "runtime_config": public_runtime_config(),
-    }
-    result["session_momentum_gate_enabled"] = ENFORCE_SESSION_MOMENTUM_GATE
-    result["prediction_gate_mode"] = PREDICTION_GATE_MODE
-    result["prediction_gate_thresholds"] = PREDICTION_GATE_THRESHOLDS
-    result["prediction_gate_name"] = "deterministic_signal_quality_gate"
-    result["ml_prediction_cache"] = prediction_cache_status()
-    result["decision_policy"] = public_decision_policy_config()
-    result["policy_controls"] = public_policy_control_config()
-    result["runtime_metrics"] = metrics_snapshot()
-    result["strategy_engine_mode"] = STRATEGY_ENGINE_MODE
-    result["execution_policy_mode"] = os.getenv("EXECUTION_POLICY_MODE", "compare").strip().lower()
-    result["intra_session_tape_degradation_enabled"] = INTRA_SESSION_TAPE_DEGRADATION_ENABLED
-    result["one_bar_confirmation_hold_enabled"] = ONE_BAR_CONFIRMATION_HOLD_ENABLED
-    result["prediction_soft_avoid_min_sample_size"] = PREDICTION_SOFT_AVOID_MIN_SAMPLE_SIZE
-    result["macro_position_count_floor"] = MACRO_POSITION_COUNT_FLOOR
-    result["tape_exception_enabled"] = TAPE_EXCEPTION_ENABLED
-    result["open_momentum_fast_lane_enabled"] = OPEN_MOMENTUM_FAST_LANE_ENABLED
-    result["risk_policy_mode"] = RISK_POLICY_MODE
-    result["portfolio_rotation"] = {
-        "mode": os.getenv("PORTFOLIO_REPLACEMENT_MODE", "observe_only").strip().lower(),
-        "live_sells": os.getenv("PORTFOLIO_REPLACEMENT_LIVE_SELLS", "false").strip().lower()
-        in ("1", "true", "yes", "on"),
-        "require_replace_now": os.getenv(
-            "PORTFOLIO_REPLACEMENT_REQUIRE_REPLACE_NOW", "true"
-        ).strip().lower() in ("1", "true", "yes", "on"),
-        "min_candidate_score": float(os.getenv("PORTFOLIO_REPLACEMENT_MIN_CANDIDATE_SCORE", "120")),
-        "min_buy_score": float(os.getenv("PORTFOLIO_REPLACEMENT_MIN_BUY_SCORE", "15")),
-        "weak_holding_plpc": float(os.getenv("PORTFOLIO_REPLACEMENT_WEAK_HOLDING_PLPC", "-1.00")),
-        "runtime_effect": "live_sell_path" if os.getenv(
-            "PORTFOLIO_REPLACEMENT_LIVE_SELLS", "false"
-        ).strip().lower() in ("1", "true", "yes", "on") else "observe_only",
-    }
-    result["alerts"] = alert_config_public()
-    result["session_momentum_summary"] = _session_momentum_summary()
-    result["session_momentum"] = _session_momentum_snapshot()
-    result["symbol_intelligence"] = _symbol_intelligence_snapshot()
-    result["policy_artifacts"] = policy_artifact_status(Path(__file__).parent)
-    
-    # Uptime
-    try:
-        elapsed = datetime.now(timezone.utc) - _START_TIME
-        h, rem = divmod(int(elapsed.total_seconds()), 3600)
-        m, s = divmod(rem, 60)
-        result["uptime"] = f"{h}h {m}m {s}s"
-    except Exception:
-        pass
-
-    # Market session
-    try:
-        result["market_session"] = _market_session()
-    except Exception:
-        pass
-
-    # Macro risk regime
-    try:
-        result["macro_risk"] = get_macro_risk(Path(__file__).parent)
-    except Exception as e:
-        logger.error(f"/status macro_risk error: {e}")
-
-    # Observe-only rolling multi-day momentum context
-    try:
-        result["rolling_momentum"] = rolling_summary()
-    except Exception as e:
-        logger.error(f"/status rolling_momentum error: {e}")
-
-    # Account summary + daily P&L (via get_mock_account_state)
-    try:
-        state = get_mock_account_state()
-        balance = state.get("balance", 0)
-        result["account"] = {
-            "balance":         balance,
-            "portfolio_value": state.get("portfolio_value"),
-            "daily_pnl":       state.get("daily_pnl"),
-            "daily_pnl_pct":   state.get("daily_pnl_pct"),
-            "circuit_breaker_triggered": (state.get("daily_pnl_pct") or 0) <= -3.0,
-        }
-    except Exception as e:
-        logger.error(f"/status account error: {e}")
-        balance = 0
-
-    # Buying power (get_account has it; get_mock_account_state does not)
-    try:
-        acct = get_account()
-        if acct and "account" in result:
-            result["account"]["buying_power"] = acct["buying_power"]
-    except Exception:
-        pass
-
-    # Read-only ledger/DB summary.
-    try:
-        result["ledger_summary"] = ledger_summary()
-    except Exception as e:
-        result["ledger_summary_error"] = str(e)
-
-    # Detailed positions (now with trend, market_bias, and exposure-cap signals)
-    symbols_at_cap = []
-    try:
-        alpaca_positions = broker_service.list_positions()
-        pos_list = []
-        for p in sorted(alpaca_positions, key=lambda x: -float(x.market_value)):
-            try:
-                mv = float(p.market_value)
-                pct_of_balance = round(mv / balance * 100, 2) if balance else None
-                cap_hit = bool(pct_of_balance is not None and pct_of_balance >= 4.0)
-                if cap_hit:
-                    symbols_at_cap.append(p.symbol)
-                trend = _trend_table.get(p.symbol) or {}
-                bias_entry = _market_bias.get(p.symbol) or {}
-                pos_list.append({
-                    "symbol":          p.symbol,
-                    "qty":             float(p.qty),
-                    "current_price":   float(p.current_price),
-                    "value":           mv,
-                    "unrealized_pl":   float(p.unrealized_pl),
-                    "pct_of_balance":  pct_of_balance,
-                    "trend_direction": trend.get("direction"),
-                    "trend_strength":  trend.get("strength"),
-                    "market_bias":     bias_entry.get("bias"),
-                    "session_momentum": _latest_session_momentum_for_symbol(p.symbol),
-                    "exposure_cap_hit": cap_hit,
-                })
-            except Exception as e:
-                logger.warning(f"/status per-symbol error for {p.symbol}: {e}")
-        result["positions"] = pos_list
-        result["position_count"] = f"{len(alpaca_positions)}/8"
-    except Exception as e:
-        logger.error(f"/status positions error: {e}")
-
-    # Correlation exposure per cluster (mega_cap_tech / broad_index / energy)
-    try:
-        cluster_status = {}
-        for cluster_name, members in CORRELATION_CLUSTERS.items():
-            value = 0.0
-            held = []
-            for p in broker_service.list_positions():
-                if p.symbol in members:
-                    mv = float(p.market_value)
-                    value += mv
-                    held.append({
-                        "symbol": p.symbol,
-                        "value": round(mv, 2),
-                    })
-
-            exposure_pct = round(value / balance * 100, 2) if balance else None
-            limit_pct = CLUSTER_EXPOSURE_LIMITS.get(cluster_name)
-            cluster_status[cluster_name] = {
-                "members": sorted(members),
-                "held": sorted(held, key=lambda x: -x["value"]),
-                "value": round(value, 2),
-                "exposure_pct": exposure_pct,
-                "limit_pct": limit_pct,
-                "limit_hit": bool(
-                    exposure_pct is not None and limit_pct is not None and exposure_pct >= limit_pct
-                ),
-            }
-
-        result["correlation_exposure"] = cluster_status
-    except Exception as e:
-        logger.error(f"/status correlation_exposure error: {e}")
-
-    # Read-only risk package telemetry.
-    # This does not replace or weaken live inline risk gates.
-    if RISK_POLICY_MODE == "compare":
-        try:
-            macro_live = result.get("macro_risk") or get_macro_risk(Path(__file__).parent)
-            positions_for_risk = result.get("positions") or []
-            account_for_risk = result.get("account") or {}
-
-            result["risk_account_snapshot"] = account_risk_snapshot(
-                account=account_for_risk,
-                positions=positions_for_risk,
-                daily_pnl_pct=account_for_risk.get("daily_pnl_pct"),
-                max_positions=int(macro_live.get("max_new_positions") or 8),
-            )
-
-            guard_policy = live_guard_policy(os.environ)
-            allowed, guard_reason = live_order_allowed(guard_policy)
-            result["risk_live_guard_policy"] = {
-                **guard_policy,
-                "live_order_allowed": allowed,
-                "live_order_reason": guard_reason,
-            }
-
-            ctx_path = Path(__file__).parent / "market_context.json"
-            if ctx_path.exists():
-                ctx = json.loads(ctx_path.read_text())
-                macro_policy_compare = policy_from_market_context(ctx)
-                result["risk_macro_policy_compare"] = {
-                    "package_policy": macro_policy_compare,
-                    "live_macro_risk": macro_live,
-                    "matches_live": (
-                        macro_policy_compare.get("macro_regime") == macro_live.get("macro_regime")
-                        and macro_policy_compare.get("risk_multiplier") == macro_live.get("risk_multiplier")
-                        and macro_policy_compare.get("max_new_positions") == macro_live.get("max_new_positions")
-                        and macro_policy_compare.get("block_new_buys") == macro_live.get("block_new_buys")
-                    ),
-                }
-            else:
-                result["risk_macro_policy_compare"] = {
-                    "error": "market_context.json missing",
-                    "live_macro_risk": macro_live,
-                }
-        except Exception as e:
-            result["risk_policy_error"] = str(e)
-
-    # Pre-check state — what would block / pass right now if a buy signal arrived
-    try:
-        now_et_value = now_et()
-        market_hours_open = is_market_hours(now_et_value)
-
-        # Stage B: read cooldowns and recent_sells from DB tables so the
-        # snapshot reflects state across all gunicorn workers (the in-memory
-        # dicts only hold this worker's view).
-        et = pytz.timezone("America/New_York")
-        cooldowns = []
-        churn = []
-        try:
-            cd_rows = cooldown_repo.cooldown_rows()
-            cs_rows = cooldown_repo.recent_sell_rows()
-            for sym, act, ts_str in cd_rows:
-                try:
-                    ts = datetime.fromisoformat(ts_str)
-                    if ts.tzinfo is None:
-                        ts = et.localize(ts)
-                    elapsed = (now_et_value - ts).total_seconds()
-                    if elapsed < 15 * 60:
-                        cooldowns.append({
-                            "symbol": sym,
-                            "action": act,
-                            "minutes_remaining": int((15 * 60 - elapsed) // 60),
-                        })
-                except Exception:
-                    pass
-            for sym, ts_str, *_ in cs_rows:
-                try:
-                    ts = datetime.fromisoformat(ts_str)
-                    if ts.tzinfo is None:
-                        ts = et.localize(ts)
-                    elapsed = (now_et_value - ts).total_seconds()
-                    if elapsed < 30 * 60:
-                        churn.append(sym)
-                except Exception:
-                    pass
-        except Exception as e:
-            logger.error(f"/status DB read for pre_check_state failed: {e}")
-
-        trend_blocked = [
-            {"symbol": sym, "direction": t.get("direction"), "strength": t.get("strength")}
-            for sym, t in _trend_table.items()
-            if sym in APPROVED_SYMBOLS and t.get("direction") in ("neutral", "bearish")
-        ]
-
-        bias_avoid = sorted(
-            sym for sym, entry in _market_bias.items()
-            if (entry or {}).get("bias") == "avoid"
-        )
-
-        daily_pnl_pct = result.get("account", {}).get("daily_pnl_pct")
-        result["pre_check_state"] = {
-            "market_hours_open": market_hours_open,
-            "circuit_breaker_active": (daily_pnl_pct or 0) < DAILY_LOSS_LIMIT_PCT,
-            "symbols_on_cooldown": sorted(cooldowns, key=lambda c: (c["symbol"], c["action"])),
-            "symbols_on_churn_block": sorted(churn),
-            "symbols_at_exposure_cap": sorted(symbols_at_cap),
-            "trend_gate_blocked": sorted(trend_blocked, key=lambda x: x["symbol"]),
-            "market_bias_avoided": bias_avoid,
-        }
-    except Exception as e:
-        logger.error(f"/status pre_check_state error: {e}")
-
-    # Trend snapshot for all 15 approved symbols (not just held positions)
-    try:
-        result["trend_table_summary"] = {}
-        for sym in sorted(APPROVED_SYMBOLS):
-            t = _trend_table.get(sym)
-            if not t:
-                result["trend_table_summary"][sym] = None
-                continue
-
-            buy_confirmation = _required_buy_confirmations(sym, result.get("account") or {})
-            sell_confirmation = _required_sell_confirmations(sym, result.get("account") or {})
-
-            result["trend_table_summary"][sym] = {
-                "direction": t.get("direction"),
-                "strength": t.get("strength"),
-                "consecutive_count": t.get("consecutive_count"),
-                "last_signal": t.get("last_signal"),
-                "flip_event": t.get("flip_event"),
-                "required_buy_confirmations": buy_confirmation.get("required_buy_confirmations"),
-                "required_sell_confirmations": sell_confirmation.get("required_sell_confirmations"),
-                "fast_lane_buy_flip": is_fast_lane_buy_flip(
-                    t,
-                    required_buy_confirmations=buy_confirmation.get("required_buy_confirmations") or 3,
-                ),
-                "fast_lane_sell_flip": is_fast_lane_sell_flip(
-                    t,
-                    required_sell_confirmations=sell_confirmation.get("required_sell_confirmations") or 2,
-                ),
-            }
-    except Exception as e:
-        logger.error(f"/status trend_table_summary error: {e}")
-
-    # Today's signal counts from trades.db
-    try:
-        result["today_signals"] = trades_repo.today_signal_counts()
-    except Exception as e:
-        logger.error(f"/status signal counts error: {e}")
-
-    try:
-        result["intelligence"] = get_intelligence_snapshot()
-    except Exception as e:
-        result["intelligence"] = {
-            "available": False,
-            "error": str(e),
-        }
-
-    return result
-
+    return build_status_payload(sys.modules[__name__])
 
 def positions_payload():
-    result = {"timestamp": datetime.now().isoformat()}
-
-    balance = 0.0
-    daily_pnl_pct = None
-    try:
-        state = get_mock_account_state()
-        balance = float(state.get("balance") or 0)
-        daily_pnl_pct = state.get("daily_pnl_pct")
-    except Exception as e:
-        logger.error(f"/positions account state error: {e}")
-
-    def _cooldown_active(symbol):
-        try:
-            now_et_value = now_et()
-            market_hours_open = is_market_hours(now_et_value)
-            for (sym, _action), ts in _last_order.items():
-                if sym == symbol and (now_et_value - ts).total_seconds() < 15 * 60:
-                    return True
-        except Exception:
-            pass
-        return False
-
-    positions_list = []
-    total_unrealized = 0.0
-    try:
-        for p in broker_service.list_positions():
-            try:
-                qty = float(p.qty)
-                avg_entry = float(p.avg_entry_price)
-                current = float(p.current_price)
-                market_value = float(p.market_value)
-                unrealized_pl = float(p.unrealized_pl)
-                unrealized_pl_pct = float(p.unrealized_plpc) * 100
-                exposure_pct = (market_value / balance * 100) if balance else None
-                trend = _trend_table.get(p.symbol) or {}
-                bias_entry = _market_bias.get(p.symbol) or {}
-                entry_ctx = _open_entry_context(p.symbol) or {}
-
-                positions_list.append({
-                    "symbol": p.symbol,
-                    "qty": qty,
-                    "avg_entry_price": round(avg_entry, 4),
-                    "current_price": round(current, 4),
-                    "market_value": round(market_value, 2),
-                    "unrealized_pl": round(unrealized_pl, 2),
-                    "unrealized_pl_pct": round(unrealized_pl_pct, 3),
-                    "unrealized_plpc": round(unrealized_pl_pct, 3),
-                    "exposure_pct": round(exposure_pct, 2) if exposure_pct is not None else None,
-                    "exposure_cap_hit": bool(exposure_pct is not None and exposure_pct >= 4.0),
-                    "trend_direction": trend.get("direction"),
-                    "trend_strength": trend.get("strength"),
-                    "market_bias": bias_entry.get("bias"),
-                    "cooldown_active": _cooldown_active(p.symbol),
-
-                    # Entry-side context from the oldest currently-open FIFO lot.
-                    "entry_timestamp": entry_ctx.get("entry_timestamp"),
-                    "open_lot_qty": entry_ctx.get("open_lot_qty"),
-                    "entry_fill_price": entry_ctx.get("entry_fill_price"),
-                    "entry_signal_price": entry_ctx.get("entry_signal_price"),
-                    "holding_minutes": entry_ctx.get("holding_minutes"),
-                    "entry_market_bias": entry_ctx.get("entry_market_bias"),
-                    "entry_risk_level": entry_ctx.get("entry_risk_level"),
-                    "entry_quality": entry_ctx.get("entry_quality"),
-                    "entry_trend_direction": entry_ctx.get("entry_trend_direction"),
-                    "entry_trend_strength": entry_ctx.get("entry_trend_strength"),
-                    "entry_momentum_direction": entry_ctx.get("entry_momentum_direction"),
-                    "entry_momentum_pct": entry_ctx.get("entry_momentum_pct"),
-                    "entry_macro_regime": entry_ctx.get("entry_macro_regime"),
-                    "entry_risk_multiplier": entry_ctx.get("entry_risk_multiplier"),
-                    "entry_correlation_cluster": entry_ctx.get("entry_correlation_cluster"),
-                    "entry_cluster_exposure_pct": entry_ctx.get("entry_cluster_exposure_pct"),
-                })
-                total_unrealized += unrealized_pl
-            except Exception as e:
-                logger.warning(f"/positions per-symbol error for {p.symbol}: {e}")
-    except Exception as e:
-        logger.error(f"/positions list_positions error: {e}")
-
-    market_context_date = None
-    macro_sentiment = None
-    try:
-        _load_market_context()  # opportunistic lazy refresh
-        ctx_path = Path(__file__).parent / "market_context.json"
-        if ctx_path.exists():
-            ctx = json.loads(ctx_path.read_text())
-            market_context_date = ctx.get("market_date")
-            macro_sentiment = ctx.get("macro_sentiment")
-    except Exception as e:
-        logger.error(f"/positions market_context read error: {e}")
-
-    result["summary"] = {
-        "total_positions": len(positions_list),
-        "max_positions": MAX_OPEN_POSITIONS,
-        "total_unrealized_pl": round(total_unrealized, 2),
-        "account_balance": balance,
-        "daily_pnl_pct": daily_pnl_pct,
-        "market_context_date": market_context_date,
-        "macro_sentiment": macro_sentiment,
-    }
-    result["positions"] = sorted(positions_list, key=lambda x: -(x.get("market_value") or 0))
-    try:
-        for position in result.get("positions", []):
-            symbol = position.get("symbol")
-            position["intelligence"] = get_position_intelligence(symbol)
-    except Exception as e:
-        result["position_intelligence_error"] = str(e)
-
-    return result
-
+    return build_positions_payload(sys.modules[__name__])
 
 def debug_symbol_payload(symbol):
-    symbol = symbol.upper()
-    if symbol not in APPROVED_SYMBOLS:
-        return {
-            "error": "symbol not approved",
-            "symbol": symbol,
-            "approved_symbols": sorted(APPROVED_SYMBOLS),
-        }, 400
-
-    _load_market_context()
-
-    now_et_value = now_et()
-    market_hours_open = is_market_hours(now_et_value)
-    
-    result = {
-        "symbol": symbol,
-        "timestamp": datetime.now().isoformat(),
-        "now_et": now_et_value.strftime("%Y-%m-%d %H:%M:%S %Z"),
-        "market_hours_open": market_hours_open,
-    }
-
-    # Account / circuit breaker
-    try:
-        state = get_mock_account_state()
-        result["account"] = {
-            "balance": state.get("balance"),
-            "portfolio_value": state.get("portfolio_value"),
-            "daily_pnl": state.get("daily_pnl"),
-            "daily_pnl_pct": state.get("daily_pnl_pct"),
-            "circuit_breaker_active_for_buys": (state.get("daily_pnl_pct") or 0) < DAILY_LOSS_LIMIT_PCT,
-            "open_position_count": state.get("open_position_count"),
-        }
-    except Exception as e:
-        result["account_error"] = str(e)
-        state = {}
-
-    # Alpaca live position
-    try:
-        pos = get_position(symbol)
-        result["alpaca_position"] = pos
-        result["has_live_position"] = bool(pos)
-    except Exception as e:
-        result["alpaca_position_error"] = str(e)
-
-    # Trend snapshot for all approved symbols
-    try:
-        result["trend_table_summary"] = {}
-        for sym in sorted(APPROVED_SYMBOLS):
-            t = _trend_table.get(sym)
-            if not t:
-                result["trend_table_summary"][sym] = None
-                continue
-
-            buy_confirmation = _required_buy_confirmations(sym, result.get("account") or {})
-            sell_confirmation = _required_sell_confirmations(sym, result.get("account") or {})
-
-            result["trend_table_summary"][sym] = {
-                "direction": t.get("direction"),
-                "strength": t.get("strength"),
-                "consecutive_count": t.get("consecutive_count"),
-                "last_signal": t.get("last_signal"),
-                "flip_event": t.get("flip_event"),
-                "required_buy_confirmations": buy_confirmation.get("required_buy_confirmations"),
-                "required_sell_confirmations": sell_confirmation.get("required_sell_confirmations"),
-                "fast_lane_buy_flip": is_fast_lane_buy_flip(
-                    t,
-                    required_buy_confirmations=buy_confirmation.get("required_buy_confirmations") or 3,
-                ),
-                "fast_lane_sell_flip": is_fast_lane_sell_flip(
-                    t,
-                    required_sell_confirmations=sell_confirmation.get("required_sell_confirmations") or 2,
-                ),
-            }
-    except Exception as e:
-        logger.error(f"/status trend_table_summary error: {e}")
-
-    # Market context
-    try:
-        result["market_bias"] = _market_bias.get(symbol)
-    except Exception as e:
-        result["market_bias_error"] = str(e)
-
-    # Successful buys today
-    try:
-        result["successful_buys_today"] = _successful_buys_today(symbol)
-        result["max_buys_per_symbol_per_day"] = MAX_BUYS_PER_SYMBOL_PER_DAY
-        result["daily_symbol_buy_limit_hit"] = (
-            result["successful_buys_today"] >= MAX_BUYS_PER_SYMBOL_PER_DAY
-        )
-    except Exception as e:
-        result["successful_buys_today_error"] = str(e)
-
-    # Cooldowns
-    try:
-        cooldowns = {}
-        for action in ("buy", "sell"):
-            last = _read_cooldown(symbol, action)
-            if last:
-                elapsed = (now_et_value - last).total_seconds()
-                active = elapsed < 15 * 60
-                cooldowns[action] = {
-                    "last_order_time": last.isoformat(),
-                    "active": active,
-                    "minutes_remaining": int((15 * 60 - elapsed) // 60) if active else 0,
-                }
-            else:
-                cooldowns[action] = None
-        result["cooldowns"] = cooldowns
-    except Exception as e:
-        result["cooldown_error"] = str(e)
-
-    # Recent sell / churn
-    try:
-        last_sell = _read_recent_sell(symbol)
-        if last_sell:
-            ts, sell_price = last_sell
-            elapsed = (now_et_value - ts).total_seconds()
-            result["recent_sell"] = {
-                "last_sell_time": ts.isoformat(),
-                "last_sell_price": sell_price,
-                "within_30min_churn_window": elapsed < 30 * 60,
-                "minutes_remaining": int((30 * 60 - elapsed) // 60) if elapsed < 30 * 60 else 0,
-            }
-        else:
-            result["recent_sell"] = None
-    except Exception as e:
-        result["recent_sell_error"] = str(e)
-
-    # Cluster exposure
-    try:
-        balance = float(state.get("balance") or 0)
-        result["correlation_exposure"] = _cluster_exposure(symbol, balance)
-    except Exception as e:
-        result["correlation_exposure_error"] = str(e)
-
-    # Macro risk
-    try:
-        result["macro_risk"] = get_macro_risk(Path(__file__).parent)
-    except Exception as e:
-        result["macro_risk_error"] = str(e)
-
-    # Observe-only rolling multi-day momentum context
-    try:
-        result["rolling_momentum"] = rolling_symbol_context(symbol)
-    except Exception as e:
-        result["rolling_momentum_error"] = str(e)
-
-    # Observe-only market alignment
-    try:
-        result["market_alignment"] = _symbol_market_alignment(symbol)
-    except Exception as e:
-        result["market_alignment_error"] = str(e)
-
-    # Observe-only daily prediction intelligence
-    try:
-        result["symbol_intelligence"] = _symbol_intelligence_for_symbol(symbol)
-    except Exception as e:
-        result["symbol_intelligence_error"] = str(e)
-
-    # Observe-only adaptive BUY confirmation diagnostics
-    try:
-        result["adaptive_buy_confirmation"] = _required_buy_confirmations(symbol, result)
-    except Exception as e:
-        result["adaptive_buy_confirmation_error"] = str(e)
-
-    # High-level buy block reasons
-    buy_blocks = []
-
-    override_reason = _symbol_override_block(symbol, "buy")
-    if override_reason:
-        buy_blocks.append("symbol_override")
-
-    if not market_hours_open:
-        buy_blocks.append("market_hours")
-
-    acct = result.get("account") or {}
-    if acct.get("circuit_breaker_active_for_buys"):
-        buy_blocks.append("circuit_breaker")
-
-    trend = result.get("trend") or {}
-    prediction_gate = (state or {}).get("prediction_gate") or {}
-
-    if prediction_gate.get("prediction_decision") == "block":
-        buy_blocks.append(
-            f"prediction_gate:{prediction_gate.get('prediction_score')}:{prediction_gate.get('prediction_reason')}"
-    )
-    bias = result.get("market_bias") or {}
-
-    if bias.get("bias") == "avoid":
-        buy_blocks.append("market_bias_avoid")
-
-    fundamental_score = bias.get("fundamental_score")
-
-    if fundamental_score in ("bearish", "strong_bearish"):
-        buy_blocks.append("fundamental_score")
-
-    if bias.get("entry_quality") in ("do_not_chase", "avoid_chasing"):
-        buy_blocks.append("chase_prevention")
-
-    if result.get("daily_symbol_buy_limit_hit"):
-        buy_blocks.append("daily_symbol_buy_limit")
-
-    macro = result.get("macro_risk") or {}
-    if macro.get("block_new_buys"):
-        buy_blocks.append("macro_risk")
-
-    for c in result.get("correlation_exposure") or []:
-        if c.get("limit_hit"):
-            buy_blocks.append(f"correlation_cap:{c.get('cluster')}")
-
-    result["would_block_buy_because"] = buy_blocks
-    result["buy_would_pass_known_prechecks"] = len(buy_blocks) == 0
-
-    return result, 200
-
+    return build_debug_symbol_payload(sys.modules[__name__], symbol)
 
 app.extensions["application_container"] = container
 _register_routes(app, container)

@@ -432,3 +432,214 @@ def log_rejection(
             log.warning(f"decision snapshot write failed for {symbol}: {snapshot_error}")
     except Exception as exc:
         log.error(f"log_rejection DB write failed for {symbol}: {exc}")
+
+
+def record_webhook_status(
+    *,
+    dedupe_key: str | None,
+    status: str,
+    mark_webhook_event_status: Callable[..., None],
+    order_id=None,
+    client_order_id=None,
+    failure_reason=None,
+    log=None,
+) -> None:
+    """Persist webhook processing status through an injected repository/service."""
+    if not dedupe_key:
+        return
+    try:
+        mark_webhook_event_status(
+            dedupe_key,
+            status,
+            order_id=order_id,
+            client_order_id=client_order_id,
+            failure_reason=failure_reason,
+        )
+    except Exception as exc:
+        if log:
+            log.warning(f"webhook status write failed for {dedupe_key}: {exc}")
+
+
+def record_rejection(
+    *,
+    symbol: str,
+    action: str,
+    category: str,
+    reason: str,
+    price=None,
+    account_state: dict[str, Any] | None,
+    dedupe_key: str | None = None,
+    mark_webhook_event_status: Callable[..., None] | None = None,
+    market_bias: dict[str, dict[str, Any]],
+    trend_table: dict[str, dict[str, Any]],
+    ml_prediction_bucket: Callable[[Any], str],
+    log,
+) -> None:
+    """Record a rejected signal and optionally mark the webhook as rejected."""
+    log_rejection(
+        symbol,
+        action,
+        category,
+        reason,
+        price=price,
+        account_state=account_state,
+        market_bias=market_bias,
+        trend_table=trend_table,
+        ml_prediction_bucket=ml_prediction_bucket,
+        log=log,
+    )
+    if mark_webhook_event_status:
+        record_webhook_status(
+            dedupe_key=dedupe_key,
+            status="rejected",
+            mark_webhook_event_status=mark_webhook_event_status,
+            failure_reason=f"{category}: {reason}",
+            log=log,
+        )
+
+
+def record_execution(
+    *,
+    signal: dict[str, Any],
+    decision: dict[str, Any],
+    order: dict[str, Any] | None,
+    account_state: dict[str, Any] | None,
+    dedupe_key: str | None = None,
+    webhook_status: str = "processed",
+    mark_webhook_event_status: Callable[..., None] | None = None,
+    market_bias: dict[str, dict[str, Any]],
+    trend_table: dict[str, dict[str, Any]],
+    ml_prediction_bucket: Callable[[Any], str],
+    log,
+) -> None:
+    """Record the final approved/rejected trade row and webhook status."""
+    log_trade(
+        signal,
+        decision,
+        order,
+        account_state=account_state,
+        market_bias=market_bias,
+        trend_table=trend_table,
+        ml_prediction_bucket=ml_prediction_bucket,
+        log=log,
+    )
+    if mark_webhook_event_status:
+        record_webhook_status(
+            dedupe_key=dedupe_key,
+            status=webhook_status,
+            mark_webhook_event_status=mark_webhook_event_status,
+            order_id=(order or {}).get("order_id"),
+            client_order_id=(order or {}).get("client_order_id"),
+            failure_reason=None if webhook_status == "processed" else decision.get("reason"),
+            log=log,
+        )
+
+
+class TradeAuditService:
+    """Object wrapper for audit persistence.
+
+    The module-level functions remain for compatibility while the signal
+    pipeline migrates away from app-level shims. New code should depend on this
+    class so tests can patch a stable service boundary.
+    """
+
+    def __init__(
+        self,
+        *,
+        market_bias: dict[str, dict[str, Any]],
+        trend_table: dict[str, dict[str, Any]],
+        ml_prediction_bucket: Callable[[Any], str],
+        log,
+        mark_webhook_event_status: Callable[..., None] | None = None,
+    ):
+        self.market_bias = market_bias
+        self.trend_table = trend_table
+        self.ml_prediction_bucket = ml_prediction_bucket
+        self.log = log
+        self.mark_webhook_event_status = mark_webhook_event_status
+
+    def build_decision_context(
+        self,
+        symbol: str,
+        action: str,
+        account_state: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        return build_decision_context(
+            symbol,
+            action,
+            account_state,
+            market_bias=self.market_bias,
+            trend_table=self.trend_table,
+            log=self.log,
+        )
+
+    def record_rejection(
+        self,
+        *,
+        symbol: str,
+        action: str,
+        category: str,
+        reason: str,
+        price=None,
+        account_state: dict[str, Any] | None,
+        dedupe_key: str | None = None,
+    ) -> None:
+        return record_rejection(
+            symbol=symbol,
+            action=action,
+            category=category,
+            reason=reason,
+            price=price,
+            account_state=account_state,
+            dedupe_key=dedupe_key,
+            mark_webhook_event_status=self.mark_webhook_event_status,
+            market_bias=self.market_bias,
+            trend_table=self.trend_table,
+            ml_prediction_bucket=self.ml_prediction_bucket,
+            log=self.log,
+        )
+
+    def record_execution(
+        self,
+        *,
+        signal: dict[str, Any],
+        decision: dict[str, Any],
+        order: dict[str, Any] | None,
+        account_state: dict[str, Any] | None,
+        dedupe_key: str | None = None,
+        webhook_status: str = "processed",
+    ) -> None:
+        return record_execution(
+            signal=signal,
+            decision=decision,
+            order=order,
+            account_state=account_state,
+            dedupe_key=dedupe_key,
+            webhook_status=webhook_status,
+            mark_webhook_event_status=self.mark_webhook_event_status,
+            market_bias=self.market_bias,
+            trend_table=self.trend_table,
+            ml_prediction_bucket=self.ml_prediction_bucket,
+            log=self.log,
+        )
+
+    def record_webhook_status(
+        self,
+        *,
+        dedupe_key: str | None,
+        status: str,
+        order_id=None,
+        client_order_id=None,
+        failure_reason=None,
+    ) -> None:
+        if not self.mark_webhook_event_status:
+            return None
+        return record_webhook_status(
+            dedupe_key=dedupe_key,
+            status=status,
+            mark_webhook_event_status=self.mark_webhook_event_status,
+            order_id=order_id,
+            client_order_id=client_order_id,
+            failure_reason=failure_reason,
+            log=self.log,
+        )

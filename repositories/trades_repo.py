@@ -206,3 +206,48 @@ def today_signal_counts(db_path=DB_PATH) -> dict[str, int]:
         "null_orders": row[4] or 0,
     }
 
+
+def weekly_symbol_performance(symbol: str, db_path=DB_PATH) -> dict[str, Any]:
+    with get_connection(db_path) as con:
+        row = con.execute(
+            """
+            SELECT
+                COUNT(*) AS trades,
+                SUM(CASE WHEN realized_pnl > 0 THEN 1 ELSE 0 END) AS wins,
+                SUM(CASE WHEN realized_pnl < 0 THEN 1 ELSE 0 END) AS losses,
+                SUM(COALESCE(realized_pnl, 0)) AS pnl,
+                AVG(realized_pnl) AS expectancy,
+                AVG(realized_pnl_pct) AS avg_pnl_pct
+            FROM matched_trades
+            WHERE symbol = ?
+              AND entry_timestamp >= date('now','weekday 1','-7 days')
+            """,
+            (symbol,),
+        ).fetchone()
+
+    trades = int(row["trades"] or 0) if row else 0
+    wins = int(row["wins"] or 0) if row else 0
+    losses = int(row["losses"] or 0) if row else 0
+    pnl = float(row["pnl"] or 0.0) if row else 0.0
+    expectancy = float(row["expectancy"] or 0.0) if row else 0.0
+    avg_pnl_pct = float(row["avg_pnl_pct"] or 0.0) if row else 0.0
+    win_rate = wins / trades if trades else 0.0
+
+    label = "neutral"
+    if trades >= 3 and expectancy > 0 and win_rate >= 0.75:
+        label = "strong_weekly_boost"
+    elif trades >= 2 and expectancy > 0 and win_rate >= 0.50:
+        label = "weekly_boost"
+    elif trades >= 2 and (expectancy < 0 or win_rate < 0.35):
+        label = "weekly_penalty"
+
+    return {
+        "label": label,
+        "trades": trades,
+        "wins": wins,
+        "losses": losses,
+        "win_rate": round(win_rate, 4),
+        "pnl": round(pnl, 2),
+        "expectancy": round(expectancy, 2),
+        "avg_pnl_pct": round(avg_pnl_pct, 4),
+    }

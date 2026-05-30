@@ -169,7 +169,7 @@ def _base_patches(**overrides):
         # Session momentum — unavailable by default (fail-open)
         "app.get_latest_session_momentum": MagicMock(return_value=None),
         "app._session_momentum_is_fresh": MagicMock(return_value=False),
-        "app._evaluate_session_momentum_gate": MagicMock(return_value=False),
+        "app.entry_policy.evaluate_session_momentum_gate": MagicMock(return_value=False),
         # Trend confirmation helpers
         "app._required_buy_confirmations": MagicMock(
             return_value={"required_buy_confirmations": 3, "reason": "default"}
@@ -185,7 +185,7 @@ def _base_patches(**overrides):
             return_value={"prediction_decision": "observe_only", "decision": "pass"}
         ),
         # Downstream gates (tested separately; default to pass)
-        "app._live_bias_override": MagicMock(return_value={}),
+        "app.entry_policy.live_bias_override": MagicMock(return_value={}),
         "app._one_bar_confirmation_hold": MagicMock(return_value=(False, "")),
         "app._pre_order_safety_check": MagicMock(return_value=True),
         "app._sell_continuation_delay_reason": MagicMock(return_value=None),
@@ -201,9 +201,9 @@ def _base_patches(**overrides):
             }
         ),
         # DB writes — capture without touching trades.db
-        "app.log_rejection": MagicMock(),
-        "app.log_trade": MagicMock(),
-        "app._mark_webhook_event_status": MagicMock(),
+        "services.trade_audit_service.TradeAuditService.record_rejection": MagicMock(),
+        "services.trade_audit_service.TradeAuditService.record_execution": MagicMock(),
+        "services.trade_audit_service.TradeAuditService.record_webhook_status": MagicMock(),
         # Stale-signal check — fresh by default
         "app._is_signal_stale": MagicMock(return_value=(False, 0.0, "fresh")),
         # Portfolio rotation — disabled by default
@@ -234,21 +234,19 @@ class _Env:
 
     # Convenience accessors for captured log_rejection calls
     def rejected(self):
-        mock = self._patch_map.get("app.log_rejection")
+        mock = self._patch_map.get("services.trade_audit_service.TradeAuditService.record_rejection")
         return mock is not None and mock.called
 
     def rejection_category(self):
-        mock = self._patch_map.get("app.log_rejection")
+        mock = self._patch_map.get("services.trade_audit_service.TradeAuditService.record_rejection")
         if mock and mock.called:
-            args = mock.call_args[0]
-            return args[2] if len(args) > 2 else None
+            return mock.call_args.kwargs.get("category")
         return None
 
     def rejection_reason(self):
-        mock = self._patch_map.get("app.log_rejection")
+        mock = self._patch_map.get("services.trade_audit_service.TradeAuditService.record_rejection")
         if mock and mock.called:
-            args = mock.call_args[0]
-            return args[3] if len(args) > 3 else None
+            return mock.call_args.kwargs.get("reason")
         return None
 
 
@@ -339,7 +337,7 @@ def test_webhook_accepts_valid_buy_signal():
     executor_mock.submit = submit_mock
     with patch("app._signal_executor", executor_mock):
         with patch("app._record_webhook_event", return_value=True):
-            with patch("app._mark_webhook_event_status", MagicMock()):
+            with patch("services.trade_audit_service.TradeAuditService.record_webhook_status", MagicMock()):
                 client = _app.app.test_client()
                 resp = client.post(
                     "/webhook",
@@ -385,12 +383,12 @@ def test_circuit_breaker_does_not_block_sell():
         "app.get_mock_account_state": MagicMock(
             return_value=_account(daily_pnl_pct=-4.0)
         ),
-        "app.log_rejection": log_mock,
+        "services.trade_audit_service.TradeAuditService.record_rejection": log_mock,
     }):
         _app.process_signal(_sell())
     # No circuit_breaker rejection for sells
     for call in log_mock.call_args_list:
-        assert call[0][2] != "circuit_breaker", "circuit_breaker must not block sells"
+        assert call.kwargs.get("category") != "circuit_breaker", "circuit_breaker must not block sells"
 
 
 def test_duplicate_webhook_blocked():

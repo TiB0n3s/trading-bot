@@ -4,11 +4,11 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from app import _live_bias_override
+from services.policies.entry_policy import live_bias_override
 
 
 def test_hard_avoid_stays_blocked():
-    result = _live_bias_override(
+    result = live_bias_override(
         symbol="TEST",
         bias_entry={"bias": "avoid", "avoid_type": "hard"},
         trend={},
@@ -22,7 +22,7 @@ def test_hard_avoid_stays_blocked():
 
 
 def test_soft_avoid_can_be_overridden_by_strong_live_evidence():
-    result = _live_bias_override(
+    result = live_bias_override(
         symbol="TEST",
         bias_entry={"bias": "avoid", "avoid_type": "soft"},
         trend={
@@ -47,7 +47,7 @@ def test_soft_avoid_can_be_overridden_by_strong_live_evidence():
 
 
 def test_soft_avoid_stays_blocked_without_strong_live_evidence():
-    result = _live_bias_override(
+    result = live_bias_override(
         symbol="TEST",
         bias_entry={"bias": "avoid", "avoid_type": "soft"},
         trend={
@@ -69,7 +69,7 @@ def test_soft_avoid_stays_blocked_without_strong_live_evidence():
 
 
 def test_pre_market_buy_can_be_downgraded_by_bad_live_evidence():
-    result = _live_bias_override(
+    result = live_bias_override(
         symbol="TEST",
         bias_entry={"bias": "buy"},
         trend={
@@ -91,7 +91,7 @@ def test_pre_market_buy_can_be_downgraded_by_bad_live_evidence():
 
 
 def test_neutral_can_upgrade_on_strong_live_evidence():
-    result = _live_bias_override(
+    result = live_bias_override(
         symbol="TEST",
         bias_entry={"bias": "neutral"},
         trend={

@@ -112,7 +112,6 @@ TEMPORARY_DB_ACCESS_ALLOWLIST = {
     "excursion_report.py",
     "export_ml_dataset.py",
     "fill_poller.py",
-    "fill_stream.py",
     "filter_report.py",
     "ingest_market_context.py",
     "init_prediction_db.py",
@@ -166,10 +165,10 @@ APPROVED_BROKER_ACCESS = {
     "broker.py",
     "services/broker_service.py",
     "services/container.py",
+    "services/fill_stream_service.py",
 }
 
 TEMPORARY_BROKER_ACCESS_ALLOWLIST = {
-    "fill_stream.py",
     "morning_check.py",
     "services/market_data_service.py",
 }

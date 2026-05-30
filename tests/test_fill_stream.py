@@ -6,7 +6,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-import fill_stream
+from repositories import fill_repo
 
 
 class SimpleMonkeyPatch:
@@ -63,14 +63,7 @@ def count_trades(db_path: Path):
 def test_insert_synthetic_exit_is_idempotent_by_order_id(tmp_path, monkeypatch):
     db_path = make_test_db(tmp_path)
 
-    def test_get_connection():
-        con = sqlite3.connect(db_path)
-        con.row_factory = sqlite3.Row
-        return con
-
-    monkeypatch.setattr(fill_stream, "get_connection", test_get_connection)
-
-    inserted_first = fill_stream.insert_synthetic_exit(
+    inserted_first = fill_repo.insert_synthetic_exit(
         order_id="child-sell-1",
         symbol="AAPL",
         side="sell",
@@ -78,9 +71,10 @@ def test_insert_synthetic_exit_is_idempotent_by_order_id(tmp_path, monkeypatch):
         filled_qty=10,
         fill_price=105.50,
         parent_order_id="parent-buy-1",
+        db_path=db_path,
     )
 
-    inserted_second = fill_stream.insert_synthetic_exit(
+    inserted_second = fill_repo.insert_synthetic_exit(
         order_id="child-sell-1",
         symbol="AAPL",
         side="sell",
@@ -88,10 +82,11 @@ def test_insert_synthetic_exit_is_idempotent_by_order_id(tmp_path, monkeypatch):
         filled_qty=10,
         fill_price=105.50,
         parent_order_id="parent-buy-1",
+        db_path=db_path,
     )
 
     assert inserted_first is True
-    assert inserted_second is True
+    assert inserted_second is False
     assert count_trades(db_path) == 1
 
 
@@ -122,15 +117,8 @@ def test_trade_order_exists_checks_order_id(tmp_path, monkeypatch):
     con.commit()
     con.close()
 
-    def test_get_connection():
-        con = sqlite3.connect(db_path)
-        con.row_factory = sqlite3.Row
-        return con
-
-    monkeypatch.setattr(fill_stream, "get_connection", test_get_connection)
-
-    assert fill_stream.trade_order_exists(insert_order_id) is True
-    assert fill_stream.trade_order_exists("missing-order") is False
+    assert fill_repo.trade_order_exists(insert_order_id, db_path=db_path) is True
+    assert fill_repo.trade_order_exists("missing-order", db_path=db_path) is False
 
 
 def test_update_db_refreshes_cumulative_filled_qty(tmp_path, monkeypatch):
@@ -160,14 +148,7 @@ def test_update_db_refreshes_cumulative_filled_qty(tmp_path, monkeypatch):
     con.commit()
     con.close()
 
-    def test_get_connection():
-        con = sqlite3.connect(db_path)
-        con.row_factory = sqlite3.Row
-        return con
-
-    monkeypatch.setattr(fill_stream, "get_connection", test_get_connection)
-
-    rows = fill_stream.update_db(order_id, "filled", 147.352, filled_qty=5)
+    rows = fill_repo.update_trade_fill(order_id, "filled", 147.352, filled_qty=5, db_path=db_path)
 
     con = sqlite3.connect(db_path)
     row = con.execute(

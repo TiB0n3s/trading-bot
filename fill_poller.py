@@ -1,56 +1,23 @@
-import sqlite3
 import logging
-from db import get_connection
-from services.broker_service import broker_service
+
+from services.container import ApplicationContainer
+from services.fill_poller_service import FillPollerService
+
 
 logging.basicConfig(
     level=logging.INFO,
-    format="%(asctime)s - %(levelname)s - %(message)s"
+    format="%(asctime)s - %(levelname)s - %(message)s",
 )
 logger = logging.getLogger(__name__)
 
-PENDING_STATUSES = ("pending_new", "new", "partially_filled")
 
 def poll_fills():
-    checked = updated = skipped = 0
-    with get_connection() as con:
-        con.row_factory = sqlite3.Row
+    container = ApplicationContainer.create_default(
+        logger=logger,
+        signal_executor_factory=lambda: None,
+    )
+    return FillPollerService.from_container(container).poll_fills()
 
-        rows = con.execute(
-            "SELECT id, order_id, symbol FROM trades WHERE order_status IN (?, ?, ?)",
-            PENDING_STATUSES
-        ).fetchall()
-
-        for row in rows:
-            checked += 1
-            try:
-                order = broker_service.get_order(row["order_id"])
-                new_status = order.status
-                fill_price = float(order.filled_avg_price) if order.filled_avg_price else None
-
-                cur = con.execute(
-                    "SELECT order_status, fill_price FROM trades WHERE id = ?", (row["id"],)
-                ).fetchone()
-
-                if cur["order_status"] == new_status and cur["fill_price"] == fill_price:
-                    skipped += 1
-                    continue
-
-                con.execute(
-                    "UPDATE trades SET order_status = ?, fill_price = ? WHERE id = ?",
-                    (new_status, fill_price, row["id"])
-                )
-                con.commit()
-                updated += 1
-                logger.info(
-                    f"Updated {row['symbol']} order {row['order_id']}: "
-                    f"status={new_status} fill_price={fill_price}"
-                )
-            except Exception as e:
-                logger.error(f"Failed to poll order {row['order_id']} ({row['symbol']}): {e}")
-                skipped += 1
-
-    logger.info(f"Poll complete — checked: {checked}, updated: {updated}, skipped: {skipped}")
 
 if __name__ == "__main__":
     poll_fills()

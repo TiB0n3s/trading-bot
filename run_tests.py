@@ -68,6 +68,7 @@ TESTS = [
     "tests/test_broker.py",
     "tests/test_db_migrations.py",
     "tests/test_fill_stream.py",
+    "tests/test_fill_poller_service.py",
     "tests/test_trend.py",
     "tests/test_fast_lane.py",
     "tests/test_fast_lane_sell.py",

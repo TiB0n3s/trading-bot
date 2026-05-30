@@ -92,6 +92,41 @@ def update_trade_fill(
         return int(cur.rowcount)
 
 
+def pending_trade_orders(
+    statuses: tuple[str, ...],
+    db_path=DB_PATH,
+) -> list[Any]:
+    placeholders = ", ".join(["?"] * len(statuses))
+    with get_connection(db_path) as con:
+        return con.execute(
+            f"SELECT id, order_id, symbol FROM trades WHERE order_status IN ({placeholders})",
+            statuses,
+        ).fetchall()
+
+
+def trade_status_by_id(trade_id: int, db_path=DB_PATH) -> Any:
+    with get_connection(db_path) as con:
+        return con.execute(
+            "SELECT order_status, fill_price FROM trades WHERE id = ?",
+            (trade_id,),
+        ).fetchone()
+
+
+def update_trade_status_by_id(
+    *,
+    trade_id: int,
+    status: str,
+    fill_price: float | None,
+    db_path=DB_PATH,
+) -> int:
+    with get_connection(db_path) as con:
+        cur = con.execute(
+            "UPDATE trades SET order_status = ?, fill_price = ? WHERE id = ?",
+            (status, fill_price, trade_id),
+        )
+        return int(cur.rowcount)
+
+
 def trade_order_exists(order_id: str, db_path=DB_PATH) -> bool:
     if not order_id:
         return False

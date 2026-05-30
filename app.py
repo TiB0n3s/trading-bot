@@ -1,3 +1,11 @@
+"""Flask composition root for the trading bot.
+
+This module should stay limited to Flask app creation, startup entry points,
+container selection, route registration, and the public `process_signal()`
+compatibility wrapper. Trading behavior belongs in services, policies,
+repositories, and infrastructure adapters.
+"""
+
 import os
 import sys
 import json

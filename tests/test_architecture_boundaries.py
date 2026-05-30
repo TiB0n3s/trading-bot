@@ -144,7 +144,6 @@ TEMPORARY_DB_ACCESS_ALLOWLIST = {
     "portfolio_rotation_manager.py",
     "portfolio_state.py",
     "position_manager.py",
-    "position_momentum_monitor.py",
     "post_session_check.py",
     "pre_market_research_data.py",
     "prediction_cache.py",
@@ -263,6 +262,11 @@ def test_app_cannot_import_sqlite3():
     assert_true("sqlite3" not in imports, "app.py sqlite3 boundary")
 
 
+def test_app_py_stays_under_1500_lines():
+    line_count = (ROOT / "app.py").read_text().count("\n") + 1
+    assert_true(line_count < 1500, f"app.py line count {line_count} < 1500")
+
+
 def test_app_cannot_call_broker_directly():
     imports = _imports(ROOT / "app.py")
     calls = _calls(ROOT / "app.py")
@@ -349,6 +353,7 @@ def main():
     tests = [
         test_api_cannot_import_broker_directly,
         test_app_cannot_import_sqlite3,
+        test_app_py_stays_under_1500_lines,
         test_app_cannot_call_broker_directly,
         test_api_cannot_import_runtime_infra_directly,
         test_repositories_cannot_import_flask,

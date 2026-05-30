@@ -19,8 +19,7 @@ import os
 import math
 from datetime import datetime, timedelta
 from typing import Any
-from pathlib import Path
-from db import get_connection
+from repositories import position_momentum_repo
 from services.broker_service import broker_service
 
 from market_time import now_et, is_market_hours
@@ -47,8 +46,6 @@ MAX_MOMENTUM_AGE_MINUTES = 5
 MIN_BARS_FOR_ACTION = 15
 AUTO_SELL_COOLDOWN_MINUTES = 30
 MIN_HOLD_MINUTES_BEFORE_AUTO_SELL = 15
-
-DB_PATH = Path(__file__).resolve().parent / "trades.db"
 
 POSITION_MOMENTUM_AUTO_SELL = _env_bool("POSITION_MOMENTUM_AUTO_SELL", False)
 POSITION_MOMENTUM_SELL_CANDIDATES_ONLY = _env_bool("POSITION_MOMENTUM_SELL_CANDIDATES_ONLY", True)
@@ -575,104 +572,30 @@ def maybe_promote_sell_pressure(decision: dict[str, Any], unrealized_plpc: float
 
 
 def init_position_momentum_table() -> None:
-    with get_connection(DB_PATH) as con:
-        con.execute(
-            """
-            CREATE TABLE IF NOT EXISTS position_momentum_checks (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                timestamp TEXT NOT NULL,
-                symbol TEXT NOT NULL,
-                qty REAL,
-                action TEXT,
-                severity TEXT,
-                reason TEXT,
-                trend_label TEXT,
-                trend_score REAL,
-                session_return_pct REAL,
-                momentum_5m_pct REAL,
-                momentum_15m_pct REAL,
-                momentum_30m_pct REAL,
-                distance_from_vwap_pct REAL,
-                unrealized_pl REAL,
-                unrealized_plpc REAL,
-                auto_sell_enabled INTEGER DEFAULT 0,
-                order_submitted INTEGER DEFAULT 0,
-                order_id TEXT,
-                sell_pressure_score REAL,
-                sell_pressure_recommendation TEXT,
-                sell_pressure_reason TEXT
-            )
-            """
-        )
-
-        existing_cols = {
-            row["name"]
-            for row in con.execute("PRAGMA table_info(position_momentum_checks)").fetchall()
-        }
-        for col_name, col_type in (
-            ("sell_pressure_score", "REAL"),
-            ("sell_pressure_recommendation", "TEXT"),
-            ("sell_pressure_reason", "TEXT"),
-        ):
-            if col_name not in existing_cols:
-                con.execute(f"ALTER TABLE position_momentum_checks ADD COLUMN {col_name} {col_type}")
+    position_momentum_repo.init_checks_table()
 
 
 def log_position_momentum_check(position, session, decision, auto_sell_enabled=False, order=None) -> None:
     session = session or {}
     order = order or {}
 
-    with get_connection(DB_PATH) as con:
-        con.execute(
-            """
-            INSERT INTO position_momentum_checks (
-                timestamp,
-                symbol,
-                qty,
-                action,
-                severity,
-                reason,
-                trend_label,
-                trend_score,
-                session_return_pct,
-                momentum_5m_pct,
-                momentum_15m_pct,
-                momentum_30m_pct,
-                distance_from_vwap_pct,
-                unrealized_pl,
-                unrealized_plpc,
-                auto_sell_enabled,
-                order_submitted,
-                order_id,
-                sell_pressure_score,
-                sell_pressure_recommendation,
-                sell_pressure_reason
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                getattr(position, "symbol", None),
-                _to_float(getattr(position, "qty", 0)),
-                decision.get("action"),
-                decision.get("severity"),
-                decision.get("reason"),
-                session.get("trend_label"),
-                session.get("trend_score"),
-                session.get("session_return_pct"),
-                session.get("momentum_5m_pct"),
-                session.get("momentum_15m_pct"),
-                session.get("momentum_30m_pct"),
-                session.get("distance_from_vwap_pct"),
-                _to_float(getattr(position, "unrealized_pl", 0)),
-                _to_float(getattr(position, "unrealized_plpc", 0)) * 100,
-                1 if auto_sell_enabled else 0,
-                1 if order else 0,
-                order.get("order_id") if isinstance(order, dict) else None,
-                decision.get("sell_pressure_score"),
-                decision.get("sell_pressure_recommendation"),
-                decision.get("sell_pressure_reason"),
-            ),
-        )
+    position_momentum_repo.insert_check(
+        timestamp=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        symbol=getattr(position, "symbol", None),
+        qty=_to_float(getattr(position, "qty", 0)),
+        action=decision.get("action"),
+        severity=decision.get("severity"),
+        reason=decision.get("reason"),
+        session=session,
+        unrealized_pl=_to_float(getattr(position, "unrealized_pl", 0)),
+        unrealized_plpc=_to_float(getattr(position, "unrealized_plpc", 0)) * 100,
+        auto_sell_enabled=auto_sell_enabled,
+        order_submitted=bool(order),
+        order_id=order.get("order_id") if isinstance(order, dict) else None,
+        sell_pressure_score=decision.get("sell_pressure_score"),
+        sell_pressure_recommendation=decision.get("sell_pressure_recommendation"),
+        sell_pressure_reason=decision.get("sell_pressure_reason"),
+    )
 
 def build_client_order_id(symbol: str) -> str:
     ts = datetime.now().strftime("%Y%m%d%H%M%S")
@@ -680,25 +603,12 @@ def build_client_order_id(symbol: str) -> str:
 
 def latest_approved_buy_time(symbol: str) -> datetime | None:
     """Return latest approved buy timestamp for symbol, if known."""
-    with get_connection(DB_PATH) as con:
-        row = con.execute(
-            """
-            SELECT timestamp
-            FROM trades
-            WHERE symbol = ?
-              AND LOWER(action) = 'buy'
-              AND approved = 1
-            ORDER BY timestamp DESC
-            LIMIT 1
-            """,
-            (symbol,),
-        ).fetchone()
-
-    if not row:
+    timestamp = position_momentum_repo.latest_approved_buy_timestamp(symbol)
+    if not timestamp:
         return None
 
     try:
-        return datetime.strptime(row["timestamp"], "%Y-%m-%d %H:%M:%S")
+        return datetime.strptime(timestamp, "%Y-%m-%d %H:%M:%S")
     except Exception:
         return None
 
@@ -888,18 +798,7 @@ def maybe_execute_auto_sell(position, decision, market_open: bool) -> dict[str, 
     return order
 
 def init_position_momentum_actions_table() -> None:
-    with get_connection(DB_PATH) as con:
-        con.execute(
-            """
-            CREATE TABLE IF NOT EXISTS position_momentum_actions (
-                symbol TEXT PRIMARY KEY,
-                last_action_time TEXT NOT NULL,
-                action TEXT NOT NULL,
-                reason TEXT,
-                order_id TEXT
-            )
-            """
-        )
+    position_momentum_repo.init_actions_table()
 
 def get_position_high_water_plpc(symbol: str) -> float | None:
     """
@@ -912,20 +811,9 @@ def get_position_high_water_plpc(symbol: str) -> float | None:
     today = datetime.now().strftime("%Y-%m-%d")
 
     try:
-        with get_connection(DB_PATH) as con:
-            row = con.execute(
-                """
-                SELECT MAX(unrealized_plpc) AS max_plpc
-                FROM position_momentum_checks
-                WHERE symbol = ?
-                  AND timestamp LIKE ?
-                  AND unrealized_plpc IS NOT NULL
-                """,
-                (symbol, f"{today}%"),
-            ).fetchone()
-
-        if row and row["max_plpc"] is not None:
-            return float(row["max_plpc"])
+        max_plpc = position_momentum_repo.max_unrealized_plpc_today(symbol, today)
+        if max_plpc is not None:
+            return float(max_plpc)
 
     except Exception as e:
         logger.warning(f"Failed to read high-water P/L for {symbol}: {e}")
@@ -933,21 +821,12 @@ def get_position_high_water_plpc(symbol: str) -> float | None:
     return None
 
 def recently_auto_sold(symbol: str, cooldown_minutes: int = AUTO_SELL_COOLDOWN_MINUTES) -> bool:
-    with get_connection(DB_PATH) as con:
-        row = con.execute(
-            """
-            SELECT last_action_time
-            FROM position_momentum_actions
-            WHERE symbol = ?
-            """,
-            (symbol,),
-        ).fetchone()
-
-    if not row:
+    last_action_time = position_momentum_repo.latest_action_time(symbol)
+    if not last_action_time:
         return False
 
     try:
-        ts = datetime.strptime(row["last_action_time"], "%Y-%m-%d %H:%M:%S")
+        ts = datetime.strptime(last_action_time, "%Y-%m-%d %H:%M:%S")
         age = datetime.now() - ts
         return age.total_seconds() < cooldown_minutes * 60
     except Exception:
@@ -957,30 +836,12 @@ def recently_auto_sold(symbol: str, cooldown_minutes: int = AUTO_SELL_COOLDOWN_M
 def record_auto_sell_action(symbol: str, reason: str, order: dict[str, Any] | None) -> None:
     order_id = order.get("order_id") if isinstance(order, dict) else None
 
-    with get_connection(DB_PATH) as con:
-        con.execute(
-            """
-            INSERT INTO position_momentum_actions (
-                symbol,
-                last_action_time,
-                action,
-                reason,
-                order_id
-            ) VALUES (?, ?, ?, ?, ?)
-            ON CONFLICT(symbol) DO UPDATE SET
-                last_action_time=excluded.last_action_time,
-                action=excluded.action,
-                reason=excluded.reason,
-                order_id=excluded.order_id
-            """,
-            (
-                symbol,
-                datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                "auto_sell",
-                reason,
-                order_id,
-            ),
-        )
+    position_momentum_repo.upsert_auto_sell_action(
+        symbol=symbol,
+        timestamp=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        reason=reason,
+        order_id=order_id,
+    )
 
 def main() -> int:
     market_now = now_et()

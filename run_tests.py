@@ -79,6 +79,7 @@ TESTS = [
     "tests/test_startup_service.py",
     "tests/test_runtime_state_services.py",
     "tests/test_momentum_service.py",
+    "tests/test_pre_market_research_service.py",
     "tests/test_session_momentum_service.py",
     "tests/test_architecture_boundaries.py",
     "tests/test_signal_pipeline.py",

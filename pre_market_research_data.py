@@ -21,7 +21,7 @@ import os
 import time
 import sys
 from collections import Counter
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime
 from pathlib import Path
 
 from symbols_config import APPROVED_SYMBOLS_LIST
@@ -34,7 +34,6 @@ from market_intelligence.market_brief_builder import (
 )
 from market_intelligence.intelligence_store import ingest_market_context
 from alerts import send_alert
-from db import DB_PATH, get_connection
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 OUTPUT_FILE = SCRIPT_DIR / "market_context.json"
@@ -104,7 +103,10 @@ def load_env_if_needed():
 
 load_env_if_needed()
 
-from services.market_data_service import market_data_service  # noqa: E402
+from services.pre_market_research_service import (  # noqa: E402
+    PreMarketResearchConfig,
+    build_default_pre_market_research_service,
+)
 
 
 def pct_change(old, new):
@@ -138,101 +140,30 @@ def unique_price_levels(levels, digits=2, limit=3):
     return out
 
 
+_pre_market_research_service = None
+
+
+def get_pre_market_research_service():
+    global _pre_market_research_service
+    if _pre_market_research_service is None:
+        _pre_market_research_service = build_default_pre_market_research_service(
+            config=PreMarketResearchConfig(
+                fetch_daily_bars=PRE_MARKET_ALPACA_FETCH_DAILY_BARS,
+                fetch_minute_bars=PRE_MARKET_ALPACA_FETCH_MINUTE_BARS,
+                skip_minute_if_daily_fails=PRE_MARKET_ALPACA_SKIP_MINUTE_IF_DAILY_FAILS,
+                daily_lookback_days=PRE_MARKET_ALPACA_DAILY_LOOKBACK_DAYS,
+                minute_lookback_hours=PRE_MARKET_ALPACA_MINUTE_LOOKBACK_HOURS,
+            ),
+            pct_change=pct_change,
+            unique_price_levels=unique_price_levels,
+            logger=logger,
+        )
+    return _pre_market_research_service
+
+
 def get_recent_bars(symbol):
-    """Return lightweight recent data from Alpaca IEX feed."""
-    out = {
-        "symbol": symbol,
-        "daily_pct": None,
-        "intraday_pct": None,
-        "momentum_30m_pct": None,
-        "last_price": None,
-        "support_levels": [],
-        "resistance_levels": [],
-        "bar_count_1m": 0,
-        "error": None,
-    }
-
-    now = datetime.now(timezone.utc)
-
-    daily_failed = False
-
-    if PRE_MARKET_ALPACA_FETCH_DAILY_BARS:
-        try:
-            daily_start = (now - timedelta(days=PRE_MARKET_ALPACA_DAILY_LOOKBACK_DAYS)).isoformat()
-            daily_bars = market_data_service.get_bars_with_fallback(
-                symbol, "1Day", start=daily_start, feed="iex"
-            )
-            if len(daily_bars) >= 2:
-                prev = daily_bars[-2]
-                last = daily_bars[-1]
-                out["daily_pct"] = pct_change(float(prev.c), float(last.c))
-                out["last_price"] = float(last.c)
-            elif len(daily_bars) == 1:
-                out["last_price"] = float(daily_bars[-1].c)
-
-            recent_daily = daily_bars[-5:]
-            daily_supports = sorted((float(b.l) for b in recent_daily), reverse=True)
-            daily_resistances = sorted((float(b.h) for b in recent_daily))
-            out["support_levels"] = unique_price_levels(daily_supports)
-            out["resistance_levels"] = unique_price_levels(daily_resistances)
-        except Exception as e:
-            daily_failed = True
-            out["error"] = f"daily bars failed: {e}"
-
-    should_fetch_minute = PRE_MARKET_ALPACA_FETCH_MINUTE_BARS and not (
-        daily_failed and PRE_MARKET_ALPACA_SKIP_MINUTE_IF_DAILY_FAILS
-    )
-
-    if should_fetch_minute:
-        try:
-            minute_start = (now - timedelta(hours=PRE_MARKET_ALPACA_MINUTE_LOOKBACK_HOURS)).isoformat()
-            minute_bars = market_data_service.get_bars_with_fallback(
-                symbol, "1Min", start=minute_start, feed="iex"
-            )
-            minute_bars = minute_bars[-120:]
-            out["bar_count_1m"] = len(minute_bars)
-
-            if len(minute_bars) >= 2:
-                first = float(minute_bars[0].c)
-                last = float(minute_bars[-1].c)
-                out["intraday_pct"] = pct_change(first, last)
-                out["last_price"] = last
-
-            if len(minute_bars) >= 30:
-                first_30 = float(minute_bars[-30].c)
-                last_30 = float(minute_bars[-1].c)
-                out["momentum_30m_pct"] = pct_change(first_30, last_30)
-
-            if minute_bars:
-                minute_support = min(float(b.l) for b in minute_bars)
-                minute_resistance = max(float(b.h) for b in minute_bars)
-                out["support_levels"] = unique_price_levels(
-                    [minute_support] + out["support_levels"]
-                )
-                out["resistance_levels"] = unique_price_levels(
-                    [minute_resistance] + out["resistance_levels"]
-                )
-
-        except Exception as e:
-            if out["error"]:
-                out["error"] += f"; minute bars failed: {e}"
-            else:
-                out["error"] = f"minute bars failed: {e}"
-    elif PRE_MARKET_ALPACA_FETCH_MINUTE_BARS and daily_failed:
-        out["minute_fetch_skipped"] = "daily_failed"
-
-    if out["last_price"]:
-        last_price = float(out["last_price"])
-        supports = [level for level in out["support_levels"] if level <= last_price]
-        resistances = [level for level in out["resistance_levels"] if level >= last_price]
-        out["support_levels"] = unique_price_levels(supports + [last_price * 0.99])
-        out["resistance_levels"] = unique_price_levels(resistances + [last_price * 1.01])
-        if not out["support_levels"]:
-            out["support_levels"] = unique_price_levels([last_price * 0.99])
-        if not out["resistance_levels"]:
-            out["resistance_levels"] = unique_price_levels([last_price * 1.01])
-
-    return out
+    """Compatibility wrapper for pre-market market-data reads."""
+    return get_pre_market_research_service().get_recent_bars(symbol)
 
 
 def classify_macro(market):
@@ -509,43 +440,7 @@ def load_event_enrichment(market_date: str) -> dict:
     intelligence scores but does not create events or affect trading directly.
     """
     try:
-        from db import DB_PATH, get_connection
-        from market_intelligence.intelligence_store import init_intelligence_tables
-
-        init_intelligence_tables()
-        with get_connection(DB_PATH) as con:
-            rows = con.execute(
-                """
-                SELECT symbol,
-                       catalyst_score,
-                       consumer_appetite_score,
-                       revenue_impact_score,
-                       profit_potential_score,
-                       margin_risk_score,
-                       supply_chain_risk_score,
-                       materials_risk_score,
-                       competitive_risk_score,
-                       execution_risk_score
-                FROM daily_symbol_context
-                WHERE market_date = ?
-                """,
-                (market_date,),
-            ).fetchall()
-
-        out = {}
-        for r in rows:
-            out[r["symbol"]] = {
-                "catalyst_score": r["catalyst_score"],
-                "consumer_appetite_score": r["consumer_appetite_score"],
-                "revenue_impact_score": r["revenue_impact_score"],
-                "profit_potential_score": r["profit_potential_score"],
-                "margin_risk_score": r["margin_risk_score"],
-                "supply_chain_risk_score": r["supply_chain_risk_score"],
-                "materials_risk_score": r["materials_risk_score"],
-                "competitive_risk_score": r["competitive_risk_score"],
-                "execution_risk_score": r["execution_risk_score"],
-            }
-        return out
+        return get_pre_market_research_service().load_event_enrichment(market_date)
     except Exception as e:
         logger.warning(f"Event enrichment load failed for {market_date}: {e}")
         return {}
@@ -625,21 +520,7 @@ def write_json(path, payload):
 def latest_session_momentum(symbol: str) -> dict:
     """Return latest intraday session momentum row for a symbol."""
     try:
-        with get_connection(DB_PATH) as con:
-            row = con.execute(
-                """
-                SELECT symbol, updated_at, trend_label, trend_score,
-                       session_return_pct, momentum_5m_pct,
-                       momentum_15m_pct, momentum_30m_pct,
-                       distance_from_vwap_pct, reason
-                FROM session_momentum
-                WHERE symbol = ?
-                ORDER BY updated_at DESC
-                LIMIT 1
-                """,
-                (symbol,),
-            ).fetchone()
-        return dict(row) if row else {}
+        return get_pre_market_research_service().latest_session_momentum(symbol)
     except Exception:
         return {}
 
@@ -647,25 +528,7 @@ def latest_session_momentum(symbol: str) -> dict:
 def get_latest_prediction(symbol: str, market_date: str) -> dict:
     """Return latest daily prediction row for a symbol/date."""
     try:
-        with get_connection(DB_PATH) as con:
-            row = con.execute(
-                """
-                SELECT symbol, prediction_score, probability_of_profit,
-                       expected_pnl, expected_win_rate, confidence,
-                       sample_size, timing_score, recommended_entry_timing,
-                       recommended_exit_timing,
-                       trend_score, trend_label, trend_regime,
-                       trend_confidence, trend_similarity_sample_size,
-                       reason, raw_json, updated_at
-                FROM daily_symbol_predictions
-                WHERE market_date = ?
-                  AND symbol = ?
-                ORDER BY updated_at DESC
-                LIMIT 1
-                """,
-                (market_date, symbol),
-            ).fetchone()
-        return dict(row) if row else {}
+        return get_pre_market_research_service().get_latest_prediction(symbol, market_date)
     except Exception:
         return {}
 
@@ -673,19 +536,7 @@ def get_latest_prediction(symbol: str, market_date: str) -> dict:
 def get_prior_session_context(symbol: str, market_date: str) -> dict:
     """Return most recent prior-session strong-day participation row."""
     try:
-        with get_connection(DB_PATH) as con:
-            row = con.execute(
-                """
-                SELECT *
-                FROM strong_day_participation
-                WHERE symbol = ?
-                  AND market_date < ?
-                ORDER BY market_date DESC
-                LIMIT 1
-                """,
-                (symbol, market_date),
-            ).fetchone()
-        return dict(row) if row else {}
+        return get_pre_market_research_service().get_prior_session_context(symbol, market_date)
     except Exception:
         return {}
 
@@ -693,39 +544,7 @@ def get_prior_session_context(symbol: str, market_date: str) -> dict:
 def get_strategy_memory_context(symbol: str) -> dict:
     """Return lightweight current strategy-memory/performance context from matched trades."""
     try:
-        with get_connection(DB_PATH) as con:
-            row = con.execute(
-                """
-                SELECT
-                    COUNT(*) AS trades,
-                    SUM(CASE WHEN realized_pnl > 0 THEN 1 ELSE 0 END) AS wins,
-                    SUM(CASE WHEN realized_pnl < 0 THEN 1 ELSE 0 END) AS losses,
-                    SUM(COALESCE(realized_pnl, 0)) AS pnl,
-                    AVG(realized_pnl) AS expectancy,
-                    AVG(realized_pnl_pct) AS avg_pnl_pct
-                FROM matched_trades
-                WHERE symbol = ?
-                """,
-                (symbol,),
-            ).fetchone()
-
-        trades = int(row["trades"] or 0) if row else 0
-        wins = int(row["wins"] or 0) if row else 0
-        losses = int(row["losses"] or 0) if row else 0
-        pnl = float(row["pnl"] or 0.0) if row else 0.0
-        expectancy = float(row["expectancy"] or 0.0) if row else 0.0
-        avg_pnl_pct = float(row["avg_pnl_pct"] or 0.0) if row else 0.0
-        win_rate = wins / trades if trades else 0.0
-
-        return {
-            "trades": trades,
-            "wins": wins,
-            "losses": losses,
-            "win_rate": round(win_rate, 4),
-            "pnl": round(pnl, 2),
-            "expectancy": round(expectancy, 2),
-            "avg_pnl_pct": round(avg_pnl_pct, 4),
-        }
+        return get_pre_market_research_service().get_strategy_memory_context(symbol)
     except Exception:
         return {}
 

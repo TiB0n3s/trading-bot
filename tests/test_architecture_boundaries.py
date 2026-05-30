@@ -140,7 +140,6 @@ TEMPORARY_DB_ACCESS_ALLOWLIST = {
     "portfolio_replacement_report.py",
     "portfolio_state.py",
     "post_session_check.py",
-    "pre_market_research_data.py",
     "prediction_cache.py",
     "prediction_report.py",
     "prediction_validation_report.py",
@@ -175,6 +174,7 @@ APPROVED_MARKET_DATA_ACCESS = {
     "services/market_data_service.py",
     "services/execution_adapters.py",
     "services/momentum_service.py",
+    "services/pre_market_research_service.py",
     "services/session_momentum_service.py",
     "live_features.py",
 }
@@ -186,7 +186,6 @@ TEMPORARY_MARKET_DATA_ACCESS_ALLOWLIST = {
     "label_features.py",
     "missed_opportunity_report.py",
     "position_manager.py",
-    "pre_market_research_data.py",
     "rejected_signal_outcome_builder.py",
     "rolling_momentum.py",
     "services/policies/entry_policy.py",

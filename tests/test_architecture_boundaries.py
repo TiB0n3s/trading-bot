@@ -93,7 +93,6 @@ TEMPORARY_DB_ACCESS_ALLOWLIST = {
     "analytics_ext/replay_engine.py",
     "analytics_report.py",
     "app.py",
-    "auto_buy_manager.py",
     "auto_buy_outcome_report.py",
     "backfill_missing_fills.py",
     "backfill_setup_labels.py",

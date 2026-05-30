@@ -13,7 +13,6 @@ from datetime import datetime
 import logging
 from typing import Any, Callable
 
-from services.signal_models import ExecutionResult, SignalContext
 
 
 @dataclass(frozen=True)
@@ -163,14 +162,145 @@ def execute_order(
 
 
 class ExecutionService:
-    def __init__(self, legacy_processor: Callable[[dict], None] | None = None):
-        self.legacy_processor = legacy_processor
-
-    def execute_legacy(self, signal: SignalContext, **kwargs) -> ExecutionResult:
-        if self.legacy_processor is None:
-            raise RuntimeError("legacy_processor is not configured")
-        self.legacy_processor(signal.raw_signal, **kwargs)
-        return ExecutionResult(submitted=False, status="handled_by_legacy_processor")
-
     def execute_order(self, **kwargs) -> ExecutionOutcome:
         return execute_order(**kwargs)
+
+
+def run_legacy_approved_order_path(
+    *,
+    signal: dict[str, Any],
+    symbol: str,
+    action: str,
+    price: Any,
+    account_state: dict[str, Any],
+    dedupe_key: str | None,
+    current_et: Any,
+    decision: dict[str, Any],
+    execution_mode: str,
+    apply_final_sizing: Callable[..., Any],
+    apply_buy_opportunity_sizing: Callable[..., Any],
+    execute_order_func: Callable[..., ExecutionOutcome],
+    pre_order_safety_check: Callable[..., tuple[bool, str]],
+    one_bar_confirmation_hold: Callable[..., tuple[bool, str]],
+    make_client_order_id: Callable[[str, str, dict[str, Any]], str],
+    place_order: Callable[..., dict[str, Any] | None],
+    execution_rejection_decision: Callable[[ExecutionOutcome], Any],
+    deterministic_rejection: Callable[..., Any],
+    reject_approval_decision: Callable[..., Any],
+    log_trade: Callable[..., Any],
+    record_webhook_status: Callable[..., Any],
+    write_cooldown: Callable[[str, str, Any], Any],
+    write_recent_sell: Callable[[str, Any, Any], Any],
+    last_order: dict,
+    last_sell: dict,
+    log: logging.Logger,
+) -> bool:
+    """Run the legacy approved/rejected post-Claude order path.
+
+    Returns True when the path rejected and the caller should stop.
+    """
+    order_result = None
+
+    if decision.get("approved"):
+        try:
+            approved_reason = decision.get("reason")
+            log.info(f"APPROVED: {symbol} {action.upper()} - {approved_reason}")
+
+            risk_multiplier = float(account_state.get("macro_risk", {}).get("risk_multiplier", 1.0))
+            sizing_decision = apply_final_sizing(
+                symbol=symbol,
+                action=action,
+                decision=decision,
+                risk_multiplier=risk_multiplier,
+                account_state=account_state,
+                apply_buy_opportunity_sizing=apply_buy_opportunity_sizing,
+                log=log,
+            )
+            adjusted_position_size_pct = sizing_decision.final_size_pct
+            account_state["final_sizing"] = {
+                "requested_size_pct": sizing_decision.requested_size_pct,
+                "final_size_pct": sizing_decision.final_size_pct,
+                "dominant_limiter": sizing_decision.dominant_limiter,
+                "active_caps": [
+                    {"source": cap.source, "cap_pct": cap.cap_pct, "reason": cap.reason}
+                    for cap in sizing_decision.active_caps
+                ],
+                "conviction_stack": sizing_decision.conviction_stack,
+            }
+
+            execution = execute_order_func(
+                symbol=symbol,
+                action=action,
+                signal=signal,
+                signal_price=price,
+                decision=decision,
+                account_state=account_state,
+                position_size_pct=adjusted_position_size_pct,
+                execution_mode=execution_mode,
+                pre_order_safety_check=pre_order_safety_check,
+                one_bar_confirmation_hold=one_bar_confirmation_hold,
+                make_client_order_id=make_client_order_id,
+                place_order=place_order,
+                log=log,
+            )
+            account_state.update(execution.account_state_updates)
+            if execution.decision_updates:
+                decision.update(execution.decision_updates)
+            order_result = execution.order_result
+
+            if execution.rejection_category:
+                reject_approval_decision(approval=execution_rejection_decision(execution))
+                return True
+
+            if order_result:
+                if execution_mode == "dry_run":
+                    log.info(f"DRY RUN ORDER RECORDED: {order_result}")
+                else:
+                    log.info(f"ORDER PLACED: {order_result}")
+                    cooldown_key = (symbol, action)
+                    last_order[cooldown_key] = current_et
+                    write_cooldown(symbol, action, current_et)
+                    if action == "sell":
+                        last_sell[symbol] = (current_et, price)
+                        write_recent_sell(symbol, current_et, price)
+            else:
+                log.error(f"Order placement failed for {symbol}")
+                if dedupe_key:
+                    record_webhook_status(
+                        dedupe_key=dedupe_key,
+                        status="submit_failed",
+                        failure_reason=execution.failure_reason or "broker returned no order_result",
+                    )
+
+        except Exception as exc:
+            log.exception(
+                f"APPROVED ORDER PATH CRASHED for {symbol} {action.upper()}: {exc}"
+            )
+            reject_approval_decision(
+                approval=deterministic_rejection(
+                    category="order_path_exception",
+                    reason=str(exc),
+                    source="execution",
+                ),
+                level="error",
+            )
+            if dedupe_key:
+                record_webhook_status(
+                    dedupe_key=dedupe_key,
+                    status="error",
+                    failure_reason=f"order_path_exception: {exc}",
+                )
+            return True
+
+    else:
+        rejected_reason = decision.get("reason")
+        log.info(f"REJECTED: {symbol} {action.upper()} - {rejected_reason}")
+
+    log_trade(signal, decision, order_result, account_state=account_state)
+    if dedupe_key:
+        record_webhook_status(
+            dedupe_key=dedupe_key,
+            status="processed",
+        )
+
+    return False

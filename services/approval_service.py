@@ -23,6 +23,20 @@ class ApprovalDecision:
     metadata: dict[str, Any] = field(default_factory=dict)
 
 
+@dataclass(frozen=True)
+class LegacyClaudeOutcome:
+    rejected: bool = False
+    approval: ApprovalDecision | None = None
+    decision: dict[str, Any] | None = None
+
+
+@dataclass(frozen=True)
+class LegacyApprovalGateOutcome:
+    rejected: bool = False
+    approval: ApprovalDecision | None = None
+    claude_account_state: dict[str, Any] | None = None
+
+
 def deterministic_rejection(
     *,
     category: str,
@@ -268,4 +282,54 @@ def evaluate_approval_decision(
 
 class ApprovalService:
     def evaluate(self, context: DecisionContext) -> ApprovalResult:
-        return ApprovalResult(approved=True, reason="deferred_to_legacy_processor")
+        return ApprovalResult(approved=True, reason="deferred_to_live_signal_processor")
+
+
+def run_legacy_claude_and_confidence(
+    *,
+    signal: dict[str, Any],
+    symbol: str,
+    action: str,
+    account_state: dict[str, Any],
+    claude_account_state: dict[str, Any],
+    weekly_symbol_performance: Callable[[str], dict[str, Any]],
+    medium_confidence_override: Callable[..., tuple[bool, str]],
+    evaluate_signal: Callable[[dict[str, Any], dict[str, Any]], dict[str, Any]],
+    cash_safe_mode: bool,
+    market_bias: dict[str, Any] | None,
+    tape_exception_enabled: bool,
+    log: Any,
+) -> LegacyClaudeOutcome:
+    weekly_perf = weekly_symbol_performance(symbol)
+    account_state["weekly_symbol_performance"] = weekly_perf
+    claude_account_state["weekly_symbol_performance"] = weekly_perf
+
+    approval_decision = evaluate_approval_decision(
+        signal=signal,
+        action=action,
+        claude_account_state=claude_account_state,
+        evaluate_signal=evaluate_signal,
+        cash_safe_mode=cash_safe_mode,
+        market_bias=market_bias or {},
+        account_state=account_state,
+        medium_confidence_override=medium_confidence_override,
+        tape_exception_enabled=tape_exception_enabled,
+    )
+    decision = dict(approval_decision.claude_payload or {})
+
+    if (approval_decision.metadata or {}).get("raw_decision", {}).get("approved") and decision.get(
+        "_consistency_guard_triggered"
+    ):
+        log.warning(
+            f"Decision consistency guard flipped {symbol} BUY to rejected: "
+            f"approved=true but reason indicated deferral"
+        )
+
+    if approval_decision.category:
+        log.warning(
+            f"{approval_decision.category} rejected {symbol} {action.upper()}: "
+            f"{approval_decision.reason}"
+        )
+        return LegacyClaudeOutcome(rejected=True, approval=approval_decision)
+
+    return LegacyClaudeOutcome(decision=decision)

@@ -14,7 +14,6 @@ from typing import Callable
 import broker
 from repositories import context_repo, cooldown_repo, rejections_repo, snapshots_repo, trades_repo
 from services.broker_service import BrokerService
-from services.execution_service import ExecutionService
 from services.market_data_service import MarketDataService
 from services.signal_pipeline import SignalPipeline, SignalPipelineDeps
 from services.tape_service import TapeService
@@ -71,7 +70,4 @@ class ApplicationContainer:
         )
 
     def build_signal_pipeline(self, deps: SignalPipelineDeps) -> SignalPipeline:
-        return SignalPipeline(
-            deps,
-            execution_service=ExecutionService(deps.legacy_processor),
-        )
+        return SignalPipeline(deps)

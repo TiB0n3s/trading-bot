@@ -38,6 +38,7 @@ from services.approval_service import (
     setup_policy_rejection,
     strategy_memory_rejection,
     trend_confirmation_rejection,
+    run_legacy_claude_and_confidence,
 )
 from services.context_builder import (
     ContextAssemblyDeps,
@@ -49,7 +50,7 @@ from services.preflight_service import (
     normalize_signal_identity,
 )
 from services.sizing_service import apply_final_sizing, apply_size_cap, build_conviction_stack
-from services.execution_service import execute_order
+from services.execution_service import execute_order, run_legacy_approved_order_path
 from services import legacy_signal_stages
 from services.signal_pipeline import SignalPipelineDeps
 from services.signal_models import SignalContext, SignalRuntimeState
@@ -2650,10 +2651,6 @@ def _legacy_run_claude_and_confidence(
     account_state: dict,
     claude_account_state: dict,
 ) -> _LegacyClaudeStageResult:
-    weekly_perf = _weekly_symbol_performance(symbol)
-    account_state["weekly_symbol_performance"] = weekly_perf
-    claude_account_state["weekly_symbol_performance"] = weekly_perf
-
     def _medium_confidence_override_adapter(*, decision, account_state):
         return _allow_medium_confidence_momentum_override(
             symbol=symbol,
@@ -2664,43 +2661,32 @@ def _legacy_run_claude_and_confidence(
             setup_obs=account_state.get("setup_observation") or {},
         )
 
-    approval_decision = evaluate_approval_decision(
+    outcome = run_legacy_claude_and_confidence(
         signal=data,
+        symbol=symbol,
         action=action,
+        account_state=account_state,
         claude_account_state=claude_account_state,
+        weekly_symbol_performance=_weekly_symbol_performance,
+        medium_confidence_override=_medium_confidence_override_adapter,
         evaluate_signal=evaluate_signal,
         cash_safe_mode=is_cash_safe_mode(),
         market_bias=_market_bias.get(symbol) or {},
-        account_state=account_state,
-        medium_confidence_override=_medium_confidence_override_adapter,
         tape_exception_enabled=TAPE_EXCEPTION_ENABLED,
+        log=logger,
     )
-    decision = dict(approval_decision.claude_payload or {})
-
-    if (approval_decision.metadata or {}).get("raw_decision", {}).get("approved") and decision.get(
-        "_consistency_guard_triggered"
-    ):
-        logger.warning(
-            f"Decision consistency guard flipped {symbol} BUY to rejected: "
-            f"approved=true but reason indicated deferral"
-        )
-
-    if approval_decision.category:
-        logger.warning(
-            f"{approval_decision.category} rejected {symbol} {action.upper()}: "
-            f"{approval_decision.reason}"
-        )
+    if outcome.rejected and outcome.approval:
         log_rejection(
             symbol,
             action,
-            approval_decision.category,
-            approval_decision.reason,
+            outcome.approval.category,
+            outcome.approval.reason,
             price=price,
             account_state=account_state,
         )
         return _LegacyClaudeStageResult(rejected=True)
 
-    return _LegacyClaudeStageResult(decision=decision)
+    return _LegacyClaudeStageResult(decision=outcome.decision)
 
 
 def _legacy_run_approved_order_path(
@@ -2714,123 +2700,50 @@ def _legacy_run_approved_order_path(
     current_et,
     decision: dict,
 ) -> _LegacyStageResult:
-    order_result = None
-
-    if decision.get("approved"):
-        try:
-            approved_reason = decision.get("reason")
-            logger.info(f"APPROVED: {symbol} {action.upper()} - {approved_reason}")
-
-            risk_multiplier = float(account_state.get("macro_risk", {}).get("risk_multiplier", 1.0))
-            sizing_decision = apply_final_sizing(
-                symbol=symbol,
-                action=action,
-                decision=decision,
-                risk_multiplier=risk_multiplier,
-                account_state=account_state,
-                apply_buy_opportunity_sizing=lambda **kwargs: (
-                    sizing_policy.apply_buy_opportunity_sizing(**kwargs, log=logger)
-                ),
-                log=logger,
-            )
-            adjusted_position_size_pct = sizing_decision.final_size_pct
-            account_state["final_sizing"] = {
-                "requested_size_pct": sizing_decision.requested_size_pct,
-                "final_size_pct": sizing_decision.final_size_pct,
-                "dominant_limiter": sizing_decision.dominant_limiter,
-                "active_caps": [
-                    {"source": cap.source, "cap_pct": cap.cap_pct, "reason": cap.reason}
-                    for cap in sizing_decision.active_caps
-                ],
-                "conviction_stack": sizing_decision.conviction_stack,
-            }
-
-            execution = execute_order(
-                symbol=symbol,
-                action=action,
-                signal=data,
-                signal_price=price,
-                decision=decision,
-                account_state=account_state,
-                position_size_pct=adjusted_position_size_pct,
-                execution_mode=EXECUTION_MODE,
-                pre_order_safety_check=_pre_order_safety_check,
-                one_bar_confirmation_hold=_one_bar_confirmation_hold,
-                make_client_order_id=_make_client_order_id,
-                place_order=place_order,
-                log=logger,
-            )
-            account_state.update(execution.account_state_updates)
-            if execution.decision_updates:
-                decision.update(execution.decision_updates)
-            order_result = execution.order_result
-
-            if execution.rejection_category:
-                return _legacy_reject_approval_decision(
-                    symbol=symbol,
-                    action=action,
-                    price=price,
-                    account_state=account_state,
-                    dedupe_key=dedupe_key,
-                    approval=execution_rejection_decision(execution),
-                )
-
-            if order_result:
-                if EXECUTION_MODE == "dry_run":
-                    logger.info(f"DRY RUN ORDER RECORDED: {order_result}")
-                else:
-                    logger.info(f"ORDER PLACED: {order_result}")
-                    cooldown_key = (symbol, action)
-                    _last_order[cooldown_key] = current_et
-                    _write_cooldown(symbol, action, current_et)
-                    if action == "sell":
-                        _last_sell[symbol] = (current_et, price)
-                        _write_recent_sell(symbol, current_et, price)
-            else:
-                logger.error(f"Order placement failed for {symbol}")
-                if dedupe_key:
-                    _trade_audit_recorder().record_webhook_status(
-                        dedupe_key=dedupe_key,
-                        status="submit_failed",
-                        failure_reason=execution.failure_reason or "broker returned no order_result",
-                    )
-
-        except Exception as e:
-            logger.exception(
-                f"APPROVED ORDER PATH CRASHED for {symbol} {action.upper()}: {e}"
-            )
-            _legacy_reject_approval_decision(
+    rejected = run_legacy_approved_order_path(
+        signal=data,
+        symbol=symbol,
+        action=action,
+        price=price,
+        account_state=account_state,
+        dedupe_key=dedupe_key,
+        current_et=current_et,
+        decision=decision,
+        execution_mode=EXECUTION_MODE,
+        apply_final_sizing=apply_final_sizing,
+        apply_buy_opportunity_sizing=lambda **kwargs: (
+            sizing_policy.apply_buy_opportunity_sizing(**kwargs, log=logger)
+        ),
+        execute_order_func=execute_order,
+        pre_order_safety_check=_pre_order_safety_check,
+        one_bar_confirmation_hold=_one_bar_confirmation_hold,
+        make_client_order_id=_make_client_order_id,
+        place_order=place_order,
+        execution_rejection_decision=execution_rejection_decision,
+        deterministic_rejection=deterministic_rejection,
+        reject_approval_decision=(
+            lambda approval, level="warning": _legacy_reject_approval_decision(
                 symbol=symbol,
                 action=action,
                 price=price,
                 account_state=account_state,
                 dedupe_key=dedupe_key,
-                approval=deterministic_rejection(
-                    category="order_path_exception",
-                    reason=str(e),
-                    source="execution",
-                ),
-                level="error",
+                approval=approval,
+                level=level,
             )
-            if dedupe_key:
-                _trade_audit_recorder().record_webhook_status(
-                    dedupe_key=dedupe_key,
-                    status="error",
-                    failure_reason=f"order_path_exception: {e}",
-                )
-            return _LegacyStageResult(rejected=True)
-
-    else:
-        rejected_reason = decision.get("reason")
-        logger.info(f"REJECTED: {symbol} {action.upper()} - {rejected_reason}")
-
-    log_trade(data, decision, order_result, account_state=account_state)
-    if dedupe_key:
-        _trade_audit_recorder().record_webhook_status(
-            dedupe_key=dedupe_key,
-            status="processed",
-        )
-
+        ),
+        log_trade=log_trade,
+        record_webhook_status=(
+            lambda **kwargs: _trade_audit_recorder().record_webhook_status(**kwargs)
+        ),
+        write_cooldown=_write_cooldown,
+        write_recent_sell=_write_recent_sell,
+        last_order=_last_order,
+        last_sell=_last_sell,
+        log=logger,
+    )
+    if rejected:
+        return _LegacyStageResult(rejected=True)
     return _LEGACY_STAGE_CONTINUE
 
 
@@ -3869,7 +3782,7 @@ def _build_signal_pipeline(app_container: ApplicationContainer | None = None):
     app_container = app_container or container
     return app_container.build_signal_pipeline(
         SignalPipelineDeps(
-            legacy_processor=_legacy_process_signal,
+            live_signal_processor=_legacy_process_signal,
             build_runtime_state=_build_runtime_state,
             build_context_runtime=_build_context_runtime,
             evaluate_preflight=_evaluate_preflight,

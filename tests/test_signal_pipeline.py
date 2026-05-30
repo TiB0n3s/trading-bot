@@ -46,8 +46,8 @@ class Recorder:
     def __init__(self):
         self.calls = []
 
-    def legacy_processor(self, signal, **kwargs):
-        self.calls.append(("legacy", dict(signal), kwargs))
+    def live_signal_processor(self, signal, **kwargs):
+        self.calls.append(("live_signal", dict(signal), kwargs))
 
     def build_runtime_state(self, context):
         self.calls.append(("build_runtime_state", context.symbol, context.action))
@@ -88,7 +88,7 @@ def _pipeline(recorder=None, logger=None):
     logger = logger or FakeLogger()
     return SignalPipeline(
         SignalPipelineDeps(
-            legacy_processor=recorder.legacy_processor,
+            live_signal_processor=recorder.live_signal_processor,
             build_runtime_state=recorder.build_runtime_state,
             build_context_runtime=recorder.build_context_runtime,
             evaluate_preflight=recorder.evaluate_preflight,
@@ -113,7 +113,7 @@ def test_normalize_preserves_original_and_returns_typed_context():
     assert_equal(context.raw_signal["action"], "buy", "legacy payload action")
 
 
-def test_invalid_payload_is_rejected_before_legacy_processor():
+def test_invalid_payload_is_rejected_before_live_signal_processor():
     pipeline, recorder, logger = _pipeline()
 
     result = pipeline.run({"action": "hold", "symbol": "AAPL", "price": 199, "_dedupe_key": "abc"})
@@ -125,7 +125,7 @@ def test_invalid_payload_is_rejected_before_legacy_processor():
     assert_equal(recorder.calls[0][1][1], "rejected", "dedupe status")
 
 
-def test_ghost_sell_is_rejected_before_legacy_processor():
+def test_ghost_sell_is_rejected_before_live_signal_processor():
     pipeline, recorder, _ = _pipeline()
 
     result = pipeline.run({"action": "sell", "symbol": "MSFT", "price": 405, "_dedupe_key": "sell-1"})
@@ -146,25 +146,25 @@ def test_ghost_sell_is_rejected_before_legacy_processor():
     assert_equal(recorder.calls[4][1][1], "rejected", "dedupe status")
 
 
-def test_valid_signal_runs_legacy_execution_stage_once():
+def test_valid_signal_runs_live_signal_orchestration_stage_once():
     reset_metrics()
     pipeline, recorder, _ = _pipeline()
 
     result = pipeline.run({"action": "buy", "symbol": "aapl", "price": "199.25"})
 
     assert_true(result.execution is not None, "execution result")
-    assert_equal(result.execution.status, "handled_by_legacy_processor", "execution status")
+    assert_equal(result.execution.status, "handled_by_live_signal_processor", "execution status")
     assert_equal(
         [call[0] for call in recorder.calls],
-        ["build_runtime_state", "build_context_runtime", "evaluate_preflight", "legacy"],
+        ["build_runtime_state", "build_context_runtime", "evaluate_preflight", "live_signal"],
         "call order",
     )
-    assert_equal(recorder.calls[3][1]["symbol"], "AAPL", "legacy symbol normalized")
-    assert_true("runtime_state" in recorder.calls[3][2], "runtime state passed to legacy")
-    assert_true("context_runtime" in recorder.calls[3][2], "context runtime passed to legacy")
-    assert_true("preflight_result" in recorder.calls[3][2], "preflight result passed to legacy")
+    assert_equal(recorder.calls[3][1]["symbol"], "AAPL", "live symbol normalized")
+    assert_true("runtime_state" in recorder.calls[3][2], "runtime state passed to live processor")
+    assert_true("context_runtime" in recorder.calls[3][2], "context runtime passed to live processor")
+    assert_true("preflight_result" in recorder.calls[3][2], "preflight result passed to live processor")
     timing = metrics_snapshot()["pipeline_stage_timing"]
-    for stage in ("normalize", "preflight", "runtime_state", "context_runtime", "legacy_live_execution"):
+    for stage in ("normalize", "preflight", "runtime_state", "context_runtime", "live_signal_orchestration"):
         assert_true(stage in timing, f"{stage} timing recorded")
     for placeholder_stage in ("context_build", "approval", "sizing", "execution"):
         assert_true(
@@ -176,9 +176,9 @@ def test_valid_signal_runs_legacy_execution_stage_once():
 def main():
     tests = [
         test_normalize_preserves_original_and_returns_typed_context,
-        test_invalid_payload_is_rejected_before_legacy_processor,
-        test_ghost_sell_is_rejected_before_legacy_processor,
-        test_valid_signal_runs_legacy_execution_stage_once,
+        test_invalid_payload_is_rejected_before_live_signal_processor,
+        test_ghost_sell_is_rejected_before_live_signal_processor,
+        test_valid_signal_runs_live_signal_orchestration_stage_once,
     ]
     for test in tests:
         test()

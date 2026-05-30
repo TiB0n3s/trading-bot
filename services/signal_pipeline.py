@@ -12,15 +12,14 @@ from typing import Any, Callable
 
 from exceptions import ValidationError
 from rejection_categories import format_rejection_reason
-from services.execution_service import ExecutionService
 from services.observability import stage_timer
 from services.preflight_service import PreflightResult
-from services.signal_models import PipelineResult, SignalContext, SignalRuntimeState
+from services.signal_models import ExecutionResult, PipelineResult, SignalContext, SignalRuntimeState
 
 
 @dataclass(frozen=True)
 class SignalPipelineDeps:
-    legacy_processor: Callable[..., None]
+    live_signal_processor: Callable[..., None]
     build_runtime_state: Callable[[SignalContext], SignalRuntimeState]
     build_context_runtime: Callable[[SignalRuntimeState], Any]
     evaluate_preflight: Callable[[SignalRuntimeState], PreflightResult]
@@ -33,10 +32,8 @@ class SignalPipeline:
     def __init__(
         self,
         deps: SignalPipelineDeps,
-        execution_service: ExecutionService | None = None,
     ):
         self.deps = deps
-        self.execution_service = execution_service or ExecutionService(deps.legacy_processor)
 
     def run(self, raw_signal: dict) -> PipelineResult:
         try:
@@ -89,15 +86,18 @@ class SignalPipeline:
                 )
             return PipelineResult(handled=True, context=context)
 
-        # The real trading decisions are still owned by the legacy processor
-        # until those branches are fully extracted. Runtime/context are prepared
-        # here to create the next safe ownership seam.
-        with stage_timer("legacy_live_execution"):
-            execution = self.execution_service.execute_legacy(
-                context,
+        # The live signal processor still owns the remaining orchestration while
+        # individual stages are migrated behind services.
+        with stage_timer("live_signal_orchestration"):
+            self.deps.live_signal_processor(
+                context.raw_signal,
                 runtime_state=runtime_state,
                 context_runtime=context_runtime,
                 preflight_result=preflight_result,
+            )
+            execution = ExecutionResult(
+                submitted=False,
+                status="handled_by_live_signal_processor",
             )
         self.deps.logger.info(
             "signal_pipeline_decision "

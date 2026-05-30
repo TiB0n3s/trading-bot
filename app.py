@@ -27,6 +27,7 @@ from services.policy_controls import public_policy_control_config
 from services.approval_service import (
     ApprovalDecision,
     decision_policy_rejection,
+    deterministic_rejection,
     evaluate_approval_decision,
     live_bias_rejection,
     opportunity_score_rejection,
@@ -1979,18 +1980,14 @@ def _legacy_process_signal_with_context(data, runtime_state, context_runtime, pr
 
     is_stale, age_seconds, stale_reason = _is_signal_stale(data)
     if is_stale:
-        logger.warning(
-            f"Stale signal blocked for {symbol} {action.upper()}: {stale_reason}"
-        )
-        log_rejection(
-            symbol,
-            action,
-            "stale_signal",
-            stale_reason,
-            price=price,
-            account_state=account_state,
-        )
-        return
+        if _reject_approval_decision(
+            deterministic_rejection(
+                category="stale_signal",
+                reason=stale_reason,
+                metadata={"age_seconds": age_seconds},
+            )
+        ):
+            return
 
     if age_seconds is not None:
         account_state["signal_age_seconds"] = round(age_seconds, 2)
@@ -2187,16 +2184,14 @@ def _legacy_process_signal_with_context(data, runtime_state, context_runtime, pr
     if action == "buy" and is_cash_safe_mode():
         if symbol not in CASH_SAFE_SYMBOLS:
             reason = f"{symbol} not allowed in cash_safe symbols {sorted(CASH_SAFE_SYMBOLS)}"
-            logger.warning(f"Cash-safe gate blocked {symbol} BUY: {reason}")
-            log_rejection(
-                symbol,
-                action,
-                "cash_safe_symbol",
-                reason,
-                price=price,
-                account_state=account_state,
-            )
-            return
+            if _reject_approval_decision(
+                deterministic_rejection(
+                    category="cash_safe_symbol",
+                    reason=reason,
+                    metadata={"cash_safe_symbols": sorted(CASH_SAFE_SYMBOLS)},
+                )
+            ):
+                return
 
         open_count = account_state.get("open_position_count", 0)
         if open_count >= CASH_SAFE_MAX_OPEN_POSITIONS:
@@ -2204,16 +2199,17 @@ def _legacy_process_signal_with_context(data, runtime_state, context_runtime, pr
                 f"open_position_count={open_count} >= cash_safe max "
                 f"{CASH_SAFE_MAX_OPEN_POSITIONS}"
             )
-            logger.warning(f"Cash-safe gate blocked {symbol} BUY: {reason}")
-            log_rejection(
-                symbol,
-                action,
-                "cash_safe_position_limit",
-                reason,
-                price=price,
-                account_state=account_state,
-            )
-            return
+            if _reject_approval_decision(
+                deterministic_rejection(
+                    category="cash_safe_position_limit",
+                    reason=reason,
+                    metadata={
+                        "open_position_count": open_count,
+                        "max_open_positions": CASH_SAFE_MAX_OPEN_POSITIONS,
+                    },
+                )
+            ):
+                return
 
         try:
             buys_today = trades_repo.cash_safe_buys_today(symbol)
@@ -2226,32 +2222,28 @@ def _legacy_process_signal_with_context(data, runtime_state, context_runtime, pr
                 f"buys_today={buys_today} >= cash_safe per-symbol daily max "
                 f"{CASH_SAFE_MAX_NEW_BUYS_PER_SYMBOL_PER_DAY}"
             )
-            logger.warning(f"Cash-safe gate blocked {symbol} BUY: {reason}")
-            log_rejection(
-                symbol,
-                action,
-                "cash_safe_daily_symbol_limit",
-                reason,
-                price=price,
-                account_state=account_state,
-            )
-            return
+            if _reject_approval_decision(
+                deterministic_rejection(
+                    category="cash_safe_daily_symbol_limit",
+                    reason=reason,
+                    metadata={
+                        "buys_today": buys_today,
+                        "max_buys_per_symbol": CASH_SAFE_MAX_NEW_BUYS_PER_SYMBOL_PER_DAY,
+                    },
+                )
+            ):
+                return
 
     # Operator symbol overrides: quick no-code control during live sessions.
     override_reason = _symbol_override_block(symbol, action)
     if override_reason:
-        logger.warning(
-            f"Symbol override blocked {symbol} {action.upper()}: {override_reason}"
-        )
-        log_rejection(
-            symbol,
-            action,
-            "symbol_override",
-            override_reason,
-            price=price,
-            account_state=account_state,
-        )
-        return
+        if _reject_approval_decision(
+            deterministic_rejection(
+                category="symbol_override",
+                reason=override_reason,
+            )
+        ):
+            return
 
     # Update trend table with this incoming signal before any pre-checks
     # (Stage C: refresh from trades.db first so all workers see the same history)
@@ -3157,18 +3149,17 @@ def _legacy_process_signal_with_context(data, runtime_state, context_runtime, pr
                     f"buying_power ${buying_power_for_affordability:.2f} cannot buy 1 share "
                     f"at signal price ${signal_price_f:.2f}"
                 )
-                logger.warning(
-                    f"Affordability gate blocked {symbol} BUY before Claude: {reason}"
-                )
-                log_rejection(
-                    symbol,
-                    action,
-                    "affordability",
-                    reason,
-                    price=price,
-                    account_state=account_state,
-                )
-                return
+                if _reject_approval_decision(
+                    deterministic_rejection(
+                        category="affordability",
+                        reason=reason,
+                        metadata={
+                            "buying_power": buying_power_for_affordability,
+                            "signal_price": signal_price_f,
+                        },
+                    )
+                ):
+                    return
 
         except Exception as e:
             logger.warning(f"Affordability gate skipped for {symbol} BUY due to error: {e}")

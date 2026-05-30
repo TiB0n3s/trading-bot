@@ -140,7 +140,6 @@ TEMPORARY_DB_ACCESS_ALLOWLIST = {
     "pnl.py",
     "policy_backtest.py",
     "portfolio_replacement_report.py",
-    "portfolio_rotation_manager.py",
     "portfolio_state.py",
     "post_session_check.py",
     "pre_market_research_data.py",

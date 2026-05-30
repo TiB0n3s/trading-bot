@@ -21,9 +21,9 @@ from datetime import datetime
 import pytz
 
 from bot_events import log_event
-from db import DB_PATH, get_connection
 from decision_snapshots import record_decision_snapshot
 from intelligence_freshness import freshness_for_file
+from repositories import portfolio_rotation_repo
 from services.broker_service import broker_service
 
 
@@ -193,50 +193,11 @@ def log_rotation_sell(decision: dict, order: dict | None) -> int | None:
     if not order:
         return None
 
-    order_id = order.get("order_id") if isinstance(order, dict) else None
-    if not order_id:
-        return None
-
-    with get_connection(DB_PATH) as con:
-        existing = con.execute(
-            "SELECT id FROM trades WHERE order_id = ? LIMIT 1",
-            (order_id,),
-        ).fetchone()
-        if existing:
-            return int(existing["id"])
-
-        cur = con.execute(
-            """
-            INSERT INTO trades (
-                timestamp,
-                symbol,
-                action,
-                signal_price,
-                approved,
-                rejection_reason,
-                confidence,
-                position_size_pct,
-                stop_loss_pct,
-                take_profit_pct,
-                order_id,
-                order_status,
-                qty,
-                fill_price
-            ) VALUES (?, ?, 'sell', ?, 1, ?, ?, 0.0, 0.0, 0.0, ?, ?, ?, NULL)
-            """,
-            (
-                _now_et_string(),
-                decision.get("symbol_to_sell"),
-                order.get("current_price"),
-                "portfolio_rotation_manager: live replacement sell submitted; "
-                + str(decision.get("reason") or ""),
-                "portfolio_rotation_manager",
-                order_id,
-                order.get("status") or "submitted",
-                int(float(order.get("qty"))) if order.get("qty") is not None else None,
-            ),
-        )
-        return int(cur.lastrowid)
+    return portfolio_rotation_repo.insert_rotation_sell(
+        timestamp=_now_et_string(),
+        decision=decision,
+        order=order,
+    )
 
 
 def record_rotation_snapshot(decision: dict, order: dict | None, trade_id: int | None) -> None:

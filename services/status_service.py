@@ -103,9 +103,9 @@ def build_status_payload(runtime):
         logger.error(f"/status account error: {e}")
         balance = 0
 
-    # Buying power (get_account has it; get_mock_account_state does not)
+    # Buying power (broker account has it; get_mock_account_state does not)
     try:
-        acct = get_account()
+        acct = broker_service.get_account()
         if acct and "account" in result:
             result["account"]["buying_power"] = acct["buying_power"]
     except Exception:

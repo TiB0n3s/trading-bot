@@ -114,7 +114,7 @@ def _base_patches(**overrides):
         # Fail-open advisory context
         "app.rolling_symbol_context": MagicMock(return_value=None),
         "app.prior_session_context": MagicMock(return_value=None),
-        "app.build_tape_context": MagicMock(
+        "app.tape_service.build_tape_context": MagicMock(
             return_value={"ok": True, "bar_count": 5, "classification": {}, "state": {}}
         ),
         "app.get_momentum": MagicMock(return_value=None),
@@ -144,7 +144,7 @@ def _base_patches(**overrides):
         "app.now_et": MagicMock(return_value=_ET_NOW),
         "app.is_market_hours": MagicMock(return_value=True),
         # Position tracking
-        "app.get_position": MagicMock(return_value=None),
+        "app.broker_service.get_position": MagicMock(return_value=None),
         "app._has_open_position_db": MagicMock(return_value=True),
         # Rate limits / churn — open by default
         "app._read_cooldown": MagicMock(return_value=None),
@@ -475,7 +475,7 @@ def test_exposure_cap_blocks_overexposed_buy():
         "avg_entry": 90.0,
     }
     with _Env(**{
-        "app.get_position": MagicMock(return_value=existing_position),
+        "app.broker_service.get_position": MagicMock(return_value=existing_position),
         "app.get_mock_account_state": MagicMock(return_value=_account(balance=balance)),
     }) as env:
         _app.process_signal(_buy())
@@ -615,7 +615,7 @@ def test_sell_profit_threshold_blocks_small_profit_without_bearish_pressure():
     existing_position = {"qty": 10, "current_price": exit_price, "avg_entry": _PRICE}
     with patch.object(_app.broker_service, "assert_position_exists", MagicMock()):
         with _Env(**{
-            "app.get_position": MagicMock(return_value=existing_position),
+            "app.broker_service.get_position": MagicMock(return_value=existing_position),
             "app.get_mock_account_state": MagicMock(return_value=_account()),
             "app._compute_trend": MagicMock(
                 return_value={
@@ -643,7 +643,7 @@ def test_sell_discipline_blocks_small_red_position_without_bearish():
     existing_position = {"qty": 10, "current_price": exit_price, "avg_entry": _PRICE}
     with patch.object(_app.broker_service, "assert_position_exists", MagicMock()):
         with _Env(**{
-            "app.get_position": MagicMock(return_value=existing_position),
+            "app.broker_service.get_position": MagicMock(return_value=existing_position),
             "app.get_mock_account_state": MagicMock(return_value=_account()),
             "app._compute_trend": MagicMock(
                 return_value={

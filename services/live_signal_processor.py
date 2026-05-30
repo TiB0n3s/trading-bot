@@ -1,13 +1,9 @@
-"""Service-owned live signal orchestration.
-
-This is a behavior-preserving relocation of the staged live signal flow out of
-the Flask composition root.  The helper names are intentionally still
-``legacy``-flavored while the migration is in progress.
-"""
+"""Service-owned live signal orchestration."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime, timezone
 import os
 from typing import Any, Callable
 
@@ -15,37 +11,62 @@ from rejection_categories import format_rejection_reason
 from services import legacy_signal_stages
 from services.approval_service import (
     ApprovalDecision,
-    LegacyRejectionAdapter,
+    RejectionAdapter,
     deterministic_rejection,
     execution_rejection_decision,
-    run_legacy_claude_and_confidence,
-    run_legacy_entry_sanity_gates,
-    run_legacy_final_approval_gates,
-    run_legacy_intra_session_tape_degradation_gate,
-    run_legacy_macro_position_gate,
-    run_legacy_prediction_bias_session_gate,
-    run_legacy_trend_confirmation_gate,
+    run_claude_and_confidence,
+    run_entry_sanity_gates,
+    run_final_approval_gates,
+    run_intra_session_tape_degradation_gate,
+    run_macro_position_gate,
+    run_prediction_session_tape_gates,
+    run_trend_confirmation_gate,
     setup_policy_rejection,
 )
-from services.execution_service import run_legacy_approved_order_path
+from services.execution_service import execute_approved_order
 from services.signal_models import ExecutionResult, PipelineResult, SignalContext, SignalRuntimeState
 
 
+def build_runtime_state(
+    signal_context: SignalContext,
+    *,
+    load_market_context: Callable[[], Any],
+    get_account_state: Callable[[], dict[str, Any]],
+) -> SignalRuntimeState:
+    load_market_context()
+    return SignalRuntimeState(
+        raw_signal=signal_context.raw_signal,
+        symbol=signal_context.symbol,
+        action=signal_context.action,
+        received_at=datetime.now(timezone.utc),
+        account_state=get_account_state(),
+    )
+
+
+def build_context_runtime(
+    runtime_state: SignalRuntimeState,
+    *,
+    build_signal_context: Callable[..., Any],
+    context_deps: Any,
+) -> Any:
+    return build_signal_context(runtime_state, context_deps)
+
+
 @dataclass(frozen=True)
-class LegacyStageResult:
+class StageResult:
     rejected: bool = False
     response: object | None = None
 
 
 @dataclass(frozen=True)
-class LegacyClaudeStageResult:
+class ClaudeStageResult:
     rejected: bool = False
     decision: dict | None = None
     response: object | None = None
 
 
 @dataclass(frozen=True)
-class LegacyApprovalGateResult:
+class ApprovalGateResult:
     rejected: bool = False
     claude_account_state: dict | None = None
     response: object | None = None
@@ -399,7 +420,7 @@ class LiveSignalProcessor:
         category: str,
         reason: str,
         level: str = "warning",
-    ) -> LegacyStageResult:
+    ) -> StageResult:
         if level == "error":
             self.deps.log.error(f"{category} blocked {symbol} {action.upper()}: {reason}")
         elif level == "info":
@@ -423,7 +444,7 @@ class LiveSignalProcessor:
                 failure_reason=format_rejection_reason(category, reason),
             )
 
-        return LegacyStageResult(rejected=True)
+        return StageResult(rejected=True)
 
     def _reject_approval_decision(
         self,
@@ -435,7 +456,7 @@ class LiveSignalProcessor:
         dedupe_key: str | None,
         approval: ApprovalDecision,
         level: str = "warning",
-    ) -> LegacyStageResult:
+    ) -> StageResult:
         return self._reject_current_signal(
             symbol=symbol,
             action=action,
@@ -455,8 +476,8 @@ class LiveSignalProcessor:
         price: Any,
         account_state: dict[str, Any],
         dedupe_key: str | None,
-    ) -> LegacyRejectionAdapter:
-        return LegacyRejectionAdapter(
+    ) -> RejectionAdapter:
+        return RejectionAdapter(
             reject_current_signal=(
                 lambda category, reason, level="warning": self._reject_current_signal(
                     symbol=symbol,
@@ -498,7 +519,7 @@ class LiveSignalProcessor:
                 approval=decision.approval,
             )
 
-        return LegacyStageResult()
+        return StageResult()
 
     def check_cash_safe_gates(self, *, symbol, action, price, account_state, dedupe_key):
         decision = legacy_signal_stages.check_cash_safe_gates(
@@ -524,7 +545,7 @@ class LiveSignalProcessor:
                 approval=decision.approval,
             )
 
-        return LegacyStageResult()
+        return StageResult()
 
     def check_symbol_override(self, *, symbol, action, price, account_state, dedupe_key):
         decision = legacy_signal_stages.apply_symbol_overrides(
@@ -542,7 +563,7 @@ class LiveSignalProcessor:
                 approval=decision.approval,
             )
 
-        return LegacyStageResult()
+        return StageResult()
 
     def apply_setup_stage(self, *, symbol, action, price, account_state, dedupe_key, setup_obs):
         if (
@@ -722,11 +743,11 @@ class LiveSignalProcessor:
                     reason=reason,
                 )
 
-        return LegacyStageResult()
+        return StageResult()
 
     def check_sell_discipline(self, *, symbol, action, price, account_state, dedupe_key, existing_position):
         if action != "sell" or not existing_position:
-            return LegacyStageResult()
+            return StageResult()
 
         try:
             avg_entry = float(existing_position.get("avg_entry") or 0)
@@ -785,10 +806,10 @@ class LiveSignalProcessor:
                 f"Sell discipline check failed for {symbol}; fail-open for SELL safety: {exc}"
             )
 
-        return LegacyStageResult()
+        return StageResult()
 
     def run_macro_position_gate(self, **kwargs):
-        outcome = run_legacy_macro_position_gate(
+        outcome = run_macro_position_gate(
             macro_position_count_floor=self.deps.macro_position_count_floor,
             get_latest_session_momentum=self.deps.get_latest_session_momentum,
             session_momentum_is_fresh=self.deps.session_momentum_is_fresh,
@@ -802,15 +823,15 @@ class LiveSignalProcessor:
             **{k: v for k, v in kwargs.items() if k != "rejection_adapter"},
         )
         if outcome.rejected and outcome.approval:
-            return LegacyStageResult(
+            return StageResult(
                 rejected=kwargs["rejection_adapter"].reject_approval_decision(
                     outcome.approval
                 )
             )
-        return LegacyStageResult()
+        return StageResult()
 
     def run_trend_confirmation_gate(self, **kwargs):
-        outcome = run_legacy_trend_confirmation_gate(
+        outcome = run_trend_confirmation_gate(
             required_buy_confirmations=self.deps.required_buy_confirmations,
             required_sell_confirmations=self.deps.required_sell_confirmations,
             is_fast_lane_buy_flip=self.deps.is_fast_lane_buy_flip,
@@ -827,15 +848,15 @@ class LiveSignalProcessor:
             },
         )
         if outcome.rejected and outcome.approval:
-            return LegacyStageResult(
+            return StageResult(
                 rejected=kwargs["rejection_adapter"].reject_approval_decision(
                     outcome.approval
                 )
             )
-        return LegacyStageResult()
+        return StageResult()
 
     def run_entry_sanity_gates(self, **kwargs):
-        outcome = run_legacy_entry_sanity_gates(
+        outcome = run_entry_sanity_gates(
             apply_market_bias_context=self.deps.apply_market_bias_context,
             **{
                 k: v
@@ -844,15 +865,15 @@ class LiveSignalProcessor:
             },
         )
         if outcome.rejected and outcome.approval:
-            return LegacyStageResult(
+            return StageResult(
                 rejected=kwargs["rejection_adapter"].reject_approval_decision(
                     outcome.approval
                 )
             )
-        return LegacyStageResult()
+        return StageResult()
 
     def run_prediction_bias_session_gate(self, **kwargs):
-        outcome = run_legacy_prediction_bias_session_gate(
+        outcome = run_prediction_session_tape_gates(
             execution_mode=self.deps.execution_mode,
             evaluate_signal_quality_gate=self.deps.evaluate_signal_quality_gate,
             get_cached_prediction=self.deps.get_cached_prediction,
@@ -876,15 +897,15 @@ class LiveSignalProcessor:
             **{k: v for k, v in kwargs.items() if k not in ("price", "rejection_adapter")},
         )
         if outcome.rejected and outcome.approval:
-            return LegacyStageResult(
+            return StageResult(
                 rejected=kwargs["rejection_adapter"].reject_approval_decision(
                     outcome.approval
                 )
             )
-        return LegacyStageResult()
+        return StageResult()
 
     def run_intra_session_tape_degradation_gate(self, **kwargs):
-        outcome = run_legacy_intra_session_tape_degradation_gate(
+        outcome = run_intra_session_tape_degradation_gate(
             enabled=self.deps.intra_session_tape_degradation_enabled,
             start_hour_et=self.deps.intra_session_tape_degradation_start_hour_et,
             min_setup_score=self.deps.intra_session_tape_degradation_min_setup_score,
@@ -893,15 +914,15 @@ class LiveSignalProcessor:
             **{k: v for k, v in kwargs.items() if k not in ("price", "rejection_adapter")},
         )
         if outcome.rejected and outcome.approval:
-            return LegacyStageResult(
+            return StageResult(
                 rejected=kwargs["rejection_adapter"].reject_approval_decision(
                     outcome.approval
                 )
             )
-        return LegacyStageResult()
+        return StageResult()
 
     def run_final_approval_gates(self, **kwargs):
-        outcome = run_legacy_final_approval_gates(
+        outcome = run_final_approval_gates(
             signal=kwargs["data"],
             symbol=kwargs["symbol"],
             action=kwargs["action"],
@@ -927,13 +948,13 @@ class LiveSignalProcessor:
             log=self.deps.log,
         )
         if outcome.rejected and outcome.approval:
-            return LegacyApprovalGateResult(
+            return ApprovalGateResult(
                 rejected=kwargs["rejection_adapter"].reject_approval_decision(
                     outcome.approval
                 ),
                 claude_account_state=outcome.claude_account_state,
             )
-        return LegacyApprovalGateResult(
+        return ApprovalGateResult(
             claude_account_state=outcome.claude_account_state
         )
 
@@ -949,7 +970,7 @@ class LiveSignalProcessor:
                 setup_obs=account_state.get("setup_observation") or {},
             )
 
-        outcome = run_legacy_claude_and_confidence(
+        outcome = run_claude_and_confidence(
             signal=kwargs["data"],
             symbol=kwargs["symbol"],
             action=kwargs["action"],
@@ -964,15 +985,15 @@ class LiveSignalProcessor:
             log=self.deps.log,
         )
         if outcome.rejected and outcome.approval:
-            return LegacyClaudeStageResult(
+            return ClaudeStageResult(
                 rejected=kwargs["rejection_adapter"].reject_approval_decision(
                     outcome.approval
                 )
             )
-        return LegacyClaudeStageResult(decision=outcome.decision)
+        return ClaudeStageResult(decision=outcome.decision)
 
     def run_approved_order_path(self, **kwargs):
-        rejected = run_legacy_approved_order_path(
+        rejected = execute_approved_order(
             signal=kwargs["data"],
             symbol=kwargs["symbol"],
             action=kwargs["action"],
@@ -1001,5 +1022,5 @@ class LiveSignalProcessor:
             log=self.deps.log,
         )
         if rejected:
-            return LegacyStageResult(rejected=True)
-        return LegacyStageResult()
+            return StageResult(rejected=True)
+        return StageResult()

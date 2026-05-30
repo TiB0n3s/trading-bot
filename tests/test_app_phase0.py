@@ -80,7 +80,7 @@ def test_create_app_exposes_explicit_container():
 def test_health_route_snapshot():
     flask_app = _app.create_app()
     flask_app.testing = True
-    with patch("app.get_account", MagicMock(return_value={"buying_power": 123.45})):
+    with patch("app.broker_service.get_account", MagicMock(return_value={"buying_power": 123.45})):
         resp = flask_app.test_client().get("/health")
     assert_equal(resp.status_code, 200, "health status")
     data = resp.get_json()
@@ -106,7 +106,7 @@ def test_status_route_snapshot():
                 "daily_pnl_pct": 0.0,
             }
         ),
-        "app.get_account": MagicMock(return_value={"buying_power": 50000.0}),
+        "app.broker_service.get_account": MagicMock(return_value={"buying_power": 50000.0}),
         "app.ledger_summary": MagicMock(return_value={"rows": 0}),
         "app.broker_service.list_positions": MagicMock(return_value=[]),
         "app.get_intelligence_snapshot": MagicMock(return_value={"available": False}),
@@ -157,7 +157,7 @@ def test_debug_symbol_route_snapshot():
                 "open_position_count": 0,
             }
         ),
-        "app.get_position": MagicMock(return_value=None),
+        "app.broker_service.get_position": MagicMock(return_value=None),
         "app._successful_buys_today": MagicMock(return_value=0),
         "app._read_cooldown": MagicMock(return_value=None),
         "app._read_recent_sell": MagicMock(return_value=None),

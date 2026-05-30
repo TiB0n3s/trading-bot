@@ -166,7 +166,7 @@ class ExecutionService:
         return execute_order(**kwargs)
 
 
-def run_legacy_approved_order_path(
+def execute_approved_order(
     *,
     signal: dict[str, Any],
     symbol: str,
@@ -195,7 +195,7 @@ def run_legacy_approved_order_path(
     last_sell: dict,
     log: logging.Logger,
 ) -> bool:
-    """Run the legacy approved/rejected post-Claude order path.
+    """Run the approved/rejected post-Claude order path.
 
     Returns True when the path rejected and the caller should stop.
     """

@@ -81,7 +81,7 @@ def test_successful_approved_buy_submits_order_and_logs_trade():
                     "take_profit_pct": 1.5,
                 }
             ),
-            "app.place_order": place_order,
+            "app.broker_service.place_order": place_order,
             "services.trade_audit_service.TradeAuditService.record_execution": log_trade,
             "app._write_cooldown": write_cooldown,
         }
@@ -100,7 +100,7 @@ def test_second_look_rejection_blocks_order_submission():
         **{
             "app.evaluate_signal": MagicMock(return_value={"approved": True, "confidence": "high", "position_size_pct": 1.0}),
             "app._pre_order_safety_check": MagicMock(return_value=(False, "spread too wide")),
-            "app.place_order": place_order,
+            "app.broker_service.place_order": place_order,
         }
     )) as env:
         _app.process_signal(_buy(_dedupe_key="second-look"))
@@ -115,7 +115,7 @@ def test_broker_order_failure_marks_decision_unapproved_and_submit_failed():
     with _Env(**_approved_downstream(
         **{
             "app.evaluate_signal": MagicMock(return_value={"approved": True, "confidence": "high", "position_size_pct": 1.0}),
-            "app.place_order": MagicMock(return_value=None),
+            "app.broker_service.place_order": MagicMock(return_value=None),
             "services.trade_audit_service.TradeAuditService.record_execution": log_trade,
             "services.trade_audit_service.TradeAuditService.record_webhook_status": mark_status,
         }
@@ -138,7 +138,7 @@ def test_claude_low_confidence_rejection_never_submits_order():
             "app.evaluate_signal": MagicMock(
                 return_value={"approved": True, "confidence": "low", "reason": "too weak"}
             ),
-            "app.place_order": place_order,
+            "app.broker_service.place_order": place_order,
         }
     )) as env:
         _app.process_signal(_buy())
@@ -264,7 +264,7 @@ def test_buy_opportunity_cap_reduces_submitted_size():
                     "take_profit_pct": 1.5,
                 }
             ),
-            "app.place_order": place_order,
+            "app.broker_service.place_order": place_order,
         }
     )):
         _app.process_signal(_buy())
@@ -280,7 +280,7 @@ def test_successful_approved_sell_submits_order_and_records_recent_sell():
     with patch.object(_app.broker_service, "assert_position_exists", MagicMock()):
         with _Env(**_approved_downstream(
             **{
-                "app.get_position": MagicMock(return_value=existing_position),
+                "app.broker_service.get_position": MagicMock(return_value=existing_position),
                 "app._compute_trend": MagicMock(
                     return_value={
                         "direction": "bearish",
@@ -303,7 +303,7 @@ def test_successful_approved_sell_submits_order_and_records_recent_sell():
                         "position_size_pct": 0,
                     }
                 ),
-                "app.place_order": place_order,
+                "app.broker_service.place_order": place_order,
                 "app._write_recent_sell": write_recent_sell,
             }
         )):

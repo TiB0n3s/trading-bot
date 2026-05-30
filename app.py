@@ -36,9 +36,14 @@ from services.preflight_service import (
 )
 from services.sizing_service import apply_final_sizing, apply_size_cap, build_conviction_stack
 from services.execution_service import execute_order
-from services.live_signal_processor import LiveSignalProcessor, LiveSignalProcessorDeps
+from services.live_signal_processor import (
+    LiveSignalProcessor,
+    LiveSignalProcessorDeps,
+    build_context_runtime as live_build_context_runtime,
+    build_runtime_state as live_build_runtime_state,
+)
 from services.signal_pipeline import SignalPipelineDeps
-from services.signal_models import SignalContext, SignalRuntimeState
+from services.signal_models import SignalRuntimeState
 from services import trend_context_service
 from services import trade_audit_service
 from services.setup_context_service import (
@@ -430,26 +435,6 @@ def _env_float(name: str, default: float) -> float:
         return float(os.getenv(name, str(default)))
     except Exception:
         return default
-
-
-def _get_bars_with_fallback(symbol: str, timeframe: str, **kwargs):
-    return market_data_service.get_bars_with_fallback(symbol, timeframe, **kwargs)
-
-
-def get_account():
-    return broker_service.get_account()
-
-
-def get_position(symbol):
-    return broker_service.get_position(symbol)
-
-
-def place_order(*args, **kwargs):
-    return broker_service.place_order(*args, **kwargs)
-
-
-def build_tape_context(*args, **kwargs):
-    return tape_service.build_tape_context(*args, **kwargs)
 
 
 def evaluate_buy_opportunity(
@@ -857,7 +842,7 @@ def _context_assembly_deps():
         trend_table=_trend_table,
         rolling_symbol_context=rolling_symbol_context,
         prior_session_context=prior_session_context,
-        build_tape_context=build_tape_context,
+        build_tape_context=tape_service.build_tape_context,
         get_momentum=get_momentum,
         setup_context_deps=SetupContextDeps(
             build_snapshot=build_snapshot,
@@ -887,35 +872,6 @@ def validate_secret(req):
         abort(401)
     if req.args.get("secret"):
         logger.warning("Secret accepted from query parameter; prefer X-Webhook-Secret or Authorization header")
-
-def log_trade(signal, decision, order, account_state=None):
-    return _trade_audit_recorder().record_execution(
-        signal=signal,
-        decision=decision,
-        order=order,
-        account_state=account_state,
-    )
-
-
-def _build_decision_context(symbol, action, account_state=None):
-    return trade_audit_service.build_decision_context(
-        symbol,
-        action,
-        account_state,
-        market_bias=_market_bias,
-        trend_table=_trend_table,
-        log=logger,
-    )
-
-def log_rejection(symbol, action, category, reason, price=None, account_state=None):
-    return _trade_audit_recorder().record_rejection(
-        symbol=symbol,
-        action=action,
-        category=category,
-        reason=reason,
-        price=price,
-        account_state=account_state,
-    )
 
 def _open_entry_context(symbol):
     """Return the oldest currently-open buy lot context for a symbol."""
@@ -1030,7 +986,7 @@ def _one_bar_confirmation_hold(symbol: str, signal_price: float, account_state: 
         enabled=ONE_BAR_CONFIRMATION_HOLD_ENABLED,
         extension_threshold_pct=ONE_BAR_CONFIRMATION_EXTENSION_THRESHOLD_PCT,
         timeout_seconds=ONE_BAR_CONFIRMATION_TIMEOUT_SECONDS,
-        get_bars_with_fallback=_get_bars_with_fallback,
+        get_bars_with_fallback=market_data_service.get_bars_with_fallback,
     )
 
 def _session_momentum_is_fresh(session_momentum, max_age_minutes=5):
@@ -1094,7 +1050,7 @@ def get_momentum(symbol, price, premarket_bias=None):
         start = (datetime.now(timezone.utc) - timedelta(minutes=20)).isoformat()
         # SIP = consolidated tape (NYSE/NASDAQ/all venues). IEX captures only a
         # fraction of volume for high-volume names, making surge detection unreliable.
-        bars = _get_bars_with_fallback(symbol, '1Min', start=start, feed='sip')
+        bars = market_data_service.get_bars_with_fallback(symbol, '1Min', start=start, feed='sip')
 
         if len(bars) < 2:
             return None
@@ -1684,8 +1640,15 @@ def _try_portfolio_rotation(candidate_symbol, candidate_price, account_state, no
         rotation_count_today=_portfolio_rotation_count_today,
         rotation_candidate_score=_rotation_candidate_score,
         weakest_rotation_holding=_weakest_rotation_holding,
-        place_order=place_order,
-        log_trade=log_trade,
+        place_order=broker_service.place_order,
+        log_trade=(
+            lambda signal, decision, order, account_state=None: _trade_audit_recorder().record_execution(
+                signal=signal,
+                decision=decision,
+                order=order,
+                account_state=account_state,
+            )
+        ),
         last_order=_last_order,
         write_cooldown=_write_cooldown,
         last_sell=_last_sell,
@@ -1832,31 +1795,13 @@ def _adaptive_churn_reentry_allowed(symbol, signal_price, last_sell_price, accou
     )
 
 
-def _build_runtime_state(signal_context: SignalContext) -> SignalRuntimeState:
-    _load_market_context()
-    return SignalRuntimeState(
-        raw_signal=signal_context.raw_signal,
-        symbol=signal_context.symbol,
-        action=signal_context.action,
-        received_at=datetime.now(timezone.utc),
-        account_state=get_mock_account_state(),
-    )
-
-
-def _build_context_runtime(runtime_state: SignalRuntimeState):
-    return build_legacy_signal_context(
-        runtime_state,
-        _context_assembly_deps(),
-    )
-
-
 def _evaluate_preflight(runtime_state: SignalRuntimeState):
     preflight = PreflightService(
         PreflightDeps(
             now_et=now_et,
             is_market_hours=is_market_hours,
             assert_position_exists=broker_service.assert_position_exists,
-            get_position=get_position,
+            get_position=broker_service.get_position,
             read_cooldown=_read_cooldown,
             read_recent_sell=_read_recent_sell,
             is_duplicate_webhook=_is_duplicate_webhook,
@@ -2033,7 +1978,16 @@ def _build_live_signal_processor() -> LiveSignalProcessor:
     return LiveSignalProcessor(
         LiveSignalProcessorDeps(
             log=logger,
-            log_rejection=log_rejection,
+            log_rejection=(
+                lambda symbol, action, category, reason, price=None, account_state=None: _trade_audit_recorder().record_rejection(
+                    symbol=symbol,
+                    action=action,
+                    category=category,
+                    reason=reason,
+                    price=price,
+                    account_state=account_state,
+                )
+            ),
             record_webhook_status=(
                 lambda **kwargs: _trade_audit_recorder().record_webhook_status(**kwargs)
             ),
@@ -2114,8 +2068,15 @@ def _build_live_signal_processor() -> LiveSignalProcessor:
             pre_order_safety_check=_pre_order_safety_check,
             one_bar_confirmation_hold=_one_bar_confirmation_hold,
             make_client_order_id=_make_client_order_id,
-            place_order=place_order,
-            log_trade=log_trade,
+            place_order=broker_service.place_order,
+            log_trade=(
+                lambda signal, decision, order, account_state=None: _trade_audit_recorder().record_execution(
+                    signal=signal,
+                    decision=decision,
+                    order=order,
+                    account_state=account_state,
+                )
+            ),
             write_cooldown=_write_cooldown,
             write_recent_sell=_write_recent_sell,
             last_order=_last_order,
@@ -2129,10 +2090,31 @@ def _build_signal_pipeline(app_container: ApplicationContainer | None = None):
     return app_container.build_signal_pipeline(
         SignalPipelineDeps(
             live_signal_processor=_build_live_signal_processor(),
-            build_runtime_state=_build_runtime_state,
-            build_context_runtime=_build_context_runtime,
+            build_runtime_state=(
+                lambda signal_context: live_build_runtime_state(
+                    signal_context,
+                    load_market_context=_load_market_context,
+                    get_account_state=get_mock_account_state,
+                )
+            ),
+            build_context_runtime=(
+                lambda runtime_state: live_build_context_runtime(
+                    runtime_state,
+                    build_signal_context=build_legacy_signal_context,
+                    context_deps=_context_assembly_deps(),
+                )
+            ),
             evaluate_preflight=_evaluate_preflight,
-            log_rejection=log_rejection,
+            log_rejection=(
+                lambda symbol, action, category, reason, price=None, account_state=None: _trade_audit_recorder().record_rejection(
+                    symbol=symbol,
+                    action=action,
+                    category=category,
+                    reason=reason,
+                    price=price,
+                    account_state=account_state,
+                )
+            ),
             mark_webhook_event_status=(
                 lambda dedupe_key, status, **kwargs: _trade_audit_recorder().record_webhook_status(
                     dedupe_key=dedupe_key,
@@ -2150,7 +2132,7 @@ def process_signal(data):
 
 
 def health_payload():
-    account = get_account()
+    account = broker_service.get_account()
     return {
         "status": "online",
         "timestamp": datetime.now().isoformat(),

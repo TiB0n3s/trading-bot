@@ -25,28 +25,28 @@ class ApprovalDecision:
 
 
 @dataclass(frozen=True)
-class LegacyClaudeOutcome:
+class ClaudeOutcome:
     rejected: bool = False
     approval: ApprovalDecision | None = None
     decision: dict[str, Any] | None = None
 
 
 @dataclass(frozen=True)
-class LegacyApprovalGateOutcome:
+class ApprovalGateOutcome:
     rejected: bool = False
     approval: ApprovalDecision | None = None
     claude_account_state: dict[str, Any] | None = None
 
 
 @dataclass(frozen=True)
-class LegacyStageOutcome:
+class StageOutcome:
     rejected: bool = False
     approval: ApprovalDecision | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
-class LegacyRejectionAdapter:
+class RejectionAdapter:
     reject_current_signal: Callable[..., bool]
     reject_approval_decision: Callable[..., bool]
 
@@ -299,7 +299,7 @@ class ApprovalService:
         return ApprovalResult(approved=True, reason="deferred_to_live_signal_processor")
 
 
-def run_legacy_claude_and_confidence(
+def run_claude_and_confidence(
     *,
     signal: dict[str, Any],
     symbol: str,
@@ -313,7 +313,7 @@ def run_legacy_claude_and_confidence(
     market_bias: dict[str, Any] | None,
     tape_exception_enabled: bool,
     log: Any,
-) -> LegacyClaudeOutcome:
+) -> ClaudeOutcome:
     weekly_perf = weekly_symbol_performance(symbol)
     account_state["weekly_symbol_performance"] = weekly_perf
     claude_account_state["weekly_symbol_performance"] = weekly_perf
@@ -340,12 +340,12 @@ def run_legacy_claude_and_confidence(
         )
 
     if approval_decision.category:
-        return LegacyClaudeOutcome(rejected=True, approval=approval_decision)
+        return ClaudeOutcome(rejected=True, approval=approval_decision)
 
-    return LegacyClaudeOutcome(decision=decision)
+    return ClaudeOutcome(decision=decision)
 
 
-def run_legacy_macro_position_gate(
+def run_macro_position_gate(
     *,
     symbol: str,
     action: str,
@@ -364,12 +364,12 @@ def run_legacy_macro_position_gate(
     get_account_state: Callable[[], dict[str, Any]],
     sleep: Callable[[float], None],
     log: Any,
-) -> LegacyStageOutcome:
+) -> StageOutcome:
     if action != "buy":
-        return LegacyStageOutcome()
+        return StageOutcome()
 
     if macro_risk.get("block_new_buys"):
-        return LegacyStageOutcome(
+        return StageOutcome(
             rejected=True,
             approval=deterministic_rejection(
                 category="macro_risk",
@@ -390,7 +390,7 @@ def run_legacy_macro_position_gate(
         effective_count = open_count
 
     if effective_count < max_new_positions:
-        return LegacyStageOutcome()
+        return StageOutcome()
 
     candidate_session = None
     try:
@@ -482,7 +482,7 @@ def run_legacy_macro_position_gate(
                 f"open_position_count {open_count} -> {refreshed_open_count}; "
                 "continuing BUY pipeline"
             )
-            return LegacyStageOutcome()
+            return StageOutcome()
 
         pending_reason = (
             f"rotation_pending: {rotation_reason}; "
@@ -490,7 +490,7 @@ def run_legacy_macro_position_gate(
             f"macro max_new_positions={max_new_positions}; original_reason={reason}"
         )
         log.warning(f"Portfolio rotation pending for {symbol}: {pending_reason}")
-        return LegacyStageOutcome(
+        return StageOutcome(
             rejected=True,
             approval=deterministic_rejection(
                 category="portfolio_rotation_pending",
@@ -500,7 +500,7 @@ def run_legacy_macro_position_gate(
         )
 
     reason = f"{reason}; rotation_not_taken={rotation_reason}"
-    return LegacyStageOutcome(
+    return StageOutcome(
         rejected=True,
         approval=deterministic_rejection(
             category="macro_position_limit",
@@ -515,7 +515,7 @@ def run_legacy_macro_position_gate(
     )
 
 
-def run_legacy_trend_confirmation_gate(
+def run_trend_confirmation_gate(
     *,
     symbol: str,
     action: str,
@@ -530,9 +530,9 @@ def run_legacy_trend_confirmation_gate(
     iex_thin_symbols: set[str],
     adaptive_buy_confirmation_enabled: bool,
     log: Any,
-) -> LegacyStageOutcome:
+) -> StageOutcome:
     if action not in ("buy", "sell"):
-        return LegacyStageOutcome()
+        return StageOutcome()
 
     trend_obs = context_runtime.build_trend_confirmation_observation(
         current_et=current_et,
@@ -606,7 +606,7 @@ def run_legacy_trend_confirmation_gate(
             )
 
             if adaptive_buy_confirmation_enabled:
-                return LegacyStageOutcome(
+                return StageOutcome(
                     rejected=True,
                     approval=trend_confirmation_rejection(
                         reason,
@@ -615,7 +615,7 @@ def run_legacy_trend_confirmation_gate(
                 )
             log.info(f"Trend confirmation BUY observe-only for {symbol}: {reason}")
 
-        return LegacyStageOutcome()
+        return StageOutcome()
 
     sell_confirmation = trend_confirmation.get("sell_confirmation") or {}
     required = int(trend_confirmation.get("required_confirmations") or 2)
@@ -626,7 +626,7 @@ def run_legacy_trend_confirmation_gate(
             f"last_signal={last_signal} "
             f"required={required}"
         )
-        return LegacyStageOutcome(
+        return StageOutcome(
             rejected=True,
             approval=trend_confirmation_rejection(
                 reason,
@@ -655,7 +655,7 @@ def run_legacy_trend_confirmation_gate(
             f"strength={strength} "
             f"flip_event={trend.get('flip_event')}"
         )
-        return LegacyStageOutcome(
+        return StageOutcome(
             rejected=True,
             approval=trend_confirmation_rejection(
                 reason,
@@ -663,10 +663,10 @@ def run_legacy_trend_confirmation_gate(
             ),
         )
 
-    return LegacyStageOutcome()
+    return StageOutcome()
 
 
-def run_legacy_entry_sanity_gates(
+def run_entry_sanity_gates(
     *,
     symbol: str,
     action: str,
@@ -674,14 +674,14 @@ def run_legacy_entry_sanity_gates(
     bias_entry: dict[str, Any],
     existing_position: Any,
     apply_market_bias_context: Callable[..., Any],
-) -> LegacyStageOutcome:
+) -> StageOutcome:
     if action != "buy":
-        return LegacyStageOutcome()
+        return StageOutcome()
 
     if bias_entry:
         fundamental_score = bias_entry.get("fundamental_score")
         if fundamental_score in ("bearish", "strong_bearish"):
-            return LegacyStageOutcome(
+            return StageOutcome(
                 rejected=True,
                 approval=deterministic_rejection(
                     category="fundamental_score",
@@ -703,7 +703,7 @@ def run_legacy_entry_sanity_gates(
                 f"entry_quality={entry_quality} "
                 f"risk_level={bias_entry.get('risk_level') or '-'}"
             )
-            return LegacyStageOutcome(
+            return StageOutcome(
                 rejected=True,
                 approval=deterministic_rejection(
                     category="chase_prevention",
@@ -722,7 +722,7 @@ def run_legacy_entry_sanity_gates(
                 f"existing position with risk_level={risk_level} "
                 f"and momentum_direction={momentum_direction or 'unknown'}"
             )
-            return LegacyStageOutcome(
+            return StageOutcome(
                 rejected=True,
                 approval=deterministic_rejection(
                     category="addon_momentum_gate",
@@ -735,10 +735,10 @@ def run_legacy_entry_sanity_gates(
                 ),
             )
 
-    return LegacyStageOutcome()
+    return StageOutcome()
 
 
-def run_legacy_prediction_bias_session_gate(
+def run_prediction_session_tape_gates(
     *,
     symbol: str,
     action: str,
@@ -762,9 +762,9 @@ def run_legacy_prediction_bias_session_gate(
     enforce_session_momentum_gate: bool,
     is_degraded_setup: Callable[[dict[str, Any]], bool],
     log: Any,
-) -> LegacyStageOutcome:
+) -> StageOutcome:
     if action != "buy":
-        return LegacyStageOutcome()
+        return StageOutcome()
 
     trend = context_runtime.deps.trend_table.get(symbol) or {}
     bias_entry = context_runtime.deps.market_bias.get(symbol) or {}
@@ -881,7 +881,7 @@ def run_legacy_prediction_bias_session_gate(
             f"reason={bias_override.get('reason')}; "
             f"context_reason={bias_entry.get('reason','')}"
         )
-        return LegacyStageOutcome(
+        return StageOutcome(
             rejected=True,
             approval=live_bias_rejection(
                 "market_bias_avoid",
@@ -905,7 +905,7 @@ def run_legacy_prediction_bias_session_gate(
             f"context_reason={bias_entry.get('reason','')}"
         )
         if prediction_sample_size >= prediction_soft_avoid_min_sample_size:
-            return LegacyStageOutcome(
+            return StageOutcome(
                 rejected=True,
                 approval=live_bias_rejection(
                     "soft_avoid_prediction_gate",
@@ -924,7 +924,7 @@ def run_legacy_prediction_bias_session_gate(
             f"{bias_override.get('reason')}; "
             f"context_reason={bias_entry.get('reason','')}"
         )
-        return LegacyStageOutcome(
+        return StageOutcome(
             rejected=True,
             approval=live_bias_rejection(
                 "live_bias_downgrade",
@@ -972,7 +972,7 @@ def run_legacy_prediction_bias_session_gate(
             f"decision={prediction_decision} "
             f"reason={prediction_gate.get('prediction_reason')}"
         )
-        return LegacyStageOutcome(
+        return StageOutcome(
             rejected=True,
             approval=prediction_gate_rejection(reason, metadata=prediction_gate),
         )
@@ -988,7 +988,7 @@ def run_legacy_prediction_bias_session_gate(
     if session_gate.get("would_block"):
         reason = session_gate.get("reason", "session momentum gate")
         if enforce_session_momentum_gate:
-            return LegacyStageOutcome(
+            return StageOutcome(
                 rejected=True,
                 approval=session_momentum_rejection(reason, metadata=session_gate),
             )
@@ -1022,10 +1022,10 @@ def run_legacy_prediction_bias_session_gate(
             f"Session momentum size cap for {symbol}: severity={severity} → {session_cap}%"
         )
 
-    return LegacyStageOutcome()
+    return StageOutcome()
 
 
-def run_legacy_intra_session_tape_degradation_gate(
+def run_intra_session_tape_degradation_gate(
     *,
     symbol: str,
     action: str,
@@ -1035,9 +1035,9 @@ def run_legacy_intra_session_tape_degradation_gate(
     min_setup_score: float,
     et_timezone: Any,
     log: Any,
-) -> LegacyStageOutcome:
+) -> StageOutcome:
     if action != "buy" or not enabled:
-        return LegacyStageOutcome()
+        return StageOutcome()
 
     try:
         tape_now_et = datetime.now(timezone.utc).astimezone(et_timezone)
@@ -1067,7 +1067,7 @@ def run_legacy_intra_session_tape_degradation_gate(
                 "min_setup_score": min_setup_score,
                 "session_label": session_label,
             }
-            return LegacyStageOutcome(
+            return StageOutcome(
                 rejected=True,
                 approval=deterministic_rejection(
                     category="intra_session_tape_degradation",
@@ -1086,10 +1086,10 @@ def run_legacy_intra_session_tape_degradation_gate(
         log.warning(f"Intra-session tape degradation gate skipped for {symbol}: {exc}")
         account_state["intra_session_tape_degradation_error"] = str(exc)
 
-    return LegacyStageOutcome()
+    return StageOutcome()
 
 
-def run_legacy_final_approval_gates(
+def run_final_approval_gates(
     *,
     signal: dict[str, Any],
     symbol: str,
@@ -1110,7 +1110,7 @@ def run_legacy_final_approval_gates(
     compute_dominant_limiter: Callable[..., Any],
     log_event: Callable[..., Any],
     log: Any,
-) -> LegacyApprovalGateOutcome:
+) -> ApprovalGateOutcome:
     claude_account_state = dict(account_state)
 
     if action == "buy":
@@ -1123,7 +1123,7 @@ def run_legacy_final_approval_gates(
                     f"buying_power ${buying_power_for_affordability:.2f} cannot buy 1 share "
                     f"at signal price ${signal_price_f:.2f}"
                 )
-                return LegacyApprovalGateOutcome(
+                return ApprovalGateOutcome(
                     rejected=True,
                     approval=deterministic_rejection(
                         category="affordability",
@@ -1181,7 +1181,7 @@ def run_legacy_final_approval_gates(
                 log.warning(
                     f"Strategy memory gate blocked {symbol} BUY before Claude: {reason}"
                 )
-                return LegacyApprovalGateOutcome(
+                return ApprovalGateOutcome(
                     rejected=True,
                     approval=strategy_memory_rejection(
                         reason,
@@ -1206,7 +1206,7 @@ def run_legacy_final_approval_gates(
             log.warning(
                 f"Opportunity score gate blocked {symbol} BUY before Claude: {reason}"
             )
-            return LegacyApprovalGateOutcome(
+            return ApprovalGateOutcome(
                 rejected=True,
                 approval=opportunity_score_rejection(reason, metadata=opportunity),
                 claude_account_state=claude_account_state,
@@ -1268,7 +1268,7 @@ def run_legacy_final_approval_gates(
         log.warning(
             f"Decision policy gate blocked {symbol} BUY before Claude: {reason}"
         )
-        return LegacyApprovalGateOutcome(
+        return ApprovalGateOutcome(
             rejected=True,
             approval=decision_policy_rejection(reason, metadata=decision_policy),
             claude_account_state=claude_account_state,
@@ -1393,4 +1393,4 @@ def run_legacy_final_approval_gates(
             f"dominant={account_state['dominant_limiter']}"
         )
 
-    return LegacyApprovalGateOutcome(claude_account_state=claude_account_state)
+    return ApprovalGateOutcome(claude_account_state=claude_account_state)

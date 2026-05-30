@@ -1,9 +1,4 @@
-"""Deterministic signal pipeline orchestration.
-
-The live trading context is still assembled by the legacy processor during the
-current migration. This pipeline owns only the real outer stages today:
-normalization, preflight, and delegation to the legacy live signal path.
-"""
+"""Deterministic signal pipeline orchestration."""
 
 from __future__ import annotations
 

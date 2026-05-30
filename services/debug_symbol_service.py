@@ -56,7 +56,7 @@ def build_debug_symbol_payload(runtime, symbol):
 
     # Alpaca live position
     try:
-        pos = get_position(symbol)
+        pos = broker_service.get_position(symbol)
         result["alpaca_position"] = pos
         result["has_live_position"] = bool(pos)
     except Exception as e:

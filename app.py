@@ -29,6 +29,7 @@ from services.approval_service import (
     decision_policy_rejection,
     deterministic_rejection,
     evaluate_approval_decision,
+    execution_rejection_decision,
     live_bias_rejection,
     opportunity_score_rejection,
     prediction_gate_rejection,
@@ -3523,25 +3524,10 @@ def _legacy_process_signal_with_context(data, runtime_state, context_runtime, pr
             order_result = execution.order_result
 
             if execution.rejection_category:
-                logger.warning(
-                    f"{execution.rejection_category} blocked {symbol} {action.upper()}: "
-                    f"{execution.rejection_reason}"
-                )
-                log_rejection(
-                    symbol,
-                    action,
-                    execution.rejection_category,
-                    execution.rejection_reason,
-                    price=price,
-                    account_state=account_state,
-                )
-                if dedupe_key:
-                    _trade_audit_recorder().record_webhook_status(
-                        dedupe_key=dedupe_key,
-                        status="rejected",
-                        failure_reason=execution.failure_reason,
-                    )
-                return
+                if _reject_approval_decision(
+                    execution_rejection_decision(execution)
+                ):
+                    return
 
             if order_result:
                 if EXECUTION_MODE == "dry_run":
@@ -3566,13 +3552,13 @@ def _legacy_process_signal_with_context(data, runtime_state, context_runtime, pr
             logger.exception(
                 f"APPROVED ORDER PATH CRASHED for {symbol} {action.upper()}: {e}"
             )
-            log_rejection(
-                symbol,
-                action,
-                "order_path_exception",
-                str(e),
-                price=price,
-                account_state=account_state,
+            _reject_approval_decision(
+                deterministic_rejection(
+                    category="order_path_exception",
+                    reason=str(e),
+                    source="execution",
+                ),
+                level="error",
             )
             if dedupe_key:
                 _trade_audit_recorder().record_webhook_status(

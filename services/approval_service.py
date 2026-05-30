@@ -106,6 +106,19 @@ def decision_policy_rejection(reason: str, metadata: dict[str, Any] | None = Non
     )
 
 
+def execution_rejection_decision(outcome: Any) -> ApprovalDecision:
+    return deterministic_rejection(
+        category=getattr(outcome, "rejection_category", None) or "order_path_exception",
+        reason=(
+            getattr(outcome, "rejection_reason", None)
+            or getattr(outcome, "failure_reason", None)
+            or "execution rejected"
+        ),
+        source="execution",
+        metadata=getattr(outcome, "metadata", None) or {},
+    )
+
+
 def normalize_claude_decision(
     *,
     action: str,

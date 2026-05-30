@@ -1919,6 +1919,13 @@ class _LegacyClaudeStageResult:
     response: object | None = None
 
 
+@dataclass(frozen=True)
+class _LegacyApprovalGateResult:
+    rejected: bool = False
+    claude_account_state: dict | None = None
+    response: object | None = None
+
+
 _LEGACY_STAGE_CONTINUE = _LegacyStageResult()
 
 
@@ -2336,6 +2343,304 @@ def _legacy_check_sell_discipline(
     return _LEGACY_STAGE_CONTINUE
 
 
+def _legacy_run_final_approval_gates(
+    *,
+    data: dict,
+    symbol: str,
+    action: str,
+    price,
+    account_state: dict,
+    context_runtime,
+    dedupe_key: str | None,
+) -> _LegacyApprovalGateResult:
+    claude_account_state = dict(account_state)
+
+    def _reject_approval(approval: ApprovalDecision, level="warning"):
+        return _legacy_reject_approval_decision(
+            symbol=symbol,
+            action=action,
+            price=price,
+            account_state=account_state,
+            dedupe_key=dedupe_key,
+            approval=approval,
+            level=level,
+        )
+
+    if action == "buy":
+        try:
+            buying_power_for_affordability = float(account_state.get("buying_power") or 0)
+            signal_price_f = float(price or 0)
+
+            if buying_power_for_affordability > 0 and signal_price_f > 0 and buying_power_for_affordability < signal_price_f:
+                reason = (
+                    f"buying_power ${buying_power_for_affordability:.2f} cannot buy 1 share "
+                    f"at signal price ${signal_price_f:.2f}"
+                )
+                result = _reject_approval(
+                    deterministic_rejection(
+                        category="affordability",
+                        reason=reason,
+                        metadata={
+                            "buying_power": buying_power_for_affordability,
+                            "signal_price": signal_price_f,
+                        },
+                    )
+                )
+                return _LegacyApprovalGateResult(rejected=result.rejected, response=result.response)
+
+        except Exception as e:
+            logger.warning(f"Affordability gate skipped for {symbol} BUY due to error: {e}")
+
+    if action == "buy":
+        opportunity = score_buy_opportunity(symbol, data, account_state)
+        account_state["opportunity_score"] = opportunity
+        claude_account_state["opportunity_score"] = opportunity
+
+        strategy_memory = memory_for_signal(symbol, opportunity)
+        account_state["strategy_memory"] = strategy_memory
+        claude_account_state["strategy_memory"] = strategy_memory
+
+        learned_min_score = strategy_memory.get("min_setup_score")
+        if isinstance(learned_min_score, int):
+            raw_score = opportunity.get("score")
+            try:
+                score_f = float(raw_score)
+            except Exception:
+                score_f = None
+
+            normalized_score = score_f
+
+            logger.info(
+                f"STRATEGY_MEMORY {symbol} BUY: "
+                f"recommendation={strategy_memory.get('recommendation')} "
+                f"learned_min_score={learned_min_score} "
+                f"opportunity_score={raw_score} "
+                f"normalized_score={normalized_score} "
+                f"reason={strategy_memory.get('reason')}"
+            )
+
+            if (
+                normalized_score is not None
+                and strategy_memory.get("recommendation") in ("caution", "avoid")
+                and normalized_score < learned_min_score
+            ):
+                reason = (
+                    f"strategy memory tightened {symbol}: "
+                    f"recommendation={strategy_memory.get('recommendation')} "
+                    f"normalized_score={normalized_score:.1f} < learned_min_score={learned_min_score}; "
+                    f"{strategy_memory.get('reason')}"
+                )
+                logger.warning(
+                    f"Strategy memory gate blocked {symbol} BUY before Claude: {reason}"
+                )
+                result = _reject_approval(
+                    strategy_memory_rejection(
+                        reason,
+                        metadata={
+                            "strategy_memory": strategy_memory,
+                            "opportunity_score": opportunity,
+                        },
+                    )
+                )
+                return _LegacyApprovalGateResult(rejected=result.rejected, response=result.response)
+
+        logger.info(
+            f"Opportunity score for {symbol} BUY: "
+            f"score={opportunity.get('score')} bucket={opportunity.get('bucket')} "
+            f"decision={opportunity.get('decision')} "
+            f"size_multiplier={opportunity.get('size_multiplier')} "
+            f"reasons={opportunity.get('reason_codes')}"
+        )
+
+        if opportunity.get("decision") == "block":
+            reason = opportunity.get("summary", "opportunity score blocked setup")
+            logger.warning(
+                f"Opportunity score gate blocked {symbol} BUY before Claude: {reason}"
+            )
+            result = _reject_approval(
+                opportunity_score_rejection(reason, metadata=opportunity)
+            )
+            return _LegacyApprovalGateResult(rejected=result.rejected, response=result.response)
+
+    intelligence_context = build_intelligence_context(
+        symbol=symbol,
+        action=action,
+        account_state=account_state,
+    )
+    account_state["intelligence_context"] = intelligence_context
+    claude_account_state["intelligence_context"] = intelligence_context
+
+    summary = intelligence_context.get("summary") or {}
+    logger.info(
+        f"INTELLIGENCE_CONTEXT {symbol} {action.upper()}: "
+        f"recommended_action={summary.get('recommended_action')} "
+        f"supports={summary.get('support_count')} "
+        f"risks={summary.get('risk_count')} "
+        f"primary_supports={summary.get('primary_supports')} "
+        f"primary_risks={summary.get('primary_risks')}"
+    )
+
+    decision_policy = evaluate_decision_policy(
+        symbol=symbol,
+        action=action,
+        intelligence_context=intelligence_context,
+        account_state=account_state,
+    )
+    account_state["decision_policy"] = decision_policy
+    claude_account_state["decision_policy"] = decision_policy
+    decision_policy_config = public_decision_policy_config()
+    account_state["decision_policy_authority"] = decision_policy_config
+    claude_account_state["decision_policy_authority"] = decision_policy_config
+
+    logger.info(
+        f"DECISION_POLICY {symbol} {action.upper()}: "
+        f"decision={decision_policy.get('decision')} "
+        f"size_multiplier={decision_policy.get('size_multiplier')} "
+        f"reason={decision_policy.get('reason')} "
+        f"risks={decision_policy.get('risks')} "
+        f"supports={decision_policy.get('supports')}"
+    )
+
+    decision_policy_authority_enabled = decision_policy_live_authority_enabled()
+    decision_policy_live_block = DECISION_POLICY_LIVE_BLOCK and decision_policy_authority_enabled
+    decision_policy_live_size_down = DECISION_POLICY_LIVE_SIZE_DOWN and decision_policy_authority_enabled
+
+    if (
+        action == "buy"
+        and decision_policy_live_block
+        and decision_policy.get("decision") == "block"
+    ):
+        reason = decision_policy.get("reason", "decision policy blocked setup")
+        logger.warning(
+            f"Decision policy gate blocked {symbol} BUY before Claude: {reason}"
+        )
+        result = _reject_approval(
+            decision_policy_rejection(reason, metadata=decision_policy)
+        )
+        return _LegacyApprovalGateResult(rejected=result.rejected, response=result.response)
+    elif action == "buy" and decision_policy.get("decision") == "block":
+        logger.warning(
+            f"Decision policy block observed but not enforced for {symbol} BUY: "
+            f"authority_enabled={decision_policy_authority_enabled} "
+            f"live_block_enabled={DECISION_POLICY_LIVE_BLOCK} "
+            f"mode={decision_policy_config.get('authority_mode')} "
+            f"reason={decision_policy.get('reason')}"
+        )
+
+    if (
+        action == "buy"
+        and decision_policy_live_size_down
+        and decision_policy.get("decision") == "size_down"
+    ):
+        try:
+            size_multiplier = float(decision_policy.get("size_multiplier") or 1.0)
+        except Exception:
+            size_multiplier = 1.0
+
+        size_multiplier = max(0.0, min(1.0, size_multiplier))
+
+        current_limit = None
+        for key in ("max_position_size_pct", "position_size_pct"):
+            try:
+                val = claude_account_state.get(key)
+                if val is not None:
+                    current_limit = float(val)
+                    break
+            except Exception:
+                pass
+
+        if current_limit is None:
+            current_limit = 2.0
+
+        reduced_limit = round(current_limit * size_multiplier, 4)
+
+        account_state["decision_policy_size_down"] = {
+            "enabled": True,
+            "original_position_size_pct": current_limit,
+            "reduced_position_size_pct": reduced_limit,
+            "size_multiplier": size_multiplier,
+            "reason": decision_policy.get("reason"),
+        }
+        claude_account_state["decision_policy_size_down"] = account_state[
+            "decision_policy_size_down"
+        ]
+        claude_account_state["max_position_size_pct"] = reduced_limit
+        claude_account_state["decision_policy_max_position_size_pct"] = reduced_limit
+
+        logger.warning(
+            f"DECISION_POLICY_SIZE_DOWN {symbol} BUY: "
+            f"original_position_size_pct={current_limit} "
+            f"size_multiplier={size_multiplier} "
+            f"reduced_position_size_pct={reduced_limit} "
+            f"reason={decision_policy.get('reason')}"
+        )
+
+        log_event(
+            event_type="DECISION_POLICY_SIZE_DOWN",
+            symbol=symbol,
+            action=action,
+            decision="size_down",
+            severity="medium",
+            reason=decision_policy.get("reason"),
+            source="app.py",
+            payload={
+                "decision_policy": decision_policy,
+                "original_position_size_pct": current_limit,
+                "reduced_position_size_pct": reduced_limit,
+                "size_multiplier": size_multiplier,
+            },
+        )
+    elif action == "buy" and decision_policy.get("decision") == "size_down":
+        logger.info(
+            f"Decision policy size_down observed but not enforced for {symbol} BUY: "
+            f"authority_enabled={decision_policy_authority_enabled} "
+            f"live_size_down_enabled={DECISION_POLICY_LIVE_SIZE_DOWN} "
+            f"mode={decision_policy_config.get('authority_mode')} "
+            f"reason={decision_policy.get('reason')}"
+        )
+
+    if action == "buy":
+        build_conviction_stack(
+            action=action,
+            account_state=account_state,
+            ml_prediction_bucket=_ml_prediction_bucket,
+            compute_dominant_limiter=sizing_policy.compute_dominant_limiter,
+        )
+
+    built_context = context_runtime.refresh(
+        intelligence_context=intelligence_context,
+        claude_account_state=claude_account_state,
+    )
+    claude_account_state = built_context.claude_account_state
+
+    summary = built_context.summary
+    logger.info(
+        f"Decision context for {symbol} {action.upper()}: "
+        f"setup={summary.get('setup_label')}/"
+        f"{summary.get('setup_policy_action')} "
+        f"prediction={summary.get('prediction_score')}/"
+        f"{summary.get('prediction_decision')} "
+        f"session={summary.get('session_trend_label')}/"
+        f"{summary.get('session_trend_score')} "
+        f"session_gate={summary.get('session_gate_severity')}/"
+        f"{summary.get('session_gate_would_block')} "
+        f"effective_bias={summary.get('effective_bias')}"
+    )
+
+    if action == "buy":
+        logger.info(
+            f"Conviction stack for {symbol} BUY: "
+            f"buy_opp={account_state['conviction_stack']['buy_opportunity']} "
+            f"strategy={account_state['conviction_stack']['strategy_score']:.0f} "
+            f"session={account_state['conviction_stack']['session_severity']} "
+            f"ml_bucket={account_state['conviction_stack']['ml_bucket']} "
+            f"cap={account_state['conviction_stack']['effective_cap_pct']} "
+            f"dominant={account_state['dominant_limiter']}"
+        )
+
+    return _LegacyApprovalGateResult(claude_account_state=claude_account_state)
+
+
 def _legacy_run_claude_and_confidence(
     *,
     data: dict,
@@ -2529,6 +2834,177 @@ def _legacy_run_approved_order_path(
     return _LEGACY_STAGE_CONTINUE
 
 
+def _legacy_hydrate_pre_macro_context(
+    *,
+    symbol: str,
+    action: str,
+    account_state: dict,
+    context_runtime,
+) -> dict:
+    """Populate non-authoritative context required before macro-position gates."""
+    if action == "buy" and "buy_opportunity" not in account_state:
+        try:
+            context_runtime.build_buy_opportunity_observation(
+                trend=_trend_table.get(symbol) or {},
+                bias_entry=_market_bias.get(symbol) or {},
+                evaluate_buy_opportunity=evaluate_buy_opportunity,
+                required_buy_confirmations=_required_buy_confirmations,
+                log_prefix="BUY opportunity pre-macro",
+            )
+        except Exception as e:
+            logger.warning(f"BUY opportunity pre-macro scoring failed for {symbol}: {e}")
+
+    macro_risk = get_macro_risk(Path(__file__).parent)
+    account_state["macro_risk"] = macro_risk
+    return macro_risk
+
+
+def _legacy_apply_market_bias_context(
+    *,
+    action: str,
+    account_state: dict,
+    bias_entry: dict,
+) -> None:
+    """Inject market-bias metadata without making an approval decision."""
+    if action != "buy" or not bias_entry:
+        return
+
+    bias = bias_entry.get("bias")
+    account_state["market_bias_original"] = bias
+    account_state["market_bias"] = bias
+    account_state["avoid_type"] = bias_entry.get("avoid_type")
+    account_state["soft_avoid_reason"] = bias_entry.get("reason", "")
+
+    if bias_entry.get("fundamental_score"):
+        account_state["fundamental_score"] = bias_entry["fundamental_score"]
+    if bias_entry.get("risk_level"):
+        account_state["risk_level"] = bias_entry["risk_level"]
+    if bias_entry.get("entry_quality"):
+        account_state["entry_quality"] = bias_entry["entry_quality"]
+
+
+def _legacy_hydrate_session_context(*, context_runtime) -> None:
+    context_runtime.build_session_momentum_observation(
+        get_latest_session_momentum=get_latest_session_momentum,
+        session_momentum_is_fresh=_session_momentum_is_fresh,
+    )
+
+
+def _legacy_hydrate_buy_momentum_context(
+    *,
+    symbol: str,
+    action: str,
+    account_state: dict,
+    context_runtime,
+) -> None:
+    if action != "buy":
+        return
+
+    context_runtime.hydrate_buy_live_context(only_missing=True)
+    momentum = account_state.get("momentum")
+    if not momentum:
+        return
+
+    alignment = momentum.get("premarket_alignment")
+    action_hint = momentum.get("action_hint")
+
+    if alignment == "contradicted":
+        account_state["signal_confidence_hint"] = "low"
+        logger.warning(
+            f"Pre-market alignment contradicted for {symbol} BUY: "
+            f"bias={momentum.get('premarket_bias')} "
+            f"5m={momentum.get('momentum_5m_pct')}% "
+            f"15m={momentum.get('momentum_15m_pct')}% "
+            f"hint={action_hint} — confidence hint set to low"
+        )
+
+    elif alignment == "confirmed":
+        account_state["signal_confidence_hint"] = "high"
+        logger.info(
+            f"Pre-market alignment confirmed for {symbol} BUY: "
+            f"bias={momentum.get('premarket_bias')} "
+            f"5m={momentum.get('momentum_5m_pct')}% "
+            f"15m={momentum.get('momentum_15m_pct')}% "
+            f"hint={action_hint} — confidence hint set to high"
+        )
+
+    elif momentum["direction"] == "falling" and momentum["momentum_pct"] < -0.15:
+        account_state["signal_confidence_hint"] = "low"
+        logger.warning(
+            f"Momentum caution for {symbol} BUY: direction={momentum['direction']} "
+            f"momentum_pct={momentum['momentum_pct']}% last_close={momentum['last_close']} "
+            f"— downgrading confidence hint to low"
+        )
+
+    elif momentum["direction"] == "rising":
+        account_state["signal_confidence_hint"] = "high"
+        logger.info(
+            f"Momentum confirms {symbol} BUY: direction={momentum['direction']} "
+            f"momentum_pct={momentum['momentum_pct']}% — confidence hint set to high"
+        )
+
+
+def _legacy_hydrate_strategy_context(
+    *,
+    symbol: str,
+    action: str,
+    account_state: dict,
+    context_runtime,
+) -> None:
+    if STRATEGY_ENGINE_MODE != "observe":
+        return
+
+    try:
+        strategy_trend = _trend_table.get(symbol) or {}
+        strategy_momentum = account_state.get("momentum") or {}
+        strategy_alignment = context_runtime.build_market_alignment_observation(
+            symbol_market_alignment=_symbol_market_alignment,
+        ).data
+
+        strategy_result = evaluate_strategy_observe_only(
+            symbol=symbol,
+            action=action,
+            account_state=account_state,
+            trend=strategy_trend,
+            momentum=strategy_momentum,
+            market_alignment=strategy_alignment,
+            tape=account_state.get("tape") or {},
+        )
+        strategy_observation = strategy_result.to_dict()
+        account_state["strategy_observation"] = strategy_observation
+
+        trader_brain = strategy_observation.get("trader_brain") or {}
+        logger.info(
+            f"Strategy observe for {symbol} {action.upper()}: "
+            f"score={trader_brain.get('score')} "
+            f"approved_by_scorer={trader_brain.get('approved_by_scorer')} "
+            f"setup={trader_brain.get('setup_type')} "
+            f"reason={trader_brain.get('reason')}"
+        )
+
+        if action == "buy":
+            _tb_score = float(trader_brain.get("score") or 0)
+            _strat_cap = None
+            if _tb_score < 40:
+                _strat_cap = _env_float("STRATEGY_SCORE_LOW_SIZE_CAP_PCT", 0.70)
+            elif _tb_score < 55:
+                _strat_cap = _env_float("STRATEGY_SCORE_BELOW_THRESHOLD_SIZE_CAP_PCT", 0.85)
+            if _strat_cap is not None:
+                apply_size_cap(
+                    account_state,
+                    cap_pct=_strat_cap,
+                    state_key="strategy_score_size_cap",
+                    payload={"score": _tb_score, "cap_pct": _strat_cap},
+                )
+                logger.info(
+                    f"Strategy score size cap for {symbol}: "
+                    f"score={_tb_score:.1f} → {_strat_cap}%"
+                )
+
+    except Exception as e:
+        logger.warning(f"Strategy observe failed for {symbol} {action.upper()}: {e}")
+
+
 def _legacy_process_signal(data, *, runtime_state=None, context_runtime=None, preflight_result=None):
     if runtime_state is None or context_runtime is None:
         symbol, action = normalize_signal_identity(data)
@@ -2653,25 +3129,12 @@ def _legacy_process_signal_with_context(data, runtime_state, context_runtime, pr
     if sell_discipline_result.rejected:
         return sell_discipline_result.response
 
-    # Observe-only BUY opportunity score before macro position-limit checks.
-    # This ensures macro_position_limit rejections still get scored for replacement intelligence.
-    if action == "buy" and "buy_opportunity" not in account_state:
-        try:
-            trend = _trend_table.get(symbol) or {}
-            bias_entry = _market_bias.get(symbol) or {}
-            context_runtime.build_buy_opportunity_observation(
-                trend=trend,
-                bias_entry=bias_entry,
-                evaluate_buy_opportunity=evaluate_buy_opportunity,
-                required_buy_confirmations=_required_buy_confirmations,
-                log_prefix="BUY opportunity pre-macro",
-            )
-        except Exception as e:
-            logger.warning(f"BUY opportunity pre-macro scoring failed for {symbol}: {e}")
-
-    # Macro-risk gate: regime-aware risk control before Claude
-    macro_risk = get_macro_risk(Path(__file__).parent)
-    account_state["macro_risk"] = macro_risk
+    macro_risk = _legacy_hydrate_pre_macro_context(
+        symbol=symbol,
+        action=action,
+        account_state=account_state,
+        context_runtime=context_runtime,
+    )
 
     if action == "buy":
         if macro_risk.get("block_new_buys"):
@@ -2974,24 +3437,11 @@ def _legacy_process_signal_with_context(data, runtime_state, context_runtime, pr
                 if _reject_current_signal("fundamental_score", reason):
                     return
 
-        # Market-bias context injection.
-        #
-        # Do not block on market_bias here. Live evidence from momentum,
-        # prediction scoring, setup policy, and indicator state is evaluated
-        # below before the effective intraday bias is enforced.
-        if action == "buy" and bias_entry:
-            bias = bias_entry.get("bias")
-            account_state["market_bias_original"] = bias
-            account_state["market_bias"] = bias
-            account_state["avoid_type"] = bias_entry.get("avoid_type")
-            account_state["soft_avoid_reason"] = bias_entry.get("reason", "")
-
-            if bias_entry.get("fundamental_score"):
-                account_state["fundamental_score"] = bias_entry["fundamental_score"]
-            if bias_entry.get("risk_level"):
-                account_state["risk_level"] = bias_entry["risk_level"]
-            if bias_entry.get("entry_quality"):
-                account_state["entry_quality"] = bias_entry["entry_quality"]
+        _legacy_apply_market_bias_context(
+            action=action,
+            account_state=account_state,
+            bias_entry=bias_entry,
+        )
 
         # Chase prevention gate
         if action == "buy":
@@ -3002,13 +3452,7 @@ def _legacy_process_signal_with_context(data, runtime_state, context_runtime, pr
                     if _reject_current_signal("chase_prevention", reason):
                         return
 
-    # Session-aware momentum context, observe-only.
-    # This reads the latest state produced by session_momentum.py.
-    # It does not fetch bars or block trading here.
-    context_runtime.build_session_momentum_observation(
-        get_latest_session_momentum=get_latest_session_momentum,
-        session_momentum_is_fresh=_session_momentum_is_fresh,
-    )
+    _legacy_hydrate_session_context(context_runtime=context_runtime)
 
     if action == "sell" and existing_position:
         try:
@@ -3030,51 +3474,12 @@ def _legacy_process_signal_with_context(data, runtime_state, context_runtime, pr
                 f"Sell continuation check failed for {symbol}; fail-open for SELL safety: {e}"
             )
 
-    # Momentum check (buy signals only, fail-open — never blocks trading)
-    alignment = None
-    action_hint = None
-
-    if action == "buy":
-        context_runtime.hydrate_buy_live_context(only_missing=True)
-        momentum = account_state.get("momentum")
-        if momentum:
-            alignment = momentum.get("premarket_alignment")
-            action_hint = momentum.get("action_hint")
-
-            if alignment == "contradicted":
-                account_state["signal_confidence_hint"] = "low"
-                logger.warning(
-                    f"Pre-market alignment contradicted for {symbol} BUY: "
-                    f"bias={momentum.get('premarket_bias')} "
-                    f"5m={momentum.get('momentum_5m_pct')}% "
-                    f"15m={momentum.get('momentum_15m_pct')}% "
-                    f"hint={action_hint} — confidence hint set to low"
-                )
-
-            elif alignment == "confirmed":
-                account_state["signal_confidence_hint"] = "high"
-                logger.info(
-                    f"Pre-market alignment confirmed for {symbol} BUY: "
-                    f"bias={momentum.get('premarket_bias')} "
-                    f"5m={momentum.get('momentum_5m_pct')}% "
-                    f"15m={momentum.get('momentum_15m_pct')}% "
-                    f"hint={action_hint} — confidence hint set to high"
-                )
-
-            elif momentum["direction"] == "falling" and momentum["momentum_pct"] < -0.15:
-                account_state["signal_confidence_hint"] = "low"
-                logger.warning(
-                    f"Momentum caution for {symbol} BUY: direction={momentum['direction']} "
-                    f"momentum_pct={momentum['momentum_pct']}% last_close={momentum['last_close']} "
-                    f"— downgrading confidence hint to low"
-                )
-
-            elif momentum["direction"] == "rising":
-                account_state["signal_confidence_hint"] = "high"
-                logger.info(
-                    f"Momentum confirms {symbol} BUY: direction={momentum['direction']} "
-                    f"momentum_pct={momentum['momentum_pct']}% — confidence hint set to high"
-                )
+    _legacy_hydrate_buy_momentum_context(
+        symbol=symbol,
+        action=action,
+        account_state=account_state,
+        context_runtime=context_runtime,
+    )
     # Add-on momentum gate: for existing positions with high/very_high risk,
     # require rising short-term momentum before adding more exposure.
     # This prevents adding to already-held high-risk names when momentum is flat/falling.
@@ -3415,348 +3820,25 @@ def _legacy_process_signal_with_context(data, runtime_state, context_runtime, pr
                 logger.warning(f"Intra-session tape degradation gate skipped for {symbol}: {e}")
                 account_state["intra_session_tape_degradation_error"] = str(e)
 
-    if STRATEGY_ENGINE_MODE == "observe":
-        try:
-            strategy_trend = _trend_table.get(symbol) or {}
-            strategy_momentum = account_state.get("momentum") or {}
-            strategy_alignment = context_runtime.build_market_alignment_observation(
-                symbol_market_alignment=_symbol_market_alignment,
-            ).data
-
-            strategy_result = evaluate_strategy_observe_only(
-                symbol=symbol,
-                action=action,
-                account_state=account_state,
-                trend=strategy_trend,
-                momentum=strategy_momentum,
-                market_alignment=strategy_alignment,
-                tape=account_state.get("tape") or {},
-            )
-            strategy_observation = strategy_result.to_dict()
-            account_state["strategy_observation"] = strategy_observation
-
-            trader_brain = strategy_observation.get("trader_brain") or {}
-            logger.info(
-                f"Strategy observe for {symbol} {action.upper()}: "
-                f"score={trader_brain.get('score')} "
-                f"approved_by_scorer={trader_brain.get('approved_by_scorer')} "
-                f"setup={trader_brain.get('setup_type')} "
-                f"reason={trader_brain.get('reason')}"
-            )
-
-            # Strategy score sizing: promote trader_brain score from observe-only to
-            # live sizing.  Scores below the 55 "watchlist" threshold indicate the
-            # scorer sees net-negative conditions — apply a progressive cap.
-            # Scores >= 55 receive no additional cap (buy_opportunity handles those).
-            if action == "buy":
-                _tb_score = float(trader_brain.get("score") or 0)
-                _strat_cap = None
-                if _tb_score < 40:
-                    _strat_cap = _env_float("STRATEGY_SCORE_LOW_SIZE_CAP_PCT", 0.70)
-                elif _tb_score < 55:
-                    _strat_cap = _env_float("STRATEGY_SCORE_BELOW_THRESHOLD_SIZE_CAP_PCT", 0.85)
-                if _strat_cap is not None:
-                    apply_size_cap(
-                        account_state,
-                        cap_pct=_strat_cap,
-                        state_key="strategy_score_size_cap",
-                        payload={"score": _tb_score, "cap_pct": _strat_cap},
-                    )
-                    logger.info(
-                        f"Strategy score size cap for {symbol}: "
-                        f"score={_tb_score:.1f} → {_strat_cap}%"
-                    )
-
-        except Exception as e:
-            logger.warning(f"Strategy observe failed for {symbol} {action.upper()}: {e}")
-
-    claude_account_state = dict(account_state)
-
-    # Pre-Claude affordability gate.
-    # This is only a hard 1-share buying-power check. Macro risk and
-    # buy-opportunity caps belong downstream in position sizing; using them here
-    # causes false pre-Claude blocks on high-priced symbols.
-    if action == "buy":
-        try:
-            buying_power_for_affordability = float(account_state.get("buying_power") or 0)
-            signal_price_f = float(price or 0)
-
-            if buying_power_for_affordability > 0 and signal_price_f > 0 and buying_power_for_affordability < signal_price_f:
-                reason = (
-                    f"buying_power ${buying_power_for_affordability:.2f} cannot buy 1 share "
-                    f"at signal price ${signal_price_f:.2f}"
-                )
-                if _reject_approval_decision(
-                    deterministic_rejection(
-                        category="affordability",
-                        reason=reason,
-                        metadata={
-                            "buying_power": buying_power_for_affordability,
-                            "signal_price": signal_price_f,
-                        },
-                    )
-                ):
-                    return
-
-        except Exception as e:
-            logger.warning(f"Affordability gate skipped for {symbol} BUY due to error: {e}")
-
-    # Live-in-paper opportunity score gate.
-    # This is not observe-only: low-score BUY signals are rejected before Claude.
-    if action == "buy":
-        opportunity = score_buy_opportunity(symbol, data, account_state)
-        account_state["opportunity_score"] = opportunity
-        claude_account_state["opportunity_score"] = opportunity
-
-        strategy_memory = memory_for_signal(symbol, opportunity)
-        account_state["strategy_memory"] = strategy_memory
-        claude_account_state["strategy_memory"] = strategy_memory
-
-        learned_min_score = strategy_memory.get("min_setup_score")
-        if isinstance(learned_min_score, int):
-            raw_score = opportunity.get("score")
-            try:
-                score_f = float(raw_score)
-            except Exception:
-                score_f = None
-
-            # opportunity_score.py already outputs 0-100; pass through unchanged.
-            normalized_score = score_f
-
-            logger.info(
-                f"STRATEGY_MEMORY {symbol} BUY: "
-                f"recommendation={strategy_memory.get('recommendation')} "
-                f"learned_min_score={learned_min_score} "
-                f"opportunity_score={raw_score} "
-                f"normalized_score={normalized_score} "
-                f"reason={strategy_memory.get('reason')}"
-            )
-
-            if (
-                normalized_score is not None
-                and strategy_memory.get("recommendation") in ("caution", "avoid")
-                and normalized_score < learned_min_score
-            ):
-                reason = (
-                    f"strategy memory tightened {symbol}: "
-                    f"recommendation={strategy_memory.get('recommendation')} "
-                    f"normalized_score={normalized_score:.1f} < learned_min_score={learned_min_score}; "
-                    f"{strategy_memory.get('reason')}"
-                )
-                logger.warning(
-                    f"Strategy memory gate blocked {symbol} BUY before Claude: {reason}"
-                )
-                _reject_approval_decision(
-                    strategy_memory_rejection(
-                        reason,
-                        metadata={
-                            "strategy_memory": strategy_memory,
-                            "opportunity_score": opportunity,
-                        },
-                    )
-                )
-                return
-
-        logger.info(
-            f"Opportunity score for {symbol} BUY: "
-            f"score={opportunity.get('score')} bucket={opportunity.get('bucket')} "
-            f"decision={opportunity.get('decision')} "
-            f"size_multiplier={opportunity.get('size_multiplier')} "
-            f"reasons={opportunity.get('reason_codes')}"
-        )
-
-        if opportunity.get("decision") == "block":
-            reason = opportunity.get("summary", "opportunity score blocked setup")
-            logger.warning(
-                f"Opportunity score gate blocked {symbol} BUY before Claude: {reason}"
-            )
-            _reject_approval_decision(
-                opportunity_score_rejection(reason, metadata=opportunity)
-            )
-            return
-
-    intelligence_context = build_intelligence_context(
+    _legacy_hydrate_strategy_context(
         symbol=symbol,
         action=action,
         account_state=account_state,
-    )
-    account_state["intelligence_context"] = intelligence_context
-    claude_account_state["intelligence_context"] = intelligence_context
-
-    summary = intelligence_context.get("summary") or {}
-    logger.info(
-        f"INTELLIGENCE_CONTEXT {symbol} {action.upper()}: "
-        f"recommended_action={summary.get('recommended_action')} "
-        f"supports={summary.get('support_count')} "
-        f"risks={summary.get('risk_count')} "
-        f"primary_supports={summary.get('primary_supports')} "
-        f"primary_risks={summary.get('primary_risks')}"
+        context_runtime=context_runtime,
     )
 
-    decision_policy = evaluate_decision_policy(
+    final_gate_result = _legacy_run_final_approval_gates(
+        data=data,
         symbol=symbol,
         action=action,
-        intelligence_context=intelligence_context,
+        price=price,
         account_state=account_state,
+        context_runtime=context_runtime,
+        dedupe_key=dedupe_key,
     )
-    account_state["decision_policy"] = decision_policy
-    claude_account_state["decision_policy"] = decision_policy
-    decision_policy_config = public_decision_policy_config()
-    account_state["decision_policy_authority"] = decision_policy_config
-    claude_account_state["decision_policy_authority"] = decision_policy_config
-
-    logger.info(
-        f"DECISION_POLICY {symbol} {action.upper()}: "
-        f"decision={decision_policy.get('decision')} "
-        f"size_multiplier={decision_policy.get('size_multiplier')} "
-        f"reason={decision_policy.get('reason')} "
-        f"risks={decision_policy.get('risks')} "
-        f"supports={decision_policy.get('supports')}"
-    )
-
-    decision_policy_authority_enabled = decision_policy_live_authority_enabled()
-    decision_policy_live_block = DECISION_POLICY_LIVE_BLOCK and decision_policy_authority_enabled
-    decision_policy_live_size_down = DECISION_POLICY_LIVE_SIZE_DOWN and decision_policy_authority_enabled
-
-    if (
-        action == "buy"
-        and decision_policy_live_block
-        and decision_policy.get("decision") == "block"
-    ):
-        reason = decision_policy.get("reason", "decision policy blocked setup")
-        logger.warning(
-            f"Decision policy gate blocked {symbol} BUY before Claude: {reason}"
-        )
-        _reject_approval_decision(
-            decision_policy_rejection(reason, metadata=decision_policy)
-        )
-        return
-    elif action == "buy" and decision_policy.get("decision") == "block":
-        logger.warning(
-            f"Decision policy block observed but not enforced for {symbol} BUY: "
-            f"authority_enabled={decision_policy_authority_enabled} "
-            f"live_block_enabled={DECISION_POLICY_LIVE_BLOCK} "
-            f"mode={decision_policy_config.get('authority_mode')} "
-            f"reason={decision_policy.get('reason')}"
-        )
-
-    # Live decision-policy size-down:
-    # This is intentionally one-way risk reduction. It can lower the max size
-    # available to Claude/broker, but it cannot increase exposure.
-    if (
-        action == "buy"
-        and decision_policy_live_size_down
-        and decision_policy.get("decision") == "size_down"
-    ):
-        try:
-            size_multiplier = float(decision_policy.get("size_multiplier") or 1.0)
-        except Exception:
-            size_multiplier = 1.0
-
-        # Clamp multiplier so this can never increase size.
-        size_multiplier = max(0.0, min(1.0, size_multiplier))
-
-        current_limit = None
-        for key in ("max_position_size_pct", "position_size_pct"):
-            try:
-                val = claude_account_state.get(key)
-                if val is not None:
-                    current_limit = float(val)
-                    break
-            except Exception:
-                pass
-
-        if current_limit is None:
-            # Conservative default: normal max buy size in this project.
-            current_limit = 2.0
-
-        reduced_limit = round(current_limit * size_multiplier, 4)
-
-        account_state["decision_policy_size_down"] = {
-            "enabled": True,
-            "original_position_size_pct": current_limit,
-            "reduced_position_size_pct": reduced_limit,
-            "size_multiplier": size_multiplier,
-            "reason": decision_policy.get("reason"),
-        }
-        claude_account_state["decision_policy_size_down"] = account_state[
-            "decision_policy_size_down"
-        ]
-
-        # Give Claude a deterministic ceiling to respect.
-        claude_account_state["max_position_size_pct"] = reduced_limit
-        claude_account_state["decision_policy_max_position_size_pct"] = reduced_limit
-
-        logger.warning(
-            f"DECISION_POLICY_SIZE_DOWN {symbol} BUY: "
-            f"original_position_size_pct={current_limit} "
-            f"size_multiplier={size_multiplier} "
-            f"reduced_position_size_pct={reduced_limit} "
-            f"reason={decision_policy.get('reason')}"
-        )
-
-        log_event(
-            event_type="DECISION_POLICY_SIZE_DOWN",
-            symbol=symbol,
-            action=action,
-            decision="size_down",
-            severity="medium",
-            reason=decision_policy.get("reason"),
-            source="app.py",
-            payload={
-                "decision_policy": decision_policy,
-                "original_position_size_pct": current_limit,
-                "reduced_position_size_pct": reduced_limit,
-                "size_multiplier": size_multiplier,
-            },
-        )
-    elif action == "buy" and decision_policy.get("decision") == "size_down":
-        logger.info(
-            f"Decision policy size_down observed but not enforced for {symbol} BUY: "
-            f"authority_enabled={decision_policy_authority_enabled} "
-            f"live_size_down_enabled={DECISION_POLICY_LIVE_SIZE_DOWN} "
-            f"mode={decision_policy_config.get('authority_mode')} "
-            f"reason={decision_policy.get('reason')}"
-        )
-
-    if action == "buy":
-        build_conviction_stack(
-            action=action,
-            account_state=account_state,
-            ml_prediction_bucket=_ml_prediction_bucket,
-            compute_dominant_limiter=sizing_policy.compute_dominant_limiter,
-        )
-
-    built_context = context_runtime.refresh(
-        intelligence_context=intelligence_context,
-        claude_account_state=claude_account_state,
-    )
-    claude_account_state = built_context.claude_account_state
-
-    summary = built_context.summary
-    logger.info(
-        f"Decision context for {symbol} {action.upper()}: "
-        f"setup={summary.get('setup_label')}/"
-        f"{summary.get('setup_policy_action')} "
-        f"prediction={summary.get('prediction_score')}/"
-        f"{summary.get('prediction_decision')} "
-        f"session={summary.get('session_trend_label')}/"
-        f"{summary.get('session_trend_score')} "
-        f"session_gate={summary.get('session_gate_severity')}/"
-        f"{summary.get('session_gate_would_block')} "
-        f"effective_bias={summary.get('effective_bias')}"
-    )
-
-    if action == "buy":
-        logger.info(
-            f"Conviction stack for {symbol} BUY: "
-            f"buy_opp={account_state['conviction_stack']['buy_opportunity']} "
-            f"strategy={account_state['conviction_stack']['strategy_score']:.0f} "
-            f"session={account_state['conviction_stack']['session_severity']} "
-            f"ml_bucket={account_state['conviction_stack']['ml_bucket']} "
-            f"cap={account_state['conviction_stack']['effective_cap_pct']} "
-            f"dominant={account_state['dominant_limiter']}"
-        )
+    if final_gate_result.rejected:
+        return final_gate_result.response
+    claude_account_state = final_gate_result.claude_account_state or dict(account_state)
 
     claude_result = _legacy_run_claude_and_confidence(
         data=data,

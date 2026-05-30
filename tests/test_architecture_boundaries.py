@@ -143,7 +143,6 @@ TEMPORARY_DB_ACCESS_ALLOWLIST = {
     "portfolio_replacement_report.py",
     "portfolio_rotation_manager.py",
     "portfolio_state.py",
-    "position_manager.py",
     "post_session_check.py",
     "pre_market_research_data.py",
     "prediction_cache.py",

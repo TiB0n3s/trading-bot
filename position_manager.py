@@ -23,8 +23,8 @@ from pathlib import Path
 
 import pytz
 
-from db import DB_PATH, get_connection
 from bot_events import log_event
+from repositories import position_repo
 from services.broker_service import broker_service
 from services.market_data_service import market_data_service
 from session_momentum import get_latest_session_momentum
@@ -240,28 +240,7 @@ def get_entry_context(symbol):
     Return oldest open entry context from trades.db if available.
     """
     try:
-        with get_connection(DB_PATH) as con:
-            rows = con.execute("""
-                SELECT
-                    timestamp, symbol, action, qty, fill_price,
-                    market_bias, market_bias_effective,
-                    trend_direction, trend_strength,
-                    momentum_direction, momentum_pct,
-                    session_trend_label, session_trend_score,
-                    prediction_score, prediction_decision,
-                    setup_label, setup_policy_action,
-                    buy_opportunity_score, buy_opportunity_recommendation,
-                    ml_prediction_score, ml_prediction_bucket
-                FROM trades
-                WHERE symbol = ?
-                  AND approved = 1
-                  AND order_status IN ('filled', 'partially_filled')
-                  AND qty IS NOT NULL
-                  AND fill_price IS NOT NULL
-                  AND action IN ('buy', 'sell')
-                ORDER BY timestamp ASC, id ASC
-            """, (symbol,)).fetchall()
-
+        rows = position_repo.entry_context_rows(symbol)
         lots = []
 
         for r in rows:
@@ -1041,68 +1020,28 @@ def log_position_manager_exit(decision, order_result, exit_type):
             f"reasons={'; '.join(decision.get('reasons') or [])}"
         )
 
-        with get_connection(DB_PATH) as con:
-            con.execute("""
-                INSERT INTO trades (
-                    timestamp,
-                    symbol,
-                    action,
-                    signal_price,
-                    approved,
-                    rejection_reason,
-                    confidence,
-                    position_size_pct,
-                    stop_loss_pct,
-                    take_profit_pct,
-                    order_id,
-                    order_status,
-                    qty,
-                    fill_price,
-
-                    market_bias,
-                    market_bias_effective,
-                    trend_direction,
-                    trend_strength,
-                    momentum_direction,
-                    momentum_pct,
-                    session_trend_label,
-                    session_trend_score,
-                    prediction_score,
-                    prediction_decision,
-                    setup_label,
-                    setup_policy_action,
-                    buy_opportunity_score,
-                    buy_opportunity_recommendation
-                ) VALUES (?, ?, 'sell', ?, 1, ?, ?, 0.0, 0.0, 0.0, ?, ?, ?, NULL,
-                          ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """, (
-                datetime.now(ET).strftime("%Y-%m-%d %H:%M:%S"),
-                decision.get("symbol"),
-                decision.get("current_price"),
-                reason,
-                "position_manager",
-                order_id,
-                status,
-                int(float(qty)) if qty is not None else None,
-
-                (decision.get("entry_context") or {}).get("entry_market_bias"),
-                (decision.get("entry_context") or {}).get("entry_market_bias_effective"),
-                ((decision.get("entry_context") or {}).get("entry_trend") or "/").split("/")[0],
-                ((decision.get("entry_context") or {}).get("entry_trend") or "/").split("/")[1],
-                "falling" if (
-                    (decision.get("momentum_5m_pct") is not None and decision.get("momentum_5m_pct") < 0)
-                    or (decision.get("momentum_15m_pct") is not None and decision.get("momentum_15m_pct") < 0)
-                ) else "neutral",
-                decision.get("momentum_5m_pct"),
-                (decision.get("entry_context") or {}).get("entry_session_trend_label"),
-                (decision.get("entry_context") or {}).get("entry_session_trend_score"),
-                (decision.get("entry_context") or {}).get("entry_prediction_score"),
-                (decision.get("entry_context") or {}).get("entry_prediction_decision"),
-                (decision.get("entry_context") or {}).get("entry_setup_label"),
-                (decision.get("entry_context") or {}).get("entry_setup_policy_action"),
-                (decision.get("entry_context") or {}).get("entry_buy_opportunity_score"),
-                (decision.get("entry_context") or {}).get("entry_buy_opportunity_recommendation"),
-            ))
+        position_repo.insert_position_manager_exit(
+            timestamp=datetime.now(ET).strftime("%Y-%m-%d %H:%M:%S"),
+            symbol=decision.get("symbol"),
+            signal_price=decision.get("current_price"),
+            reason=reason,
+            confidence="position_manager",
+            order_id=order_id,
+            order_status=status,
+            qty=int(float(qty)) if qty is not None else None,
+            entry_context=decision.get("entry_context") or {},
+            momentum_direction="falling" if (
+                (
+                    decision.get("momentum_5m_pct") is not None
+                    and decision.get("momentum_5m_pct") < 0
+                )
+                or (
+                    decision.get("momentum_15m_pct") is not None
+                    and decision.get("momentum_15m_pct") < 0
+                )
+            ) else "neutral",
+            momentum_pct=decision.get("momentum_5m_pct"),
+        )
 
         return True
 

@@ -16,6 +16,7 @@ from repositories import context_repo, cooldown_repo, rejections_repo, snapshots
 from services.broker_service import BrokerService
 from services.market_data_service import MarketDataService
 from services.signal_pipeline import SignalPipeline, SignalPipelineDeps
+from services.signal_runtime_wiring import build_signal_pipeline_deps
 from services.tape_service import TapeService
 
 
@@ -69,5 +70,14 @@ class ApplicationContainer:
             signal_executor_factory=signal_executor_factory,
         )
 
-    def build_signal_pipeline(self, deps: SignalPipelineDeps) -> SignalPipeline:
+    def build_signal_pipeline(
+        self,
+        deps: SignalPipelineDeps | None = None,
+        *,
+        runtime: object | None = None,
+    ) -> SignalPipeline:
+        if deps is None:
+            if runtime is None:
+                raise ValueError("runtime is required when deps are not provided")
+            deps = build_signal_pipeline_deps(container=self, runtime=runtime)
         return SignalPipeline(deps)

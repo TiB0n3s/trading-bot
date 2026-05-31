@@ -21,16 +21,16 @@
 # For more information see the manual pages of crontab(5) and cron(8)
 # 
 # m h  dom mon dow   command
-*/2 * * * * flock -n /tmp/tradingbot_fill_poller.lock bash -lc 'cd /home/tradingbot/trading-bot && set -a && . /etc/trading-bot.env && set +a && /home/tradingbot/trading-bot/venv/bin/python fill_poller.py' >> /home/tradingbot/trading-bot/fill_poller.log 2>&1
+*/2 * * * * flock -n /tmp/tradingbot_fill_poller.lock bash -lc 'cd /home/tradingbot/trading-bot && set -a && . /etc/trading-bot.env && set +a && /home/tradingbot/trading-bot/venv/bin/python fill_poller.py' >> /home/tradingbot/trading-bot/fill_poller.log 2>&1 || echo "$(date -Is) lock-busy: fill_poller skipped" >> /home/tradingbot/trading-bot/fill_poller.log
 
 0 8 * * 1-5 cd /home/tradingbot/trading-bot && set -a && . /etc/trading-bot.env && set +a && /home/tradingbot/trading-bot/venv/bin/python pre_market_research_data.py --raw-output /tmp/raw_market_research_$(date +\%F).data.json --build-output market_context.json --ingest-context >> /home/tradingbot/trading-bot/pre_market_research.log 2>&1
 6 8 * * 1-5 cd /home/tradingbot/trading-bot && set -a && . /etc/trading-bot.env && set +a && /home/tradingbot/trading-bot/venv/bin/python archive_context_state.py --reason premarket_context_refresh >> /home/tradingbot/trading-bot/context_archive.log 2>&1
 
-8 8 * * 1-5 flock -n /tmp/tradingbot_event_collection.lock bash -lc 'cd /home/tradingbot/trading-bot && set -a && . /etc/trading-bot.env && set +a && /home/tradingbot/trading-bot/venv/bin/python collect_and_score_events.py --date $(date +\%F) --max-per-symbol 2 --apply-context --predict --output /tmp/events_$(date +\%F).auto.json' >> /home/tradingbot/trading-bot/event_collection.log 2>&1
+8 8 * * 1-5 flock -n /tmp/tradingbot_event_collection.lock bash -lc 'cd /home/tradingbot/trading-bot && set -a && . /etc/trading-bot.env && set +a && /home/tradingbot/trading-bot/venv/bin/python collect_and_score_events.py --date $(date +\%F) --max-per-symbol 2 --apply-context --predict --output /tmp/events_$(date +\%F).auto.json' >> /home/tradingbot/trading-bot/event_collection.log 2>&1 || echo "$(date -Is) lock-busy: collect_and_score_events premarket skipped" >> /home/tradingbot/trading-bot/event_collection.log
 10 8 * * 1-5 cd /home/tradingbot/trading-bot && set -a && . /etc/trading-bot.env && set +a && TARGET_DATE=$(/home/tradingbot/trading-bot/venv/bin/python next_trading_date.py) && /home/tradingbot/trading-bot/venv/bin/python prediction_cache.py preload --date "$TARGET_DATE" >> /home/tradingbot/trading-bot/prediction_cache.log 2>&1
 
 # Intraday context refresh — price reclassification + event enrichment + session learning
-*/45 9-15 * * 1-5 flock -n /tmp/tradingbot_intraday_context_refresh.lock bash -lc 'set -a && . /etc/trading-bot.env && set +a && /home/tradingbot/trading-bot/venv/bin/python /home/tradingbot/trading-bot/intraday_context_refresh.py' >> /home/tradingbot/trading-bot/intraday_refresh.log 2>&1
+*/45 9-15 * * 1-5 flock -n /tmp/tradingbot_intraday_context_refresh.lock bash -lc 'set -a && . /etc/trading-bot.env && set +a && /home/tradingbot/trading-bot/venv/bin/python /home/tradingbot/trading-bot/intraday_context_refresh.py' >> /home/tradingbot/trading-bot/intraday_refresh.log 2>&1 || echo "$(date -Is) lock-busy: intraday_context_refresh skipped" >> /home/tradingbot/trading-bot/intraday_refresh.log
 
 0 16 * * 1-5 cd /home/tradingbot/trading-bot && set -a && . /etc/trading-bot.env && set +a && /home/tradingbot/trading-bot/venv/bin/python daily_summary.py >> daily_summary.log 2>&1
 
@@ -38,31 +38,31 @@
 
 10 16 * * 1-5 cd /home/tradingbot/trading-bot && set -a && . /etc/trading-bot.env && set +a && /home/tradingbot/trading-bot/venv/bin/python trade_matcher.py >> trade_matcher.log 2>&1
 
-*/2 8-14 * * 1-5 flock -n /tmp/tradingbot_live_features.lock bash /home/tradingbot/trading-bot/run_live_features.sh
+*/2 8-14 * * 1-5 flock -n /tmp/tradingbot_live_features.lock bash /home/tradingbot/trading-bot/run_live_features.sh || echo "$(date -Is) lock-busy: run_live_features skipped" >> /home/tradingbot/trading-bot/live_features.log
 
-*/5 8-14 * * 1-5 flock -n /tmp/tradingbot_label_features.lock bash /home/tradingbot/trading-bot/run_label_features.sh
+*/5 8-14 * * 1-5 flock -n /tmp/tradingbot_label_features.lock bash /home/tradingbot/trading-bot/run_label_features.sh || echo "$(date -Is) lock-busy: run_label_features skipped" >> /home/tradingbot/trading-bot/label_features.log
 
-*/2 8-15 * * 1-5 flock -n /tmp/tradingbot_rolling_momentum.lock bash -lc 'cd /home/tradingbot/trading-bot && set -a && . /etc/trading-bot.env && set +a && /home/tradingbot/trading-bot/venv/bin/python rolling_momentum.py' >> /home/tradingbot/trading-bot/rolling_momentum.log 2>&1
+*/2 8-15 * * 1-5 flock -n /tmp/tradingbot_rolling_momentum.lock bash -lc 'cd /home/tradingbot/trading-bot && set -a && . /etc/trading-bot.env && set +a && /home/tradingbot/trading-bot/venv/bin/python rolling_momentum.py' >> /home/tradingbot/trading-bot/rolling_momentum.log 2>&1 || echo "$(date -Is) lock-busy: rolling_momentum skipped" >> /home/tradingbot/trading-bot/rolling_momentum.log
 
-*/2 8-15 * * 1-5 flock -n /tmp/tradingbot_session_momentum.lock bash -lc 'cd /home/tradingbot/trading-bot && set -a && . /etc/trading-bot.env && set +a && /home/tradingbot/trading-bot/venv/bin/python session_momentum.py --all' >> /home/tradingbot/trading-bot/session_momentum.log 2>&1
+*/2 8-15 * * 1-5 flock -n /tmp/tradingbot_session_momentum.lock bash -lc 'cd /home/tradingbot/trading-bot && set -a && . /etc/trading-bot.env && set +a && /home/tradingbot/trading-bot/venv/bin/python session_momentum.py --all' >> /home/tradingbot/trading-bot/session_momentum.log 2>&1 || echo "$(date -Is) lock-busy: session_momentum skipped" >> /home/tradingbot/trading-bot/session_momentum.log
 
-*/2 8-15 * * 1-5 flock -n /tmp/tradingbot_auto_buy_manager.lock bash -lc 'cd /home/tradingbot/trading-bot && set -a && . /etc/trading-bot.env && set +a && /home/tradingbot/trading-bot/venv/bin/python auto_buy_manager.py --scope internal --live' >> /home/tradingbot/trading-bot/auto_buy.log 2>&1
+*/2 8-15 * * 1-5 flock -n /tmp/tradingbot_auto_buy_manager.lock bash -lc 'cd /home/tradingbot/trading-bot && set -a && . /etc/trading-bot.env && set +a && /home/tradingbot/trading-bot/venv/bin/python auto_buy_manager.py --scope internal --live' >> /home/tradingbot/trading-bot/auto_buy.log 2>&1 || echo "$(date -Is) lock-busy: auto_buy_manager skipped" >> /home/tradingbot/trading-bot/auto_buy.log
 
-1-59/2 8-15 * * 1-5 flock -n /tmp/tradingbot_position_momentum_monitor.lock bash -lc 'cd /home/tradingbot/trading-bot && set -a && . /etc/trading-bot.env && set +a && /home/tradingbot/trading-bot/venv/bin/python position_momentum_monitor.py' >> /home/tradingbot/trading-bot/position_momentum_monitor.log 2>&1
+1-59/2 8-15 * * 1-5 flock -n /tmp/tradingbot_position_momentum_monitor.lock bash -lc 'cd /home/tradingbot/trading-bot && set -a && . /etc/trading-bot.env && set +a && /home/tradingbot/trading-bot/venv/bin/python position_momentum_monitor.py' >> /home/tradingbot/trading-bot/position_momentum_monitor.log 2>&1 || echo "$(date -Is) lock-busy: position_momentum_monitor skipped" >> /home/tradingbot/trading-bot/position_momentum_monitor.log
 
-*/2 8-15 * * 1-5 flock -n /tmp/tradingbot_position_manager.lock bash /home/tradingbot/trading-bot/run_position_manager.sh >> /home/tradingbot/trading-bot/position_manager.log 2>&1
+*/2 8-15 * * 1-5 flock -n /tmp/tradingbot_position_manager.lock bash /home/tradingbot/trading-bot/run_position_manager.sh >> /home/tradingbot/trading-bot/position_manager.log 2>&1 || echo "$(date -Is) lock-busy: run_position_manager skipped" >> /home/tradingbot/trading-bot/position_manager.log
 
-30 16 * * 1-5 flock -n /tmp/tradingbot_after_close.lock bash /home/tradingbot/trading-bot/run_after_close_learning.sh >> /home/tradingbot/trading-bot/after_close_learning.log 2>&1
+30 16 * * 1-5 flock -n /tmp/tradingbot_after_close.lock bash /home/tradingbot/trading-bot/run_after_close_learning.sh >> /home/tradingbot/trading-bot/after_close_learning.log 2>&1 || echo "$(date -Is) lock-busy: run_after_close_learning skipped" >> /home/tradingbot/trading-bot/after_close_learning.log
 
-*/2 8-15 * * 1-5 flock -n /tmp/tradingbot_portfolio_rotation.lock bash -lc 'cd /home/tradingbot/trading-bot && set -a && . /etc/trading-bot.env && set +a && /home/tradingbot/trading-bot/venv/bin/python /home/tradingbot/trading-bot/portfolio_replacement_report.py --minutes 120 --top 20 --write-memory && /home/tradingbot/trading-bot/venv/bin/python /home/tradingbot/trading-bot/portfolio_rotation_manager.py' >> /home/tradingbot/trading-bot/portfolio_rotation.log 2>&1
+*/2 8-15 * * 1-5 flock -n /tmp/tradingbot_portfolio_rotation.lock bash -lc 'cd /home/tradingbot/trading-bot && set -a && . /etc/trading-bot.env && set +a && /home/tradingbot/trading-bot/venv/bin/python /home/tradingbot/trading-bot/portfolio_replacement_report.py --minutes 120 --top 20 --write-memory && /home/tradingbot/trading-bot/venv/bin/python /home/tradingbot/trading-bot/portfolio_rotation_manager.py' >> /home/tradingbot/trading-bot/portfolio_rotation.log 2>&1 || echo "$(date -Is) lock-busy: portfolio_rotation skipped" >> /home/tradingbot/trading-bot/portfolio_rotation.log
 
 # After-hours event collection for next trading session, Mon-Thu.
-0 18 * * 1-4 flock -n /tmp/tradingbot_event_collection.lock bash -lc 'cd /home/tradingbot/trading-bot && set -a && . /etc/trading-bot.env && set +a && TARGET_DATE=$(/home/tradingbot/trading-bot/venv/bin/python next_trading_date.py) && /home/tradingbot/trading-bot/venv/bin/python collect_and_score_events.py --date "$TARGET_DATE" --max-per-symbol 2 --apply-context --predict --output /tmp/events_"$TARGET_DATE"_afterhours.json' >> /home/tradingbot/trading-bot/event_collection.log 2>&1
+0 18 * * 1-4 flock -n /tmp/tradingbot_event_collection.lock bash -lc 'cd /home/tradingbot/trading-bot && set -a && . /etc/trading-bot.env && set +a && TARGET_DATE=$(/home/tradingbot/trading-bot/venv/bin/python next_trading_date.py) && /home/tradingbot/trading-bot/venv/bin/python collect_and_score_events.py --date "$TARGET_DATE" --max-per-symbol 2 --apply-context --predict --output /tmp/events_"$TARGET_DATE"_afterhours.json' >> /home/tradingbot/trading-bot/event_collection.log 2>&1 || echo "$(date -Is) lock-busy: collect_and_score_events afterhours skipped" >> /home/tradingbot/trading-bot/event_collection.log
 
 # Friday after-hours + weekend event collection for next trading session.
-0 18 * * 5 flock -n /tmp/tradingbot_event_collection.lock bash -lc 'cd /home/tradingbot/trading-bot && set -a && . /etc/trading-bot.env && set +a && TARGET_DATE=$(/home/tradingbot/trading-bot/venv/bin/python next_trading_date.py) && /home/tradingbot/trading-bot/venv/bin/python collect_and_score_events.py --date "$TARGET_DATE" --max-per-symbol 2 --apply-context --predict --output /tmp/events_"$TARGET_DATE"_friday_afterhours.json' >> /home/tradingbot/trading-bot/event_collection.log 2>&1
+0 18 * * 5 flock -n /tmp/tradingbot_event_collection.lock bash -lc 'cd /home/tradingbot/trading-bot && set -a && . /etc/trading-bot.env && set +a && TARGET_DATE=$(/home/tradingbot/trading-bot/venv/bin/python next_trading_date.py) && /home/tradingbot/trading-bot/venv/bin/python collect_and_score_events.py --date "$TARGET_DATE" --max-per-symbol 2 --apply-context --predict --output /tmp/events_"$TARGET_DATE"_friday_afterhours.json' >> /home/tradingbot/trading-bot/event_collection.log 2>&1 || echo "$(date -Is) lock-busy: collect_and_score_events friday_afterhours skipped" >> /home/tradingbot/trading-bot/event_collection.log
 
-0 10,18 * * 6,0 flock -n /tmp/tradingbot_event_collection.lock bash -lc 'cd /home/tradingbot/trading-bot && set -a && . /etc/trading-bot.env && set +a && TARGET_DATE=$(/home/tradingbot/trading-bot/venv/bin/python next_trading_date.py) && /home/tradingbot/trading-bot/venv/bin/python collect_and_score_events.py --date "$TARGET_DATE" --max-per-symbol 2 --apply-context --predict --output /tmp/events_"$TARGET_DATE"_weekend.json' >> /home/tradingbot/trading-bot/event_collection.log 2>&1
+0 10,18 * * 6,0 flock -n /tmp/tradingbot_event_collection.lock bash -lc 'cd /home/tradingbot/trading-bot && set -a && . /etc/trading-bot.env && set +a && TARGET_DATE=$(/home/tradingbot/trading-bot/venv/bin/python next_trading_date.py) && /home/tradingbot/trading-bot/venv/bin/python collect_and_score_events.py --date "$TARGET_DATE" --max-per-symbol 2 --apply-context --predict --output /tmp/events_"$TARGET_DATE"_weekend.json' >> /home/tradingbot/trading-bot/event_collection.log 2>&1 || echo "$(date -Is) lock-busy: collect_and_score_events weekend skipped" >> /home/tradingbot/trading-bot/event_collection.log
 
 # Automated operator validation.
 
@@ -72,7 +72,7 @@
 
 # Post-session review: runs after after-close learning (4:30 PM CT) completes.
 # Logs output to post_session_review.log for review.
-0 17 * * 1-5 flock -n /tmp/tradingbot_after_close.lock bash /home/tradingbot/trading-bot/run_post_session_review.sh >> /home/tradingbot/trading-bot/post_session_review.log 2>&1
+0 17 * * 1-5 flock -n /tmp/tradingbot_after_close.lock bash /home/tradingbot/trading-bot/run_post_session_review.sh >> /home/tradingbot/trading-bot/post_session_review.log 2>&1 || echo "$(date -Is) lock-busy: run_post_session_review skipped" >> /home/tradingbot/trading-bot/post_session_review.log
 
 # Tuesday full-day QA runner: script internally sleeps through 7 timed windows.
 # Single invocation; the script exits after the after-close window (~5 PM CT).

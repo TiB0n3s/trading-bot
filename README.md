@@ -99,6 +99,31 @@ LOG_LEVEL
 EXECUTION_MODE
 LIVE_TRADING_ENABLED
 
+## Fresh Checkout Bootstrap
+
+For local development or audit from a fresh checkout:
+
+```bash
+cd /home/tradingbot/trading-bot
+python3 -m venv venv
+. venv/bin/activate
+pip install -U pip
+pip install -r requirements.txt
+pip install -e '.[dev]'
+python run_tests.py
+```
+
+Additional validation commands:
+
+```bash
+bash safe_repo_check.sh
+python tests/test_architecture_boundaries.py
+python run_staged_tests.py
+python tests/test_cron_contract.py
+```
+
+Runtime secrets still belong in `/etc/trading-bot.env`; do not commit them.
+
 ## Approved Symbols
 
 Current intelligence/reporting universe:

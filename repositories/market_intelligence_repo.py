@@ -184,6 +184,18 @@ class MarketIntelligenceRepository:
             ).fetchall()
         return [row["symbol"] for row in rows]
 
+    def context_summary_rows(self, market_date: str):
+        with get_connection(self.db_path) as con:
+            return con.execute(
+                """
+                SELECT symbol, bias, confidence, risk_level, entry_quality
+                FROM daily_symbol_context
+                WHERE market_date = ?
+                ORDER BY symbol
+                """,
+                (market_date,),
+            ).fetchall()
+
     def context_exists(self, market_date: str, symbol: str) -> bool:
         with get_connection(self.db_path) as con:
             row = con.execute(

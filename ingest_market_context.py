@@ -12,11 +12,11 @@ import json
 from collections import Counter
 from pathlib import Path
 
-from db import DB_PATH, get_connection
 from market_intelligence.intelligence_store import (
     init_intelligence_tables,
     ingest_market_context,
 )
+from repositories.market_intelligence_repo import MarketIntelligenceRepository
 
 
 def main():
@@ -31,16 +31,7 @@ def main():
     init_intelligence_tables()
     summary = ingest_market_context(path)
 
-    with get_connection(DB_PATH) as con:
-        rows = con.execute(
-            """
-            SELECT symbol, bias, confidence, risk_level, entry_quality
-            FROM daily_symbol_context
-            WHERE market_date = ?
-            ORDER BY symbol
-            """,
-            (summary["market_date"],),
-        ).fetchall()
+    rows = MarketIntelligenceRepository().context_summary_rows(summary["market_date"])
 
     bias_counts = Counter(r["bias"] for r in rows)
 

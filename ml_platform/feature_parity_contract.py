@@ -10,7 +10,10 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass
 
 from ml_platform.dataset_builder import ROW_COLUMNS
-from services.decision_snapshot_service import SNAPSHOT_CONTEXT_FIELDS
+from services.decision_snapshot_service import (
+    DECISION_SNAPSHOT_FEATURE_SEMANTIC_VERSION,
+    SNAPSHOT_CONTEXT_FIELDS,
+)
 
 
 @dataclass(frozen=True)
@@ -128,6 +131,7 @@ LIVE_DECISION_ML_FEATURE_PARITY: tuple[FeatureParitySpec, ...] = (
 def parity_contract_summary() -> dict:
     return {
         "contract_name": "runtime_offline_feature_parity_v1",
+        "runtime_feature_semantic_version": DECISION_SNAPSHOT_FEATURE_SEMANTIC_VERSION,
         "runtime_snapshot": "decision_snapshots",
         "offline_export": "ml_platform.dataset_builder.ROW_COLUMNS",
         "features": [spec.to_dict() for spec in LIVE_DECISION_ML_FEATURE_PARITY],

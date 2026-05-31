@@ -4,7 +4,10 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from services.decision_snapshot_service import DecisionSnapshotService
+from services.decision_snapshot_service import (
+    DECISION_SNAPSHOT_FEATURE_SEMANTIC_VERSION,
+    DecisionSnapshotService,
+)
 
 
 class FakeRepository:
@@ -21,7 +24,7 @@ class FakeRepository:
         return {"total": 1, "symbols": 1, "by_decision": []}
 
 
-def test_record_decision_snapshot_builds_expected_row(tmp_path):
+def _record_snapshot(tmp_path, *, prediction_gate):
     (tmp_path / "market_context.json").write_text('{"market_date": "2026-05-30"}')
     repo = FakeRepository()
     service = DecisionSnapshotService(repository=repo, base_dir=tmp_path)
@@ -37,13 +40,7 @@ def test_record_decision_snapshot_builds_expected_row(tmp_path):
         order={"order_id": "abc", "status": "filled"},
         context={"market_bias": "buy", "session_trend_label": "strong_uptrend"},
         account_state={
-            "prediction_gate": {
-                "prediction_score": 71,
-                "prediction_decision": "observe_only",
-                "ml_prediction_score": 63,
-                "ml_prediction_confidence": "medium",
-                "ml_prediction_sample_size": 42,
-            },
+            "prediction_gate": prediction_gate,
             "setup_observation": {
                 "setup_label": "near_vwap_recovery",
                 "setup_confidence": "high",
@@ -64,9 +61,23 @@ def test_record_decision_snapshot_builds_expected_row(tmp_path):
         },
         raw_signal={"symbol": "AAPL"},
     )
+    return snapshot_id, repo.inserted
 
-    row = repo.inserted
+
+def test_record_decision_snapshot_builds_expected_row(tmp_path):
+    snapshot_id, row = _record_snapshot(
+        tmp_path,
+        prediction_gate={
+            "prediction_score": 71,
+            "prediction_decision": "observe_only",
+            "ml_prediction_score": 63,
+            "ml_prediction_confidence": "medium",
+            "ml_prediction_sample_size": 42,
+        },
+    )
+
     assert snapshot_id == 123
+    assert row["feature_semantic_version"] == DECISION_SNAPSHOT_FEATURE_SEMANTIC_VERSION
     assert row["trade_id"] == 7
     assert row["symbol"] == "AAPL"
     assert row["approved"] == 1
@@ -86,6 +97,65 @@ def test_record_decision_snapshot_builds_expected_row(tmp_path):
     assert row["raw_signal_json"] == '{"symbol": "AAPL"}'
 
 
+def test_prediction_feature_fallback_uses_ml_when_present(tmp_path):
+    _, row = _record_snapshot(
+        tmp_path,
+        prediction_gate={
+            "prediction_score": 71,
+            "prediction_confidence": "deterministic",
+            "prediction_sample_size": 99,
+            "ml_prediction_score": 63,
+            "ml_prediction_confidence": "medium",
+            "ml_prediction_sample_size": 42,
+        },
+    )
+
+    assert row["prediction_score"] == 63
+    assert row["prediction_confidence"] == "medium"
+    assert row["prediction_sample_size"] == 42
+
+
+def test_prediction_feature_fallback_uses_deterministic_when_ml_absent(tmp_path):
+    _, row = _record_snapshot(
+        tmp_path,
+        prediction_gate={
+            "prediction_score": 71,
+            "prediction_confidence": "deterministic",
+            "prediction_sample_size": 99,
+        },
+    )
+
+    assert row["prediction_score"] == 71
+    assert row["prediction_confidence"] == "deterministic"
+    assert row["prediction_sample_size"] == 99
+
+
+def test_prediction_feature_fallback_preserves_zero_sample_size(tmp_path):
+    _, row = _record_snapshot(
+        tmp_path,
+        prediction_gate={
+            "prediction_score": 71,
+            "prediction_confidence": "deterministic",
+            "prediction_sample_size": 99,
+            "ml_prediction_score": 63,
+            "ml_prediction_confidence": None,
+            "ml_prediction_sample_size": 0,
+        },
+    )
+
+    assert row["prediction_score"] == 63
+    assert row["prediction_confidence"] == "deterministic"
+    assert row["prediction_sample_size"] == 0
+
+
+def test_prediction_feature_fallback_handles_absent_scores(tmp_path):
+    _, row = _record_snapshot(tmp_path, prediction_gate={})
+
+    assert row["prediction_score"] is None
+    assert row["prediction_confidence"] is None
+    assert row["prediction_sample_size"] is None
+
+
 def test_summarize_snapshots_delegates_to_repository(tmp_path):
     repo = FakeRepository()
     service = DecisionSnapshotService(repository=repo, base_dir=tmp_path)
@@ -99,6 +169,10 @@ if __name__ == "__main__":
 
     tests = [
         test_record_decision_snapshot_builds_expected_row,
+        test_prediction_feature_fallback_uses_ml_when_present,
+        test_prediction_feature_fallback_uses_deterministic_when_ml_absent,
+        test_prediction_feature_fallback_preserves_zero_sample_size,
+        test_prediction_feature_fallback_handles_absent_scores,
         test_summarize_snapshots_delegates_to_repository,
     ]
     for test in tests:

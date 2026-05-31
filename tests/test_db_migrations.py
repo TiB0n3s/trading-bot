@@ -301,6 +301,7 @@ def test_decision_snapshot_feature_parity_migration_adds_columns():
             "setup_confidence",
             "prediction_confidence",
             "prediction_sample_size",
+            "feature_semantic_version",
         }
         assert_true(expected <= table_columns(db_path, "decision_snapshots"), "feature parity decision columns")
 

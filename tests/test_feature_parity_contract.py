@@ -16,7 +16,9 @@ from ml_platform.dataset_builder import ROW_COLUMNS
 from ml_platform.feature_parity_contract import (
     LIVE_DECISION_ML_FEATURE_PARITY,
     RUNTIME_SNAPSHOT_FEATURE_FIELDS,
+    parity_contract_summary,
 )
+from services.decision_snapshot_service import DECISION_SNAPSHOT_FEATURE_SEMANTIC_VERSION
 
 
 def _table_columns(db_path: Path, table: str) -> set[str]:
@@ -80,6 +82,15 @@ def test_decision_snapshot_table_contains_parity_fields_after_ensure():
             for spec in LIVE_DECISION_ML_FEATURE_PARITY
         }
         assert required <= columns, sorted(required - columns)
+        assert "feature_semantic_version" in columns
+
+
+def test_parity_contract_exposes_runtime_feature_semantic_version():
+    summary = parity_contract_summary()
+    assert (
+        summary["runtime_feature_semantic_version"]
+        == DECISION_SNAPSHOT_FEATURE_SEMANTIC_VERSION
+    )
 
 
 def main():
@@ -87,6 +98,7 @@ def main():
         test_ml_live_feature_names_match_runtime_snapshot_and_offline_export,
         test_ml_live_feature_contract_documents_null_and_pit_semantics,
         test_decision_snapshot_table_contains_parity_fields_after_ensure,
+        test_parity_contract_exposes_runtime_feature_semantic_version,
     ]
     for test in tests:
         test()

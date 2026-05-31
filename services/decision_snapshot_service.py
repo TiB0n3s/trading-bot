@@ -64,6 +64,8 @@ SNAPSHOT_CONTEXT_FIELDS = (
     "cluster_exposure_pct",
 )
 
+DECISION_SNAPSHOT_FEATURE_SEMANTIC_VERSION = "decision_snapshot_features_v2"
+
 
 def json_dumps(value: Any) -> str:
     return json.dumps(value or {}, sort_keys=True, default=str)
@@ -168,6 +170,7 @@ class DecisionSnapshotService:
 
         row = {
             "created_at": datetime.now(timezone.utc).isoformat(),
+            "feature_semantic_version": DECISION_SNAPSHOT_FEATURE_SEMANTIC_VERSION,
             "decision_time": timestamp,
             "trade_id": trade_id,
             "source": source,
@@ -203,7 +206,8 @@ class DecisionSnapshotService:
             "buy_opportunity_reason": buy_opportunity.get("buy_opportunity_reason"),
             "prediction_confidence": (
                 prediction_gate.get("ml_prediction_confidence")
-                or prediction_gate.get("prediction_confidence")
+                if prediction_gate.get("ml_prediction_confidence") is not None
+                else prediction_gate.get("prediction_confidence")
             ),
             "prediction_sample_size": (
                 prediction_gate.get("ml_prediction_sample_size")

@@ -431,6 +431,7 @@ MIGRATIONS: tuple[Migration, ...] = (
             "ALTER TABLE decision_snapshots ADD COLUMN setup_confidence TEXT",
             "ALTER TABLE decision_snapshots ADD COLUMN prediction_confidence TEXT",
             "ALTER TABLE decision_snapshots ADD COLUMN prediction_sample_size INTEGER",
+            "ALTER TABLE decision_snapshots ADD COLUMN feature_semantic_version TEXT",
         ),
     ),
 )

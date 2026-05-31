@@ -13,7 +13,7 @@ Usage:
 import sys
 from datetime import date
 from collections import defaultdict
-from db import DB_PATH, get_connection
+from repositories.trades_repo import adaptive_impact_report_rows
 
 
 def section(title):
@@ -28,31 +28,7 @@ def main():
     print(f"  Adaptive Impact Report — {target_date}")
     print("=" * 80)
 
-    with get_connection(DB_PATH) as con:
-        rows = con.execute(
-            """
-            SELECT
-                timestamp,
-                symbol,
-                action,
-                approved,
-                rejection_reason,
-                market_bias,
-                risk_level,
-                entry_quality,
-                trend_direction,
-                trend_strength,
-                setup_label,
-                setup_policy_action,
-                prediction_score,
-                prediction_decision
-            FROM trades
-            WHERE timestamp LIKE ?
-              AND action = 'buy'
-            ORDER BY timestamp ASC
-            """,
-            (f"{target_date}%",),
-        ).fetchall()
+    rows = adaptive_impact_report_rows(target_date)
 
     total = len(rows)
     approved = [r for r in rows if r["approved"]]

@@ -287,3 +287,31 @@ def buy_opportunity_report_rows(target_date: str, db_path=DB_PATH):
             """,
             (f"{target_date}%",),
         ).fetchall()
+
+
+def adaptive_impact_report_rows(target_date: str, db_path=DB_PATH):
+    with get_connection(db_path) as con:
+        return con.execute(
+            """
+            SELECT
+                timestamp,
+                symbol,
+                action,
+                approved,
+                rejection_reason,
+                market_bias,
+                risk_level,
+                entry_quality,
+                trend_direction,
+                trend_strength,
+                setup_label,
+                setup_policy_action,
+                prediction_score,
+                prediction_decision
+            FROM trades
+            WHERE timestamp LIKE ?
+              AND action = 'buy'
+            ORDER BY timestamp ASC
+            """,
+            (f"{target_date}%",),
+        ).fetchall()

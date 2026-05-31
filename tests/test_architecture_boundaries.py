@@ -88,7 +88,6 @@ APPROVED_DB_ACCESS = {
 }
 
 TEMPORARY_REPORT_DB_ALLOWLIST = {
-    "adaptive_impact_report.py",
     "analytics_report.py",
     "auto_buy_outcome_report.py",
     "context_trade_join_report.py",

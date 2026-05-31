@@ -47,6 +47,16 @@ def _hash(value: dict[str, Any]) -> str:
     return hashlib.sha256(_json(value).encode("utf-8")).hexdigest()
 
 
+def stable_canonical_json(value: Any) -> str:
+    """Return deterministic compact JSON for canonical audit payloads."""
+    return _json(value)
+
+
+def stable_canonical_hash(value: dict[str, Any]) -> str:
+    """Return a deterministic SHA-256 hash for canonical audit payloads."""
+    return _hash(value)
+
+
 def canonical_json(snapshot: "CanonicalIntelligenceSnapshot") -> str:
     return _json(snapshot.to_dict())
 

@@ -70,6 +70,13 @@ RETENTION_RULES: tuple[RetentionRule, ...] = (
         "Immutable replay/audit trail; preserve rather than compact destructively.",
     ),
     RetentionRule(
+        "exit_snapshots",
+        "cold",
+        None,
+        "archive_or_separate_sqlite",
+        "Immutable exit-learning trail; preserve for post-exit recovery and capture analysis.",
+    ),
+    RetentionRule(
         "bot_events",
         "warm",
         120,

@@ -20,6 +20,7 @@ def test_retention_policy_classifies_new_ml_tables():
         "rejected_signal_outcomes",
         "auto_buy_candidates",
         "decision_snapshots",
+        "exit_snapshots",
         "bot_events",
     }
     missing = required - set(names)
@@ -31,6 +32,8 @@ def test_retention_policy_classifies_new_ml_tables():
 
     if names["decision_snapshots"]["tier"] != "cold":
         raise AssertionError("decision_snapshots should be cold archival data")
+    if names["exit_snapshots"]["tier"] != "cold":
+        raise AssertionError("exit_snapshots should be cold archival data")
 
 
 if __name__ == "__main__":

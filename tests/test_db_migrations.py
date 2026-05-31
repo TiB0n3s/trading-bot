@@ -329,6 +329,41 @@ def test_canonical_intelligence_migration_adds_columns():
         assert_true(expected <= table_columns(db_path, "decision_snapshots"), "canonical intelligence columns")
 
 
+def test_canonical_exit_snapshot_migration_creates_table():
+    with tempfile.TemporaryDirectory() as tmp:
+        db_path = Path(tmp) / "test.db"
+
+        migration = next(
+            m
+            for m in MIGRATIONS
+            if m.migration_id == "20260531_018_canonical_exit_snapshots"
+        )
+        applied = apply_migration(migration, db_path)
+        assert_equal(applied, True, "apply")
+
+        expected = {
+            "exit_trade_id",
+            "matched_trade_id",
+            "symbol",
+            "exit_timestamp",
+            "exit_trigger",
+            "exit_source",
+            "realized_pnl",
+            "realized_return_pct",
+            "mfe_pct",
+            "capture_ratio",
+            "avoided_drawdown_pct",
+            "missed_upside_pct",
+            "post_exit_return_30m_pct",
+            "post_exit_return_60m_pct",
+            "canonical_exit_version",
+            "canonical_exit_hash",
+            "canonical_exit_json",
+            "canonical_intelligence_hash",
+        }
+        assert_true(expected <= table_columns(db_path, "exit_snapshots"), "canonical exit snapshot columns")
+
+
 if __name__ == "__main__":
     test_feature_audit_migration_is_idempotent()
     print("[OK] test_feature_audit_migration_is_idempotent")
@@ -354,4 +389,6 @@ if __name__ == "__main__":
     print("[OK] test_decision_snapshot_feature_parity_migration_adds_columns")
     test_canonical_intelligence_migration_adds_columns()
     print("[OK] test_canonical_intelligence_migration_adds_columns")
-    print("\nAll 12 DB migration tests passed.")
+    test_canonical_exit_snapshot_migration_creates_table()
+    print("[OK] test_canonical_exit_snapshot_migration_creates_table")
+    print("\nAll 13 DB migration tests passed.")

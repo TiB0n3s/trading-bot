@@ -443,6 +443,44 @@ MIGRATIONS: tuple[Migration, ...] = (
             "ALTER TABLE decision_snapshots ADD COLUMN canonical_intelligence_json TEXT",
         ),
     ),
+    Migration(
+        migration_id="20260531_018_canonical_exit_snapshots",
+        description="Create canonical exit snapshots for exit learning and post-exit review.",
+        statements=(
+            """
+            CREATE TABLE IF NOT EXISTS exit_snapshots (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                created_at TEXT NOT NULL,
+                exit_trade_id INTEGER,
+                matched_trade_id INTEGER,
+                symbol TEXT,
+                exit_timestamp TEXT,
+                exit_trigger TEXT,
+                exit_source TEXT,
+                realized_pnl REAL,
+                realized_return_pct REAL,
+                mfe_pct REAL,
+                capture_ratio REAL,
+                avoided_drawdown_pct REAL,
+                missed_upside_pct REAL,
+                post_exit_return_30m_pct REAL,
+                post_exit_return_60m_pct REAL,
+                canonical_exit_version TEXT NOT NULL,
+                canonical_exit_hash TEXT NOT NULL,
+                canonical_exit_json TEXT NOT NULL,
+                canonical_intelligence_hash TEXT
+            )
+            """,
+            """
+            CREATE INDEX IF NOT EXISTS idx_exit_snapshots_symbol_time
+            ON exit_snapshots(symbol, exit_timestamp)
+            """,
+            """
+            CREATE INDEX IF NOT EXISTS idx_exit_snapshots_trade
+            ON exit_snapshots(exit_trade_id, matched_trade_id)
+            """,
+        ),
+    ),
 )
 
 

@@ -66,6 +66,7 @@ def _deps(**overrides):
         "hydrate_recent_sells": step("recent-sells"),
         "load_market_context": step("market-context"),
         "env_get": lambda _key: "set",
+        "ml_authority_config": MagicMock(return_value={"authority_mode": "observe_only_compare"}),
     }
     base.update(overrides)
     return StartupDeps(**base), calls, logger
@@ -81,6 +82,14 @@ def test_startup_service_runs_all_steps_even_when_one_fails():
     assert_true("core" in calls, "early step ran")
     assert_true("market-context" in calls, "later step ran after failure")
     assert_true(logger.error.called, "failure logged")
+    assert_true(logger.info.called, "startup info logged")
+    assert_true(
+        any(
+            "ML authority config at startup" in str(call.args[0])
+            for call in logger.info.call_args_list
+        ),
+        "ML authority config logged",
+    )
 
 
 def test_startup_reconcile_reports_position_mismatches():

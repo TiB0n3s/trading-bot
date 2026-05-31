@@ -13,6 +13,12 @@ from pathlib import Path
 from typing import Any
 
 from policy_artifacts import policy_artifacts_enabled
+from setup_policy import (
+    FAVORABLE_LABELS,
+    HARD_AVOID_LABELS,
+    NEUTRAL_LABELS,
+    WATCH_LABELS,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -30,6 +36,38 @@ class StrategyMemoryRecommendation(str, Enum):
     OBSERVE = "observe"
     FAVOR = "favor"
     NONE = "none"
+
+
+ALLOWED_SETUP_LABELS = frozenset(
+    HARD_AVOID_LABELS | FAVORABLE_LABELS | WATCH_LABELS | NEUTRAL_LABELS | {"unknown"}
+)
+ALLOWED_PREDICTION_DECISIONS = frozenset({"pass", "watch", "block", "none", "unknown"})
+ALLOWED_BUY_OPPORTUNITY_RECOMMENDATIONS = frozenset(
+    {
+        "strong_buy_candidate",
+        "small_buy_candidate",
+        "buy_candidate",
+        "neutral",
+        "watch",
+        "avoid",
+        "none",
+        "unknown",
+    }
+)
+ALLOWED_SESSION_TREND_LABELS = frozenset(
+    {
+        "strong_uptrend",
+        "developing_uptrend",
+        "reversal_attempt",
+        "downtrend",
+        "fading",
+        "rangebound",
+        "insufficient_data",
+        "disabled",
+        "none",
+        "unknown",
+    }
+)
 
 
 @dataclass(frozen=True)
@@ -50,11 +88,42 @@ class StrategyMemoryContext:
         }
 
 
-def _clean_context_value(value: Any) -> str:
+def _as_dict(value: Any, field_name: str) -> dict[str, Any]:
+    if value is None:
+        return {}
+    if isinstance(value, dict):
+        return value
+    logger.warning(
+        "Strategy memory context normalized malformed %s container to unknown: %r",
+        field_name,
+        type(value).__name__,
+    )
+    return {}
+
+
+def _clean_context_value(
+    value: Any,
+    *,
+    field_name: str,
+    allowed_values: frozenset[str],
+) -> str:
     if value is None:
         return "unknown"
     text = str(value).strip()
-    return text if text else "unknown"
+    if not text:
+        logger.warning(
+            "Strategy memory context normalized blank %s to unknown",
+            field_name,
+        )
+        return "unknown"
+    if text not in allowed_values:
+        logger.warning(
+            "Strategy memory context normalized unsupported %s=%r to unknown",
+            field_name,
+            text,
+        )
+        return "unknown"
+    return text
 
 
 def _load_strategy_memory():
@@ -103,39 +172,80 @@ def _worst_recommendation(recommendations):
 def normalize_strategy_memory_context(signal_context) -> StrategyMemoryContext:
     ctx = signal_context or {}
     if not isinstance(ctx, dict):
+        logger.warning(
+            "Strategy memory context normalized malformed root context to unknown: %r",
+            type(signal_context).__name__,
+        )
         return StrategyMemoryContext()
-    setup_obs = ctx.get("setup_observation") or {}
-    setup_quality = ctx.get("setup_quality") or setup_obs.get("setup_quality") or {}
-    buy_opportunity = ctx.get("buy_opportunity") or {}
-    prediction = ctx.get("prediction") or ctx.get("prediction_gate") or {}
-    session = ctx.get("session_momentum") or {}
+    setup_obs = _as_dict(ctx.get("setup_observation"), "setup_observation")
+    setup_quality = _as_dict(
+        ctx.get("setup_quality") or setup_obs.get("setup_quality"),
+        "setup_quality",
+    )
+    setup_quality_outcome = _as_dict(
+        ctx.get("setup_quality_outcome"),
+        "setup_quality_outcome",
+    )
+    buy_opportunity = _as_dict(ctx.get("buy_opportunity"), "buy_opportunity")
+    opportunity_observation = _as_dict(
+        ctx.get("opportunity_observation"),
+        "opportunity_observation",
+    )
+    prediction = _as_dict(
+        ctx.get("prediction") or ctx.get("prediction_gate"),
+        "prediction",
+    )
+    prediction_state = _as_dict(ctx.get("prediction_state"), "prediction_state")
+    prediction_observation = _as_dict(
+        ctx.get("prediction_observation"),
+        "prediction_observation",
+    )
+    session = _as_dict(ctx.get("session_momentum"), "session_momentum")
+    session_observation = _as_dict(
+        ctx.get("session_observation"),
+        "session_observation",
+    )
 
     return StrategyMemoryContext(
         setup_label=_clean_context_value(
             (
                 setup_obs.get("setup_label")
                 or setup_quality.get("label")
+                or setup_quality_outcome.get("label")
                 or ctx.get("setup_label")
-            )
+            ),
+            field_name="setup_label",
+            allowed_values=ALLOWED_SETUP_LABELS,
         ),
         prediction_decision=_clean_context_value(
             (
                 prediction.get("prediction_decision")
+                or prediction.get("decision")
+                or prediction_state.get("deterministic_decision")
+                or prediction_observation.get("decision")
                 or ctx.get("prediction_decision")
-            )
+            ),
+            field_name="prediction_decision",
+            allowed_values=ALLOWED_PREDICTION_DECISIONS,
         ),
         buy_opportunity_recommendation=_clean_context_value(
             (
                 buy_opportunity.get("buy_opportunity_recommendation")
                 or buy_opportunity.get("recommendation")
+                or opportunity_observation.get("recommendation")
                 or ctx.get("buy_opportunity_recommendation")
-            )
+            ),
+            field_name="buy_opportunity_recommendation",
+            allowed_values=ALLOWED_BUY_OPPORTUNITY_RECOMMENDATIONS,
         ),
         session_trend_label=_clean_context_value(
             (
                 session.get("trend_label")
+                or session_observation.get("label")
                 or ctx.get("session_trend_label")
-            )
+            ),
+            field_name="session_trend_label",
+            allowed_values=ALLOWED_SESSION_TREND_LABELS,
         ),
     )
 
@@ -259,16 +369,38 @@ def contextual_memory_for_signal(symbol, intelligence_context=None, memory_overr
 
     symbol = (symbol or "").upper()
     ctx = intelligence_context or {}
+    if not isinstance(ctx, dict):
+        logger.warning(
+            "Strategy memory context normalized malformed intelligence context to unknown: %r",
+            type(intelligence_context).__name__,
+        )
+        ctx = {}
 
-    setup = ctx.get("setup") or {}
-    prediction = ctx.get("prediction") or {}
-    buy_opp = ctx.get("buy_opportunity") or {}
-    session = ctx.get("session_momentum") or {}
+    setup = _as_dict(ctx.get("setup"), "setup")
+    prediction = _as_dict(ctx.get("prediction"), "prediction")
+    buy_opp = _as_dict(ctx.get("buy_opportunity"), "buy_opportunity")
+    session = _as_dict(ctx.get("session_momentum"), "session_momentum")
 
-    setup_label = setup.get("setup_label") or "unknown"
-    prediction_decision = prediction.get("prediction_decision") or "unknown"
-    buy_opp_rec = buy_opp.get("buy_opportunity_recommendation") or "unknown"
-    session_label = session.get("trend_label") or "unknown"
+    setup_label = _clean_context_value(
+        setup.get("setup_label"),
+        field_name="setup_label",
+        allowed_values=ALLOWED_SETUP_LABELS,
+    )
+    prediction_decision = _clean_context_value(
+        prediction.get("prediction_decision"),
+        field_name="prediction_decision",
+        allowed_values=ALLOWED_PREDICTION_DECISIONS,
+    )
+    buy_opp_rec = _clean_context_value(
+        buy_opp.get("buy_opportunity_recommendation"),
+        field_name="buy_opportunity_recommendation",
+        allowed_values=ALLOWED_BUY_OPPORTUNITY_RECOMMENDATIONS,
+    )
+    session_label = _clean_context_value(
+        session.get("trend_label"),
+        field_name="session_trend_label",
+        allowed_values=ALLOWED_SESSION_TREND_LABELS,
+    )
 
     lookups = [
         ("symbol", "symbols", symbol),

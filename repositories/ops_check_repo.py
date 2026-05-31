@@ -222,8 +222,13 @@ class OpsCheckRepository:
         columns = self.table_columns("decision_snapshots")
         if "account_state_json" not in columns:
             return []
+        canonical_expr = (
+            "canonical_intelligence_json"
+            if "canonical_intelligence_json" in columns
+            else "NULL AS canonical_intelligence_json"
+        )
         return self._fetchall(
-            """
+            f"""
             SELECT
                 id,
                 decision_time,
@@ -232,7 +237,8 @@ class OpsCheckRepository:
                 approved,
                 final_decision,
                 rejection_reason,
-                account_state_json
+                account_state_json,
+                {canonical_expr}
             FROM decision_snapshots
             WHERE substr(decision_time, 1, 10) = ?
               AND LOWER(COALESCE(action, '')) IN ('buy', 'sell')

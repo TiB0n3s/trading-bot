@@ -29,6 +29,95 @@ def _increment_if(counter: Counter, key: str, condition: bool) -> None:
         counter[key] += 1
 
 
+def _canonical_authority_state(row: dict[str, Any]) -> dict[str, Any]:
+    canonical = _load_json(row.get("canonical_intelligence_json"))
+    state = canonical.get("advisory_authority_state") if canonical else None
+    return state if isinstance(state, dict) else {}
+
+
+def _outcome(
+    authority_state: dict[str, Any],
+    key: str,
+    fallback: dict[str, Any],
+) -> dict[str, Any]:
+    normalized = authority_state.get(key)
+    if isinstance(normalized, dict) and normalized:
+        return normalized
+    return fallback
+
+
+def _legacy_decision_policy_outcome(account_state: dict[str, Any]) -> dict[str, Any]:
+    # Compatibility only: new reports should consume decision_policy_outcome.
+    authority = account_state.get("decision_policy_authority") or {}
+    decision_policy = account_state.get("decision_policy") or {}
+    decision = decision_policy.get("decision")
+    size_down_applied = bool(account_state.get("decision_policy_size_down"))
+    return {
+        "advisory_decision": decision,
+        "authority_mode": authority.get("authority_mode") or "unknown",
+        "enforced": bool(size_down_applied),
+        "effect_on_size": "size_down" if size_down_applied else "none",
+        "effect_on_execution": "none",
+        "reason": decision_policy.get("reason"),
+    }
+
+
+def _legacy_ml_outcome(account_state: dict[str, Any]) -> dict[str, Any]:
+    # Compatibility only: new reports should consume ml_outcome.
+    prediction_gate = account_state.get("prediction_gate") or {}
+    ml_authority = account_state.get("ml_authority") or prediction_gate.get("ml_authority") or {}
+    mode = ml_authority.get("authority_mode", ml_authority.get("mode")) or "unknown"
+    advisory_decision = prediction_gate.get("ml_prediction_compare_decision")
+    if ml_authority.get("advisory_decision") is not None:
+        advisory_decision = ml_authority.get("advisory_decision")
+    return {
+        "advisory_decision": advisory_decision,
+        "authority_mode": mode,
+        "qualified_for_authority": bool(ml_authority.get("qualified_for_authority")),
+        "enforced": bool(ml_authority.get("enforced")),
+        "effect_on_size": ml_authority.get("effect_on_size") or "none",
+        "effect_on_execution": ml_authority.get("effect_on_execution") or "none",
+        "would_block_under_promoted_mode": bool(
+            ml_authority.get("would_block_under_promoted_mode")
+        ),
+        "safety_check_passed": ml_authority.get("safety_check_passed", True),
+        "reason": ml_authority.get("reason"),
+    }
+
+
+def _legacy_session_gate_outcome(account_state: dict[str, Any]) -> dict[str, Any]:
+    # Compatibility only: new reports should consume session_gate_outcome.
+    session_gate = account_state.get("session_momentum_gate") or {}
+    would_block = bool(session_gate.get("would_block"))
+    return {
+        "advisory_decision": "block" if would_block else session_gate.get("severity"),
+        "authority_mode": "legacy_unknown",
+        "enforced": False,
+        "effect_on_size": "cap"
+        if session_gate.get("severity") in ("soft_negative", "reversal_caution", "hard_negative")
+        else "none",
+        "effect_on_execution": "none",
+        "reason": session_gate.get("reason"),
+    }
+
+
+def _legacy_setup_quality_outcome(account_state: dict[str, Any]) -> dict[str, Any]:
+    # Compatibility only: new reports should consume setup_quality_outcome.
+    setup_quality = account_state.get("setup_quality") or {}
+    return {
+        "advisory_decision": setup_quality.get("recommendation"),
+        "authority_mode": "legacy_context",
+        "enforced": False,
+        "effect_on_size": "none",
+        "effect_on_execution": "none",
+        "label": setup_quality.get("label"),
+        "score": setup_quality.get("score"),
+        "confidence": setup_quality.get("confidence"),
+        "source": setup_quality.get("source"),
+        "fallback": setup_quality.get("fallback"),
+    }
+
+
 def run_advisory_authority_report(target_date: str, *, base_dir: Path) -> bool:
     print()
     print("=" * 72)
@@ -53,52 +142,81 @@ def run_advisory_authority_report(target_date: str, *, base_dir: Path) -> bool:
 
     for row in rows:
         account_state = _load_json(row.get("account_state_json"))
+        authority_state = _canonical_authority_state(row)
         approved = _is_approved(row)
         action = (row.get("action") or "").lower()
         counts["rows"] += 1
         _increment_if(counts, "buy_rows", action == "buy")
         _increment_if(counts, "approved_rows", approved)
 
-        authority = account_state.get("decision_policy_authority") or {}
-        mode = authority.get("authority_mode") or "unknown"
+        decision_policy_outcome = _outcome(
+            authority_state,
+            "decision_policy_outcome",
+            _legacy_decision_policy_outcome(account_state),
+        )
+        mode = decision_policy_outcome.get("authority_mode") or "unknown"
         mode_counts[mode] += 1
 
-        decision_policy = account_state.get("decision_policy") or {}
-        decision_policy_decision = decision_policy.get("decision")
-        dp_block = action == "buy" and decision_policy_decision == "block"
-        dp_size_down = action == "buy" and decision_policy_decision == "size_down"
-        dp_size_down_applied = bool(account_state.get("decision_policy_size_down"))
+        dp_decision = decision_policy_outcome.get("advisory_decision")
+        dp_block = action == "buy" and dp_decision == "block"
+        dp_size_down = action == "buy" and dp_decision == "size_down"
+        dp_size_down_applied = bool(
+            decision_policy_outcome.get("enforced")
+            and decision_policy_outcome.get("effect_on_size") in ("size_down", "cap")
+        )
 
-        prediction_gate = account_state.get("prediction_gate") or {}
-        ml_runtime_effect = prediction_gate.get("ml_prediction_runtime_effect")
-        ml_compare = prediction_gate.get("ml_prediction_compare_decision")
-        ml_authority = account_state.get("ml_authority") or prediction_gate.get("ml_authority") or {}
-        ml_authority_mode = ml_authority.get("authority_mode", ml_authority.get("mode")) or "unknown"
+        ml_outcome = _outcome(
+            authority_state,
+            "ml_outcome",
+            _legacy_ml_outcome(account_state),
+        )
+        ml_compare = ml_outcome.get("advisory_decision")
+        ml_authority_mode = ml_outcome.get("authority_mode") or "unknown"
         if action == "buy":
             ml_mode_counts[ml_authority_mode] += 1
-        ml_negative = (
-            action == "buy"
-            and ml_runtime_effect == "observe_only_compare"
-            and ml_compare in ("avoid", "block", "caution")
-        )
+        ml_negative = action == "buy" and ml_compare in ("avoid", "block", "caution")
         ml_ignored_by_design = (
             ml_negative
             and ml_authority_mode == "observe_only_compare"
+            and not ml_outcome.get("enforced")
         )
-        ml_would_block_promoted = (
+        ml_would_block_under_promoted_mode = (
             action == "buy"
-            and bool(ml_authority.get("would_block_under_promoted_mode"))
+            and bool(ml_outcome.get("would_block_under_promoted_mode"))
         )
-        ml_enforced = action == "buy" and bool(ml_authority.get("enforced"))
-        ml_size_down = ml_enforced and ml_authority.get("effect_on_size") == "cap"
-        ml_block_enforced = ml_enforced and ml_authority.get("effect_on_execution") == "block"
+        ml_qualified = action == "buy" and bool(ml_outcome.get("qualified_for_authority"))
+        ml_enforced = action == "buy" and bool(ml_outcome.get("enforced"))
+        ml_size_down = ml_enforced and ml_outcome.get("effect_on_size") == "cap"
+        ml_block_enforced = ml_enforced and ml_outcome.get("effect_on_execution") == "block"
+        ml_not_enforced_due_to_mode = (
+            ml_qualified
+            and not ml_enforced
+            and ml_authority_mode in ("observe_only_compare", "paper_block")
+        )
+        ml_live_block_refused = (
+            ml_qualified
+            and not ml_enforced
+            and ml_authority_mode == "live_block"
+            and not ml_outcome.get("safety_check_passed", True)
+        )
 
-        session_gate = account_state.get("session_momentum_gate") or {}
-        session_would_block = action == "buy" and bool(session_gate.get("would_block"))
+        session_outcome = _outcome(
+            authority_state,
+            "session_gate_outcome",
+            _legacy_session_gate_outcome(account_state),
+        )
+        session_would_block = (
+            action == "buy"
+            and session_outcome.get("advisory_decision") == "block"
+        )
 
-        setup_quality = account_state.get("setup_quality") or {}
-        setup_score = setup_quality.get("score")
-        setup_recommendation = setup_quality.get("recommendation")
+        setup_outcome = _outcome(
+            authority_state,
+            "setup_quality_outcome",
+            _legacy_setup_quality_outcome(account_state),
+        )
+        setup_score = setup_outcome.get("score")
+        setup_recommendation = setup_outcome.get("advisory_decision")
         weak_setup = (
             action == "buy"
             and (
@@ -118,7 +236,14 @@ def run_advisory_authority_report(target_date: str, *, base_dir: Path) -> bool:
         _increment_if(counts, "ml_negative_compare_advisory", ml_negative)
         _increment_if(counts, "ml_negative_compare_but_approved", ml_negative and approved)
         _increment_if(counts, "ml_negative_compare_ignored_by_design", ml_ignored_by_design)
-        _increment_if(counts, "ml_negative_compare_would_block_promoted", ml_would_block_promoted)
+        _increment_if(
+            counts,
+            "ml_negative_compare_would_block_under_promoted_mode",
+            ml_would_block_under_promoted_mode,
+        )
+        _increment_if(counts, "ml_authority_qualified", ml_qualified)
+        _increment_if(counts, "ml_authority_not_enforced_due_to_mode", ml_not_enforced_due_to_mode)
+        _increment_if(counts, "ml_authority_live_block_refused", ml_live_block_refused)
         _increment_if(counts, "ml_authority_triggered", ml_enforced)
         _increment_if(counts, "ml_authority_size_down", ml_size_down)
         _increment_if(counts, "ml_authority_block_enforced", ml_block_enforced)
@@ -169,7 +294,7 @@ def run_advisory_authority_report(target_date: str, *, base_dir: Path) -> bool:
         "ml_negative_compare_advisory",
         "ml_negative_compare_but_approved",
         "ml_negative_compare_ignored_by_design",
-        "ml_negative_compare_would_block_promoted",
+        "ml_negative_compare_would_block_under_promoted_mode",
         "ml_authority_triggered",
         "ml_authority_size_down",
         "ml_authority_block_enforced",
@@ -177,6 +302,17 @@ def run_advisory_authority_report(target_date: str, *, base_dir: Path) -> bool:
         "session_would_block_but_approved",
         "weak_setup_quality_advisory",
         "weak_setup_quality_but_approved",
+    ):
+        print(f"  {key:<42} {counts[key]:5d}")
+
+    print()
+    print("ML authority promotion checklist")
+    for key in (
+        "ml_authority_qualified",
+        "ml_authority_not_enforced_due_to_mode",
+        "ml_authority_live_block_refused",
+        "ml_authority_block_enforced",
+        "ml_authority_size_down",
     ):
         print(f"  {key:<42} {counts[key]:5d}")
 

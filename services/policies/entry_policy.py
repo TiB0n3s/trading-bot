@@ -214,6 +214,7 @@ def evaluate_signal_quality_gate(
         "ml_prediction_sample_size": (ml_prediction or {}).get("sample_size"),
         "ml_prediction_reason": (ml_prediction or {}).get("reason"),
         "ml_prediction_provider": (ml_prediction or {}).get("provider"),
+        "ml_prediction_generated_at": (ml_prediction or {}).get("prediction_generated_at"),
         "ml_prediction_runtime_effect": "observe_only_compare",
         "ml_prediction_compare_decision": ml_compare_decision,
         "ml_prediction_agrees_with_gate": ml_agrees,

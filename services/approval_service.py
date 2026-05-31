@@ -62,6 +62,8 @@ class MLAuthorityOutcome:
     prediction_age_seconds: float | None
     max_age_seconds: int
     would_block_under_promoted_mode: bool
+    safety_check_passed: bool
+    safety_blockers: list[str] = field(default_factory=list)
     size_cap_pct: float | None = None
 
     def to_dict(self) -> dict[str, Any]:
@@ -82,6 +84,8 @@ class MLAuthorityOutcome:
             "prediction_age_seconds": self.prediction_age_seconds,
             "max_age_seconds": self.max_age_seconds,
             "would_block_under_promoted_mode": self.would_block_under_promoted_mode,
+            "safety_check_passed": self.safety_check_passed,
+            "safety_blockers": list(self.safety_blockers),
             "size_cap_pct": self.size_cap_pct,
         }
 
@@ -224,19 +228,38 @@ def _parse_ml_prediction_timestamp(value: Any) -> datetime | None:
 
 
 def _ml_prediction_age_seconds(ml_prediction: dict[str, Any]) -> float | None:
-    for key in (
-        "prediction_timestamp",
-        "prediction_time",
-        "generated_at",
-        "created_at",
-        "updated_at",
-        "market_date",
-        "date",
-    ):
-        parsed = _parse_ml_prediction_timestamp(ml_prediction.get(key))
-        if parsed is not None:
-            return max(0.0, (datetime.now(timezone.utc) - parsed).total_seconds())
-    return None
+    parsed = _parse_ml_prediction_timestamp(
+        (ml_prediction or {}).get("prediction_generated_at")
+    )
+    if parsed is None:
+        return None
+    return max(0.0, (datetime.now(timezone.utc) - parsed).total_seconds())
+
+
+def _ml_authority_safety_blockers(
+    *,
+    mode: str,
+    execution_mode: str,
+    min_sample_size: int,
+    min_confidence: str,
+    max_age_seconds: int,
+    prediction_age_seconds: float | None,
+) -> list[str]:
+    if mode != "live_block":
+        return []
+
+    blockers = []
+    if execution_mode not in {"cash_safe", "cash_full"}:
+        blockers.append(f"execution_mode={execution_mode} is not live-compatible")
+    if min_sample_size < 20:
+        blockers.append(f"min_sample_size={min_sample_size} below safe floor 20")
+    if _ML_CONFIDENCE_RANK.get(min_confidence, -1) < _ML_CONFIDENCE_RANK["medium"]:
+        blockers.append(f"min_confidence={min_confidence} below medium")
+    if max_age_seconds <= 0:
+        blockers.append("max_age_seconds must be > 0 for live_block")
+    if prediction_age_seconds is None:
+        blockers.append("prediction freshness timestamp missing")
+    return blockers
 
 
 def evaluate_ml_authority_outcome(
@@ -279,6 +302,15 @@ def evaluate_ml_authority_outcome(
 
     max_age_seconds = int(config.get("max_age_seconds") or 0)
     age_seconds = _ml_prediction_age_seconds(ml_prediction or {})
+    safety_blockers = _ml_authority_safety_blockers(
+        mode=mode,
+        execution_mode=execution_mode,
+        min_sample_size=min_sample_size,
+        min_confidence=min_confidence,
+        max_age_seconds=max_age_seconds,
+        prediction_age_seconds=age_seconds,
+    )
+    safety_check_passed = not safety_blockers
     recency_ok = max_age_seconds <= 0 or (
         age_seconds is not None and age_seconds <= max_age_seconds
     )
@@ -300,6 +332,8 @@ def evaluate_ml_authority_outcome(
         reason_parts.append(
             f"prediction_age_seconds={age_seconds} > max_age_seconds={max_age_seconds}"
         )
+    if safety_blockers:
+        reason_parts.append("live_block refused: " + "; ".join(safety_blockers))
     if not reason_parts:
         reason_parts.append("qualified negative ML compare")
 
@@ -319,9 +353,11 @@ def evaluate_ml_authority_outcome(
                 effect_on_execution = "block"
             else:
                 reason_parts.append("paper_block not enforced outside paper/dry_run")
-        elif mode == "live_block":
+        elif mode == "live_block" and safety_check_passed:
             enforced = True
             effect_on_execution = "block"
+        elif mode == "live_block":
+            reason_parts.append("live_block kill-switch held enforcement disabled")
         elif mode == "observe_only_compare":
             reason_parts.append("negative compare ignored by design in observe_only_compare")
 
@@ -341,6 +377,8 @@ def evaluate_ml_authority_outcome(
         prediction_age_seconds=age_seconds,
         max_age_seconds=max_age_seconds,
         would_block_under_promoted_mode=would_block_under_promoted_mode,
+        safety_check_passed=safety_check_passed,
+        safety_blockers=safety_blockers,
         size_cap_pct=size_cap_pct,
     )
 
@@ -1059,9 +1097,18 @@ def run_prediction_session_tape_gates(
     account_state["ml_outcome"] = {
         "advisory_decision": ml_authority.advisory_decision,
         "authority_mode": ml_authority.mode,
+        "qualified_for_authority": ml_authority.qualified_for_authority,
         "enforced": ml_authority.enforced,
         "effect_on_size": ml_authority.effect_on_size,
         "effect_on_execution": ml_authority.effect_on_execution,
+        "would_block_under_promoted_mode": ml_authority.would_block_under_promoted_mode,
+        "safety_check_passed": ml_authority.safety_check_passed,
+        "safety_blockers": list(ml_authority.safety_blockers),
+        "size_cap_pct": ml_authority.size_cap_pct,
+        "sample_size": ml_authority.sample_size,
+        "confidence": ml_authority.confidence,
+        "prediction_age_seconds": ml_authority.prediction_age_seconds,
+        "max_age_seconds": ml_authority.max_age_seconds,
         "reason": ml_authority.reason,
     }
     account_state["ml_authority"] = ml_authority_payload
@@ -1413,6 +1460,7 @@ def run_final_approval_gates(
                 "buy_opportunity": account_state.get("buy_opportunity") or {},
                 "setup_observation": account_state.get("setup_observation") or {},
                 "setup_quality": account_state.get("setup_quality") or {},
+                "setup_quality_outcome": account_state.get("setup_quality_outcome") or {},
                 "prediction_gate": account_state.get("prediction_gate") or {},
                 "session_momentum": account_state.get("session_momentum") or {},
             },

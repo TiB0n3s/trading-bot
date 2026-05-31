@@ -165,6 +165,7 @@ def apply_buy_opportunity_sizing(
             and session_severity in ("pass", None)
             and setup_action in ("boost", "allow", "neutral")
             and account_state.get("max_position_size_pct_override") is None
+            and not account_state.get("setup_quality_size_cap")
         )
         if has_strong_context:
             lift_mult = env_float("BUY_OPPORTUNITY_STRONG_CONVICTION_LIFT_MULT", 1.10)

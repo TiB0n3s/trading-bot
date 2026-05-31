@@ -83,6 +83,12 @@ def build_setup_observation(
             "effect_on_size": "multiplier"
             if setup_policy.get("setup_size_multiplier") not in (None, 1, 1.0)
             else "none",
+            "effect_on_execution": "block"
+            if setup_policy.get("setup_policy_action") == "block"
+            else "none",
+            "label": setup_quality.get("label"),
+            "score": setup_quality.get("score"),
+            "confidence": setup_quality.get("confidence"),
             "reason": setup_policy.get("reason"),
             "source": setup_quality_source,
             "fallback": setup_quality_source != "setup_engine",
@@ -130,6 +136,10 @@ def build_setup_observation(
             "authority_mode": "advisory_context",
             "enforced": False,
             "effect_on_size": "none",
+            "effect_on_execution": "none",
+            "label": None,
+            "score": None,
+            "confidence": None,
             "reason": unknown_reason,
             "source": "setup_error",
             "fallback": True,

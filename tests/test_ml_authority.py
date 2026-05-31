@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import sys
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -100,7 +101,7 @@ def test_authority_requires_sample_confidence_and_optional_recency():
     )
     stale = evaluate_ml_authority_outcome(
         prediction_gate=_gate(),
-        ml_prediction={"generated_at": "2020-01-01T00:00:00+00:00"},
+        ml_prediction={"prediction_generated_at": "2020-01-01T00:00:00+00:00"},
         ml_authority_config=_config(authority_mode="live_block", max_age_seconds=60),
         execution_mode="cash_full",
     )
@@ -113,12 +114,77 @@ def test_authority_requires_sample_confidence_and_optional_recency():
     assert stale.enforced is False
 
 
+def test_live_block_requires_safe_runtime_and_freshness_config():
+    unsafe = evaluate_ml_authority_outcome(
+        prediction_gate=_gate(),
+        ml_prediction={},
+        ml_authority_config=_config(authority_mode="live_block", max_age_seconds=0),
+        execution_mode="paper",
+    )
+    safe = evaluate_ml_authority_outcome(
+        prediction_gate=_gate(),
+        ml_prediction={"prediction_generated_at": "2999-01-01T00:00:00+00:00"},
+        ml_authority_config=_config(authority_mode="live_block", max_age_seconds=3600),
+        execution_mode="cash_full",
+    )
+
+    assert unsafe.qualified_for_authority is True
+    assert unsafe.enforced is False
+    assert unsafe.safety_check_passed is False
+    assert any("not live-compatible" in blocker for blocker in unsafe.safety_blockers)
+    assert any("max_age_seconds" in blocker for blocker in unsafe.safety_blockers)
+    assert any("freshness timestamp missing" in blocker for blocker in unsafe.safety_blockers)
+    assert safe.enforced is True
+    assert safe.effect_on_execution == "block"
+
+
+def test_recency_uses_only_canonical_prediction_generated_at():
+    legacy_only = evaluate_ml_authority_outcome(
+        prediction_gate=_gate(),
+        ml_prediction={"generated_at": "2999-01-01T00:00:00+00:00"},
+        ml_authority_config=_config(authority_mode="live_block", max_age_seconds=3600),
+        execution_mode="cash_full",
+    )
+
+    assert legacy_only.qualified_for_authority is False
+    assert legacy_only.enforced is False
+    assert any("freshness timestamp missing" in blocker for blocker in legacy_only.safety_blockers)
+
+
+def test_recency_handles_naive_and_timezone_aware_canonical_timestamps():
+    aware_fresh = (datetime.now(timezone.utc) - timedelta(seconds=30)).isoformat()
+    naive_fresh = (
+        datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(seconds=30)
+    ).isoformat()
+
+    aware = evaluate_ml_authority_outcome(
+        prediction_gate=_gate(),
+        ml_prediction={"prediction_generated_at": aware_fresh},
+        ml_authority_config=_config(authority_mode="live_block", max_age_seconds=3600),
+        execution_mode="cash_full",
+    )
+    naive = evaluate_ml_authority_outcome(
+        prediction_gate=_gate(),
+        ml_prediction={"prediction_generated_at": naive_fresh},
+        ml_authority_config=_config(authority_mode="live_block", max_age_seconds=3600),
+        execution_mode="cash_full",
+    )
+
+    assert aware.enforced is True
+    assert aware.prediction_age_seconds is not None
+    assert naive.enforced is True
+    assert naive.prediction_age_seconds is not None
+
+
 def main():
     tests = [
         test_observe_mode_records_negative_compare_without_enforcement,
         test_size_down_mode_enforces_size_cap_only,
         test_paper_block_mode_only_blocks_paper_execution_modes,
         test_authority_requires_sample_confidence_and_optional_recency,
+        test_live_block_requires_safe_runtime_and_freshness_config,
+        test_recency_uses_only_canonical_prediction_generated_at,
+        test_recency_handles_naive_and_timezone_aware_canonical_timestamps,
     ]
     for test in tests:
         test()

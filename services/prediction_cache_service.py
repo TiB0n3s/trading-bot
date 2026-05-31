@@ -64,6 +64,7 @@ class PredictionCacheService:
             if not symbol:
                 continue
             item["symbol"] = symbol
+            item["prediction_generated_at"] = item.get("prediction_generated_at")
             item["cache_loaded_at"] = loaded_at
             item["provider"] = "daily_symbol_predictions_ttl_cache"
             item["runtime_effect"] = "observe_only_compare"

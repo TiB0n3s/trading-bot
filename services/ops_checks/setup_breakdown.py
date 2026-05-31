@@ -6,8 +6,11 @@ from pathlib import Path
 from typing import Any
 
 from repositories.ops_check_repo import OpsCheckRepository
+from services.observability import setup_quality_degradation_category
 
 EM_DASH = "\u2014"
+SETUP_FALLBACK_WARN_COUNT = 1
+SETUP_FALLBACK_WARN_RATE_PCT = 5.0
 
 
 def _load_json(raw: str | None) -> dict[str, Any]:
@@ -18,6 +21,24 @@ def _load_json(raw: str | None) -> dict[str, Any]:
         return loaded if isinstance(loaded, dict) else {}
     except Exception:
         return {}
+
+
+def _setup_source_from_snapshot(row) -> str:
+    canonical = _load_json(row["canonical_intelligence_json"]) if "canonical_intelligence_json" in row.keys() else {}
+    authority_state = canonical.get("advisory_authority_state") or {}
+    setup_outcome = authority_state.get("setup_quality_outcome") or {}
+    source = setup_outcome.get("source")
+    if source:
+        return source
+
+    account_state = _load_json(row["account_state_json"])
+    # Compatibility only: new snapshots should expose setup_quality_outcome.
+    setup_quality = account_state.get("setup_quality") or {}
+    return setup_quality.get("source") or "unknown"
+
+
+def _setup_degradation_type(source: str) -> str:
+    return setup_quality_degradation_category(source)
 
 
 def run_setup_breakdown(target_date: str, *, base_dir: Path) -> bool:
@@ -73,20 +94,59 @@ def run_setup_breakdown(target_date: str, *, base_dir: Path) -> bool:
     print()
     snapshot_rows = repo.decision_authority_rows(target_date)
     setup_source_counts = Counter()
+    setup_degradation_counts = Counter()
     setup_source_symbol_counts: Counter[tuple[str, str]] = Counter()
     buy_snapshot_count = 0
     for row in snapshot_rows:
         if (row["action"] or "").lower() != "buy":
             continue
         buy_snapshot_count += 1
-        account_state = _load_json(row["account_state_json"])
-        setup_quality = account_state.get("setup_quality") or {}
-        source = setup_quality.get("source") or "unknown"
+        source = _setup_source_from_snapshot(row)
+        degradation_type = _setup_degradation_type(source)
         setup_source_counts[source] += 1
-        if source != "setup_engine":
-            setup_source_symbol_counts[(row["symbol"] or "-", source)] += 1
+        setup_degradation_counts[degradation_type] += 1
+        if degradation_type != "ok":
+            setup_source_symbol_counts[(row["symbol"] or "-", degradation_type)] += 1
 
     if buy_snapshot_count:
+        fallback_total = buy_snapshot_count - setup_degradation_counts.get("ok", 0)
+        fallback_rate = 100.0 * fallback_total / buy_snapshot_count
+        print("  Setup quality fallback health (decision snapshots):")
+        print(f"  buy_snapshots              : {buy_snapshot_count}")
+        print(f"  fallback_count             : {fallback_total}")
+        print(f"  fallback_rate              : {fallback_rate:.1f}%")
+        if (
+            fallback_total >= SETUP_FALLBACK_WARN_COUNT
+            or fallback_rate >= SETUP_FALLBACK_WARN_RATE_PCT
+        ):
+            print(
+                "[WARN] setup_quality fallback degradation detected: "
+                f"count={fallback_total}, rate={fallback_rate:.1f}% "
+                f"(threshold count>={SETUP_FALLBACK_WARN_COUNT}, "
+                f"rate>={SETUP_FALLBACK_WARN_RATE_PCT:.1f}%)"
+            )
+        else:
+            print("[OK] setup_quality fallback rate within threshold")
+
+        print()
+        print("  Setup quality degradation types:")
+        print(f"  {'type':<28} {'signals':>7} {'rate%':>7}")
+        print(f"  {'-'*28} {'-'*7} {'-'*7}")
+        ordered_degradation_types = (
+            "setup_error",
+            "feature_snapshot_fallback",
+            "unknown",
+            "other_fallback",
+            "ok",
+        )
+        for degradation_type in ordered_degradation_types:
+            n = setup_degradation_counts.get(degradation_type, 0)
+            if not n and degradation_type == "ok" and fallback_total:
+                continue
+            rate = 100.0 * n / buy_snapshot_count
+            print(f"  {degradation_type:<28} {n:>7} {rate:>6.1f}%")
+
+        print()
         print("  Setup quality source breakdown (decision snapshots):")
         print(f"  {'source':<24} {'signals':>7} {'rate%':>7}")
         print(f"  {'-'*24} {'-'*7} {'-'*7}")
@@ -94,14 +154,13 @@ def run_setup_breakdown(target_date: str, *, base_dir: Path) -> bool:
             rate = 100.0 * n / buy_snapshot_count
             print(f"  {source:<24} {n:>7} {rate:>6.1f}%")
 
-        fallback_total = buy_snapshot_count - setup_source_counts.get("setup_engine", 0)
         if fallback_total:
             print()
             print("  Setup quality fallback by symbol (top 20):")
-            print(f"  {'symbol':<8} {'source':<20} {'signals':>7}")
-            print(f"  {'-'*8} {'-'*20} {'-'*7}")
-            for (symbol, source), n in setup_source_symbol_counts.most_common(20):
-                print(f"  {symbol:<8} {source:<20} {n:>7}")
+            print(f"  {'symbol':<8} {'type':<28} {'signals':>7}")
+            print(f"  {'-'*8} {'-'*28} {'-'*7}")
+            for (symbol, degradation_type), n in setup_source_symbol_counts.most_common(20):
+                print(f"  {symbol:<8} {degradation_type:<28} {n:>7}")
 
     print()
     pnl_rows = repo.setup_pnl_rows(target_date)

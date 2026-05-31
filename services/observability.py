@@ -15,6 +15,7 @@ _metrics = {
     "fallback_frequency": {},
     "dominant_limiter_frequency": {},
     "setup_quality_source_frequency": {},
+    "setup_quality_degradation_frequency": {},
     "policy_disagreement_rates": {},
     "policy_kill_switches": {},
 }
@@ -67,9 +68,25 @@ def record_dominant_limiter(limiter: str) -> None:
 
 def record_setup_quality_source(source: str | None) -> None:
     key = source or "unknown"
+    degradation = setup_quality_degradation_category(key)
     with _lock:
         bucket = _metrics["setup_quality_source_frequency"]
         bucket[key] = bucket.get(key, 0) + 1
+        degradation_bucket = _metrics["setup_quality_degradation_frequency"]
+        degradation_bucket[degradation] = degradation_bucket.get(degradation, 0) + 1
+
+
+def setup_quality_degradation_category(source: str | None) -> str:
+    source_key = (source or "unknown").strip() or "unknown"
+    if source_key == "setup_engine":
+        return "ok"
+    if source_key == "feature_snapshot":
+        return "feature_snapshot_fallback"
+    if source_key == "setup_error":
+        return "setup_error"
+    if source_key == "unknown":
+        return "unknown"
+    return "other_fallback"
 
 
 def record_policy_comparison(policy: str, primary: str | None, secondary: str | None) -> None:

@@ -273,6 +273,7 @@ def _build_startup_service(app_container: ApplicationContainer | None = None) ->
             hydrate_recent_sells=_hydrate_recent_sells,
             load_market_context=_load_market_context,
             env_get=os.environ.get,
+            ml_authority_config=public_ml_authority_config,
         )
     )
 

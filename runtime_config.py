@@ -85,9 +85,13 @@ ML_AUTHORITY_MIN_CONFIDENCE = os.getenv("ML_AUTHORITY_MIN_CONFIDENCE", "medium")
 if ML_AUTHORITY_MIN_CONFIDENCE not in {"unknown", "low", "medium", "high"}:
     ML_AUTHORITY_MIN_CONFIDENCE = "medium"
 
-# 0 disables recency enforcement. Keep this disabled by default until all
-# prediction producers write a consistent point-in-time timestamp.
-ML_AUTHORITY_MAX_AGE_SECONDS = _env_int("ML_AUTHORITY_MAX_AGE_SECONDS", 0)
+_ml_authority_default_max_age_seconds = (
+    86_400 if ML_AUTHORITY_MODE in {"paper_block", "live_block"} else 0
+)
+ML_AUTHORITY_MAX_AGE_SECONDS = _env_int(
+    "ML_AUTHORITY_MAX_AGE_SECONDS",
+    _ml_authority_default_max_age_seconds,
+)
 ML_AUTHORITY_SIZE_CAP_PCT = _env_float("ML_AUTHORITY_SIZE_CAP_PCT", 0.80)
 
 
@@ -142,14 +146,29 @@ def public_decision_policy_config() -> dict:
 def public_ml_authority_config() -> dict:
     return {
         "authority_mode": ML_AUTHORITY_MODE,
+        "execution_mode": EXECUTION_MODE,
         "allowed_modes": sorted(ML_AUTHORITY_MODES),
         "min_sample_size": ML_AUTHORITY_MIN_SAMPLE_SIZE,
         "min_confidence": ML_AUTHORITY_MIN_CONFIDENCE,
         "max_age_seconds": ML_AUTHORITY_MAX_AGE_SECONDS,
         "size_cap_pct": ML_AUTHORITY_SIZE_CAP_PCT,
         "negative_decisions": ["avoid", "block", "caution"],
+        "live_block_requirements": {
+            "execution_mode": "cash_safe_or_cash_full",
+            "min_sample_size_floor": 20,
+            "min_confidence_floor": "medium",
+            "max_age_seconds_required": True,
+            "prediction_freshness_timestamp_required": True,
+        },
         "can_increase_size": False,
         "default_authority_mode": "observe_only_compare",
+        "promotion_checklist": [
+            "Review advisory-authority-report for qualified/not-enforced rows.",
+            "Promote to size_down_only before any block mode.",
+            "Use paper_block for paper/dry_run block validation.",
+            "Use live_block only with cash_safe/cash_full, min_sample_size >= 20, "
+            "min_confidence >= medium, max_age_seconds > 0, and prediction timestamps present.",
+        ],
     }
 
 

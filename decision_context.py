@@ -125,13 +125,18 @@ def _summarize_context(ctx):
     elif repl_rec == "observe_only":
         supports.append("portfolio replacement advisory observe_only")
 
-    setup = ctx.get("setup") or {}
-    setup_label = setup.get("setup_label")
-    setup_policy = setup.get("setup_policy_action")
-    if setup_policy in ("allow", "favor"):
-        supports.append(f"setup supportive ({setup_label})")
-    elif setup_policy in ("block", "avoid"):
-        risks.append(f"setup policy caution ({setup_label}/{setup_policy})")
+    setup_quality = ctx.get("setup_quality") or ctx.get("setup") or {}
+    setup_label = setup_quality.get("label")
+    setup_recommendation = setup_quality.get("recommendation")
+    setup_source = setup_quality.get("source")
+    if setup_recommendation in ("favorable", "allow", "favor", "boost"):
+        supports.append(f"setup quality supportive ({setup_label}, source={setup_source})")
+    elif setup_recommendation == "watch":
+        risks.append(f"setup quality watch ({setup_label}, source={setup_source})")
+    elif setup_recommendation in ("avoid", "block"):
+        risks.append(
+            f"setup quality caution ({setup_label}/{setup_recommendation}, source={setup_source})"
+        )
 
     macro = ctx.get("macro") or {}
     macro_regime = macro.get("macro_regime")
@@ -147,7 +152,7 @@ def _summarize_context(ctx):
         pred_decision == "block",
         opp_decision == "block",
         session_gate.get("would_block") is True,
-        setup_policy in ("block", "avoid"),
+        setup_recommendation in ("block", "avoid"),
         live_bias == "avoid_hard",
         mem_rec == "avoid",
     ]
@@ -189,12 +194,17 @@ def build_intelligence_context(symbol, action, account_state):
         "entry_quality": account_state.get("entry_quality"),
     }
 
+    setup_quality = _compact_dict(account_state.get("setup_quality"))
+    setup_observation = _compact_dict(account_state.get("setup_observation"))
+
     ctx = {
         "symbol": symbol,
         "action": action,
         "market_brief": _compact_dict(market_brief),
         "macro": _compact_dict(account_state.get("macro_risk")),
-        "setup": _compact_dict(account_state.get("setup_observation")),
+        "setup": setup_quality,
+        "setup_quality": setup_quality,
+        "setup_observation": setup_observation,
         "live_features": _compact_dict(account_state.get("live_features")),
         "label_features": _compact_dict(account_state.get("label_features")),
         "rolling_momentum": _compact_dict(account_state.get("momentum")),

@@ -191,6 +191,7 @@ def build_canonical_intelligence_snapshot(
         "ml_confidence": prediction.get("ml_prediction_confidence"),
         "ml_sample_size": prediction.get("ml_prediction_sample_size"),
         "ml_provider": prediction.get("ml_prediction_provider"),
+        "ml_prediction_generated_at": prediction.get("ml_prediction_generated_at"),
         "runtime_effect": prediction.get("ml_prediction_runtime_effect"),
     }
     setup_state = {

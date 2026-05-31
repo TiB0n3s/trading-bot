@@ -4,6 +4,8 @@
 from __future__ import annotations
 
 import sys
+import os
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -19,11 +21,30 @@ from services.context_builder import (
 from services.setup_context_service import SetupContextDeps
 from services.signal_models import SignalRuntimeState
 from services.sizing_service import apply_final_sizing, apply_size_cap, build_conviction_stack
+from services.policies import sizing_policy
 
 
 def assert_equal(actual, expected, label):
     if actual != expected:
         raise AssertionError(f"{label}: expected {expected!r}, got {actual!r}")
+
+
+@contextmanager
+def _temporary_env(**updates):
+    original = {key: os.environ.get(key) for key in updates}
+    for key, value in updates.items():
+        if value is None:
+            os.environ.pop(key, None)
+        else:
+            os.environ[key] = str(value)
+    try:
+        yield
+    finally:
+        for key, value in original.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
 
 
 def test_context_builder_sanitizes_claude_context():
@@ -202,6 +223,99 @@ def test_conviction_stack_sets_dominant_limiter():
     assert_equal(account_state["dominant_limiter"], "weak_prediction_degraded", "limiter")
 
 
+def test_setup_quality_sizing_is_disabled_by_default():
+    account_state = {
+        "setup_quality": {
+            "recommendation": "watch",
+            "score": 45,
+            "source": "setup_engine",
+            "policy_action": "neutral",
+        },
+        "buy_opportunity": {
+            "buy_opportunity_recommendation": "strong_buy_candidate",
+            "buy_opportunity_score": 12,
+        },
+        "strategy_observation": {"trader_brain": {"score": 80}},
+        "session_momentum_gate": {"severity": "pass"},
+    }
+    with _temporary_env(SETUP_QUALITY_SIZING_ENABLED=None):
+        sizing = apply_final_sizing(
+            symbol="AAPL",
+            action="buy",
+            decision={"position_size_pct": 1.0},
+            risk_multiplier=1.0,
+            account_state=account_state,
+            apply_buy_opportunity_sizing=lambda **kwargs: (
+                sizing_policy.apply_buy_opportunity_sizing(**kwargs)
+            ),
+        )
+
+    assert_equal(sizing.final_size_pct, 1.1, "strong buy lift remains active")
+    assert_equal("setup_quality_size_cap" in account_state, False, "setup cap absent")
+
+
+def test_setup_quality_sizing_caps_when_enabled_without_fighting_tighter_caps():
+    account_state = {
+        "setup_quality": {
+            "recommendation": "watch",
+            "score": 45,
+            "source": "setup_engine",
+            "policy_action": "neutral",
+        },
+        "buy_opportunity": {
+            "buy_opportunity_recommendation": "strong_buy_candidate",
+            "buy_opportunity_score": 12,
+        },
+        "strategy_observation": {"trader_brain": {"score": 80}},
+        "session_momentum_gate": {"severity": "pass"},
+    }
+    with _temporary_env(SETUP_QUALITY_SIZING_ENABLED="true"):
+        sizing = apply_final_sizing(
+            symbol="AAPL",
+            action="buy",
+            decision={"position_size_pct": 1.0},
+            risk_multiplier=1.0,
+            account_state=account_state,
+            apply_buy_opportunity_sizing=lambda **kwargs: (
+                sizing_policy.apply_buy_opportunity_sizing(**kwargs)
+            ),
+        )
+
+    assert_equal(sizing.final_size_pct, 0.8, "setup quality watch cap")
+    assert_equal(account_state["setup_quality_size_cap"]["cap_pct"], 0.8, "setup cap pct")
+    assert_equal(sizing.dominant_limiter, "setup_quality", "setup limiter")
+
+    account_state = {
+        "max_position_size_pct_override": 0.5,
+        "dominant_limiter": "weak_prediction_degraded",
+        "weak_prediction_setup_gate": {"triggered": True},
+        "setup_quality": {
+            "recommendation": "watch",
+            "score": 45,
+            "source": "setup_engine",
+            "policy_action": "neutral",
+        },
+        "buy_opportunity": {
+            "buy_opportunity_recommendation": "strong_buy_candidate",
+            "buy_opportunity_score": 12,
+        },
+    }
+    with _temporary_env(SETUP_QUALITY_SIZING_ENABLED="true"):
+        sizing = apply_final_sizing(
+            symbol="AAPL",
+            action="buy",
+            decision={"position_size_pct": 1.0},
+            risk_multiplier=1.0,
+            account_state=account_state,
+            apply_buy_opportunity_sizing=lambda **kwargs: (
+                sizing_policy.apply_buy_opportunity_sizing(**kwargs)
+            ),
+        )
+
+    assert_equal(sizing.final_size_pct, 0.5, "tighter weak-prediction cap wins")
+    assert_equal(sizing.dominant_limiter, "weak_prediction_degraded", "tighter limiter")
+
+
 def main():
     tests = [
         test_context_builder_sanitizes_claude_context,
@@ -210,6 +324,8 @@ def main():
         test_sizing_service_preserves_sell_default_size,
         test_apply_size_cap_keeps_tightest_cap,
         test_conviction_stack_sets_dominant_limiter,
+        test_setup_quality_sizing_is_disabled_by_default,
+        test_setup_quality_sizing_caps_when_enabled_without_fighting_tighter_caps,
     ]
     for test in tests:
         test()

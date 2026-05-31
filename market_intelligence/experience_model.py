@@ -54,6 +54,7 @@ PREDICTION_COLUMNS = [
     "trend_similarity_sample_size",
     "trend_reason",
     "raw_json",
+    "prediction_generated_at",
     "created_at",
     "updated_at",
 ]
@@ -746,7 +747,7 @@ def predict_symbol(market_date: str, symbol: str, db_path: Path | str = DB_PATH)
 def upsert_prediction(prediction: dict, db_path: Path | str = DB_PATH) -> None:
     init_prediction_tables(db_path)
 
-    now = datetime.now().isoformat(timespec="seconds")
+    now = datetime.now().astimezone().isoformat(timespec="seconds")
     row = {
         "market_date": prediction["market_date"],
         "symbol": prediction["symbol"],
@@ -774,6 +775,7 @@ def upsert_prediction(prediction: dict, db_path: Path | str = DB_PATH) -> None:
         "trend_similarity_sample_size": prediction.get("trend_similarity_sample_size"),
         "trend_reason": prediction.get("trend_reason"),
         "raw_json": json.dumps(prediction.get("raw") or {}, sort_keys=True),
+        "prediction_generated_at": prediction.get("prediction_generated_at") or now,
         "created_at": now,
         "updated_at": now,
     }

@@ -25,6 +25,7 @@ class StartupDeps:
     hydrate_recent_sells: Callable[[], Any]
     load_market_context: Callable[[], Any]
     env_get: Callable[[str], str | None]
+    ml_authority_config: Callable[[], dict[str, Any]] | None = None
     required_env_keys: tuple[str, ...] = (
         "ANTHROPIC_API_KEY",
         "ALPACA_API_KEY",
@@ -38,6 +39,7 @@ class StartupService:
         self.log = deps.logger
 
     def run(self) -> None:
+        self._log_ml_authority_config()
         self._run_step("DB init", self.deps.init_core_tables)
         self._run_step("Recent favorable setups init", self._init_recent_favorable_setups)
         self._run_step("Session momentum table initialization", self.deps.init_session_momentum_table)
@@ -50,6 +52,16 @@ class StartupService:
         self._run_step("Cooldown startup hydration", self.deps.hydrate_cooldowns)
         self._run_step("Recent-sell startup hydration", self.deps.hydrate_recent_sells)
         self._run_step("Market-context startup load", self.deps.load_market_context)
+
+    def _log_ml_authority_config(self) -> None:
+        if self.deps.ml_authority_config is None:
+            return
+        try:
+            self.log.info(
+                f"ML authority config at startup: {self.deps.ml_authority_config()}"
+            )
+        except Exception as exc:
+            self.log.error(f"ML authority config startup log failed: {exc}")
 
     def _run_step(self, label: str, func: Callable[[], Any]) -> None:
         try:

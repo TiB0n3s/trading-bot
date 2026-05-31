@@ -1022,9 +1022,10 @@ def build_final_signal_context(
 
     summary = {
         "setup_label": setup_quality.get("label") or setup.get("setup_label"),
-        "setup_policy_action": setup.get("setup_policy_action"),
+        "setup_recommendation": setup_quality.get("recommendation"),
         "setup_quality_source": setup_quality.get("source"),
         "setup_quality_recommendation": setup_quality.get("recommendation"),
+        "setup_policy_action": setup.get("setup_policy_action"),
         "prediction_score": prediction.get("prediction_score"),
         "prediction_decision": prediction.get("prediction_decision"),
         "session_trend_label": session.get("trend_label"),

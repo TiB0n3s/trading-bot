@@ -76,6 +76,11 @@ def test_refresh_loads_predictions_and_memory_read_does_not_query_db():
 
         assert_true(pred, "cached prediction")
         assert_equal(pred["prediction_score"], 72.5, "prediction score")
+        assert_equal(
+            pred["prediction_generated_at"],
+            None,
+            "legacy rows do not infer canonical prediction timestamp",
+        )
         assert_equal(pred["provider"], "daily_symbol_predictions_ttl_cache", "provider")
 
 

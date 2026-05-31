@@ -58,6 +58,7 @@ TESTS = [
     "tests/test_setup_policy.py",
     "tests/test_setup_engine_service.py",
     "tests/test_decision_policy.py",
+    "tests/test_decision_context.py",
     "tests/test_ml_authority.py",
     "tests/test_strategy_memory.py",
     "tests/test_prediction_cache_service.py",

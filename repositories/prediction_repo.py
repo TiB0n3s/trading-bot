@@ -9,6 +9,18 @@ from typing import Any
 from db import DB_PATH, init_prediction_tables
 
 
+def _prediction_generated_at_expr(columns: set[str]) -> str:
+    if "prediction_generated_at" in columns:
+        return "prediction_generated_at"
+    return "NULL"
+
+
+def _column_expr(columns: set[str], column_name: str) -> str:
+    if column_name in columns:
+        return column_name
+    return f"NULL AS {column_name}"
+
+
 class PredictionRepository:
     def __init__(self, db_path: Path | str | None = None):
         self.db_path = Path(db_path or DB_PATH)
@@ -31,13 +43,20 @@ class PredictionRepository:
             ).fetchone()
             if not exists:
                 return []
+            columns = {
+                row["name"]
+                for row in con.execute("PRAGMA table_info(daily_symbol_predictions)").fetchall()
+            }
+            prediction_generated_at_expr = _prediction_generated_at_expr(columns)
+            updated_at_expr = _column_expr(columns, "updated_at")
             rows = con.execute(
-                """
+                f"""
                 SELECT market_date, symbol, prediction_score, probability_of_profit,
                        probability_of_order, expected_pnl, confidence, sample_size,
                        reason, timing_score, recommended_entry_timing,
                        recommended_exit_timing, trend_score, trend_label,
-                       trend_regime, trend_confidence, updated_at
+                       trend_regime, trend_confidence, {updated_at_expr},
+                       {prediction_generated_at_expr} AS prediction_generated_at
                 FROM daily_symbol_predictions
                 WHERE market_date = ?
                 """,
@@ -72,10 +91,16 @@ class PredictionRepository:
             timeout=0.05,
         ) as con:
             con.row_factory = sqlite3.Row
+            columns = {
+                row["name"]
+                for row in con.execute("PRAGMA table_info(daily_symbol_predictions)").fetchall()
+            }
+            prediction_generated_at_expr = _prediction_generated_at_expr(columns)
             row = con.execute(
-                """
+                f"""
                 SELECT market_date, symbol, prediction_score, confidence,
-                       sample_size, trend_label, timing_score, reason
+                       sample_size, trend_label, timing_score, reason,
+                       {prediction_generated_at_expr} AS prediction_generated_at
                 FROM daily_symbol_predictions
                 WHERE market_date = ?
                   AND symbol = ?

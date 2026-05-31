@@ -50,6 +50,7 @@ class ExperienceModelRepository:
                     trend_reason TEXT,
 
                     raw_json TEXT,
+                    prediction_generated_at TEXT,
                     created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL,
 
@@ -77,6 +78,10 @@ class ExperienceModelRepository:
             for col, col_type in timing_columns.items():
                 if col not in existing_cols:
                     con.execute(f"ALTER TABLE daily_symbol_predictions ADD COLUMN {col} {col_type}")
+            if "prediction_generated_at" not in existing_cols:
+                con.execute(
+                    "ALTER TABLE daily_symbol_predictions ADD COLUMN prediction_generated_at TEXT"
+                )
 
     def load_target_context(self, market_date: str, symbol: str):
         with get_connection(self.db_path) as con:

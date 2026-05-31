@@ -52,6 +52,7 @@ from services.ops_checks.conviction_checks import (
     run_claude_context_audit,
     run_conviction_stack_report,
 )
+from services.ops_checks.auto_buy_checks import run_auto_buy_health
 from services.ops_checks.excursion_checks import (
     run_peak_bucket_report,
     run_winner_became_loser,
@@ -1148,120 +1149,7 @@ def rejected_outcomes_health(target_date):
 
 
 def auto_buy_health(target_date):
-    import sqlite3
-
-    db_path = BASE_DIR / "trades.db"
-
-    print()
-    print("=" * 72)
-    print(f"  Auto-Buy Candidates - {target_date}")
-    print("=" * 72)
-
-    if not db_path.exists():
-        print(f"[FAIL] missing {db_path}")
-        return False
-
-    with sqlite3.connect(f"file:{db_path}?mode=ro", uri=True) as con:
-        con.row_factory = sqlite3.Row
-
-        if not _table_exists(con, "auto_buy_candidates"):
-            print("[WARN] auto_buy_candidates table is missing; run auto_buy_manager.py first")
-            return False
-
-        rows = con.execute(
-            """
-            SELECT decision, COUNT(*) AS n, AVG(score) AS avg_score, MAX(score) AS max_score
-            FROM auto_buy_candidates
-            WHERE substr(timestamp, 1, 10) = ?
-            GROUP BY decision
-            ORDER BY n DESC, decision
-            """,
-            (target_date,),
-        ).fetchall()
-
-        print("Decision distribution")
-        if rows:
-            for row in rows:
-                avg_score = row["avg_score"]
-                max_score = row["max_score"]
-                avg_s = f"{avg_score:.2f}" if avg_score is not None else "-"
-                max_s = f"{max_score:.2f}" if max_score is not None else "-"
-                print(f"  {row['decision']:<24} {row['n']:>6} avg={avg_s:>7} max={max_s:>7}")
-        else:
-            print("  none")
-
-        print()
-        cols = {row["name"] for row in con.execute("PRAGMA table_info(auto_buy_candidates)").fetchall()}
-        if "hard_block_reason" in cols:
-            print("Hard-block reasons")
-            rows = con.execute(
-                """
-                SELECT hard_block_reason, COUNT(*) AS n
-                FROM auto_buy_candidates
-                WHERE substr(timestamp, 1, 10) = ?
-                  AND hard_block_reason IS NOT NULL
-                  AND hard_block_reason != ''
-                GROUP BY hard_block_reason
-                ORDER BY n DESC, hard_block_reason
-                LIMIT 10
-                """,
-                (target_date,),
-            ).fetchall()
-            if rows:
-                for row in rows:
-                    print(f"  {row['hard_block_reason']:<55} {row['n']:>6}")
-            else:
-                print("  none")
-            print()
-
-        print("Top candidates")
-        rows = con.execute(
-            """
-            SELECT timestamp, symbol, signal_source, decision, score,
-                   session_trend_label, session_trend_score,
-                   setup_label, reason, order_submitted, order_id
-            FROM auto_buy_candidates
-            WHERE substr(timestamp, 1, 10) = ?
-            ORDER BY score DESC, id DESC
-            LIMIT 15
-            """,
-            (target_date,),
-        ).fetchall()
-        if rows:
-            for row in rows:
-                print(
-                    f"  {row['timestamp']} {row['symbol']:<6} "
-                    f"{row['decision']:<22} score={row['score']:<5} "
-                    f"source={row['signal_source'] or '-':<18} "
-                    f"session={row['session_trend_label']}/{row['session_trend_score']} "
-                    f"setup={row['setup_label'] or '-'} "
-                    f"order={row['order_id'] or '-'}"
-                )
-        else:
-            print("  none")
-
-        print()
-        print("Auto-buy audit snapshots")
-        if _table_exists(con, "auto_buy_decision_snapshots"):
-            row = con.execute(
-                """
-                SELECT COUNT(*) AS n,
-                       SUM(CASE WHEN order_submitted = 1 THEN 1 ELSE 0 END) AS submitted,
-                       SUM(CASE WHEN live_block_reason IS NOT NULL AND live_block_reason != '' THEN 1 ELSE 0 END) AS blocked
-                FROM auto_buy_decision_snapshots
-                WHERE substr(candidate_timestamp, 1, 10) = ?
-                """,
-                (target_date,),
-            ).fetchone()
-            print(f"  snapshots             {int(row['n'] or 0):>8}")
-            print(f"  submitted             {int(row['submitted'] or 0):>8}")
-            print(f"  live_blocked          {int(row['blocked'] or 0):>8}")
-        else:
-            print("  [WARN] auto_buy_decision_snapshots table missing")
-
-    print()
-    print("[OK] auto-buy candidate check completed")
-    return True
+    return run_auto_buy_health(target_date, base_dir=BASE_DIR)
 
 
 def decision_snapshot_health(target_date):

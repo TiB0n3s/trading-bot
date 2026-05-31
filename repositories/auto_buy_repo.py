@@ -96,6 +96,82 @@ def init_tables(db_path=DB_PATH) -> None:
             con.execute("ALTER TABLE auto_buy_candidates ADD COLUMN hard_block_reason TEXT")
 
 
+def table_exists(table_name: str, db_path=DB_PATH) -> bool:
+    with get_connection(db_path) as con:
+        row = con.execute(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?",
+            (table_name,),
+        ).fetchone()
+    return row is not None
+
+
+def table_columns(table_name: str, db_path=DB_PATH) -> set[str]:
+    with get_connection(db_path) as con:
+        rows = con.execute(f"PRAGMA table_info({table_name})").fetchall()
+    return {row["name"] for row in rows}
+
+
+def candidate_decision_rows(target_date: str, db_path=DB_PATH):
+    with get_connection(db_path) as con:
+        return con.execute(
+            """
+            SELECT decision, COUNT(*) AS n, AVG(score) AS avg_score, MAX(score) AS max_score
+            FROM auto_buy_candidates
+            WHERE substr(timestamp, 1, 10) = ?
+            GROUP BY decision
+            ORDER BY n DESC, decision
+            """,
+            (target_date,),
+        ).fetchall()
+
+
+def candidate_hard_block_reason_rows(target_date: str, db_path=DB_PATH):
+    with get_connection(db_path) as con:
+        return con.execute(
+            """
+            SELECT hard_block_reason, COUNT(*) AS n
+            FROM auto_buy_candidates
+            WHERE substr(timestamp, 1, 10) = ?
+              AND hard_block_reason IS NOT NULL
+              AND hard_block_reason != ''
+            GROUP BY hard_block_reason
+            ORDER BY n DESC, hard_block_reason
+            LIMIT 10
+            """,
+            (target_date,),
+        ).fetchall()
+
+
+def top_candidate_rows(target_date: str, db_path=DB_PATH):
+    with get_connection(db_path) as con:
+        return con.execute(
+            """
+            SELECT timestamp, symbol, signal_source, decision, score,
+                   session_trend_label, session_trend_score,
+                   setup_label, reason, order_submitted, order_id
+            FROM auto_buy_candidates
+            WHERE substr(timestamp, 1, 10) = ?
+            ORDER BY score DESC, id DESC
+            LIMIT 15
+            """,
+            (target_date,),
+        ).fetchall()
+
+
+def decision_snapshot_summary(target_date: str, db_path=DB_PATH):
+    with get_connection(db_path) as con:
+        return con.execute(
+            """
+            SELECT COUNT(*) AS n,
+                   SUM(CASE WHEN order_submitted = 1 THEN 1 ELSE 0 END) AS submitted,
+                   SUM(CASE WHEN live_block_reason IS NOT NULL AND live_block_reason != '' THEN 1 ELSE 0 END) AS blocked
+            FROM auto_buy_decision_snapshots
+            WHERE substr(candidate_timestamp, 1, 10) = ?
+            """,
+            (target_date,),
+        ).fetchone()
+
+
 def latest_session(symbol: str, db_path=DB_PATH) -> dict[str, Any]:
     with get_connection(db_path) as con:
         row = con.execute(

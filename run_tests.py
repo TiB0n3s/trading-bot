@@ -78,6 +78,7 @@ TESTS = [
     "tests/test_fast_lane_sell.py",
     "tests/test_position_manager.py",
     "tests/test_trade_matcher.py",
+    "tests/test_trade_matcher_service.py",
     "tests/test_live_bias_override.py",
     "tests/test_app_phase0.py",
     "tests/test_startup_service.py",

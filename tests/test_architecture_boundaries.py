@@ -144,7 +144,6 @@ TEMPORARY_DB_ACCESS_ALLOWLIST = {
     "strategy_intelligence_report.py",
     "strategy_learner.py",
     "strong_day_participation_report.py",
-    "trade_matcher.py",
     "tradingview_alert_coverage_report.py",
     "trend_context_report.py",
 }

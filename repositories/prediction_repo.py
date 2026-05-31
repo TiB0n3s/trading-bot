@@ -6,12 +6,15 @@ import sqlite3
 from pathlib import Path
 from typing import Any
 
-from db import DB_PATH
+from db import DB_PATH, init_prediction_tables
 
 
 class PredictionRepository:
     def __init__(self, db_path: Path | str | None = None):
         self.db_path = Path(db_path or DB_PATH)
+
+    def init_tables(self) -> None:
+        init_prediction_tables()
 
     def daily_predictions(self, market_date: str) -> list[dict[str, Any]]:
         if not self.db_path.exists():

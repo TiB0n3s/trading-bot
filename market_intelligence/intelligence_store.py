@@ -14,7 +14,9 @@ import json
 from datetime import datetime
 from pathlib import Path
 
-from db import DB_PATH, get_connection
+from repositories.market_intelligence_repo import MarketIntelligenceRepository
+
+DB_PATH = Path(__file__).resolve().parents[1] / "trades.db"
 
 
 DAILY_SYMBOL_CONTEXT_COLUMNS = [
@@ -76,140 +78,7 @@ DAILY_SYMBOL_CONTEXT_COLUMNS = [
 
 def init_intelligence_tables(db_path: Path | str = DB_PATH) -> None:
     """Create intelligence tables and indexes. Safe to run repeatedly."""
-    with get_connection(db_path) as con:
-        con.execute(
-            """
-            CREATE TABLE IF NOT EXISTS daily_symbol_context (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-
-                market_date TEXT NOT NULL,
-                symbol TEXT NOT NULL,
-                source TEXT,
-
-                macro_sentiment TEXT,
-                macro_regime TEXT,
-                risk_multiplier REAL,
-                max_new_positions INTEGER,
-                block_new_buys INTEGER,
-
-                bias TEXT,
-                confidence TEXT,
-                fundamental_score TEXT,
-                risk_level TEXT,
-                entry_quality TEXT,
-                avoid_type TEXT,
-                reason TEXT,
-
-                daily_pct REAL,
-                intraday_pct REAL,
-                momentum_30m_pct REAL,
-                last_price REAL,
-                bar_count_1m INTEGER,
-
-                catalyst_score REAL,
-                relative_strength_score REAL,
-                sector_alignment TEXT,
-                index_alignment TEXT,
-                liquidity_quality TEXT,
-                volume_context TEXT,
-                price_location TEXT,
-
-                business_quality_score REAL,
-                growth_score REAL,
-                debt_risk_score REAL,
-                management_score REAL,
-                industry_health_score REAL,
-                economic_risk_score REAL,
-                political_risk_score REAL,
-                geopolitical_risk_score REAL,
-                cultural_risk_score REAL,
-
-                consumer_appetite_score REAL,
-                revenue_impact_score REAL,
-                profit_potential_score REAL,
-                margin_risk_score REAL,
-                supply_chain_risk_score REAL,
-                materials_risk_score REAL,
-                competitive_risk_score REAL,
-                execution_risk_score REAL,
-
-                raw_json TEXT,
-                created_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL,
-
-                UNIQUE(market_date, symbol)
-            )
-            """
-        )
-
-        con.execute(
-            """
-            CREATE TABLE IF NOT EXISTS daily_symbol_events (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-
-                market_date TEXT NOT NULL,
-                symbol TEXT NOT NULL,
-
-                event_type TEXT NOT NULL,
-                event_subtype TEXT,
-                event_summary TEXT,
-                source TEXT,
-                source_url TEXT,
-
-                product_name TEXT,
-                company_segment TEXT,
-                industry TEXT,
-
-                expected_market_impact TEXT,
-                trade_relevance TEXT,
-                time_horizon TEXT,
-                confidence TEXT,
-
-                consumer_appetite_score REAL,
-                revenue_impact_score REAL,
-                profit_potential_score REAL,
-                margin_risk_score REAL,
-                supply_chain_risk_score REAL,
-                materials_risk_score REAL,
-                regulatory_risk_score REAL,
-                competitive_risk_score REAL,
-                execution_risk_score REAL,
-                macro_risk_score REAL,
-
-                raw_json TEXT,
-                created_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL
-            )
-            """
-        )
-
-        con.execute(
-            """
-            CREATE INDEX IF NOT EXISTS idx_daily_symbol_context_date_symbol
-            ON daily_symbol_context(market_date, symbol)
-            """
-        )
-
-        con.execute(
-            """
-            CREATE INDEX IF NOT EXISTS idx_daily_symbol_context_symbol_date
-            ON daily_symbol_context(symbol, market_date)
-            """
-        )
-
-        con.execute(
-            """
-            CREATE INDEX IF NOT EXISTS idx_daily_symbol_events_date_symbol
-            ON daily_symbol_events(market_date, symbol)
-            """
-        )
-
-        con.execute(
-            """
-            CREATE INDEX IF NOT EXISTS idx_daily_symbol_events_type
-            ON daily_symbol_events(event_type, market_date)
-            """
-        )
+    MarketIntelligenceRepository(db_path).init_tables()
 
 
 def _num(value):
@@ -311,25 +180,10 @@ def context_row_from_market_context(ctx: dict, symbol: str) -> dict:
 
 def upsert_daily_symbol_context(row: dict, db_path: Path | str = DB_PATH) -> None:
     """Insert/update one daily symbol context row."""
-    cols = DAILY_SYMBOL_CONTEXT_COLUMNS
-    insert_cols = ", ".join(cols)
-    placeholders = ", ".join(["?"] * len(cols))
-
-    update_cols = [c for c in cols if c not in ("market_date", "symbol", "created_at")]
-    update_sql = ", ".join([f"{c}=excluded.{c}" for c in update_cols])
-
-    values = [row.get(c) for c in cols]
-
-    with get_connection(db_path) as con:
-        con.execute(
-            f"""
-            INSERT INTO daily_symbol_context ({insert_cols})
-            VALUES ({placeholders})
-            ON CONFLICT(market_date, symbol)
-            DO UPDATE SET {update_sql}
-            """,
-            values,
-        )
+    MarketIntelligenceRepository(db_path).upsert_daily_symbol_context(
+        row,
+        DAILY_SYMBOL_CONTEXT_COLUMNS,
+    )
 
 
 def ingest_market_context(path: Path | str, db_path: Path | str = DB_PATH) -> dict:
@@ -402,15 +256,7 @@ def insert_daily_symbol_event(event: dict, db_path: Path | str = DB_PATH) -> int
     cols = list(row)
     placeholders = ", ".join(["?"] * len(cols))
 
-    with get_connection(db_path) as con:
-        cur = con.execute(
-            f"""
-            INSERT INTO daily_symbol_events ({", ".join(cols)})
-            VALUES ({placeholders})
-            """,
-            [row[c] for c in cols],
-        )
-        return int(cur.lastrowid)
+    return MarketIntelligenceRepository(db_path).insert_daily_symbol_event(row)
 
 
 EVENT_SCORE_FIELDS = [
@@ -456,16 +302,7 @@ def aggregate_symbol_events(market_date: str, symbol: str, db_path: Path | str =
     Risk fields use max because one serious supply-chain/regulatory/execution
     risk is enough to matter.
     """
-    with get_connection(db_path) as con:
-        events = con.execute(
-            """
-            SELECT *
-            FROM daily_symbol_events
-            WHERE market_date = ?
-              AND symbol = ?
-            """,
-            (market_date, symbol),
-        ).fetchall()
+    events = MarketIntelligenceRepository(db_path).daily_symbol_events(market_date, symbol)
 
     if not events:
         return {
@@ -535,20 +372,11 @@ def update_daily_context_from_events(market_date: str, symbol: str | None = None
     """
     init_intelligence_tables(db_path)
 
-    with get_connection(db_path) as con:
-        if symbol:
-            symbols = [symbol.upper()]
-        else:
-            rows = con.execute(
-                """
-                SELECT symbol
-                FROM daily_symbol_context
-                WHERE market_date = ?
-                ORDER BY symbol
-                """,
-                (market_date,),
-            ).fetchall()
-            symbols = [r["symbol"] for r in rows]
+    repo = MarketIntelligenceRepository(db_path)
+    if symbol:
+        symbols = [symbol.upper()]
+    else:
+        symbols = repo.context_symbols(market_date)
 
     updated = 0
     skipped = 0
@@ -563,114 +391,16 @@ def update_daily_context_from_events(market_date: str, symbol: str | None = None
 
         now = datetime.now().isoformat(timespec="seconds")
 
-        with get_connection(db_path) as con:
-            existing = con.execute(
-                """
-                SELECT id
-                FROM daily_symbol_context
-                WHERE market_date = ?
-                  AND symbol = ?
-                """,
-                (market_date, sym),
-            ).fetchone()
-
-            if existing:
-                con.execute(
-                    """
-                    UPDATE daily_symbol_context
-                    SET
-                        catalyst_score = ?,
-                        consumer_appetite_score = ?,
-                        revenue_impact_score = ?,
-                        profit_potential_score = ?,
-                        margin_risk_score = ?,
-                        supply_chain_risk_score = ?,
-                        materials_risk_score = ?,
-                        competitive_risk_score = ?,
-                        execution_risk_score = ?,
-                        updated_at = ?
-                    WHERE market_date = ?
-                      AND symbol = ?
-                    """,
-                    (
-                        agg.get("catalyst_score"),
-                        agg.get("consumer_appetite_score"),
-                        agg.get("revenue_impact_score"),
-                        agg.get("profit_potential_score"),
-                        agg.get("margin_risk_score"),
-                        agg.get("supply_chain_risk_score"),
-                        agg.get("materials_risk_score"),
-                        agg.get("competitive_risk_score"),
-                        agg.get("execution_risk_score"),
-                        now,
-                        market_date,
-                        sym,
-                    ),
-                )
-            else:
-                con.execute(
-                    """
-                    INSERT INTO daily_symbol_context (
-                        market_date,
-                        symbol,
-                        source,
-                        macro_sentiment,
-                        macro_regime,
-                        risk_multiplier,
-                        max_new_positions,
-                        block_new_buys,
-                        bias,
-                        confidence,
-                        fundamental_score,
-                        risk_level,
-                        entry_quality,
-                        avoid_type,
-                        reason,
-                        catalyst_score,
-                        consumer_appetite_score,
-                        revenue_impact_score,
-                        profit_potential_score,
-                        margin_risk_score,
-                        supply_chain_risk_score,
-                        materials_risk_score,
-                        competitive_risk_score,
-                        execution_risk_score,
-                        raw_json,
-                        created_at,
-                        updated_at
-                    )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    """,
-                    (
-                        market_date,
-                        sym,
-                        "event_aggregate_seed",
-                        "mixed",
-                        "caution",
-                        0.75,
-                        6,
-                        0,
-                        "neutral",
-                        "low",
-                        "neutral",
-                        "medium",
-                        "conditional",
-                        None,
-                        "Seeded from event aggregates; market context builder should enrich full context.",
-                        agg.get("catalyst_score"),
-                        agg.get("consumer_appetite_score"),
-                        agg.get("revenue_impact_score"),
-                        agg.get("profit_potential_score"),
-                        agg.get("margin_risk_score"),
-                        agg.get("supply_chain_risk_score"),
-                        agg.get("materials_risk_score"),
-                        agg.get("competitive_risk_score"),
-                        agg.get("execution_risk_score"),
-                        json.dumps(agg),
-                        now,
-                        now,
-                    ),
-                )
+        if repo.context_exists(market_date, sym):
+            repo.update_context_event_scores(market_date, sym, agg, now)
+        else:
+            repo.insert_context_event_scores(
+                market_date,
+                sym,
+                agg,
+                json.dumps(agg),
+                now,
+            )
 
         updated += 1
         summaries.append(agg)

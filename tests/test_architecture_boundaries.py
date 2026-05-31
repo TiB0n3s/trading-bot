@@ -108,11 +108,13 @@ TEMPORARY_BROKER_ACCESS_ALLOWLIST = {
 }
 
 APPROVED_MARKET_DATA_ACCESS = {
+    "broker.py",
     "services/market_data_service.py",
     "services/execution_adapters.py",
     "services/momentum_service.py",
     "services/pre_market_research_service.py",
     "services/live_features_service.py",
+    "services/rolling_momentum_service.py",
     "services/session_momentum_service.py",
     "services/excursion_service.py",
     "services/missed_opportunity_service.py",
@@ -120,11 +122,9 @@ APPROVED_MARKET_DATA_ACCESS = {
 }
 
 TEMPORARY_MARKET_DATA_ACCESS_ALLOWLIST = {
-    "broker.py",
     "label_features.py",
     "position_manager.py",
     "rejected_signal_outcome_builder.py",
-    "rolling_momentum.py",
     "services/policies/entry_policy.py",
     "services/policies/execution_policy.py",
 }

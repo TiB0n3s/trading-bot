@@ -105,7 +105,6 @@ TEMPORARY_DB_ACCESS_ALLOWLIST = {
     "drawdown_report.py",
     "event_attribution_report.py",
     "export_ml_dataset.py",
-    "filter_report.py",
     "ingest_market_context.py",
     "init_prediction_db.py",
     "intelligence_context_report.py",

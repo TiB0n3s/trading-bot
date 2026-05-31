@@ -12,10 +12,8 @@ Usage:
 
 import argparse
 from collections import defaultdict
-from datetime import date, timedelta
-from pathlib import Path
 
-from db import DB_PATH, get_connection
+from services.filter_report_service import build_default_filter_report_service
 
 KNOWN_LABELS = {
     "market_hours": "Outside trading hours",
@@ -64,20 +62,6 @@ def category(reason):
     return "claude_rejection"
 
 
-def date_clause(args):
-    if args.all:
-        return "", []
-
-    if args.week:
-        today = date.today()
-        monday = today - timedelta(days=today.weekday())
-        saturday = monday + timedelta(days=5)
-        return "AND timestamp >= ? AND timestamp < ?", [monday.isoformat(), saturday.isoformat()]
-
-    target = args.date or date.today().isoformat()
-    return "AND timestamp LIKE ?", [f"{target}%"]
-
-
 def print_section(title):
     print()
     print("── " + title + " " + "─" * max(0, 64 - len(title)))
@@ -92,49 +76,20 @@ def main():
     parser.add_argument("--limit", type=int, default=20, help="Recent sample rows to show")
     args = parser.parse_args()
 
-    if not DB_PATH.exists():
-        raise SystemExit(f"ERROR: {DB_PATH} not found")
+    try:
+        payload = build_default_filter_report_service().payload(
+            target_date=args.date,
+            week=args.week,
+            all_history=args.all,
+            symbol=args.symbol,
+        )
+    except FileNotFoundError as e:
+        raise SystemExit(f"ERROR: {e.filename} not found")
 
-    clause, params = date_clause(args)
-    symbol_clause = ""
-    if args.symbol:
-        symbol_clause = "AND symbol = ?"
-        params.append(args.symbol.upper())
-
-    con = get_connection(DB_PATH)
-
-    rows = con.execute(f"""
-        SELECT id, timestamp, symbol, action, approved, rejection_reason,
-               market_bias, risk_level, entry_quality,
-               trend_direction, trend_strength,
-               momentum_direction, momentum_pct,
-               macro_regime, risk_multiplier,
-               correlation_cluster, cluster_exposure_pct
-        FROM trades
-        WHERE approved = 0
-          AND rejection_reason IS NOT NULL
-          {clause}
-          {symbol_clause}
-        ORDER BY id DESC
-    """, params).fetchall()
-
-    total_signals = con.execute(f"""
-        SELECT COUNT(*) AS n
-        FROM trades
-        WHERE 1=1
-          {clause}
-          {symbol_clause}
-    """, params).fetchone()["n"]
-
-    approved_signals = con.execute(f"""
-        SELECT COUNT(*) AS n
-        FROM trades
-        WHERE approved = 1
-          {clause}
-          {symbol_clause}
-    """, params).fetchone()["n"]
-
-    rejected_signals = len(rows)
+    rows = payload.rows
+    total_signals = payload.total_signals
+    approved_signals = payload.approved_signals
+    rejected_signals = payload.rejected_signals
 
     print()
     print("=" * 72)
@@ -145,8 +100,8 @@ def main():
     print(f"  Rejected signals   : {rejected_signals}")
     if total_signals:
         print(f"  Rejection rate     : {rejected_signals / total_signals * 100:.1f}%")
-    if args.symbol:
-        print(f"  Symbol filter      : {args.symbol.upper()}")
+    if payload.symbol:
+        print(f"  Symbol filter      : {payload.symbol}")
 
     by_cat = defaultdict(int)
     by_symbol = defaultdict(int)
@@ -200,8 +155,6 @@ def main():
                 f"  {r['id']:>5} {r['timestamp']:<19} {r['symbol']:<6} "
                 f"{r['action']:<5} {cat:<24} {detail[:80]}"
             )
-
-    con.close()
 
 
 if __name__ == "__main__":

@@ -167,7 +167,6 @@ APPROVED_MARKET_DATA_ACCESS = {
 }
 
 TEMPORARY_MARKET_DATA_ACCESS_ALLOWLIST = {
-    "app.py",
     "broker.py",
     "label_features.py",
     "position_manager.py",

@@ -58,3 +58,32 @@ class DecisionSnapshotRepository:
             "missing_git_sha": int(total["missing_git_sha"] or 0),
             "by_decision": [dict(row) for row in rows],
         }
+
+    def table_exists(self, table_name: str) -> bool:
+        with get_connection(self.db_path) as con:
+            row = con.execute(
+                "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?",
+                (table_name,),
+            ).fetchone()
+        return row is not None
+
+    def trade_count_for_date(self, target_date: str) -> int:
+        with get_connection(self.db_path) as con:
+            row = con.execute(
+                "SELECT COUNT(*) AS n FROM trades WHERE substr(timestamp, 1, 10) = ?",
+                (target_date,),
+            ).fetchone()
+        return int(row["n"] or 0) if row else 0
+
+    def snapshot_trade_count_for_date(self, target_date: str) -> int:
+        with get_connection(self.db_path) as con:
+            row = con.execute(
+                """
+                SELECT COUNT(DISTINCT trade_id) AS n
+                FROM decision_snapshots
+                WHERE substr(decision_time, 1, 10) = ?
+                  AND trade_id IS NOT NULL
+                """,
+                (target_date,),
+            ).fetchone()
+        return int(row["n"] or 0) if row else 0

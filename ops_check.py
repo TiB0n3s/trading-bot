@@ -58,6 +58,7 @@ from services.ops_checks.excursion_checks import (
 )
 from services.ops_checks.rejection_checks import run_rejection_summary
 from services.ops_checks.setup_breakdown import run_setup_breakdown
+from services.ops_checks.snapshot_checks import run_decision_snapshot_health
 
 BASE_DIR = Path(__file__).resolve().parent
 VENV_PYTHON = BASE_DIR / "venv" / "bin" / "python"
@@ -1541,71 +1542,7 @@ def auto_buy_health(target_date):
 
 
 def decision_snapshot_health(target_date):
-    import sqlite3
-
-    from decision_snapshots import summarize_snapshots
-
-    db_path = BASE_DIR / "trades.db"
-
-    print()
-    print("=" * 72)
-    print(f"  Decision Snapshots - {target_date}")
-    print("=" * 72)
-
-    if not db_path.exists():
-        print(f"[FAIL] missing {db_path}")
-        return False
-
-    ok = True
-    summary = summarize_snapshots(target_date, db_path)
-    print(f"  snapshots              {summary['total']:>8}")
-    print(f"  symbols                {summary['symbols']:>8}")
-    print(f"  missing_context_hash   {summary['missing_context_hash']:>8}")
-    print(f"  missing_git_sha        {summary['missing_git_sha']:>8}")
-
-    print()
-    print("Decision distribution")
-    if summary["by_decision"]:
-        for row in summary["by_decision"]:
-            print(
-                f"  {row['final_decision'] or '-':<24} approved={row['approved']} n={row['n']}"
-            )
-    else:
-        print("  none")
-
-    with sqlite3.connect(f"file:{db_path}?mode=ro", uri=True) as con:
-        con.row_factory = sqlite3.Row
-        if not _table_exists(con, "decision_snapshots"):
-            print("[FAIL] decision_snapshots table is missing")
-            return False
-        if _table_exists(con, "trades"):
-            trade_count = con.execute(
-                "SELECT COUNT(*) AS n FROM trades WHERE substr(timestamp, 1, 10) = ?",
-                (target_date,),
-            ).fetchone()["n"]
-            snapshot_trade_count = con.execute(
-                """
-                SELECT COUNT(DISTINCT trade_id) AS n
-                FROM decision_snapshots
-                WHERE substr(decision_time, 1, 10) = ?
-                  AND trade_id IS NOT NULL
-                """,
-                (target_date,),
-            ).fetchone()["n"]
-            print()
-            print("Trade coverage")
-            print(f"  trades_today           {int(trade_count or 0):>8}")
-            print(f"  snapshots_with_trade   {int(snapshot_trade_count or 0):>8}")
-            if trade_count and snapshot_trade_count < trade_count:
-                print("[WARN] older trades may predate decision snapshot logging")
-
-    if summary["total"] and summary["missing_context_hash"]:
-        ok = False
-        print("[WARN] some snapshots are missing market_context_hash")
-
-    print()
-    print("[OK] decision snapshot check completed" if ok else "[WARN] decision snapshot check found issues")
-    return ok
+    return run_decision_snapshot_health(target_date, base_dir=BASE_DIR)
 
 
 def policy_artifact_health():

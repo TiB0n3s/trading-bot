@@ -263,3 +263,51 @@ class TrainingDataRepository:
         except Exception as exc:
             result["error"] = str(exc)
         return result
+
+    def manifest_source_summary(
+        self,
+        start_date: str | None = None,
+        end_date: str | None = None,
+    ) -> dict[str, Any]:
+        summary: dict[str, Any] = {
+            "row_count": 0,
+            "symbol_count": 0,
+            "date_range": {"start": start_date, "end": end_date},
+        }
+        if not self.db_path.exists():
+            return summary
+
+        where_sql = ""
+        params: tuple[str, ...] = ()
+        if start_date and end_date:
+            where_sql = "WHERE substr(timestamp, 1, 10) BETWEEN ? AND ?"
+            params = (start_date, end_date)
+        elif start_date or end_date:
+            raise ValueError("Provide both start_date and end_date, or neither")
+
+        with self._connect() as con:
+            if not self._table_exists(con, "feature_snapshots"):
+                return summary
+            row = con.execute(
+                f"""
+                SELECT COUNT(*) AS rows, COUNT(DISTINCT symbol) AS symbols
+                FROM feature_snapshots {where_sql}
+                """,
+                params,
+            ).fetchone()
+            summary["row_count"] = int(row["rows"] or 0)
+            summary["symbol_count"] = int(row["symbols"] or 0)
+            if not start_date and not end_date:
+                range_row = con.execute(
+                    """
+                    SELECT
+                        MIN(substr(timestamp, 1, 10)) AS start,
+                        MAX(substr(timestamp, 1, 10)) AS end
+                    FROM feature_snapshots
+                    """
+                ).fetchone()
+                summary["date_range"] = {
+                    "start": range_row["start"],
+                    "end": range_row["end"],
+                }
+        return summary

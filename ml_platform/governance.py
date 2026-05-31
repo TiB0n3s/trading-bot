@@ -9,15 +9,14 @@ from __future__ import annotations
 
 import hashlib
 import json
-import sqlite3
 import subprocess
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from db import DB_PATH
-from ml_platform.config import FEATURE_VERSION
+from ml_platform.config import DEFAULT_DB_PATH, FEATURE_VERSION
+from repositories.training_data_repo import TrainingDataRepository
 
 
 LEAKAGE_TIMEPOINTS = (
@@ -612,17 +611,9 @@ def _policy_artifact_known_good_id(project_root: Path) -> str | None:
     return None
 
 
-def _table_exists(con: sqlite3.Connection, table: str) -> bool:
-    row = con.execute(
-        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?",
-        (table,),
-    ).fetchone()
-    return row is not None
-
-
 def build_dataset_manifest(
     *,
-    db_path: Path | str = DB_PATH,
+    db_path: Path | str = DEFAULT_DB_PATH,
     start_date: str | None = None,
     end_date: str | None = None,
     query_version: str = "brain_features_query_v1",
@@ -633,33 +624,13 @@ def build_dataset_manifest(
 ) -> dict[str, Any]:
     """Build a read-only dataset manifest from current source DB metadata."""
     db_path = Path(db_path)
-    row_count = 0
-    symbol_count = 0
-    date_range: dict[str, str | None] = {"start": start_date, "end": end_date}
-
-    if db_path.exists():
-        where_sql = ""
-        params: tuple[str, ...] = ()
-        if start_date and end_date:
-            where_sql = "WHERE substr(timestamp, 1, 10) BETWEEN ? AND ?"
-            params = (start_date, end_date)
-        elif start_date or end_date:
-            raise ValueError("Provide both start_date and end_date, or neither")
-
-        with sqlite3.connect(f"file:{db_path}?mode=ro", uri=True) as con:
-            con.row_factory = sqlite3.Row
-            if _table_exists(con, "feature_snapshots"):
-                row = con.execute(
-                    f"SELECT COUNT(*) AS rows, COUNT(DISTINCT symbol) AS symbols FROM feature_snapshots {where_sql}",
-                    params,
-                ).fetchone()
-                row_count = int(row["rows"] or 0)
-                symbol_count = int(row["symbols"] or 0)
-                if not start_date and not end_date:
-                    range_row = con.execute(
-                        "SELECT MIN(substr(timestamp, 1, 10)) AS start, MAX(substr(timestamp, 1, 10)) AS end FROM feature_snapshots"
-                    ).fetchone()
-                    date_range = {"start": range_row["start"], "end": range_row["end"]}
+    source_summary = TrainingDataRepository(db_path).manifest_source_summary(
+        start_date,
+        end_date,
+    )
+    row_count = source_summary["row_count"]
+    symbol_count = source_summary["symbol_count"]
+    date_range = source_summary["date_range"]
 
     created_at = datetime.now(timezone.utc).isoformat()
     source_db_hash = _file_sha256(db_path)

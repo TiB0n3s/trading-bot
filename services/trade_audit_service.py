@@ -222,6 +222,29 @@ def _shared_values(
     prediction_gate = account_state.get("prediction_gate") or {}
     strategy_observation = account_state.get("strategy_observation") or {}
     trader_brain = strategy_observation.get("trader_brain") or {}
+    final_sizing = account_state.get("final_sizing") or {}
+    conviction_stack = (
+        final_sizing.get("conviction_stack")
+        or account_state.get("conviction_stack")
+        or {}
+    )
+    active_caps = final_sizing.get("active_caps") or []
+    active_cap_values = [
+        cap.get("cap_pct")
+        for cap in active_caps
+        if isinstance(cap, dict) and cap.get("cap_pct") is not None
+    ]
+    effective_size_cap_pct = (
+        min(active_cap_values)
+        if active_cap_values
+        else conviction_stack.get("effective_cap_pct")
+    )
+    dominant_limiter = (
+        final_sizing.get("dominant_limiter")
+        or account_state.get("dominant_limiter")
+    )
+    ml_score = prediction_gate.get("ml_prediction_score")
+    ml_bucket = prediction_gate.get("ml_prediction_bucket") or ml_prediction_bucket(ml_score)
 
     return {
         "timestamp": timestamp,
@@ -269,8 +292,8 @@ def _shared_values(
         "setup_confidence_adjustment": setup_obs.get("setup_confidence_adjustment"),
         "setup_size_multiplier": setup_obs.get("setup_size_multiplier"),
         "setup_unknown_reason": setup_obs.get("setup_unknown_reason"),
-        "ml_prediction_score": prediction_gate.get("ml_prediction_score"),
-        "ml_prediction_bucket": ml_prediction_bucket(prediction_gate.get("ml_prediction_score")),
+        "ml_prediction_score": ml_score,
+        "ml_prediction_bucket": ml_bucket,
         "buy_opportunity_score": account_state.get("buy_opportunity", {}).get("buy_opportunity_score"),
         "buy_opportunity_recommendation": account_state.get("buy_opportunity", {}).get("buy_opportunity_recommendation"),
         "buy_opportunity_reason": account_state.get("buy_opportunity", {}).get("buy_opportunity_reason"),
@@ -290,9 +313,9 @@ def _shared_values(
             trader_brain.get("risk_factors") or [],
             sort_keys=True,
         ),
-        "session_momentum_severity": account_state.get("conviction_stack", {}).get("session_severity"),
-        "effective_size_cap_pct": account_state.get("conviction_stack", {}).get("effective_cap_pct"),
-        "dominant_limiter": account_state.get("dominant_limiter"),
+        "session_momentum_severity": conviction_stack.get("session_severity"),
+        "effective_size_cap_pct": effective_size_cap_pct,
+        "dominant_limiter": dominant_limiter,
     }
 
 

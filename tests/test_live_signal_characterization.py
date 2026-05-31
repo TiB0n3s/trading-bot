@@ -112,6 +112,10 @@ def test_successful_approved_buy_submits_order_and_logs_trade():
     assert_true(write_cooldown.called, "cooldown written")
     assert_true(log_trade.called, "trade logged")
     assert_equal(log_trade.call_args.kwargs["decision"]["approved"], True, "logged approval")
+    logged_state = log_trade.call_args.kwargs["account_state"]
+    assert_true("final_sizing" in logged_state, "final sizing carried to audit")
+    assert_equal(logged_state["final_sizing"]["dominant_limiter"], "uncapped", "audit limiter")
+    assert_equal(logged_state["dominant_limiter"], "uncapped", "account-state limiter")
 
 
 def test_stale_signal_rejection_stops_before_approval():

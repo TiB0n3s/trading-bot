@@ -114,6 +114,7 @@ APPROVED_MARKET_DATA_ACCESS = {
     "services/momentum_service.py",
     "services/pre_market_research_service.py",
     "services/live_features_service.py",
+    "services/label_features_market_data_service.py",
     "services/position_market_data_service.py",
     "services/rejected_signal_outcome_market_data_service.py",
     "services/rolling_momentum_service.py",
@@ -123,9 +124,7 @@ APPROVED_MARKET_DATA_ACCESS = {
     "services/strong_day_participation_service.py",
 }
 
-TEMPORARY_MARKET_DATA_ACCESS_ALLOWLIST = {
-    "label_features.py",
-}
+TEMPORARY_MARKET_DATA_ACCESS_ALLOWLIST = set()
 
 
 def _is_db_access(path: Path) -> bool:

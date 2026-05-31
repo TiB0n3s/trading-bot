@@ -50,7 +50,7 @@ load_env_file()
 import pytz
 
 from repositories.label_features_repo import LabelFeaturesRepository
-from services.market_data_service import market_data_service
+from services.label_features_market_data_service import label_features_market_data_service
 
 _repo = LabelFeaturesRepository()
 logger = logging.getLogger("label_features")
@@ -77,32 +77,10 @@ def safe_pct_change(current: float | None, base: float | None) -> float | None:
 
 def fetch_forward_bars(symbol: str, ts: str) -> list[dict]:
     snapshot_dt = parse_ts(ts)
-    end_dt = snapshot_dt + timedelta(minutes=35)
-
-    bars = market_data_service.get_barset_with_fallback(
-        symbol,
-        "1Min",
-        start=snapshot_dt.isoformat(),
-        end=end_dt.isoformat(),
-        adjustment="raw",
-        feed="iex",
-    ).df
-
-    if bars is None or bars.empty:
-        return []
-
-    if "symbol" in bars.columns:
-        bars = bars[bars["symbol"] == symbol]
-
-    rows = []
-    for idx, row in bars.iterrows():
-        rows.append({
-            "timestamp": idx.isoformat() if hasattr(idx, "isoformat") else str(idx),
-            "close": float(row["close"]),
-            "high": float(row["high"]),
-            "low": float(row["low"]),
-        })
-    return rows
+    return label_features_market_data_service.fetch_forward_bars(
+        symbol=symbol,
+        snapshot_dt=snapshot_dt,
+    )
 
 
 def first_price_at_or_after(rows: list[dict], minutes_forward: int, snapshot_dt: datetime) -> float | None:

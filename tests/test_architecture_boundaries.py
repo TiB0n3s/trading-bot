@@ -101,7 +101,6 @@ TEMPORARY_DB_ACCESS_ALLOWLIST = {
     "buy_opportunity_report.py",
     "collect_and_score_events.py",
     "context_trade_join_report.py",
-    "daily_summary.py",
     "decision_engine.py",
     "drawdown_report.py",
     "entry_quality_report.py",

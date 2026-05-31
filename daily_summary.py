@@ -1,13 +1,9 @@
 import sys
-import sqlite3
 from collections import defaultdict
-from datetime import date, timedelta
 from pathlib import Path
-from collections import defaultdict
-from datetime import date, timedelta
-from trade_matcher import rebuild_matched_trades
 
-from db import DB_PATH, get_connection
+from services.daily_summary_service import build_default_daily_summary_service
+
 LOG_PATH = Path(__file__).parent / "daily_summary.log"
 
 # claude-haiku-4-5-20251001 pricing (per million tokens)
@@ -58,68 +54,6 @@ def grouped_trade_summary(rows, key_fn, min_samples: int = 1):
         reverse=True,
     )
     return out
-
-def _query_matched(con, extra_where, params):
-    """Fetch matched_trades for a date predicate on exit_timestamp.
-
-    `extra_where` is appended to a base 'WHERE 1=1' so it must start with ' AND '.
-    Returns an empty list if matched_trades doesn't exist (graceful degrade).
-    """
-    try:
-        return con.execute(f"""
-            SELECT symbol, qty, entry_price, exit_price, realized_pnl, won
-            FROM matched_trades
-            WHERE 1=1 {extra_where}
-            ORDER BY exit_timestamp ASC
-        """, params).fetchall()
-    except sqlite3.OperationalError:
-        return []
-
-def _load_trade_rows(con, target_date: str = None, start_date: str = None, end_date: str = None):
-    if target_date:
-        return con.execute(
-            """
-            SELECT
-                id,
-                timestamp,
-                symbol,
-                action,
-                approved,
-                rejection_reason,
-                confidence,
-                setup_label,
-                setup_policy_action,
-                setup_policy_reason
-            FROM trades
-            WHERE timestamp LIKE ?
-            ORDER BY timestamp ASC
-            """,
-            (f"{target_date}%",),
-        ).fetchall()
-
-    if start_date and end_date:
-        return con.execute(
-            """
-            SELECT
-                id,
-                timestamp,
-                symbol,
-                action,
-                approved,
-                rejection_reason,
-                confidence,
-                setup_label,
-                setup_policy_action,
-                setup_policy_reason
-            FROM trades
-            WHERE timestamp >= ? AND timestamp < ?
-            ORDER BY timestamp ASC
-            """,
-            (start_date, end_date),
-        ).fetchall()
-
-    return []
-
 
 def _grouped_trade_summary(rows, key_fn, min_samples: int = 1):
     groups = defaultdict(list)
@@ -535,61 +469,18 @@ def _render(rows, matched, header, trade_rows=None):
         f.write("\n".join(lines) + "\n")
 
 
-def _refresh_matched():
-    try:
-        rebuild_matched_trades()
-    except Exception as e:
-        print(f"WARNING: matched_trades rebuild failed: {e}")
-
-
 def run(target_date: str = None):
-    target_date = target_date or str(date.today())
-    _refresh_matched()
-    with get_connection(DB_PATH) as con:
-        rows = con.execute(
-            "SELECT * FROM trades WHERE timestamp LIKE ?", (f"{target_date}%",)
-        ).fetchall()
-        trade_rows = _load_trade_rows(con, target_date=target_date)
-        matched = _query_matched(con, "AND exit_timestamp LIKE ?", (f"{target_date}%",))
-    _render(rows, matched, f"DAILY SUMMARY — {target_date}", trade_rows=trade_rows)
+    payload = build_default_daily_summary_service(warning_sink=print).daily_payload(
+        target_date
+    )
+    _render(payload.rows, payload.matched, payload.header, trade_rows=payload.trade_rows)
 
 
 def run_week(target_date: str = None):
-    if target_date:
-        ref = date.fromisoformat(target_date)
-    else:
-        today = date.today()
-        if today.weekday() >= 5:
-            ref = today - timedelta(days=today.weekday() - 4)
-        else:
-            ref = today
-
-    monday = ref - timedelta(days=ref.weekday())
-    friday = monday + timedelta(days=4)
-    end_excl = (friday + timedelta(days=1)).isoformat()
-
-    _refresh_matched()
-    with get_connection(DB_PATH) as con:
-        rows = con.execute(
-            "SELECT * FROM trades WHERE timestamp >= ? AND timestamp < ?",
-            (monday.isoformat(), end_excl),
-        ).fetchall()
-        trade_rows = _load_trade_rows(
-            con,
-            start_date=monday.isoformat(),
-            end_date=end_excl,
-        )
-        matched = _query_matched(
-            con,
-            "AND exit_timestamp >= ? AND exit_timestamp < ?",
-            (monday.isoformat(), end_excl),
-        )
-    _render(
-        rows,
-        matched,
-        f"WEEKLY SUMMARY — {monday} to {friday}",
-        trade_rows=trade_rows,
+    payload = build_default_daily_summary_service(warning_sink=print).weekly_payload(
+        target_date
     )
+    _render(payload.rows, payload.matched, payload.header, trade_rows=payload.trade_rows)
 
 
 if __name__ == "__main__":

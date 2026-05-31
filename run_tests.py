@@ -91,6 +91,7 @@ TESTS = [
     "tests/test_ledger_repo.py",
     "tests/test_daily_summary_service.py",
     "tests/test_excursion_service.py",
+    "tests/test_entry_quality_service.py",
     "tests/test_architecture_boundaries.py",
     "tests/test_signal_pipeline.py",
     "tests/test_preflight_service.py",

@@ -11,7 +11,7 @@ import argparse
 from collections import defaultdict
 from statistics import mean
 
-from db import DB_PATH, get_connection
+from services.entry_quality_service import build_default_entry_quality_service
 
 MIN_BUCKET_SAMPLE = 20
 
@@ -60,73 +60,11 @@ def _bucket_setup_score(value):
 
 
 def _rows(target_date: str):
-    with get_connection(DB_PATH) as con:
-        return con.execute(
-            """
-            SELECT ds.symbol,
-                   ds.decision_time,
-                   ds.momentum_state,
-                   ds.volume_state,
-                   ds.extension_from_recent_base_pct,
-                   ds.rolling_special_labels,
-                   ds.prior_session_return_pct,
-                   ds.prior_session_participated,
-                   ds.tape_label_at_signal,
-                   ds.tape_bar_age_seconds,
-                   ds.setup_label,
-                   ds.setup_score,
-                   ds.setup_rationale,
-                   mt.realized_pnl_pct,
-                   mt.won,
-                   mt.exit_reason,
-                   mt.holding_minutes
-            FROM decision_snapshots ds
-            JOIN trades t ON t.id = ds.trade_id
-            JOIN matched_trades mt
-              ON mt.symbol = t.symbol
-             AND mt.entry_timestamp = t.timestamp
-            WHERE substr(ds.decision_time, 1, 10) = ?
-              AND lower(ds.action) = 'buy'
-              AND ds.approved = 1
-              AND mt.realized_pnl_pct IS NOT NULL
-            ORDER BY ds.decision_time ASC, ds.symbol ASC
-            """,
-            (target_date,),
-        ).fetchall()
+    return build_default_entry_quality_service().rows(target_date, all_history=False)
 
 
 def _rows_all():
-    with get_connection(DB_PATH) as con:
-        return con.execute(
-            """
-            SELECT ds.symbol,
-                   ds.decision_time,
-                   ds.momentum_state,
-                   ds.volume_state,
-                   ds.extension_from_recent_base_pct,
-                   ds.rolling_special_labels,
-                   ds.prior_session_return_pct,
-                   ds.prior_session_participated,
-                   ds.tape_label_at_signal,
-                   ds.tape_bar_age_seconds,
-                   ds.setup_label,
-                   ds.setup_score,
-                   ds.setup_rationale,
-                   mt.realized_pnl_pct,
-                   mt.won,
-                   mt.exit_reason,
-                   mt.holding_minutes
-            FROM decision_snapshots ds
-            JOIN trades t ON t.id = ds.trade_id
-            JOIN matched_trades mt
-              ON mt.symbol = t.symbol
-             AND mt.entry_timestamp = t.timestamp
-            WHERE lower(ds.action) = 'buy'
-              AND ds.approved = 1
-              AND mt.realized_pnl_pct IS NOT NULL
-            ORDER BY ds.decision_time ASC, ds.symbol ASC
-            """,
-        ).fetchall()
+    return build_default_entry_quality_service().rows(None, all_history=True)
 
 
 def _summarize(rows, key_fn):

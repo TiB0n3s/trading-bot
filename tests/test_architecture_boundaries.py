@@ -103,7 +103,6 @@ TEMPORARY_DB_ACCESS_ALLOWLIST = {
     "context_trade_join_report.py",
     "decision_engine.py",
     "drawdown_report.py",
-    "entry_quality_report.py",
     "event_attribution_report.py",
     "export_ml_dataset.py",
     "filter_report.py",

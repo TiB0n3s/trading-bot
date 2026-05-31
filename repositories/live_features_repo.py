@@ -116,6 +116,68 @@ class LiveFeaturesRepository:
                 (target_date,),
             ).fetchall()
 
+    def snapshots_missing_setup_rows(self, limit: int = 5000):
+        with get_connection(self.db_path) as con:
+            return con.execute(
+                """
+                SELECT
+                    id,
+                    timestamp,
+                    symbol,
+                    market_session,
+                    market_bias,
+                    trend_direction,
+                    trend_strength,
+                    relative_strength_5m,
+                    distance_from_vwap,
+                    ret_5m,
+                    ret_15m,
+                    bar_timeframe,
+                    bar_count
+                FROM feature_snapshots
+                WHERE setup_label IS NULL
+                   OR setup_recommendation IS NULL
+                   OR setup_score IS NULL
+                   OR setup_confidence IS NULL
+                   OR setup_key IS NULL
+                ORDER BY id ASC
+                LIMIT ?
+                """,
+                (limit,),
+            ).fetchall()
+
+    def update_snapshot_setup_fields(
+        self,
+        *,
+        snapshot_id: int,
+        setup_label: str | None,
+        setup_recommendation: str | None,
+        setup_score: float | None,
+        setup_confidence: str | None,
+        setup_key: str | None,
+    ) -> None:
+        with get_connection(self.db_path) as con:
+            con.execute(
+                """
+                UPDATE feature_snapshots
+                SET
+                    setup_label = ?,
+                    setup_recommendation = ?,
+                    setup_score = ?,
+                    setup_confidence = ?,
+                    setup_key = ?
+                WHERE id = ?
+                """,
+                (
+                    setup_label,
+                    setup_recommendation,
+                    setup_score,
+                    setup_confidence,
+                    setup_key,
+                    snapshot_id,
+                ),
+            )
+
     def recent_actions(self, symbol: str, limit: int = 10) -> list[str]:
         with get_connection(self.db_path) as con:
             rows = con.execute(

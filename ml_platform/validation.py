@@ -16,15 +16,15 @@ Read-only. No model training, no live behavior changes.
 
 from __future__ import annotations
 
-import sqlite3
 from dataclasses import asdict, dataclass, field
 from datetime import date, timedelta
 from pathlib import Path
 from typing import Any
 
-from db import DB_PATH
 from market_time import is_trading_day
+from ml_platform.config import DEFAULT_DB_PATH
 from ml_platform.governance import BASELINE_POLICIES, CALIBRATION_BUCKETS, MIN_SAMPLE_GATES
+from repositories.ml_validation_repo import MLValidationRepository
 
 
 PURGE_DEFAULT_DAYS = 5
@@ -261,43 +261,19 @@ def build_fold_specs(
 
 
 # ---------------------------------------------------------------------------
-# DB helpers
-# ---------------------------------------------------------------------------
-
-def _table_exists(con: sqlite3.Connection, table: str) -> bool:
-    r = con.execute(
-        "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (table,)
-    ).fetchone()
-    return r is not None
-
-
-def _table_columns(con: sqlite3.Connection, table: str) -> set[str]:
-    return {row[1] for row in con.execute(f"PRAGMA table_info({table})").fetchall()}
-
-
-# ---------------------------------------------------------------------------
 # Per-fold row counting
 # ---------------------------------------------------------------------------
 
 def _count_rows_in_fold(
-    con: sqlite3.Connection,
+    repo: MLValidationRepository,
     fold: FoldSpec,
     embargo_days: int,
 ) -> FoldCounts:
     """Count feature_snapshot rows assigned to each role in this fold."""
 
-    def _count(start: str | None, end: str | None) -> int:
-        if not start or not end:
-            return 0
-        r = con.execute(
-            "SELECT COUNT(*) FROM feature_snapshots WHERE substr(timestamp,1,10) BETWEEN ? AND ?",
-            (start, end),
-        ).fetchone()
-        return int(r[0] or 0)
-
-    train_rows = _count(fold.train_start, fold.train_end)
-    purged_rows = _count(fold.purge_start, fold.purge_end)
-    test_rows_total = _count(fold.test_start, fold.test_end)
+    train_rows = repo.count_feature_snapshots_between(fold.train_start, fold.train_end)
+    purged_rows = repo.count_feature_snapshots_between(fold.purge_start, fold.purge_end)
+    test_rows_total = repo.count_feature_snapshots_between(fold.test_start, fold.test_end)
 
     # Same-symbol embargo: symbols whose last training date is within embargo_days
     # of train_end have their test rows embargoed for the first embargo_days of
@@ -308,46 +284,26 @@ def _count_rows_in_fold(
         if fold.train_start and embargo_window_start < fold.train_start:
             embargo_window_start = fold.train_start
 
-        embargo_symbols_rows = con.execute(
-            """
-            SELECT DISTINCT symbol
-            FROM feature_snapshots
-            WHERE substr(timestamp,1,10) BETWEEN ? AND ?
-            """,
-            (embargo_window_start, fold.train_end),
-        ).fetchall()
-        embargo_symbols = [r[0] for r in embargo_symbols_rows]
+        embargo_symbols = sorted(repo.distinct_symbols_between(
+            embargo_window_start,
+            fold.train_end,
+        ))
 
         if embargo_symbols:
             test_embargo_end = _add_trading_days(fold.test_start, embargo_days - 1)
             if test_embargo_end > fold.test_end:
                 test_embargo_end = fold.test_end
-            placeholders = ",".join("?" * len(embargo_symbols))
-            r2 = con.execute(
-                f"""
-                SELECT COUNT(*) FROM feature_snapshots
-                WHERE symbol IN ({placeholders})
-                  AND substr(timestamp,1,10) BETWEEN ? AND ?
-                """,
-                embargo_symbols + [fold.test_start, test_embargo_end],
-            ).fetchone()
-            embargoed_rows = int(r2[0] or 0)
+            embargoed_rows = repo.count_feature_snapshots_for_symbols_between(
+                embargo_symbols,
+                fold.test_start,
+                test_embargo_end,
+            )
 
     # Complete-label test rows (all fixed-horizon labels present)
-    complete_label_rows = 0
-    if _table_exists(con, "labeled_setups"):
-        r = con.execute(
-            """
-            SELECT COUNT(*) FROM feature_snapshots fs
-            JOIN labeled_setups ls ON ls.snapshot_id = fs.id
-            WHERE substr(fs.timestamp,1,10) BETWEEN ? AND ?
-              AND ls.ret_fwd_5m IS NOT NULL
-              AND ls.ret_fwd_15m IS NOT NULL
-              AND ls.ret_fwd_30m IS NOT NULL
-            """,
-            (fold.test_start, fold.test_end),
-        ).fetchone()
-        complete_label_rows = int(r[0] or 0)
+    complete_label_rows = repo.complete_label_rows_between(
+        fold.test_start,
+        fold.test_end,
+    )
 
     usable = max(0, test_rows_total - embargoed_rows)
     return FoldCounts(
@@ -366,7 +322,7 @@ def _count_rows_in_fold(
 # ---------------------------------------------------------------------------
 
 def _check_leakage_for_fold(
-    con: sqlite3.Connection,
+    repo: MLValidationRepository,
     fold: FoldSpec,
     purge_days: int,
 ) -> LeakageCheck:
@@ -386,18 +342,10 @@ def _check_leakage_for_fold(
     # feature_available_at is set microseconds after timestamp in atomic feature
     # generation — that is benign. A cross-date violation (features dated after the
     # decision date) would be a real look-ahead issue.
-    fav_violations = 0
-    cols = _table_columns(con, "feature_snapshots")
-    if "feature_available_at" in cols:
-        r = con.execute(
-            """
-            SELECT COUNT(*) FROM feature_snapshots
-            WHERE substr(timestamp,1,10) BETWEEN ? AND ?
-              AND substr(feature_available_at,1,10) > substr(timestamp,1,10)
-            """,
-            (fold.test_start, fold.test_end),
-        ).fetchone()
-        fav_violations = int(r[0] or 0)
+    fav_violations = repo.feature_available_at_violations_between(
+        fold.test_start,
+        fold.test_end,
+    )
 
     # 4. Actual gap between train_end and test_start in trading days
     gap = None
@@ -411,51 +359,32 @@ def _check_leakage_for_fold(
     symbols_only_in_test: list[str] = []
 
     if fold.train_end:
-        # Symbols that have test-window rows
-        test_syms_rows = con.execute(
-            "SELECT DISTINCT symbol FROM feature_snapshots WHERE substr(timestamp,1,10) BETWEEN ? AND ?",
-            (fold.test_start, fold.test_end),
-        ).fetchall()
-        test_symbols = {r[0] for r in test_syms_rows}
+        test_symbols = repo.distinct_symbols_between(fold.test_start, fold.test_end)
 
         # Symbols that have training rows
-        train_syms_rows = con.execute(
-            "SELECT DISTINCT symbol FROM feature_snapshots WHERE substr(timestamp,1,10) BETWEEN ? AND ?",
-            (fold.train_start or fold.test_start, fold.train_end),
-        ).fetchall() if fold.train_start else []
-        train_symbols = {r[0] for r in train_syms_rows}
+        train_symbols = repo.distinct_symbols_between(
+            fold.train_start or fold.test_start,
+            fold.train_end,
+        ) if fold.train_start else set()
 
         symbols_only_in_test = sorted(test_symbols - train_symbols)
 
         # For each symbol in both sets, find last train date and proximity
         if train_symbols and test_symbols and fold.purge_start:
-            boundary_rows = con.execute(
-                """
-                SELECT symbol, MAX(substr(timestamp,1,10)) AS last_date
-                FROM feature_snapshots
-                WHERE symbol IN ({})
-                  AND substr(timestamp,1,10) BETWEEN ? AND ?
-                GROUP BY symbol
-                """.format(",".join("?" * len(train_symbols))),
-                list(train_symbols) + [fold.purge_start, fold.train_end],
-            ).fetchall() if fold.train_start else []
-
-            # First test date per symbol
-            first_test_rows = con.execute(
-                """
-                SELECT symbol, MIN(substr(timestamp,1,10)) AS first_date
-                FROM feature_snapshots
-                WHERE symbol IN ({})
-                  AND substr(timestamp,1,10) BETWEEN ? AND ?
-                GROUP BY symbol
-                """.format(",".join("?" * len(test_symbols))),
-                list(test_symbols) + [fold.test_start, fold.test_end],
-            ).fetchall()
-            first_test_by_sym = {r[0]: r[1] for r in first_test_rows}
+            boundary_rows = repo.last_train_dates_for_symbols_between(
+                sorted(train_symbols),
+                fold.purge_start,
+                fold.train_end,
+            ) if fold.train_start else []
+            first_test_by_sym = repo.first_test_dates_for_symbols_between(
+                sorted(test_symbols),
+                fold.test_start,
+                fold.test_end,
+            )
 
             for row in boundary_rows[:20]:  # cap to avoid huge output
-                sym = row[0]
-                last_train = row[1]
+                sym = row["symbol"]
+                last_train = row["last_date"]
                 first_test = first_test_by_sym.get(sym)
                 sym_gap = (
                     _trading_days_between(last_train, first_test)
@@ -471,17 +400,7 @@ def _check_leakage_for_fold(
                 ).to_dict())
 
     # 6. Stale feature rows in test window
-    stale_rows = 0
-    if "is_stale" in cols:
-        r = con.execute(
-            """
-            SELECT COUNT(*) FROM feature_snapshots
-            WHERE substr(timestamp,1,10) BETWEEN ? AND ?
-              AND is_stale = 1
-            """,
-            (fold.test_start, fold.test_end),
-        ).fetchone()
-        stale_rows = int(r[0] or 0)
+    stale_rows = repo.stale_feature_rows_between(fold.test_start, fold.test_end)
 
     note = (
         "Leakage check verified: no date overlap, no purge-zone bleed, "
@@ -559,7 +478,7 @@ def _baseline_contract() -> dict[str, Any]:
 
 def walk_forward_split_report(
     *,
-    db_path: Path | str = DB_PATH,
+    db_path: Path | str = DEFAULT_DB_PATH,
     start_date: str,
     end_date: str,
     n_folds: int = N_FOLDS_DEFAULT,
@@ -590,24 +509,23 @@ def walk_forward_split_report(
     total_train = total_test = total_purged = total_embargoed = None
 
     if fold_specs and db_path.exists():
-        with sqlite3.connect(f"file:{db_path}?mode=ro", uri=True) as con:
-            con.row_factory = sqlite3.Row
-            if _table_exists(con, "feature_snapshots"):
-                counts = [
-                    _count_rows_in_fold(con, fold, embargo_days)
-                    for fold in fold_specs
-                ]
-                leaks = [
-                    _check_leakage_for_fold(con, fold, purge_days)
-                    for fold in fold_specs
-                ]
-                fold_counts = [c.to_dict() for c in counts]
-                leakage_checks = [lk.to_dict() for lk in leaks]
+        repo = MLValidationRepository(db_path)
+        if repo.feature_snapshots_exists():
+            counts = [
+                _count_rows_in_fold(repo, fold, embargo_days)
+                for fold in fold_specs
+            ]
+            leaks = [
+                _check_leakage_for_fold(repo, fold, purge_days)
+                for fold in fold_specs
+            ]
+            fold_counts = [c.to_dict() for c in counts]
+            leakage_checks = [lk.to_dict() for lk in leaks]
 
-                total_train = sum(c.train_rows for c in counts)
-                total_test = sum(c.test_rows_usable for c in counts)
-                total_purged = sum(c.purged_rows for c in counts)
-                total_embargoed = sum(c.test_rows_embargoed for c in counts)
+            total_train = sum(c.train_rows for c in counts)
+            total_test = sum(c.test_rows_usable for c in counts)
+            total_purged = sum(c.purged_rows for c in counts)
+            total_embargoed = sum(c.test_rows_embargoed for c in counts)
 
     # Determine status
     usable_test = total_test or 0

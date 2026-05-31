@@ -6,6 +6,7 @@ from pathlib import Path
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
+DEFAULT_DB_PATH = PROJECT_ROOT / "trades.db"
 ML_ROOT = PROJECT_ROOT / "ml"
 DATASET_ROOT = ML_ROOT / "datasets"
 EXPERIMENT_ROOT = ML_ROOT / "experiments"

@@ -11,12 +11,12 @@ import argparse
 import json
 from pathlib import Path
 
-from db import DB_PATH
 from ml_platform.brain_features import (
     brain_feature_manifest,
     build_brain_feature_rows,
     write_brain_features_csv,
 )
+from ml_platform.config import DEFAULT_DB_PATH
 from ml_platform.datasets import dataset_profile, write_profile
 from ml_platform.experiments import create_experiment
 from ml_platform.evaluation import default_evaluation_plan
@@ -47,13 +47,13 @@ def main() -> int:
     sub = parser.add_subparsers(dest="command", required=True)
 
     profile = sub.add_parser("profile-dataset", help="Summarize ML table coverage")
-    profile.add_argument("--db-path", default=str(DB_PATH))
+    profile.add_argument("--db-path", default=str(DEFAULT_DB_PATH))
     profile.add_argument("--start-date")
     profile.add_argument("--end-date")
     profile.add_argument("--output")
 
     brain = sub.add_parser("export-brain-features", help="Export existing bot-brain features")
-    brain.add_argument("--db-path", default=str(DB_PATH))
+    brain.add_argument("--db-path", default=str(DEFAULT_DB_PATH))
     brain.add_argument("--date")
     brain.add_argument("--start-date")
     brain.add_argument("--end-date")
@@ -82,7 +82,7 @@ def main() -> int:
     sub.add_parser("integration-contract", help="Print ML/brain promotion contract")
     sub.add_parser("evaluation-plan", help="Print default evaluation requirements")
     readiness = sub.add_parser("retraining-readiness", help="Print manual retraining readiness evidence")
-    readiness.add_argument("--db-path", default=str(DB_PATH))
+    readiness.add_argument("--db-path", default=str(DEFAULT_DB_PATH))
     readiness.add_argument("--start-date")
     readiness.add_argument("--end-date")
     readiness.add_argument("--trading-sessions-observed", type=int, default=0)
@@ -92,7 +92,7 @@ def main() -> int:
     sub.add_parser("env-policy", help="Print ML kill-switch defaults")
 
     manifest = sub.add_parser("dataset-manifest", help="Build a read-only dataset manifest")
-    manifest.add_argument("--db-path", default=str(DB_PATH))
+    manifest.add_argument("--db-path", default=str(DEFAULT_DB_PATH))
     manifest.add_argument("--start-date")
     manifest.add_argument("--end-date")
     manifest.add_argument("--query-version", default="brain_features_query_v1")
@@ -107,13 +107,13 @@ def main() -> int:
     replay.add_argument("--end-date", required=True)
     replay.add_argument("--policy", default="current")
     replay.add_argument("--candidate-model", default="similarity_v0")
-    replay.add_argument("--db-path", default=str(DB_PATH))
+    replay.add_argument("--db-path", default=str(DEFAULT_DB_PATH))
     replay.add_argument("--friction-bps", type=float, default=10.0)
     replay.add_argument("--max-changed-rows", type=int, default=50)
     replay.add_argument("--output")
 
     staged = sub.add_parser("staged-readiness", help="Print staged observe-only ML integration report")
-    staged.add_argument("--db-path", default=str(DB_PATH))
+    staged.add_argument("--db-path", default=str(DEFAULT_DB_PATH))
     staged.add_argument("--start-date", required=True)
     staged.add_argument("--end-date", required=True)
     staged.add_argument("--policy", default="current")
@@ -131,14 +131,14 @@ def main() -> int:
     )
     pit.add_argument("--start-date", required=True)
     pit.add_argument("--end-date", required=True)
-    pit.add_argument("--db-path", default=str(DB_PATH))
+    pit.add_argument("--db-path", default=str(DEFAULT_DB_PATH))
     pit.add_argument("--output")
 
     wf = sub.add_parser(
         "walk-forward-splits",
         help="Build purged walk-forward fold specs and row counts",
     )
-    wf.add_argument("--db-path", default=str(DB_PATH))
+    wf.add_argument("--db-path", default=str(DEFAULT_DB_PATH))
     wf.add_argument("--start-date", required=True)
     wf.add_argument("--end-date", required=True)
     wf.add_argument("--n-folds", type=int, default=N_FOLDS_DEFAULT)
@@ -151,7 +151,7 @@ def main() -> int:
         "leakage-report",
         help="Symbol/date leakage audit for walk-forward splits",
     )
-    leak.add_argument("--db-path", default=str(DB_PATH))
+    leak.add_argument("--db-path", default=str(DEFAULT_DB_PATH))
     leak.add_argument("--start-date", required=True)
     leak.add_argument("--end-date", required=True)
     leak.add_argument("--n-folds", type=int, default=N_FOLDS_DEFAULT)

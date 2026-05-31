@@ -13,8 +13,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from db import DB_PATH
 from ml_platform.brain_features import brain_feature_manifest, build_brain_feature_rows
+from ml_platform.config import DEFAULT_DB_PATH
 from ml_platform.datasets import dataset_profile
 from ml_platform.governance import (
     APP_REFACTOR_RISK_POLICY,
@@ -53,7 +53,7 @@ class StagedIntegrationReport:
 
 def staged_ml_integration_report(
     *,
-    db_path: Path | str = DB_PATH,
+    db_path: Path | str = DEFAULT_DB_PATH,
     start_date: str,
     end_date: str,
     candidate_model: str,

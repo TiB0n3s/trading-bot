@@ -26,7 +26,7 @@ import pytz
 from bot_events import log_event
 from repositories import position_repo
 from services.broker_service import broker_service
-from services.market_data_service import market_data_service
+from services.position_market_data_service import position_market_data_service
 from session_momentum import get_latest_session_momentum
 
 
@@ -290,31 +290,7 @@ def get_entry_context(symbol):
 
 
 def fetch_intraday_bars(symbol, minutes=60):
-    start = (now_utc() - timedelta(minutes=minutes + 5)).isoformat()
-    # Keep requests bounded so one slow symbol does not stall the full position review.
-    bars = market_data_service.get_bars_with_fallback(
-        symbol,
-        "1Min",
-        start=start,
-        feed="iex",
-        limit=minutes + 10,
-    )
-
-    out = []
-    for b in bars:
-        try:
-            out.append({
-                "timestamp": b.t.isoformat(),
-                "open": float(b.o),
-                "high": float(b.h),
-                "low": float(b.l),
-                "close": float(b.c),
-                "volume": float(getattr(b, "v", 0) or 0),
-            })
-        except Exception:
-            continue
-
-    return out
+    return position_market_data_service.fetch_intraday_bars(symbol, minutes=minutes)
 
 
 def calc_vwap(bars):

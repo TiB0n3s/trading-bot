@@ -786,3 +786,50 @@ class OpsCheckRepository:
             """,
             (target_date, target_date, target_date),
         )
+
+    def intelligence_row_count(self, table_name: str, target_date: str) -> int:
+        row = self._fetchone(
+            f"""
+            SELECT COUNT(*) AS n
+            FROM {table_name}
+            WHERE market_date = ?
+            """,
+            (target_date,),
+        )
+        return int(row["n"] or 0) if row else 0
+
+    def context_bias_rows(self, target_date: str) -> list[sqlite3.Row]:
+        return self._fetchall(
+            """
+            SELECT COALESCE(bias, 'missing') AS bias, COUNT(*) AS n
+            FROM daily_symbol_context
+            WHERE market_date = ?
+            GROUP BY COALESCE(bias, 'missing')
+            ORDER BY bias
+            """,
+            (target_date,),
+        )
+
+    def context_avoid_rows(self, target_date: str) -> list[sqlite3.Row]:
+        return self._fetchall(
+            """
+            SELECT symbol, bias, risk_level, entry_quality, avoid_type, reason
+            FROM daily_symbol_context
+            WHERE market_date = ?
+              AND bias = 'avoid'
+            ORDER BY symbol
+            """,
+            (target_date,),
+        )
+
+    def latest_context_update_rows(self, target_date: str) -> list[sqlite3.Row]:
+        return self._fetchall(
+            """
+            SELECT symbol, updated_at
+            FROM daily_symbol_context
+            WHERE market_date = ?
+            ORDER BY updated_at DESC, symbol
+            LIMIT 10
+            """,
+            (target_date,),
+        )

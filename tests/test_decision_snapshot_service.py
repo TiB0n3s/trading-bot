@@ -1,4 +1,5 @@
 import sys
+import json
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -8,6 +9,7 @@ from services.decision_snapshot_service import (
     DECISION_SNAPSHOT_FEATURE_SEMANTIC_VERSION,
     DecisionSnapshotService,
 )
+from services.canonical_intelligence_service import CANONICAL_INTELLIGENCE_VERSION
 
 
 class FakeRepository:
@@ -58,6 +60,12 @@ def _record_snapshot(tmp_path, *, prediction_gate):
                 "buy_opportunity_score": 65,
                 "buy_opportunity_recommendation": "buy_candidate",
             },
+            "intelligence_context": {
+                "summary": {
+                    "support_count": 2,
+                    "risk_count": 1,
+                },
+            },
         },
         raw_signal={"symbol": "AAPL"},
     )
@@ -78,6 +86,14 @@ def test_record_decision_snapshot_builds_expected_row(tmp_path):
 
     assert snapshot_id == 123
     assert row["feature_semantic_version"] == DECISION_SNAPSHOT_FEATURE_SEMANTIC_VERSION
+    assert row["canonical_intelligence_version"] == CANONICAL_INTELLIGENCE_VERSION
+    assert len(row["canonical_intelligence_hash"]) == 64
+    canonical = json.loads(row["canonical_intelligence_json"])
+    assert canonical["version"] == CANONICAL_INTELLIGENCE_VERSION
+    assert canonical["symbol"] == "AAPL"
+    assert canonical["event_state"]["support_count"] == 2
+    assert canonical["prediction_state"]["ml_score"] == 63
+    assert canonical["feature_vector_hash"] == row["canonical_intelligence_hash"]
     assert row["trade_id"] == 7
     assert row["symbol"] == "AAPL"
     assert row["approved"] == 1

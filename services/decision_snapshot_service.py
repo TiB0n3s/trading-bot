@@ -10,6 +10,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from services.canonical_intelligence_service import (
+    CANONICAL_INTELLIGENCE_VERSION,
+    build_canonical_intelligence_snapshot,
+)
 from repositories.decision_snapshot_repo import DecisionSnapshotRepository
 from symbols_config import SYMBOL_UNIVERSE_VERSION
 
@@ -168,9 +172,24 @@ class DecisionSnapshotService:
             or "rejected"
         )
 
+        market_context_metadata = self.market_context_metadata()
+        canonical = build_canonical_intelligence_snapshot(
+            symbol=symbol,
+            decision_ts=timestamp,
+            action=action,
+            context=context,
+            account_state=account_state,
+            feature_semantic_version=DECISION_SNAPSHOT_FEATURE_SEMANTIC_VERSION,
+            market_context_metadata=market_context_metadata,
+        )
+        canonical_json = json_dumps(canonical.to_dict())
+
         row = {
             "created_at": datetime.now(timezone.utc).isoformat(),
             "feature_semantic_version": DECISION_SNAPSHOT_FEATURE_SEMANTIC_VERSION,
+            "canonical_intelligence_version": CANONICAL_INTELLIGENCE_VERSION,
+            "canonical_intelligence_hash": canonical.feature_vector_hash,
+            "canonical_intelligence_json": canonical_json,
             "decision_time": timestamp,
             "trade_id": trade_id,
             "source": source,
@@ -231,7 +250,7 @@ class DecisionSnapshotService:
             "decision_json": json_dumps(decision),
             "order_json": json_dumps(order),
             "account_state_json": json_dumps(account_state),
-            **self.market_context_metadata(),
+            **market_context_metadata,
         }
         for field in SNAPSHOT_CONTEXT_FIELDS:
             row[field] = context.get(field)

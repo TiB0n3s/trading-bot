@@ -434,6 +434,15 @@ MIGRATIONS: tuple[Migration, ...] = (
             "ALTER TABLE decision_snapshots ADD COLUMN feature_semantic_version TEXT",
         ),
     ),
+    Migration(
+        migration_id="20260531_017_canonical_intelligence_snapshot",
+        description="Add canonical intelligence snapshot fields to decision_snapshots.",
+        statements=(
+            "ALTER TABLE decision_snapshots ADD COLUMN canonical_intelligence_version TEXT",
+            "ALTER TABLE decision_snapshots ADD COLUMN canonical_intelligence_hash TEXT",
+            "ALTER TABLE decision_snapshots ADD COLUMN canonical_intelligence_json TEXT",
+        ),
+    ),
 )
 
 

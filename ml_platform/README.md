@@ -122,6 +122,12 @@ contract. It verifies that ML-facing decision features have the same names in
 `decision_snapshots` and the canonical dataset export, and that each field has
 documented null/default semantics and point-in-time cutoff rules.
 
+`canonical_intelligence_v1` is persisted on each decision snapshot as
+`canonical_intelligence_json` plus a stable hash/version. It consolidates
+regime, momentum, trend, event/intelligence, prediction, setup, strategy,
+opportunity, policy-artifact, freshness, confidence, and source timestamp state
+for replay and later dataset exports.
+
 ## Staged Readiness
 
 `staged.py` composes the current observe-only platform pieces into a single

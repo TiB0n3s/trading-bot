@@ -93,6 +93,14 @@ or destabilize the webhook path if treated as routine cleanup.
    - Next parity step: expand the contract from the current high-value
      decision features into the canonical intelligence snapshot once that
      snapshot exists.
+9. Canonical intelligence snapshot:
+   - `canonical_intelligence_v1` is persisted with each decision snapshot as
+     JSON plus hash/version.
+   - It unifies regime, momentum, trend, event/intelligence, prediction, setup,
+     strategy, opportunity, policy-artifact, source timestamp, freshness, and
+     confidence state without changing approval or execution behavior.
+   - Next step: make dataset export and replay consume this object directly
+     instead of reconstructing equivalent state from several columns.
 
 ## Platform Layers
 

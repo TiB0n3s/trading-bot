@@ -306,6 +306,29 @@ def test_decision_snapshot_feature_parity_migration_adds_columns():
         assert_true(expected <= table_columns(db_path, "decision_snapshots"), "feature parity decision columns")
 
 
+def test_canonical_intelligence_migration_adds_columns():
+    with tempfile.TemporaryDirectory() as tmp:
+        db_path = Path(tmp) / "test.db"
+        with sqlite3.connect(db_path) as con:
+            con.execute("CREATE TABLE trades (id INTEGER PRIMARY KEY)")
+        apply_migration(MIGRATIONS[4], db_path)
+
+        migration = next(
+            m
+            for m in MIGRATIONS
+            if m.migration_id == "20260531_017_canonical_intelligence_snapshot"
+        )
+        applied = apply_migration(migration, db_path)
+        assert_equal(applied, True, "apply")
+
+        expected = {
+            "canonical_intelligence_version",
+            "canonical_intelligence_hash",
+            "canonical_intelligence_json",
+        }
+        assert_true(expected <= table_columns(db_path, "decision_snapshots"), "canonical intelligence columns")
+
+
 if __name__ == "__main__":
     test_feature_audit_migration_is_idempotent()
     print("[OK] test_feature_audit_migration_is_idempotent")
@@ -329,4 +352,6 @@ if __name__ == "__main__":
     print("[OK] test_entry_intelligence_migration_adds_columns")
     test_decision_snapshot_feature_parity_migration_adds_columns()
     print("[OK] test_decision_snapshot_feature_parity_migration_adds_columns")
-    print("\nAll 11 DB migration tests passed.")
+    test_canonical_intelligence_migration_adds_columns()
+    print("[OK] test_canonical_intelligence_migration_adds_columns")
+    print("\nAll 12 DB migration tests passed.")

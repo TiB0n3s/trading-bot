@@ -49,15 +49,21 @@ def _snapshot(**overrides):
         "exit_ts": "2026-05-31T15:15:00+00:00",
         "exit_trigger": "peak_lock_floor",
         "exit_source": "position_manager",
+        "decision_snapshot_id": 303,
+        "entry_trade_id": 99,
         "exit_trade_id": 101,
         "matched_trade_id": 202,
+        "position_id": "MSFT:99",
         "exit_order_id": "sell-1",
+        "entry_canonical_intelligence_version": "canonical_intelligence_v1",
+        "entry_canonical_intelligence_hash": "b" * 64,
         "canonical_intelligence": _canonical_intelligence(),
         "realized_outcome": {
             "realized_pnl": 12.5,
             "realized_return_pct": 0.42,
             "mfe_pct": 0.8,
             "capture_ratio": 0.525,
+            "max_adverse_excursion_pct": -0.35,
         },
         "foregone_outcome": {
             "avoided_drawdown_pct": 0.3,
@@ -66,6 +72,7 @@ def _snapshot(**overrides):
         "post_exit_path": {
             "return_30m_pct": -0.2,
             "return_60m_pct": -0.35,
+            "reentry_window_summary": "no_clean_reentry_60m",
             "summary": "faded_after_exit",
         },
         "trigger_metadata": {"floor_pct": 0.25, "peak_pct": 0.8},
@@ -88,10 +95,15 @@ def test_build_canonical_exit_snapshot_collects_exit_state_and_hashes():
     assert data["version"] == CANONICAL_EXIT_VERSION
     assert data["symbol"] == "MSFT"
     assert data["exit_identity"]["exit_trade_id"] == 101
+    assert data["exit_identity"]["decision_snapshot_id"] == 303
+    assert data["exit_identity"]["entry_trade_id"] == 99
+    assert data["exit_identity"]["position_id"] == "MSFT:99"
+    assert data["exit_identity"]["entry_canonical_intelligence_hash"] == "b" * 64
     assert data["exit_trigger"]["trigger"] == "peak_lock_floor"
     assert data["canonical_intelligence_state"]["hash"] == "a" * 64
     assert data["canonical_intelligence_state"]["momentum_state"]["session_label"] == "strong_uptrend"
     assert data["realized_outcome"]["capture_ratio"] == 0.525
+    assert data["realized_outcome"]["max_adverse_excursion_pct"] == -0.35
     assert data["foregone_outcome"]["avoided_drawdown_pct"] == 0.3
     assert data["post_exit_path"]["return_60m_pct"] == -0.35
     assert len(data["exit_snapshot_hash"]) == 64
@@ -157,13 +169,23 @@ def test_canonical_exit_persistence_writes_queryable_row():
         assert len(rows) == 1
         row = rows[0]
         assert row["symbol"] == "MSFT"
+        assert row["decision_snapshot_id"] == 303
+        assert row["entry_trade_id"] == 99
+        assert row["position_id"] == "MSFT:99"
         assert row["exit_trigger"] == "peak_lock_floor"
         assert row["exit_source"] == "position_manager"
         assert row["realized_pnl"] == 12.5
         assert row["capture_ratio"] == 0.525
+        assert row["max_adverse_excursion_pct"] == -0.35
+        assert row["reentry_window_summary"] == "no_clean_reentry_60m"
         assert row["canonical_exit_version"] == CANONICAL_EXIT_VERSION
         assert row["canonical_exit_hash"] == snapshot.exit_snapshot_hash
         assert row["canonical_intelligence_hash"] == "a" * 64
+        assert row["entry_canonical_intelligence_version"] == "canonical_intelligence_v1"
+        assert row["entry_canonical_intelligence_hash"] == "b" * 64
+        assert json.loads(row["exit_regime_state_json"])["macro_regime"] == "risk_on"
+        assert json.loads(row["exit_momentum_state_json"])["session_label"] == "strong_uptrend"
+        assert json.loads(row["exit_trend_state_json"])["direction"] == "bullish"
         persisted = json.loads(row["canonical_exit_json"])
         assert persisted["exit_snapshot_hash"] == snapshot.exit_snapshot_hash
 

@@ -343,7 +343,10 @@ def test_canonical_exit_snapshot_migration_creates_table():
 
         expected = {
             "exit_trade_id",
+            "decision_snapshot_id",
+            "entry_trade_id",
             "matched_trade_id",
+            "position_id",
             "symbol",
             "exit_timestamp",
             "exit_trigger",
@@ -352,16 +355,80 @@ def test_canonical_exit_snapshot_migration_creates_table():
             "realized_return_pct",
             "mfe_pct",
             "capture_ratio",
+            "max_adverse_excursion_pct",
             "avoided_drawdown_pct",
             "missed_upside_pct",
             "post_exit_return_30m_pct",
             "post_exit_return_60m_pct",
+            "reentry_window_summary",
+            "exit_regime_state_json",
+            "exit_momentum_state_json",
+            "exit_trend_state_json",
             "canonical_exit_version",
             "canonical_exit_hash",
             "canonical_exit_json",
             "canonical_intelligence_hash",
+            "entry_canonical_intelligence_version",
+            "entry_canonical_intelligence_hash",
         }
         assert_true(expected <= table_columns(db_path, "exit_snapshots"), "canonical exit snapshot columns")
+
+
+def test_exit_snapshot_lifecycle_links_migration_adds_columns():
+    with tempfile.TemporaryDirectory() as tmp:
+        db_path = Path(tmp) / "test.db"
+
+        # Simulate a database that already had the v18 table before lifecycle
+        # columns were promoted into the base CREATE TABLE.
+        with sqlite3.connect(db_path) as con:
+            con.execute(
+                """
+                CREATE TABLE exit_snapshots (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    created_at TEXT NOT NULL,
+                    exit_trade_id INTEGER,
+                    matched_trade_id INTEGER,
+                    symbol TEXT,
+                    exit_timestamp TEXT,
+                    exit_trigger TEXT,
+                    exit_source TEXT,
+                    realized_pnl REAL,
+                    realized_return_pct REAL,
+                    mfe_pct REAL,
+                    capture_ratio REAL,
+                    avoided_drawdown_pct REAL,
+                    missed_upside_pct REAL,
+                    post_exit_return_30m_pct REAL,
+                    post_exit_return_60m_pct REAL,
+                    canonical_exit_version TEXT NOT NULL,
+                    canonical_exit_hash TEXT NOT NULL,
+                    canonical_exit_json TEXT NOT NULL,
+                    canonical_intelligence_hash TEXT
+                )
+                """
+            )
+
+        migration = next(
+            m
+            for m in MIGRATIONS
+            if m.migration_id == "20260531_019_exit_snapshot_lifecycle_links"
+        )
+        applied = apply_migration(migration, db_path)
+        assert_equal(applied, True, "apply")
+
+        expected = {
+            "decision_snapshot_id",
+            "entry_trade_id",
+            "position_id",
+            "max_adverse_excursion_pct",
+            "reentry_window_summary",
+            "exit_regime_state_json",
+            "exit_momentum_state_json",
+            "exit_trend_state_json",
+            "entry_canonical_intelligence_version",
+            "entry_canonical_intelligence_hash",
+        }
+        assert_true(expected <= table_columns(db_path, "exit_snapshots"), "exit lifecycle link columns")
 
 
 if __name__ == "__main__":
@@ -391,4 +458,6 @@ if __name__ == "__main__":
     print("[OK] test_canonical_intelligence_migration_adds_columns")
     test_canonical_exit_snapshot_migration_creates_table()
     print("[OK] test_canonical_exit_snapshot_migration_creates_table")
-    print("\nAll 13 DB migration tests passed.")
+    test_exit_snapshot_lifecycle_links_migration_adds_columns()
+    print("[OK] test_exit_snapshot_lifecycle_links_migration_adds_columns")
+    print("\nAll 14 DB migration tests passed.")

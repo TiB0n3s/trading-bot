@@ -451,8 +451,11 @@ MIGRATIONS: tuple[Migration, ...] = (
             CREATE TABLE IF NOT EXISTS exit_snapshots (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 created_at TEXT NOT NULL,
+                decision_snapshot_id INTEGER,
+                entry_trade_id INTEGER,
                 exit_trade_id INTEGER,
                 matched_trade_id INTEGER,
+                position_id TEXT,
                 symbol TEXT,
                 exit_timestamp TEXT,
                 exit_trigger TEXT,
@@ -461,14 +464,21 @@ MIGRATIONS: tuple[Migration, ...] = (
                 realized_return_pct REAL,
                 mfe_pct REAL,
                 capture_ratio REAL,
+                max_adverse_excursion_pct REAL,
                 avoided_drawdown_pct REAL,
                 missed_upside_pct REAL,
                 post_exit_return_30m_pct REAL,
                 post_exit_return_60m_pct REAL,
+                reentry_window_summary TEXT,
+                exit_regime_state_json TEXT,
+                exit_momentum_state_json TEXT,
+                exit_trend_state_json TEXT,
                 canonical_exit_version TEXT NOT NULL,
                 canonical_exit_hash TEXT NOT NULL,
                 canonical_exit_json TEXT NOT NULL,
-                canonical_intelligence_hash TEXT
+                canonical_intelligence_hash TEXT,
+                entry_canonical_intelligence_version TEXT,
+                entry_canonical_intelligence_hash TEXT
             )
             """,
             """
@@ -478,6 +488,38 @@ MIGRATIONS: tuple[Migration, ...] = (
             """
             CREATE INDEX IF NOT EXISTS idx_exit_snapshots_trade
             ON exit_snapshots(exit_trade_id, matched_trade_id)
+            """,
+            """
+            CREATE INDEX IF NOT EXISTS idx_exit_snapshots_decision
+            ON exit_snapshots(decision_snapshot_id)
+            """,
+            """
+            CREATE INDEX IF NOT EXISTS idx_exit_snapshots_entry_hash
+            ON exit_snapshots(entry_canonical_intelligence_hash)
+            """,
+        ),
+    ),
+    Migration(
+        migration_id="20260531_019_exit_snapshot_lifecycle_links",
+        description="Add explicit lifecycle links and outcome-window summaries to exit snapshots.",
+        statements=(
+            "ALTER TABLE exit_snapshots ADD COLUMN decision_snapshot_id INTEGER",
+            "ALTER TABLE exit_snapshots ADD COLUMN entry_trade_id INTEGER",
+            "ALTER TABLE exit_snapshots ADD COLUMN position_id TEXT",
+            "ALTER TABLE exit_snapshots ADD COLUMN max_adverse_excursion_pct REAL",
+            "ALTER TABLE exit_snapshots ADD COLUMN reentry_window_summary TEXT",
+            "ALTER TABLE exit_snapshots ADD COLUMN exit_regime_state_json TEXT",
+            "ALTER TABLE exit_snapshots ADD COLUMN exit_momentum_state_json TEXT",
+            "ALTER TABLE exit_snapshots ADD COLUMN exit_trend_state_json TEXT",
+            "ALTER TABLE exit_snapshots ADD COLUMN entry_canonical_intelligence_version TEXT",
+            "ALTER TABLE exit_snapshots ADD COLUMN entry_canonical_intelligence_hash TEXT",
+            """
+            CREATE INDEX IF NOT EXISTS idx_exit_snapshots_decision
+            ON exit_snapshots(decision_snapshot_id)
+            """,
+            """
+            CREATE INDEX IF NOT EXISTS idx_exit_snapshots_entry_hash
+            ON exit_snapshots(entry_canonical_intelligence_hash)
             """,
         ),
     ),

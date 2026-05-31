@@ -11,14 +11,14 @@ broker behavior, or any live trading state.
 from __future__ import annotations
 
 import json
-import sqlite3
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
-from db import DB_PATH
+from ml_platform.config import DEFAULT_DB_PATH
 from ml_platform.governance import BASELINE_POLICIES, FRICTION_ASSUMPTIONS
 from ml_platform.pit_context import get_archive_root, select_pit_context
+from repositories.training_data_repo import TrainingDataRepository
 
 DEFAULT_ROUND_TRIP_FRICTION_BPS = 10.0
 POLICY_ALLOW_DECISIONS = {"allow", "size_down"}
@@ -150,39 +150,8 @@ def _load_snapshots(
     start_date: str,
     end_date: str,
     db_path: Path | str,
-) -> list[sqlite3.Row]:
-    db_path = Path(db_path)
-    if not db_path.exists():
-        return []
-    with sqlite3.connect(f"file:{db_path}?mode=ro", uri=True) as con:
-        con.row_factory = sqlite3.Row
-        tables = {
-            row[0]
-            for row in con.execute(
-                "SELECT name FROM sqlite_master WHERE type='table'"
-            ).fetchall()
-        }
-        if "decision_snapshots" not in tables:
-            return []
-        return con.execute(
-            """
-            SELECT id, symbol, action, decision_time, final_decision, approved,
-                   trade_id, rejection_reason, account_state_json
-            FROM decision_snapshots
-            WHERE action = 'buy'
-              AND substr(decision_time, 1, 10) BETWEEN ? AND ?
-            ORDER BY decision_time, id
-            """,
-            (start_date, end_date),
-        ).fetchall()
-
-
-def _table_exists(con: sqlite3.Connection, table: str) -> bool:
-    row = con.execute(
-        "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?",
-        (table,),
-    ).fetchone()
-    return row is not None
+) -> list[Any]:
+    return TrainingDataRepository(db_path).replay_snapshot_rows(start_date, end_date)
 
 
 def _load_realized_outcomes(
@@ -195,36 +164,10 @@ def _load_realized_outcomes(
     matched_trades does not carry trade_id today, so this joins through the
     exact FIFO entry timestamp/symbol recorded by the trade matcher.
     """
-    db_path = Path(db_path)
-    if not db_path.exists():
-        return {}
-
-    with sqlite3.connect(f"file:{db_path}?mode=ro", uri=True) as con:
-        con.row_factory = sqlite3.Row
-        if not (_table_exists(con, "trades") and _table_exists(con, "matched_trades")):
-            return {}
-        rows = con.execute(
-            """
-            SELECT
-                t.id AS trade_id,
-                t.symbol,
-                t.timestamp,
-                SUM(COALESCE(mt.realized_pnl, 0)) AS realized_pnl,
-                SUM(COALESCE(mt.qty, 0) * COALESCE(mt.entry_price, 0)) AS capital_at_risk,
-                COUNT(mt.id) AS matched_exit_count,
-                MIN(mt.exit_timestamp) AS first_exit_timestamp,
-                MAX(mt.exit_timestamp) AS last_exit_timestamp
-            FROM trades t
-            JOIN matched_trades mt
-              ON mt.symbol = t.symbol
-             AND mt.entry_timestamp = t.timestamp
-            WHERE lower(t.action) = 'buy'
-              AND COALESCE(t.approved, 0) = 1
-              AND substr(t.timestamp, 1, 10) BETWEEN ? AND ?
-            GROUP BY t.id, t.symbol, t.timestamp
-            """,
-            (start_date, end_date),
-        ).fetchall()
+    rows = TrainingDataRepository(db_path).replay_realized_outcome_rows(
+        start_date,
+        end_date,
+    )
 
     outcomes: dict[int, dict[str, Any]] = {}
     for row in rows:
@@ -249,26 +192,10 @@ def _load_rejected_outcomes(
     end_date: str,
     db_path: Path | str,
 ) -> dict[int, dict[str, Any]]:
-    db_path = Path(db_path)
-    if not db_path.exists():
-        return {}
-
-    with sqlite3.connect(f"file:{db_path}?mode=ro", uri=True) as con:
-        con.row_factory = sqlite3.Row
-        if not _table_exists(con, "rejected_signal_outcomes"):
-            return {}
-        rows = con.execute(
-            """
-            SELECT trade_id, label_status, partial_reason,
-                   return_5m, return_15m, return_30m, return_60m, return_eod,
-                   max_favorable_60m, max_adverse_60m
-            FROM rejected_signal_outcomes
-            WHERE trade_id IS NOT NULL
-              AND lower(action) = 'buy'
-              AND substr(timestamp, 1, 10) BETWEEN ? AND ?
-            """,
-            (start_date, end_date),
-        ).fetchall()
+    rows = TrainingDataRepository(db_path).replay_rejected_outcome_rows(
+        start_date,
+        end_date,
+    )
 
     outcomes: dict[int, dict[str, Any]] = {}
     for row in rows:
@@ -285,7 +212,7 @@ def _load_rejected_outcomes(
     return outcomes
 
 
-def _best_rejected_return(row: sqlite3.Row | dict[str, Any]) -> tuple[str | None, float | None]:
+def _best_rejected_return(row: Any | dict[str, Any]) -> tuple[str | None, float | None]:
     for horizon in ("return_60m", "return_30m", "return_15m", "return_5m", "return_eod"):
         value = _to_float(row[horizon])
         if value is not None:
@@ -387,7 +314,7 @@ def replay_decisions_v1(
     start_date: str,
     end_date: str,
     policy: str = "current",
-    db_path: Path | str = DB_PATH,
+    db_path: Path | str = DEFAULT_DB_PATH,
     max_changed_rows: int = 50,
     friction_bps: float = DEFAULT_ROUND_TRIP_FRICTION_BPS,
 ) -> dict[str, Any]:

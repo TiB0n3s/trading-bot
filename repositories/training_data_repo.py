@@ -311,3 +311,78 @@ class TrainingDataRepository:
                     "end": range_row["end"],
                 }
         return summary
+
+    def replay_snapshot_rows(self, start_date: str, end_date: str) -> list[sqlite3.Row]:
+        if not self.db_path.exists():
+            return []
+        with self._connect() as con:
+            tables = {
+                row[0]
+                for row in con.execute(
+                    "SELECT name FROM sqlite_master WHERE type='table'"
+                ).fetchall()
+            }
+            if "decision_snapshots" not in tables:
+                return []
+            return con.execute(
+                """
+                SELECT id, symbol, action, decision_time, final_decision, approved,
+                       trade_id, rejection_reason, account_state_json
+                FROM decision_snapshots
+                WHERE action = 'buy'
+                  AND substr(decision_time, 1, 10) BETWEEN ? AND ?
+                ORDER BY decision_time, id
+                """,
+                (start_date, end_date),
+            ).fetchall()
+
+    def replay_realized_outcome_rows(self, start_date: str, end_date: str) -> list[sqlite3.Row]:
+        if not self.db_path.exists():
+            return []
+        with self._connect() as con:
+            if not (
+                self._table_exists(con, "trades")
+                and self._table_exists(con, "matched_trades")
+            ):
+                return []
+            return con.execute(
+                """
+                SELECT
+                    t.id AS trade_id,
+                    t.symbol,
+                    t.timestamp,
+                    SUM(COALESCE(mt.realized_pnl, 0)) AS realized_pnl,
+                    SUM(COALESCE(mt.qty, 0) * COALESCE(mt.entry_price, 0)) AS capital_at_risk,
+                    COUNT(mt.id) AS matched_exit_count,
+                    MIN(mt.exit_timestamp) AS first_exit_timestamp,
+                    MAX(mt.exit_timestamp) AS last_exit_timestamp
+                FROM trades t
+                JOIN matched_trades mt
+                  ON mt.symbol = t.symbol
+                 AND mt.entry_timestamp = t.timestamp
+                WHERE lower(t.action) = 'buy'
+                  AND COALESCE(t.approved, 0) = 1
+                  AND substr(t.timestamp, 1, 10) BETWEEN ? AND ?
+                GROUP BY t.id, t.symbol, t.timestamp
+                """,
+                (start_date, end_date),
+            ).fetchall()
+
+    def replay_rejected_outcome_rows(self, start_date: str, end_date: str) -> list[sqlite3.Row]:
+        if not self.db_path.exists():
+            return []
+        with self._connect() as con:
+            if not self._table_exists(con, "rejected_signal_outcomes"):
+                return []
+            return con.execute(
+                """
+                SELECT trade_id, label_status, partial_reason,
+                       return_5m, return_15m, return_30m, return_60m, return_eod,
+                       max_favorable_60m, max_adverse_60m
+                FROM rejected_signal_outcomes
+                WHERE trade_id IS NOT NULL
+                  AND lower(action) = 'buy'
+                  AND substr(timestamp, 1, 10) BETWEEN ? AND ?
+                """,
+                (start_date, end_date),
+            ).fetchall()

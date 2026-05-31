@@ -266,3 +266,24 @@ def recent_symbol_outcomes(symbol: str, limit: int = 10, db_path=DB_PATH):
             """,
             (symbol, int(limit)),
         ).fetchall()
+
+
+def buy_opportunity_report_rows(target_date: str, db_path=DB_PATH):
+    with get_connection(db_path) as con:
+        return con.execute(
+            """
+            SELECT timestamp, symbol, approved, rejection_reason,
+                   buy_opportunity_score,
+                   buy_opportunity_recommendation,
+                   buy_opportunity_reason,
+                   market_bias, risk_level, entry_quality,
+                   trend_direction, trend_strength,
+                   setup_label, setup_policy_action,
+                   prediction_score, prediction_decision
+            FROM trades
+            WHERE timestamp LIKE ?
+              AND action = 'buy'
+            ORDER BY timestamp ASC
+            """,
+            (f"{target_date}%",),
+        ).fetchall()

@@ -10,7 +10,7 @@ Usage:
 import sys
 from datetime import date
 from collections import defaultdict
-from db import DB_PATH, get_connection
+from repositories.trades_repo import buy_opportunity_report_rows
 
 
 def main():
@@ -20,24 +20,7 @@ def main():
     print(f"  BUY Opportunity Report — {target_date}")
     print("=" * 90)
 
-    with get_connection(DB_PATH) as con:
-        rows = con.execute(
-            """
-            SELECT timestamp, symbol, approved, rejection_reason,
-                   buy_opportunity_score,
-                   buy_opportunity_recommendation,
-                   buy_opportunity_reason,
-                   market_bias, risk_level, entry_quality,
-                   trend_direction, trend_strength,
-                   setup_label, setup_policy_action,
-                   prediction_score, prediction_decision
-            FROM trades
-            WHERE timestamp LIKE ?
-              AND action = 'buy'
-            ORDER BY timestamp ASC
-            """,
-            (f"{target_date}%",),
-        ).fetchall()
+    rows = buy_opportunity_report_rows(target_date)
 
     if not rows:
         print("No BUY rows found.")

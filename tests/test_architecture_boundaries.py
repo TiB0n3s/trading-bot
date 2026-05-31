@@ -91,7 +91,6 @@ TEMPORARY_REPORT_DB_ALLOWLIST = {
     "adaptive_impact_report.py",
     "analytics_report.py",
     "auto_buy_outcome_report.py",
-    "buy_opportunity_report.py",
     "context_trade_join_report.py",
     "drawdown_report.py",
     "event_attribution_report.py",

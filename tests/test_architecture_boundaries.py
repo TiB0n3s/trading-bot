@@ -105,7 +105,6 @@ TEMPORARY_DB_ACCESS_ALLOWLIST = {
     "drawdown_report.py",
     "entry_quality_report.py",
     "event_attribution_report.py",
-    "excursion_report.py",
     "export_ml_dataset.py",
     "filter_report.py",
     "ingest_market_context.py",
@@ -167,12 +166,12 @@ APPROVED_MARKET_DATA_ACCESS = {
     "services/pre_market_research_service.py",
     "services/live_features_service.py",
     "services/session_momentum_service.py",
+    "services/excursion_service.py",
 }
 
 TEMPORARY_MARKET_DATA_ACCESS_ALLOWLIST = {
     "app.py",
     "broker.py",
-    "excursion_report.py",
     "label_features.py",
     "missed_opportunity_report.py",
     "position_manager.py",

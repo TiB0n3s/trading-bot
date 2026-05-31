@@ -18,14 +18,18 @@ import argparse
 import json
 import statistics
 from collections import defaultdict
-from datetime import datetime, timezone
+from datetime import datetime
 from pathlib import Path
 
 import pytz
 
-from services.market_data_service import market_data_service
-from db import DB_PATH, get_connection
 from policy_artifacts import atomic_write_json
+from services.excursion_service import (
+    build_default_excursion_service,
+    classify_trade,
+    parse_ts,
+    pct_change,
+)
 
 
 ET = pytz.timezone("America/New_York")
@@ -33,197 +37,24 @@ BASE_DIR = Path(__file__).resolve().parent
 EXCURSION_MEMORY_FILE = BASE_DIR / "excursion_memory.json"
 
 
-def parse_ts(ts):
-    if not ts:
-        return None
-
-    dt = datetime.fromisoformat(str(ts).replace("Z", "+00:00"))
-
-    if dt.tzinfo is None:
-        dt = ET.localize(dt)
-
-    return dt.astimezone(timezone.utc)
-
-
-def pct_change(start_price, end_price):
-    if not start_price or not end_price or start_price <= 0:
-        return None
-    return (end_price - start_price) / start_price * 100.0
-
-
 def fetch_trade_bars(symbol, entry_ts_utc, exit_ts_utc):
-    start = entry_ts_utc.isoformat()
-    end = exit_ts_utc.isoformat()
-
-    bars = market_data_service.get_bars_with_fallback(
+    return build_default_excursion_service().fetch_trade_bars(
         symbol,
-        "1Min",
-        start=start,
-        end=end,
-        feed="iex",
+        entry_ts_utc,
+        exit_ts_utc,
     )
-    out = []
-
-    for b in bars:
-        bt = b.t
-        if bt.tzinfo is None:
-            bt = bt.replace(tzinfo=timezone.utc)
-        else:
-            bt = bt.astimezone(timezone.utc)
-
-        out.append({
-            "timestamp": bt,
-            "open": float(b.o),
-            "high": float(b.h),
-            "low": float(b.l),
-            "close": float(b.c),
-        })
-
-    return out
-
-
-def classify_trade(row, mfe_pct, mae_pct, giveback_pct):
-    pnl = float(row["realized_pnl"] or 0)
-
-    if mfe_pct is None or mae_pct is None:
-        return "insufficient_data"
-
-    if pnl < 0 and mfe_pct < 0.25:
-        return "bad_entry_never_worked"
-
-    if pnl < 0 and mfe_pct >= 0.50:
-        return "winner_became_loser"
-
-    if pnl > 0 and giveback_pct is not None and giveback_pct >= 50:
-        return "profit_giveback"
-
-    if pnl > 0 and mfe_pct >= 0.75:
-        return "good_trade"
-
-    if mae_pct <= -1.0:
-        return "large_adverse_excursion"
-
-    return "mixed"
 
 
 def analyze_trade(row):
-    symbol = row["symbol"]
-    entry_price = float(row["entry_price"] or 0)
-    exit_price = float(row["exit_price"] or 0)
-    qty = float(row["qty"] or 0)
-
-    entry_ts = parse_ts(row["entry_timestamp"])
-    exit_ts = parse_ts(row["exit_timestamp"])
-
-    result = {
-        "id": row["id"],
-        "symbol": symbol,
-        "entry_timestamp": row["entry_timestamp"],
-        "exit_timestamp": row["exit_timestamp"],
-        "holding_minutes": row["holding_minutes"],
-        "qty": qty,
-        "entry_price": entry_price,
-        "exit_price": exit_price,
-        "realized_pnl": float(row["realized_pnl"] or 0),
-        "realized_pnl_pct": float(row["realized_pnl_pct"] or 0),
-        "market_bias": row["market_bias"],
-        "market_bias_effective": row["market_bias_effective"],
-        "trend_direction": row["trend_direction"],
-        "trend_strength": row["trend_strength"],
-        "session_trend_label": row["session_trend_label"],
-        "prediction_decision": row["prediction_decision"],
-        "setup_label": row["setup_label"],
-        "setup_policy_action": row["setup_policy_action"],
-        "buy_opportunity_recommendation": row["buy_opportunity_recommendation"],
-        "error": None,
-    }
-
-    if not symbol or entry_price <= 0 or exit_price <= 0 or not entry_ts or not exit_ts:
-        result["error"] = "invalid symbol, prices, or timestamps"
-        return result
-
-    if exit_ts <= entry_ts:
-        result["error"] = "exit timestamp is not after entry timestamp"
-        return result
-
-    try:
-        bars = fetch_trade_bars(symbol, entry_ts, exit_ts)
-    except Exception as e:
-        result["error"] = f"bar fetch failed: {e}"
-        return result
-
-    if not bars:
-        result["error"] = "no bars returned for trade window"
-        return result
-
-    highs = [b["high"] for b in bars]
-    lows = [b["low"] for b in bars]
-
-    max_high = max(highs)
-    min_low = min(lows)
-
-    mfe_pct = pct_change(entry_price, max_high)
-    mae_pct = pct_change(entry_price, min_low)
-
-    mfe_dollars = (max_high - entry_price) * qty
-    mae_dollars = (min_low - entry_price) * qty
-
-    realized_pnl = float(row["realized_pnl"] or 0)
-
-    giveback_dollars = None
-    giveback_pct = None
-
-    if mfe_dollars > 0:
-        giveback_dollars = mfe_dollars - realized_pnl
-        giveback_pct = giveback_dollars / mfe_dollars * 100.0
-
-    result.update({
-        "mfe_pct": round(mfe_pct, 3) if mfe_pct is not None else None,
-        "mae_pct": round(mae_pct, 3) if mae_pct is not None else None,
-        "mfe_dollars": round(mfe_dollars, 2),
-        "mae_dollars": round(mae_dollars, 2),
-        "max_high": round(max_high, 4),
-        "min_low": round(min_low, 4),
-        "profit_giveback_dollars": round(giveback_dollars, 2) if giveback_dollars is not None else None,
-        "profit_giveback_pct": round(giveback_pct, 1) if giveback_pct is not None else None,
-        "bar_count": len(bars),
-    })
-
-    result["excursion_classification"] = classify_trade(
-        row,
-        result["mfe_pct"],
-        result["mae_pct"],
-        result["profit_giveback_pct"],
-    )
-
-    return result
+    return build_default_excursion_service().analyze_trade(row)
 
 
 def load_matched_trades(target_date=None, symbol=None, limit=100):
-    params = []
-    extra = ""
-
-    if target_date:
-        extra += " AND exit_timestamp LIKE ?"
-        params.append(f"{target_date}%")
-
-    if symbol:
-        extra += " AND symbol = ?"
-        params.append(symbol.upper())
-
-    params.append(limit)
-
-    with get_connection(DB_PATH) as con:
-        rows = con.execute(f"""
-            SELECT *
-            FROM matched_trades
-            WHERE 1=1
-              {extra}
-            ORDER BY exit_timestamp DESC
-            LIMIT ?
-        """, params).fetchall()
-
-    return rows
+    return build_default_excursion_service().load_matched_trades(
+        target_date,
+        symbol,
+        limit,
+    )
 
 
 def avg(values):
@@ -456,15 +287,13 @@ def main():
     print(f"  Excursion Report — {title_date}")
     print("=" * 72)
 
-    rows = load_matched_trades(
+    rows, results = build_default_excursion_service().analyze_trades(
         target_date=args.date,
         symbol=args.symbol,
         limit=args.limit,
     )
 
     print(f"Matched trades loaded: {len(rows)}")
-
-    results = [analyze_trade(row) for row in rows]
 
     summarize(results)
     print_trade_samples(results, limit=args.samples)

@@ -815,6 +815,21 @@ Current major cron categories:
 Cron jobs that require secrets should source:
 
 set -a && . /etc/trading-bot.env && set +a
+
+Write-heavy cron jobs should run through `job_runner.py`. The runner owns
+non-blocking lock acquisition, lock-busy logging, command output redirection,
+and durable `job_runs` ledger rows with start/end time, duration, exit code,
+lock state, optional row counts, warning counts, and artifact hashes.
+
+Example:
+
+```bash
+/home/tradingbot/trading-bot/venv/bin/python job_runner.py \
+  --job-name run_position_manager \
+  --lock-file /tmp/tradingbot_position_manager.lock \
+  --log-file /home/tradingbot/trading-bot/position_manager.log \
+  -- bash /home/tradingbot/trading-bot/run_position_manager.sh
+```
 Services
 
 Check services:

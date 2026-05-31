@@ -20,11 +20,22 @@ def _cron_command_lines() -> list[str]:
     return lines
 
 
-def test_flock_jobs_log_lock_busy_skips():
+def test_no_raw_flock_jobs_remain():
     offenders = [
         line
         for line in _cron_command_lines()
-        if "flock -n " in line and "lock-busy:" not in line
+        if "flock -n " in line
+    ]
+    assert not offenders, offenders
+
+
+def test_locked_jobs_use_job_runner_with_logs():
+    offenders = [
+        line
+        for line in _cron_command_lines()
+        if "job_runner.py" in line
+        and "--lock-file" in line
+        and "--log-file" not in line
     ]
     assert not offenders, offenders
 
@@ -55,11 +66,22 @@ def test_after_close_and_post_session_share_lock():
     assert "/tmp/tradingbot_after_close.lock" in post_session[0]
 
 
+def test_job_runner_lines_have_job_name():
+    offenders = [
+        line
+        for line in _cron_command_lines()
+        if "job_runner.py" in line and "--job-name" not in line
+    ]
+    assert not offenders, offenders
+
+
 def main():
     tests = [
-        test_flock_jobs_log_lock_busy_skips,
+        test_no_raw_flock_jobs_remain,
+        test_locked_jobs_use_job_runner_with_logs,
         test_wrapper_scripts_are_invoked_through_bash,
         test_after_close_and_post_session_share_lock,
+        test_job_runner_lines_have_job_name,
     ]
     for test in tests:
         test()

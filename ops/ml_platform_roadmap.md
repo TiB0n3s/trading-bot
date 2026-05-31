@@ -77,10 +77,13 @@ or destabilize the webhook path if treated as routine cleanup.
    - Rejected BUY rows should persist available pre-sizing context, while sizing
      fields are expected only for rows that reached sizing.
 7. Cron/job observability:
-   - `flock` prevents overlap, and lock-busy skips are logged in cron output.
-   - Next durable step is a `job_runs` table or JSONL ledger with job name,
-     start/end, duration, exit code, lock-acquired/skipped state, rows written,
+   - `job_runner.py` is the standard wrapper for write-heavy cron/operator
+     jobs. It owns non-blocking locks, lock-busy logging, command output
+     redirection, and durable `job_runs` rows with job name, start/end,
+     duration, exit code, lock-acquired/skipped state, optional rows written,
      warnings, and artifact paths/hashes.
+   - Next observability step: pass real row/warning/artifact metrics from
+     individual jobs instead of only command-level status.
 8. Runtime/offline feature parity:
    - Add a hard contract that every offline ML feature exists in live decision
      snapshots with matching names, nullability, semantics, and point-in-time

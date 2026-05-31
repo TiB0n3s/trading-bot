@@ -15,7 +15,9 @@ Usage:
 
 import argparse
 
-from db import DB_PATH, get_connection
+from repositories.reporting_repo import ReportingRepository
+
+repo = ReportingRepository()
 
 
 def money(v):
@@ -83,31 +85,7 @@ def recommendation(row):
 
 
 def fetch_rows(group_expr, where_sql, params):
-    with get_connection(DB_PATH) as con:
-        rows = con.execute(
-            f"""
-            SELECT
-              {group_expr} AS bucket,
-              action,
-              COUNT(*) AS n,
-              SUM(CASE WHEN matched_outcome_id IS NOT NULL THEN 1 ELSE 0 END) AS matched,
-              SUM(CASE WHEN realized_pnl > 0 THEN 1 ELSE 0 END) AS winners,
-              SUM(CASE WHEN realized_pnl < 0 THEN 1 ELSE 0 END) AS losers,
-              ROUND(AVG(entry_delay_minutes), 1) AS avg_entry_delay,
-              ROUND(AVG(exit_delay_minutes), 1) AS avg_exit_delay,
-              ROUND(AVG(holding_minutes), 1) AS avg_holding_minutes,
-              ROUND(AVG(realized_pnl), 2) AS avg_pnl,
-              ROUND(SUM(realized_pnl), 2) AS total_pnl,
-              ROUND(AVG(realized_pnl_pct), 2) AS avg_pnl_pct
-            FROM historical_signal_outcomes
-            WHERE {where_sql}
-            GROUP BY {group_expr}, action
-            ORDER BY total_pnl DESC, matched DESC, n DESC
-            """,
-            params,
-        ).fetchall()
-
-    return rows
+    return repo.timing_lesson_rows(group_expr, where_sql, params)
 
 
 def print_lesson_table(title, rows):
@@ -147,17 +125,7 @@ def print_lesson_table(title, rows):
 
 
 def print_details(where_sql, params):
-    with get_connection(DB_PATH) as con:
-        rows = con.execute(
-            f"""
-            SELECT *
-            FROM historical_signal_outcomes
-            WHERE {where_sql}
-            ORDER BY market_date, symbol, signal_timestamp
-            LIMIT 150
-            """,
-            params,
-        ).fetchall()
+    rows = repo.timing_lesson_detail_rows(where_sql, params)
 
     print()
     print("── Details ─────────────────────────────────────────────────────────────")
@@ -217,24 +185,7 @@ def main():
 
     where_sql = " AND ".join(where)
 
-    with get_connection(DB_PATH) as con:
-        summary = con.execute(
-            f"""
-            SELECT
-              COUNT(*) AS signals,
-              SUM(CASE WHEN matched_outcome_id IS NOT NULL THEN 1 ELSE 0 END) AS matched,
-              SUM(CASE WHEN realized_pnl > 0 THEN 1 ELSE 0 END) AS winners,
-              SUM(CASE WHEN realized_pnl < 0 THEN 1 ELSE 0 END) AS losers,
-              ROUND(AVG(entry_delay_minutes), 1) AS avg_entry_delay,
-              ROUND(AVG(exit_delay_minutes), 1) AS avg_exit_delay,
-              ROUND(SUM(realized_pnl), 2) AS total_pnl,
-              ROUND(AVG(realized_pnl), 2) AS avg_pnl,
-              ROUND(AVG(realized_pnl_pct), 2) AS avg_pnl_pct
-            FROM historical_signal_outcomes
-            WHERE {where_sql}
-            """,
-            params,
-        ).fetchone()
+    summary = repo.timing_lesson_summary(where_sql, params)
 
     by_symbol = fetch_rows("symbol", where_sql, params)
     by_entry = fetch_rows("entry_timing_label", where_sql, params)

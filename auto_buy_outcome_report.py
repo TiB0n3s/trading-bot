@@ -15,55 +15,12 @@ from pathlib import Path
 from statistics import mean
 from typing import Any
 
-from db import DB_PATH, get_connection
+from repositories.reporting_repo import ReportingRepository
 
 
 BASE_DIR = Path(__file__).resolve().parent
+DB_PATH = BASE_DIR / "trades.db"
 HORIZONS = (5, 15, 30, 60)
-
-
-def _table_exists(con, table: str) -> bool:
-    row = con.execute(
-        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?",
-        (table,),
-    ).fetchone()
-    return row is not None
-
-
-def _price_at_or_before(con, symbol: str, ts: str) -> tuple[float | None, str | None]:
-    row = con.execute(
-        """
-        SELECT last_price, timestamp
-        FROM feature_snapshots
-        WHERE symbol = ?
-          AND julianday(timestamp) <= julianday(?)
-          AND last_price IS NOT NULL
-        ORDER BY julianday(timestamp) DESC, id DESC
-        LIMIT 1
-        """,
-        (symbol, ts),
-    ).fetchone()
-    if not row:
-        return None, None
-    return float(row["last_price"]), row["timestamp"]
-
-
-def _price_at_or_after(con, symbol: str, ts: str, minutes: int) -> tuple[float | None, str | None]:
-    row = con.execute(
-        """
-        SELECT last_price, timestamp
-        FROM feature_snapshots
-        WHERE symbol = ?
-          AND julianday(timestamp) >= julianday(?, ?)
-          AND last_price IS NOT NULL
-        ORDER BY julianday(timestamp) ASC, id ASC
-        LIMIT 1
-        """,
-        (symbol, ts, f"+{minutes} minutes"),
-    ).fetchone()
-    if not row:
-        return None, None
-    return float(row["last_price"]), row["timestamp"]
 
 
 def _pct(start: float | None, end: float | None) -> float | None:
@@ -73,76 +30,25 @@ def _pct(start: float | None, end: float | None) -> float | None:
 
 
 def candidate_outcomes(target_date: str, db_path: Path | str = DB_PATH) -> list[dict[str, Any]]:
-    with get_connection(db_path) as con:
-        if not _table_exists(con, "auto_buy_candidates") or not _table_exists(con, "feature_snapshots"):
-            return []
-        candidates = con.execute(
-            """
-            SELECT *
-            FROM auto_buy_candidates
-            WHERE substr(timestamp, 1, 10) = ?
-            ORDER BY timestamp, id
-            """,
-            (target_date,),
-        ).fetchall()
-
-        out = []
-        for row in candidates:
-            item = dict(row)
-            base_price, base_ts = _price_at_or_before(con, item["symbol"], item["timestamp"])
-            item["base_price"] = base_price
-            item["base_timestamp"] = base_ts
-            for minutes in HORIZONS:
-                future_price, future_ts = _price_at_or_after(con, item["symbol"], item["timestamp"], minutes)
-                item[f"price_{minutes}m"] = future_price
-                item[f"timestamp_{minutes}m"] = future_ts
-                item[f"return_{minutes}m"] = _pct(base_price, future_price)
-            out.append(item)
+    repo = ReportingRepository(db_path)
+    candidates = repo.auto_buy_candidate_rows(target_date)
+    out = []
+    for row in candidates:
+        item = dict(row)
+        base_price, base_ts = repo.feature_price_at_or_before(item["symbol"], item["timestamp"])
+        item["base_price"] = base_price
+        item["base_timestamp"] = base_ts
+        for minutes in HORIZONS:
+            future_price, future_ts = repo.feature_price_at_or_after(item["symbol"], item["timestamp"], minutes)
+            item[f"price_{minutes}m"] = future_price
+            item[f"timestamp_{minutes}m"] = future_ts
+            item[f"return_{minutes}m"] = _pct(base_price, future_price)
+        out.append(item)
     return out
 
 
 def tradingview_signal_summary(target_date: str, db_path: Path | str = DB_PATH) -> dict[str, Any]:
-    with get_connection(db_path) as con:
-        if not _table_exists(con, "trades"):
-            return {}
-        rows = con.execute(
-            """
-            SELECT
-                COUNT(*) AS n,
-                SUM(CASE WHEN approved = 1 THEN 1 ELSE 0 END) AS approved,
-                SUM(CASE WHEN approved = 0 THEN 1 ELSE 0 END) AS rejected
-            FROM trades
-            WHERE substr(timestamp, 1, 10) = ?
-            """,
-            (target_date,),
-        ).fetchone()
-
-        rejected = {}
-        if _table_exists(con, "rejected_signal_outcomes"):
-            rejected_rows = con.execute(
-                """
-                SELECT action,
-                       COUNT(*) AS n,
-                       AVG(return_15m) AS avg15,
-                       AVG(return_60m) AS avg60,
-                       AVG(max_favorable_60m) AS mfe60,
-                       AVG(max_adverse_60m) AS mae60
-                FROM rejected_signal_outcomes
-                WHERE substr(timestamp, 1, 10) = ?
-                  AND label_status IN ('labeled', 'partial')
-                GROUP BY action
-                ORDER BY action
-                """,
-                (target_date,),
-            ).fetchall()
-            rejected = {row["action"]: dict(row) for row in rejected_rows}
-
-    return {
-        "signals": int(rows["n"] or 0),
-        "approved": int(rows["approved"] or 0),
-        "rejected": int(rows["rejected"] or 0),
-        "rejected_outcomes": rejected,
-    }
+    return ReportingRepository(db_path).tradingview_signal_summary(target_date)
 
 
 def _fmt(value: Any) -> str:

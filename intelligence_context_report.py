@@ -12,8 +12,8 @@ import argparse
 from collections import Counter
 from datetime import date
 
-from db import DB_PATH, get_connection
 from market_intelligence.intelligence_store import init_intelligence_tables
+from repositories.reporting_repo import ReportingRepository
 
 
 def short(v, width):
@@ -31,34 +31,7 @@ def main():
 
     init_intelligence_tables()
 
-    params = [args.date]
-    symbol_sql = ""
-    if args.symbol:
-        symbol_sql = "AND symbol = ?"
-        params.append(args.symbol.upper())
-
-    with get_connection(DB_PATH) as con:
-        rows = con.execute(
-            f"""
-            SELECT *
-            FROM daily_symbol_context
-            WHERE market_date = ?
-              {symbol_sql}
-            ORDER BY symbol
-            """,
-            params,
-        ).fetchall()
-
-        events = con.execute(
-            f"""
-            SELECT *
-            FROM daily_symbol_events
-            WHERE market_date = ?
-              {symbol_sql}
-            ORDER BY symbol, event_type
-            """,
-            params,
-        ).fetchall()
+    rows, events = ReportingRepository().intelligence_context_rows(args.date, args.symbol)
 
     print("=" * 132)
     print(f"  Daily Symbol Intelligence — {args.date}")

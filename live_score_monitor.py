@@ -15,103 +15,13 @@ from __future__ import annotations
 
 import argparse
 import os
-import sqlite3
 import time
 from datetime import datetime
-from pathlib import Path
+
+from repositories.reporting_repo import ReportingRepository
 
 
-DB_PATH = Path(__file__).resolve().parent / "trades.db"
-
-
-def connect():
-    con = sqlite3.connect(DB_PATH)
-    con.row_factory = sqlite3.Row
-    return con
-
-
-def table_exists(con, table: str) -> bool:
-    row = con.execute(
-        "SELECT name FROM sqlite_master WHERE type='table' AND name=?",
-        (table,),
-    ).fetchone()
-    return row is not None
-
-
-def cols(con, table: str) -> set[str]:
-    if not table_exists(con, table):
-        return set()
-    return {r["name"] for r in con.execute(f"PRAGMA table_info({table})").fetchall()}
-
-
-def latest_by_symbol(con, table: str, time_col: str, symbol_filter: list[str] | None = None):
-    if not table_exists(con, table):
-        return {}
-
-    where = ""
-    params = []
-
-    if symbol_filter:
-        placeholders = ",".join("?" for _ in symbol_filter)
-        where = f"WHERE symbol IN ({placeholders})"
-        params.extend(symbol_filter)
-
-    q = f"""
-    WITH ranked AS (
-        SELECT *,
-               ROW_NUMBER() OVER (
-                   PARTITION BY symbol
-                   ORDER BY {time_col} DESC, rowid DESC
-               ) AS rn
-        FROM {table}
-        {where}
-    )
-    SELECT *
-    FROM ranked
-    WHERE rn = 1
-    """
-
-    return {r["symbol"]: dict(r) for r in con.execute(q, params).fetchall()}
-
-
-def score_history(con, symbol: str, limit: int = 12):
-    if not table_exists(con, "auto_buy_candidates"):
-        return []
-
-    return con.execute(
-        """
-        SELECT timestamp, score, decision, hard_block_reason
-        FROM auto_buy_candidates
-        WHERE symbol = ?
-        ORDER BY timestamp DESC, id DESC
-        LIMIT ?
-        """,
-        (symbol, limit),
-    ).fetchall()
-
-
-def recent_rejections(con, limit: int = 8, symbol_filter: list[str] | None = None):
-    if not table_exists(con, "trades"):
-        return []
-
-    where = "WHERE action='buy' AND approved=0"
-    params = []
-
-    if symbol_filter:
-        placeholders = ",".join("?" for _ in symbol_filter)
-        where += f" AND symbol IN ({placeholders})"
-        params.extend(symbol_filter)
-
-    return con.execute(
-        f"""
-        SELECT timestamp, symbol, rejection_reason
-        FROM trades
-        {where}
-        ORDER BY timestamp DESC, id DESC
-        LIMIT ?
-        """,
-        (*params, limit),
-    ).fetchall()
+repo = ReportingRepository()
 
 
 def val(row, key, default=""):
@@ -140,14 +50,13 @@ def clear():
 
 
 def render(symbols: list[str] | None, history_symbol: str | None, limit: int):
-    with connect() as con:
-        auto_cols = cols(con, "auto_buy_candidates")
-        feature_cols = cols(con, "feature_snapshots")
-        session_cols = cols(con, "session_momentum")
+        auto_cols = repo.table_columns("auto_buy_candidates")
+        feature_cols = repo.table_columns("feature_snapshots")
+        session_cols = repo.table_columns("session_momentum")
 
-        auto = latest_by_symbol(con, "auto_buy_candidates", "timestamp", symbols) if auto_cols else {}
-        session = latest_by_symbol(con, "session_momentum", "updated_at", symbols) if session_cols else {}
-        feature = latest_by_symbol(con, "feature_snapshots", "timestamp", symbols) if feature_cols else {}
+        auto = repo.latest_by_symbol("auto_buy_candidates", "timestamp", symbols) if auto_cols else {}
+        session = repo.latest_by_symbol("session_momentum", "updated_at", symbols) if session_cols else {}
+        feature = repo.latest_by_symbol("feature_snapshots", "timestamp", symbols) if feature_cols else {}
 
         all_symbols = sorted(set(auto) | set(session) | set(feature))
         if symbols:
@@ -205,14 +114,14 @@ def render(symbols: list[str] | None, history_symbol: str | None, limit: int):
         print()
         print("Recent BUY rejections")
         print("-" * 180)
-        for r in recent_rejections(con, 10, symbols):
+        for r in repo.recent_buy_rejections(10, symbols):
             print(f"{r['timestamp']} {r['symbol']:<6} {trim(r['rejection_reason'], 150)}")
 
         if history_symbol:
             print()
             print(f"Auto-buy score history — {history_symbol}")
             print("-" * 180)
-            rows = list(reversed(score_history(con, history_symbol.upper(), 20)))
+            rows = list(reversed(repo.auto_buy_score_history(history_symbol.upper(), 20)))
             for r in rows:
                 print(
                     f"{r['timestamp']}  "

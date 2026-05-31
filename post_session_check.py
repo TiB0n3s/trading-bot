@@ -10,8 +10,6 @@ Usage:
 import os
 import subprocess
 import sys
-import sqlite3
-from collections import defaultdict
 from datetime import date
 from pathlib import Path
 
@@ -48,7 +46,9 @@ _load_env_file()
 
 from services.broker_service import broker_service
 from trade_matcher import rebuild_matched_trades
-from db import DB_PATH, get_connection
+from repositories.reporting_repo import ReportingRepository
+
+repo = ReportingRepository()
 
 
 def ok(msg):
@@ -87,23 +87,9 @@ def run_cmd(label, cmd):
         return False
 
 
-def db_connect():
-    return get_connection(DB_PATH)
-
-
 def check_missing_fills(target_date):
     print("\n── Missing Fill Prices ─────────────────────────────")
-    with db_connect() as con:
-        rows = con.execute("""
-            SELECT id, timestamp, symbol, action, order_id, order_status, qty, fill_price
-            FROM trades
-            WHERE timestamp LIKE ?
-              AND approved = 1
-              AND order_id IS NOT NULL
-              AND qty IS NOT NULL
-              AND fill_price IS NULL
-            ORDER BY id DESC
-        """, (f"{target_date}%",)).fetchall()
+    rows = repo.post_session_missing_fills(target_date)
 
     if not rows:
         ok("No approved order rows missing fill_price for target date")
@@ -129,21 +115,7 @@ def check_reconciliation():
         fail(f"Could not fetch Alpaca positions: {e}")
         return False
 
-    with db_connect() as con:
-        rows = con.execute("""
-            SELECT symbol,
-                   SUM(CASE
-                           WHEN LOWER(action) = 'buy'  THEN COALESCE(qty, 0)
-                           WHEN LOWER(action) = 'sell' THEN -COALESCE(qty, 0)
-                           ELSE 0
-                       END) AS net_qty
-            FROM trades
-            WHERE order_id IS NOT NULL
-              AND order_status IN ('filled', 'partially_filled')
-            GROUP BY symbol
-            HAVING net_qty > 0
-            ORDER BY symbol
-        """).fetchall()
+    rows = repo.db_open_position_rows()
 
     db_open = {r["symbol"]: float(r["net_qty"]) for r in rows if r["symbol"]}
 
@@ -186,18 +158,7 @@ def check_reconciliation():
 
 def check_fill_events(target_date):
     print("\n── Fill Events ─────────────────────────────────────")
-    with db_connect() as con:
-        try:
-            rows = con.execute("""
-                SELECT event, symbol, side, status, COUNT(*) AS n
-                FROM fill_events
-                WHERE timestamp LIKE ?
-                GROUP BY event, symbol, side, status
-                ORDER BY n DESC
-                LIMIT 20
-            """, (f"{target_date}%",)).fetchall()
-        except sqlite3.OperationalError:
-            rows = []
+    rows = repo.fill_event_summary_rows(target_date)
 
     if not rows:
         warn("No fill_events rows found for target date")
@@ -214,16 +175,7 @@ def check_fill_events(target_date):
 
 def check_signal_counts(target_date):
     print("\n── Signal Counts ───────────────────────────────────")
-    with db_connect() as con:
-        row = con.execute("""
-            SELECT
-                COUNT(*) AS total,
-                SUM(CASE WHEN approved = 1 THEN 1 ELSE 0 END) AS approved,
-                SUM(CASE WHEN approved = 0 THEN 1 ELSE 0 END) AS rejected,
-                SUM(CASE WHEN order_id IS NOT NULL THEN 1 ELSE 0 END) AS orders
-            FROM trades
-            WHERE timestamp LIKE ?
-        """, (f"{target_date}%",)).fetchone()
+    row = repo.signal_count_row(target_date)
 
     total = row["total"] or 0
     approved = row["approved"] or 0

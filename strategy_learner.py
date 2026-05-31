@@ -17,8 +17,8 @@ from collections import defaultdict
 from datetime import datetime, timedelta
 from pathlib import Path
 
-from db import DB_PATH, get_connection
 from policy_artifacts import atomic_write_json
+from repositories.reporting_repo import ReportingRepository
 from trade_matcher import rebuild_matched_trades
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -272,35 +272,7 @@ def main():
     by_symbol_buy_opportunity = defaultdict(new_bucket)
     by_symbol_session_trend = defaultdict(new_bucket)
 
-    with get_connection(DB_PATH) as con:
-        rows = con.execute("""
-            SELECT
-                symbol,
-                realized_pnl,
-                trend_direction,
-                trend_strength,
-                market_bias,
-                risk_level,
-                entry_quality,
-                macro_regime,
-                market_bias_effective,
-                fundamental_score,
-                session_trend_label,
-                session_trend_score,
-                session_momentum_5m_pct,
-                session_momentum_15m_pct,
-                session_momentum_30m_pct,
-                prediction_score,
-                prediction_decision,
-                setup_label,
-                setup_policy_action,
-                buy_opportunity_score,
-                buy_opportunity_recommendation,
-                exit_timestamp
-            FROM matched_trades
-            WHERE exit_timestamp >= ?
-            ORDER BY exit_timestamp ASC
-        """, (cutoff,)).fetchall()
+    rows = ReportingRepository().strategy_learner_rows(cutoff)
 
     for r in rows:
         symbol = r["symbol"] or "UNKNOWN"

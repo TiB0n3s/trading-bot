@@ -28,11 +28,12 @@ Usage:
 """
 
 import argparse
-import json
 from collections import defaultdict
-from datetime import datetime, timedelta
+from datetime import datetime
 
-from db import DB_PATH, get_connection
+from repositories.reporting_repo import ReportingRepository
+
+repo = ReportingRepository()
 
 
 def parse_dt(value):
@@ -45,84 +46,11 @@ def parse_dt(value):
 
 
 def init_table():
-    with get_connection(DB_PATH) as con:
-        con.execute("""
-            CREATE TABLE IF NOT EXISTS historical_signal_events (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-
-                market_date TEXT NOT NULL,
-                symbol TEXT NOT NULL,
-                action TEXT NOT NULL,
-
-                first_timestamp TEXT,
-                last_timestamp TEXT,
-                signal_price REAL,
-                signal_source TEXT,
-
-                raw_signal_count INTEGER NOT NULL DEFAULT 0,
-                has_signal_received INTEGER NOT NULL DEFAULT 0,
-                has_processing_signal INTEGER NOT NULL DEFAULT 0,
-                has_order_placed INTEGER NOT NULL DEFAULT 0,
-                has_rejection_or_gate INTEGER NOT NULL DEFAULT 0,
-
-                approved INTEGER,
-                order_id TEXT,
-                rejection_reason TEXT,
-                decision_summary TEXT,
-
-                raw_ids_json TEXT,
-                raw_json TEXT,
-                created_at TEXT NOT NULL,
-
-                UNIQUE(market_date, symbol, action, first_timestamp, signal_price)
-            )
-        """)
-
-        con.execute("""
-            CREATE INDEX IF NOT EXISTS idx_historical_signal_events_date_symbol
-            ON historical_signal_events(market_date, symbol)
-        """)
-
-        con.execute("""
-            CREATE INDEX IF NOT EXISTS idx_historical_signal_events_symbol_time
-            ON historical_signal_events(symbol, first_timestamp)
-        """)
+    repo.init_historical_signal_events()
 
 
 def load_raw_rows(start_date=None, end_date=None, symbol=None):
-    where = [
-        "market_date IS NOT NULL",
-        "symbol IS NOT NULL",
-        "action IS NOT NULL",
-        "timestamp IS NOT NULL",
-        "decision_summary IN ('signal_received', 'processing_signal', 'order_placed', 'rejection_or_gate')",
-    ]
-    params = []
-
-    if start_date:
-        where.append("market_date >= ?")
-        params.append(start_date)
-
-    if end_date:
-        where.append("market_date <= ?")
-        params.append(end_date)
-
-    if symbol:
-        where.append("symbol = ?")
-        params.append(symbol.upper())
-
-    with get_connection(DB_PATH) as con:
-        rows = con.execute(
-            f"""
-            SELECT *
-            FROM historical_signal_experience
-            WHERE {' AND '.join(where)}
-            ORDER BY market_date, symbol, action, timestamp, id
-            """,
-            params,
-        ).fetchall()
-
-    return rows
+    return repo.raw_historical_signal_rows(start_date, end_date, symbol)
 
 
 def should_start_new_event(current, row, window_seconds):
@@ -244,51 +172,7 @@ def build_events(rows, window_seconds=20):
 
 
 def insert_events(events, replace=False):
-    now = datetime.now().isoformat(sep=" ", timespec="seconds")
-    inserted = 0
-
-    with get_connection(DB_PATH) as con:
-        if replace:
-            con.execute("DELETE FROM historical_signal_events")
-
-        for e in events:
-            cur = con.execute(
-                """
-                INSERT OR REPLACE INTO historical_signal_events (
-                    market_date, symbol, action,
-                    first_timestamp, last_timestamp, signal_price, signal_source,
-                    raw_signal_count, has_signal_received, has_processing_signal,
-                    has_order_placed, has_rejection_or_gate,
-                    approved, order_id, rejection_reason, decision_summary,
-                    raw_ids_json, raw_json, created_at
-                )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    e["market_date"],
-                    e["symbol"],
-                    e["action"],
-                    e["first_timestamp"],
-                    e["last_timestamp"],
-                    e["signal_price"],
-                    e["signal_source"],
-                    e["raw_signal_count"],
-                    e["has_signal_received"],
-                    e["has_processing_signal"],
-                    e["has_order_placed"],
-                    e["has_rejection_or_gate"],
-                    e["approved"],
-                    e["order_id"],
-                    e["rejection_reason"],
-                    e["decision_summary"],
-                    json.dumps(e["raw_ids"]),
-                    json.dumps(e["raw_rows"], sort_keys=True),
-                    now,
-                ),
-            )
-            inserted += cur.rowcount
-
-    return inserted
+    return repo.insert_historical_signal_events(events, replace=replace)
 
 
 def print_preview(events):

@@ -87,16 +87,7 @@ APPROVED_DB_ACCESS = {
     "db_migrations.py",
 }
 
-TEMPORARY_REPORT_DB_ALLOWLIST = {
-    "auto_buy_outcome_report.py",
-    "intelligence_context_report.py",
-    "live_score_monitor.py",
-    "pnl.py",
-    "post_session_check.py",
-    "signal_event_builder.py",
-    "signal_timing_lesson_report.py",
-    "strategy_learner.py",
-}
+TEMPORARY_REPORT_DB_ALLOWLIST = set()
 
 TEMPORARY_BACKFILL_TRAINING_DB_ALLOWLIST = {
     "analytics_ext/attribution.py",

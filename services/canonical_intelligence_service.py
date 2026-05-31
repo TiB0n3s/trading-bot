@@ -10,14 +10,67 @@ from typing import Any
 
 
 CANONICAL_INTELLIGENCE_VERSION = "canonical_intelligence_v1"
+CANONICAL_INTELLIGENCE_REQUIRED_SECTIONS = (
+    "regime_state",
+    "momentum_state",
+    "trend_state",
+    "event_state",
+    "prediction_state",
+    "setup_state",
+    "strategy_state",
+    "opportunity_state",
+    "policy_artifact_ref",
+    "source_timestamps",
+    "freshness_sec",
+    "confidence",
+)
+CANONICAL_INTELLIGENCE_MAX_JSON_BYTES = 16_384
+
+
+def _normalize(value: Any) -> Any:
+    if isinstance(value, dict):
+        return {key: _normalize(value.get(key)) for key in sorted(value)}
+    if isinstance(value, tuple):
+        value = list(value)
+    if isinstance(value, list):
+        return [_normalize(item) for item in value]
+    if isinstance(value, float):
+        return round(value, 10)
+    return value
 
 
 def _json(value: Any) -> str:
-    return json.dumps(value or {}, sort_keys=True, default=str, separators=(",", ":"))
+    return json.dumps(_normalize(value or {}), sort_keys=True, default=str, separators=(",", ":"))
 
 
 def _hash(value: dict[str, Any]) -> str:
     return hashlib.sha256(_json(value).encode("utf-8")).hexdigest()
+
+
+def canonical_json(snapshot: "CanonicalIntelligenceSnapshot") -> str:
+    return _json(snapshot.to_dict())
+
+
+def canonical_json_size_bytes(snapshot: "CanonicalIntelligenceSnapshot") -> int:
+    return len(canonical_json(snapshot).encode("utf-8"))
+
+
+def validate_canonical_snapshot_contract(snapshot: "CanonicalIntelligenceSnapshot") -> dict[str, Any]:
+    data = snapshot.to_dict()
+    missing_sections = [
+        section
+        for section in CANONICAL_INTELLIGENCE_REQUIRED_SECTIONS
+        if section not in data or not isinstance(data.get(section), dict)
+    ]
+    size_bytes = canonical_json_size_bytes(snapshot)
+    return {
+        "ok": not missing_sections and size_bytes <= CANONICAL_INTELLIGENCE_MAX_JSON_BYTES,
+        "version": snapshot.version,
+        "missing_sections": missing_sections,
+        "json_size_bytes": size_bytes,
+        "max_json_size_bytes": CANONICAL_INTELLIGENCE_MAX_JSON_BYTES,
+        "stable_hash": snapshot.feature_vector_hash,
+    }
 
 
 def _parse_time(value: Any) -> datetime | None:
@@ -136,7 +189,6 @@ def build_canonical_intelligence_snapshot(
         "unknown_reason": setup.get("setup_unknown_reason"),
     }
     event_state = {
-        "summary": summary,
         "support_count": summary.get("support_count"),
         "risk_count": summary.get("risk_count"),
         "primary_supports": summary.get("primary_supports"),

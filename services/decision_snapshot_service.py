@@ -13,6 +13,7 @@ from typing import Any
 from services.canonical_intelligence_service import (
     CANONICAL_INTELLIGENCE_VERSION,
     build_canonical_intelligence_snapshot,
+    canonical_json,
 )
 from repositories.decision_snapshot_repo import DecisionSnapshotRepository
 from symbols_config import SYMBOL_UNIVERSE_VERSION
@@ -182,14 +183,14 @@ class DecisionSnapshotService:
             feature_semantic_version=DECISION_SNAPSHOT_FEATURE_SEMANTIC_VERSION,
             market_context_metadata=market_context_metadata,
         )
-        canonical_json = json_dumps(canonical.to_dict())
+        canonical_payload = canonical_json(canonical)
 
         row = {
             "created_at": datetime.now(timezone.utc).isoformat(),
             "feature_semantic_version": DECISION_SNAPSHOT_FEATURE_SEMANTIC_VERSION,
             "canonical_intelligence_version": CANONICAL_INTELLIGENCE_VERSION,
             "canonical_intelligence_hash": canonical.feature_vector_hash,
-            "canonical_intelligence_json": canonical_json,
+            "canonical_intelligence_json": canonical_payload,
             "decision_time": timestamp,
             "trade_id": trade_id,
             "source": source,

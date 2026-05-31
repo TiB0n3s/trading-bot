@@ -62,6 +62,10 @@ class ExecutionAdapterService:
             "spread_pct": self.compute_spread_pct(bid, ask),
         }
 
+    def latest_trade_price(self, symbol):
+        latest_trade = self.market_data_service.get_latest_trade(symbol)
+        return float(latest_trade.price)
+
     def validate_spread_with_retry(
         self,
         symbol,
@@ -140,7 +144,7 @@ class ExecutionAdapterService:
             action=action,
             signal_price=signal_price,
             account_state=account_state,
-            market_data_service=self.market_data_service,
+            latest_trade_price=self.latest_trade_price,
             broker_service=self.broker_service,
             validate_spread_with_retry=self.validate_spread_with_retry,
             symbol_max_spread_pct=self.symbol_max_spread_pct,

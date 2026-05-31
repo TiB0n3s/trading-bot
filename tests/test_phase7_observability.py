@@ -79,7 +79,7 @@ def test_execution_kill_switch_skips_rotation_and_fails_open_second_look():
             action="buy",
             signal_price=100,
             account_state={},
-            market_data_service=None,
+            latest_trade_price=lambda symbol: 100.0,
             broker_service=None,
             validate_spread_with_retry=lambda *args, **kwargs: {"ok": True},
             symbol_max_spread_pct={},

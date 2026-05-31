@@ -20,7 +20,7 @@ def pre_order_safety_check(
     action: str,
     signal_price: Any,
     account_state: dict[str, Any],
-    market_data_service,
+    latest_trade_price: Callable[[str], float],
     broker_service,
     validate_spread_with_retry: Callable[..., dict[str, Any]],
     symbol_max_spread_pct: dict[str, float],
@@ -36,8 +36,7 @@ def pre_order_safety_check(
         return True, "sell signal bypasses buy-side second-look checks"
 
     try:
-        latest_trade = market_data_service.get_latest_trade(symbol)
-        latest_price = float(latest_trade.price)
+        latest_price = float(latest_trade_price(symbol))
     except Exception as exc:
         return False, f"failed to fetch latest trade for second-look check: {exc}"
 

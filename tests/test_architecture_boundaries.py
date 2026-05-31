@@ -115,7 +115,6 @@ TEMPORARY_DB_ACCESS_ALLOWLIST = {
     "market_alignment_report.py",
     "market_intelligence/experience_model.py",
     "market_intelligence/intelligence_store.py",
-    "missed_opportunity_report.py",
     "ml_platform/brain_features.py",
     "ml_platform/cli.py",
     "ml_platform/dataset_builder.py",
@@ -163,13 +162,13 @@ APPROVED_MARKET_DATA_ACCESS = {
     "services/live_features_service.py",
     "services/session_momentum_service.py",
     "services/excursion_service.py",
+    "services/missed_opportunity_service.py",
 }
 
 TEMPORARY_MARKET_DATA_ACCESS_ALLOWLIST = {
     "app.py",
     "broker.py",
     "label_features.py",
-    "missed_opportunity_report.py",
     "position_manager.py",
     "rejected_signal_outcome_builder.py",
     "rolling_momentum.py",

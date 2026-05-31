@@ -95,6 +95,7 @@ TESTS = [
     "tests/test_filter_report_service.py",
     "tests/test_prediction_validation_service.py",
     "tests/test_blocked_signal_outcome_service.py",
+    "tests/test_missed_opportunity_service.py",
     "tests/test_architecture_boundaries.py",
     "tests/test_signal_pipeline.py",
     "tests/test_preflight_service.py",

@@ -18,14 +18,19 @@ import argparse
 import json
 import statistics
 from collections import defaultdict
-from datetime import datetime, timedelta, timezone
+from datetime import datetime
 from pathlib import Path
 
 import pytz
 
-from services.market_data_service import market_data_service
-from db import DB_PATH, get_connection
 from policy_artifacts import atomic_write_json
+from services.missed_opportunity_service import (
+    bar_at_or_after,
+    build_default_missed_opportunity_service,
+    category,
+    parse_ts,
+    pct_change,
+)
 
 
 ET = pytz.timezone("America/New_York")
@@ -33,187 +38,25 @@ BASE_DIR = Path(__file__).resolve().parent
 MISSED_MEMORY_FILE = BASE_DIR / "missed_opportunity_memory.json"
 
 
-def parse_ts(ts):
-    if not ts:
-        return None
-
-    dt = datetime.fromisoformat(str(ts).replace("Z", "+00:00"))
-
-    if dt.tzinfo is None:
-        dt = ET.localize(dt)
-
-    return dt.astimezone(timezone.utc)
-
-
-def category(reason):
-    if not reason:
-        return "unknown"
-    if ":" in reason:
-        return reason.split(":", 1)[0].strip()
-    return "uncategorized"
-
-
-def pct_change(start_price, end_price):
-    if not start_price or not end_price or start_price <= 0:
-        return None
-    return (end_price - start_price) / start_price * 100.0
-
-
 def fetch_forward_bars(symbol, ts_utc, minutes=75):
-    start = ts_utc.isoformat()
-    end = (ts_utc + timedelta(minutes=minutes + 5)).isoformat()
-
-    bars = market_data_service.get_bars_with_fallback(
+    return build_default_missed_opportunity_service().fetch_forward_bars(
         symbol,
-        "1Min",
-        start=start,
-        end=end,
-        feed="iex",
+        ts_utc,
+        minutes=minutes,
     )
-    out = []
-
-    for b in bars:
-        bt = b.t
-        if bt.tzinfo is None:
-            bt = bt.replace(tzinfo=timezone.utc)
-        else:
-            bt = bt.astimezone(timezone.utc)
-
-        out.append({
-            "timestamp": bt,
-            "open": float(b.o),
-            "high": float(b.h),
-            "low": float(b.l),
-            "close": float(b.c),
-        })
-
-    return out
-
-
-def bar_at_or_after(bars, target_ts):
-    for b in bars:
-        if b["timestamp"] >= target_ts:
-            return b
-    return None
 
 
 def analyze_row(row):
-    symbol = row["symbol"]
-    signal_price = float(row["signal_price"] or 0)
-    ts_utc = parse_ts(row["timestamp"])
-
-    base = {
-        "id": row["id"],
-        "timestamp": row["timestamp"],
-        "symbol": symbol,
-        "signal_price": signal_price,
-        "category": category(row["rejection_reason"]),
-        "reason": row["rejection_reason"],
-        "market_bias": row["market_bias"],
-        "market_bias_effective": row["market_bias_effective"],
-        "trend_direction": row["trend_direction"],
-        "trend_strength": row["trend_strength"],
-        "momentum_direction": row["momentum_direction"],
-        "momentum_pct": row["momentum_pct"],
-        "session_trend_label": row["session_trend_label"],
-        "prediction_score": row["prediction_score"],
-        "prediction_decision": row["prediction_decision"],
-        "setup_label": row["setup_label"],
-        "setup_policy_action": row["setup_policy_action"],
-        "buy_opportunity_score": row["buy_opportunity_score"],
-        "buy_opportunity_recommendation": row["buy_opportunity_recommendation"],
-        "error": None,
-    }
-
-    if not symbol or signal_price <= 0 or not ts_utc:
-        base["error"] = "invalid symbol, signal_price, or timestamp"
-        return base
-
-    try:
-        bars = fetch_forward_bars(symbol, ts_utc, minutes=75)
-    except Exception as e:
-        base["error"] = f"bar fetch failed: {e}"
-        return base
-
-    if not bars:
-        base["error"] = "no forward bars returned"
-        return base
-
-    for mins in (15, 30, 60):
-        b = bar_at_or_after(bars, ts_utc + timedelta(minutes=mins))
-        base[f"return_{mins}m_pct"] = (
-            round(pct_change(signal_price, b["close"]), 3)
-            if b else None
-        )
-
-    highs = [b["high"] for b in bars]
-    lows = [b["low"] for b in bars]
-
-    mfe = pct_change(signal_price, max(highs)) if highs else None
-    mae = pct_change(signal_price, min(lows)) if lows else None
-
-    base["mfe_75m_pct"] = round(mfe, 3) if mfe is not None else None
-    base["mae_75m_pct"] = round(mae, 3) if mae is not None else None
-
-    ret_30 = base.get("return_30m_pct")
-
-    if mfe is not None and mfe >= 0.75 and ret_30 is not None and ret_30 > 0.25:
-        base["missed_classification"] = "missed_good_trade"
-    elif mae is not None and mae <= -0.50 and (ret_30 is None or ret_30 <= 0):
-        base["missed_classification"] = "good_rejection"
-    else:
-        base["missed_classification"] = "mixed_or_unclear"
-
-    return base
+    return build_default_missed_opportunity_service().analyze_row(row)
 
 
 def load_rejections(target_date, symbol=None, category_filter=None, limit=80):
-    params = [f"{target_date}%"]
-    extra = ""
-
-    if symbol:
-        extra += " AND symbol = ?"
-        params.append(symbol.upper())
-
-    if category_filter:
-        extra += " AND rejection_reason LIKE ?"
-        params.append(f"{category_filter}:%")
-
-    with get_connection(DB_PATH) as con:
-        return con.execute(f"""
-            SELECT
-                id,
-                timestamp,
-                symbol,
-                action,
-                signal_price,
-                approved,
-                rejection_reason,
-
-                market_bias,
-                market_bias_effective,
-                trend_direction,
-                trend_strength,
-                momentum_direction,
-                momentum_pct,
-
-                session_trend_label,
-                prediction_score,
-                prediction_decision,
-                setup_label,
-                setup_policy_action,
-                buy_opportunity_score,
-                buy_opportunity_recommendation
-            FROM trades
-            WHERE approved = 0
-              AND LOWER(action) = 'buy'
-              AND signal_price IS NOT NULL
-              AND rejection_reason IS NOT NULL
-              AND timestamp LIKE ?
-              {extra}
-            ORDER BY id DESC
-            LIMIT ?
-        """, params + [limit]).fetchall()
+    return build_default_missed_opportunity_service().load_rejections(
+        target_date,
+        symbol=symbol,
+        category_filter=category_filter,
+        limit=limit,
+    )
 
 
 def avg(values):
@@ -399,7 +242,7 @@ def main():
     print(f"  Missed Opportunity Report — {args.date}")
     print("=" * 72)
 
-    rows = load_rejections(
+    rows, results = build_default_missed_opportunity_service().analyze_rejections(
         target_date=args.date,
         symbol=args.symbol,
         category_filter=args.category,
@@ -407,8 +250,6 @@ def main():
     )
 
     print(f"Rejected BUY rows loaded: {len(rows)}")
-
-    results = [analyze_row(row) for row in rows]
 
     summarize(results)
     print_samples(results, limit=args.samples)

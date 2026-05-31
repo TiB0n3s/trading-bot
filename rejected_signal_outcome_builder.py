@@ -48,6 +48,9 @@ load_env_file()
 import pytz
 
 from repositories.rejected_signal_outcome_repo import RejectedSignalOutcomeRepository
+from services.rejected_signal_outcome_market_data_service import (
+    rejected_signal_outcome_market_data_service,
+)
 
 _repo = RejectedSignalOutcomeRepository()
 
@@ -190,71 +193,22 @@ def compute_outcome(row: dict, bars: list[dict]) -> dict:
 
 
 def fetch_forward_bars(symbol: str, timestamp: str) -> list[dict]:
-    from services.market_data_service import market_data_service
-
     signal_dt = parse_trade_timestamp(timestamp)
-    end_dt = max(signal_dt + timedelta(minutes=65), market_close_for(signal_dt))
-
-    bars = market_data_service.get_barset_with_fallback(
-        symbol,
-        "1Min",
-        start=signal_dt.isoformat(),
-        end=end_dt.isoformat(),
-        adjustment="raw",
-        feed=os.getenv("ALPACA_BARS_FEED", "iex"),
-    ).df
-
-    if bars is None or bars.empty:
-        return []
-
-    if "symbol" in bars.columns:
-        bars = bars[bars["symbol"] == symbol]
-
-    rows = []
-    for idx, bar in bars.iterrows():
-        rows.append(
-            {
-                "timestamp": idx.isoformat() if hasattr(idx, "isoformat") else str(idx),
-                "close": float(bar["close"]),
-                "high": float(bar["high"]),
-                "low": float(bar["low"]),
-            }
-        )
-    return rows
+    return rejected_signal_outcome_market_data_service.fetch_forward_bars(
+        symbol=symbol,
+        signal_dt=signal_dt,
+        market_close_dt=market_close_for(signal_dt),
+    )
 
 
 def fetch_day_bars(symbol: str, target_date: str) -> list[dict]:
-    from services.market_data_service import market_data_service
-
     start_dt = market_open_for_date(target_date)
     end_dt = market_close_for_date(target_date) + timedelta(minutes=1)
-
-    bars = market_data_service.get_barset_with_fallback(
-        symbol,
-        "1Min",
-        start=start_dt.isoformat(),
-        end=end_dt.isoformat(),
-        adjustment="raw",
-        feed=os.getenv("ALPACA_BARS_FEED", "iex"),
-    ).df
-
-    if bars is None or bars.empty:
-        return []
-
-    if "symbol" in bars.columns:
-        bars = bars[bars["symbol"] == symbol]
-
-    rows = []
-    for idx, bar in bars.iterrows():
-        rows.append(
-            {
-                "timestamp": idx.isoformat() if hasattr(idx, "isoformat") else str(idx),
-                "close": float(bar["close"]),
-                "high": float(bar["high"]),
-                "low": float(bar["low"]),
-            }
-        )
-    return rows
+    return rejected_signal_outcome_market_data_service.fetch_day_bars(
+        symbol=symbol,
+        start_dt=start_dt,
+        end_dt=end_dt,
+    )
 
 
 def rejected_rows(target_date: str, limit: int | None = None, symbol: str | None = None) -> list:

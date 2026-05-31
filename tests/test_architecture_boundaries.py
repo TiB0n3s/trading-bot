@@ -115,6 +115,7 @@ APPROVED_MARKET_DATA_ACCESS = {
     "services/pre_market_research_service.py",
     "services/live_features_service.py",
     "services/position_market_data_service.py",
+    "services/rejected_signal_outcome_market_data_service.py",
     "services/rolling_momentum_service.py",
     "services/session_momentum_service.py",
     "services/excursion_service.py",
@@ -124,7 +125,6 @@ APPROVED_MARKET_DATA_ACCESS = {
 
 TEMPORARY_MARKET_DATA_ACCESS_ALLOWLIST = {
     "label_features.py",
-    "rejected_signal_outcome_builder.py",
 }
 
 

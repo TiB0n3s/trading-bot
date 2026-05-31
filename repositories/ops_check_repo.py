@@ -12,6 +12,13 @@ class OpsCheckRepository:
     def exists(self) -> bool:
         return self.db_path.exists()
 
+    def table_exists(self, table_name: str) -> bool:
+        row = self._fetchone(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?",
+            (table_name,),
+        )
+        return row is not None
+
     def _fetchall(self, sql: str, params: tuple[Any, ...] = ()) -> list[sqlite3.Row]:
         with sqlite3.connect(f"file:{self.db_path}?mode=ro", uri=True) as con:
             con.row_factory = sqlite3.Row
@@ -473,6 +480,97 @@ class OpsCheckRepository:
               AND date(timestamp) >= date(?, '-30 days')
             GROUP BY confidence
             ORDER BY n DESC
+            """,
+            (target_date,),
+        )
+
+    def rejection_total_count(self, target_date: str) -> int:
+        row = self._fetchone(
+            """
+            SELECT COUNT(*) AS n
+            FROM trades
+            WHERE substr(timestamp, 1, 10) = ?
+            """,
+            (target_date,),
+        )
+        return int(row["n"] or 0) if row else 0
+
+    def rejection_approved_count(self, target_date: str) -> int:
+        row = self._fetchone(
+            """
+            SELECT COUNT(*) AS n
+            FROM trades
+            WHERE substr(timestamp, 1, 10) = ?
+              AND approved = 1
+            """,
+            (target_date,),
+        )
+        return int(row["n"] or 0) if row else 0
+
+    def rejection_rejected_count(self, target_date: str) -> int:
+        row = self._fetchone(
+            """
+            SELECT COUNT(*) AS n
+            FROM trades
+            WHERE substr(timestamp, 1, 10) = ?
+              AND COALESCE(approved, 0) = 0
+            """,
+            (target_date,),
+        )
+        return int(row["n"] or 0) if row else 0
+
+    def rejection_action_rows(self, target_date: str) -> list[sqlite3.Row]:
+        return self._fetchall(
+            """
+            SELECT COALESCE(action, 'missing') AS action,
+                   COALESCE(approved, 0) AS approved,
+                   COUNT(*) AS n
+            FROM trades
+            WHERE substr(timestamp, 1, 10) = ?
+            GROUP BY COALESCE(action, 'missing'), COALESCE(approved, 0)
+            ORDER BY action, approved DESC
+            """,
+            (target_date,),
+        )
+
+    def rejection_reason_rows(self, target_date: str) -> list[sqlite3.Row]:
+        return self._fetchall(
+            """
+            SELECT rejection_reason, COUNT(*) AS n
+            FROM trades
+            WHERE substr(timestamp, 1, 10) = ?
+              AND COALESCE(approved, 0) = 0
+            GROUP BY rejection_reason
+            ORDER BY n DESC, rejection_reason
+            """,
+            (target_date,),
+        )
+
+    def rejected_symbol_rows(self, target_date: str) -> list[sqlite3.Row]:
+        return self._fetchall(
+            """
+            SELECT COALESCE(symbol, 'missing') AS symbol, COUNT(*) AS n
+            FROM trades
+            WHERE substr(timestamp, 1, 10) = ?
+              AND COALESCE(approved, 0) = 0
+            GROUP BY COALESCE(symbol, 'missing')
+            ORDER BY n DESC, symbol
+            LIMIT 15
+            """,
+            (target_date,),
+        )
+
+    def recent_rejected_rows(self, target_date: str) -> list[sqlite3.Row]:
+        return self._fetchall(
+            """
+            SELECT timestamp, symbol, action, rejection_reason, confidence,
+                   prediction_score, prediction_decision, setup_label,
+                   buy_opportunity_score, buy_opportunity_recommendation
+            FROM trades
+            WHERE substr(timestamp, 1, 10) = ?
+              AND COALESCE(approved, 0) = 0
+            ORDER BY timestamp DESC, id DESC
+            LIMIT 12
             """,
             (target_date,),
         )

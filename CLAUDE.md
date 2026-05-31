@@ -2,7 +2,7 @@
 
 This file provides guidance to Claude Code when working in this repository.
 
-The project is an automated AI-assisted trading bot. It currently runs in paper trading with layered safety controls, pre-market intelligence, event scoring, prediction reporting, and observe-only strategy validation. Do not change live trading behavior unless explicitly instructed.
+The project is an automated AI-assisted trading bot. It currently runs in paper trading with layered safety controls, pre-market intelligence, event scoring, prediction reporting, and service-owned live signal orchestration. Do not change live trading behavior unless explicitly instructed.
 
 ---
 
@@ -12,9 +12,16 @@ The bot is operational in paper trading.
 
 Recent completed roadmap items:
 
-- `/status` exposes read-only `symbol_intelligence`.
+- `app.py` is now a Flask composition root only: app creation, startup entry point, container selection, route registration, and the public `process_signal()` compatibility wrapper.
+- Live signal orchestration is owned by `services/live_signal_processor.py`; approval gates, sizing, execution, context runtime, audit persistence, and repositories are service-owned.
+- The legacy live processor, `execute_legacy`, `run_legacy_*` service names, and app-level `log_trade` / `log_rejection` shims have been removed.
+- Architecture tests enforce approved DB, broker, market-data, Flask, repository, policy, report, and runtime boundaries. Temporary architecture allowlists are empty and expected to stay empty.
+- Report, ops, runtime, ML, and backfill DB/market-data access has been migrated behind repositories/services.
+- `/status` exposes read-only `symbol_intelligence`, prediction-cache state, policy-artifact state, runtime config, and service-owned route payloads.
 - `prediction_validation_report.py` exists.
 - `ops_check.py prediction-validation DATE` works.
+- `ops_check.py conviction-persistence-health DATE [--samples N]` verifies that BUY rows persist setup, prediction, session, strategy, buy-opportunity, and sizing attribution fields.
+- `ops_check.py conviction-stack-report DATE`, `peak-bucket-report DATE`, and `winner-became-loser DATE` are the current first-line trading-performance diagnostics.
 - `next_trading_date.py` uses holiday-aware market calendar helpers from `market_time.py`.
 - `market_context.json` validation uses the expected trading session, so weekend/holiday context can target the next market day.
 - `export_ml_dataset.py` can write an audit manifest with `--manifest-output`.
@@ -58,25 +65,31 @@ Recent completed roadmap items:
 - App startup no longer owns schema `ALTER TABLE` migration work.
 - Webhook/status secrets should use `X-Webhook-Secret` or
   `Authorization: Bearer ...`; query-string secrets are legacy fallback only.
-- Prediction gate mode defaults to warn-only until labeled paper-session
-  outcomes justify promotion to hard blocking.
-- The prediction layer is observe-only and does not modify trade decisions.
+- Prediction gate mode defaults to warn-only for hard blocking until labeled
+  paper-session outcomes justify promotion.
+- Cached ML predictions are still conservative: weak prediction evidence can
+  apply logged downside size caps, but prediction scores cannot place orders,
+  loosen gates, increase size, or override broker/order safeguards.
 - `prediction_cache.py` is the only runtime-safe path for
-  `daily_symbol_predictions` in `app.py`: preload/background refresh outside
-  webhook handling, 60-second TTL, memory-only signal-path reads, fail-open to
-  no ML prediction.
+  `daily_symbol_predictions` in the live signal path: preload/background
+  refresh outside webhook handling, 60-second TTL, memory-only signal-path
+  reads, fail-open to no ML prediction.
 - The legacy `prediction_gate` fields in trades/snapshots are deterministic
   signal-quality gate fields. Actual ML prediction values must use
-  `ml_prediction_*` names and remain compare-only until promoted explicitly.
-- The intelligence pipeline is staged for the next live paper-trading session.
+  `ml_prediction_*` names; weak buckets may reduce size only through explicit
+  cap logic.
+- The current operational focus is performance validation on clean-feed live
+  paper sessions before further policy tuning.
 
 Current roadmap posture:
 
 ```text
-Validate intelligence pipeline during live paper session first.
-Expose and report prediction data.
-Do not use predictions as live risk gates yet.
-Safety Principles
+Validate setup health and SIP->IEX fallback on a clean session.
+Verify conviction-stack persistence and cap attribution.
+Tune one policy at a time from measured paper-session evidence.
+```
+
+## Safety Principles
 
 This repo controls an automated trading system. Treat all changes as potentially high impact.
 
@@ -105,11 +118,12 @@ Webhook routing
 Market-hours logic
 Live/cash-mode behavior
 Any prediction-driven trade blocking or sizing
-Prediction layer rule
 
-The prediction layer must remain observe-only until enough paper-session validation exists.
+## Prediction Layer Rule
 
-Do not convert these into live gates without explicit instruction:
+The prediction layer must remain conservative until enough paper-session validation exists.
+
+Do not convert these into hard live gates or size increases without explicit instruction:
 
 prediction_score
 probability_of_profit
@@ -120,7 +134,7 @@ trend_score
 trend_label
 trend_regime
 
-ML platform rule
+## ML Platform Rule
 
 The ML platform is allowed to be one step ahead of live behavior only in staged
 or observe-only paths. Do not import staged ML integration into `app.py`
@@ -152,7 +166,8 @@ observe-only
 → warn-only
 → soft modifier
 → possible live gate later
-Typed Config Layer
+
+## Typed Config Layer
 
 The `config/` package provides frozen dataclasses and factory functions for all
 env-var-driven configuration. The rule is:
@@ -231,23 +246,28 @@ sudo systemctl status nginx --no-pager
 
 Do not restart services unnecessarily during active market hours unless fixing an urgent operational issue.
 
-Core Architecture
+## Core Architecture
+
 TradingView alert
   → Cloudflare Tunnel
   → Nginx
   → Gunicorn
-  → Flask app.py
-  → pre-Claude risk stack
+  → Flask app.py composition root
+  → SignalPipeline
+  → LiveSignalProcessor
+  → service-owned context / approval / sizing / execution / audit
   → Claude Haiku decision_engine.py
-  → broker.py
+  → BrokerService / broker.py
   → Alpaca paper account
   → fill_stream.py / fill_poller.py
   → trades.db
   → reports / intelligence / validation
-Important Runtime Files
-app.py
 
-Main Flask/Gunicorn webhook app.
+## Important Runtime Files
+
+### app.py
+
+Flask/Gunicorn composition root.
 
 Key routes:
 
@@ -259,15 +279,24 @@ GET  /debug/symbol/<SYMBOL>
 
 Responsibilities:
 
-Validate webhook secret.
-Validate incoming TradingView signal payloads.
-Enforce approved symbols and price sanity checks.
-Apply pre-Claude risk gates.
-Build account state.
-Call Claude decision engine.
-Submit orders via broker.
-Persist trades/rejections/fill metadata.
-Expose operator dashboards.
+Create Flask app instances.
+Select and attach the `ApplicationContainer`.
+Register API routes.
+Run explicit startup orchestration.
+Expose `process_signal()` as a compatibility wrapper around `SignalPipeline`.
+Avoid owning trading behavior, broker access, direct DB access, or report logic.
+
+### services/live_signal_processor.py
+
+Service-owned live signal orchestration.
+
+Responsibilities:
+
+Consume `SignalContext`, `SignalRuntimeState`, and context runtime objects.
+Run deterministic pre-Claude and post-Claude gates through approval services.
+Call sizing and execution services.
+Preserve audit behavior and webhook status updates.
+Keep app-level code out of trading decisions.
 
 The /status route now includes:
 
@@ -464,7 +493,7 @@ session_momentum
 position_momentum_actions
 position_momentum_checks
 
-Use db.get_connection() for SQLite connections. It applies row factory, WAL mode, busy timeout, and foreign keys.
+Runtime, services, reports, ops checks, and ML scripts should not open SQLite directly. Put DB reads/writes in repositories. Repository modules may use `db.get_connection()`, which applies row factory, WAL mode, busy timeout, and foreign keys.
 
 List tables:
 
@@ -609,7 +638,7 @@ predict_symbol_outcomes.py
 
 prediction_validation_report.py
   → validate predictions against later outcomes
-Prediction Layer
+## Prediction Layer
 
 Prediction fields include:
 
@@ -638,7 +667,11 @@ Prediction confidence is expected to remain low or very low until more clean liv
 
 Do not treat predictions as proven until validated.
 
-/status Intelligence
+Current live behavior is downside-only: weak ML buckets can cap size when the
+setup/sample conditions are met. Predictions cannot place orders, increase
+size, loosen gates, or override broker/order safeguards.
+
+## /status Intelligence
 
 /status contains a read-only symbol_intelligence block.
 
@@ -1094,21 +1127,19 @@ benchmark alignment
 QQQ/SPY/IWM/GLD support/conflict
 6. app.py decomposition
 
-Status: Later.
+Status: Complete for the live signal path.
 
-Possible extraction targets:
+Current ownership:
 
-signal_router.py
-risk_engine.py
-execution_engine.py
-market_state.py
-state_store.py
+app.py remains the Flask composition root.
+SignalPipeline owns runtime flow entry.
+LiveSignalProcessor owns live signal orchestration.
+ApprovalService owns deterministic and Claude/confidence decisions.
+SizingService owns final sizing.
+ExecutionService and execution adapters own approved order execution.
+TradeAuditService owns execution/rejection persistence.
 
-Safest first extraction:
-
-signal_router.py
-
-Initial mode should be observe-only beside current /webhook logic.
+Next app-level work should be composition cleanup only, not trading behavior migration.
 
 7. Risk engine skeleton
 
@@ -1120,27 +1151,30 @@ risk_engine.py
 RiskCheckResult
 RiskDecision
 layered risk checks
-observe-only compare against current app.py decisions
+observe-only compare against current service-owned decisions
 8. Soft risk modifier / live use of predictions
 
-Status: Not ready.
+Status: Conservative downside-only modifiers are active; hard blocking is not.
 
-Potential future behavior, not enabled:
+Current active behavior:
 
-prediction_score < 35 → require extra confirmation or reduce size
-expected_pnl negative + weak trend_score → avoid/chase block
-recommended_entry_timing = prefer_wait_for_confirmation → require confirmation
-trend_label = extended_uptrend + weak expectancy → reduce size or block chase
+weak ML bucket plus degraded setup can cap size.
+confident weak ML bucket on non-boost setups can cap size.
+high ML bucket remains advisory.
+prediction gate hard blocking requires explicit promotion through `PREDICTION_GATE_MODE=hard`.
 
-Do not implement until there are several clean paper sessions and validation reports support the change.
+Do not add broader prediction authority until there are several clean paper sessions and validation reports support the change.
 
 Known Watch Items
+
 Prediction confidence is still very_low due to limited clean historical samples.
 Some outcome data was reconstructed and should not be over-weighted.
 Early market closes are not currently modeled in the shared calendar.
 Event collection can surface low-quality or loosely relevant financial news.
 Large share-price symbols can hit affordability limits.
-Prediction layer is observe-only and must remain so until validated.
+
+Prediction hard blocking remains disabled until validated.
+
 Current Best Next Operational Step
 
 Before the next trading session:

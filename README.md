@@ -1,8 +1,8 @@
 # Trading Bot
 
-Automated AI-assisted paper trading bot using TradingView webhooks, a Flask/Gunicorn webhook server, Alpaca paper trading, pre-market intelligence, event scoring, prediction reports, and layered risk controls.
+Automated AI-assisted paper trading bot using TradingView webhooks, a Flask/Gunicorn webhook server, service-owned signal orchestration, Alpaca paper trading, pre-market intelligence, event scoring, prediction reports, and layered risk controls.
 
-This project is currently operated as a paper-trading system. Several live-safe controls are present in the codebase, but prediction-driven live behavior is intentionally observe-only until enough paper-session validation exists.
+This project is currently operated as a paper-trading system. Several live-safe controls are present in the codebase. ML prediction authority remains conservative: weak prediction evidence can apply explicitly logged downside size caps, while hard prediction blocking remains disabled unless promoted through paper-session validation and operator review.
 
 ---
 
@@ -11,44 +11,21 @@ This project is currently operated as a paper-trading system. Several live-safe 
 As of the latest roadmap work:
 
 - Bot is operational in paper trading.
-- `/status` exposes read-only `symbol_intelligence`.
-- Daily intelligence pipeline creates:
-  - `daily_symbol_context`
-  - `daily_symbol_events`
-  - `daily_symbol_predictions`
-  - `strong_day_participation` after the post-session strong-day report runs
-  - trend context reports
-- `prediction_validation_report.py` exists and is wired into `ops_check.py`.
-- `next_trading_date.py` now uses holiday-aware market calendar logic from `market_time.py`.
-- `market_context.json` date checks use the expected trading session, so weekend/holiday premarket context may target the next open market day.
-- `export_ml_dataset.py` can write a dataset manifest next to the CSV export.
-- `ml_platform` has a staged, ahead-of-live integration lane with `staged-readiness` and `retraining-readiness` reports.
-- `ml/models/similarity_v0/` is a research-only metadata placeholder, not a trained model artifact.
-- `run_staged_tests.py` runs observe-only integration tests separate from the live/current behavior tests.
-- `broker.py` has input validation, structured error types, and unit coverage for core order-flow boundaries.
-- `broker.py` polls for bracket-order cancellation before market sells instead of relying on a fixed sleep.
-- `ops/db_connection_audit.py` reports manual SQLite connection patterns to support gradual cleanup.
-- `db_migrations.py` provides an idempotent schema migration runner.
-- `feature_snapshots` now carries leakage/audit fields required by the ML governance contract.
-- `decision_snapshots` records immutable point-in-time decision context for
-  new approvals/rejections.
-- `auto_buy_outcome_report.py` compares internal auto-buy candidates with
-  forward feature-snapshot returns, score buckets, and the TradingView signal
-  baseline.
-- `strong_day_participation_report.py --write-db` persists strong-session
-  participation rows and joins them back into prediction validation.
-- Auto-buy live paper execution cross-checks shared app cooldowns, recent-sell
-  churn state, per-symbol daily app buys, and correlation-cluster exposure
-  before calling the broker.
-- `archive_context_state.py` snapshots market context, override hashes, policy
-  artifact hashes, and symbol-universe version for future replay.
-- App-startup schema `ALTER TABLE` work has moved into `db_migrations.py`.
-- Webhook/status secrets should be supplied by `X-Webhook-Secret` or
-  `Authorization: Bearer ...`; query-string secrets are legacy fallback only.
-- Prediction gate mode defaults to warn-only until labeled paper-session
-  outcomes justify promotion to hard blocking.
-- Prediction layer remains observe-only.
-- No prediction score currently changes live trading decisions.
+- `app.py` is a Flask composition root: app creation, startup entry point, container selection, route registration, and the public `process_signal()` compatibility wrapper.
+- Live signal orchestration is owned by `services/live_signal_processor.py`; approval gates, sizing, execution adapters, audit persistence, runtime context, and repositories are service-owned.
+- The legacy live signal processor, `execute_legacy`, `run_legacy_*` service functions, and app-level audit shims have been removed.
+- Architecture boundary tests enforce DB access through `db.py`, repositories, and migrations; broker/market-data access through approved adapter boundaries; and no temporary architecture allowlists remain.
+- Runtime and report DB/market-data cleanup has moved most scripts through repositories/services, including fill stream/poller, session momentum, pre-market research, live features, prediction cache, bot events, reports, ops checks, and ML/backfill paths.
+- `/status` exposes `symbol_intelligence`, prediction-cache status, policy-artifact status, runtime config, and service-owned status payloads.
+- Daily intelligence pipeline creates `daily_symbol_context`, `daily_symbol_events`, `daily_symbol_predictions`, `strong_day_participation`, trend context, and prediction-validation reports.
+- `ops_check.py` includes performance and persistence diagnostics such as `setup-breakdown`, `conviction-stack-report`, `conviction-persistence-health`, `peak-bucket-report`, `winner-became-loser`, and prediction validation.
+- Approved BUY audit persistence records final sizing attribution, dominant limiter, active cap-derived effective cap, ML prediction bucket/score, buy-opportunity recommendation, strategy score, session label, and setup policy action.
+- `db_migrations.py` provides the idempotent migration runner; app startup no longer owns schema `ALTER TABLE` work.
+- `feature_snapshots`, `decision_snapshots`, `rejected_signal_outcomes`, `matched_trades`, and related report tables support ML governance and replay validation.
+- `ml_platform` remains a staged, ahead-of-live research lane with read-only readiness, replay, governance, manifest, and retraining reports.
+- `ml/models/similarity_v0/` remains a research-only metadata placeholder, not a trained model artifact.
+- Webhook/status secrets should be supplied by `X-Webhook-Secret` or `Authorization: Bearer ...`; query-string secrets are legacy fallback only.
+- Prediction gate mode defaults to warn-only for hard blocking. Weak ML predictions can only reduce risk through explicit size caps; they do not place orders, loosen gates, or override broker/order safeguards.
 
 ---
 
@@ -83,7 +60,9 @@ SQLite trades.db
         |
         v
 Reports, intelligence, validation
-Runtime Environment
+```
+
+## Runtime Environment
 
 Production VM:
 
@@ -119,7 +98,8 @@ ALPACA_SECRET_KEY
 LOG_LEVEL
 EXECUTION_MODE
 LIVE_TRADING_ENABLED
-Approved Symbols
+
+## Approved Symbols
 
 Current intelligence/reporting universe:
 
@@ -167,10 +147,11 @@ XOM
 
 Symbol definitions and price ranges are maintained in symbols_config.py and imported through config.py.
 
-Main Runtime Files
-app.py
+## Main Runtime Files
 
-Main Flask webhook server.
+### app.py
+
+Flask composition root and compatibility entrypoint.
 
 Exposes:
 
@@ -182,16 +163,26 @@ GET  /debug/symbol/<SYMBOL>
 
 Core responsibilities:
 
-Receives TradingView alerts.
-Validates webhook secret and payload.
-Enforces approved symbol list.
-Applies pre-Claude risk checks.
-Builds account state for Claude.
-Calls decision_engine.py.
-Places orders through broker.py.
-Persists trades, rejections, context, and order metadata to trades.db.
-Exposes operator state through /status, /positions, and debug endpoints.
-decision_engine.py
+- Create Flask app instances.
+- Select and attach the `ApplicationContainer`.
+- Register API routes.
+- Run explicit startup orchestration.
+- Expose `process_signal()` as a compatibility wrapper around `SignalPipeline`.
+- Avoid owning trading behavior, broker access, direct DB access, or report logic.
+
+### services/live_signal_processor.py
+
+Service-owned live signal orchestration.
+
+Responsibilities:
+
+- Consume `SignalContext`, `SignalRuntimeState`, and context runtime objects.
+- Run staged deterministic gates.
+- Call approval, sizing, and execution services.
+- Preserve audit behavior and webhook status updates.
+- Keep app-level code out of trading decisions.
+
+### decision_engine.py
 
 Claude Haiku decision layer.
 
@@ -412,9 +403,9 @@ daily_symbol_predictions
         v
 /status symbol_intelligence
 ops_check.py prediction-validation
-Prediction Layer
+## Prediction Layer
 
-The prediction layer is observe-only.
+The prediction layer is conservative and risk-reducing only.
 
 It produces fields such as:
 
@@ -441,9 +432,13 @@ Current behavior:
 Predictions are visible in /status.
 Predictions are reported by intelligence_prediction_report.py.
 Predictions are validated by prediction_validation_report.py.
-Predictions do not yet block trades.
-Predictions do not yet alter sizing.
-Predictions do not yet override existing gates.
+Weak ML buckets can apply explicit downside size caps when sample-size and
+setup-quality conditions are met.
+Predictions do not place orders.
+Predictions do not loosen gates.
+Predictions do not increase sizing.
+Hard prediction blocking remains disabled unless `PREDICTION_GATE_MODE=hard`
+is explicitly promoted after paper-session validation.
 
 The correct roadmap path is:
 
@@ -451,9 +446,9 @@ observe-only
 → validation report
 → warn-only
 → soft modifier
-→ possible live gate much later
+→ possible hard gate much later
 
-ML Platform and Staged Integration
+## ML Platform and Staged Integration
 
 The ML platform is a research/audit layer. It is intentionally separate from
 live webhook, broker, order, and hard risk-control paths.
@@ -490,15 +485,14 @@ The staged readiness report composes dataset profile, dataset manifest, brain
 feature manifest, replay decision-delta audit, prediction-provider contract,
 retraining readiness, and promotion gates. It reports `runtime_effect: none`.
 
-`prediction_cache.py` is the runtime-safe bridge for observe-only ML prediction
-reads. It preloads `daily_symbol_predictions` into an in-memory dict keyed by
-symbol, refreshes on a 60-second TTL, and exposes memory-only lookups to the
-webhook path. The serving contract remains target 25 ms / hard timeout 50 ms,
-fail-open to no prediction. The existing deterministic `prediction_gate` is now
+`prediction_cache.py` is the runtime-safe bridge for ML prediction reads. It
+preloads `daily_symbol_predictions` into an in-memory dict keyed by symbol,
+refreshes on a 60-second TTL, and exposes memory-only lookups to the live signal
+path. The serving contract remains target 25 ms / hard timeout 50 ms,
+fail-open to no prediction. The existing deterministic `prediction_gate` is
 documented as the deterministic signal-quality gate; cached ML predictions are
-recorded beside it as `ml_prediction_*` compare-only fields. The validation
-report prints deterministic-gate versus cached-ML agreement once live
-`decision_snapshots` contain compare fields.
+recorded beside it as `ml_prediction_*` fields. Weak buckets can reduce size
+through explicit cap logic only.
 
 `python3 -m ml_platform.cli replay-decisions` is read-only. It re-runs
 `decision_policy` against stored `decision_snapshots`, joins changed decisions
@@ -688,7 +682,7 @@ prediction_validation_report.py compares predictions to later signal/trade
 outcomes and, after `strong_day_participation_report.py --write-db` runs,
 strong-session participation/coverage outcomes. It also reports agreement and
 disagreement between the deterministic signal-quality gate and cached
-`ml_prediction_*` compare-only fields from decision snapshots.
+`ml_prediction_*` fields from decision snapshots.
 
 Usage:
 
@@ -1038,21 +1032,19 @@ benchmark alignment
 QQQ/SPY/IWM/GLD support or conflict
 6. app.py decomposition
 
-Status: Later.
+Status: Complete for the live signal path.
 
-Possible future extraction targets:
+Current ownership:
 
-signal_router.py
-risk_engine.py
-execution_engine.py
-market_state.py
-state_store.py
+app.py remains the Flask composition root.
+SignalPipeline owns runtime flow entry.
+LiveSignalProcessor owns live signal orchestration.
+ApprovalService owns deterministic and Claude/confidence decisions.
+SizingService owns final sizing.
+ExecutionService and execution adapters own approved order execution.
+TradeAuditService owns execution/rejection persistence.
 
-Safest first extraction:
-
-signal_router.py
-
-Initially observe-only beside existing /webhook logic.
+Next app-level work should be composition cleanup only, not trading behavior migration.
 
 7. Risk engine skeleton
 

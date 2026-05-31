@@ -6,29 +6,34 @@ becomes an ML-driven trading system.
 ## Current stance
 
 - Paper trading remains the runtime mode.
-- Prediction outputs stay observe-only.
+- Prediction outputs remain conservative and evidence-gated.
 - No model should place orders, loosen risk controls, or override broker/order
   safeguards.
-- Any future prediction influence must be paper-only, environment-controlled,
-  logged, reversible, and limited to soft risk reduction until validated.
+- Current prediction influence is limited to logged downside size caps for weak
+  prediction evidence. Hard prediction blocking remains disabled unless
+  explicitly promoted through paper-session validation.
+- Any future additional prediction influence must be paper-only,
+  environment-controlled, logged, reversible, and limited to soft risk reduction
+  until validated.
 
 ## Near-term foundation
 
-1. Keep deterministic intelligence generation stable.
-2. Monitor data collection with `dataset-health`, `feature-health`, and
-   `feature-watch`.
-3. Track rejected signals with `rejection-summary`.
-4. Track order/fill integrity with `order-health`.
-5. Preserve clean Tuesday session evidence before structural refactors.
+1. Validate setup health on a clean-feed live paper session.
+2. Confirm SIP->IEX fallback health and collapse of setup-policy error counts.
+3. Verify conviction-stack persistence with `conviction-persistence-health`.
+4. Use `conviction-stack-report`, `peak-bucket-report`, and
+   `winner-became-loser` before tuning policy.
+5. Tune one policy at a time from measured paper evidence: exit capture,
+   weak-entry containment, conviction caps, buy-opportunity sizing, prediction
+   authority, then session-momentum caps.
 
-## Explicit Pending Gates After Tuesday QA
+## Explicit Pending Gates Before Broader ML Authority
 
 These items must remain visible because they can quietly corrupt future ML work
 or destabilize the webhook path if treated as routine cleanup.
 
 1. Serving latency SLA:
-   - Define and enforce a prediction-read budget before `app.py` imports any
-     provider.
+   - Prediction reads must stay outside direct webhook DB access.
    - Current contract: target 25 ms, hard timeout 50 ms, in-memory TTL cache
      loaded outside the webhook path, TTL 60 seconds, fail-open to no
      prediction.
@@ -41,11 +46,12 @@ or destabilize the webhook path if treated as routine cleanup.
      flagged before training.
    - Current manifest contract includes `override_files`,
      `override_state_hash`, and `override_tracking_status`.
-3. `app.py` refactor risk:
-   - Treat decomposition as a multi-week mini-project with regression risk.
-   - Use tests, feature/shadow flags, and behavior-parity checks before any old
-     path is removed.
-   - Do not mix extraction with broker/order/risk-control behavior changes.
+3. Architecture-boundary regression risk:
+   - `app.py` is now a composition root, and the live signal path is
+     service-owned.
+   - Temporary architecture allowlists are empty. Do not reintroduce direct DB,
+     broker, market-data, or Flask coupling outside approved boundaries.
+   - Keep architecture-boundary tests green before and after ML/report changes.
 4. Retraining cadence:
    - No automatic retraining by default.
    - First policy: manually reviewed batch retraining after 20 trading sessions
@@ -64,6 +70,12 @@ or destabilize the webhook path if treated as routine cleanup.
      learning is running.
    - `POLICY_ARTIFACTS_ENABLED=false` must make live loaders return neutral
      state without file deletion.
+6. Conviction persistence:
+   - Approved BUY rows must persist final sizing attribution, dominant limiter,
+     effective size cap, active-cap state, ML bucket/score, setup action,
+     session label, strategy score, and buy-opportunity recommendation.
+   - Rejected BUY rows should persist available pre-sizing context, while sizing
+     fields are expected only for rows that reached sizing.
 
 ## Platform Layers
 
@@ -81,6 +93,14 @@ Current state:
 - `dataset-manifest`, `governance-contract`, `label-taxonomy`,
   `model-card-template`, and `env-policy` CLI commands are staged as read-only
   research/operator tools.
+- `decision_snapshots` records immutable point-in-time decision context for new
+  approvals/rejections.
+- `feature_snapshots` carries leakage/audit fields required by the governance
+  contract.
+- Repositories/services own DB and market-data access for runtime files,
+  reports, ops checks, ML builders, and backfill/training scripts.
+- Architecture tests enforce approved DB, broker, market-data, Flask, policy,
+  repository, and report boundaries with empty temporary allowlists.
 
 Required rules:
 
@@ -107,11 +127,12 @@ Required rules:
 
 Remaining:
 
-- Add schema/migration management before structural DB refactors.
-- Add durable decision snapshots after Tuesday's session is preserved.
-- Add rejected-signal forward returns and stale-context quality gates.
-- Archive point-in-time market context and override state before historical
-  brain-feature replay is trusted.
+- Continue reducing compatibility wrappers only when grep proves no public
+  import surface depends on them.
+- Add stale-context quality gates where validation shows they would have
+  prevented contaminated rows.
+- Keep archiving point-in-time market context and override state before
+  historical brain-feature replay is trusted.
 
 ### Counterfactual And Selection-Bias Layer
 
@@ -598,30 +619,34 @@ Retraining policy:
 
 ### Serving Layer
 
-Goal: read-only prediction service used by `app.py`, initially only for logging
-and dashboards.
+Goal: service-owned prediction observation used for logging, dashboards, and
+conservative downside-only sizing modifiers.
 
 Current state:
 
 - `ml_platform.serving` defines a dormant read-only `PredictionProvider`
   interface and SQLite implementation.
-- `prediction_cache.py` is the runtime-safe loader. It preloads
+- `prediction_cache.py` is a compatibility wrapper around service/repository
+  owned cache loading. It preloads
   `daily_symbol_predictions` into an in-memory dict keyed by symbol, refreshes
   on a 60-second TTL outside webhook handling, and exposes memory-only reads to
-  `app.py`.
+  the live signal path.
 - `/status` exposes prediction-cache age, symbol count, load duration, and
   stale/error state.
-- The existing deterministic `prediction_gate` is now documented in code as the
+- The existing deterministic `prediction_gate` is documented in code as the
   deterministic signal-quality gate. Cached ML predictions are attached as
-  `ml_prediction_*` compare-only fields beside the deterministic gate output.
+  `ml_prediction_*` fields beside the deterministic gate output.
+- Weak ML buckets can apply explicit risk-reducing size caps. High buckets are
+  advisory. Hard prediction blocking remains behind explicit promotion.
 - `prediction_validation_report.py` now prints deterministic-gate versus
   cached-ML agreement/disagreement from `decision_snapshots` when compare
   fields are present.
 
 Remaining:
 
-- Keep ML prediction runtime influence off until paper evidence supports
-  promotion. Compare deterministic-vs-ML agreement/divergence first.
+- Keep additional ML prediction runtime influence off until clean paper-session
+  evidence supports promotion. Compare deterministic-vs-ML
+  agreement/divergence first.
 - Serving must degrade to no prediction if disabled, stale, missing, or failed;
   it must never block signal processing.
 - Continue validating the serving latency contract in session logs: target
@@ -673,13 +698,11 @@ Pending:
 
 ### Phase 1: Stabilize Foundation
 
-- Treat `app.py` decomposition as its own mini-project, not a casual cleanup.
-  Extract webhook handling, signal validation, context building, risk checks,
-  order execution, and logging behind tests and feature/shadow flags.
-- Add formal schema/migration management instead of scattered runtime table
-  creation. This includes a schema version table, migration files, migration
-  status command, backup before migration, rollback notes, and idempotent
-  checks.
+- Keep the completed architecture cleanup locked down with boundary tests.
+  `app.py` is a composition root, and live signal orchestration is
+  service-owned.
+- Keep formal schema/migration management in `db_migrations.py`; do not add
+  scattered runtime schema mutation.
 - Make local setup reproducible with `pyproject.toml` or
   `requirements-dev.txt`.
 - Add sample/synthetic `market_context.json` fixtures for tests.
@@ -688,9 +711,9 @@ Pending:
   sanity failure, earnings hard avoid, missing/stale market context, synthetic
   matched exit, and broker fill mismatch.
 
-Status: partially started with safety docs, ops checks, ML scaffolding, and
-readiness automation. Structural refactor is intentionally deferred until after
-Tuesday and should be scheduled as a multi-week risk-managed project.
+Status: complete for the live signal path and architecture boundaries. Further
+work should be behavior validation or small composition cleanup, not another
+large app-owned migration.
 
 ### Phase 2: Make ML Loop Real
 
@@ -704,8 +727,9 @@ Tuesday and should be scheduled as a multi-week risk-managed project.
 - Resolve the counterfactual problem, fixed-horizon label policy, purged
   validation, and point-in-time context before any real training.
 
-Status: scaffolded, not train-ready. Waiting on post-rebuild
-`feature_snapshots`, `labeled_setups`, and matched outcomes.
+Status: scaffolded, not train-ready. Current priority is validating clean-feed
+setup health, prediction bucket separation, conviction persistence, and
+exit-capture diagnostics across newer paper sessions.
 
 ### Phase 3: Platformize Decisions
 
@@ -716,7 +740,8 @@ Status: scaffolded, not train-ready. Waiting on post-rebuild
 - Promote only after evidence: observe-only -> warn-only -> soft modifier ->
   guarded paper gate.
 
-Status: provider interface scaffolded only; no `app.py` integration yet.
+Status: provider/cache path is integrated as service-owned prediction
+observation. Additional authority remains blocked pending paper evidence.
 
 ### Phase 4: Productize If Desired
 
@@ -754,12 +779,14 @@ Reusable logic staged for ML:
 
 Existing order intelligence:
 
-- `app.py` builds trend state from signal history and stores trend fields on
-  trade rows.
-- `app.py` uses short momentum, session momentum, setup observation, and
-  prediction-gate diagnostics in decision context and audit rows.
+- Service-owned runtime/context builders track trend state from signal history
+  and persist trend fields on trade rows.
+- Live signal services use short momentum, session momentum, setup observation,
+  prediction diagnostics, strategy observation, and buy-opportunity scoring in
+  decision context and audit rows.
 - `session_momentum.py`, `rolling_momentum.py`, and
-  `position_momentum_monitor.py` feed session/position risk visibility.
+  `position_momentum_monitor.py` are thin or service-backed entrypoints feeding
+  session/position risk visibility.
 - `market_intelligence.experience_model` blends trend/timing lessons into
   observe-only `daily_symbol_predictions`.
 
@@ -793,13 +820,23 @@ Promotion remains blocked until the integration contract allows it:
 python3 -m ml_platform.cli integration-contract
 ```
 
-## Refactor sequence after Tuesday
+## Current Refactor State
 
-1. Extract signal-processing logic from `app.py` behind tests.
-2. Add typed context/result objects around the extracted seam.
-3. Move restart-sensitive globals behind a durable state manager.
-4. Consolidate SQL access into `db.py` after behavior is covered.
-5. Add structured logging/report exports where reporting needs it.
+Completed:
+
+1. Live signal processing moved out of `app.py`.
+2. Context, approval, sizing, execution, audit, startup, route registration,
+   runtime state, market-data adapters, and portfolio rotation are
+   service-owned.
+3. Runtime/report/ops/ML DB access moved behind repositories.
+4. Market-data access moved behind approved services/adapters.
+5. Temporary architecture allowlists are empty and guarded by tests.
+
+Remaining:
+
+1. Remove compatibility wrappers only after import checks prove they are unused.
+2. Keep report/backfill scripts thin and repository-backed.
+3. Add new architecture guards before relaxing any boundary.
 
 ## Promotion rule
 
@@ -812,14 +849,14 @@ A model can only move from observe-only to paper-trading influence after it has:
 - an environment flag defaulting off,
 - operator-visible reports showing what it would have changed.
 
-## Best Next Additions After Tuesday
+## Best Next Additions
 
 1. Done: add schema/migration management.
 2. Done: add immutable decision snapshots.
 3. Done: add `feature_available_at`, `feature_generated_at`,
    `feature_age_seconds`, `source`, `is_stale`, and `staleness_reason` fields
    to `feature_snapshots_v2`.
-4. Add serving latency enforcement before any webhook-path provider import.
+4. Validate serving latency and fail-open behavior during clean paper sessions.
 5. Done: add policy-artifact registry, known-good pointer, rollback command,
    after-close failure alert, manifest registry hash/known-good id, and
    `ops_check.py policy-artifacts` coverage for the after-close learning memory
@@ -827,49 +864,53 @@ A model can only move from observe-only to paper-trading influence after it has:
 6. Started: add timestamped override history and dataset-manifest override
    hashes. Current point-in-time archive snapshots market context, override
    files, policy artifact hashes, and symbol-universe version.
-7. Started: add data-retention tiers and archive/compaction commands. Current
+7. Done: add conviction persistence health and sample diagnostics.
+8. Next: use clean-session reports to validate setup errors, fallback health,
+   dominant limiter attribution, weak/degraded loss containment, full-exit
+   capture ratio, winner-became-loser count, and prediction bucket separation.
+9. Started: add data-retention tiers and archive/compaction commands. Current
    policy classifies hot/warm/cold tables and leaves destructive compaction
    disabled.
-8. Scope `app.py` decomposition as a multi-week mini-project.
-9. Done: add `rejected_signal_outcomes` schema target plus
+10. Done: complete `app.py` decomposition for the live signal path.
+11. Done: add `rejected_signal_outcomes` schema target plus
    `rejected_signal_outcome_builder.py` and `ops_check.py rejected-outcomes`
    coverage/label-quality reporting. The post-session cron now runs the
    builder daily before validation. Continue collecting multiple paper sessions
    before treating counterfactual labels as training-ready.
-10. Done: define label v1 formally with fixed-horizon returns, excursion
+12. Done: define label v1 formally with fixed-horizon returns, excursion
     labels, classification labels, and exit-policy requirements.
-11. Done: add dataset manifest generation to dataset export flow.
-12. Started: staged observe-only ML integration lane and `staged-readiness`
+13. Done: add dataset manifest generation to dataset export flow.
+14. Started: staged observe-only ML integration lane and `staged-readiness`
     report.
-13. Started: convert the similarity model into versioned model `v0` with
+15. Started: convert the similarity model into versioned model `v0` with
     research-only metadata.
-14. Done: build read-only `replay-decisions` v1. It re-runs
+16. Done: build read-only `replay-decisions` v1. It re-runs
     `decision_policy` against stored `decision_snapshots` account-state JSON,
     reports policy drift, joins changed decisions to realized/rejected outcomes,
     estimates friction-adjusted decision deltas, and emits best/worst changed
     decisions without changing live behavior.
-15. Add calibration and walk-forward evaluation.
-16. Started: define the first retraining-readiness report and 20-session review
+17. Add calibration and walk-forward evaluation.
+18. Started: define the first retraining-readiness report and 20-session review
     cadence.
-17. Done: expose read-only symbol intelligence in `/status`; prediction values
-    remain observe-only and do not affect live decisions.
-18. Started: evaluate whether TradingView alerts should remain primary, become
+19. Done: expose symbol intelligence in `/status`; weak prediction values can
+    only reduce risk through explicit size caps.
+20. Started: evaluate whether TradingView alerts should remain primary, become
     secondary, or be replaced by an Alpaca-bar-derived internal signal
     generator after side-by-side paper-session evidence. `auto_buy_outcome_report.py`
     now compares internal candidate forward returns against the TradingView
     signal baseline, and `strong_day_participation_report.py --write-db`
     captures full-universe strong-session coverage including no-alert symbols.
-19. Done: add post-learning point-in-time archive to
+21. Done: add post-learning point-in-time archive to
     `run_after_close_learning.sh` after policy artifact registration, so
     after-close strategy/policy memory refreshes are archived as well as
     pre-market context.
-20. Done: add `auto_buy_decision_snapshots` so the internal auto-buy execution
+22. Done: add `auto_buy_decision_snapshots` so the internal auto-buy execution
     path records candidate decisions, live block reasons, risk cross-check
     reasons, and submitted order metadata outside the main webhook path.
-21. Started: route fixed-horizon label generation through
+23. Started: route fixed-horizon label generation through
     `label_v1_builder.py`, which validates feature availability/staleness
     audit fields before delegating to the current label feature builder.
-22. Started: entry-intelligence instrumentation v1. The live signal path now
+24. Started: entry-intelligence instrumentation v1. The live signal path now
     captures momentum acceleration, volume surge ratio, recent-base extension,
     prior-session strong-day context, and fresh tape classification into
     `decision_snapshots`; `feature_snapshots_v3` includes the new signal-time

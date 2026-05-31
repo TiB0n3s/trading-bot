@@ -254,8 +254,9 @@ candidate quality against the existing alert-driven universe.
 
 Initial auto-buy methodology:
 
-- `auto_buy_manager.py --scope internal` scores internal/bar-only candidates
-  from session momentum, latest live feature snapshot/setup, and market context.
+- `auto_buy_manager.py --scope all` scores candidates across the full approved
+  universe from session momentum, latest live feature snapshot/setup, and
+  market context.
 - It writes `auto_buy_candidates` and `AUTO_BUY_CANDIDATE` bot events for
   comparison against TradingView-triggered signals.
 - Live paper buys are disabled by default and require both `--live` and

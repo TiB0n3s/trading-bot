@@ -79,7 +79,7 @@ Use these read-only reports during or after a session:
 cd ~/trading-bot
 python3 ops_check.py rejection-summary 2026-05-26
 python3 ops_check.py rejected-outcomes 2026-05-26
-python3 auto_buy_manager.py --scope internal
+python3 auto_buy_manager.py --scope all
 python3 ops_check.py auto-buy 2026-05-26
 python3 auto_buy_outcome_report.py --date 2026-05-26
 python3 strong_day_participation_report.py --date 2026-05-26 --write-db
@@ -94,8 +94,9 @@ python3 prediction_cache.py preload --date 2026-05-26
 `rejection-summary` groups rejected trade rows by reason/category, symbol, and
 recent context. `rejected-outcomes` checks counterfactual forward-return
 coverage for rejected signals after `rejected_signal_outcome_builder.py` runs.
-`auto_buy_manager.py` scores Alpaca-bar-derived internal buy candidates without
-requiring TradingView alerts. Live paper buys require both `--live` and
+`auto_buy_manager.py` scores Alpaca-bar-derived buy candidates across the full
+approved universe so scored-but-not-taken opportunities are persisted for later
+counterfactual review. Live paper buys require both `--live` and
 `AUTO_BUY_LIVE_BUYS=true`, and are constrained by
 `AUTO_BUY_MAX_ORDERS_PER_RUN`, `AUTO_BUY_MAX_DAILY_ORDERS`, and
 `AUTO_BUY_COOLDOWN_MINUTES`. The cron remains Central-time localized, but
@@ -104,7 +105,7 @@ requiring TradingView alerts. Live paper buys require both `--live` and
 candidate rows. Before any live paper buy it also cross-checks shared app
 cooldowns, recent-sell churn state, the app per-symbol daily buy count, and
 correlation-cluster exposure.
-`auto_buy_outcome_report.py` compares internal candidates against forward
+`auto_buy_outcome_report.py` compares captured candidates against forward
 feature-snapshot returns, score buckets, and the TradingView signal baseline.
 `strong_day_participation_report.py --write-db` persists full-universe
 strong-session participation rows so `prediction_validation_report.py` and

@@ -75,6 +75,12 @@ def test_job_runner_lines_have_job_name():
     assert not offenders, offenders
 
 
+def test_auto_buy_captures_full_candidate_universe():
+    lines = [line for line in _cron_command_lines() if "auto_buy_manager.py" in line]
+    assert len(lines) == 1, lines
+    assert "--scope all" in lines[0]
+
+
 def main():
     tests = [
         test_no_raw_flock_jobs_remain,
@@ -82,6 +88,7 @@ def main():
         test_wrapper_scripts_are_invoked_through_bash,
         test_after_close_and_post_session_share_lock,
         test_job_runner_lines_have_job_name,
+        test_auto_buy_captures_full_candidate_universe,
     ]
     for test in tests:
         test()

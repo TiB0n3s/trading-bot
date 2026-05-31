@@ -19,9 +19,12 @@ from datetime import datetime
 from pathlib import Path
 from statistics import mean
 
-from db import DB_PATH, get_connection
 from build_historical_trend_context import ensure_historical_trend_context_table
 from market_intelligence.intelligence_store import init_intelligence_tables
+from repositories.experience_model_repo import ExperienceModelRepository
+
+
+DB_PATH = Path(__file__).resolve().parents[1] / "trades.db"
 
 
 PREDICTION_COLUMNS = [
@@ -60,88 +63,22 @@ def init_prediction_tables(db_path: Path | str = DB_PATH) -> None:
     init_intelligence_tables(db_path)
     ensure_historical_trend_context_table(db_path)
 
-    with get_connection(db_path) as con:
-        con.execute(
-            """
-            CREATE TABLE IF NOT EXISTS daily_symbol_predictions (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-
-                market_date TEXT NOT NULL,
-                symbol TEXT NOT NULL,
-
-                prediction_score REAL,
-                probability_of_profit REAL,
-                probability_of_approval REAL,
-                probability_of_order REAL,
-                expected_pnl REAL,
-                expected_win_rate REAL,
-
-                confidence TEXT,
-                sample_size INTEGER,
-                similarity_basis TEXT,
-                reason TEXT,
-
-                timing_score REAL,
-                recommended_entry_timing TEXT,
-                recommended_exit_timing TEXT,
-                historical_avg_entry_delay REAL,
-                historical_avg_exit_delay REAL,
-                historical_timing_sample_size INTEGER,
-                timing_reason TEXT,
-
-                trend_score REAL,
-                trend_label TEXT,
-                trend_regime TEXT,
-                trend_confidence TEXT,
-                trend_similarity_sample_size INTEGER,
-                trend_reason TEXT,
-
-                raw_json TEXT,
-                created_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL,
-
-                UNIQUE(market_date, symbol)
-            )
-            """
-        )
-
-        con.execute(
-            """
-            CREATE INDEX IF NOT EXISTS idx_daily_symbol_predictions_date_symbol
-            ON daily_symbol_predictions(market_date, symbol)
-            """
-        )
-
-        con.execute(
-            """
-            CREATE INDEX IF NOT EXISTS idx_daily_symbol_predictions_symbol_date
-            ON daily_symbol_predictions(symbol, market_date)
-            """
-        )
-
-        # Add timing columns for existing databases.
-        existing_cols = {
-            row["name"]
-            for row in con.execute("PRAGMA table_info(daily_symbol_predictions)").fetchall()
-        }
-        timing_columns = {
-            "timing_score": "REAL",
-            "recommended_entry_timing": "TEXT",
-            "recommended_exit_timing": "TEXT",
-            "historical_avg_entry_delay": "REAL",
-            "historical_avg_exit_delay": "REAL",
-            "historical_timing_sample_size": "INTEGER",
-            "timing_reason": "TEXT",
-            "trend_score": "REAL",
-            "trend_label": "TEXT",
-            "trend_regime": "TEXT",
-            "trend_confidence": "TEXT",
-            "trend_similarity_sample_size": "INTEGER",
-            "trend_reason": "TEXT",
-        }
-        for col, col_type in timing_columns.items():
-            if col not in existing_cols:
-                con.execute(f"ALTER TABLE daily_symbol_predictions ADD COLUMN {col} {col_type}")
+    timing_columns = {
+        "timing_score": "REAL",
+        "recommended_entry_timing": "TEXT",
+        "recommended_exit_timing": "TEXT",
+        "historical_avg_entry_delay": "REAL",
+        "historical_avg_exit_delay": "REAL",
+        "historical_timing_sample_size": "INTEGER",
+        "timing_reason": "TEXT",
+        "trend_score": "REAL",
+        "trend_label": "TEXT",
+        "trend_regime": "TEXT",
+        "trend_confidence": "TEXT",
+        "trend_similarity_sample_size": "INTEGER",
+        "trend_reason": "TEXT",
+    }
+    ExperienceModelRepository(db_path).init_prediction_tables(timing_columns)
 
 
 def score_bucket(value, label):
@@ -196,83 +133,34 @@ def clamp(v, lo=0.0, hi=100.0):
     return max(lo, min(hi, float(v)))
 
 
-def load_target_context(con, market_date: str, symbol: str):
-    return con.execute(
-        """
-        SELECT *
-        FROM daily_symbol_context
-        WHERE market_date = ?
-          AND symbol = ?
-        """,
-        (market_date, symbol),
-    ).fetchone()
+def load_target_context(repo: ExperienceModelRepository, market_date: str, symbol: str):
+    return repo.load_target_context(market_date, symbol)
 
 
-def load_target_events(con, market_date: str, symbol: str):
-    return con.execute(
-        """
-        SELECT *
-        FROM daily_symbol_events
-        WHERE market_date = ?
-          AND symbol = ?
-        ORDER BY id
-        """,
-        (market_date, symbol),
-    ).fetchall()
+def load_target_events(repo: ExperienceModelRepository, market_date: str, symbol: str):
+    return repo.load_target_events(market_date, symbol)
 
 
-def load_historical_contexts(con, market_date: str, symbol: str | None = None):
-    params = [market_date]
-    symbol_filter = ""
-
-    # Use all symbols by default so early model has more samples.
-    # Symbol-specific similarity is rewarded separately.
-    if symbol:
-        symbol_filter = "AND symbol = ?"
-        params.append(symbol)
-
-    return con.execute(
-        f"""
-        SELECT *
-        FROM daily_symbol_context
-        WHERE market_date < ?
-          {symbol_filter}
-        ORDER BY market_date DESC, symbol
-        """,
-        params,
-    ).fetchall()
+def load_historical_contexts(
+    repo: ExperienceModelRepository,
+    market_date: str,
+    symbol: str | None = None,
+):
+    return repo.load_historical_contexts(market_date, symbol)
 
 
-def events_for_context(con, market_date: str, symbol: str):
-    return con.execute(
-        """
-        SELECT event_type, expected_market_impact, trade_relevance,
-               consumer_appetite_score, profit_potential_score,
-               supply_chain_risk_score, competitive_risk_score
-        FROM daily_symbol_events
-        WHERE market_date = ?
-          AND symbol = ?
-        """,
-        (market_date, symbol),
-    ).fetchall()
+def events_for_context(repo: ExperienceModelRepository, market_date: str, symbol: str):
+    return repo.events_for_context(market_date, symbol)
 
 
-def outcome_for_context(con, market_date: str, symbol: str):
+def outcome_for_context(repo: ExperienceModelRepository, market_date: str, symbol: str):
     """Return trade/outcome stats for a symbol/date.
 
     Uses live trades/matched_trades when present, plus learning-only historical
     tables rebuilt from Alpaca exports and signal logs.
     """
     try:
-        trades = con.execute(
-            """
-            SELECT *
-            FROM trades
-            WHERE timestamp LIKE ?
-              AND symbol = ?
-            """,
-            (f"{market_date}%", symbol),
-        ).fetchall()
+        trades = repo.trade_rows_for_context(market_date, symbol)
     except Exception:
         trades = []
 
@@ -288,31 +176,14 @@ def outcome_for_context(con, market_date: str, symbol: str):
     # Add deduped historical signal events when live trades rows are missing due to DB rebuild.
     hist_signals = []
     try:
-        hist_signals = con.execute(
-            """
-            SELECT *
-            FROM historical_signal_events
-            WHERE market_date = ?
-              AND symbol = ?
-            """,
-            (market_date, symbol),
-        ).fetchall()
+        hist_signals = repo.historical_signal_event_rows(market_date, symbol)
     except Exception:
         hist_signals = []
 
     # Fallback to raw signal experience if deduped events are not built yet.
     if not hist_signals:
         try:
-            hist_signals = con.execute(
-                """
-                SELECT *
-                FROM historical_signal_experience
-                WHERE market_date = ?
-                  AND symbol = ?
-                  AND decision_summary IN ('signal_received', 'processing_signal', 'order_placed')
-                """,
-                (market_date, symbol),
-            ).fetchall()
+            hist_signals = repo.historical_signal_experience_rows(market_date, symbol)
         except Exception:
             hist_signals = []
 
@@ -324,29 +195,13 @@ def outcome_for_context(con, market_date: str, symbol: str):
 
     matched = []
     try:
-        matched = con.execute(
-            """
-            SELECT realized_pnl, realized_pnl_pct
-            FROM matched_trades
-            WHERE exit_timestamp LIKE ?
-              AND symbol = ?
-            """,
-            (f"{market_date}%", symbol),
-        ).fetchall()
+        matched = repo.matched_trade_rows_for_context(market_date, symbol)
     except Exception:
         matched = []
 
     hist_outcomes = []
     try:
-        hist_outcomes = con.execute(
-            """
-            SELECT realized_pnl, realized_pnl_pct
-            FROM historical_trade_outcomes
-            WHERE exit_timestamp LIKE ?
-              AND symbol = ?
-            """,
-            (f"{market_date}%", symbol),
-        ).fetchall()
+        hist_outcomes = repo.historical_trade_outcome_rows(market_date, symbol)
     except Exception:
         hist_outcomes = []
 
@@ -484,28 +339,20 @@ def _timing_recommendation_from_row(row):
 
 
 
-def trend_context_for_symbol(con, market_date: str, symbol: str):
+def trend_context_for_symbol(repo: ExperienceModelRepository, market_date: str, symbol: str):
     try:
-        return con.execute(
-            """
-            SELECT *
-            FROM historical_trend_context
-            WHERE market_date = ?
-              AND symbol = ?
-            """,
-            (market_date, symbol),
-        ).fetchone()
+        return repo.trend_context_for_symbol(market_date, symbol)
     except Exception:
         return None
 
 
-def trend_similarity_lesson(con, market_date: str, symbol: str) -> dict:
+def trend_similarity_lesson(repo: ExperienceModelRepository, market_date: str, symbol: str) -> dict:
     """Return observe-only trend score using historical trend contexts + signal outcomes.
 
     Finds prior symbol/date rows with the same trend_label/regime when possible,
     then summarizes linked historical_signal_outcomes by date+symbol.
     """
-    target = trend_context_for_symbol(con, market_date, symbol)
+    target = trend_context_for_symbol(repo, market_date, symbol)
 
     if not target:
         return {
@@ -518,49 +365,7 @@ def trend_similarity_lesson(con, market_date: str, symbol: str) -> dict:
         }
 
     try:
-        rows = con.execute(
-            """
-            SELECT
-                t.market_date,
-                t.symbol,
-                t.trend_label,
-                t.trend_regime,
-                t.relative_strength_score,
-                t.distance_from_sma_20_pct,
-                COUNT(s.id) AS signal_rows,
-                SUM(CASE WHEN s.matched_outcome_id IS NOT NULL THEN 1 ELSE 0 END) AS matched_signals,
-                SUM(CASE WHEN s.realized_pnl > 0 THEN 1 ELSE 0 END) AS winners,
-                SUM(CASE WHEN s.realized_pnl < 0 THEN 1 ELSE 0 END) AS losers,
-                AVG(s.realized_pnl) AS avg_pnl,
-                SUM(s.realized_pnl) AS total_pnl,
-                AVG(s.realized_pnl_pct) AS avg_pnl_pct
-            FROM historical_trend_context t
-            LEFT JOIN historical_signal_outcomes s
-              ON s.market_date = t.market_date
-             AND s.symbol = t.symbol
-            WHERE t.market_date < ?
-              AND (
-                    t.trend_label = ?
-                 OR t.trend_regime = ?
-                 OR t.symbol = ?
-              )
-            GROUP BY t.market_date, t.symbol
-            HAVING matched_signals > 0
-            ORDER BY
-              CASE WHEN t.symbol = ? THEN 0 ELSE 1 END,
-              CASE WHEN t.trend_label = ? THEN 0 ELSE 1 END,
-              t.market_date DESC
-            LIMIT 40
-            """,
-            (
-                market_date,
-                target["trend_label"],
-                target["trend_regime"],
-                symbol,
-                symbol,
-                target["trend_label"],
-            ),
-        ).fetchall()
+        rows = repo.trend_similarity_rows(market_date, symbol, target)
     except Exception as e:
         return {
             "trend_score": 50.0,
@@ -624,7 +429,7 @@ def trend_similarity_lesson(con, market_date: str, symbol: str) -> dict:
 
 
 
-def timing_lesson_for_symbol(con, market_date: str, symbol: str) -> dict:
+def timing_lesson_for_symbol(repo: ExperienceModelRepository, market_date: str, symbol: str) -> dict:
     """Return observe-only timing lesson from historical_signal_outcomes.
 
     Preference order:
@@ -632,48 +437,15 @@ def timing_lesson_for_symbol(con, market_date: str, symbol: str) -> dict:
     2. all-symbol buy timing
     3. no data
     """
-    def fetch(symbol_filter: bool):
-        params = []
-        where = ["action = 'buy'", "market_date <= ?"]
-        params.append(market_date)
-
-        if symbol_filter:
-            where.append("symbol = ?")
-            params.append(symbol)
-
-        where_sql = " AND ".join(where)
-
-        return con.execute(
-            f"""
-            SELECT
-              entry_timing_label AS bucket,
-              action,
-              COUNT(*) AS n,
-              SUM(CASE WHEN matched_outcome_id IS NOT NULL THEN 1 ELSE 0 END) AS matched,
-              ROUND(AVG(entry_delay_minutes), 2) AS avg_entry_delay,
-              ROUND(AVG(exit_delay_minutes), 2) AS avg_exit_delay,
-              ROUND(AVG(realized_pnl), 4) AS avg_pnl,
-              ROUND(SUM(realized_pnl), 4) AS total_pnl,
-              ROUND(AVG(realized_pnl_pct), 4) AS avg_pnl_pct
-            FROM historical_signal_outcomes
-            WHERE {where_sql}
-            GROUP BY entry_timing_label, action
-            HAVING matched > 0
-            ORDER BY total_pnl DESC, matched DESC
-            LIMIT 1
-            """,
-            params,
-        ).fetchone()
-
     try:
-        row = fetch(symbol_filter=True)
+        row = repo.timing_lesson_row(market_date, symbol, symbol_filter=True)
     except Exception:
         row = None
 
     scope = "symbol_specific"
     if not row:
         try:
-            row = fetch(symbol_filter=False)
+            row = repo.timing_lesson_row(market_date, symbol, symbol_filter=False)
             scope = "global_buy_timing"
         except Exception:
             row = None
@@ -833,23 +605,10 @@ def weekly_symbol_performance(market_date: str, symbol: str, db_path: Path | str
     This is a soft modifier only; it must not override hard risk controls.
     """
     try:
-        with get_connection(db_path) as con:
-            row = con.execute(
-                """
-                SELECT
-                    COUNT(*) AS trades,
-                    SUM(CASE WHEN realized_pnl > 0 THEN 1 ELSE 0 END) AS wins,
-                    SUM(CASE WHEN realized_pnl < 0 THEN 1 ELSE 0 END) AS losses,
-                    SUM(COALESCE(realized_pnl, 0)) AS pnl,
-                    AVG(realized_pnl) AS expectancy,
-                    AVG(realized_pnl_pct) AS avg_pnl_pct
-                FROM matched_trades
-                WHERE symbol = ?
-                  AND entry_timestamp >= date(?, 'weekday 1', '-7 days')
-                  AND entry_timestamp < date(?, '+1 day')
-                """,
-                (symbol, market_date, market_date),
-            ).fetchone()
+        row = ExperienceModelRepository(db_path).weekly_symbol_performance_row(
+            market_date,
+            symbol,
+        )
 
         trades = int(row["trades"] or 0) if row else 0
         wins = int(row["wins"] or 0) if row else 0
@@ -910,37 +669,36 @@ def predict_symbol(market_date: str, symbol: str, db_path: Path | str = DB_PATH)
     init_prediction_tables(db_path)
 
     symbol = symbol.upper()
+    repo = ExperienceModelRepository(db_path)
 
-    with get_connection(db_path) as con:
-        target_ctx = load_target_context(con, market_date, symbol)
-        if not target_ctx:
-            raise ValueError(f"No daily_symbol_context for {market_date} {symbol}")
+    target_ctx = load_target_context(repo, market_date, symbol)
+    if not target_ctx:
+        raise ValueError(f"No daily_symbol_context for {market_date} {symbol}")
 
-        target_events = load_target_events(con, market_date, symbol)
-        historical_contexts = load_historical_contexts(con, market_date)
+    target_events = load_target_events(repo, market_date, symbol)
+    historical_contexts = load_historical_contexts(repo, market_date)
 
-        matches = []
-        for hist_ctx in historical_contexts:
-            hist_events = events_for_context(con, hist_ctx["market_date"], hist_ctx["symbol"])
-            sim_score, reasons = similarity_score(target_ctx, target_events, hist_ctx, hist_events)
+    matches = []
+    for hist_ctx in historical_contexts:
+        hist_events = events_for_context(repo, hist_ctx["market_date"], hist_ctx["symbol"])
+        sim_score, reasons = similarity_score(target_ctx, target_events, hist_ctx, hist_events)
 
-            if sim_score <= 0:
-                continue
+        if sim_score <= 0:
+            continue
 
-            outcome = outcome_for_context(con, hist_ctx["market_date"], hist_ctx["symbol"])
+        outcome = outcome_for_context(repo, hist_ctx["market_date"], hist_ctx["symbol"])
 
-            matches.append({
-                "similarity_score": sim_score,
-                "reasons": reasons,
-                "context": dict(hist_ctx),
-                "outcome": outcome,
-            })
+        matches.append({
+            "similarity_score": sim_score,
+            "reasons": reasons,
+            "context": dict(hist_ctx),
+            "outcome": outcome,
+        })
 
     pred = prediction_from_matches(target_ctx, matches)
 
-    with get_connection(db_path) as con:
-        timing = timing_lesson_for_symbol(con, market_date, symbol)
-        trend = trend_similarity_lesson(con, market_date, symbol)
+    timing = timing_lesson_for_symbol(repo, market_date, symbol)
+    trend = trend_similarity_lesson(repo, market_date, symbol)
 
     # Gentle observe-only score blend: trend/timing should inform, not dominate.
     base_score = float(pred.get("prediction_score") or 50.0)
@@ -1020,41 +778,16 @@ def upsert_prediction(prediction: dict, db_path: Path | str = DB_PATH) -> None:
         "updated_at": now,
     }
 
-    cols = PREDICTION_COLUMNS
-    values = [row.get(c) for c in cols]
-    placeholders = ", ".join(["?"] * len(cols))
-    update_cols = [c for c in cols if c not in ("market_date", "symbol", "created_at")]
-    update_sql = ", ".join(f"{c}=excluded.{c}" for c in update_cols)
-
-    with get_connection(db_path) as con:
-        con.execute(
-            f"""
-            INSERT INTO daily_symbol_predictions ({", ".join(cols)})
-            VALUES ({placeholders})
-            ON CONFLICT(market_date, symbol)
-            DO UPDATE SET {update_sql}
-            """,
-            values,
-        )
+    ExperienceModelRepository(db_path).upsert_prediction(row, PREDICTION_COLUMNS)
 
 
 def predict_all_symbols(market_date: str, symbol: str | None = None, write: bool = True) -> list[dict]:
     init_prediction_tables()
 
-    with get_connection(DB_PATH) as con:
-        if symbol:
-            symbols = [symbol.upper()]
-        else:
-            rows = con.execute(
-                """
-                SELECT symbol
-                FROM daily_symbol_context
-                WHERE market_date = ?
-                ORDER BY symbol
-                """,
-                (market_date,),
-            ).fetchall()
-            symbols = [r["symbol"] for r in rows]
+    if symbol:
+        symbols = [symbol.upper()]
+    else:
+        symbols = ExperienceModelRepository(DB_PATH).prediction_symbols(market_date)
 
     predictions = []
     for sym in symbols:

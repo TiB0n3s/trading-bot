@@ -98,7 +98,6 @@ TEMPORARY_BACKFILL_TRAINING_DB_ALLOWLIST = {
     "collect_and_score_events.py",
     "ingest_market_context.py",
     "init_prediction_db.py",
-    "market_intelligence/experience_model.py",
     "ml_platform/brain_features.py",
     "ml_platform/cli.py",
     "ml_platform/dataset_builder.py",

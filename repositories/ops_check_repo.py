@@ -1,0 +1,478 @@
+from __future__ import annotations
+
+import sqlite3
+from pathlib import Path
+from typing import Any
+
+
+class OpsCheckRepository:
+    def __init__(self, db_path: Path):
+        self.db_path = db_path
+
+    def exists(self) -> bool:
+        return self.db_path.exists()
+
+    def _fetchall(self, sql: str, params: tuple[Any, ...] = ()) -> list[sqlite3.Row]:
+        with sqlite3.connect(f"file:{self.db_path}?mode=ro", uri=True) as con:
+            con.row_factory = sqlite3.Row
+            return con.execute(sql, params).fetchall()
+
+    def _fetchone(self, sql: str, params: tuple[Any, ...] = ()) -> sqlite3.Row | None:
+        with sqlite3.connect(f"file:{self.db_path}?mode=ro", uri=True) as con:
+            con.row_factory = sqlite3.Row
+            return con.execute(sql, params).fetchone()
+
+    def setup_overview_rows(self, target_date: str) -> list[sqlite3.Row]:
+        return self._fetchall(
+            """
+            SELECT
+                COALESCE(setup_policy_action, 'NULL') AS action,
+                COUNT(*) AS signals,
+                SUM(approved) AS approved,
+                SUM(CASE WHEN approved = 0 THEN 1 ELSE 0 END) AS rejected
+            FROM trades
+            WHERE date(timestamp) = ?
+              AND action = 'buy'
+            GROUP BY setup_policy_action
+            ORDER BY signals DESC
+            """,
+            (target_date,),
+        )
+
+    def setup_error_symbol_rows(self, target_date: str) -> list[sqlite3.Row]:
+        return self._fetchall(
+            """
+            SELECT
+                symbol,
+                COUNT(*) AS signals,
+                SUM(approved) AS approved,
+                COALESCE(setup_unknown_reason, setup_policy_reason, 'no_reason') AS reason
+            FROM trades
+            WHERE date(timestamp) = ?
+              AND action = 'buy'
+              AND (
+                  setup_policy_action = 'error'
+                  OR setup_unknown_reason IS NOT NULL
+              )
+            GROUP BY symbol, setup_unknown_reason, setup_policy_reason
+            ORDER BY signals DESC
+            LIMIT 20
+            """,
+            (target_date,),
+        )
+
+    def setup_error_hour_rows(self, target_date: str) -> list[sqlite3.Row]:
+        return self._fetchall(
+            """
+            SELECT
+                CAST(strftime('%H', timestamp) AS INTEGER) AS hour_et,
+                COUNT(*) AS signals,
+                SUM(approved) AS approved
+            FROM trades
+            WHERE date(timestamp) = ?
+              AND action = 'buy'
+              AND (
+                  setup_policy_action = 'error'
+                  OR setup_unknown_reason IS NOT NULL
+              )
+            GROUP BY hour_et
+            ORDER BY hour_et
+            """,
+            (target_date,),
+        )
+
+    def setup_feed_error_rows(self, target_date: str) -> list[sqlite3.Row]:
+        return self._fetchall(
+            """
+            SELECT
+                CASE
+                    WHEN setup_unknown_reason LIKE '%subscription%'
+                      OR setup_policy_reason LIKE '%subscription%'
+                        THEN 'sip_subscription_failure'
+                    WHEN setup_policy_action = 'error' THEN 'other_snapshot_error'
+                    WHEN setup_unknown_reason IS NOT NULL THEN 'label_unknown'
+                    ELSE 'no_error'
+                END AS error_category,
+                COUNT(*) AS signals,
+                SUM(approved) AS approved
+            FROM trades
+            WHERE date(timestamp) = ?
+              AND action = 'buy'
+            GROUP BY error_category
+            ORDER BY signals DESC
+            """,
+            (target_date,),
+        )
+
+    def setup_pnl_rows(self, target_date: str) -> list[sqlite3.Row]:
+        return self._fetchall(
+            """
+            SELECT
+                COALESCE(setup_policy_action, 'NULL') AS spa,
+                COUNT(*) AS trades,
+                SUM(won) AS wins,
+                ROUND(AVG(realized_pnl_pct), 3) AS avg_pnl_pct,
+                ROUND(SUM(realized_pnl_pct), 2) AS total_pnl_pct
+            FROM matched_trades
+            WHERE date(entry_timestamp) = ?
+            GROUP BY setup_policy_action
+            ORDER BY trades DESC
+            """,
+            (target_date,),
+        )
+
+    def approved_unknown_setup_rows(self, target_date: str) -> list[sqlite3.Row]:
+        return self._fetchall(
+            """
+            SELECT
+                mt.symbol,
+                mt.setup_policy_action,
+                COALESCE(mt.setup_unknown_reason, mt.setup_policy_reason, '') AS unknown_reason,
+                ROUND(mt.realized_pnl_pct, 3) AS pnl_pct,
+                mt.won,
+                mt.holding_minutes
+            FROM matched_trades mt
+            WHERE date(mt.entry_timestamp) = ?
+              AND (
+                  mt.setup_policy_action = 'error'
+                  OR mt.setup_unknown_reason IS NOT NULL
+              )
+            ORDER BY mt.entry_timestamp
+            """,
+            (target_date,),
+        )
+
+    def prediction_bucket_signal_rows(self, target_date: str) -> list[sqlite3.Row]:
+        return self._fetchall(
+            """
+            SELECT
+                COALESCE(ml_prediction_bucket, 'unknown') AS bucket,
+                COUNT(*) AS signals,
+                SUM(approved) AS approved,
+                ROUND(100.0 * SUM(approved) / COUNT(*), 1) AS approval_rate_pct
+            FROM trades
+            WHERE date(timestamp) = ?
+              AND action = 'buy'
+            GROUP BY bucket
+            ORDER BY
+                CASE bucket
+                    WHEN 'high_55_plus'  THEN 1
+                    WHEN 'mid_50_55'     THEN 2
+                    WHEN 'low_45_50'     THEN 3
+                    WHEN 'weak_below_45' THEN 4
+                    ELSE 5
+                END
+            """,
+            (target_date,),
+        )
+
+    def prediction_bucket_pnl_rows(self, target_date: str) -> list[sqlite3.Row]:
+        return self._fetchall(
+            """
+            SELECT
+                COALESCE(mt.ml_prediction_bucket, 'unknown') AS bucket,
+                COUNT(*) AS trades,
+                SUM(mt.won) AS wins,
+                ROUND(AVG(mt.realized_pnl_pct), 3) AS avg_pnl_pct,
+                ROUND(SUM(mt.realized_pnl_pct), 2) AS total_pnl_pct
+            FROM matched_trades mt
+            WHERE date(mt.entry_timestamp) = ?
+            GROUP BY bucket
+            ORDER BY
+                CASE bucket
+                    WHEN 'high_55_plus'  THEN 1
+                    WHEN 'mid_50_55'     THEN 2
+                    WHEN 'low_45_50'     THEN 3
+                    WHEN 'weak_below_45' THEN 4
+                    ELSE 5
+                END
+            """,
+            (target_date,),
+        )
+
+    def capture_by_exit_type_rows(self, target_date: str) -> list[sqlite3.Row]:
+        return self._fetchall(
+            """
+            SELECT
+                CASE
+                    WHEN exit_reason LIKE 'position_manager_full%'    THEN 'pm_full_exit'
+                    WHEN exit_reason LIKE 'position_manager_partial%'  THEN 'pm_partial_exit'
+                    WHEN exit_reason LIKE 'synthetic_bracket%'         THEN 'bracket_exit'
+                    ELSE COALESCE(SUBSTR(exit_reason, 1, 22), 'unknown')
+                END AS exit_type,
+                COUNT(*) AS n,
+                SUM(CASE WHEN mfe_pct IS NOT NULL THEN 1 ELSE 0 END) AS has_mfe,
+                ROUND(AVG(mfe_pct), 3) AS avg_mfe,
+                ROUND(AVG(realized_pnl_pct), 3) AS avg_pnl,
+                ROUND(AVG(capture_ratio), 3) AS avg_capture,
+                SUM(CASE WHEN mfe_pct >= 0.40 AND realized_pnl_pct <= 0 THEN 1 ELSE 0 END)
+                    AS winners_became_losers
+            FROM matched_trades
+            WHERE exit_timestamp IS NOT NULL
+              AND DATE(exit_timestamp) = ?
+            GROUP BY exit_type
+            ORDER BY n DESC
+            """,
+            (target_date,),
+        )
+
+    def peak_bucket_rows(self, target_date: str | None = None) -> list[sqlite3.Row]:
+        where_clause = "WHERE mfe_pct IS NOT NULL"
+        params: tuple[Any, ...] = ()
+        if target_date:
+            where_clause += " AND DATE(exit_timestamp) = ?"
+            params = (target_date,)
+        return self._fetchall(
+            f"""
+            SELECT
+                CASE
+                    WHEN mfe_pct >= 1.00 THEN '1.00%+'
+                    WHEN mfe_pct >= 0.60 THEN '0.60-1.00%'
+                    WHEN mfe_pct >= 0.30 THEN '0.30-0.60%'
+                    ELSE '<0.30%'
+                END AS peak_bucket,
+                COUNT(*) AS trades,
+                ROUND(AVG(realized_pnl_pct), 3) AS avg_pnl,
+                ROUND(100.0 * SUM(won) / COUNT(*), 1) AS win_rate,
+                ROUND(AVG(mfe_pct), 3) AS avg_mfe,
+                ROUND(AVG(capture_ratio), 3) AS avg_capture,
+                SUM(CASE WHEN realized_pnl_pct < 0 THEN 1 ELSE 0 END) AS exits_below_zero,
+                SUM(CASE WHEN mfe_pct >= 0.30 AND realized_pnl_pct <= 0
+                         THEN 1 ELSE 0 END) AS winner_became_loser
+            FROM matched_trades
+            {where_clause}
+            GROUP BY peak_bucket
+            ORDER BY
+                CASE peak_bucket
+                    WHEN '1.00%+'     THEN 1
+                    WHEN '0.60-1.00%' THEN 2
+                    WHEN '0.30-0.60%' THEN 3
+                    ELSE 4
+                END
+            """,
+            params,
+        )
+
+    def peak_bucket_total(self, target_date: str | None = None) -> sqlite3.Row | None:
+        where_clause = "WHERE 1=1"
+        params: tuple[Any, ...] = ()
+        if target_date:
+            where_clause += " AND DATE(exit_timestamp) = ?"
+            params = (target_date,)
+        return self._fetchone(
+            f"""
+            SELECT COUNT(*) AS n, SUM(CASE WHEN mfe_pct IS NOT NULL THEN 1 ELSE 0 END) AS with_mfe
+            FROM matched_trades
+            {where_clause}
+            """,
+            params,
+        )
+
+    def winner_became_loser_summary(self, target_date: str, mfe_threshold: float) -> sqlite3.Row | None:
+        return self._fetchone(
+            """
+            SELECT
+                COUNT(*) AS total,
+                SUM(CASE WHEN mfe_pct IS NOT NULL THEN 1 ELSE 0 END) AS has_mfe,
+                SUM(CASE WHEN mfe_pct >= ? AND realized_pnl_pct <= 0 THEN 1 ELSE 0 END)
+                    AS true_wbl,
+                SUM(CASE WHEN mfe_pct >= ? AND realized_pnl_pct > 0
+                          AND (capture_ratio IS NULL OR capture_ratio < 0.50)
+                          THEN 1 ELSE 0 END) AS poor_capture
+            FROM matched_trades
+            WHERE DATE(exit_timestamp) = ?
+            """,
+            (mfe_threshold, mfe_threshold, target_date),
+        )
+
+    def winner_became_loser_rows(self, target_date: str, mfe_threshold: float) -> list[sqlite3.Row]:
+        return self._fetchall(
+            """
+            SELECT
+                symbol, entry_timestamp, exit_timestamp,
+                holding_minutes, realized_pnl_pct, mfe_pct, capture_ratio,
+                setup_policy_action, exit_reason
+            FROM matched_trades
+            WHERE DATE(exit_timestamp) = ?
+              AND mfe_pct >= ?
+              AND realized_pnl_pct <= 0
+            ORDER BY realized_pnl_pct ASC
+            """,
+            (target_date, mfe_threshold),
+        )
+
+    def poor_capture_rows(self, target_date: str, mfe_threshold: float) -> list[sqlite3.Row]:
+        return self._fetchall(
+            """
+            SELECT
+                symbol, holding_minutes, realized_pnl_pct, mfe_pct, capture_ratio,
+                setup_policy_action, exit_reason
+            FROM matched_trades
+            WHERE DATE(exit_timestamp) = ?
+              AND mfe_pct >= ?
+              AND realized_pnl_pct > 0
+              AND (capture_ratio IS NULL OR capture_ratio < 0.50)
+            ORDER BY capture_ratio ASC NULLS LAST
+            """,
+            (target_date, mfe_threshold),
+        )
+
+    def all_mfe_rows_for_date(self, target_date: str) -> list[sqlite3.Row]:
+        return self._fetchall(
+            """
+            SELECT
+                symbol, realized_pnl_pct, mfe_pct, capture_ratio,
+                setup_policy_action
+            FROM matched_trades
+            WHERE DATE(exit_timestamp) = ?
+              AND mfe_pct IS NOT NULL
+            ORDER BY capture_ratio ASC NULLS FIRST
+            """,
+            (target_date,),
+        )
+
+    def conviction_stack_rows(self, target_date: str) -> list[sqlite3.Row]:
+        return self._fetchall(
+            """
+            SELECT
+                effective_size_cap_pct,
+                dominant_limiter,
+                buy_opportunity_recommendation,
+                setup_policy_action,
+                session_momentum_severity,
+                trader_brain_score,
+                ml_prediction_bucket,
+                approved
+            FROM trades
+            WHERE date(timestamp) = ?
+              AND action = 'buy'
+            ORDER BY timestamp
+            """,
+            (target_date,),
+        )
+
+    def buy_opportunity_signal_rows(self, target_date: str) -> list[sqlite3.Row]:
+        return self._fetchall(
+            """
+            SELECT
+                buy_opportunity_recommendation AS rec,
+                COUNT(*) AS signals,
+                SUM(approved) AS approved,
+                AVG(CAST(approved AS REAL)) * 100 AS appr_pct,
+                MIN(buy_opportunity_score) AS min_score,
+                MAX(buy_opportunity_score) AS max_score,
+                AVG(buy_opportunity_score) AS avg_score
+            FROM trades
+            WHERE date(timestamp) = ?
+              AND action = 'buy'
+              AND buy_opportunity_recommendation IS NOT NULL
+            GROUP BY buy_opportunity_recommendation
+            ORDER BY AVG(buy_opportunity_score) DESC
+            """,
+            (target_date,),
+        )
+
+    def buy_opportunity_pnl_rows(self, target_date: str) -> list[sqlite3.Row]:
+        return self._fetchall(
+            """
+            SELECT
+                t.buy_opportunity_recommendation AS rec,
+                COUNT(mt.id) AS exits,
+                AVG(mt.realized_pnl_pct) AS avg_pnl,
+                SUM(CASE WHEN mt.realized_pnl_pct > 0 THEN 1 ELSE 0 END) AS wins,
+                AVG(mt.capture_ratio) AS avg_capture
+            FROM trades t
+            JOIN matched_trades mt
+              ON mt.symbol = t.symbol
+             AND ABS(julianday(mt.entry_timestamp) - julianday(t.timestamp)) < 0.01
+            WHERE date(t.timestamp) = ?
+              AND t.action = 'buy'
+              AND t.approved = 1
+              AND t.buy_opportunity_recommendation IS NOT NULL
+            GROUP BY t.buy_opportunity_recommendation
+            ORDER BY AVG(mt.realized_pnl_pct) DESC
+            """,
+            (target_date,),
+        )
+
+    def buy_opportunity_cap_rows(self, target_date: str) -> list[sqlite3.Row]:
+        return self._fetchall(
+            """
+            SELECT
+                buy_opportunity_recommendation AS rec,
+                dominant_limiter,
+                COUNT(*) AS n
+            FROM trades
+            WHERE date(timestamp) = ?
+              AND action = 'buy'
+              AND buy_opportunity_recommendation IS NOT NULL
+            GROUP BY buy_opportunity_recommendation, dominant_limiter
+            ORDER BY rec, n DESC
+            """,
+            (target_date,),
+        )
+
+    def buy_opportunity_double_count_row(self, target_date: str) -> sqlite3.Row | None:
+        return self._fetchone(
+            """
+            SELECT COUNT(*) AS n
+            FROM trades
+            WHERE date(timestamp) = ?
+              AND action = 'buy'
+              AND setup_policy_action IN ('block', 'error')
+              AND buy_opportunity_recommendation = 'avoid'
+            """,
+            (target_date,),
+        )
+
+    def claude_daily_approval_rows(self, target_date: str) -> list[sqlite3.Row]:
+        return self._fetchall(
+            """
+            SELECT
+                date(timestamp) AS day,
+                COUNT(*) AS total,
+                SUM(approved) AS approved,
+                AVG(CAST(approved AS REAL)) * 100 AS appr_pct
+            FROM trades
+            WHERE action = 'buy'
+              AND date(timestamp) >= date(?, '-14 days')
+            GROUP BY date(timestamp)
+            ORDER BY date(timestamp)
+            """,
+            (target_date,),
+        )
+
+    def claude_rejection_reason_rows(self, target_date: str) -> list[sqlite3.Row]:
+        return self._fetchall(
+            """
+            SELECT
+                rejection_reason,
+                COUNT(*) AS n
+            FROM trades
+            WHERE date(timestamp) = ?
+              AND action = 'buy'
+              AND approved = 0
+              AND rejection_reason IS NOT NULL
+            ORDER BY n DESC
+            LIMIT 12
+            """,
+            (target_date,),
+        )
+
+    def claude_confidence_rows(self, target_date: str) -> list[sqlite3.Row]:
+        return self._fetchall(
+            """
+            SELECT
+                confidence,
+                COUNT(*) AS n,
+                ROUND(COUNT(*) * 100.0 / SUM(COUNT(*)) OVER (), 1) AS pct
+            FROM trades
+            WHERE action = 'buy'
+              AND approved = 1
+              AND confidence IS NOT NULL
+              AND date(timestamp) >= date(?, '-30 days')
+            GROUP BY confidence
+            ORDER BY n DESC
+            """,
+            (target_date,),
+        )

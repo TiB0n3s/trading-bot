@@ -36,6 +36,8 @@ Usage:
   python3 ops_check.py order-health
   python3 ops_check.py runtime-health
   python3 ops_check.py lifecycle-analysis
+  python3 ops_check.py feature-attribution
+  python3 ops_check.py post-trade-learning
   python3 ops_check.py advisory-authority-report
   python3 ops_check.py migration-status
   python3 ops_check.py strong-days
@@ -66,6 +68,8 @@ from services.ops_checks.excursion_checks import (
 from services.ops_checks.feature_checks import run_feature_health, run_feature_watch
 from services.ops_checks.intelligence_checks import run_intelligence_summary
 from services.ops_checks.lifecycle_checks import run_lifecycle_analysis
+from services.ops_checks.feature_attribution_checks import run_feature_attribution_report
+from services.ops_checks.post_trade_learning_checks import run_post_trade_learning_report
 from services.ops_checks.advisory_authority_checks import run_advisory_authority_report
 from services.ops_checks.order_checks import run_order_health
 from services.ops_checks.rejection_checks import run_rejection_summary
@@ -498,6 +502,33 @@ def lifecycle_analysis(target_date):
     )
 
 
+def feature_attribution(target_date):
+    symbol = None
+    if "--symbol" in sys.argv:
+        idx = sys.argv.index("--symbol")
+        if idx + 1 < len(sys.argv):
+            symbol = sys.argv[idx + 1]
+    return run_feature_attribution_report(
+        target_date,
+        base_dir=BASE_DIR,
+        symbol=symbol,
+        min_sample_size=_int_option("--min-sample-size", 30),
+    )
+
+
+def post_trade_learning(target_date):
+    symbol = None
+    if "--symbol" in sys.argv:
+        idx = sys.argv.index("--symbol")
+        if idx + 1 < len(sys.argv):
+            symbol = sys.argv[idx + 1]
+    return run_post_trade_learning_report(
+        target_date,
+        base_dir=BASE_DIR,
+        symbol=symbol,
+    )
+
+
 def setup_breakdown(target_date: str) -> bool:
     return run_setup_breakdown(target_date, base_dir=BASE_DIR)
 
@@ -598,6 +629,12 @@ def main():
 
     if command == "lifecycle-analysis":
         return 0 if lifecycle_analysis(target_date) else 1
+
+    if command == "feature-attribution":
+        return 0 if feature_attribution(target_date) else 1
+
+    if command == "post-trade-learning":
+        return 0 if post_trade_learning(target_date) else 1
 
     if command == "migration-status":
         return 0 if migration_status_check() else 1

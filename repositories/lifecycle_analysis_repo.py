@@ -206,6 +206,7 @@ class LifecycleAnalysisRepository:
                     ds.approved,
                     ds.final_decision,
                     ds.rejection_reason,
+                    {sel(decision_cols, "ds", "canonical_intelligence_json")},
                     {sel(decision_cols, "ds", "canonical_intelligence_version", "entry_canonical_intelligence_version")},
                     {sel(decision_cols, "ds", "canonical_intelligence_hash", "entry_canonical_intelligence_hash")},
                     {exit_select},

@@ -11,6 +11,8 @@ class PostTradeLearningPayload:
     summary: dict[str, Any]
     expectancy_by_dimension: dict[str, list[dict[str, Any]]]
     gate_value: list[dict[str, Any]]
+    false_positive_patterns: list[dict[str, Any]]
+    false_negative_patterns: list[dict[str, Any]]
 
 
 def _float(value: Any) -> float | None:
@@ -63,6 +65,39 @@ def _expectancy_rows(rows: list[dict[str, Any]], key: str) -> list[dict[str, Any
             }
         )
     return result
+
+
+def _pattern_rows(
+    rows: list[dict[str, Any]],
+    *,
+    dimensions: list[str],
+    approved: bool,
+    profitable: bool,
+) -> list[dict[str, Any]]:
+    grouped: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        if bool(row.get("approved")) != approved:
+            continue
+        outcome = _outcome_return(row)
+        if outcome is None:
+            continue
+        if profitable and outcome <= 0:
+            continue
+        if not profitable and outcome > 0:
+            continue
+        parts = [f"{dimension}={_bucket(row, dimension)}" for dimension in dimensions]
+        key = " | ".join(parts)
+        item = grouped.setdefault(key, {"pattern": key, "count": 0, "outcomes": []})
+        item["count"] += 1
+        item["outcomes"].append(outcome)
+
+    result = []
+    for item in grouped.values():
+        outcomes = item.pop("outcomes")
+        item["avg_return_pct"] = _mean(outcomes)
+        result.append(item)
+    result.sort(key=lambda item: (-item["count"], item["pattern"]))
+    return result[:20]
 
 
 def build_post_trade_learning_payload(
@@ -142,6 +177,12 @@ def build_post_trade_learning_payload(
         gate_value.append(item)
 
     gate_value.sort(key=lambda item: (item["gate"]))
+    pattern_dimensions = [
+        "setup_label",
+        "market_regime",
+        "session_phase",
+        "execution_quality_decision",
+    ]
     summary = {
         "rows": len(rows_list),
         "approved_with_outcomes": len(approved_returns),
@@ -154,4 +195,16 @@ def build_post_trade_learning_payload(
         summary=summary,
         expectancy_by_dimension=expectancy,
         gate_value=gate_value,
+        false_positive_patterns=_pattern_rows(
+            rows_list,
+            dimensions=pattern_dimensions,
+            approved=True,
+            profitable=False,
+        ),
+        false_negative_patterns=_pattern_rows(
+            rows_list,
+            dimensions=pattern_dimensions,
+            approved=False,
+            profitable=True,
+        ),
     )

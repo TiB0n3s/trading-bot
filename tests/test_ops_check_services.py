@@ -17,6 +17,8 @@ from services.ops_checks.conviction_checks import (
     run_conviction_stack_report,
 )
 from services.ops_checks.advisory_authority_checks import run_advisory_authority_report
+from services.ops_checks.feature_attribution_checks import run_feature_attribution_report
+from services.ops_checks.post_trade_learning_checks import run_post_trade_learning_report
 from services.ops_checks.excursion_checks import (
     run_peak_bucket_report,
     run_winner_became_loser,
@@ -33,6 +35,8 @@ def test_ops_checks_return_false_when_db_missing(tmp_path):
         lambda: run_buy_opportunity_report("2026-05-30", base_dir=tmp_path),
         lambda: run_claude_context_audit("2026-05-30", base_dir=tmp_path),
         lambda: run_advisory_authority_report("2026-05-30", base_dir=tmp_path),
+        lambda: run_feature_attribution_report("2026-05-30", base_dir=tmp_path),
+        lambda: run_post_trade_learning_report("2026-05-30", base_dir=tmp_path),
     ]
 
     buf = io.StringIO()
@@ -42,6 +46,153 @@ def test_ops_checks_return_false_when_db_missing(tmp_path):
 
     out = buf.getvalue()
     assert out.count("[WARN] trades.db not found") == len(funcs)
+
+
+def _canonical_lifecycle_json(
+    *,
+    regime="trend_expansion",
+    execution="allow",
+    portfolio="allow",
+    breakout="confirmed_expansion_breakout",
+    participation="confirmed",
+    volatility="low",
+    structure="high_quality_structure",
+    downside="contained_downside",
+    utility="trade_candidate",
+    setup="breakout",
+    phase="first_30m",
+):
+    return json.dumps(
+        {
+            "regime_state": {
+                "market_regime": regime,
+                "execution_quality_decision": execution,
+                "portfolio_decision": portfolio,
+                "breakout_quality": breakout,
+                "participation_state": participation,
+                "volatility_chase_risk": volatility,
+                "downside_state": downside,
+                "session_phase": phase,
+            },
+            "setup_state": {
+                "label": setup,
+                "structure_state": structure,
+            },
+            "advisory_authority_state": {
+                "utility_estimate": {"utility_decision": utility}
+            },
+        }
+    )
+
+
+def test_feature_attribution_and_post_trade_learning_reports_use_lifecycle_rows(tmp_path):
+    db_path = tmp_path / "trades.db"
+    with sqlite3.connect(db_path) as con:
+        con.execute(
+            """
+            CREATE TABLE decision_snapshots (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                trade_id INTEGER,
+                decision_time TEXT,
+                symbol TEXT,
+                action TEXT,
+                approved INTEGER,
+                final_decision TEXT,
+                rejection_reason TEXT,
+                canonical_intelligence_version TEXT,
+                canonical_intelligence_hash TEXT,
+                canonical_intelligence_json TEXT
+            )
+            """
+        )
+        con.execute(
+            """
+            CREATE TABLE exit_snapshots (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                entry_trade_id INTEGER,
+                exit_timestamp TEXT,
+                exit_trigger TEXT,
+                realized_return_pct REAL,
+                mfe_pct REAL,
+                max_adverse_excursion_pct REAL
+            )
+            """
+        )
+        con.execute(
+            """
+            CREATE TABLE rejected_signal_outcomes (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                decision_snapshot_id INTEGER,
+                return_60m REAL,
+                max_favorable_60m REAL,
+                max_adverse_60m REAL,
+                label_status TEXT
+            )
+            """
+        )
+        con.execute(
+            """
+            INSERT INTO decision_snapshots (
+                trade_id, decision_time, symbol, action, approved, final_decision,
+                rejection_reason, canonical_intelligence_json
+            ) VALUES (1, '2026-05-30T10:00:00+00:00', 'AAPL', 'buy', 1, 'approved', NULL, ?)
+            """,
+            (_canonical_lifecycle_json(),),
+        )
+        con.execute(
+            """
+            INSERT INTO exit_snapshots (
+                entry_trade_id, exit_timestamp, exit_trigger,
+                realized_return_pct, mfe_pct, max_adverse_excursion_pct
+            ) VALUES (1, '2026-05-30T11:00:00+00:00', 'target', 0.8, 1.2, -0.2)
+            """
+        )
+        con.execute(
+            """
+            INSERT INTO decision_snapshots (
+                trade_id, decision_time, symbol, action, approved, final_decision,
+                rejection_reason, canonical_intelligence_json
+            ) VALUES (2, '2026-05-30T12:00:00+00:00', 'MSFT', 'buy', 0, 'rejected', 'trend_confirmation', ?)
+            """,
+            (
+                _canonical_lifecycle_json(
+                    regime="compression_chop",
+                    execution="size_down",
+                    portfolio="size_down",
+                    breakout="liquidity_vacuum_breakout",
+                    participation="isolated_or_weak",
+                    volatility="high",
+                    structure="messy_range",
+                    downside="asymmetric_downside_high",
+                    utility="do_not_trade",
+                    setup="late_chase",
+                    phase="midday",
+                ),
+            ),
+        )
+        con.execute(
+            """
+            INSERT INTO rejected_signal_outcomes (
+                decision_snapshot_id, return_60m, max_favorable_60m, max_adverse_60m, label_status
+            ) VALUES (2, -0.4, 0.1, -0.8, 'complete')
+            """
+        )
+
+    buf = io.StringIO()
+    with redirect_stdout(buf):
+        assert run_feature_attribution_report(
+            "2026-05-30",
+            base_dir=tmp_path,
+            min_sample_size=1,
+        ) is True
+        assert run_post_trade_learning_report("2026-05-30", base_dir=tmp_path) is True
+
+    out = buf.getvalue()
+    assert "Feature Attribution Report" in out
+    assert "market_regime" in out
+    assert "diagnostic_only_no_live_authority" in out
+    assert "Post-Trade Learning Report" in out
+    assert "Expectancy by setup_label" in out
 
 
 def test_advisory_authority_report_prefers_canonical_outcomes(tmp_path):
@@ -260,6 +411,7 @@ def test_setup_breakdown_prints_prominent_fallback_health(tmp_path):
 def main():
     tests = [
         test_ops_checks_return_false_when_db_missing,
+        test_feature_attribution_and_post_trade_learning_reports_use_lifecycle_rows,
         test_advisory_authority_report_prefers_canonical_outcomes,
         test_setup_breakdown_prints_prominent_fallback_health,
     ]

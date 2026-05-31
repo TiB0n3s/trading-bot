@@ -172,6 +172,118 @@ def test_execution_quality_can_size_down_policy():
     )
 
 
+def test_duplicate_portfolio_risk_blocks_even_with_strong_standalone_chart():
+    original = decision_policy.contextual_memory_for_signal
+    try:
+        decision_policy.contextual_memory_for_signal = neutral_memory
+        result = decision_policy.evaluate_decision_policy(
+            "TSM",
+            "buy",
+            intelligence_context={
+                "summary": {"recommended_action": "allow"},
+                "opportunity_score": {"score": 95, "decision": "allow"},
+                "prediction": {"prediction_decision": "allow", "prediction_score": 80},
+            },
+            account_state={
+                "setup_quality": {"score": 92, "recommendation": "buy"},
+                "portfolio_decision": {
+                    "decision": "block",
+                    "size_multiplier": 0.0,
+                    "duplicate_risk_score": 0.94,
+                    "crowded_theme": "semiconductors",
+                },
+                "execution_quality": {"decision": "allow"},
+            },
+        )
+    finally:
+        decision_policy.contextual_memory_for_signal = original
+
+    assert_equal(result["decision"], "block", "portfolio block wins")
+    assert_equal(result["size_multiplier"], 0.0, "size")
+    assert_true("portfolio duplicate risk says block" in result["risks"], "risk reason")
+
+
+def test_utility_estimate_cannot_block_or_size_by_itself():
+    original = decision_policy.contextual_memory_for_signal
+    try:
+        decision_policy.contextual_memory_for_signal = neutral_memory
+        result = decision_policy.evaluate_decision_policy(
+            "AAPL",
+            "buy",
+            intelligence_context={
+                "summary": {"recommended_action": "allow"},
+                "opportunity_score": {"score": 90, "decision": "allow"},
+                "prediction": {"prediction_decision": "allow", "prediction_score": 80},
+            },
+            account_state={
+                "utility_estimate": {
+                    "utility_decision": "do_not_trade",
+                    "portfolio_adjusted_utility_pct": -9.0,
+                    "utility_scope": "telemetry_observe_only",
+                },
+                "portfolio_decision": {"decision": "allow"},
+                "execution_quality": {"decision": "allow"},
+            },
+        )
+    finally:
+        decision_policy.contextual_memory_for_signal = original
+
+    assert_equal(result["decision"], "allow", "utility telemetry is not authority")
+    assert_equal(result["size_multiplier"], 1.0, "utility telemetry does not size")
+
+
+def test_calibrated_confidence_cannot_change_live_authority_by_itself():
+    original = decision_policy.contextual_memory_for_signal
+    try:
+        decision_policy.contextual_memory_for_signal = neutral_memory
+        result = decision_policy.evaluate_decision_policy(
+            "AAPL",
+            "buy",
+            intelligence_context={
+                "summary": {"recommended_action": "allow"},
+                "opportunity_score": {"score": 90, "decision": "allow"},
+                "prediction": {"prediction_decision": "allow", "prediction_score": 80},
+            },
+            account_state={
+                "calibrated_confidence": {
+                    "primary_realized_win_rate": 0.05,
+                    "primary_sample_size": 500,
+                    "confidence_quality": "medium",
+                },
+                "portfolio_decision": {"decision": "allow"},
+                "execution_quality": {"decision": "allow"},
+            },
+        )
+    finally:
+        decision_policy.contextual_memory_for_signal = original
+
+    assert_equal(result["decision"], "allow", "calibration telemetry is not authority")
+    assert_equal(result["size_multiplier"], 1.0, "calibration does not size")
+
+
+def test_canonical_snapshot_payload_cannot_change_decision_by_itself():
+    original = decision_policy.contextual_memory_for_signal
+    try:
+        decision_policy.contextual_memory_for_signal = neutral_memory
+        result = decision_policy.evaluate_decision_policy(
+            "AAPL",
+            "buy",
+            intelligence_context={
+                "summary": {"recommended_action": "allow"},
+                "opportunity_score": {"score": 90, "decision": "allow"},
+            },
+            account_state={
+                "canonical_intelligence_json": '{"advisory_authority_state":{"utility_estimate":{"utility_decision":"do_not_trade"}}}',
+                "portfolio_decision": {"decision": "allow"},
+                "execution_quality": {"decision": "allow"},
+            },
+        )
+    finally:
+        decision_policy.contextual_memory_for_signal = original
+
+    assert_equal(result["decision"], "allow", "canonical persistence is inert")
+
+
 def test_decision_policy_module_does_not_import_order_execution():
     source = inspect.getsource(decision_policy)
 
@@ -191,6 +303,14 @@ if __name__ == "__main__":
     print("[OK] test_portfolio_duplicate_risk_can_size_down_policy")
     test_execution_quality_can_size_down_policy()
     print("[OK] test_execution_quality_can_size_down_policy")
+    test_duplicate_portfolio_risk_blocks_even_with_strong_standalone_chart()
+    print("[OK] test_duplicate_portfolio_risk_blocks_even_with_strong_standalone_chart")
+    test_utility_estimate_cannot_block_or_size_by_itself()
+    print("[OK] test_utility_estimate_cannot_block_or_size_by_itself")
+    test_calibrated_confidence_cannot_change_live_authority_by_itself()
+    print("[OK] test_calibrated_confidence_cannot_change_live_authority_by_itself")
+    test_canonical_snapshot_payload_cannot_change_decision_by_itself()
+    print("[OK] test_canonical_snapshot_payload_cannot_change_decision_by_itself")
     test_decision_policy_module_does_not_import_order_execution()
     print("[OK] test_decision_policy_module_does_not_import_order_execution")
-    print("\nAll 6 decision policy tests passed.")
+    print("\nAll 10 decision policy tests passed.")

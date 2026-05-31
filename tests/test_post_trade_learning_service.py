@@ -60,6 +60,10 @@ def test_post_trade_learning_summarizes_expectancy_and_gate_value():
     ][0]
     assert prediction_gate["would_have_helped"] == 1
     assert prediction_gate["help_rate"] == 1.0
+    assert payload.false_positive_patterns
+    assert payload.false_negative_patterns
+    assert "setup_label=messy_breakout" in payload.false_positive_patterns[0]["pattern"]
+    assert "setup_label=clean_breakout" in payload.false_negative_patterns[0]["pattern"]
 
 
 def main():

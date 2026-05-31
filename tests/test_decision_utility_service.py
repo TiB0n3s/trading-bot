@@ -115,6 +115,17 @@ def test_strong_buy_context_produces_positive_utility_candidate():
         estimate.probability_favorable_move,
         "nested edge estimate",
     )
+    assert_equal(estimate.to_dict()["utility_scope"], "telemetry_observe_only", "scope")
+    assert_equal(
+        estimate.to_dict()["threshold_scope"],
+        "diagnostic_not_live_policy",
+        "threshold scope",
+    )
+    assert_equal(
+        estimate.to_dict()["telemetry_expected_value_pct"],
+        estimate.expected_value_pct,
+        "telemetry ev",
+    )
 
 
 def test_negative_context_produces_do_not_trade_observation():
@@ -362,6 +373,76 @@ def test_downside_asymmetry_reduces_probability_and_increases_adverse_excursion(
     )
 
 
+def test_interaction_strong_context_bad_execution_degrades_but_stays_telemetry():
+    state = _strong_buy_state()
+    state["market_microstructure"] = {
+        "breakout_quality": "confirmed_expansion_breakout",
+        "microstructure_score": 0.78,
+        "expectancy_modifier": 1.10,
+    }
+    good = estimate_decision_utility(action="buy", account_state=state)
+    state["execution_quality"] = {
+        "decision": "size_down",
+        "size_multiplier": 0.50,
+        "net_execution_cost_pct": 0.90,
+    }
+    bad_execution = estimate_decision_utility(action="buy", account_state=state)
+
+    assert_lt(
+        bad_execution.portfolio_adjusted_utility_pct,
+        good.portfolio_adjusted_utility_pct,
+        "bad execution utility degradation",
+    )
+    assert_equal(
+        bad_execution.to_dict()["utility_scope"],
+        "telemetry_observe_only",
+        "telemetry only",
+    )
+
+
+def test_interaction_supportive_breakout_participation_lifts_without_authority_flag():
+    base_state = _strong_buy_state()
+    supportive_state = _strong_buy_state()
+    supportive_state["market_microstructure"] = {
+        "session_phase": "first_30m",
+        "breakout_quality": "confirmed_expansion_breakout",
+        "microstructure_score": 0.82,
+        "expectancy_modifier": 1.12,
+    }
+    supportive_state["market_participation"] = {
+        "participation_state": "confirmed",
+        "confirmation_score": 0.84,
+        "isolated_move_risk": "low",
+        "expectancy_modifier": 1.15,
+    }
+
+    base = estimate_decision_utility(action="buy", account_state=base_state)
+    supportive = estimate_decision_utility(action="buy", account_state=supportive_state)
+
+    assert_gt(
+        supportive.portfolio_adjusted_utility_pct,
+        base.portfolio_adjusted_utility_pct,
+        "supportive utility lift",
+    )
+    assert_equal(
+        supportive.to_dict()["threshold_scope"],
+        "diagnostic_not_live_policy",
+        "no policy threshold authority",
+    )
+
+
+def test_missing_telemetry_uses_neutral_fallback_without_fake_confidence():
+    estimate = estimate_decision_utility(action="buy", account_state={})
+
+    assert_equal(estimate.confidence, "low", "fallback confidence")
+    assert_equal(
+        estimate.to_dict()["utility_scope"],
+        "telemetry_observe_only",
+        "telemetry only",
+    )
+    assert_equal(estimate.utility_decision in {"trade_candidate", "do_not_trade"}, True, "known decision")
+
+
 def main():
     tests = [
         test_probabilistic_edge_separates_strong_and_negative_contexts,
@@ -376,6 +457,9 @@ def main():
         test_market_participation_confirmation_shifts_edge,
         test_volatility_normalization_reduces_stretched_entry_edge,
         test_downside_asymmetry_reduces_probability_and_increases_adverse_excursion,
+        test_interaction_strong_context_bad_execution_degrades_but_stays_telemetry,
+        test_interaction_supportive_breakout_participation_lifts_without_authority_flag,
+        test_missing_telemetry_uses_neutral_fallback_without_fake_confidence,
     ]
     for test in tests:
         test()

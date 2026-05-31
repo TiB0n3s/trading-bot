@@ -34,6 +34,8 @@ class DecisionUtilityEstimate:
     portfolio_adjusted_utility_pct: float
     utility_threshold_pct: float
     utility_decision: str
+    utility_scope: str = "telemetry_observe_only"
+    threshold_scope: str = "diagnostic_not_live_policy"
 
     @property
     def probability_favorable_move(self) -> float:
@@ -67,9 +69,14 @@ class DecisionUtilityEstimate:
             "slippage_fee_pct": self.slippage_fee_pct,
             "execution_cost_pct": self.execution_cost_pct,
             "expected_value_pct": self.expected_value_pct,
+            "telemetry_expected_value_pct": self.expected_value_pct,
             "portfolio_adjusted_utility_pct": self.portfolio_adjusted_utility_pct,
+            "telemetry_portfolio_adjusted_utility_pct": self.portfolio_adjusted_utility_pct,
             "utility_threshold_pct": self.utility_threshold_pct,
             "utility_decision": self.utility_decision,
+            "telemetry_utility_decision": self.utility_decision,
+            "utility_scope": self.utility_scope,
+            "threshold_scope": self.threshold_scope,
         }
 
 

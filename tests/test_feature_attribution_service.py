@@ -1,0 +1,143 @@
+#!/usr/bin/env python3
+"""Tests for canonical lifecycle feature attribution."""
+
+from __future__ import annotations
+
+import json
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
+
+from services.feature_attribution_service import build_feature_attribution_payload
+
+
+def assert_equal(actual, expected, label):
+    if actual != expected:
+        raise AssertionError(f"{label}: expected {expected!r}, got {actual!r}")
+
+
+def assert_true(value, label):
+    if not value:
+        raise AssertionError(f"{label}: expected truthy value")
+
+
+def _canonical(
+    *,
+    regime="trend_expansion",
+    execution="allow",
+    portfolio="allow",
+    breakout="confirmed_expansion_breakout",
+    participation="confirmed",
+    volatility="low",
+    structure="high_quality_structure",
+    downside="contained_downside",
+    utility="trade_candidate",
+    setup="breakout",
+    phase="first_30m",
+):
+    return json.dumps(
+        {
+            "regime_state": {
+                "market_regime": regime,
+                "execution_quality_decision": execution,
+                "portfolio_decision": portfolio,
+                "breakout_quality": breakout,
+                "participation_state": participation,
+                "volatility_chase_risk": volatility,
+                "downside_state": downside,
+                "session_phase": phase,
+            },
+            "setup_state": {
+                "label": setup,
+                "structure_state": structure,
+            },
+            "advisory_authority_state": {
+                "utility_estimate": {"utility_decision": utility}
+            },
+        }
+    )
+
+
+def test_feature_attribution_summarizes_family_deltas_and_guardrails():
+    rows = [
+        {
+            "approved": 1,
+            "realized_return_pct": 1.0,
+            "mfe_pct": 1.4,
+            "max_adverse_excursion_pct": -0.2,
+            "canonical_intelligence_json": _canonical(),
+        },
+        {
+            "approved": 1,
+            "realized_return_pct": 0.8,
+            "mfe_pct": 1.0,
+            "max_adverse_excursion_pct": -0.1,
+            "canonical_intelligence_json": _canonical(setup="vwap_recovery"),
+        },
+        {
+            "approved": 1,
+            "realized_return_pct": -0.6,
+            "mfe_pct": 0.2,
+            "max_adverse_excursion_pct": -1.1,
+            "canonical_intelligence_json": _canonical(
+                regime="compression_chop",
+                execution="size_down",
+                portfolio="size_down",
+                breakout="liquidity_vacuum_breakout",
+                participation="isolated_or_weak",
+                volatility="high",
+                structure="messy_range",
+                downside="asymmetric_downside_high",
+                utility="do_not_trade",
+                setup="late_chase",
+                phase="midday",
+            ),
+        },
+        {
+            "approved": 0,
+            "rejected_return_60m": -0.4,
+            "rejected_max_favorable_60m": 0.1,
+            "rejected_max_adverse_60m": -0.9,
+            "canonical_intelligence_json": _canonical(
+                regime="compression_chop",
+                execution="size_down",
+                portfolio="size_down",
+                breakout="liquidity_vacuum_breakout",
+                participation="isolated_or_weak",
+                volatility="high",
+                structure="messy_range",
+                downside="asymmetric_downside_high",
+                utility="do_not_trade",
+                setup="late_chase",
+                phase="midday",
+            ),
+        },
+    ]
+
+    payload = build_feature_attribution_payload(rows, min_sample_size=2)
+
+    assert_equal(payload.summary["rows_with_outcome"], 4, "outcome rows")
+    assert_equal(payload.summary["authority_note"], "diagnostic_only_no_live_authority", "note")
+    regime = next(item for item in payload.families if item["family"] == "market_regime")
+    assert_equal(regime["best_bucket"]["bucket"], "trend_expansion", "best regime")
+    assert_equal(regime["worst_bucket"]["bucket"], "compression_chop", "worst regime")
+    assert_true(regime["best_bucket"]["hit_rate_delta"] > 0, "hit-rate delta")
+    assert_true(regime["worst_bucket"]["false_positive_rate"] > 0, "false positive")
+    assert_true(regime["worst_bucket"]["interactions"]["setup_label"], "setup interaction")
+    guard = next(item for item in payload.rollout_guardrails if item["family"] == "market_regime")
+    assert_equal(guard["status"], "eligible_for_review", "guardrail status")
+    assert_true("acceptable_calibration_error" in guard["required_before_authority"], "calibration guard")
+
+
+def main():
+    tests = [test_feature_attribution_summarizes_family_deltas_and_guardrails]
+    for test in tests:
+        test()
+        print(f"[OK] {test.__name__}")
+    print(f"\nAll {len(tests)} feature attribution service tests passed.")
+
+
+if __name__ == "__main__":
+    main()

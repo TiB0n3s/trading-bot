@@ -3,8 +3,6 @@ import os
 import time
 from typing import Any
 
-import alpaca_trade_api as tradeapi
-
 from exceptions import BrokerError, ValidationError
 from execution.order_policy import (
     calculate_bracket_prices,
@@ -33,17 +31,24 @@ SELL_CANCEL_POLL_SLEEP_SECONDS = float(os.getenv("SELL_CANCEL_POLL_SLEEP_SECONDS
 
 
 class _LazyAlpacaAPI:
-    """Defers tradeapi.REST construction until the first attribute access.
+    """Defers Alpaca SDK import/construction until first broker use.
 
     Callers continue to use ``from broker import api`` and ``api.xxx()``
     unchanged. Tests can replace ``broker.api`` with a mock before any
-    attribute is accessed, avoiding import-time credential requirements.
+    attribute is accessed, avoiding import-time SDK/credential requirements.
     """
 
-    _instance: "tradeapi.REST | None" = None
+    _instance: Any | None = None
 
-    def _get(self) -> "tradeapi.REST":
+    def _get(self) -> Any:
         if self._instance is None:
+            try:
+                import alpaca_trade_api as tradeapi
+            except ModuleNotFoundError as exc:
+                raise BrokerError(
+                    "alpaca_trade_api is required for broker operations; "
+                    "install runtime dependencies or patch broker.api in tests"
+                ) from exc
             self._instance = tradeapi.REST(
                 os.environ.get("ALPACA_API_KEY", ""),
                 os.environ.get("ALPACA_SECRET_KEY", ""),

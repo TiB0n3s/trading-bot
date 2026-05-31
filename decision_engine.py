@@ -1,18 +1,25 @@
 import json
 import logging
+from typing import Any
 
-from anthropic import Anthropic
 
 from symbols_config import APPROVED_SYMBOLS_CSV
 
 logger = logging.getLogger(__name__)
 
-_client: Anthropic | None = None
+_client: Any | None = None
 
 
-def _get_client() -> Anthropic:
+def _get_client() -> Any:
     global _client
     if _client is None:
+        try:
+            from anthropic import Anthropic
+        except ModuleNotFoundError as exc:
+            raise RuntimeError(
+                "anthropic is required for Claude decisions; install runtime "
+                "dependencies or patch decision_engine._get_client/evaluate_signal in tests"
+            ) from exc
         _client = Anthropic()
     return _client
 

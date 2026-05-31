@@ -173,7 +173,8 @@ def test_staged_report_composes_observe_only_contracts():
         assert report["dataset_manifest"]["row_count"] == 1
         assert report["brain_feature_manifest"]["rows"] == 1
         assert report["brain_feature_manifest"]["runtime_use"] == "none"
-        assert report["replay_contract"]["status"] == "scaffold_only_no_runtime_effect"
+        assert report["replay_contract"]["status"] == "complete"
+        assert "No orders, risk controls, or live decisions were changed" in report["replay_contract"]["note"]
         assert report["prediction_provider_contract"]["runtime_effect"] == "none"
         assert report["prediction_provider_contract"]["sample_prediction"]["runtime_effect"] == "none"
         assert report["retraining_readiness"]["runtime_effect"] == "none"

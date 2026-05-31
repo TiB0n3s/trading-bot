@@ -70,8 +70,71 @@ VALID_AVOID_TYPE = {"hard", "soft", None}
 PLACEHOLDER_TEXT = "Research pending."
 
 
+def _sample_symbol_entry():
+    return {
+        "avoid_type": None,
+        "bias": "neutral",
+        "catalyst_score": 0,
+        "confidence": "low",
+        "entry_quality": "tactical_only",
+        "fundamental_score": "neutral",
+        "index_alignment": "mixed",
+        "key_catalysts": ["sample catalyst"],
+        "key_risks": ["sample risk"],
+        "liquidity_quality": "normal",
+        "notes": "Sanitized schema-test fixture.",
+        "price_location": "near_vwap",
+        "reason": "Sanitized schema-test fixture.",
+        "relative_strength_score": 0,
+        "resistance_levels": [999999.0],
+        "risk_level": "medium",
+        "sector_alignment": "mixed",
+        "support_levels": [0.01],
+        "volume_context": "normal",
+    }
+
+
+def _sample_context():
+    return {
+        "block_new_buys": False,
+        "format": "rich_market_brief_v1",
+        "generated_at": "2026-01-01T00:00:00Z",
+        "index_state": {
+            symbol: {
+                "above_vwap": False,
+                "key_levels": [],
+                "notes": "Sanitized schema-test fixture.",
+                "premarket_gap_pct": 0,
+                "trend": "neutral",
+            }
+            for symbol in ("SPY", "QQQ", "IWM", "GLD")
+        },
+        "macro_events": [],
+        "macro_regime": "neutral",
+        "macro_sentiment": "neutral",
+        "macro_summary": "Sanitized schema-test fixture.",
+        "market_date": "2026-01-01",
+        "max_new_positions": 8,
+        "risk_multiplier": 1.0,
+        "sector_state": {
+            "technology": {
+                "notes": "Sanitized schema-test fixture.",
+                "risk": "medium",
+                "trend": "neutral",
+            }
+        },
+        "source": "market_brief_builder",
+        "symbols": {symbol: _sample_symbol_entry() for symbol in APPROVED_SYMBOLS_LIST},
+    }
+
+
 def load_context(path=None):
-    p = Path(path) if path else ROOT / "market_context.json"
+    if path is None:
+        p = ROOT / "market_context.json"
+        if not p.exists():
+            return _sample_context()
+    else:
+        p = Path(path)
     return json.loads(p.read_text())
 
 

@@ -100,7 +100,6 @@ TEMPORARY_REPORT_DB_ALLOWLIST = {
     "intelligence_prediction_report.py",
     "live_score_monitor.py",
     "market_alignment_report.py",
-    "ops_check.py",
     "pnl.py",
     "portfolio_replacement_report.py",
     "post_session_check.py",

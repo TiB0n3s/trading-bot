@@ -103,7 +103,6 @@ TEMPORARY_BACKFILL_TRAINING_DB_ALLOWLIST = {
     "ml_platform/datasets.py",
     "ml_platform/governance.py",
     "ml_platform/replay.py",
-    "ml_platform/serving.py",
     "ml_platform/validation.py",
     "policy_backtest.py",
     "strategy_learner.py",

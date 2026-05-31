@@ -11,12 +11,12 @@ never block signal processing.
 
 from __future__ import annotations
 
-import sqlite3
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Protocol
 
-from db import DB_PATH
+from ml_platform.config import DEFAULT_DB_PATH
+from repositories.prediction_repo import PredictionRepository
 
 
 @dataclass(frozen=True)
@@ -49,25 +49,13 @@ class PredictionProvider(Protocol):
 class SQLitePredictionProvider:
     """Read daily_symbol_predictions without modifying runtime state."""
 
-    def __init__(self, db_path: Path | str = DB_PATH):
+    def __init__(self, db_path: Path | str = DEFAULT_DB_PATH):
         self.db_path = Path(db_path)
         self.latency_budget_ms = 25
         self.timeout_ms = 50
 
     def get_prediction(self, market_date: str, symbol: str) -> PredictionView | None:
-        with sqlite3.connect(f"file:{self.db_path}?mode=ro", uri=True) as con:
-            con.row_factory = sqlite3.Row
-            row = con.execute(
-                """
-                SELECT market_date, symbol, prediction_score, confidence,
-                       sample_size, trend_label, timing_score, reason
-                FROM daily_symbol_predictions
-                WHERE market_date = ?
-                  AND symbol = ?
-                """,
-                (market_date, symbol.upper()),
-            ).fetchone()
-
+        row = PredictionRepository(self.db_path).serving_prediction_row(market_date, symbol)
         if not row:
             return None
 

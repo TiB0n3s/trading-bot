@@ -59,6 +59,29 @@ class PredictionRepository:
             ).fetchone()
         return row is not None
 
+    def serving_prediction_row(self, market_date: str, symbol: str) -> dict[str, Any] | None:
+        if not self.db_path.exists():
+            return None
+
+        with sqlite3.connect(
+            f"file:{self.db_path}?mode=ro",
+            uri=True,
+            timeout=0.05,
+        ) as con:
+            con.row_factory = sqlite3.Row
+            row = con.execute(
+                """
+                SELECT market_date, symbol, prediction_score, confidence,
+                       sample_size, trend_label, timing_score, reason
+                FROM daily_symbol_predictions
+                WHERE market_date = ?
+                  AND symbol = ?
+                """,
+                (market_date, symbol.upper()),
+            ).fetchone()
+
+        return dict(row) if row else None
+
     def intelligence_prediction_report_rows(
         self,
         market_date: str,

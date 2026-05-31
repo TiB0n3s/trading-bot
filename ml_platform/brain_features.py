@@ -8,12 +8,12 @@ it is safe to do so.
 from __future__ import annotations
 
 import csv
-import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from db import DB_PATH
+from ml_platform.config import DEFAULT_DB_PATH
+from repositories.training_data_repo import TrainingDataRepository
 from setup_engine import classify_feature_snapshot as classify_setup
 
 
@@ -67,14 +67,6 @@ BRAIN_FEATURE_COLUMNS = [
 ]
 
 
-def _table_exists(con: sqlite3.Connection, table: str) -> bool:
-    row = con.execute(
-        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?",
-        (table,),
-    ).fetchone()
-    return row is not None
-
-
 def _date_filter(date_arg: str | None, start_date: str | None, end_date: str | None) -> tuple[str, tuple[str, ...]]:
     if date_arg and (start_date or end_date):
         raise ValueError("Use either date or start/end range, not both")
@@ -85,85 +77,19 @@ def _date_filter(date_arg: str | None, start_date: str | None, end_date: str | N
     raise ValueError("Provide date or both start_date and end_date")
 
 
-def _event_count_sql(con: sqlite3.Connection) -> str:
-    if not _table_exists(con, "daily_symbol_events"):
-        return "0"
-    return """
-        (
-            SELECT COUNT(*)
-            FROM daily_symbol_events e
-            WHERE e.market_date = substr(fs.timestamp, 1, 10)
-              AND e.symbol = fs.symbol
-        )
-    """
-
-
 def fetch_brain_source_rows(
     *,
-    db_path: Path | str = DB_PATH,
+    db_path: Path | str = DEFAULT_DB_PATH,
     date_arg: str | None = None,
     start_date: str | None = None,
     end_date: str | None = None,
-) -> list[sqlite3.Row]:
+) -> list[Any]:
     """Fetch source rows for offline brain feature generation."""
-    db_path = Path(db_path)
     where_sql, params = _date_filter(date_arg, start_date, end_date)
-
-    with sqlite3.connect(f"file:{db_path}?mode=ro", uri=True) as con:
-        con.row_factory = sqlite3.Row
-        if not _table_exists(con, "feature_snapshots"):
-            return []
-
-        event_count = _event_count_sql(con)
-        has_labels = _table_exists(con, "labeled_setups")
-        has_context = _table_exists(con, "daily_symbol_context")
-        has_predictions = _table_exists(con, "daily_symbol_predictions")
-
-        label_join = """
-            LEFT JOIN labeled_setups ls
-              ON ls.snapshot_id = fs.id
-        """ if has_labels else ""
-        context_join = """
-            LEFT JOIN daily_symbol_context c
-              ON c.market_date = substr(fs.timestamp, 1, 10)
-             AND c.symbol = fs.symbol
-        """ if has_context else ""
-        prediction_join = """
-            LEFT JOIN daily_symbol_predictions p
-              ON p.market_date = substr(fs.timestamp, 1, 10)
-             AND p.symbol = fs.symbol
-        """ if has_predictions else ""
-
-        query = f"""
-            SELECT
-                fs.*,
-                substr(fs.timestamp, 1, 10) AS snapshot_date,
-                {event_count} AS event_count,
-                {('ls.outcome_label' if has_labels else 'NULL')} AS outcome_label,
-                {('ls.ret_fwd_15m' if has_labels else 'NULL')} AS ret_fwd_15m,
-                {('ls.ret_fwd_30m' if has_labels else 'NULL')} AS ret_fwd_30m,
-                {('c.bias' if has_context else 'NULL')} AS context_bias,
-                {('c.confidence' if has_context else 'NULL')} AS context_confidence,
-                {('c.risk_level' if has_context else 'NULL')} AS context_risk_level,
-                {('c.entry_quality' if has_context else 'NULL')} AS context_entry_quality,
-                {('c.catalyst_score' if has_context else 'NULL')} AS context_catalyst_score,
-                {('c.relative_strength_score' if has_context else 'NULL')} AS context_relative_strength_score,
-                {('p.prediction_score' if has_predictions else 'NULL')} AS prediction_score,
-                {('p.confidence' if has_predictions else 'NULL')} AS prediction_confidence,
-                {('p.sample_size' if has_predictions else 'NULL')} AS prediction_sample_size,
-                {('p.trend_label' if has_predictions else 'NULL')} AS prediction_trend_label,
-                {('p.timing_score' if has_predictions else 'NULL')} AS prediction_timing_score
-            FROM feature_snapshots fs
-            {label_join}
-            {context_join}
-            {prediction_join}
-            WHERE {where_sql}
-            ORDER BY fs.timestamp, fs.symbol, fs.id
-        """
-        return con.execute(query, params).fetchall()
+    return TrainingDataRepository(db_path).brain_source_rows(where_sql, params)
 
 
-def build_brain_feature_row(row: sqlite3.Row | dict[str, Any]) -> dict[str, Any]:
+def build_brain_feature_row(row: Any | dict[str, Any]) -> dict[str, Any]:
     """Build one ML feature row from a feature_snapshot-like row."""
     data = dict(row)
     setup = classify_setup(data)
@@ -211,7 +137,7 @@ def build_brain_feature_row(row: sqlite3.Row | dict[str, Any]) -> dict[str, Any]
 
 def build_brain_feature_rows(
     *,
-    db_path: Path | str = DB_PATH,
+    db_path: Path | str = DEFAULT_DB_PATH,
     date_arg: str | None = None,
     start_date: str | None = None,
     end_date: str | None = None,

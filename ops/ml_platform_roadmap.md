@@ -85,9 +85,14 @@ or destabilize the webhook path if treated as routine cleanup.
    - Next observability step: pass real row/warning/artifact metrics from
      individual jobs instead of only command-level status.
 8. Runtime/offline feature parity:
-   - Add a hard contract that every offline ML feature exists in live decision
-     snapshots with matching names, nullability, semantics, and point-in-time
-     cutoff.
+   - `ml_platform.feature_parity_contract` defines the first enforced
+     runtime/offline feature contract for ML-facing decision features.
+   - `tests/test_feature_parity_contract.py` verifies matching field names
+     across `decision_snapshots` and `ml_platform.dataset_builder.ROW_COLUMNS`,
+     documented null semantics, and point-in-time cutoff rules.
+   - Next parity step: expand the contract from the current high-value
+     decision features into the canonical intelligence snapshot once that
+     snapshot exists.
 
 ## Platform Layers
 

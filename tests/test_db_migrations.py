@@ -282,6 +282,29 @@ def test_entry_intelligence_migration_adds_columns():
         assert_true(feature_expected <= table_columns(db_path, "feature_snapshots"), "entry feature columns")
 
 
+def test_decision_snapshot_feature_parity_migration_adds_columns():
+    with tempfile.TemporaryDirectory() as tmp:
+        db_path = Path(tmp) / "test.db"
+        with sqlite3.connect(db_path) as con:
+            con.execute("CREATE TABLE trades (id INTEGER PRIMARY KEY)")
+        apply_migration(MIGRATIONS[4], db_path)
+
+        migration = next(
+            m
+            for m in MIGRATIONS
+            if m.migration_id == "20260531_016_decision_snapshot_feature_parity"
+        )
+        applied = apply_migration(migration, db_path)
+        assert_equal(applied, True, "apply")
+
+        expected = {
+            "setup_confidence",
+            "prediction_confidence",
+            "prediction_sample_size",
+        }
+        assert_true(expected <= table_columns(db_path, "decision_snapshots"), "feature parity decision columns")
+
+
 if __name__ == "__main__":
     test_feature_audit_migration_is_idempotent()
     print("[OK] test_feature_audit_migration_is_idempotent")
@@ -303,4 +326,6 @@ if __name__ == "__main__":
     print("[OK] test_historical_trend_context_migration_creates_table")
     test_entry_intelligence_migration_adds_columns()
     print("[OK] test_entry_intelligence_migration_adds_columns")
-    print("\nAll 10 DB migration tests passed.")
+    test_decision_snapshot_feature_parity_migration_adds_columns()
+    print("[OK] test_decision_snapshot_feature_parity_migration_adds_columns")
+    print("\nAll 11 DB migration tests passed.")

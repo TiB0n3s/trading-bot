@@ -117,6 +117,11 @@ This is the first bridge between the current bot brain and the future ML
 platform. It creates offline features only. It does not import runtime order
 code, write to SQLite, or modify decisions.
 
+`feature_parity_contract.py` is the first enforced runtime/offline feature
+contract. It verifies that ML-facing decision features have the same names in
+`decision_snapshots` and the canonical dataset export, and that each field has
+documented null/default semantics and point-in-time cutoff rules.
+
 ## Staged Readiness
 
 `staged.py` composes the current observe-only platform pieces into a single

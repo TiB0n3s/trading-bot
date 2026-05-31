@@ -370,6 +370,11 @@ def ensure_decision_snapshots_table(db_path: Path | str = DB_PATH) -> None:
     setup_score_migration = next(
         m for m in MIGRATIONS if m.migration_id == "20260527_011_setup_score_rationale"
     )
+    feature_parity_migration = next(
+        m
+        for m in MIGRATIONS
+        if m.migration_id == "20260531_016_decision_snapshot_feature_parity"
+    )
     ensure_migration_table(db_path)
     with get_connection(db_path) as con:
         table_exists = con.execute(
@@ -400,6 +405,13 @@ def ensure_decision_snapshots_table(db_path: Path | str = DB_PATH) -> None:
                     con.execute(statement)
                     existing_cols.add(column)
         for statement in setup_score_migration.statements:
+            alter = statement.strip().split()
+            if len(alter) >= 6 and alter[2] == "decision_snapshots":
+                column = alter[5]
+                if column not in existing_cols:
+                    con.execute(statement)
+                    existing_cols.add(column)
+        for statement in feature_parity_migration.statements:
             alter = statement.strip().split()
             if len(alter) >= 6 and alter[2] == "decision_snapshots":
                 column = alter[5]

@@ -424,6 +424,15 @@ MIGRATIONS: tuple[Migration, ...] = (
             "ALTER TABLE trades ADD COLUMN dominant_limiter TEXT",
         ),
     ),
+    Migration(
+        migration_id="20260531_016_decision_snapshot_feature_parity",
+        description="Add runtime/offline ML feature parity columns to decision_snapshots.",
+        statements=(
+            "ALTER TABLE decision_snapshots ADD COLUMN setup_confidence TEXT",
+            "ALTER TABLE decision_snapshots ADD COLUMN prediction_confidence TEXT",
+            "ALTER TABLE decision_snapshots ADD COLUMN prediction_sample_size INTEGER",
+        ),
+    ),
 )
 
 

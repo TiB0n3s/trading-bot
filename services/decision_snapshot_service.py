@@ -183,10 +183,15 @@ class DecisionSnapshotService:
             "position_size_pct": decision.get("position_size_pct"),
             "stop_loss_pct": decision.get("stop_loss_pct"),
             "take_profit_pct": decision.get("take_profit_pct"),
-            "prediction_score": prediction_gate.get("prediction_score"),
+            "prediction_score": (
+                prediction_gate.get("ml_prediction_score")
+                if prediction_gate.get("ml_prediction_score") is not None
+                else prediction_gate.get("prediction_score")
+            ),
             "prediction_decision": prediction_gate.get("prediction_decision"),
             "prediction_reason": prediction_gate.get("prediction_reason"),
             "setup_label": setup_obs.get("setup_label"),
+            "setup_confidence": setup_obs.get("setup_confidence"),
             "setup_policy_action": setup_obs.get("setup_policy_action"),
             "setup_policy_reason": setup_obs.get("setup_policy_reason"),
             "setup_confidence_adjustment": setup_obs.get("setup_confidence_adjustment"),
@@ -196,6 +201,15 @@ class DecisionSnapshotService:
             "buy_opportunity_score": buy_opportunity.get("buy_opportunity_score"),
             "buy_opportunity_recommendation": buy_opportunity.get("buy_opportunity_recommendation"),
             "buy_opportunity_reason": buy_opportunity.get("buy_opportunity_reason"),
+            "prediction_confidence": (
+                prediction_gate.get("ml_prediction_confidence")
+                or prediction_gate.get("prediction_confidence")
+            ),
+            "prediction_sample_size": (
+                prediction_gate.get("ml_prediction_sample_size")
+                if prediction_gate.get("ml_prediction_sample_size") is not None
+                else prediction_gate.get("prediction_sample_size")
+            ),
             "trader_brain_score": trader_brain.get("score"),
             "trader_brain_setup_type": trader_brain.get("setup_type"),
             "trader_brain_approved": (

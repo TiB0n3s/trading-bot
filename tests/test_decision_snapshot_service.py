@@ -40,9 +40,13 @@ def test_record_decision_snapshot_builds_expected_row(tmp_path):
             "prediction_gate": {
                 "prediction_score": 71,
                 "prediction_decision": "observe_only",
+                "ml_prediction_score": 63,
+                "ml_prediction_confidence": "medium",
+                "ml_prediction_sample_size": 42,
             },
             "setup_observation": {
                 "setup_label": "near_vwap_recovery",
+                "setup_confidence": "high",
                 "setup_policy_action": "boost",
             },
             "strategy_observation": {
@@ -70,8 +74,11 @@ def test_record_decision_snapshot_builds_expected_row(tmp_path):
     assert row["order_id"] == "abc"
     assert row["market_bias"] == "buy"
     assert row["session_trend_label"] == "strong_uptrend"
-    assert row["prediction_score"] == 71
+    assert row["prediction_score"] == 63
+    assert row["prediction_confidence"] == "medium"
+    assert row["prediction_sample_size"] == 42
     assert row["setup_label"] == "near_vwap_recovery"
+    assert row["setup_confidence"] == "high"
     assert row["trader_brain_approved"] == 1
     assert row["buy_opportunity_score"] == 65
     assert row["market_context_date"] == "2026-05-30"

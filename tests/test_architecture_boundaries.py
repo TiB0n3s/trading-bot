@@ -82,9 +82,13 @@ def _assert_no_import(directory: str, banned: set[str], label: str):
     assert_true(not violations, f"{label}: {violations}")
 
 
-APPROVED_DB_ACCESS = {
+APPROVED_DB_BOUNDARIES = {
     "db.py",
     "db_migrations.py",
+}
+APPROVED_DB_BOUNDARY_PREFIXES = {
+    "repositories/",
+    "migrations/",
 }
 
 TEMPORARY_REPORT_DB_ALLOWLIST = set()
@@ -95,19 +99,17 @@ TEMPORARY_DB_ACCESS_ALLOWLIST = (
     TEMPORARY_REPORT_DB_ALLOWLIST | TEMPORARY_BACKFILL_TRAINING_DB_ALLOWLIST
 )
 
-APPROVED_BROKER_ACCESS = {
+APPROVED_BROKER_BOUNDARIES = {
     "broker.py",
     "services/broker_service.py",
     "services/container.py",
     "services/fill_stream_service.py",
-}
-
-TEMPORARY_BROKER_ACCESS_ALLOWLIST = {
-    "morning_check.py",
     "services/market_data_service.py",
 }
 
-APPROVED_MARKET_DATA_ACCESS = {
+TEMPORARY_BROKER_ACCESS_ALLOWLIST = set()
+
+APPROVED_MARKET_DATA_BOUNDARIES = {
     "broker.py",
     "services/market_data_service.py",
     "services/execution_adapters.py",
@@ -165,19 +167,31 @@ def _is_market_data_access(path: Path) -> bool:
 def _assert_access_with_allowlist(
     predicate,
     approved: set[str],
+    approved_prefixes: set[str],
     temporary: set[str],
     label: str,
 ) -> None:
     violations = []
     for path in _project_python_files():
         rel = path.relative_to(ROOT).as_posix()
-        if rel.startswith("repositories/") and label == "db access":
-            continue
-        if rel.startswith("migrations/") and label == "db access":
+        if any(rel.startswith(prefix) for prefix in approved_prefixes):
             continue
         if predicate(path) and rel not in approved and rel not in temporary:
             violations.append(rel)
     assert_true(not violations, f"{label} boundary violations: {violations}")
+
+
+def _report_and_builder_files() -> list[Path]:
+    patterns = ["*_report.py", "*_builder.py"]
+    files = []
+    for pattern in patterns:
+        files.extend(ROOT.glob(pattern))
+        files.extend((ROOT / "market_intelligence").glob(pattern))
+        files.extend((ROOT / "ml_platform").glob(pattern))
+    ops_check = ROOT / "ops_check.py"
+    if ops_check.exists():
+        files.append(ops_check)
+    return sorted(set(path for path in files if "tests" not in path.parts))
 
 
 def _runtime_python_files() -> list[Path]:
@@ -276,7 +290,8 @@ def test_live_signal_processor_cannot_import_flask():
 def test_direct_db_access_is_approved_or_tracked():
     _assert_access_with_allowlist(
         _is_db_access,
-        APPROVED_DB_ACCESS,
+        APPROVED_DB_BOUNDARIES,
+        APPROVED_DB_BOUNDARY_PREFIXES,
         TEMPORARY_DB_ACCESS_ALLOWLIST,
         "db access",
     )
@@ -285,7 +300,8 @@ def test_direct_db_access_is_approved_or_tracked():
 def test_direct_broker_access_is_approved_or_tracked():
     _assert_access_with_allowlist(
         _is_broker_access,
-        APPROVED_BROKER_ACCESS,
+        APPROVED_BROKER_BOUNDARIES,
+        set(),
         TEMPORARY_BROKER_ACCESS_ALLOWLIST,
         "broker access",
     )
@@ -294,9 +310,37 @@ def test_direct_broker_access_is_approved_or_tracked():
 def test_market_data_access_is_approved_or_tracked():
     _assert_access_with_allowlist(
         _is_market_data_access,
-        APPROVED_MARKET_DATA_ACCESS,
+        APPROVED_MARKET_DATA_BOUNDARIES,
+        set(),
         TEMPORARY_MARKET_DATA_ACCESS_ALLOWLIST,
         "market-data access",
+    )
+
+
+def test_temporary_architecture_allowlists_are_empty():
+    assert_true(
+        TEMPORARY_REPORT_DB_ALLOWLIST == set(),
+        "temporary report DB allowlist is empty",
+    )
+    assert_true(
+        TEMPORARY_BACKFILL_TRAINING_DB_ALLOWLIST == set(),
+        "temporary backfill/training DB allowlist is empty",
+    )
+    assert_true(
+        TEMPORARY_DB_ACCESS_ALLOWLIST == set(),
+        "temporary DB allowlist is empty",
+    )
+    assert_true(
+        TEMPORARY_BROKER_ACCESS_ALLOWLIST == set(),
+        "temporary broker allowlist is empty",
+    )
+    assert_true(
+        TEMPORARY_MARKET_DATA_ALLOWLIST_REASONS == {},
+        "temporary market-data allowlist reasons are empty",
+    )
+    assert_true(
+        TEMPORARY_MARKET_DATA_ACCESS_ALLOWLIST == set(),
+        "temporary market-data allowlist is empty",
     )
 
 
@@ -312,7 +356,7 @@ def test_temporary_market_data_allowlist_entries_have_todo_reasons():
 
 
 def test_no_runtime_modules_have_direct_db_or_broker_access():
-    approved_broker_runtime = APPROVED_BROKER_ACCESS | {"services/market_data_service.py"}
+    approved_broker_runtime = APPROVED_BROKER_BOUNDARIES
     violations = []
     for path in _runtime_python_files():
         rel = path.relative_to(ROOT).as_posix()
@@ -323,6 +367,23 @@ def test_no_runtime_modules_have_direct_db_or_broker_access():
         if _is_broker_access(path) and rel not in approved_broker_runtime:
             violations.append(f"{rel}: direct broker access")
     assert_true(not violations, f"runtime direct DB/broker leaks: {violations}")
+
+
+def test_reports_builders_and_ops_check_do_not_import_db_directly():
+    violations = []
+    banned_imports = {"db", "sqlite3"}
+    for path in _report_and_builder_files():
+        imports = _imports(path)
+        calls = _calls(path)
+        rel = path.relative_to(ROOT).as_posix()
+        for module in imports:
+            root = module.split(".", 1)[0]
+            if module in banned_imports or root in banned_imports:
+                violations.append(f"{rel} imports {module}")
+        for call in calls:
+            if call == "get_connection" or call == "sqlite3.connect":
+                violations.append(f"{rel} calls {call}")
+    assert_true(not violations, f"report/builder DB import boundary: {violations}")
 
 
 def main():
@@ -340,8 +401,10 @@ def main():
         test_direct_db_access_is_approved_or_tracked,
         test_direct_broker_access_is_approved_or_tracked,
         test_market_data_access_is_approved_or_tracked,
+        test_temporary_architecture_allowlists_are_empty,
         test_temporary_market_data_allowlist_entries_have_todo_reasons,
         test_no_runtime_modules_have_direct_db_or_broker_access,
+        test_reports_builders_and_ops_check_do_not_import_db_directly,
     ]
     for test in tests:
         test()

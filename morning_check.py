@@ -54,8 +54,8 @@ load_env_file()
 
 from strategy_constants import APPROVED_SYMBOLS
 from db_migrations import status as migration_status
-from broker import get_account
 from market_time import expected_market_context_date
+from services.broker_service import broker_service
 
 MARKET_CONTEXT = BASE_DIR / "market_context.json"
 ROLLING_MOMENTUM = BASE_DIR / "rolling_momentum.json"
@@ -213,7 +213,7 @@ def check_services():
 def check_alpaca():
     print("\n── Alpaca Account ─────────────────────────────────────")
     try:
-        acct = get_account()
+        acct = broker_service.get_account()
     except Exception as e:
         fail(f"Alpaca account check failed: {e}")
         return False

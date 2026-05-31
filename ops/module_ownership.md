@@ -15,6 +15,32 @@ This file defines the operational boundary for each major runtime surface.
 | Reporting / ops | `*_report.py`, `ops/*.md`, `morning_check.py`, `post_session_check.py` | Read-only diagnostics and scheduled operational checks. | Change runtime policy without an explicit policy artifact or config flag. |
 | Observability / guardrails | `services/observability.py`, `services/policy_controls.py`, `tests/test_architecture_boundaries.py` | Runtime metrics, policy kill switches, import-boundary tests. | Submit orders or perform market-data reads. |
 
+## Architecture Boundaries
+
+Direct SQLite access is allowed only in:
+
+- `db.py`
+- `db_migrations.py`
+- `repositories/`
+- `migrations/`
+
+All reports, builders, scripts, runtime services, and ops checks must use repository APIs instead of importing `db`, `get_connection`, or `sqlite3` directly.
+
+Broker and external market-data access is allowed only in approved adapter boundaries:
+
+- `broker.py`
+- `services/broker_service.py`
+- `services/market_data_service.py`
+- approved execution, context, report-labeling, and market-data adapter services
+
+Runtime scripts and reports should use those services rather than calling broker or market-data clients directly.
+
+Flask belongs only in `app.py` and `api/`. Repositories, policies, live signal processing, and data services must not import Flask.
+
+Policy modules are decision logic. They should consume facts passed in by context, execution, broker, or market-data services; they should not fetch data directly or mutate persistence.
+
+The architecture boundary tests intentionally keep temporary allowlists empty. If a future migration needs a temporary exception, add an explicit TODO reason and remove it in the same cleanup sequence.
+
 Policy families can be disabled without editing `app.py`:
 
 - `POLICY_ENTRY_ENABLED=false`

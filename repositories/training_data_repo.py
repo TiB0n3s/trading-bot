@@ -130,3 +130,136 @@ class TrainingDataRepository:
                 ORDER BY fs.timestamp, fs.symbol, fs.id
             """
             return con.execute(query, params).fetchall()
+
+    @staticmethod
+    def _table_columns(con: sqlite3.Connection, table: str) -> set[str]:
+        if not con.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (table,)
+        ).fetchone():
+            return set()
+        return {
+            row["name"]
+            for row in con.execute(f"PRAGMA table_info({table})").fetchall()
+        }
+
+    @staticmethod
+    def _opt(columns: set[str], alias: str, col: str, fallback: str = "NULL") -> str:
+        return f"{alias}.{col}" if col in columns else f"{fallback} AS {col}"
+
+    def raw_training_rows(self, start_date: str, end_date: str) -> list[sqlite3.Row]:
+        with self._connect() as con:
+            for table in ("feature_snapshots", "labeled_setups"):
+                if not self._table_exists(con, table):
+                    raise RuntimeError(f"Required table missing: {table}")
+
+            fs_cols = self._table_columns(con, "feature_snapshots")
+            opt = self._opt
+            query = f"""
+                SELECT
+                    fs.id                          AS snapshot_id,
+                    substr(fs.timestamp, 1, 10)    AS snapshot_date,
+                    fs.timestamp,
+                    fs.symbol,
+                    fs.last_price,
+                    fs.ret_1m,
+                    fs.ret_5m,
+                    fs.ret_15m,
+                    fs.range_pos_15m,
+                    fs.distance_from_5m_high,
+                    fs.distance_from_5m_low,
+                    fs.distance_from_vwap,
+                    fs.volume_ratio_5m,
+                    fs.benchmark_symbol,
+                    fs.benchmark_ret_5m,
+                    fs.relative_strength_5m,
+                    fs.spread_pct,
+                    fs.market_session,
+                    fs.macro_regime,
+                    fs.market_bias,
+                    fs.trend_direction,
+                    fs.trend_strength,
+                    {opt(fs_cols, 'fs', 'feature_available_at', 'fs.timestamp')},
+                    {opt(fs_cols, 'fs', 'feature_generated_at', 'fs.timestamp')},
+                    {opt(fs_cols, 'fs', 'feature_age_seconds', '0')},
+                    {opt(fs_cols, 'fs', 'source', "'feature_snapshots_legacy'")},
+                    {opt(fs_cols, 'fs', 'is_stale', '0')},
+                    {opt(fs_cols, 'fs', 'staleness_reason')},
+                    fs.bar_timeframe,
+                    fs.bar_count,
+                    fs.setup_label,
+                    fs.setup_recommendation,
+                    fs.setup_score,
+                    fs.setup_confidence,
+                    fs.setup_key,
+                    ls.future_price_5m,
+                    ls.future_price_15m,
+                    ls.future_price_30m,
+                    ls.ret_fwd_5m,
+                    ls.ret_fwd_15m,
+                    ls.ret_fwd_30m,
+                    ls.max_up_15m,
+                    ls.max_down_15m,
+                    ls.outcome_label,
+                    c.bias                         AS context_bias,
+                    c.confidence                   AS context_confidence,
+                    c.risk_level                   AS context_risk_level,
+                    c.entry_quality                AS context_entry_quality,
+                    c.catalyst_score               AS context_catalyst_score,
+                    c.relative_strength_score      AS context_relative_strength_score,
+                    c.sector_alignment             AS context_sector_alignment,
+                    c.index_alignment              AS context_index_alignment,
+                    p.prediction_score,
+                    p.probability_of_profit,
+                    p.probability_of_order,
+                    p.expected_pnl,
+                    p.confidence                   AS prediction_confidence,
+                    p.sample_size                  AS prediction_sample_size,
+                    CASE
+                        WHEN ls.snapshot_id IS NULL           THEN 'unlabeled'
+                        WHEN ls.ret_fwd_5m  IS NULL
+                         AND ls.ret_fwd_15m IS NULL
+                         AND ls.ret_fwd_30m IS NULL            THEN 'incomplete'
+                        WHEN ls.ret_fwd_30m IS NULL            THEN 'partial_near_close'
+                        ELSE 'complete'
+                    END                            AS label_horizon_status,
+                    'fixed_horizon_v1'             AS label_target_family,
+                    'excluded_not_training_target' AS realized_exit_label_status,
+                    NULL                           AS exit_policy_version,
+                    NULL                           AS position_manager_version
+                FROM feature_snapshots fs
+                LEFT JOIN labeled_setups ls
+                  ON ls.snapshot_id = fs.id
+                LEFT JOIN daily_symbol_context c
+                  ON c.market_date = substr(fs.timestamp, 1, 10)
+                 AND c.symbol      = fs.symbol
+                LEFT JOIN daily_symbol_predictions p
+                  ON p.market_date = substr(fs.timestamp, 1, 10)
+                 AND p.symbol      = fs.symbol
+                WHERE substr(fs.timestamp, 1, 10) BETWEEN ? AND ?
+                ORDER BY fs.timestamp, fs.symbol, fs.id
+            """
+            return con.execute(query, (start_date, end_date)).fetchall()
+
+    def pit_contract(self, required_fields: tuple[str, ...]) -> dict[str, Any]:
+        result: dict[str, Any] = {
+            "ok": False,
+            "missing_feature_audit_fields": [],
+            "stale_feature_snapshot_count": 0,
+            "table_exists": False,
+        }
+        try:
+            with self._connect() as con:
+                if not self._table_exists(con, "feature_snapshots"):
+                    return result
+                result["table_exists"] = True
+                present = self._table_columns(con, "feature_snapshots")
+                missing = [field for field in required_fields if field not in present]
+                result["missing_feature_audit_fields"] = missing
+                if not missing:
+                    result["stale_feature_snapshot_count"] = con.execute(
+                        "SELECT COUNT(*) FROM feature_snapshots WHERE is_stale != 0"
+                    ).fetchone()[0]
+                result["ok"] = not missing
+        except Exception as exc:
+            result["error"] = str(exc)
+        return result

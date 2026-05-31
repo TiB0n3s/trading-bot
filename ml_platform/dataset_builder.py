@@ -20,15 +20,14 @@ Typical use:
 
 from __future__ import annotations
 
-import sqlite3
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from db import DB_PATH
-from ml_platform.config import FEATURE_VERSION
+from ml_platform.config import DEFAULT_DB_PATH, FEATURE_VERSION
 from ml_platform.governance import build_dataset_manifest
 from ml_platform.pit_context import get_archive_root, pit_coverage_for_range
+from repositories.training_data_repo import TrainingDataRepository
 from symbols_config import SYMBOL_UNIVERSE_VERSION
 
 
@@ -145,7 +144,7 @@ class DatasetBuildConfig:
 
     start_date: str                  # YYYY-MM-DD inclusive
     end_date: str                    # YYYY-MM-DD inclusive
-    db_path: Path | None = None      # None → resolved to DB_PATH at build time
+    db_path: Path | None = None
     include_incomplete_labels: bool = False
     query_version: str = QUERY_VERSION
     label_version: str = LABEL_VERSION
@@ -177,122 +176,16 @@ class DatasetBuildResult:
 # Internal helpers
 # ---------------------------------------------------------------------------
 
-def _table_columns(con: sqlite3.Connection, table: str) -> set[str]:
-    if not con.execute(
-        "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (table,)
-    ).fetchone():
-        return set()
-    return {row["name"] for row in con.execute(f"PRAGMA table_info({table})").fetchall()}
-
-
-def _opt(columns: set[str], alias: str, col: str, fallback: str = "NULL") -> str:
-    """Return 'alias.col' if col is present in columns, else 'fallback AS col'."""
-    return f"{alias}.{col}" if col in columns else f"{fallback} AS {col}"
-
-
 def _fetch_raw_rows(
     db_path: Path,
     start_date: str,
     end_date: str,
-) -> list[sqlite3.Row]:
+) -> list[Any]:
     """Run the canonical join and return all rows for the date range."""
-    with sqlite3.connect(f"file:{db_path}?mode=ro", uri=True) as con:
-        con.row_factory = sqlite3.Row
-        for tbl in ("feature_snapshots", "labeled_setups"):
-            if not con.execute(
-                "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (tbl,)
-            ).fetchone():
-                raise RuntimeError(f"Required table missing: {tbl}")
-
-        fs_cols = _table_columns(con, "feature_snapshots")
-        query = f"""
-            SELECT
-                fs.id                          AS snapshot_id,
-                substr(fs.timestamp, 1, 10)    AS snapshot_date,
-                fs.timestamp,
-                fs.symbol,
-                fs.last_price,
-                fs.ret_1m,
-                fs.ret_5m,
-                fs.ret_15m,
-                fs.range_pos_15m,
-                fs.distance_from_5m_high,
-                fs.distance_from_5m_low,
-                fs.distance_from_vwap,
-                fs.volume_ratio_5m,
-                fs.benchmark_symbol,
-                fs.benchmark_ret_5m,
-                fs.relative_strength_5m,
-                fs.spread_pct,
-                fs.market_session,
-                fs.macro_regime,
-                fs.market_bias,
-                fs.trend_direction,
-                fs.trend_strength,
-                {_opt(fs_cols, 'fs', 'feature_available_at', 'fs.timestamp')},
-                {_opt(fs_cols, 'fs', 'feature_generated_at', 'fs.timestamp')},
-                {_opt(fs_cols, 'fs', 'feature_age_seconds', '0')},
-                {_opt(fs_cols, 'fs', 'source', "'feature_snapshots_legacy'")},
-                {_opt(fs_cols, 'fs', 'is_stale', '0')},
-                {_opt(fs_cols, 'fs', 'staleness_reason')},
-                fs.bar_timeframe,
-                fs.bar_count,
-                fs.setup_label,
-                fs.setup_recommendation,
-                fs.setup_score,
-                fs.setup_confidence,
-                fs.setup_key,
-                ls.future_price_5m,
-                ls.future_price_15m,
-                ls.future_price_30m,
-                ls.ret_fwd_5m,
-                ls.ret_fwd_15m,
-                ls.ret_fwd_30m,
-                ls.max_up_15m,
-                ls.max_down_15m,
-                ls.outcome_label,
-                c.bias                         AS context_bias,
-                c.confidence                   AS context_confidence,
-                c.risk_level                   AS context_risk_level,
-                c.entry_quality                AS context_entry_quality,
-                c.catalyst_score               AS context_catalyst_score,
-                c.relative_strength_score      AS context_relative_strength_score,
-                c.sector_alignment             AS context_sector_alignment,
-                c.index_alignment              AS context_index_alignment,
-                p.prediction_score,
-                p.probability_of_profit,
-                p.probability_of_order,
-                p.expected_pnl,
-                p.confidence                   AS prediction_confidence,
-                p.sample_size                  AS prediction_sample_size,
-                CASE
-                    WHEN ls.snapshot_id IS NULL           THEN 'unlabeled'
-                    WHEN ls.ret_fwd_5m  IS NULL
-                     AND ls.ret_fwd_15m IS NULL
-                     AND ls.ret_fwd_30m IS NULL            THEN 'incomplete'
-                    WHEN ls.ret_fwd_30m IS NULL            THEN 'partial_near_close'
-                    ELSE 'complete'
-                END                            AS label_horizon_status,
-                'fixed_horizon_v1'             AS label_target_family,
-                'excluded_not_training_target' AS realized_exit_label_status,
-                NULL                           AS exit_policy_version,
-                NULL                           AS position_manager_version
-            FROM feature_snapshots fs
-            LEFT JOIN labeled_setups ls
-              ON ls.snapshot_id = fs.id
-            LEFT JOIN daily_symbol_context c
-              ON c.market_date = substr(fs.timestamp, 1, 10)
-             AND c.symbol      = fs.symbol
-            LEFT JOIN daily_symbol_predictions p
-              ON p.market_date = substr(fs.timestamp, 1, 10)
-             AND p.symbol      = fs.symbol
-            WHERE substr(fs.timestamp, 1, 10) BETWEEN ? AND ?
-            ORDER BY fs.timestamp, fs.symbol, fs.id
-        """
-        return con.execute(query, (start_date, end_date)).fetchall()
+    return TrainingDataRepository(db_path).raw_training_rows(start_date, end_date)
 
 
-def _exclusion_counts(rows: list[sqlite3.Row]) -> dict[str, int]:
+def _exclusion_counts(rows: list[Any]) -> dict[str, int]:
     counts: dict[str, int] = {}
     for r in rows:
         status = r["label_horizon_status"] or "unlabeled"
@@ -302,7 +195,7 @@ def _exclusion_counts(rows: list[sqlite3.Row]) -> dict[str, int]:
 
 
 def _inject_pit_archive(
-    rows: list[sqlite3.Row],
+    rows: list[Any],
     pit_coverage: dict[str, Any],
 ) -> list[dict[str, Any]]:
     """Convert rows to dicts and inject pit_archive_id / pit_coverage_status.
@@ -348,35 +241,8 @@ def validate_pit_contract(db_path: Path | None = None) -> dict[str, Any]:
     Does not raise. Callers decide whether to treat missing fields as a hard
     block or a warning.
     """
-    path = db_path or DB_PATH
-    result: dict[str, Any] = {
-        "ok": False,
-        "missing_feature_audit_fields": [],
-        "stale_feature_snapshot_count": 0,
-        "table_exists": False,
-    }
-    try:
-        with sqlite3.connect(f"file:{path}?mode=ro", uri=True) as con:
-            con.row_factory = sqlite3.Row
-            if not con.execute(
-                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='feature_snapshots'"
-            ).fetchone():
-                return result
-            result["table_exists"] = True
-            present = {
-                row["name"]
-                for row in con.execute("PRAGMA table_info(feature_snapshots)").fetchall()
-            }
-            missing = [f for f in _REQUIRED_PIT_AUDIT_FIELDS if f not in present]
-            result["missing_feature_audit_fields"] = missing
-            if not missing:
-                result["stale_feature_snapshot_count"] = con.execute(
-                    "SELECT COUNT(*) FROM feature_snapshots WHERE is_stale != 0"
-                ).fetchone()[0]
-            result["ok"] = not missing
-    except Exception as exc:
-        result["error"] = str(exc)
-    return result
+    path = db_path or DEFAULT_DB_PATH
+    return TrainingDataRepository(path).pit_contract(_REQUIRED_PIT_AUDIT_FIELDS)
 
 
 def build_training_dataset(config: DatasetBuildConfig) -> DatasetBuildResult:
@@ -402,7 +268,7 @@ def build_training_dataset(config: DatasetBuildConfig) -> DatasetBuildResult:
     Raises:
         RuntimeError: if feature_snapshots or labeled_setups are missing.
     """
-    db_path = Path(config.db_path) if config.db_path else DB_PATH
+    db_path = Path(config.db_path) if config.db_path else DEFAULT_DB_PATH
     archive_root = get_archive_root(db_path.parent)
 
     pit_contract = validate_pit_contract(db_path)

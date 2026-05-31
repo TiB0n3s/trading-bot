@@ -96,7 +96,6 @@ TEMPORARY_DB_ACCESS_ALLOWLIST = {
     "auto_buy_outcome_report.py",
     "backfill_missing_fills.py",
     "backfill_setup_labels.py",
-    "blocked_signal_outcome_report.py",
     "build_historical_trend_context.py",
     "buy_opportunity_report.py",
     "collect_and_score_events.py",

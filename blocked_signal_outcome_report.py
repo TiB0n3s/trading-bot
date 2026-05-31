@@ -16,9 +16,10 @@ Usage:
 
 import argparse
 from collections import Counter, defaultdict
-from datetime import date, timedelta
 
-from db import DB_PATH, get_connection
+from services.blocked_signal_outcome_service import (
+    build_default_blocked_signal_outcome_service,
+)
 
 
 def category(reason):
@@ -27,20 +28,6 @@ def category(reason):
     if ":" in reason:
         return reason.split(":", 1)[0].strip()
     return "claude_rejection"
-
-
-def date_clause(args):
-    if args.all:
-        return "", []
-
-    if args.week:
-        today = date.today()
-        monday = today - timedelta(days=today.weekday())
-        saturday = monday + timedelta(days=5)
-        return "AND timestamp >= ? AND timestamp < ?", [monday.isoformat(), saturday.isoformat()]
-
-    target = args.date or date.today().isoformat()
-    return "AND timestamp LIKE ?", [f"{target}%"]
 
 
 def short(value, width=70):
@@ -72,76 +59,33 @@ def main():
     parser.add_argument("--limit", type=int, default=20, help="Recent samples to show")
     args = parser.parse_args()
 
-    if not DB_PATH.exists():
-        raise SystemExit(f"ERROR: {DB_PATH} not found")
+    try:
+        payload = build_default_blocked_signal_outcome_service().payload(
+            target_date=args.date,
+            week=args.week,
+            all_history=args.all,
+            symbol=args.symbol,
+            category=args.category,
+            category_fn=category,
+        )
+    except FileNotFoundError as e:
+        raise SystemExit(f"ERROR: {e.filename} not found")
 
-    clause, params = date_clause(args)
-
-    symbol_clause = ""
-    if args.symbol:
-        symbol_clause = "AND symbol = ?"
-        params.append(args.symbol.upper())
-
-    con = get_connection(DB_PATH)
-
-    rows = con.execute(f"""
-        SELECT
-            id,
-            timestamp,
-            symbol,
-            action,
-            signal_price,
-            rejection_reason,
-            market_bias,
-            market_bias_effective,
-            market_bias_override_reason,
-            fundamental_score,
-            risk_level,
-            entry_quality,
-            trend_direction,
-            trend_strength,
-            momentum_direction,
-            momentum_pct,
-            session_trend_label,
-            session_trend_score,
-            session_return_pct,
-            session_momentum_5m_pct,
-            session_momentum_15m_pct,
-            session_momentum_30m_pct,
-            session_distance_from_vwap_pct,
-            session_momentum_reason,
-            prediction_score,
-            prediction_decision,
-            prediction_reason,
-            setup_label,
-            setup_policy_action,
-            setup_policy_reason
-        FROM trades
-        WHERE approved = 0
-          AND LOWER(action) = 'buy'
-          AND rejection_reason IS NOT NULL
-          {clause}
-          {symbol_clause}
-        ORDER BY id DESC
-    """, params).fetchall()
-
-    if args.category:
-        rows = [r for r in rows if category(r["rejection_reason"]) == args.category]
+    rows = payload.rows
 
     print()
     print("=" * 80)
     print("  Blocked Signal Outcome Report — DB Context")
     print("=" * 80)
     print(f"  Blocked BUY rows : {len(rows)}")
-    if args.symbol:
-        print(f"  Symbol filter    : {args.symbol.upper()}")
-    if args.category:
-        print(f"  Category filter  : {args.category}")
+    if payload.symbol:
+        print(f"  Symbol filter    : {payload.symbol}")
+    if payload.category:
+        print(f"  Category filter  : {payload.category}")
 
     if not rows:
         print()
         print("No blocked BUY rows matched this range/filter.")
-        con.close()
         return
 
     by_cat = defaultdict(list)
@@ -227,8 +171,6 @@ def main():
             f"  {r['id']:>5} {r['timestamp']:<19} {r['symbol']:<6} {cat:<24} "
             f"{pred_str:>5} {trend:<18} {mom:<10} {short(setup, 34):<34}"
         )
-
-    con.close()
 
 
 if __name__ == "__main__":

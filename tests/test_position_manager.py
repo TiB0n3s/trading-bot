@@ -17,6 +17,7 @@ os.environ.setdefault("ALPACA_SECRET_KEY", "test-secret")
 
 from position_manager import continuation_exit_delay_reason
 from position_manager import normalize_exit_for_share_qty
+from position_manager import peak_aware_breakeven_floor
 from position_manager import planned_partial_sell_qty
 
 
@@ -87,12 +88,19 @@ def test_partial_exit_remains_partial_when_share_qty_is_actionable():
     assert_equal(planned_partial_sell_qty(8, 0.50), 4, "planned qty")
 
 
+def test_weak_entry_peak_lock_tier2_protects_more_profit():
+    floor = peak_aware_breakeven_floor(peak_pl_pct=0.70, weak_entry=True)
+
+    assert_equal(floor, 0.25, "weak entry tier2 floor")
+
+
 def main():
     tests = [
         test_continuation_delays_soft_full_exit_when_tape_supports,
         test_continuation_does_not_delay_hard_loss,
         test_partial_exit_promotes_to_full_when_position_is_one_share,
         test_partial_exit_remains_partial_when_share_qty_is_actionable,
+        test_weak_entry_peak_lock_tier2_protects_more_profit,
     ]
 
     for test in tests:

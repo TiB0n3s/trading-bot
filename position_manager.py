@@ -195,7 +195,7 @@ PEAK_LOCK_TIER3_FLOOR_PCT = float(os.getenv("POSITION_MANAGER_PEAK_LOCK_TIER3_FL
 WEAK_PEAK_LOCK_TIER1_PEAK_PCT = float(os.getenv("POSITION_MANAGER_WEAK_PEAK_LOCK_TIER1_PEAK_PCT", "0.30"))
 WEAK_PEAK_LOCK_TIER1_FLOOR_PCT = float(os.getenv("POSITION_MANAGER_WEAK_PEAK_LOCK_TIER1_FLOOR_PCT", "0.10"))
 WEAK_PEAK_LOCK_TIER2_PEAK_PCT = float(os.getenv("POSITION_MANAGER_WEAK_PEAK_LOCK_TIER2_PEAK_PCT", "0.50"))
-WEAK_PEAK_LOCK_TIER2_FLOOR_PCT = float(os.getenv("POSITION_MANAGER_WEAK_PEAK_LOCK_TIER2_FLOOR_PCT", "0.15"))
+WEAK_PEAK_LOCK_TIER2_FLOOR_PCT = float(os.getenv("POSITION_MANAGER_WEAK_PEAK_LOCK_TIER2_FLOOR_PCT", "0.25"))
 
 # Quality-split exit thresholds — three tiers:
 # Strong conviction: looser giveback tolerance, higher min-profit bar before partial exit.
@@ -632,7 +632,7 @@ def peak_aware_breakeven_floor(peak_pl_pct: float, weak_entry: bool) -> float:
     floor so existing behavior is unchanged.
 
     Strong entries (more room):  0.30% → 0.10,  0.60% → 0.20,  1.00% → 0.30
-    Weak entries (faster ratchet): 0.30% → 0.10,  0.50% → 0.15
+    Weak entries (faster ratchet): 0.30% → 0.10,  0.50% → 0.25
     """
     if weak_entry:
         if peak_pl_pct >= WEAK_PEAK_LOCK_TIER2_PEAK_PCT:

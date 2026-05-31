@@ -57,6 +57,7 @@ from services.ops_checks.excursion_checks import (
     run_peak_bucket_report,
     run_winner_became_loser,
 )
+from services.ops_checks.order_checks import run_order_health
 from services.ops_checks.rejection_checks import run_rejection_summary
 from services.ops_checks.rejected_outcome_checks import run_rejected_outcomes_health
 from services.ops_checks.setup_breakdown import run_setup_breakdown
@@ -1240,150 +1241,7 @@ def retention_health():
 
 
 def order_health(target_date):
-    import sqlite3
-
-    db_path = BASE_DIR / "trades.db"
-
-    print()
-    print("=" * 72)
-    print(f"  Order Health - {target_date}")
-    print("=" * 72)
-
-    if not db_path.exists():
-        print(f"[FAIL] missing {db_path}")
-        return False
-
-    ok = True
-
-    with sqlite3.connect(f"file:{db_path}?mode=ro", uri=True) as con:
-        con.row_factory = sqlite3.Row
-
-        if not _table_exists(con, "trades"):
-            print("[FAIL] trades table is missing")
-            return False
-
-        print("Trade order fields")
-        rows = con.execute(
-            """
-            SELECT
-                COUNT(*) AS approved_rows,
-                SUM(CASE WHEN order_id IS NOT NULL AND order_id != '' THEN 1 ELSE 0 END) AS with_order_id,
-                SUM(CASE WHEN order_id IS NULL OR order_id = '' THEN 1 ELSE 0 END) AS missing_order_id,
-                SUM(CASE WHEN order_status IS NULL OR order_status = '' THEN 1 ELSE 0 END) AS missing_order_status
-            FROM trades
-            WHERE substr(timestamp, 1, 10) = ?
-              AND approved = 1
-            """,
-            (target_date,),
-        ).fetchone()
-        approved_rows = int(rows["approved_rows"] or 0)
-        missing_order_id = int(rows["missing_order_id"] or 0)
-        print(f"  approved_rows          {approved_rows:>8}")
-        print(f"  with_order_id          {int(rows['with_order_id'] or 0):>8}")
-        print(f"  missing_order_id       {missing_order_id:>8}")
-        print(f"  missing_order_status   {int(rows['missing_order_status'] or 0):>8}")
-        if missing_order_id:
-            print("[WARN] approved rows without order_id found")
-
-        print()
-        print("Order status distribution")
-        rows = con.execute(
-            """
-            SELECT COALESCE(order_status, 'missing') AS order_status, COUNT(*) AS n
-            FROM trades
-            WHERE substr(timestamp, 1, 10) = ?
-              AND approved = 1
-            GROUP BY COALESCE(order_status, 'missing')
-            ORDER BY n DESC, order_status
-            """,
-            (target_date,),
-        ).fetchall()
-        if rows:
-            for r in rows:
-                print(f"  {r['order_status']:<22} {r['n']}")
-        else:
-            print("  none")
-
-        print()
-        print("Recent approved rows")
-        rows = con.execute(
-            """
-            SELECT timestamp, symbol, action, order_id, order_status, qty, fill_price,
-                   position_size_pct, stop_loss_pct, take_profit_pct
-            FROM trades
-            WHERE substr(timestamp, 1, 10) = ?
-              AND approved = 1
-            ORDER BY timestamp DESC, id DESC
-            LIMIT 12
-            """,
-            (target_date,),
-        ).fetchall()
-        if rows:
-            for r in rows:
-                print(
-                    f"  {r['timestamp']} {r['symbol'] or '-':<6} {r['action'] or '-':<4} "
-                    f"status={r['order_status'] or '-'} order_id={r['order_id'] or '-'} "
-                    f"qty={r['qty']} fill={r['fill_price']} size={r['position_size_pct']} "
-                    f"stop={r['stop_loss_pct']} target={r['take_profit_pct']}"
-                )
-        else:
-            print("  none")
-
-        print()
-        print("Fill events")
-        if _table_exists(con, "fill_events"):
-            rows = con.execute(
-                """
-                SELECT COALESCE(event, 'missing') AS event,
-                       COALESCE(status, 'missing') AS status,
-                       COUNT(*) AS n
-                FROM fill_events
-                WHERE substr(timestamp, 1, 10) = ?
-                GROUP BY COALESCE(event, 'missing'), COALESCE(status, 'missing')
-                ORDER BY n DESC, event, status
-                """,
-                (target_date,),
-            ).fetchall()
-            if rows:
-                for r in rows:
-                    print(f"  event={r['event']:<18} status={r['status']:<18} {r['n']}")
-            else:
-                print("  none")
-        else:
-            print("  fill_events table missing")
-
-        print()
-        print("External Alpaca orders")
-        if _table_exists(con, "external_alpaca_orders"):
-            rows = con.execute(
-                """
-                SELECT COALESCE(status, 'missing') AS status,
-                       COALESCE(side, 'missing') AS side,
-                       COUNT(*) AS n
-                FROM external_alpaca_orders
-                WHERE substr(COALESCE(submitted_at, imported_at), 1, 10) = ?
-                GROUP BY COALESCE(status, 'missing'), COALESCE(side, 'missing')
-                ORDER BY n DESC, status, side
-                """,
-                (target_date,),
-            ).fetchall()
-            if rows:
-                for r in rows:
-                    print(f"  status={r['status']:<18} side={r['side']:<8} {r['n']}")
-            else:
-                print("  none")
-        else:
-            print("  external_alpaca_orders table missing")
-
-        if approved_rows and missing_order_id:
-            ok = False
-
-    print()
-    if ok:
-        print("[OK] order health completed")
-    else:
-        print("[WARN] order health found issues")
-    return ok
+    return run_order_health(target_date, base_dir=BASE_DIR)
 
 
 def setup_breakdown(target_date: str) -> bool:

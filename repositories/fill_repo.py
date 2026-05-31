@@ -31,6 +31,95 @@ def init_fill_events_table(db_path=DB_PATH) -> None:
         )
 
 
+def table_exists(table_name: str, db_path=DB_PATH) -> bool:
+    with get_connection(db_path) as con:
+        row = con.execute(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?",
+            (table_name,),
+        ).fetchone()
+    return row is not None
+
+
+def trade_order_field_summary(target_date: str, db_path=DB_PATH):
+    with get_connection(db_path) as con:
+        return con.execute(
+            """
+            SELECT
+                COUNT(*) AS approved_rows,
+                SUM(CASE WHEN order_id IS NOT NULL AND order_id != '' THEN 1 ELSE 0 END) AS with_order_id,
+                SUM(CASE WHEN order_id IS NULL OR order_id = '' THEN 1 ELSE 0 END) AS missing_order_id,
+                SUM(CASE WHEN order_status IS NULL OR order_status = '' THEN 1 ELSE 0 END) AS missing_order_status
+            FROM trades
+            WHERE substr(timestamp, 1, 10) = ?
+              AND approved = 1
+            """,
+            (target_date,),
+        ).fetchone()
+
+
+def trade_order_status_rows(target_date: str, db_path=DB_PATH):
+    with get_connection(db_path) as con:
+        return con.execute(
+            """
+            SELECT COALESCE(order_status, 'missing') AS order_status, COUNT(*) AS n
+            FROM trades
+            WHERE substr(timestamp, 1, 10) = ?
+              AND approved = 1
+            GROUP BY COALESCE(order_status, 'missing')
+            ORDER BY n DESC, order_status
+            """,
+            (target_date,),
+        ).fetchall()
+
+
+def recent_approved_order_rows(target_date: str, db_path=DB_PATH):
+    with get_connection(db_path) as con:
+        return con.execute(
+            """
+            SELECT timestamp, symbol, action, order_id, order_status, qty, fill_price,
+                   position_size_pct, stop_loss_pct, take_profit_pct
+            FROM trades
+            WHERE substr(timestamp, 1, 10) = ?
+              AND approved = 1
+            ORDER BY timestamp DESC, id DESC
+            LIMIT 12
+            """,
+            (target_date,),
+        ).fetchall()
+
+
+def fill_event_summary_rows(target_date: str, db_path=DB_PATH):
+    with get_connection(db_path) as con:
+        return con.execute(
+            """
+            SELECT COALESCE(event, 'missing') AS event,
+                   COALESCE(status, 'missing') AS status,
+                   COUNT(*) AS n
+            FROM fill_events
+            WHERE substr(timestamp, 1, 10) = ?
+            GROUP BY COALESCE(event, 'missing'), COALESCE(status, 'missing')
+            ORDER BY n DESC, event, status
+            """,
+            (target_date,),
+        ).fetchall()
+
+
+def external_alpaca_order_summary_rows(target_date: str, db_path=DB_PATH):
+    with get_connection(db_path) as con:
+        return con.execute(
+            """
+            SELECT COALESCE(status, 'missing') AS status,
+                   COALESCE(side, 'missing') AS side,
+                   COUNT(*) AS n
+            FROM external_alpaca_orders
+            WHERE substr(COALESCE(submitted_at, imported_at), 1, 10) = ?
+            GROUP BY COALESCE(status, 'missing'), COALESCE(side, 'missing')
+            ORDER BY n DESC, status, side
+            """,
+            (target_date,),
+        ).fetchall()
+
+
 def record_fill_event(event: str, order: Any, db_path=DB_PATH) -> None:
     order_id = order.get("id")
     parent_order_id = order.get("parent_order_id")

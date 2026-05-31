@@ -94,7 +94,12 @@ def run_conviction_stack_report(target_date: str, *, base_dir: Path) -> bool:
     return True
 
 
-def run_conviction_persistence_health(target_date: str, *, base_dir: Path) -> bool:
+def run_conviction_persistence_health(
+    target_date: str,
+    *,
+    base_dir: Path,
+    samples: int = 0,
+) -> bool:
     repo = OpsCheckRepository(base_dir / "trades.db")
     if not repo.exists():
         print("[WARN] trades.db not found")
@@ -155,6 +160,70 @@ def run_conviction_persistence_health(target_date: str, *, base_dir: Path) -> bo
         pct = n / total * 100 if total else 0
         status = "ok" if n == total else ("partial" if n > 0 else "missing")
         print(f"  {label:<32} {n:>8} {pct:>6.1f}%  {status}")
+
+    stage_rows = repo.conviction_persistence_stage_rows(target_date)
+    if stage_rows:
+        print("\n  Coverage by Inferred Stage:")
+        print(
+            f"  {'Stage':<24} {'Rows':>6} {'Stack':>6} {'Lim':>6} "
+            f"{'Lim!=':>6} {'Cap':>6} {'BuyOpp':>7} {'ML':>6} {'Setup':>7}"
+        )
+        print(
+            f"  {'-'*24} {'-'*6} {'-'*6} {'-'*6} "
+            f"{'-'*6} {'-'*6} {'-'*7} {'-'*6} {'-'*7}"
+        )
+        for stage in stage_rows:
+            print(
+                f"  {stage['inferred_stage']:<24} {stage['rows']:>6} "
+                f"{stage['complete_conviction_stack']:>6} "
+                f"{stage['dominant_limiter_populated']:>6} "
+                f"{stage['dominant_limiter_meaningful']:>6} "
+                f"{stage['cap_fields_populated']:>6} "
+                f"{stage['buy_opportunity_score_populated']:>7} "
+                f"{stage['ml_prediction_bucket_populated']:>6} "
+                f"{stage['setup_policy_action_populated']:>7}"
+            )
+
+    if samples > 0:
+        sample_rows = repo.conviction_persistence_sample_rows(target_date, samples)
+        print(f"\n  Recent BUY Samples (limit {samples}):")
+        if not sample_rows:
+            print("  No sample rows.")
+        else:
+            print(
+                f"  {'id':>6} {'time':<8} {'sym':<6} {'appr':>4} "
+                f"{'reject':<24} {'setup':<8} {'ml':<12} {'buy_opp':<20} "
+                f"{'strat':>6} {'session':<14} {'cap':>6} {'limiter':<18}"
+            )
+            print(
+                f"  {'-'*6} {'-'*8} {'-'*6} {'-'*4} "
+                f"{'-'*24} {'-'*8} {'-'*12} {'-'*20} "
+                f"{'-'*6} {'-'*14} {'-'*6} {'-'*18}"
+            )
+            for item in sample_rows:
+                time_s = str(item["timestamp"] or "")[11:19]
+                cap_s = (
+                    f"{float(item['effective_size_cap_pct']):.2f}"
+                    if item["effective_size_cap_pct"] is not None
+                    else EM_DASH
+                )
+                strat_s = (
+                    f"{float(item['trader_brain_score']):.0f}"
+                    if item["trader_brain_score"] is not None
+                    else EM_DASH
+                )
+                print(
+                    f"  {item['id']:>6} {time_s:<8} {(item['symbol'] or ''):<6} "
+                    f"{int(item['approved'] or 0):>4} "
+                    f"{(item['rejection_category'] or EM_DASH)[:24]:<24} "
+                    f"{(item['setup_policy_action'] or EM_DASH)[:8]:<8} "
+                    f"{(item['ml_prediction_bucket'] or EM_DASH)[:12]:<12} "
+                    f"{(item['buy_opportunity_recommendation'] or EM_DASH)[:20]:<20} "
+                    f"{strat_s:>6} "
+                    f"{(item['session_trend_label'] or EM_DASH)[:14]:<14} "
+                    f"{cap_s:>6} "
+                    f"{(item['dominant_limiter'] or EM_DASH)[:18]:<18}"
+                )
 
     print()
     return True

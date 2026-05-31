@@ -546,6 +546,125 @@ class OpsCheckRepository:
             (target_date,),
         )
 
+    def conviction_persistence_stage_rows(self, target_date: str) -> list[sqlite3.Row]:
+        return self._fetchall(
+            """
+            WITH staged AS (
+                SELECT
+                    *,
+                    CASE
+                        WHEN approved = 1 THEN 'approved'
+                        WHEN rejection_reason LIKE 'second_look:%'
+                          OR rejection_reason LIKE 'one_bar_confirmation:%'
+                          OR rejection_reason LIKE 'order_path_exception:%'
+                          OR rejection_reason LIKE 'broker_submit:%'
+                          OR rejection_reason LIKE 'submit_failed:%'
+                        THEN 'execution_rejection'
+                        WHEN buy_opportunity_score IS NOT NULL
+                          OR trader_brain_score IS NOT NULL
+                          OR dominant_limiter IS NOT NULL
+                          OR effective_size_cap_pct IS NOT NULL
+                        THEN 'post_context_rejection'
+                        ELSE 'pre_context_rejection'
+                    END AS inferred_stage,
+                    CASE WHEN (
+                            dominant_limiter IS NOT NULL
+                            AND dominant_limiter != ''
+                         )
+                          AND buy_opportunity_score IS NOT NULL
+                          AND (
+                            buy_opportunity_recommendation IS NOT NULL
+                            AND buy_opportunity_recommendation != ''
+                          )
+                          AND trader_brain_score IS NOT NULL
+                          AND (
+                            session_trend_label IS NOT NULL
+                            AND session_trend_label != ''
+                          )
+                          AND (
+                            ml_prediction_bucket IS NOT NULL
+                            AND ml_prediction_bucket != ''
+                          )
+                          AND (
+                            setup_policy_action IS NOT NULL
+                            AND setup_policy_action != ''
+                          )
+                         THEN 1 ELSE 0 END AS has_complete_conviction_stack
+                FROM trades
+                WHERE date(timestamp) = ?
+                  AND action = 'buy'
+            )
+            SELECT
+                inferred_stage,
+                COUNT(*) AS rows,
+                SUM(CASE WHEN has_complete_conviction_stack = 1 THEN 1 ELSE 0 END)
+                    AS complete_conviction_stack,
+                SUM(CASE WHEN dominant_limiter IS NOT NULL
+                          AND dominant_limiter != ''
+                         THEN 1 ELSE 0 END) AS dominant_limiter_populated,
+                SUM(CASE WHEN dominant_limiter IS NOT NULL
+                          AND dominant_limiter != ''
+                          AND dominant_limiter != 'unknown'
+                         THEN 1 ELSE 0 END) AS dominant_limiter_meaningful,
+                SUM(CASE WHEN effective_size_cap_pct IS NOT NULL
+                         THEN 1 ELSE 0 END) AS cap_fields_populated,
+                SUM(CASE WHEN buy_opportunity_score IS NOT NULL
+                         THEN 1 ELSE 0 END) AS buy_opportunity_score_populated,
+                SUM(CASE WHEN ml_prediction_bucket IS NOT NULL
+                          AND ml_prediction_bucket != ''
+                         THEN 1 ELSE 0 END) AS ml_prediction_bucket_populated,
+                SUM(CASE WHEN setup_policy_action IS NOT NULL
+                          AND setup_policy_action != ''
+                         THEN 1 ELSE 0 END) AS setup_policy_action_populated
+            FROM staged
+            GROUP BY inferred_stage
+            ORDER BY
+                CASE inferred_stage
+                    WHEN 'pre_context_rejection' THEN 1
+                    WHEN 'post_context_rejection' THEN 2
+                    WHEN 'execution_rejection' THEN 3
+                    WHEN 'approved' THEN 4
+                    ELSE 5
+                END
+            """,
+            (target_date,),
+        )
+
+    def conviction_persistence_sample_rows(
+        self,
+        target_date: str,
+        limit: int,
+    ) -> list[sqlite3.Row]:
+        return self._fetchall(
+            """
+            SELECT
+                id,
+                timestamp,
+                symbol,
+                approved,
+                CASE
+                    WHEN approved = 1 THEN 'approved'
+                    WHEN rejection_reason IS NULL OR rejection_reason = '' THEN 'none'
+                    WHEN instr(rejection_reason, ':') > 0
+                        THEN substr(rejection_reason, 1, instr(rejection_reason, ':') - 1)
+                    ELSE substr(rejection_reason, 1, 32)
+                END AS rejection_category,
+                setup_policy_action,
+                ml_prediction_bucket,
+                buy_opportunity_recommendation,
+                trader_brain_score,
+                session_trend_label,
+                effective_size_cap_pct,
+                dominant_limiter
+            FROM trades
+            WHERE date(timestamp) = ?
+              AND action = 'buy'
+            ORDER BY id DESC
+            LIMIT ?
+            """,
+            (target_date, limit),
+        )
+
     def buy_opportunity_signal_rows(self, target_date: str) -> list[sqlite3.Row]:
         return self._fetchall(
             """

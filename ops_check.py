@@ -489,8 +489,24 @@ def conviction_stack_report(target_date: str) -> bool:
     return run_conviction_stack_report(target_date, base_dir=BASE_DIR)
 
 
+def _int_option(name: str, default: int = 0) -> int:
+    if name not in sys.argv:
+        return default
+    idx = sys.argv.index(name)
+    if idx + 1 >= len(sys.argv):
+        return default
+    try:
+        return int(sys.argv[idx + 1])
+    except Exception:
+        return default
+
+
 def conviction_persistence_health(target_date: str) -> bool:
-    return run_conviction_persistence_health(target_date, base_dir=BASE_DIR)
+    return run_conviction_persistence_health(
+        target_date,
+        base_dir=BASE_DIR,
+        samples=_int_option("--samples", 0),
+    )
 
 
 def buy_opportunity_report(target_date: str) -> bool:
@@ -510,6 +526,8 @@ def main():
 
     command = sys.argv[1].lower()
     target_date = sys.argv[2] if len(sys.argv) > 2 else date.today().isoformat()
+    if target_date.startswith("--"):
+        target_date = date.today().isoformat()
 
     if command == "market-context-check":
         return 0 if check_market_context_file() else 1

@@ -124,7 +124,8 @@ APPROVED_MARKET_DATA_ACCESS = {
     "services/strong_day_participation_service.py",
 }
 
-TEMPORARY_MARKET_DATA_ACCESS_ALLOWLIST = set()
+TEMPORARY_MARKET_DATA_ALLOWLIST_REASONS: dict[str, str] = {}
+TEMPORARY_MARKET_DATA_ACCESS_ALLOWLIST = set(TEMPORARY_MARKET_DATA_ALLOWLIST_REASONS)
 
 
 def _is_db_access(path: Path) -> bool:
@@ -299,6 +300,17 @@ def test_market_data_access_is_approved_or_tracked():
     )
 
 
+def test_temporary_market_data_allowlist_entries_have_todo_reasons():
+    missing_reasons = []
+    for rel, reason in TEMPORARY_MARKET_DATA_ALLOWLIST_REASONS.items():
+        if not reason or "TODO" not in reason:
+            missing_reasons.append(rel)
+    assert_true(
+        not missing_reasons,
+        f"temporary market-data allowlist entries need TODO reasons: {missing_reasons}",
+    )
+
+
 def test_no_runtime_modules_have_direct_db_or_broker_access():
     approved_broker_runtime = APPROVED_BROKER_ACCESS | {"services/market_data_service.py"}
     violations = []
@@ -328,6 +340,7 @@ def main():
         test_direct_db_access_is_approved_or_tracked,
         test_direct_broker_access_is_approved_or_tracked,
         test_market_data_access_is_approved_or_tracked,
+        test_temporary_market_data_allowlist_entries_have_todo_reasons,
         test_no_runtime_modules_have_direct_db_or_broker_access,
     ]
     for test in tests:

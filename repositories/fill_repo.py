@@ -181,6 +181,38 @@ def update_trade_fill(
         return int(cur.rowcount)
 
 
+def trades_missing_confirmed_fills(db_path=DB_PATH) -> list[Any]:
+    with get_connection(db_path) as con:
+        return con.execute(
+            """
+            SELECT id, timestamp, symbol, action, qty, signal_price, order_id, order_status
+            FROM trades
+            WHERE approved = 1
+              AND action IN ('buy', 'sell')
+              AND qty IS NOT NULL
+              AND fill_price IS NULL
+              AND order_id IS NOT NULL
+              AND order_id NOT LIKE 'reconcile_%'
+            ORDER BY timestamp ASC
+            """
+        ).fetchall()
+
+
+def update_trade_fill_by_row_id(
+    *,
+    row_id: int,
+    status: str,
+    fill_price: float,
+    db_path=DB_PATH,
+) -> int:
+    with get_connection(db_path) as con:
+        cur = con.execute(
+            "UPDATE trades SET order_status = ?, fill_price = ? WHERE id = ?",
+            (status, fill_price, row_id),
+        )
+        return int(cur.rowcount)
+
+
 def pending_trade_orders(
     statuses: tuple[str, ...],
     db_path=DB_PATH,

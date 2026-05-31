@@ -13,12 +13,10 @@ Usage:
 """
 import argparse
 import os
-import sqlite3
 import sys
 from pathlib import Path
 
 SCRIPT_DIR = Path(__file__).resolve().parent
-DB_PATH = SCRIPT_DIR / "trades.db"
 ENV_FILE = Path("/etc/trading-bot.env")
 
 
@@ -43,34 +41,19 @@ def _load_env_if_needed():
 _load_env_if_needed()
 
 from services.broker_service import broker_service  # noqa: E402  (env must be loaded first)
+from repositories.fill_repo import trades_missing_confirmed_fills, update_trade_fill_by_row_id  # noqa: E402
 
 
 def find_missing_rows():
-    con = sqlite3.connect(DB_PATH)
-    con.row_factory = sqlite3.Row
-    rows = con.execute("""
-        SELECT id, timestamp, symbol, action, qty, signal_price, order_id, order_status
-        FROM trades
-        WHERE approved = 1
-          AND action IN ('buy', 'sell')
-          AND qty IS NOT NULL
-          AND fill_price IS NULL
-          AND order_id IS NOT NULL
-          AND order_id NOT LIKE 'reconcile_%'
-        ORDER BY timestamp ASC
-    """).fetchall()
-    con.close()
-    return rows
+    return trades_missing_confirmed_fills()
 
 
 def update_row(row_id, status, fill_price):
-    con = sqlite3.connect(DB_PATH)
-    con.execute(
-        "UPDATE trades SET order_status = ?, fill_price = ? WHERE id = ?",
-        (status, fill_price, row_id),
+    return update_trade_fill_by_row_id(
+        row_id=row_id,
+        status=status,
+        fill_price=fill_price,
     )
-    con.commit()
-    con.close()
 
 
 def main():

@@ -94,7 +94,6 @@ TEMPORARY_REPORT_DB_ALLOWLIST = {
     "event_attribution_report.py",
     "intelligence_context_report.py",
     "intelligence_learning_report.py",
-    "intelligence_prediction_report.py",
     "live_score_monitor.py",
     "market_alignment_report.py",
     "pnl.py",

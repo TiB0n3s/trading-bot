@@ -12,16 +12,8 @@ Usage:
 import argparse
 from datetime import date
 
-from db import DB_PATH, get_connection
 from market_intelligence.experience_model import init_prediction_tables
-
-
-def table_exists(con, table_name):
-    row = con.execute(
-        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?",
-        (table_name,),
-    ).fetchone()
-    return row is not None
+from repositories.prediction_repo import PredictionRepository
 
 
 def money(v):
@@ -52,61 +44,10 @@ def main():
 
     init_prediction_tables()
 
-    params = [args.date]
-    symbol_sql = ""
-    if args.symbol:
-        symbol_sql = "AND p.symbol = ?"
-        params.append(args.symbol.upper())
-
-    with get_connection(DB_PATH) as con:
-        strong_join = ""
-        strong_columns = """
-                NULL AS strong_session_return_pct,
-                NULL AS strong_primary_status,
-                NULL AS strong_primary_blocker,
-                NULL AS strong_auto_buy_candidates,
-                NULL AS strong_auto_buy_max_score
-        """
-        if table_exists(con, "strong_day_participation"):
-            strong_columns = """
-                s.session_return_pct AS strong_session_return_pct,
-                s.primary_status AS strong_primary_status,
-                s.primary_blocker AS strong_primary_blocker,
-                s.auto_buy_candidate_count AS strong_auto_buy_candidates,
-                s.auto_buy_max_score AS strong_auto_buy_max_score
-            """
-            strong_join = """
-            LEFT JOIN strong_day_participation s
-              ON s.market_date = p.market_date
-             AND s.symbol = p.symbol
-             AND s.min_session_pct = (
-                 SELECT MIN(min_session_pct)
-                 FROM strong_day_participation
-                 WHERE market_date = p.market_date
-             )
-            """
-        rows = con.execute(
-            f"""
-            SELECT
-                p.*,
-                c.bias,
-                c.risk_level,
-                c.entry_quality,
-                c.catalyst_score,
-                c.supply_chain_risk_score,
-                c.competitive_risk_score,
-                {strong_columns}
-            FROM daily_symbol_predictions p
-            LEFT JOIN daily_symbol_context c
-              ON c.market_date = p.market_date
-             AND c.symbol = p.symbol
-            {strong_join}
-            WHERE p.market_date = ?
-              {symbol_sql}
-            ORDER BY p.prediction_score DESC, p.symbol
-            """,
-            params,
-        ).fetchall()
+    rows = PredictionRepository().intelligence_prediction_report_rows(
+        args.date,
+        symbol=args.symbol,
+    )
 
     print("=" * 132)
     print(f"  Intelligence Prediction Report — {args.date}")

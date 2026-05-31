@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
 import time
 from typing import Any
 
 from services.policies import execution_policy
+from services.policy_controls import policy_family_enabled
 
 
 def safe_float(value):
@@ -26,6 +28,9 @@ class ExecutionAdapterService:
         symbol_max_spread_pct: dict[str, float],
         max_bid_ask_spread_pct: float,
         max_signal_price_drift_pct: float,
+        one_bar_confirmation_enabled: bool = True,
+        one_bar_extension_threshold_pct: float = 0.25,
+        one_bar_timeout_seconds: int = 75,
         log: Any,
     ):
         self.market_data_service = market_data_service
@@ -33,6 +38,9 @@ class ExecutionAdapterService:
         self.symbol_max_spread_pct = symbol_max_spread_pct
         self.max_bid_ask_spread_pct = max_bid_ask_spread_pct
         self.max_signal_price_drift_pct = max_signal_price_drift_pct
+        self.one_bar_confirmation_enabled = one_bar_confirmation_enabled
+        self.one_bar_extension_threshold_pct = one_bar_extension_threshold_pct
+        self.one_bar_timeout_seconds = one_bar_timeout_seconds
         self.log = log
 
     def compute_spread_pct(self, bid, ask):
@@ -65,6 +73,77 @@ class ExecutionAdapterService:
     def latest_trade_price(self, symbol):
         latest_trade = self.market_data_service.get_latest_trade(symbol)
         return float(latest_trade.price)
+
+    def one_bar_confirmation_hold(self, symbol: str, signal_price: float, account_state: dict) -> tuple[bool, str]:
+        """Wait for the next fresh 1-minute bar to confirm an extended/decelerating BUY."""
+        if not policy_family_enabled("entry"):
+            return True, "entry_policy_disabled"
+        if not self.one_bar_confirmation_enabled:
+            return True, "one-bar confirmation disabled"
+        if signal_price is None:
+            return True, "missing signal price"
+        try:
+            signal_price_f = float(signal_price)
+        except Exception:
+            return True, f"invalid signal price={signal_price!r}"
+        if signal_price_f <= 0:
+            return True, f"nonpositive signal price={signal_price_f}"
+
+        momentum = (account_state or {}).get("momentum") or {}
+        momentum_state = momentum.get("momentum_state")
+        try:
+            price_vs_bars = float(momentum.get("price_vs_bars") or 0)
+        except Exception:
+            price_vs_bars = 0.0
+
+        threshold = self.one_bar_extension_threshold_pct
+        if momentum_state != "decelerating":
+            return True, f"momentum_state={momentum_state}; hold not required"
+        if price_vs_bars <= threshold:
+            return True, (
+                f"price_vs_bars={price_vs_bars:.3f}% <= "
+                f"threshold={threshold:.3f}%; hold not required"
+            )
+
+        deadline = datetime.now(timezone.utc).timestamp() + self.one_bar_timeout_seconds
+        seen_ts = None
+        reason_prefix = (
+            f"one_bar_hold required: momentum_state={momentum_state}; "
+            f"price_vs_bars={price_vs_bars:.3f}% > "
+            f"threshold={threshold:.3f}%; signal_price={signal_price_f:.4f}"
+        )
+
+        while datetime.now(timezone.utc).timestamp() < deadline:
+            try:
+                bars = self.market_data_service.get_bars_with_fallback(
+                    symbol, "1Min", limit=2, feed="sip"
+                )
+            except Exception as exc:
+                return False, f"{reason_prefix}; bar_fetch_error={exc}"
+
+            if bars:
+                bar = bars[-1]
+                bar_ts = getattr(bar, "t", None) or getattr(bar, "timestamp", None)
+                bar_open = getattr(bar, "o", None) or getattr(bar, "open", None)
+                if seen_ts is None:
+                    seen_ts = bar_ts
+                elif bar_ts != seen_ts:
+                    try:
+                        bar_open_f = float(bar_open)
+                    except Exception:
+                        return False, f"{reason_prefix}; next_bar_open_unavailable"
+                    if bar_open_f > signal_price_f:
+                        return True, (
+                            f"{reason_prefix}; confirmed next_bar_open={bar_open_f:.4f} "
+                            f"> signal_price={signal_price_f:.4f}"
+                        )
+                    return False, (
+                        f"{reason_prefix}; rejected next_bar_open={bar_open_f:.4f} "
+                        f"<= signal_price={signal_price_f:.4f}"
+                    )
+            time.sleep(2)
+
+        return False, f"{reason_prefix}; timeout waiting for next 1m bar"
 
     def validate_spread_with_retry(
         self,

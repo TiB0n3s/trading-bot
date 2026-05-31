@@ -773,17 +773,6 @@ def _symbol_market_alignment(symbol):
             "reason": f"alignment error: {e}",
         }
 
-def _one_bar_confirmation_hold(symbol: str, signal_price: float, account_state: dict) -> tuple[bool, str]:
-    return entry_policy.one_bar_confirmation_hold(
-        symbol,
-        signal_price,
-        account_state,
-        enabled=ONE_BAR_CONFIRMATION_HOLD_ENABLED,
-        extension_threshold_pct=ONE_BAR_CONFIRMATION_EXTENSION_THRESHOLD_PCT,
-        timeout_seconds=ONE_BAR_CONFIRMATION_TIMEOUT_SECONDS,
-        get_bars_with_fallback=market_data_service.get_bars_with_fallback,
-    )
-
 def _session_momentum_is_fresh(session_momentum, max_age_minutes=5):
     """Return True when session momentum exists and was refreshed recently."""
     if not session_momentum:
@@ -1019,10 +1008,14 @@ _execution_adapter_service = ExecutionAdapterService(
     symbol_max_spread_pct=SYMBOL_MAX_SPREAD_PCT,
     max_bid_ask_spread_pct=MAX_BID_ASK_SPREAD_PCT,
     max_signal_price_drift_pct=MAX_SIGNAL_PRICE_DRIFT_PCT,
+    one_bar_confirmation_enabled=ONE_BAR_CONFIRMATION_HOLD_ENABLED,
+    one_bar_extension_threshold_pct=ONE_BAR_CONFIRMATION_EXTENSION_THRESHOLD_PCT,
+    one_bar_timeout_seconds=ONE_BAR_CONFIRMATION_TIMEOUT_SECONDS,
     log=logger,
 )
 _validate_spread_with_retry = _execution_adapter_service.validate_spread_with_retry
 _pre_order_safety_check = _execution_adapter_service.pre_order_safety_check
+_one_bar_confirmation_hold = _execution_adapter_service.one_bar_confirmation_hold
 
 PORTFOLIO_ROTATION_ENABLED = os.environ.get("PORTFOLIO_ROTATION_ENABLED", "false").lower().strip() in (
     "1", "true", "yes", "on"

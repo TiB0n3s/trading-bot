@@ -125,7 +125,6 @@ APPROVED_MARKET_DATA_ACCESS = {
 TEMPORARY_MARKET_DATA_ACCESS_ALLOWLIST = {
     "label_features.py",
     "rejected_signal_outcome_builder.py",
-    "services/policies/entry_policy.py",
 }
 
 

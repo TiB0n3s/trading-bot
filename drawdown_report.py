@@ -14,9 +14,10 @@ from pathlib import Path
 
 from services.broker_service import broker_service
 from trade_matcher import rebuild_matched_trades
+from repositories.trade_matcher_repo import TradeMatcherRepository
 
 BASE_DIR = Path(__file__).resolve().parent
-from db import DB_PATH, get_connection
+DB_PATH = BASE_DIR / "trades.db"
 
 
 def money(v):
@@ -41,22 +42,11 @@ def main():
     except Exception as e:
         print(f"[WARN] matched_trades rebuild failed: {e}")
 
-    con = get_connection(DB_PATH)
-
-    matched = con.execute("""
-        SELECT symbol, qty, entry_price, exit_price, realized_pnl, realized_pnl_pct,
-               entry_timestamp, exit_timestamp, trend_direction, trend_strength,
-               market_bias, risk_level, entry_quality
-        FROM matched_trades
-        WHERE exit_timestamp LIKE ?
-        ORDER BY realized_pnl ASC
-    """, (f"{target_date}%",)).fetchall()
+    matched = TradeMatcherRepository(DB_PATH).drawdown_matched_rows(target_date)
 
     realized_by_symbol = defaultdict(float)
     for r in matched:
         realized_by_symbol[r["symbol"]] += float(r["realized_pnl"] or 0)
-
-    con.close()
 
     print()
     print("── Realized P&L by Symbol ─────────────────────────────")

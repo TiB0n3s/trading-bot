@@ -57,6 +57,20 @@ class TradeMatcherRepository:
             ).fetchall()
         return {str(row["exit_order_id"] or "") for row in rows}
 
+    def drawdown_matched_rows(self, target_date: str) -> list[Any]:
+        with get_connection(self.db_path) as con:
+            return con.execute(
+                """
+                SELECT symbol, qty, entry_price, exit_price, realized_pnl, realized_pnl_pct,
+                       entry_timestamp, exit_timestamp, trend_direction, trend_strength,
+                       market_bias, risk_level, entry_quality
+                FROM matched_trades
+                WHERE exit_timestamp LIKE ?
+                ORDER BY realized_pnl ASC
+                """,
+                (f"{target_date}%",),
+            ).fetchall()
+
     def event_payload_for_order(self, order_id: str | None) -> dict[str, Any] | None:
         if not order_id:
             return None

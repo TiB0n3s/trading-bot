@@ -70,6 +70,7 @@ TESTS = [
     "tests/test_decision_snapshot_service.py",
     "tests/test_canonical_intelligence_service.py",
     "tests/test_canonical_exit_service.py",
+    "tests/test_lifecycle_analysis_service.py",
     "tests/test_decision_snapshots.py",
     "tests/test_bot_events_service.py",
     "tests/test_job_runs_service.py",

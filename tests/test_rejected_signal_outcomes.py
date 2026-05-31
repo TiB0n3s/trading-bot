@@ -6,12 +6,15 @@ Run:
 """
 
 import sys
+import sqlite3
+import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from rejected_signal_outcome_builder import compute_outcome
+from repositories.rejected_signal_outcome_repo import RejectedSignalOutcomeRepository
 
 
 def assert_equal(actual, expected, label):
@@ -139,6 +142,104 @@ def test_excursions_are_action_adjusted_and_sign_bounded():
     assert_close(sell_outcome["max_adverse_60m"], -3.0, "sell adverse")
 
 
+def test_repository_links_outcome_to_canonical_decision_snapshot():
+    with tempfile.TemporaryDirectory() as tmp:
+        db_path = Path(tmp) / "test.db"
+        with sqlite3.connect(db_path) as con:
+            con.row_factory = sqlite3.Row
+            con.execute(
+                """
+                CREATE TABLE trades (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    timestamp TEXT,
+                    symbol TEXT,
+                    action TEXT,
+                    approved INTEGER,
+                    signal_price REAL,
+                    rejection_reason TEXT
+                )
+                """
+            )
+            trade_id = con.execute(
+                """
+                INSERT INTO trades (
+                    timestamp, symbol, action, approved, signal_price, rejection_reason
+                ) VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    "2026-05-26T09:35:00-04:00",
+                    "AAPL",
+                    "buy",
+                    0,
+                    100.0,
+                    "prediction_gate:test",
+                ),
+            ).lastrowid
+            con.execute(
+                """
+                CREATE TABLE decision_snapshots (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    trade_id INTEGER,
+                    canonical_intelligence_version TEXT,
+                    canonical_intelligence_hash TEXT,
+                    canonical_intelligence_json TEXT
+                )
+                """
+            )
+            snapshot_id = con.execute(
+                """
+                INSERT INTO decision_snapshots (
+                    trade_id,
+                    canonical_intelligence_version,
+                    canonical_intelligence_hash,
+                    canonical_intelligence_json
+                ) VALUES (?, ?, ?, ?)
+                """,
+                (
+                    trade_id,
+                    "canonical_intelligence_v1",
+                    "c" * 64,
+                    '{"version":"canonical_intelligence_v1"}',
+                ),
+            ).lastrowid
+            trade_row = con.execute(
+                "SELECT id, timestamp, symbol, action, signal_price, rejection_reason FROM trades WHERE id = ?",
+                (trade_id,),
+            ).fetchone()
+
+        repo = RejectedSignalOutcomeRepository(db_path)
+        repo.upsert_outcome(
+            trade_row,
+            {
+                "return_5m": 0.1,
+                "return_15m": 0.2,
+                "return_30m": 0.3,
+                "return_60m": 0.4,
+                "return_eod": 0.5,
+                "max_favorable_60m": 0.8,
+                "max_adverse_60m": -0.2,
+                "label_status": "labeled",
+            },
+            "unit_test",
+        )
+
+        with sqlite3.connect(db_path) as con:
+            con.row_factory = sqlite3.Row
+            outcome = con.execute(
+                "SELECT * FROM rejected_signal_outcomes WHERE trade_id = ?",
+                (trade_id,),
+            ).fetchone()
+
+        assert_equal(outcome["decision_snapshot_id"], snapshot_id, "decision snapshot link")
+        assert_equal(outcome["canonical_intelligence_version"], "canonical_intelligence_v1", "canonical version")
+        assert_equal(outcome["canonical_intelligence_hash"], "c" * 64, "canonical hash")
+        assert_equal(
+            outcome["canonical_intelligence_json"],
+            '{"version":"canonical_intelligence_v1"}',
+            "canonical json",
+        )
+
+
 def main():
     tests = [
         test_buy_outcome_uses_raw_forward_returns,
@@ -146,6 +247,7 @@ def main():
         test_near_close_partial_reason,
         test_missing_forward_bars_partial_reason,
         test_excursions_are_action_adjusted_and_sign_bounded,
+        test_repository_links_outcome_to_canonical_decision_snapshot,
     ]
 
     for test in tests:

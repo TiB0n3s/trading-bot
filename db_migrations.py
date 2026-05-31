@@ -523,6 +523,24 @@ MIGRATIONS: tuple[Migration, ...] = (
             """,
         ),
     ),
+    Migration(
+        migration_id="20260531_020_rejected_outcome_canonical_links",
+        description="Link rejected-signal counterfactual outcomes to canonical decision snapshots.",
+        statements=(
+            "ALTER TABLE rejected_signal_outcomes ADD COLUMN decision_snapshot_id INTEGER",
+            "ALTER TABLE rejected_signal_outcomes ADD COLUMN canonical_intelligence_version TEXT",
+            "ALTER TABLE rejected_signal_outcomes ADD COLUMN canonical_intelligence_hash TEXT",
+            "ALTER TABLE rejected_signal_outcomes ADD COLUMN canonical_intelligence_json TEXT",
+            """
+            CREATE INDEX IF NOT EXISTS idx_rejected_signal_outcomes_decision_snapshot
+            ON rejected_signal_outcomes(decision_snapshot_id)
+            """,
+            """
+            CREATE INDEX IF NOT EXISTS idx_rejected_signal_outcomes_canonical_hash
+            ON rejected_signal_outcomes(canonical_intelligence_hash)
+            """,
+        ),
+    ),
 )
 
 

@@ -13,6 +13,43 @@ class RejectedSignalOutcomeRepository:
     def ensure_table(self) -> None:
         ensure_rejected_signal_outcomes_table(self.db_path)
 
+    def _decision_snapshot_for_trade(self, con, trade_id: int) -> dict[str, Any]:
+        table = con.execute(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'decision_snapshots'"
+        ).fetchone()
+        if not table:
+            return {}
+
+        columns = {
+            row["name"]
+            for row in con.execute("PRAGMA table_info(decision_snapshots)").fetchall()
+        }
+        required = {
+            "id",
+            "trade_id",
+            "canonical_intelligence_version",
+            "canonical_intelligence_hash",
+            "canonical_intelligence_json",
+        }
+        if not required <= columns:
+            return {}
+
+        row = con.execute(
+            """
+            SELECT
+                id,
+                canonical_intelligence_version,
+                canonical_intelligence_hash,
+                canonical_intelligence_json
+            FROM decision_snapshots
+            WHERE trade_id = ?
+            ORDER BY id DESC
+            LIMIT 1
+            """,
+            (trade_id,),
+        ).fetchone()
+        return dict(row) if row else {}
+
     def rejected_rows(self, clauses: list[str], params: list[Any], limit: int | None = None) -> list[Any]:
         query_params = list(params)
         limit_sql = ""
@@ -33,15 +70,20 @@ class RejectedSignalOutcomeRepository:
             ).fetchall()
 
     def upsert_outcome(self, row: Any, outcome: dict[str, Any], source: str) -> None:
+        self.ensure_table()
         with get_connection(self.db_path) as con:
+            snapshot = self._decision_snapshot_for_trade(con, int(row["id"]))
             con.execute(
                 """
                 INSERT INTO rejected_signal_outcomes (
                     trade_id, timestamp, symbol, action, signal_price, rejection_reason,
                     return_5m, return_15m, return_30m, return_60m, return_eod,
                     max_favorable_60m, max_adverse_60m,
-                    label_status, partial_reason, source, generated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+                    label_status, partial_reason, source,
+                    decision_snapshot_id, canonical_intelligence_version,
+                    canonical_intelligence_hash, canonical_intelligence_json,
+                    generated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
                 ON CONFLICT(trade_id) DO UPDATE SET
                     timestamp = excluded.timestamp,
                     symbol = excluded.symbol,
@@ -58,6 +100,10 @@ class RejectedSignalOutcomeRepository:
                     label_status = excluded.label_status,
                     partial_reason = excluded.partial_reason,
                     source = excluded.source,
+                    decision_snapshot_id = excluded.decision_snapshot_id,
+                    canonical_intelligence_version = excluded.canonical_intelligence_version,
+                    canonical_intelligence_hash = excluded.canonical_intelligence_hash,
+                    canonical_intelligence_json = excluded.canonical_intelligence_json,
                     generated_at = excluded.generated_at
                 """,
                 (
@@ -77,5 +123,9 @@ class RejectedSignalOutcomeRepository:
                     outcome.get("label_status") or "pending",
                     outcome.get("partial_reason"),
                     source,
+                    snapshot.get("id"),
+                    snapshot.get("canonical_intelligence_version"),
+                    snapshot.get("canonical_intelligence_hash"),
+                    snapshot.get("canonical_intelligence_json"),
                 ),
             )

@@ -431,6 +431,52 @@ def test_exit_snapshot_lifecycle_links_migration_adds_columns():
         assert_true(expected <= table_columns(db_path, "exit_snapshots"), "exit lifecycle link columns")
 
 
+def test_rejected_outcome_canonical_links_migration_adds_columns():
+    with tempfile.TemporaryDirectory() as tmp:
+        db_path = Path(tmp) / "test.db"
+        with sqlite3.connect(db_path) as con:
+            con.execute(
+                """
+                CREATE TABLE rejected_signal_outcomes (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    trade_id INTEGER UNIQUE,
+                    timestamp TEXT NOT NULL,
+                    symbol TEXT NOT NULL,
+                    action TEXT NOT NULL,
+                    signal_price REAL,
+                    rejection_reason TEXT,
+                    return_5m REAL,
+                    return_15m REAL,
+                    return_30m REAL,
+                    return_60m REAL,
+                    return_eod REAL,
+                    max_favorable_60m REAL,
+                    max_adverse_60m REAL,
+                    label_status TEXT NOT NULL DEFAULT 'pending',
+                    partial_reason TEXT,
+                    source TEXT,
+                    generated_at TEXT NOT NULL DEFAULT (datetime('now'))
+                )
+                """
+            )
+
+        migration = next(
+            m
+            for m in MIGRATIONS
+            if m.migration_id == "20260531_020_rejected_outcome_canonical_links"
+        )
+        applied = apply_migration(migration, db_path)
+        assert_equal(applied, True, "apply")
+
+        expected = {
+            "decision_snapshot_id",
+            "canonical_intelligence_version",
+            "canonical_intelligence_hash",
+            "canonical_intelligence_json",
+        }
+        assert_true(expected <= table_columns(db_path, "rejected_signal_outcomes"), "canonical rejected outcome columns")
+
+
 if __name__ == "__main__":
     test_feature_audit_migration_is_idempotent()
     print("[OK] test_feature_audit_migration_is_idempotent")
@@ -460,4 +506,6 @@ if __name__ == "__main__":
     print("[OK] test_canonical_exit_snapshot_migration_creates_table")
     test_exit_snapshot_lifecycle_links_migration_adds_columns()
     print("[OK] test_exit_snapshot_lifecycle_links_migration_adds_columns")
-    print("\nAll 14 DB migration tests passed.")
+    test_rejected_outcome_canonical_links_migration_adds_columns()
+    print("[OK] test_rejected_outcome_canonical_links_migration_adds_columns")
+    print("\nAll 15 DB migration tests passed.")

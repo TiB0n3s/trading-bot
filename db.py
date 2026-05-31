@@ -324,6 +324,10 @@ def ensure_rejected_signal_outcomes_table(db_path: Path | str = DB_PATH) -> None
                 label_status TEXT NOT NULL DEFAULT 'pending',
                 partial_reason TEXT,
                 source TEXT,
+                decision_snapshot_id INTEGER,
+                canonical_intelligence_version TEXT,
+                canonical_intelligence_hash TEXT,
+                canonical_intelligence_json TEXT,
                 generated_at TEXT NOT NULL DEFAULT (datetime('now')),
                 FOREIGN KEY (trade_id) REFERENCES trades(id)
             )
@@ -351,6 +355,10 @@ def ensure_rejected_signal_outcomes_table(db_path: Path | str = DB_PATH) -> None
             "max_adverse_60m": "REAL",
             "source": "TEXT",
             "partial_reason": "TEXT",
+            "decision_snapshot_id": "INTEGER",
+            "canonical_intelligence_version": "TEXT",
+            "canonical_intelligence_hash": "TEXT",
+            "canonical_intelligence_json": "TEXT",
         }
         for col, col_type in addable.items():
             if col not in existing_cols:

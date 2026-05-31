@@ -94,6 +94,72 @@ def run_conviction_stack_report(target_date: str, *, base_dir: Path) -> bool:
     return True
 
 
+def run_conviction_persistence_health(target_date: str, *, base_dir: Path) -> bool:
+    repo = OpsCheckRepository(base_dir / "trades.db")
+    if not repo.exists():
+        print("[WARN] trades.db not found")
+        return False
+
+    print(f"\n=== Conviction Persistence Health: {target_date} ===\n")
+    row = repo.conviction_persistence_health(target_date)
+    if not row or not row["buy_rows"]:
+        print(f"  No BUY rows for {target_date}.")
+        return True
+
+    total = int(row["buy_rows"] or 0)
+
+    field_map = [
+        ("conviction_stack", "complete composite of persisted conviction fields"),
+        ("dominant_limiter", "trades.dominant_limiter"),
+        ("effective_size_cap", "trades.effective_size_cap_pct"),
+        ("was_capped", "derived: effective_size_cap_pct IS NOT NULL"),
+        ("active_caps", "not persisted as a dedicated column"),
+        ("buy_opportunity_score", "trades.buy_opportunity_score"),
+        ("buy_opportunity_bucket", "trades.buy_opportunity_recommendation"),
+        ("strategy_score", "trades.trader_brain_score"),
+        ("session_momentum_label", "trades.session_trend_label"),
+        ("ml_prediction_bucket", "trades.ml_prediction_bucket"),
+        ("setup_policy_action", "trades.setup_policy_action"),
+    ]
+
+    print("  Field Mapping:")
+    print(f"  {'Requested Field':<28} {'Persisted Source'}")
+    print(f"  {'-'*28} {'-'*44}")
+    for requested, source in field_map:
+        print(f"  {requested:<28} {source}")
+
+    checks = [
+        ("BUY rows", "buy_rows", None),
+        ("rows with conviction_stack", "conviction_stack_composite_present", None),
+        ("dominant_limiter populated", "dominant_limiter_populated", None),
+        ("dominant_limiter != unknown", "dominant_limiter_meaningful", None),
+        ("cap fields populated", "effective_size_cap_populated", None),
+        ("was_capped", "was_capped", None),
+        ("active_caps persisted", None, "unavailable"),
+        ("buy_opportunity_score", "buy_opportunity_score_populated", None),
+        ("buy_opportunity_bucket", "buy_opportunity_bucket_populated", None),
+        ("strategy_score", "strategy_score_populated", None),
+        ("session_momentum_label", "session_momentum_label_populated", None),
+        ("ml_prediction_bucket", "ml_prediction_bucket_populated", None),
+        ("setup_policy_action", "setup_policy_action_populated", None),
+    ]
+
+    print("\n  Persistence Coverage:")
+    print(f"  {'Check':<32} {'Rows':>8} {'Pct':>7}  Status")
+    print(f"  {'-'*32} {'-'*8} {'-'*7}  {'-'*12}")
+    for label, key, status_override in checks:
+        if status_override:
+            print(f"  {label:<32} {EM_DASH:>8} {EM_DASH:>7}  {status_override}")
+            continue
+        n = int(row[key] or 0)
+        pct = n / total * 100 if total else 0
+        status = "ok" if n == total else ("partial" if n > 0 else "missing")
+        print(f"  {label:<32} {n:>8} {pct:>6.1f}%  {status}")
+
+    print()
+    return True
+
+
 def run_buy_opportunity_report(target_date: str, *, base_dir: Path) -> bool:
     repo = OpsCheckRepository(base_dir / "trades.db")
     if not repo.exists():

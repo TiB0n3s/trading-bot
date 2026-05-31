@@ -37,6 +37,7 @@ Usage:
   python3 ops_check.py migration-status
   python3 ops_check.py strong-days
   python3 ops_check.py strong-days 2026-05-26
+  python3 ops_check.py conviction-persistence-health 2026-05-29
   python3 ops_check.py all
   python3 ops_check.py filters 2026-05-08
 """
@@ -50,6 +51,7 @@ from pathlib import Path
 from services.ops_checks.conviction_checks import (
     run_buy_opportunity_report,
     run_claude_context_audit,
+    run_conviction_persistence_health,
     run_conviction_stack_report,
 )
 from services.ops_checks.auto_buy_checks import run_auto_buy_health
@@ -487,6 +489,10 @@ def conviction_stack_report(target_date: str) -> bool:
     return run_conviction_stack_report(target_date, base_dir=BASE_DIR)
 
 
+def conviction_persistence_health(target_date: str) -> bool:
+    return run_conviction_persistence_health(target_date, base_dir=BASE_DIR)
+
+
 def buy_opportunity_report(target_date: str) -> bool:
     return run_buy_opportunity_report(target_date, base_dir=BASE_DIR)
 
@@ -556,6 +562,9 @@ def main():
 
     if command == "conviction-stack-report":
         return 0 if conviction_stack_report(target_date) else 1
+
+    if command == "conviction-persistence-health":
+        return 0 if conviction_persistence_health(target_date) else 1
 
     if command == "buy-opportunity-report":
         return 0 if buy_opportunity_report(target_date) else 1

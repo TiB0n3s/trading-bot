@@ -484,6 +484,68 @@ class OpsCheckRepository:
             (target_date,),
         )
 
+    def conviction_persistence_health(self, target_date: str) -> sqlite3.Row | None:
+        return self._fetchone(
+            """
+            SELECT
+                COUNT(*) AS buy_rows,
+                SUM(CASE WHEN dominant_limiter IS NOT NULL
+                          AND dominant_limiter != ''
+                         THEN 1 ELSE 0 END) AS dominant_limiter_populated,
+                SUM(CASE WHEN dominant_limiter IS NOT NULL
+                          AND dominant_limiter != ''
+                          AND dominant_limiter != 'unknown'
+                         THEN 1 ELSE 0 END) AS dominant_limiter_meaningful,
+                SUM(CASE WHEN effective_size_cap_pct IS NOT NULL
+                         THEN 1 ELSE 0 END) AS effective_size_cap_populated,
+                SUM(CASE WHEN effective_size_cap_pct IS NOT NULL
+                         THEN 1 ELSE 0 END) AS was_capped,
+                SUM(CASE WHEN buy_opportunity_score IS NOT NULL
+                         THEN 1 ELSE 0 END) AS buy_opportunity_score_populated,
+                SUM(CASE WHEN buy_opportunity_recommendation IS NOT NULL
+                          AND buy_opportunity_recommendation != ''
+                         THEN 1 ELSE 0 END) AS buy_opportunity_bucket_populated,
+                SUM(CASE WHEN trader_brain_score IS NOT NULL
+                         THEN 1 ELSE 0 END) AS strategy_score_populated,
+                SUM(CASE WHEN session_trend_label IS NOT NULL
+                          AND session_trend_label != ''
+                         THEN 1 ELSE 0 END) AS session_momentum_label_populated,
+                SUM(CASE WHEN ml_prediction_bucket IS NOT NULL
+                          AND ml_prediction_bucket != ''
+                         THEN 1 ELSE 0 END) AS ml_prediction_bucket_populated,
+                SUM(CASE WHEN setup_policy_action IS NOT NULL
+                          AND setup_policy_action != ''
+                         THEN 1 ELSE 0 END) AS setup_policy_action_populated,
+                SUM(CASE WHEN (
+                            dominant_limiter IS NOT NULL
+                            AND dominant_limiter != ''
+                         )
+                          AND buy_opportunity_score IS NOT NULL
+                          AND (
+                            buy_opportunity_recommendation IS NOT NULL
+                            AND buy_opportunity_recommendation != ''
+                          )
+                          AND trader_brain_score IS NOT NULL
+                          AND (
+                            session_trend_label IS NOT NULL
+                            AND session_trend_label != ''
+                          )
+                          AND (
+                            ml_prediction_bucket IS NOT NULL
+                            AND ml_prediction_bucket != ''
+                          )
+                          AND (
+                            setup_policy_action IS NOT NULL
+                            AND setup_policy_action != ''
+                          )
+                         THEN 1 ELSE 0 END) AS conviction_stack_composite_present
+            FROM trades
+            WHERE date(timestamp) = ?
+              AND action = 'buy'
+            """,
+            (target_date,),
+        )
+
     def buy_opportunity_signal_rows(self, target_date: str) -> list[sqlite3.Row]:
         return self._fetchall(
             """

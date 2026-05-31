@@ -14,6 +14,11 @@ Purpose:
 
 from __future__ import annotations
 
+from services.confidence_calibration_service import build_calibrated_confidence
+from services.decision_utility_service import estimate_decision_utility
+from services.execution_quality_service import estimate_execution_quality
+from services.market_regime_service import classify_market_regime
+from services.portfolio_decision_service import evaluate_portfolio_decision
 from strategy_constants import DAILY_LOSS_LIMIT_PCT
 from strategy_memory import contextual_memory_for_signal
 
@@ -88,7 +93,34 @@ def evaluate_decision_policy(
     strategy_memory_override=None,
 ):
     intelligence_context = intelligence_context or {}
-    account_state = account_state or {}
+    account_state = account_state if isinstance(account_state, dict) else {}
+    if "market_regime" not in account_state:
+        account_state["market_regime"] = classify_market_regime(
+            account_state=account_state,
+            market_context=account_state.get("market_alignment") or {},
+        ).to_dict()
+    if "portfolio_decision" not in account_state:
+        account_state["portfolio_decision"] = evaluate_portfolio_decision(
+            symbol=symbol,
+            action=action,
+            account_state=account_state,
+        ).to_dict()
+    if "execution_quality" not in account_state:
+        account_state["execution_quality"] = estimate_execution_quality(
+            symbol=symbol,
+            action=action,
+            signal_price=account_state.get("signal_price"),
+            account_state=account_state,
+        ).to_dict()
+    account_state["calibrated_confidence"] = build_calibrated_confidence(
+        account_state=account_state,
+        context=intelligence_context,
+    ).to_dict()
+    utility_estimate = estimate_decision_utility(
+        action=action,
+        intelligence_context=intelligence_context,
+        account_state=account_state,
+    ).to_dict()
 
     if action != "buy":
         return {
@@ -99,6 +131,7 @@ def evaluate_decision_policy(
             "can_increase_size": False,
             "can_submit_orders": False,
             "evidence": [],
+            "utility_estimate": utility_estimate,
         }
 
     hard_gate = _hard_gate_block(account_state)
@@ -116,6 +149,7 @@ def evaluate_decision_policy(
             "learned_min_score": None,
             "worst_memory_recommendation": None,
             "memory_matches": [],
+            "utility_estimate": utility_estimate,
         }
 
     evidence = []
@@ -171,6 +205,36 @@ def evaluate_decision_policy(
     elif session_gate.get("severity") in ("pass", "supportive"):
         supports.append("session momentum supportive")
 
+    portfolio_decision = account_state.get("portfolio_decision") or {}
+    portfolio_action = portfolio_decision.get("decision")
+    if portfolio_action == "block":
+        risks.append("portfolio duplicate risk says block")
+        evidence.append(
+            f"portfolio_duplicate_risk={portfolio_decision.get('duplicate_risk_score')}"
+        )
+    elif portfolio_action == "size_down":
+        risks.append("portfolio duplicate risk says size_down")
+        evidence.append(
+            f"portfolio_duplicate_risk={portfolio_decision.get('duplicate_risk_score')}"
+        )
+    elif portfolio_action == "allow":
+        supports.append("portfolio duplicate risk acceptable")
+
+    execution_quality = account_state.get("execution_quality") or {}
+    execution_action = execution_quality.get("decision")
+    if execution_action == "block":
+        risks.append("execution quality says block")
+        evidence.append(
+            f"net_execution_cost_pct={execution_quality.get('net_execution_cost_pct')}"
+        )
+    elif execution_action == "size_down":
+        risks.append("execution quality says size_down")
+        evidence.append(
+            f"net_execution_cost_pct={execution_quality.get('net_execution_cost_pct')}"
+        )
+    elif execution_action == "allow":
+        supports.append("execution quality acceptable")
+
     # Learned/contextual memory. strategy_memory_override injects a point-in-time
     # archived dict instead of the live strategy_memory.json (used by replay tools).
     memory = contextual_memory_for_signal(
@@ -218,10 +282,19 @@ def evaluate_decision_policy(
 
     # Hard block on strong negative deterministic signals.
     if decision != "block":
-        if opp_decision == "block" or pred_decision == "block":
+        if (
+            opp_decision == "block"
+            or pred_decision == "block"
+            or portfolio_action == "block"
+            or execution_action == "block"
+        ):
             decision = "block"
             size_multiplier = 0.0
-            reason = f"deterministic policy block: opportunity={opp_decision}, prediction={pred_decision}"
+            reason = (
+                "deterministic policy block: "
+                f"opportunity={opp_decision}, prediction={pred_decision}, "
+                f"portfolio={portfolio_action}, execution={execution_action}"
+            )
 
     # Intelligence block-preferred becomes live block only if support is weak.
     if decision != "block" and recommended_action == "block_preferred" and len(supports) == 0:
@@ -239,6 +312,20 @@ def evaluate_decision_policy(
             decision = "size_down"
             size_multiplier = 0.5
             reason = "cautionary learned/live context; reduce size"
+        elif portfolio_action == "size_down":
+            decision = "size_down"
+            size_multiplier = min(
+                0.75,
+                float(portfolio_decision.get("size_multiplier") or 0.75),
+            )
+            reason = "portfolio duplicate risk; reduce size"
+        elif execution_action == "size_down":
+            decision = "size_down"
+            size_multiplier = min(
+                0.75,
+                float(execution_quality.get("size_multiplier") or 0.75),
+            )
+            reason = "execution quality cost; reduce size"
         elif recommended_action == "caution" or len(risks) >= 2:
             decision = "size_down"
             size_multiplier = 0.75
@@ -257,4 +344,7 @@ def evaluate_decision_policy(
         "authority_scope": "conservative_buy_review",
         "can_increase_size": False,
         "can_submit_orders": False,
+        "utility_estimate": utility_estimate,
+        "portfolio_decision": portfolio_decision,
+        "execution_quality": execution_quality,
     }

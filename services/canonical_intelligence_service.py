@@ -8,6 +8,8 @@ import hashlib
 import json
 from typing import Any
 
+from services.confidence_calibration_service import build_calibrated_confidence
+
 
 CANONICAL_INTELLIGENCE_VERSION = "canonical_intelligence_v1"
 CANONICAL_INTELLIGENCE_REQUIRED_SECTIONS = (
@@ -151,15 +153,111 @@ def build_canonical_intelligence_snapshot(
     opportunity = account_state.get("buy_opportunity") or {}
     intelligence = account_state.get("intelligence_context") or {}
     summary = intelligence.get("summary") or {}
+    market_regime = account_state.get("market_regime") or {}
+    market_microstructure = account_state.get("market_microstructure") or {}
+    market_participation = account_state.get("market_participation") or {}
+    volatility_normalization = account_state.get("volatility_normalization") or {}
+    setup_structure = account_state.get("setup_structure") or setup_quality.get("structure") or {}
+    downside_asymmetry = account_state.get("downside_asymmetry") or {}
+    exit_decision_quality = account_state.get("exit_decision_quality") or {}
+    portfolio_decision = account_state.get("portfolio_decision") or {}
+    execution_quality = account_state.get("execution_quality") or {}
 
     regime_state = {
         "macro_regime": context.get("macro_regime"),
+        "market_regime": market_regime.get("composite_regime"),
+        "trend_regime": market_regime.get("trend_regime"),
+        "volatility_regime": market_regime.get("volatility_regime"),
+        "event_regime": market_regime.get("event_regime"),
+        "sector_rotation_regime": market_regime.get("sector_rotation_regime"),
+        "liquidity_regime": market_regime.get("liquidity_regime"),
+        "regime_confidence": market_regime.get("confidence"),
+        "strategy_weights": market_regime.get("strategy_weights") or {},
+        "session_phase": market_microstructure.get("session_phase"),
+        "opening_range_state": market_microstructure.get("opening_range_state"),
+        "gap_state": market_microstructure.get("gap_state"),
+        "vwap_state": market_microstructure.get("vwap_state"),
+        "microstructure_liquidity_state": market_microstructure.get("liquidity_state"),
+        "intraday_volatility_state": market_microstructure.get("intraday_volatility_state"),
+        "compression_state": market_microstructure.get("compression_state"),
+        "auction_quality": market_microstructure.get("auction_quality"),
+        "breakout_quality": market_microstructure.get("breakout_quality"),
+        "reversion_risk": market_microstructure.get("reversion_risk"),
+        "microstructure_score": market_microstructure.get("microstructure_score"),
+        "microstructure_expectancy_modifier": market_microstructure.get(
+            "expectancy_modifier"
+        ),
+        "participation_state": market_participation.get("participation_state"),
+        "sector_relative_strength_state": market_participation.get(
+            "sector_relative_strength_state"
+        ),
+        "peer_confirmation_state": market_participation.get("peer_confirmation_state"),
+        "breadth_state": market_participation.get("breadth_state"),
+        "index_participation_state": market_participation.get(
+            "index_participation_state"
+        ),
+        "leader_laggard_state": market_participation.get("leader_laggard_state"),
+        "relative_volume_state": market_participation.get("relative_volume_state"),
+        "participation_confirmation_score": market_participation.get(
+            "confirmation_score"
+        ),
+        "isolated_move_risk": market_participation.get("isolated_move_risk"),
+        "participation_expectancy_modifier": market_participation.get(
+            "expectancy_modifier"
+        ),
+        "volatility_stretch_state": volatility_normalization.get("stretch_state"),
+        "entry_distance_atr": volatility_normalization.get("entry_distance_atr"),
+        "move_zscore": volatility_normalization.get("move_zscore"),
+        "range_percentile": volatility_normalization.get("range_percentile"),
+        "gap_percentile": volatility_normalization.get("gap_percentile"),
+        "spread_atr_pct": volatility_normalization.get("spread_atr_pct"),
+        "stop_excursion_ratio": volatility_normalization.get("stop_excursion_ratio"),
+        "volatility_normalized_regime": volatility_normalization.get(
+            "volatility_regime"
+        ),
+        "volatility_chase_risk": volatility_normalization.get("chase_risk"),
+        "stop_quality": volatility_normalization.get("stop_quality"),
+        "volatility_adjusted_score": volatility_normalization.get(
+            "volatility_adjusted_score"
+        ),
+        "volatility_expectancy_modifier": volatility_normalization.get(
+            "expectancy_modifier"
+        ),
+        "downside_state": downside_asymmetry.get("downside_state"),
+        "gap_down_vulnerability": downside_asymmetry.get("gap_down_vulnerability"),
+        "catalyst_risk": downside_asymmetry.get("catalyst_risk"),
+        "overnight_risk": downside_asymmetry.get("overnight_risk"),
+        "headline_sensitivity": downside_asymmetry.get("headline_sensitivity"),
+        "beta_shock_sensitivity": downside_asymmetry.get("beta_shock_sensitivity"),
+        "historical_mae_state": downside_asymmetry.get("historical_mae_state"),
+        "failure_signature": downside_asymmetry.get("failure_signature"),
+        "downside_score": downside_asymmetry.get("downside_score"),
+        "expected_adverse_modifier": downside_asymmetry.get(
+            "expected_adverse_modifier"
+        ),
+        "exit_pressure_state": exit_decision_quality.get("exit_pressure_state"),
+        "exit_quality_score": exit_decision_quality.get("exit_quality_score"),
+        "exit_recommended_action": exit_decision_quality.get("recommended_action"),
         "risk_multiplier": context.get("risk_multiplier"),
         "market_bias": context.get("market_bias"),
         "market_bias_effective": context.get("market_bias_effective"),
         "market_bias_override_reason": context.get("market_bias_override_reason"),
         "risk_level": context.get("risk_level"),
         "entry_quality": context.get("entry_quality"),
+        "portfolio_decision": portfolio_decision.get("decision"),
+        "portfolio_size_multiplier": portfolio_decision.get("size_multiplier"),
+        "portfolio_duplicate_risk_score": portfolio_decision.get("duplicate_risk_score"),
+        "incremental_var_pct": portfolio_decision.get("incremental_var_pct"),
+        "beta_contribution_delta": portfolio_decision.get("beta_contribution_delta"),
+        "crowded_theme": portfolio_decision.get("crowded_theme"),
+        "overlap_symbols": portfolio_decision.get("overlap_symbols") or [],
+        "execution_quality_decision": execution_quality.get("decision"),
+        "fill_quality": execution_quality.get("fill_quality"),
+        "spread_pct": execution_quality.get("spread_pct"),
+        "slippage_estimate_pct": execution_quality.get("slippage_estimate_pct"),
+        "signal_executable_gap_pct": execution_quality.get("signal_executable_gap_pct"),
+        "quote_instability_score": execution_quality.get("quote_instability_score"),
+        "net_execution_cost_pct": execution_quality.get("net_execution_cost_pct"),
     }
     trend_state = {
         "direction": context.get("trend_direction"),
@@ -204,6 +302,18 @@ def build_canonical_intelligence_snapshot(
         "quality_source": setup_quality.get("source"),
         "quality_recommendation": setup_quality.get("recommendation"),
         "quality_key": setup_quality.get("key"),
+        "structure_state": setup_structure.get("structure_state"),
+        "base_quality": setup_structure.get("base_quality"),
+        "failed_breakout_risk": setup_structure.get("failed_breakout_risk"),
+        "compression_expansion_state": setup_structure.get(
+            "compression_expansion_state"
+        ),
+        "htf_location_state": setup_structure.get("htf_location_state"),
+        "anchored_vwap_state": setup_structure.get("anchored_vwap_state"),
+        "gap_context_state": setup_structure.get("gap_context_state"),
+        "retest_quality": setup_structure.get("retest_quality"),
+        "reward_risk_state": setup_structure.get("reward_risk_state"),
+        "structure_score": setup_structure.get("structure_score"),
     }
     event_state = {
         "support_count": summary.get("support_count"),
@@ -227,6 +337,18 @@ def build_canonical_intelligence_snapshot(
         "session_gate_outcome": account_state.get("session_gate_outcome") or {},
         "setup_quality_outcome": account_state.get("setup_quality_outcome") or {},
         "ml_outcome": account_state.get("ml_outcome") or {},
+        "utility_estimate": (
+            account_state.get("utility_estimate")
+            or (account_state.get("decision_policy") or {}).get("utility_estimate")
+            or {}
+        ),
+        "portfolio_decision": portfolio_decision,
+        "execution_quality": execution_quality,
+        "market_microstructure": market_microstructure,
+        "market_participation": market_participation,
+        "volatility_normalization": volatility_normalization,
+        "downside_asymmetry": downside_asymmetry,
+        "exit_decision_quality": exit_decision_quality,
     }
     source_timestamps = {
         "decision_ts": decision_ts,
@@ -253,6 +375,25 @@ def build_canonical_intelligence_snapshot(
         or account_state.get("policy_artifact_status")
         or {}
     )
+    calibrated_confidence = (
+        account_state.get("calibrated_confidence")
+        or build_calibrated_confidence(
+            account_state=account_state,
+            context=context,
+        ).to_dict()
+    )
+    confidence_payload = {
+        "raw_confidence_labels": confidence,
+        "calibrated_confidence": calibrated_confidence,
+        "primary_source": calibrated_confidence.get("primary_source"),
+        "primary_predicted_win_rate": calibrated_confidence.get(
+            "primary_predicted_win_rate"
+        ),
+        "primary_realized_win_rate": calibrated_confidence.get(
+            "primary_realized_win_rate"
+        ),
+        "confidence_quality": calibrated_confidence.get("confidence_quality"),
+    }
 
     feature_vector = {
         "regime_state": regime_state,
@@ -267,7 +408,7 @@ def build_canonical_intelligence_snapshot(
         "policy_artifact_ref": policy_artifact_ref,
         "source_timestamps": source_timestamps,
         "freshness_sec": freshness_sec,
-        "confidence": confidence,
+        "confidence": confidence_payload,
     }
 
     return CanonicalIntelligenceSnapshot(
@@ -288,6 +429,6 @@ def build_canonical_intelligence_snapshot(
         policy_artifact_ref=policy_artifact_ref,
         source_timestamps=source_timestamps,
         freshness_sec=freshness_sec,
-        confidence=confidence,
+        confidence=confidence_payload,
         feature_vector_hash=_hash(feature_vector),
     )

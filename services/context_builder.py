@@ -6,6 +6,13 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Callable
 
+from services.downside_asymmetry_service import evaluate_downside_asymmetry
+from services.exit_decision_quality_service import evaluate_exit_decision_quality
+from services.market_microstructure_service import classify_market_microstructure
+from services.market_participation_service import evaluate_market_participation
+from services.market_regime_service import classify_market_regime
+from services.execution_quality_service import estimate_execution_quality
+from services.portfolio_decision_service import evaluate_portfolio_decision
 from services.signal_models import DecisionContext, SignalContext, SignalRuntimeState
 from services.setup_context_service import (
     SetupContextDeps,
@@ -13,6 +20,7 @@ from services.setup_context_service import (
     get_recent_favorable_setup,
     remember_favorable_setup,
 )
+from services.volatility_normalization_service import classify_volatility_normalization
 
 
 @dataclass(frozen=True)
@@ -53,6 +61,76 @@ class MarketAlignmentObservation:
 
 
 @dataclass(frozen=True)
+class MarketRegimeObservation:
+    data: dict[str, Any] = field(default_factory=dict)
+    composite_regime: str | None = None
+    trend_regime: str | None = None
+    volatility_regime: str | None = None
+    confidence: str | None = None
+    strategy_weights: dict[str, float] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class MarketMicrostructureObservation:
+    data: dict[str, Any] = field(default_factory=dict)
+    session_phase: str | None = None
+    breakout_quality: str | None = None
+    liquidity_state: str | None = None
+    reversion_risk: str | None = None
+    expectancy_modifier: float = 1.0
+
+
+@dataclass(frozen=True)
+class MarketParticipationObservation:
+    data: dict[str, Any] = field(default_factory=dict)
+    participation_state: str | None = None
+    confirmation_score: float = 0.0
+    isolated_move_risk: str | None = None
+    expectancy_modifier: float = 1.0
+
+
+@dataclass(frozen=True)
+class VolatilityNormalizationObservation:
+    data: dict[str, Any] = field(default_factory=dict)
+    stretch_state: str | None = None
+    chase_risk: str | None = None
+    volatility_adjusted_score: float = 0.0
+    expectancy_modifier: float = 1.0
+
+
+@dataclass(frozen=True)
+class DownsideAsymmetryObservation:
+    data: dict[str, Any] = field(default_factory=dict)
+    downside_state: str | None = None
+    downside_score: float = 0.0
+    expected_adverse_modifier: float = 1.0
+
+
+@dataclass(frozen=True)
+class ExitDecisionQualityObservation:
+    data: dict[str, Any] = field(default_factory=dict)
+    exit_pressure_state: str | None = None
+    exit_quality_score: float = 0.0
+    recommended_action: str | None = None
+
+
+@dataclass(frozen=True)
+class PortfolioObservation:
+    data: dict[str, Any] = field(default_factory=dict)
+    decision: str | None = None
+    size_multiplier: float = 1.0
+    duplicate_risk_score: float = 0.0
+
+
+@dataclass(frozen=True)
+class ExecutionQualityObservation:
+    data: dict[str, Any] = field(default_factory=dict)
+    decision: str | None = None
+    fill_quality: str | None = None
+    net_execution_cost_pct: float = 0.0
+
+
+@dataclass(frozen=True)
 class TrendObservation:
     data: dict[str, Any] = field(default_factory=dict)
     direction: str | None = None
@@ -82,6 +160,14 @@ class BuiltSignalContext:
     trend: TrendObservation
     strategy: StrategyObservation
     market_alignment: MarketAlignmentObservation
+    market_regime: MarketRegimeObservation
+    market_microstructure: MarketMicrostructureObservation
+    market_participation: MarketParticipationObservation
+    volatility_normalization: VolatilityNormalizationObservation
+    downside_asymmetry: DownsideAsymmetryObservation
+    exit_decision_quality: ExitDecisionQualityObservation
+    portfolio: PortfolioObservation
+    execution_quality: ExecutionQualityObservation
     opportunity: OpportunityObservation
     claude_account_state: dict[str, Any]
     summary: dict[str, Any]
@@ -149,6 +235,38 @@ class SignalContextRuntime:
     @property
     def market_alignment(self) -> MarketAlignmentObservation:
         return self.built.market_alignment
+
+    @property
+    def market_regime(self) -> MarketRegimeObservation:
+        return self.built.market_regime
+
+    @property
+    def market_microstructure(self) -> MarketMicrostructureObservation:
+        return self.built.market_microstructure
+
+    @property
+    def market_participation(self) -> MarketParticipationObservation:
+        return self.built.market_participation
+
+    @property
+    def volatility_normalization(self) -> VolatilityNormalizationObservation:
+        return self.built.volatility_normalization
+
+    @property
+    def downside_asymmetry(self) -> DownsideAsymmetryObservation:
+        return self.built.downside_asymmetry
+
+    @property
+    def exit_decision_quality(self) -> ExitDecisionQualityObservation:
+        return self.built.exit_decision_quality
+
+    @property
+    def portfolio(self) -> PortfolioObservation:
+        return self.built.portfolio
+
+    @property
+    def execution_quality(self) -> ExecutionQualityObservation:
+        return self.built.execution_quality
 
     def refresh(self, **kwargs: Any) -> BuiltSignalContext:
         self.built = build_final_signal_context(
@@ -986,6 +1104,103 @@ def _opportunity_observation(opportunity: dict[str, Any]) -> OpportunityObservat
     )
 
 
+def _market_regime_observation(regime: dict[str, Any]) -> MarketRegimeObservation:
+    weights = regime.get("strategy_weights")
+    return MarketRegimeObservation(
+        data=regime,
+        composite_regime=regime.get("composite_regime"),
+        trend_regime=regime.get("trend_regime"),
+        volatility_regime=regime.get("volatility_regime"),
+        confidence=regime.get("confidence"),
+        strategy_weights=weights if isinstance(weights, dict) else {},
+    )
+
+
+def _market_microstructure_observation(
+    microstructure: dict[str, Any],
+) -> MarketMicrostructureObservation:
+    return MarketMicrostructureObservation(
+        data=microstructure,
+        session_phase=microstructure.get("session_phase"),
+        breakout_quality=microstructure.get("breakout_quality"),
+        liquidity_state=microstructure.get("liquidity_state"),
+        reversion_risk=microstructure.get("reversion_risk"),
+        expectancy_modifier=_float_or_none(microstructure.get("expectancy_modifier")) or 1.0,
+    )
+
+
+def _market_participation_observation(
+    participation: dict[str, Any],
+) -> MarketParticipationObservation:
+    return MarketParticipationObservation(
+        data=participation,
+        participation_state=participation.get("participation_state"),
+        confirmation_score=_float_or_none(participation.get("confirmation_score")) or 0.0,
+        isolated_move_risk=participation.get("isolated_move_risk"),
+        expectancy_modifier=_float_or_none(participation.get("expectancy_modifier")) or 1.0,
+    )
+
+
+def _volatility_normalization_observation(
+    volatility: dict[str, Any],
+) -> VolatilityNormalizationObservation:
+    return VolatilityNormalizationObservation(
+        data=volatility,
+        stretch_state=volatility.get("stretch_state"),
+        chase_risk=volatility.get("chase_risk"),
+        volatility_adjusted_score=_float_or_none(
+            volatility.get("volatility_adjusted_score")
+        )
+        or 0.0,
+        expectancy_modifier=_float_or_none(volatility.get("expectancy_modifier")) or 1.0,
+    )
+
+
+def _downside_asymmetry_observation(
+    downside: dict[str, Any],
+) -> DownsideAsymmetryObservation:
+    return DownsideAsymmetryObservation(
+        data=downside,
+        downside_state=downside.get("downside_state"),
+        downside_score=_float_or_none(downside.get("downside_score")) or 0.0,
+        expected_adverse_modifier=_float_or_none(
+            downside.get("expected_adverse_modifier")
+        )
+        or 1.0,
+    )
+
+
+def _exit_decision_quality_observation(
+    exit_quality: dict[str, Any],
+) -> ExitDecisionQualityObservation:
+    return ExitDecisionQualityObservation(
+        data=exit_quality,
+        exit_pressure_state=exit_quality.get("exit_pressure_state"),
+        exit_quality_score=_float_or_none(exit_quality.get("exit_quality_score")) or 0.0,
+        recommended_action=exit_quality.get("recommended_action"),
+    )
+
+
+def _portfolio_observation(portfolio: dict[str, Any]) -> PortfolioObservation:
+    return PortfolioObservation(
+        data=portfolio,
+        decision=portfolio.get("decision"),
+        size_multiplier=_float_or_none(portfolio.get("size_multiplier")) or 1.0,
+        duplicate_risk_score=_float_or_none(portfolio.get("duplicate_risk_score")) or 0.0,
+    )
+
+
+def _execution_quality_observation(execution_quality: dict[str, Any]) -> ExecutionQualityObservation:
+    return ExecutionQualityObservation(
+        data=execution_quality,
+        decision=execution_quality.get("decision"),
+        fill_quality=execution_quality.get("fill_quality"),
+        net_execution_cost_pct=_float_or_none(
+            execution_quality.get("net_execution_cost_pct")
+        ) or 0.0,
+    )
+
+
 def build_final_signal_context(
     *,
     account_state: dict[str, Any],
@@ -1005,6 +1220,52 @@ def build_final_signal_context(
     trend = trend or {}
     strategy = account_state.get("strategy_observation") or {}
     market_alignment = account_state.get("market_alignment") or {}
+    market_regime = account_state.get("market_regime") or classify_market_regime(
+        account_state=account_state,
+        market_context=market_alignment,
+    ).to_dict()
+    account_state["market_regime"] = market_regime
+    market_microstructure = (
+        account_state.get("market_microstructure")
+        or classify_market_microstructure(account_state=account_state).to_dict()
+    )
+    account_state["market_microstructure"] = market_microstructure
+    market_participation = (
+        account_state.get("market_participation")
+        or evaluate_market_participation(
+            account_state=account_state,
+            market_context=market_alignment,
+        ).to_dict()
+    )
+    account_state["market_participation"] = market_participation
+    volatility_normalization = (
+        account_state.get("volatility_normalization")
+        or classify_volatility_normalization(account_state=account_state).to_dict()
+    )
+    account_state["volatility_normalization"] = volatility_normalization
+    downside_asymmetry = (
+        account_state.get("downside_asymmetry")
+        or evaluate_downside_asymmetry(account_state=account_state).to_dict()
+    )
+    account_state["downside_asymmetry"] = downside_asymmetry
+    exit_decision_quality = (
+        account_state.get("exit_decision_quality")
+        or evaluate_exit_decision_quality(account_state=account_state).to_dict()
+    )
+    account_state["exit_decision_quality"] = exit_decision_quality
+    portfolio_decision = account_state.get("portfolio_decision") or evaluate_portfolio_decision(
+        symbol=str(symbol or ""),
+        action=str(account_state.get("action") or ""),
+        account_state=account_state,
+    ).to_dict()
+    account_state["portfolio_decision"] = portfolio_decision
+    execution_quality = account_state.get("execution_quality") or estimate_execution_quality(
+        symbol=str(symbol or ""),
+        action=str(account_state.get("action") or ""),
+        signal_price=account_state.get("signal_price"),
+        account_state=account_state,
+    ).to_dict()
+    account_state["execution_quality"] = execution_quality
     opportunity = account_state.get("buy_opportunity") or {}
     intelligence_context = intelligence_context or account_state.get("intelligence_context") or {}
     claude_account_state = build_claude_account_state(account_state)
@@ -1017,6 +1278,14 @@ def build_final_signal_context(
         "session_momentum_gate": session_gate,
         "strategy": strategy,
         "market_alignment": market_alignment,
+        "market_regime": market_regime,
+        "market_microstructure": market_microstructure,
+        "market_participation": market_participation,
+        "volatility_normalization": volatility_normalization,
+        "downside_asymmetry": downside_asymmetry,
+        "exit_decision_quality": exit_decision_quality,
+        "portfolio_decision": portfolio_decision,
+        "execution_quality": execution_quality,
         "intelligence_context": intelligence_context,
     }
 
@@ -1033,6 +1302,32 @@ def build_final_signal_context(
         "session_gate_severity": session_gate.get("severity"),
         "session_gate_would_block": session_gate.get("would_block"),
         "effective_bias": account_state.get("market_bias_effective"),
+        "market_regime": market_regime.get("composite_regime"),
+        "market_regime_confidence": market_regime.get("confidence"),
+        "session_phase": market_microstructure.get("session_phase"),
+        "breakout_quality": market_microstructure.get("breakout_quality"),
+        "microstructure_score": market_microstructure.get("microstructure_score"),
+        "microstructure_expectancy_modifier": market_microstructure.get(
+            "expectancy_modifier"
+        ),
+        "participation_state": market_participation.get("participation_state"),
+        "participation_confirmation_score": market_participation.get(
+            "confirmation_score"
+        ),
+        "isolated_move_risk": market_participation.get("isolated_move_risk"),
+        "volatility_stretch_state": volatility_normalization.get("stretch_state"),
+        "volatility_chase_risk": volatility_normalization.get("chase_risk"),
+        "volatility_adjusted_score": volatility_normalization.get(
+            "volatility_adjusted_score"
+        ),
+        "downside_state": downside_asymmetry.get("downside_state"),
+        "downside_score": downside_asymmetry.get("downside_score"),
+        "exit_pressure_state": exit_decision_quality.get("exit_pressure_state"),
+        "exit_quality_score": exit_decision_quality.get("exit_quality_score"),
+        "portfolio_decision": portfolio_decision.get("decision"),
+        "portfolio_duplicate_risk_score": portfolio_decision.get("duplicate_risk_score"),
+        "execution_quality": execution_quality.get("fill_quality"),
+        "net_execution_cost_pct": execution_quality.get("net_execution_cost_pct"),
     }
 
     return BuiltSignalContext(
@@ -1048,6 +1343,18 @@ def build_final_signal_context(
         trend=_trend_observation(trend),
         strategy=StrategyObservation(strategy),
         market_alignment=MarketAlignmentObservation(market_alignment),
+        market_regime=_market_regime_observation(market_regime),
+        market_microstructure=_market_microstructure_observation(market_microstructure),
+        market_participation=_market_participation_observation(market_participation),
+        volatility_normalization=_volatility_normalization_observation(
+            volatility_normalization
+        ),
+        downside_asymmetry=_downside_asymmetry_observation(downside_asymmetry),
+        exit_decision_quality=_exit_decision_quality_observation(
+            exit_decision_quality
+        ),
+        portfolio=_portfolio_observation(portfolio_decision),
+        execution_quality=_execution_quality_observation(execution_quality),
         opportunity=_opportunity_observation(opportunity),
         claude_account_state=claude_account_state,
         summary=summary,

@@ -7,6 +7,7 @@ from datetime import datetime
 from typing import Any, Callable
 
 from services.observability import record_setup_quality_source
+from services.setup_structure_service import evaluate_setup_structure
 
 
 @dataclass(frozen=True)
@@ -65,6 +66,14 @@ def build_setup_observation(
     try:
         snapshot = deps.build_snapshot(symbol)
         setup_quality = build_setup_quality(snapshot, deps)
+        structure = evaluate_setup_structure(snapshot).to_dict()
+        setup_quality["structure"] = structure
+        setup_quality["structure_state"] = structure.get("structure_state")
+        setup_quality["structure_score"] = structure.get("structure_score")
+        setup_quality["structure_expectancy_modifier"] = structure.get(
+            "expectancy_modifier"
+        )
+        account_state["setup_structure"] = structure
         setup_quality_source = setup_quality.get("source") or "unknown"
         record_setup_quality_source(setup_quality_source)
         if setup_quality_source != "setup_engine":
@@ -92,6 +101,8 @@ def build_setup_observation(
             "reason": setup_policy.get("reason"),
             "source": setup_quality_source,
             "fallback": setup_quality_source != "setup_engine",
+            "structure_state": structure.get("structure_state"),
+            "structure_score": structure.get("structure_score"),
         }
 
         deps.log.info(

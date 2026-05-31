@@ -116,7 +116,16 @@ def test_initial_context_builder_hydrates_buy_context():
                 "premarket_bias": premarket_bias,
             },
             setup_context_deps=SetupContextDeps(
-                build_snapshot=lambda symbol: {"setup_label": "clean", "id": 42},
+                build_snapshot=lambda symbol: {
+                    "setup_label": "clean",
+                    "id": 42,
+                    "base_type": "clean",
+                    "prior_failed_breakouts": 0,
+                    "compression_ratio": 0.55,
+                    "expansion_ratio": 1.45,
+                    "distance_to_resistance_pct": 2.1,
+                    "reward_risk_ratio": 2.4,
+                },
                 evaluate_setup_policy=lambda setup_label: {
                     "setup_policy_action": "boost",
                     "reason": "setup_policy:boost",
@@ -143,12 +152,27 @@ def test_initial_context_builder_hydrates_buy_context():
     assert_equal(account_state["momentum"]["premarket_bias"], "buy", "momentum bias")
     assert_equal(account_state["premarket_alignment_source"], "live_tape", "alignment source")
     assert_equal(
+        account_state["market_regime"]["trend_regime"],
+        "mixed",
+        "market regime default",
+    )
+    assert_equal(
+        built.market_regime.data["confidence"] in {"very_low", "low", "medium"},
+        True,
+        "market regime confidence",
+    )
+    assert_equal(
         account_state["setup_observation"]["setup_label"],
         "confirmed_near_vwap_recovery",
         "setup",
     )
     assert_equal(account_state["setup_quality"]["score"], 91, "setup quality")
     assert_equal(account_state["setup_quality"]["source"], "setup_engine", "setup source")
+    assert_equal(
+        account_state["setup_quality"]["structure_state"],
+        "high_quality_structure",
+        "setup structure",
+    )
     assert_equal(
         account_state["recent_favorable_setup"]["setup_label"],
         "confirmed_near_vwap_recovery",

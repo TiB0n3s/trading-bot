@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 import time
 from typing import Any
 
+from services.execution_quality_service import estimate_execution_quality
 from services.policies import execution_policy
 from services.policy_controls import policy_family_enabled
 
@@ -231,3 +232,24 @@ class ExecutionAdapterService:
             max_signal_price_drift_pct=self.max_signal_price_drift_pct,
             logger=self.log,
         )
+
+    def estimate_execution_quality(self, symbol, action, signal_price, account_state):
+        """Fetch a quote snapshot and estimate execution quality without submitting."""
+        try:
+            quote = self.fetch_quote_snapshot(symbol)
+        except Exception as exc:
+            quote = {"quote_error": str(exc)}
+        try:
+            latest_price = self.latest_trade_price(symbol)
+        except Exception:
+            latest_price = None
+        estimate = estimate_execution_quality(
+            symbol=symbol,
+            action=action,
+            signal_price=signal_price,
+            account_state=account_state,
+            quote_snapshot=quote,
+            latest_price=latest_price,
+        ).to_dict()
+        account_state["execution_quality"] = estimate
+        return estimate

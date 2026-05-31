@@ -60,13 +60,14 @@ def run_rollout_contract_report(
     print(f"runtime_effect          : telemetry_only_no_live_authority")
     print()
     print(
-        f"  {'family':<26} {'status':<24} {'sample':>7} "
+        f"  {'family':<26} {'status':<24} {'family_cap':<24} {'sample':>7} "
         f"{'missing':>8} {'stable':>8} {'overlap':>8} {'fp_red':>8} {'fn_cost':>8}"
     )
     for assessment in payload.assessments:
         print(
             f"  {assessment.feature_family:<26} "
             f"{assessment.status.value:<24} "
+            f"{assessment.family_max_status.value:<24} "
             f"{assessment.sample_size:>7} "
             f"{_fmt(assessment.missing_rate):>8} "
             f"{_fmt(assessment.stability_share):>8} "

@@ -60,6 +60,7 @@ class RolloutAssessment:
     feature_family: str
     report_version: str
     status: RolloutStatus
+    family_max_status: RolloutStatus
     sample_size: int
     missing_rate: float | None
     stability_share: float | None
@@ -76,6 +77,7 @@ class RolloutAssessment:
     def to_dict(self) -> dict[str, Any]:
         data = asdict(self)
         data["status"] = self.status.value
+        data["family_max_status"] = self.family_max_status.value
         return data
 
 
@@ -307,6 +309,7 @@ def assess_feature_family_rollout(
         feature_family=feature_family,
         report_version=ROLLOUT_CONTRACT_VERSION,
         status=status,
+        family_max_status=max_status,
         sample_size=sample_size,
         missing_rate=missing_rate,
         stability_share=stability_share,

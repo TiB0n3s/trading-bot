@@ -98,7 +98,6 @@ TEMPORARY_BACKFILL_TRAINING_DB_ALLOWLIST = {
     "collect_and_score_events.py",
     "ingest_market_context.py",
     "init_prediction_db.py",
-    "policy_backtest.py",
 }
 
 TEMPORARY_DB_ACCESS_ALLOWLIST = (

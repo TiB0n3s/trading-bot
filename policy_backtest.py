@@ -19,8 +19,8 @@ from collections import defaultdict
 from datetime import date, timedelta, datetime
 from pathlib import Path
 
-from db import DB_PATH, get_connection
 from policy_artifacts import atomic_write_json
+from repositories.policy_backtest_repo import PolicyBacktestRepository
 
 BASE_DIR = Path(__file__).resolve().parent
 POLICY_BACKTEST_SUMMARY_FILE = BASE_DIR / "policy_backtest_summary.json"
@@ -246,46 +246,11 @@ def load_rows(args):
 
     params.append(args.limit)
 
-    with get_connection(DB_PATH) as con:
-        rows = con.execute(f"""
-            SELECT
-                id,
-                timestamp,
-                symbol,
-                action,
-                signal_price,
-                approved,
-                rejection_reason,
-
-                market_bias,
-                market_bias_effective,
-                risk_level,
-                entry_quality,
-                trend_direction,
-                trend_strength,
-                momentum_direction,
-                momentum_pct,
-
-                session_trend_label,
-                session_trend_score,
-
-                prediction_score,
-                prediction_decision,
-
-                setup_label,
-                setup_policy_action,
-
-                buy_opportunity_score,
-                buy_opportunity_recommendation
-            FROM trades
-            WHERE LOWER(action) = 'buy'
-              AND signal_price IS NOT NULL
-              {extra}
-            ORDER BY id DESC
-            LIMIT ?
-        """, params).fetchall()
-
-    return rows
+    return PolicyBacktestRepository().buy_rows(
+        extra_sql=extra,
+        params=params,
+        limit=args.limit,
+    )
 
 
 def summarize(results):

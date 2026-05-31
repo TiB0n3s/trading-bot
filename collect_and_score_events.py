@@ -24,7 +24,6 @@ import json
 from collections import Counter, defaultdict
 from pathlib import Path
 
-from db import DB_PATH, get_connection
 from symbols_config import APPROVED_SYMBOLS_LIST
 from market_intelligence.news_event_model import score_event
 from market_intelligence.intelligence_store import (
@@ -36,6 +35,7 @@ from market_intelligence.event_collectors.company_news_collector import (
     collect_company_news_events,
 )
 from market_intelligence.experience_model import predict_all_symbols
+from repositories.market_intelligence_repo import MarketIntelligenceRepository
 from alerts import send_alert
 
 
@@ -49,25 +49,7 @@ def short(v, width):
 def existing_event_keys(market_date: str) -> set[tuple]:
     """Return keys for idempotent same-day import."""
     init_intelligence_tables()
-    with get_connection(DB_PATH) as con:
-        rows = con.execute(
-            """
-            SELECT symbol, event_type, event_summary, source_url
-            FROM daily_symbol_events
-            WHERE market_date = ?
-            """,
-            (market_date,),
-        ).fetchall()
-
-    keys = set()
-    for r in rows:
-        keys.add((
-            r["symbol"],
-            r["event_type"],
-            r["event_summary"] or "",
-            r["source_url"] or "",
-        ))
-    return keys
+    return MarketIntelligenceRepository().daily_symbol_event_keys(market_date)
 
 
 def event_key(event: dict) -> tuple:

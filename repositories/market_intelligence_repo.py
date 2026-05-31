@@ -171,6 +171,26 @@ class MarketIntelligenceRepository:
                 (market_date, symbol),
             ).fetchall()
 
+    def daily_symbol_event_keys(self, market_date: str) -> set[tuple[str, str, str, str]]:
+        with get_connection(self.db_path) as con:
+            rows = con.execute(
+                """
+                SELECT symbol, event_type, event_summary, source_url
+                FROM daily_symbol_events
+                WHERE market_date = ?
+                """,
+                (market_date,),
+            ).fetchall()
+        return {
+            (
+                row["symbol"],
+                row["event_type"],
+                row["event_summary"] or "",
+                row["source_url"] or "",
+            )
+            for row in rows
+        }
+
     def context_symbols(self, market_date: str) -> list[str]:
         with get_connection(self.db_path) as con:
             rows = con.execute(

@@ -36,6 +36,7 @@ Usage:
   python3 ops_check.py order-health
   python3 ops_check.py runtime-health
   python3 ops_check.py lifecycle-analysis
+  python3 ops_check.py advisory-authority-report
   python3 ops_check.py migration-status
   python3 ops_check.py strong-days
   python3 ops_check.py strong-days 2026-05-26
@@ -65,6 +66,7 @@ from services.ops_checks.excursion_checks import (
 from services.ops_checks.feature_checks import run_feature_health, run_feature_watch
 from services.ops_checks.intelligence_checks import run_intelligence_summary
 from services.ops_checks.lifecycle_checks import run_lifecycle_analysis
+from services.ops_checks.advisory_authority_checks import run_advisory_authority_report
 from services.ops_checks.order_checks import run_order_health
 from services.ops_checks.rejection_checks import run_rejection_summary
 from services.ops_checks.rejected_outcome_checks import run_rejected_outcomes_health
@@ -538,6 +540,10 @@ def buy_opportunity_report(target_date: str) -> bool:
 def claude_context_audit(target_date: str) -> bool:
     return run_claude_context_audit(target_date, base_dir=BASE_DIR)
 
+
+def advisory_authority_report(target_date: str) -> bool:
+    return run_advisory_authority_report(target_date, base_dir=BASE_DIR)
+
 def main():
     env_loaded = load_env_file()
     print(f"env_file_loaded={env_loaded}")
@@ -617,6 +623,9 @@ def main():
 
     if command == "claude-context-audit":
         return 0 if claude_context_audit(target_date) else 1
+
+    if command == "advisory-authority-report":
+        return 0 if advisory_authority_report(target_date) else 1
 
     if command == "premarket":
         checks = []

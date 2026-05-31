@@ -200,7 +200,9 @@ well-supported ML compare decision disagrees negatively with otherwise marginal
 evidence, you may reduce confidence or size, but never override hard gates.
 
 SETUP QUALITY GUIDANCE:
-account_state may contain "setup_quality" from the bot's live setup intelligence engine.
+For BUY signals, account_state includes "setup_quality" from the bot's live
+setup intelligence engine. Treat setup_quality as the canonical setup-quality
+source; setup policy fields are deterministic guard/sizing metadata.
 
 For BUY signals:
 - score >= 85: premium setup; high confidence may be appropriate if trend/momentum confirm.

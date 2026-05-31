@@ -1144,7 +1144,17 @@ def run_final_approval_gates(
         account_state["opportunity_score"] = opportunity
         claude_account_state["opportunity_score"] = opportunity
 
-        strategy_memory = memory_for_signal(symbol, opportunity)
+        strategy_memory = memory_for_signal(
+            symbol,
+            {
+                "opportunity_score": opportunity,
+                "buy_opportunity": account_state.get("buy_opportunity") or {},
+                "setup_observation": account_state.get("setup_observation") or {},
+                "setup_quality": account_state.get("setup_quality") or {},
+                "prediction_gate": account_state.get("prediction_gate") or {},
+                "session_momentum": account_state.get("session_momentum") or {},
+            },
+        )
         account_state["strategy_memory"] = strategy_memory
         claude_account_state["strategy_memory"] = strategy_memory
 

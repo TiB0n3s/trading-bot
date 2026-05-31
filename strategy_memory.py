@@ -50,9 +50,71 @@ def _load_strategy_memory():
     return _strategy_memory
 
 
-def memory_for_signal(symbol, setup_quality=None):
+def _worst_recommendation(recommendations):
+    order = {
+        "avoid": 4,
+        "caution": 3,
+        "neutral": 2,
+        "observe": 1,
+        "favor": 0,
+        "none": 0,
+        None: 0,
+    }
+    return max(recommendations, key=lambda item: order.get(item, 0)) if recommendations else None
+
+
+def _contextual_intelligence_from_signal_context(signal_context):
+    ctx = signal_context or {}
+    setup_obs = ctx.get("setup_observation") or {}
+    setup_quality = ctx.get("setup_quality") or setup_obs.get("setup_quality") or {}
+    buy_opportunity = ctx.get("buy_opportunity") or {}
+    prediction = ctx.get("prediction") or ctx.get("prediction_gate") or {}
+    session = ctx.get("session_momentum") or {}
+
+    return {
+        "setup": {
+            "setup_label": (
+                setup_obs.get("setup_label")
+                or setup_quality.get("label")
+                or ctx.get("setup_label")
+            )
+        },
+        "prediction": {
+            "prediction_decision": (
+                prediction.get("prediction_decision")
+                or ctx.get("prediction_decision")
+            )
+        },
+        "buy_opportunity": {
+            "buy_opportunity_recommendation": (
+                buy_opportunity.get("buy_opportunity_recommendation")
+                or buy_opportunity.get("recommendation")
+                or ctx.get("buy_opportunity_recommendation")
+            )
+        },
+        "session_momentum": {
+            "trend_label": (
+                session.get("trend_label")
+                or ctx.get("session_trend_label")
+            )
+        },
+    }
+
+
+def _summary_from_context_matches(matches):
+    match_recs = [m.get("recommendation") for m in matches]
+    worst_context_rec = _worst_recommendation(match_recs)
+    learned_min_scores = [
+        int(m["min_setup_score"])
+        for m in matches
+        if isinstance(m.get("min_setup_score"), int)
+    ]
+    return worst_context_rec, learned_min_scores
+
+
+def memory_for_signal(symbol, signal_context=None):
     """
-    Return live memory adjustment for a symbol/setup.
+    Return live memory adjustment for a symbol and current signal context.
 
     Output is intentionally simple:
     {
@@ -79,17 +141,35 @@ def memory_for_signal(symbol, setup_quality=None):
     symbol = (symbol or "").upper()
     symbols = mem.get("symbols") or {}
     symbol_mem = symbols.get(symbol)
+    context_memory = contextual_memory_for_signal(
+        symbol,
+        _contextual_intelligence_from_signal_context(signal_context),
+        memory_override=mem,
+    )
+    matches = context_memory.get("matches") or []
 
     if not symbol_mem:
+        context_rec, learned_min_scores = _summary_from_context_matches(matches)
         return {
             "available": True,
-            "recommendation": "observe",
-            "min_setup_score": None,
+            "recommendation": context_rec or "observe",
+            "min_setup_score": max(learned_min_scores) if learned_min_scores else None,
             "reason": f"no symbol memory for {symbol}",
+            "context_matches": matches,
         }
 
     rec = symbol_mem.get("recommendation", "observe")
     min_score = symbol_mem.get("min_setup_score")
+    worst_context_rec, learned_min_scores = _summary_from_context_matches(matches)
+    if learned_min_scores:
+        score_candidates = learned_min_scores[:]
+        if isinstance(min_score, int):
+            score_candidates.append(min_score)
+        min_score = max(score_candidates)
+    if worst_context_rec in ("avoid", "caution"):
+        rec = worst_context_rec
+    elif worst_context_rec == "favor" and rec in ("observe", "neutral"):
+        rec = "favor"
 
     return {
         "available": True,
@@ -97,6 +177,7 @@ def memory_for_signal(symbol, setup_quality=None):
         "min_setup_score": min_score,
         "reason": symbol_mem.get("reason"),
         "symbol_memory": symbol_mem,
+        "context_matches": matches,
         "generated_at": mem.get("generated_at"),
         "lookback_days": mem.get("lookback_days"),
     }

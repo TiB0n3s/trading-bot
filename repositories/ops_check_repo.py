@@ -216,6 +216,31 @@ class OpsCheckRepository:
             (target_date,),
         )
 
+    def decision_authority_rows(self, target_date: str) -> list[sqlite3.Row]:
+        if not self.table_exists("decision_snapshots"):
+            return []
+        columns = self.table_columns("decision_snapshots")
+        if "account_state_json" not in columns:
+            return []
+        return self._fetchall(
+            """
+            SELECT
+                id,
+                decision_time,
+                symbol,
+                action,
+                approved,
+                final_decision,
+                rejection_reason,
+                account_state_json
+            FROM decision_snapshots
+            WHERE substr(decision_time, 1, 10) = ?
+              AND LOWER(COALESCE(action, '')) IN ('buy', 'sell')
+            ORDER BY decision_time ASC, id ASC
+            """,
+            (target_date,),
+        )
+
     def capture_by_exit_type_rows(self, target_date: str) -> list[sqlite3.Row]:
         return self._fetchall(
             """

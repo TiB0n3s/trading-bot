@@ -14,6 +14,7 @@ _metrics = {
     "pipeline_stage_timing": {},
     "fallback_frequency": {},
     "dominant_limiter_frequency": {},
+    "setup_quality_source_frequency": {},
     "policy_disagreement_rates": {},
     "policy_kill_switches": {},
 }
@@ -61,6 +62,13 @@ def record_dominant_limiter(limiter: str) -> None:
     key = limiter or "unknown"
     with _lock:
         bucket = _metrics["dominant_limiter_frequency"]
+        bucket[key] = bucket.get(key, 0) + 1
+
+
+def record_setup_quality_source(source: str | None) -> None:
+    key = source or "unknown"
+    with _lock:
+        bucket = _metrics["setup_quality_source_frequency"]
         bucket[key] = bucket.get(key, 0) + 1
 
 

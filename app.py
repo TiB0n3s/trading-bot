@@ -104,6 +104,7 @@ from runtime_config import (
     DECISION_POLICY_LIVE_SIZE_DOWN,
     decision_policy_live_authority_enabled,
     public_decision_policy_config,
+    public_ml_authority_config,
     is_cash_mode,
     is_cash_safe_mode,
     public_runtime_config,

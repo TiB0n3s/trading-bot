@@ -123,6 +123,7 @@ class LiveSignalProcessorDeps:
     enforce_prediction_blocks: bool
     enforce_prediction_watch_in_cash: bool
     prediction_gate_mode: str
+    ml_authority_config: dict[str, Any]
     is_cash_mode: Callable[[], bool]
     enforce_session_momentum_gate: bool
     is_degraded_setup: Callable[[dict[str, Any]], bool]
@@ -890,6 +891,7 @@ class LiveSignalProcessor:
             enforce_prediction_blocks=self.deps.enforce_prediction_blocks,
             enforce_prediction_watch_in_cash=self.deps.enforce_prediction_watch_in_cash,
             prediction_gate_mode=self.deps.prediction_gate_mode,
+            ml_authority_config=self.deps.ml_authority_config,
             is_cash_mode=self.deps.is_cash_mode,
             enforce_session_momentum_gate=self.deps.enforce_session_momentum_gate,
             is_degraded_setup=self.deps.is_degraded_setup,

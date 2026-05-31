@@ -1,10 +1,23 @@
 from __future__ import annotations
 
+import json
+from collections import Counter
 from pathlib import Path
+from typing import Any
 
 from repositories.ops_check_repo import OpsCheckRepository
 
 EM_DASH = "\u2014"
+
+
+def _load_json(raw: str | None) -> dict[str, Any]:
+    if not raw:
+        return {}
+    try:
+        loaded = json.loads(raw)
+        return loaded if isinstance(loaded, dict) else {}
+    except Exception:
+        return {}
 
 
 def run_setup_breakdown(target_date: str, *, base_dir: Path) -> bool:
@@ -56,6 +69,39 @@ def run_setup_breakdown(target_date: str, *, base_dir: Path) -> bool:
         print(f"  {'-'*30} {'-'*7} {'-'*8}")
         for r in feed_rows:
             print(f"  {r['error_category']:<30} {r['signals']:>7} {r['approved']:>8}")
+
+    print()
+    snapshot_rows = repo.decision_authority_rows(target_date)
+    setup_source_counts = Counter()
+    setup_source_symbol_counts: Counter[tuple[str, str]] = Counter()
+    buy_snapshot_count = 0
+    for row in snapshot_rows:
+        if (row["action"] or "").lower() != "buy":
+            continue
+        buy_snapshot_count += 1
+        account_state = _load_json(row["account_state_json"])
+        setup_quality = account_state.get("setup_quality") or {}
+        source = setup_quality.get("source") or "unknown"
+        setup_source_counts[source] += 1
+        if source != "setup_engine":
+            setup_source_symbol_counts[(row["symbol"] or "-", source)] += 1
+
+    if buy_snapshot_count:
+        print("  Setup quality source breakdown (decision snapshots):")
+        print(f"  {'source':<24} {'signals':>7} {'rate%':>7}")
+        print(f"  {'-'*24} {'-'*7} {'-'*7}")
+        for source, n in sorted(setup_source_counts.items(), key=lambda item: (-item[1], item[0])):
+            rate = 100.0 * n / buy_snapshot_count
+            print(f"  {source:<24} {n:>7} {rate:>6.1f}%")
+
+        fallback_total = buy_snapshot_count - setup_source_counts.get("setup_engine", 0)
+        if fallback_total:
+            print()
+            print("  Setup quality fallback by symbol (top 20):")
+            print(f"  {'symbol':<8} {'source':<20} {'signals':>7}")
+            print(f"  {'-'*8} {'-'*20} {'-'*7}")
+            for (symbol, source), n in setup_source_symbol_counts.most_common(20):
+                print(f"  {symbol:<8} {source:<20} {n:>7}")
 
     print()
     pnl_rows = repo.setup_pnl_rows(target_date)

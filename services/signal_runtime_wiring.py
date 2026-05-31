@@ -83,6 +83,7 @@ def build_live_signal_processor(*, container: Any, runtime: Any) -> LiveSignalPr
             enforce_prediction_blocks=runtime.ENFORCE_PREDICTION_BLOCKS,
             enforce_prediction_watch_in_cash=runtime.ENFORCE_PREDICTION_WATCH_IN_CASH,
             prediction_gate_mode=runtime.PREDICTION_GATE_MODE,
+            ml_authority_config=runtime.public_ml_authority_config(),
             is_cash_mode=runtime.is_cash_mode,
             enforce_session_momentum_gate=runtime.ENFORCE_SESSION_MOMENTUM_GATE,
             is_degraded_setup=runtime.is_degraded_setup,

@@ -996,6 +996,7 @@ def build_final_signal_context(
     account_state["trend_table"] = trend_table
 
     setup = account_state.get("setup_observation") or {}
+    setup_quality = account_state.get("setup_quality") or setup.get("setup_quality") or {}
     prediction = account_state.get("prediction_gate") or {}
     session = account_state.get("session_momentum") or {}
     session_gate = account_state.get("session_momentum_gate") or {}
@@ -1010,6 +1011,7 @@ def build_final_signal_context(
 
     decision_context = {
         "setup": setup,
+        "setup_quality": setup_quality,
         "prediction": prediction,
         "session_momentum": session,
         "session_momentum_gate": session_gate,
@@ -1019,8 +1021,10 @@ def build_final_signal_context(
     }
 
     summary = {
-        "setup_label": setup.get("setup_label"),
+        "setup_label": setup_quality.get("label") or setup.get("setup_label"),
         "setup_policy_action": setup.get("setup_policy_action"),
+        "setup_quality_source": setup_quality.get("source"),
+        "setup_quality_recommendation": setup_quality.get("recommendation"),
         "prediction_score": prediction.get("prediction_score"),
         "prediction_decision": prediction.get("prediction_decision"),
         "session_trend_label": session.get("trend_label"),

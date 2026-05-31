@@ -7,7 +7,10 @@ Reads strategy_memory.json produced by strategy_learner.py.
 
 import json
 import logging
+from dataclasses import dataclass
+from enum import Enum
 from pathlib import Path
+from typing import Any
 
 from policy_artifacts import policy_artifacts_enabled
 
@@ -18,6 +21,40 @@ MEMORY_FILE = BASE_DIR / "strategy_memory.json"
 
 _strategy_memory = {}
 _strategy_memory_mtime = 0.0
+
+
+class StrategyMemoryRecommendation(str, Enum):
+    AVOID = "avoid"
+    CAUTION = "caution"
+    NEUTRAL = "neutral"
+    OBSERVE = "observe"
+    FAVOR = "favor"
+    NONE = "none"
+
+
+@dataclass(frozen=True)
+class StrategyMemoryContext:
+    setup_label: str = "unknown"
+    prediction_decision: str = "unknown"
+    buy_opportunity_recommendation: str = "unknown"
+    session_trend_label: str = "unknown"
+
+    def to_lookup_context(self) -> dict[str, dict[str, str]]:
+        return {
+            "setup": {"setup_label": self.setup_label},
+            "prediction": {"prediction_decision": self.prediction_decision},
+            "buy_opportunity": {
+                "buy_opportunity_recommendation": self.buy_opportunity_recommendation
+            },
+            "session_momentum": {"trend_label": self.session_trend_label},
+        }
+
+
+def _clean_context_value(value: Any) -> str:
+    if value is None:
+        return "unknown"
+    text = str(value).strip()
+    return text if text else "unknown"
 
 
 def _load_strategy_memory():
@@ -52,53 +89,55 @@ def _load_strategy_memory():
 
 def _worst_recommendation(recommendations):
     order = {
-        "avoid": 4,
-        "caution": 3,
-        "neutral": 2,
-        "observe": 1,
-        "favor": 0,
-        "none": 0,
+        StrategyMemoryRecommendation.AVOID.value: 4,
+        StrategyMemoryRecommendation.CAUTION.value: 3,
+        StrategyMemoryRecommendation.NEUTRAL.value: 2,
+        StrategyMemoryRecommendation.OBSERVE.value: 1,
+        StrategyMemoryRecommendation.FAVOR.value: 0,
+        StrategyMemoryRecommendation.NONE.value: 0,
         None: 0,
     }
     return max(recommendations, key=lambda item: order.get(item, 0)) if recommendations else None
 
 
-def _contextual_intelligence_from_signal_context(signal_context):
+def normalize_strategy_memory_context(signal_context) -> StrategyMemoryContext:
     ctx = signal_context or {}
+    if not isinstance(ctx, dict):
+        return StrategyMemoryContext()
     setup_obs = ctx.get("setup_observation") or {}
     setup_quality = ctx.get("setup_quality") or setup_obs.get("setup_quality") or {}
     buy_opportunity = ctx.get("buy_opportunity") or {}
     prediction = ctx.get("prediction") or ctx.get("prediction_gate") or {}
     session = ctx.get("session_momentum") or {}
 
-    return {
-        "setup": {
-            "setup_label": (
+    return StrategyMemoryContext(
+        setup_label=_clean_context_value(
+            (
                 setup_obs.get("setup_label")
                 or setup_quality.get("label")
                 or ctx.get("setup_label")
             )
-        },
-        "prediction": {
-            "prediction_decision": (
+        ),
+        prediction_decision=_clean_context_value(
+            (
                 prediction.get("prediction_decision")
                 or ctx.get("prediction_decision")
             )
-        },
-        "buy_opportunity": {
-            "buy_opportunity_recommendation": (
+        ),
+        buy_opportunity_recommendation=_clean_context_value(
+            (
                 buy_opportunity.get("buy_opportunity_recommendation")
                 or buy_opportunity.get("recommendation")
                 or ctx.get("buy_opportunity_recommendation")
             )
-        },
-        "session_momentum": {
-            "trend_label": (
+        ),
+        session_trend_label=_clean_context_value(
+            (
                 session.get("trend_label")
                 or ctx.get("session_trend_label")
             )
-        },
-    }
+        ),
+    )
 
 
 def _summary_from_context_matches(matches):
@@ -143,7 +182,7 @@ def memory_for_signal(symbol, signal_context=None):
     symbol_mem = symbols.get(symbol)
     context_memory = contextual_memory_for_signal(
         symbol,
-        _contextual_intelligence_from_signal_context(signal_context),
+        normalize_strategy_memory_context(signal_context).to_lookup_context(),
         memory_override=mem,
     )
     matches = context_memory.get("matches") or []

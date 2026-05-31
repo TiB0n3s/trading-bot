@@ -46,6 +46,47 @@ class StageOutcome:
 
 
 @dataclass(frozen=True)
+class MLAuthorityOutcome:
+    mode: str
+    advisory_decision: str | None
+    negative_compare: bool
+    qualified_for_authority: bool
+    enforced: bool
+    effect_on_size: str
+    effect_on_execution: str
+    reason: str
+    sample_size: int
+    min_sample_size: int
+    confidence: str | None
+    min_confidence: str
+    prediction_age_seconds: float | None
+    max_age_seconds: int
+    would_block_under_promoted_mode: bool
+    size_cap_pct: float | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "mode": self.mode,
+            "authority_mode": self.mode,
+            "advisory_decision": self.advisory_decision,
+            "negative_compare": self.negative_compare,
+            "qualified_for_authority": self.qualified_for_authority,
+            "enforced": self.enforced,
+            "effect_on_size": self.effect_on_size,
+            "effect_on_execution": self.effect_on_execution,
+            "reason": self.reason,
+            "sample_size": self.sample_size,
+            "min_sample_size": self.min_sample_size,
+            "confidence": self.confidence,
+            "min_confidence": self.min_confidence,
+            "prediction_age_seconds": self.prediction_age_seconds,
+            "max_age_seconds": self.max_age_seconds,
+            "would_block_under_promoted_mode": self.would_block_under_promoted_mode,
+            "size_cap_pct": self.size_cap_pct,
+        }
+
+
+@dataclass(frozen=True)
 class RejectionAdapter:
     reject_current_signal: Callable[..., bool]
     reject_approval_decision: Callable[..., bool]
@@ -144,6 +185,163 @@ def execution_rejection_decision(outcome: Any) -> ApprovalDecision:
         ),
         source="execution",
         metadata=getattr(outcome, "metadata", None) or {},
+    )
+
+
+_ML_CONFIDENCE_RANK = {
+    None: -1,
+    "": -1,
+    "unknown": 0,
+    "low": 1,
+    "medium": 2,
+    "high": 3,
+}
+
+
+def _parse_ml_prediction_timestamp(value: Any) -> datetime | None:
+    if not value:
+        return None
+    try:
+        if isinstance(value, (int, float)):
+            raw = float(value)
+            ts = raw / 1000 if raw > 10_000_000_000 else raw
+            return datetime.fromtimestamp(ts, tz=timezone.utc)
+
+        text = str(value).strip()
+        if not text:
+            return None
+        if text.isdigit():
+            raw = float(text)
+            ts = raw / 1000 if len(text) > 10 else raw
+            return datetime.fromtimestamp(ts, tz=timezone.utc)
+
+        parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        return parsed.astimezone(timezone.utc)
+    except Exception:
+        return None
+
+
+def _ml_prediction_age_seconds(ml_prediction: dict[str, Any]) -> float | None:
+    for key in (
+        "prediction_timestamp",
+        "prediction_time",
+        "generated_at",
+        "created_at",
+        "updated_at",
+        "market_date",
+        "date",
+    ):
+        parsed = _parse_ml_prediction_timestamp(ml_prediction.get(key))
+        if parsed is not None:
+            return max(0.0, (datetime.now(timezone.utc) - parsed).total_seconds())
+    return None
+
+
+def evaluate_ml_authority_outcome(
+    *,
+    prediction_gate: dict[str, Any],
+    ml_prediction: dict[str, Any] | None,
+    ml_authority_config: dict[str, Any] | None,
+    execution_mode: str,
+) -> MLAuthorityOutcome:
+    config = ml_authority_config or {}
+    mode = str(config.get("authority_mode") or "observe_only_compare").strip().lower()
+    if mode not in {"observe_only_compare", "size_down_only", "paper_block", "live_block"}:
+        mode = "observe_only_compare"
+
+    advisory_decision = prediction_gate.get("ml_prediction_compare_decision")
+    negative_decisions = set(config.get("negative_decisions") or ("avoid", "block", "caution"))
+    negative_compare = advisory_decision in negative_decisions
+
+    try:
+        sample_size = int(
+            prediction_gate.get("ml_prediction_sample_size")
+            or (ml_prediction or {}).get("sample_size")
+            or 0
+        )
+    except Exception:
+        sample_size = 0
+    min_sample_size = int(config.get("min_sample_size") or 0)
+
+    confidence = (
+        prediction_gate.get("ml_prediction_confidence")
+        or (ml_prediction or {}).get("confidence")
+        or None
+    )
+    confidence_key = str(confidence or "").strip().lower()
+    min_confidence = str(config.get("min_confidence") or "medium").strip().lower()
+    confidence_ok = _ML_CONFIDENCE_RANK.get(confidence_key, -1) >= _ML_CONFIDENCE_RANK.get(
+        min_confidence,
+        _ML_CONFIDENCE_RANK["medium"],
+    )
+
+    max_age_seconds = int(config.get("max_age_seconds") or 0)
+    age_seconds = _ml_prediction_age_seconds(ml_prediction or {})
+    recency_ok = max_age_seconds <= 0 or (
+        age_seconds is not None and age_seconds <= max_age_seconds
+    )
+
+    sample_ok = sample_size >= min_sample_size
+    qualified = bool(negative_compare and sample_ok and confidence_ok and recency_ok)
+    would_block_under_promoted_mode = qualified
+
+    reason_parts = []
+    if not negative_compare:
+        reason_parts.append(f"ml_compare={advisory_decision or 'none'} is not negative")
+    if not sample_ok:
+        reason_parts.append(f"sample_size={sample_size} < min_sample_size={min_sample_size}")
+    if not confidence_ok:
+        reason_parts.append(
+            f"confidence={confidence or 'unknown'} < min_confidence={min_confidence}"
+        )
+    if not recency_ok:
+        reason_parts.append(
+            f"prediction_age_seconds={age_seconds} > max_age_seconds={max_age_seconds}"
+        )
+    if not reason_parts:
+        reason_parts.append("qualified negative ML compare")
+
+    enforced = False
+    effect_on_size = "none"
+    effect_on_execution = "none"
+    size_cap_pct = None
+
+    if qualified:
+        if mode == "size_down_only":
+            enforced = True
+            effect_on_size = "cap"
+            size_cap_pct = float(config.get("size_cap_pct") or 0.80)
+        elif mode == "paper_block":
+            if execution_mode in {"paper", "dry_run"}:
+                enforced = True
+                effect_on_execution = "block"
+            else:
+                reason_parts.append("paper_block not enforced outside paper/dry_run")
+        elif mode == "live_block":
+            enforced = True
+            effect_on_execution = "block"
+        elif mode == "observe_only_compare":
+            reason_parts.append("negative compare ignored by design in observe_only_compare")
+
+    return MLAuthorityOutcome(
+        mode=mode,
+        advisory_decision=advisory_decision,
+        negative_compare=negative_compare,
+        qualified_for_authority=qualified,
+        enforced=enforced,
+        effect_on_size=effect_on_size,
+        effect_on_execution=effect_on_execution,
+        reason="; ".join(reason_parts),
+        sample_size=sample_size,
+        min_sample_size=min_sample_size,
+        confidence=confidence,
+        min_confidence=min_confidence,
+        prediction_age_seconds=age_seconds,
+        max_age_seconds=max_age_seconds,
+        would_block_under_promoted_mode=would_block_under_promoted_mode,
+        size_cap_pct=size_cap_pct,
     )
 
 
@@ -758,6 +956,7 @@ def run_prediction_session_tape_gates(
     enforce_prediction_blocks: bool,
     enforce_prediction_watch_in_cash: bool,
     prediction_gate_mode: str,
+    ml_authority_config: dict[str, Any] | None,
     is_cash_mode: Callable[[], bool],
     enforce_session_momentum_gate: bool,
     is_degraded_setup: Callable[[dict[str, Any]], bool],
@@ -777,6 +976,7 @@ def run_prediction_session_tape_gates(
         ml_prediction_bucket=ml_prediction_bucket,
     )
     prediction_gate = prediction_obs.data
+    ml_prediction = account_state.get("ml_prediction") or {}
 
     ml_score_raw = prediction_gate.get("ml_prediction_score")
     ml_sample = int(prediction_gate.get("ml_prediction_sample_size") or 0)
@@ -848,6 +1048,59 @@ def run_prediction_session_tape_gates(
             f"score={ml_score_raw} confidence={ml_confidence} → {pred_only_cap}%"
         )
 
+    ml_authority = evaluate_ml_authority_outcome(
+        prediction_gate=prediction_gate,
+        ml_prediction=ml_prediction,
+        ml_authority_config=ml_authority_config,
+        execution_mode=execution_mode,
+    )
+    ml_authority_payload = ml_authority.to_dict()
+    prediction_gate["ml_authority"] = ml_authority_payload
+    account_state["ml_outcome"] = {
+        "advisory_decision": ml_authority.advisory_decision,
+        "authority_mode": ml_authority.mode,
+        "enforced": ml_authority.enforced,
+        "effect_on_size": ml_authority.effect_on_size,
+        "effect_on_execution": ml_authority.effect_on_execution,
+        "reason": ml_authority.reason,
+    }
+    account_state["ml_authority"] = ml_authority_payload
+    account_state["ml_authority_mode"] = ml_authority.mode
+    account_state["ml_authority_triggered"] = ml_authority.enforced
+    account_state["ml_authority_reason"] = ml_authority.reason
+
+    if ml_authority.enforced and ml_authority.effect_on_size == "cap":
+        apply_size_cap(
+            account_state,
+            cap_pct=float(ml_authority.size_cap_pct or 0.80),
+            state_key="ml_authority_size_cap",
+            payload=ml_authority_payload,
+        )
+        log.warning(
+            f"ML authority size-down for {symbol}: mode={ml_authority.mode} "
+            f"compare={ml_authority.advisory_decision} cap={ml_authority.size_cap_pct} "
+            f"reason={ml_authority.reason}"
+        )
+
+    if ml_authority.enforced and ml_authority.effect_on_execution == "block":
+        reason = (
+            f"ml_authority_mode={ml_authority.mode}; "
+            f"compare={ml_authority.advisory_decision}; "
+            f"sample_size={ml_authority.sample_size}; "
+            f"confidence={ml_authority.confidence}; "
+            f"reason={ml_authority.reason}"
+        )
+        return StageOutcome(
+            rejected=True,
+            approval=prediction_gate_rejection(
+                reason,
+                metadata={
+                    "prediction_gate": prediction_gate,
+                    "ml_authority": ml_authority_payload,
+                },
+            ),
+        )
+
     context_runtime.build_buy_opportunity_observation(
         trend=trend,
         bias_entry=bias_entry,
@@ -891,7 +1144,6 @@ def run_prediction_session_tape_gates(
         )
 
     if effective_bias == "avoid_soft" and not allow_buy_from_bias:
-        ml_prediction = account_state.get("ml_prediction") or {}
         prediction_sample_size = int(
             prediction_gate.get("ml_prediction_sample_size")
             or ml_prediction.get("sample_size")
@@ -984,6 +1236,16 @@ def run_prediction_session_tape_gates(
         trend=trend,
     )
     account_state["session_momentum_gate"] = session_gate
+    account_state["session_gate_outcome"] = {
+        "advisory_decision": "block" if session_gate.get("would_block") else session_gate.get("severity"),
+        "authority_mode": "enforced" if enforce_session_momentum_gate else "observe_only",
+        "enforced": bool(enforce_session_momentum_gate and session_gate.get("would_block")),
+        "effect_on_size": "cap" if session_gate.get("severity") in ("soft_negative", "reversal_caution", "hard_negative") else "none",
+        "effect_on_execution": "block"
+        if enforce_session_momentum_gate and session_gate.get("would_block")
+        else "none",
+        "reason": session_gate.get("reason"),
+    }
 
     if session_gate.get("would_block"):
         reason = session_gate.get("reason", "session momentum gate")
@@ -1268,12 +1530,24 @@ def run_final_approval_gates(
     decision_policy_live_size_down = (
         decision_policy_live_size_down_enabled and decision_policy_authority_enabled
     )
+    account_state["decision_policy_outcome"] = {
+        "advisory_decision": decision_policy.get("decision"),
+        "authority_mode": decision_policy_config.get("authority_mode"),
+        "enforced": False,
+        "effect_on_size": "none",
+        "effect_on_execution": "none",
+        "reason": decision_policy.get("reason"),
+    }
+    claude_account_state["decision_policy_outcome"] = account_state["decision_policy_outcome"]
 
     if (
         action == "buy"
         and decision_policy_live_block
         and decision_policy.get("decision") == "block"
     ):
+        account_state["decision_policy_outcome"]["enforced"] = True
+        account_state["decision_policy_outcome"]["effect_on_execution"] = "block"
+        claude_account_state["decision_policy_outcome"] = account_state["decision_policy_outcome"]
         reason = decision_policy.get("reason", "decision policy blocked setup")
         log.warning(
             f"Decision policy gate blocked {symbol} BUY before Claude: {reason}"
@@ -1329,6 +1603,9 @@ def run_final_approval_gates(
         claude_account_state["decision_policy_size_down"] = account_state[
             "decision_policy_size_down"
         ]
+        account_state["decision_policy_outcome"]["enforced"] = True
+        account_state["decision_policy_outcome"]["effect_on_size"] = "size_down"
+        claude_account_state["decision_policy_outcome"] = account_state["decision_policy_outcome"]
         claude_account_state["max_position_size_pct"] = reduced_limit
         claude_account_state["decision_policy_max_position_size_pct"] = reduced_limit
 

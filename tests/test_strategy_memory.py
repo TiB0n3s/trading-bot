@@ -93,6 +93,27 @@ def test_memory_for_signal_preserves_symbol_memory_without_context(tmp_path):
     assert [m["label"] for m in result["context_matches"]] == ["symbol"]
 
 
+def test_strategy_memory_context_normalizes_malformed_context():
+    result = strategy_memory.normalize_strategy_memory_context("not-a-dict")
+    assert result.setup_label == "unknown"
+    assert result.prediction_decision == "unknown"
+    assert result.buy_opportunity_recommendation == "unknown"
+    assert result.session_trend_label == "unknown"
+
+    result = strategy_memory.normalize_strategy_memory_context(
+        {
+            "setup_quality": {"label": ""},
+            "prediction_gate": {"prediction_decision": None},
+            "buy_opportunity": {"recommendation": "  watch  "},
+            "session_momentum": {"trend_label": "strong_uptrend"},
+        }
+    )
+    assert result.setup_label == "unknown"
+    assert result.prediction_decision == "unknown"
+    assert result.buy_opportunity_recommendation == "watch"
+    assert result.session_trend_label == "strong_uptrend"
+
+
 def main():
     import tempfile
     from pathlib import Path
@@ -100,10 +121,14 @@ def main():
     tests = [
         test_memory_for_signal_uses_context_matches,
         test_memory_for_signal_preserves_symbol_memory_without_context,
+        test_strategy_memory_context_normalizes_malformed_context,
     ]
     for test in tests:
-        with tempfile.TemporaryDirectory() as tmp:
-            test(Path(tmp))
+        if test.__name__.endswith("malformed_context"):
+            test()
+        else:
+            with tempfile.TemporaryDirectory() as tmp:
+                test(Path(tmp))
         print(f"[OK] {test.__name__}")
     print(f"\nAll {len(tests)} strategy memory tests passed.")
 

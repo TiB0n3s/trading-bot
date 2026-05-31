@@ -70,6 +70,26 @@ if DECISION_POLICY_AUTHORITY_MODE not in {"disabled", "paper_only", "all_modes"}
 DECISION_POLICY_LIVE_BLOCK = _env_bool("DECISION_POLICY_LIVE_BLOCK", True)
 DECISION_POLICY_LIVE_SIZE_DOWN = _env_bool("DECISION_POLICY_LIVE_SIZE_DOWN", True)
 
+ML_AUTHORITY_MODES = {
+    "observe_only_compare",
+    "size_down_only",
+    "paper_block",
+    "live_block",
+}
+ML_AUTHORITY_MODE = os.getenv("ML_AUTHORITY_MODE", "observe_only_compare").strip().lower()
+if ML_AUTHORITY_MODE not in ML_AUTHORITY_MODES:
+    ML_AUTHORITY_MODE = "observe_only_compare"
+
+ML_AUTHORITY_MIN_SAMPLE_SIZE = _env_int("ML_AUTHORITY_MIN_SAMPLE_SIZE", 20)
+ML_AUTHORITY_MIN_CONFIDENCE = os.getenv("ML_AUTHORITY_MIN_CONFIDENCE", "medium").strip().lower()
+if ML_AUTHORITY_MIN_CONFIDENCE not in {"unknown", "low", "medium", "high"}:
+    ML_AUTHORITY_MIN_CONFIDENCE = "medium"
+
+# 0 disables recency enforcement. Keep this disabled by default until all
+# prediction producers write a consistent point-in-time timestamp.
+ML_AUTHORITY_MAX_AGE_SECONDS = _env_int("ML_AUTHORITY_MAX_AGE_SECONDS", 0)
+ML_AUTHORITY_SIZE_CAP_PCT = _env_float("ML_AUTHORITY_SIZE_CAP_PCT", 0.80)
+
 
 def is_cash_mode() -> bool:
     return EXECUTION_MODE in {"cash_safe", "cash_full"}
@@ -119,6 +139,20 @@ def public_decision_policy_config() -> dict:
     }
 
 
+def public_ml_authority_config() -> dict:
+    return {
+        "authority_mode": ML_AUTHORITY_MODE,
+        "allowed_modes": sorted(ML_AUTHORITY_MODES),
+        "min_sample_size": ML_AUTHORITY_MIN_SAMPLE_SIZE,
+        "min_confidence": ML_AUTHORITY_MIN_CONFIDENCE,
+        "max_age_seconds": ML_AUTHORITY_MAX_AGE_SECONDS,
+        "size_cap_pct": ML_AUTHORITY_SIZE_CAP_PCT,
+        "negative_decisions": ["avoid", "block", "caution"],
+        "can_increase_size": False,
+        "default_authority_mode": "observe_only_compare",
+    }
+
+
 def public_runtime_config() -> dict:
     return {
         "execution_mode": EXECUTION_MODE,
@@ -132,4 +166,5 @@ def public_runtime_config() -> dict:
         "max_live_order_dollars": MAX_LIVE_ORDER_DOLLARS if is_cash_mode() else None,
         "cash_safe_max_order_dollars": CASH_SAFE_MAX_ORDER_DOLLARS if is_cash_safe_mode() else None,
         "decision_policy": public_decision_policy_config(),
+        "ml_authority": public_ml_authority_config(),
     }

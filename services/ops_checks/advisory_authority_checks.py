@@ -48,6 +48,7 @@ def run_advisory_authority_report(target_date: str, *, base_dir: Path) -> bool:
 
     counts = Counter()
     mode_counts = Counter()
+    ml_mode_counts = Counter()
     examples: list[dict[str, Any]] = []
 
     for row in rows:
@@ -71,11 +72,26 @@ def run_advisory_authority_report(target_date: str, *, base_dir: Path) -> bool:
         prediction_gate = account_state.get("prediction_gate") or {}
         ml_runtime_effect = prediction_gate.get("ml_prediction_runtime_effect")
         ml_compare = prediction_gate.get("ml_prediction_compare_decision")
+        ml_authority = account_state.get("ml_authority") or prediction_gate.get("ml_authority") or {}
+        ml_authority_mode = ml_authority.get("authority_mode", ml_authority.get("mode")) or "unknown"
+        if action == "buy":
+            ml_mode_counts[ml_authority_mode] += 1
         ml_negative = (
             action == "buy"
             and ml_runtime_effect == "observe_only_compare"
-            and ml_compare in ("avoid", "block", "watch", "caution")
+            and ml_compare in ("avoid", "block", "caution")
         )
+        ml_ignored_by_design = (
+            ml_negative
+            and ml_authority_mode == "observe_only_compare"
+        )
+        ml_would_block_promoted = (
+            action == "buy"
+            and bool(ml_authority.get("would_block_under_promoted_mode"))
+        )
+        ml_enforced = action == "buy" and bool(ml_authority.get("enforced"))
+        ml_size_down = ml_enforced and ml_authority.get("effect_on_size") == "cap"
+        ml_block_enforced = ml_enforced and ml_authority.get("effect_on_execution") == "block"
 
         session_gate = account_state.get("session_momentum_gate") or {}
         session_would_block = action == "buy" and bool(session_gate.get("would_block"))
@@ -101,6 +117,11 @@ def run_advisory_authority_report(target_date: str, *, base_dir: Path) -> bool:
         )
         _increment_if(counts, "ml_negative_compare_advisory", ml_negative)
         _increment_if(counts, "ml_negative_compare_but_approved", ml_negative and approved)
+        _increment_if(counts, "ml_negative_compare_ignored_by_design", ml_ignored_by_design)
+        _increment_if(counts, "ml_negative_compare_would_block_promoted", ml_would_block_promoted)
+        _increment_if(counts, "ml_authority_triggered", ml_enforced)
+        _increment_if(counts, "ml_authority_size_down", ml_size_down)
+        _increment_if(counts, "ml_authority_block_enforced", ml_block_enforced)
         _increment_if(counts, "session_would_block_advisory", session_would_block)
         _increment_if(counts, "session_would_block_but_approved", session_would_block and approved)
         _increment_if(counts, "weak_setup_quality_advisory", weak_setup)
@@ -134,6 +155,11 @@ def run_advisory_authority_report(target_date: str, *, base_dir: Path) -> bool:
         print(f"  {mode:<32} {n:5d}")
 
     print()
+    print("ML authority modes (BUY rows)")
+    for mode, n in sorted(ml_mode_counts.items()):
+        print(f"  {mode:<32} {n:5d}")
+
+    print()
     print("Advisory disagreement counts")
     for key in (
         "decision_policy_block_advisory",
@@ -142,6 +168,11 @@ def run_advisory_authority_report(target_date: str, *, base_dir: Path) -> bool:
         "decision_policy_size_down_not_applied",
         "ml_negative_compare_advisory",
         "ml_negative_compare_but_approved",
+        "ml_negative_compare_ignored_by_design",
+        "ml_negative_compare_would_block_promoted",
+        "ml_authority_triggered",
+        "ml_authority_size_down",
+        "ml_authority_block_enforced",
         "session_would_block_advisory",
         "session_would_block_but_approved",
         "weak_setup_quality_advisory",

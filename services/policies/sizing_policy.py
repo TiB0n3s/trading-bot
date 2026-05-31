@@ -34,6 +34,17 @@ def buy_opportunity_sizing_enabled() -> bool:
     )
 
 
+def setup_quality_sizing_enabled() -> bool:
+    if not policy_family_enabled("sizing"):
+        return False
+    return os.getenv("SETUP_QUALITY_SIZING_ENABLED", "false").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+        "on",
+    )
+
+
 def compute_dominant_limiter(account_state: dict[str, Any]) -> str:
     """Return the label of the tightest active pre-execution size cap."""
     if not policy_family_enabled("sizing"):
@@ -55,6 +66,8 @@ def compute_dominant_limiter(account_state: dict[str, Any]) -> str:
         caps.append(("strategy_brain", account_state["strategy_score_size_cap"].get("cap_pct", 99)))
     if account_state.get("setup_policy_override"):
         caps.append(("setup_policy_override", 0.75))
+    if account_state.get("setup_quality_size_cap"):
+        caps.append(("setup_quality", account_state["setup_quality_size_cap"].get("cap_pct", 99)))
     limiter = "uncapped" if not caps else min(caps, key=lambda x: x[1])[0]
     record_dominant_limiter(limiter)
     return limiter
@@ -79,6 +92,7 @@ def apply_buy_opportunity_sizing(
         return adjusted
 
     buy_opp = (account_state or {}).get("buy_opportunity") or {}
+    setup_quality = (account_state or {}).get("setup_quality") or {}
 
     if not buy_opportunity_sizing_enabled():
         account_state["buy_opportunity_sizing"] = {
@@ -97,6 +111,37 @@ def apply_buy_opportunity_sizing(
     except Exception:
         score = None
 
+    setup_score_raw = setup_quality.get("score")
+    try:
+        setup_score = float(setup_score_raw)
+    except Exception:
+        setup_score = None
+    setup_recommendation = setup_quality.get("recommendation")
+
+    if setup_quality_sizing_enabled() and setup_quality:
+        setup_cap = None
+        if setup_recommendation == "avoid" or (setup_score is not None and setup_score < 40):
+            setup_cap = env_float("SETUP_QUALITY_AVOID_CAP_PCT", 0.50)
+        elif setup_recommendation == "watch" or (setup_score is not None and setup_score < 55):
+            setup_cap = env_float("SETUP_QUALITY_WATCH_CAP_PCT", 0.80)
+
+        if setup_cap is not None:
+            account_state["setup_quality_size_cap"] = {
+                "enabled": True,
+                "recommendation": setup_recommendation,
+                "score": setup_score,
+                "cap_pct": setup_cap,
+                "source": setup_quality.get("source"),
+                "reason": (
+                    f"setup_quality sizing cap: rec={setup_recommendation} "
+                    f"score={setup_score} cap={setup_cap}"
+                ),
+            }
+            adjusted = min(adjusted, setup_cap)
+            existing_override = account_state.get("max_position_size_pct_override")
+            if existing_override is None or setup_cap <= float(existing_override):
+                account_state["dominant_limiter"] = "setup_quality"
+
     small_cap = env_float("BUY_OPPORTUNITY_SMALL_CAP_PCT", 1.25)
     watch_cap = env_float("BUY_OPPORTUNITY_WATCH_CAP_PCT", 0.75)
     avoid_cap = env_float("BUY_OPPORTUNITY_AVOID_CAP_PCT", 0.50)
@@ -111,7 +156,10 @@ def apply_buy_opportunity_sizing(
         trader_brain = (account_state.get("strategy_observation") or {}).get("trader_brain", {})
         strategy_score = float(trader_brain.get("score") or 0)
         session_severity = (account_state.get("session_momentum_gate") or {}).get("severity")
-        setup_action = (account_state.get("setup_observation") or {}).get("setup_policy_action")
+        setup_action = (
+            setup_quality.get("policy_action")
+            or (account_state.get("setup_observation") or {}).get("setup_policy_action")
+        )
         has_strong_context = (
             strategy_score >= 70
             and session_severity in ("pass", None)

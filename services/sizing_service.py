@@ -62,6 +62,14 @@ def collect_active_caps(account_state: dict[str, Any]) -> list[SizeCap]:
         )
     if account_state.get("setup_policy_override"):
         caps.append(SizeCap("setup_policy_override", 0.75))
+    if account_state.get("setup_quality_size_cap"):
+        caps.append(
+            SizeCap(
+                "setup_quality",
+                float((account_state["setup_quality_size_cap"] or {}).get("cap_pct", 99)),
+                (account_state["setup_quality_size_cap"] or {}).get("reason"),
+            )
+        )
     if account_state.get("max_position_size_pct_override") is not None:
         caps.append(
             SizeCap(

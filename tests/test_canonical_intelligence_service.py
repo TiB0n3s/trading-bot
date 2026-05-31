@@ -68,6 +68,13 @@ def _snapshot(**overrides):
                 "buy_opportunity_score": 66,
                 "buy_opportunity_recommendation": "buy_candidate",
             },
+            "ml_outcome": {
+                "advisory_decision": "avoid",
+                "authority_mode": "observe_only_compare",
+                "enforced": False,
+                "effect_on_size": "none",
+                "reason": "negative compare ignored by design",
+            },
             "intelligence_context": {
                 "summary": {
                     "support_count": 3,
@@ -96,6 +103,7 @@ def test_build_canonical_snapshot_collects_core_state_and_hashes():
     assert data["setup_state"]["quality_recommendation"] == "favorable"
     assert data["strategy_state"]["trader_brain_score"] == 81
     assert data["opportunity_state"]["recommendation"] == "buy_candidate"
+    assert data["advisory_authority_state"]["ml_outcome"]["authority_mode"] == "observe_only_compare"
     assert data["event_state"]["support_count"] == 3
     assert data["policy_artifact_ref"]["state_hash"] == "abc"
     assert data["freshness_sec"]["market_context"] == 1800.0

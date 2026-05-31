@@ -19,6 +19,7 @@ CANONICAL_INTELLIGENCE_REQUIRED_SECTIONS = (
     "setup_state",
     "strategy_state",
     "opportunity_state",
+    "advisory_authority_state",
     "policy_artifact_ref",
     "source_timestamps",
     "freshness_sec",
@@ -118,6 +119,7 @@ class CanonicalIntelligenceSnapshot:
     setup_state: dict[str, Any]
     strategy_state: dict[str, Any]
     opportunity_state: dict[str, Any]
+    advisory_authority_state: dict[str, Any]
     policy_artifact_ref: dict[str, Any]
     source_timestamps: dict[str, Any]
     freshness_sec: dict[str, Any]
@@ -219,6 +221,12 @@ def build_canonical_intelligence_snapshot(
         "recommendation": opportunity.get("buy_opportunity_recommendation"),
         "reason": opportunity.get("buy_opportunity_reason"),
     }
+    advisory_authority_state = {
+        "decision_policy_outcome": account_state.get("decision_policy_outcome") or {},
+        "session_gate_outcome": account_state.get("session_gate_outcome") or {},
+        "setup_quality_outcome": account_state.get("setup_quality_outcome") or {},
+        "ml_outcome": account_state.get("ml_outcome") or {},
+    }
     source_timestamps = {
         "decision_ts": decision_ts,
         "market_context_mtime": market_meta.get("market_context_mtime"),
@@ -254,6 +262,7 @@ def build_canonical_intelligence_snapshot(
         "setup_state": setup_state,
         "strategy_state": strategy_state,
         "opportunity_state": opportunity_state,
+        "advisory_authority_state": advisory_authority_state,
         "policy_artifact_ref": policy_artifact_ref,
         "source_timestamps": source_timestamps,
         "freshness_sec": freshness_sec,
@@ -274,6 +283,7 @@ def build_canonical_intelligence_snapshot(
         setup_state=setup_state,
         strategy_state=strategy_state,
         opportunity_state=opportunity_state,
+        advisory_authority_state=advisory_authority_state,
         policy_artifact_ref=policy_artifact_ref,
         source_timestamps=source_timestamps,
         freshness_sec=freshness_sec,

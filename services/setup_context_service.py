@@ -6,6 +6,8 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Callable
 
+from services.observability import record_setup_quality_source
+
 
 @dataclass(frozen=True)
 class SetupContextDeps:
@@ -63,9 +65,28 @@ def build_setup_observation(
     try:
         snapshot = deps.build_snapshot(symbol)
         setup_quality = build_setup_quality(snapshot, deps)
+        setup_quality_source = setup_quality.get("source") or "unknown"
+        record_setup_quality_source(setup_quality_source)
+        if setup_quality_source != "setup_engine":
+            deps.log.warning(
+                f"setup_quality fallback for {symbol}: source={setup_quality_source}"
+            )
         setup_label = setup_quality.get("label") or snapshot.get("setup_label")
         setup_policy = observe_setup_policy(setup_label, deps)
+        setup_quality["policy_action"] = setup_policy.get("setup_policy_action")
+        setup_quality["policy_reason"] = setup_policy.get("reason")
         account_state["setup_quality"] = setup_quality
+        account_state["setup_quality_outcome"] = {
+            "advisory_decision": setup_quality.get("recommendation"),
+            "authority_mode": "advisory_context",
+            "enforced": setup_policy.get("setup_policy_action") == "block",
+            "effect_on_size": "multiplier"
+            if setup_policy.get("setup_size_multiplier") not in (None, 1, 1.0)
+            else "none",
+            "reason": setup_policy.get("reason"),
+            "source": setup_quality_source,
+            "fallback": setup_quality_source != "setup_engine",
+        }
 
         deps.log.info(
             "Setup policy evaluated: "
@@ -93,6 +114,26 @@ def build_setup_observation(
     except Exception as exc:
         unknown_reason = f"{type(exc).__name__}:{str(exc)[:200]}"
         deps.log.warning(f"setup observe-only snapshot failed for {symbol}: {unknown_reason}")
+        account_state["setup_quality"] = {
+            "label": None,
+            "recommendation": "unknown",
+            "score": None,
+            "confidence": None,
+            "key": None,
+            "rationale": unknown_reason,
+            "reasons": unknown_reason,
+            "source": "setup_error",
+            "fallback": True,
+        }
+        account_state["setup_quality_outcome"] = {
+            "advisory_decision": "unknown",
+            "authority_mode": "advisory_context",
+            "enforced": False,
+            "effect_on_size": "none",
+            "reason": unknown_reason,
+            "source": "setup_error",
+            "fallback": True,
+        }
         return {
             "setup_label": None,
             "setup_policy_action": "error",
@@ -104,6 +145,7 @@ def build_setup_observation(
             "setup_key": None,
             "setup_rationale": None,
             "setup_unknown_reason": unknown_reason,
+            "setup_quality": account_state["setup_quality"],
         }
 
 
@@ -140,6 +182,7 @@ def build_setup_quality(snapshot: dict[str, Any], deps: SetupContextDeps) -> dic
             "rs_bucket": getattr(result, "rs_bucket", None),
             "sample_basis": getattr(result, "sample_basis", None),
             "source": "setup_engine",
+            "fallback": False,
             "snapshot_id": snapshot.get("id"),
             "snapshot_timestamp": snapshot.get("timestamp"),
         }
@@ -157,6 +200,7 @@ def build_setup_quality(snapshot: dict[str, Any], deps: SetupContextDeps) -> dic
         "rs_bucket": None,
         "sample_basis": None,
         "source": "feature_snapshot",
+        "fallback": True,
         "snapshot_id": snapshot.get("id"),
         "snapshot_timestamp": snapshot.get("timestamp"),
     }

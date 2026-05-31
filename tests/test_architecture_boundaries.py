@@ -94,7 +94,6 @@ TEMPORARY_BACKFILL_TRAINING_DB_ALLOWLIST = {
     "analytics_ext/replay_engine.py",
     "backfill_missing_fills.py",
     "backfill_setup_labels.py",
-    "build_historical_trend_context.py",
     "collect_and_score_events.py",
     "ingest_market_context.py",
     "init_prediction_db.py",

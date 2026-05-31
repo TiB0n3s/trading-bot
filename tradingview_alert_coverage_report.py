@@ -21,7 +21,7 @@ import argparse
 from datetime import datetime, time
 from zoneinfo import ZoneInfo
 
-from db import DB_PATH, get_connection
+from repositories.trades_repo import tradingview_alert_rows
 from symbols_config import TRADINGVIEW_ALERT_SYMBOLS_LIST
 
 
@@ -82,19 +82,7 @@ def load_rows(report_date: str) -> dict[str, list]:
     if not symbols:
         return rows_by_symbol
 
-    placeholders = ",".join("?" for _ in symbols)
-
-    with get_connection(DB_PATH) as con:
-        rows = con.execute(
-            f"""
-            SELECT symbol, timestamp, action, approved, rejection_reason
-            FROM trades
-            WHERE substr(timestamp, 1, 10) = ?
-              AND symbol IN ({placeholders})
-            ORDER BY symbol, timestamp
-            """,
-            [report_date, *symbols],
-        ).fetchall()
+    rows = tradingview_alert_rows(report_date, symbols)
 
     for row in rows:
         rows_by_symbol[row["symbol"]].append(row)

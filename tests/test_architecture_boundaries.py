@@ -106,7 +106,6 @@ TEMPORARY_REPORT_DB_ALLOWLIST = {
     "strategy_intelligence_report.py",
     "strategy_learner.py",
     "strong_day_participation_report.py",
-    "tradingview_alert_coverage_report.py",
     "trend_context_report.py",
 }
 

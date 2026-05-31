@@ -315,3 +315,21 @@ def adaptive_impact_report_rows(target_date: str, db_path=DB_PATH):
             """,
             (f"{target_date}%",),
         ).fetchall()
+
+
+def tradingview_alert_rows(report_date: str, symbols: list[str], db_path=DB_PATH):
+    if not symbols:
+        return []
+
+    placeholders = ",".join("?" for _ in symbols)
+    with get_connection(db_path) as con:
+        return con.execute(
+            f"""
+            SELECT symbol, timestamp, action, approved, rejection_reason
+            FROM trades
+            WHERE substr(timestamp, 1, 10) = ?
+              AND symbol IN ({placeholders})
+            ORDER BY symbol, timestamp
+            """,
+            [report_date, *symbols],
+        ).fetchall()

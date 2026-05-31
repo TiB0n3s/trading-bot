@@ -11,6 +11,111 @@ class LiveFeaturesRepository:
     def __init__(self, db_path=DB_PATH):
         self.db_path = db_path
 
+    def table_exists(self, table_name: str) -> bool:
+        with get_connection(self.db_path) as con:
+            row = con.execute(
+                "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?",
+                (table_name,),
+            ).fetchone()
+        return row is not None
+
+    def table_columns(self, table_name: str) -> set[str]:
+        with get_connection(self.db_path) as con:
+            rows = con.execute(f"PRAGMA table_info({table_name})").fetchall()
+        return {row["name"] for row in rows}
+
+    def snapshot_summary(self):
+        with get_connection(self.db_path) as con:
+            return con.execute(
+                """
+                SELECT COUNT(*) AS n, MIN(timestamp) AS min_ts, MAX(timestamp) AS max_ts
+                FROM feature_snapshots
+                """
+            ).fetchone()
+
+    def unlabeled_snapshot_count(self) -> int:
+        with get_connection(self.db_path) as con:
+            row = con.execute(
+                """
+                SELECT COUNT(*) AS n
+                FROM feature_snapshots fs
+                LEFT JOIN labeled_setups ls
+                  ON ls.snapshot_id = fs.id
+                WHERE ls.snapshot_id IS NULL
+                  AND fs.last_price IS NOT NULL
+                """
+            ).fetchone()
+        return int(row["n"] or 0) if row else 0
+
+    def session_snapshot_summary(self, target_date: str):
+        with get_connection(self.db_path) as con:
+            return con.execute(
+                """
+                SELECT COUNT(*) AS n,
+                       MIN(timestamp) AS first_ts,
+                       MAX(timestamp) AS last_ts,
+                       COUNT(DISTINCT symbol) AS symbols_seen
+                FROM feature_snapshots
+                WHERE substr(timestamp, 1, 10) = ?
+                """,
+                (target_date,),
+            ).fetchone()
+
+    def snapshot_hour_rows(self, target_date: str):
+        with get_connection(self.db_path) as con:
+            return con.execute(
+                """
+                SELECT substr(timestamp, 12, 2) AS hour, COUNT(*) AS n, COUNT(DISTINCT symbol) AS symbols_seen
+                FROM feature_snapshots
+                WHERE substr(timestamp, 1, 10) = ?
+                GROUP BY substr(timestamp, 12, 2)
+                ORDER BY hour
+                """,
+                (target_date,),
+            ).fetchall()
+
+    def seen_symbol_rows(self, target_date: str):
+        with get_connection(self.db_path) as con:
+            return con.execute(
+                """
+                SELECT symbol, COUNT(*) AS n, MAX(timestamp) AS latest_ts
+                FROM feature_snapshots
+                WHERE substr(timestamp, 1, 10) = ?
+                GROUP BY symbol
+                ORDER BY symbol
+                """,
+                (target_date,),
+            ).fetchall()
+
+    def unlabeled_snapshot_rows(self, target_date: str):
+        with get_connection(self.db_path) as con:
+            return con.execute(
+                """
+                SELECT fs.id, fs.symbol, fs.timestamp
+                FROM feature_snapshots fs
+                LEFT JOIN labeled_setups ls
+                  ON ls.snapshot_id = fs.id
+                WHERE substr(fs.timestamp, 1, 10) = ?
+                  AND fs.last_price IS NOT NULL
+                  AND ls.snapshot_id IS NULL
+                ORDER BY fs.timestamp ASC
+                """,
+                (target_date,),
+            ).fetchall()
+
+    def recent_snapshot_rows(self, target_date: str):
+        with get_connection(self.db_path) as con:
+            return con.execute(
+                """
+                SELECT id, symbol, timestamp, last_price, setup_label, setup_recommendation, setup_score
+                FROM feature_snapshots
+                WHERE substr(timestamp, 1, 10) = ?
+                ORDER BY timestamp DESC, id DESC
+                LIMIT 10
+                """,
+                (target_date,),
+            ).fetchall()
+
     def recent_actions(self, symbol: str, limit: int = 10) -> list[str]:
         with get_connection(self.db_path) as con:
             rows = con.execute(

@@ -11,6 +11,55 @@ class LabelFeaturesRepository:
     def __init__(self, db_path: Path | str = DB_PATH):
         self.db_path = db_path
 
+    def table_exists(self, table_name: str) -> bool:
+        with get_connection(self.db_path) as con:
+            row = con.execute(
+                "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?",
+                (table_name,),
+            ).fetchone()
+        return row is not None
+
+    def table_columns(self, table_name: str) -> set[str]:
+        with get_connection(self.db_path) as con:
+            rows = con.execute(f"PRAGMA table_info({table_name})").fetchall()
+        return {row["name"] for row in rows}
+
+    def label_summary(self):
+        with get_connection(self.db_path) as con:
+            return con.execute(
+                """
+                SELECT COUNT(*) AS n, MIN(timestamp) AS min_ts, MAX(timestamp) AS max_ts
+                FROM labeled_setups
+                """
+            ).fetchone()
+
+    def session_label_summary(self, target_date: str):
+        with get_connection(self.db_path) as con:
+            return con.execute(
+                """
+                SELECT COUNT(*) AS n,
+                       MIN(timestamp) AS first_ts,
+                       MAX(timestamp) AS last_ts,
+                       COUNT(DISTINCT symbol) AS symbols_seen
+                FROM labeled_setups
+                WHERE substr(timestamp, 1, 10) = ?
+                """,
+                (target_date,),
+            ).fetchone()
+
+    def outcome_rows(self, target_date: str):
+        with get_connection(self.db_path) as con:
+            return con.execute(
+                """
+                SELECT COALESCE(outcome_label, 'missing') AS outcome_label, COUNT(*) AS n
+                FROM labeled_setups
+                WHERE substr(timestamp, 1, 10) = ?
+                GROUP BY COALESCE(outcome_label, 'missing')
+                ORDER BY outcome_label
+                """,
+                (target_date,),
+            ).fetchall()
+
     def unlabeled_snapshots(self, cutoff: datetime, limit: int) -> list[Any]:
         with get_connection(self.db_path) as con:
             return con.execute(

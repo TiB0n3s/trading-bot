@@ -250,6 +250,36 @@ class OpsCheckRepository:
             params = (target_date,)
         return self._fetchall(
             f"""
+            WITH base AS (
+                SELECT
+                    *,
+                    CASE
+                        WHEN LOWER(COALESCE(setup_policy_action, '')) = 'error'
+                          OR LOWER(COALESCE(prediction_decision, '')) IN ('watch', 'caution')
+                          OR LOWER(COALESCE(buy_opportunity_recommendation, '')) IN ('small_buy_candidate', 'watch')
+                          OR LOWER(COALESCE(ml_prediction_bucket, '')) = 'weak_below_45'
+                          OR LOWER(COALESCE(setup_label, '')) LIKE '%fade_risk%'
+                          OR LOWER(COALESCE(setup_label, '')) LIKE '%neutral_fade%'
+                          OR LOWER(COALESCE(setup_label, '')) LIKE '%drift_risk%'
+                          OR LOWER(COALESCE(setup_label, '')) LIKE '%unclassified%'
+                        THEN 1 ELSE 0
+                    END AS weak_entry_context
+                FROM matched_trades
+                {where_clause}
+            ),
+            enriched AS (
+                SELECT
+                    *,
+                    CASE
+                        WHEN weak_entry_context = 1 AND mfe_pct >= 0.50 THEN 0.25
+                        WHEN weak_entry_context = 1 AND mfe_pct >= 0.30 THEN 0.10
+                        WHEN weak_entry_context = 0 AND mfe_pct >= 1.00 THEN 0.30
+                        WHEN weak_entry_context = 0 AND mfe_pct >= 0.60 THEN 0.20
+                        WHEN weak_entry_context = 0 AND mfe_pct >= 0.30 THEN 0.10
+                        ELSE NULL
+                    END AS peak_lock_floor_pct
+                FROM base
+            )
             SELECT
                 CASE
                     WHEN mfe_pct >= 1.00 THEN '1.00%+'
@@ -264,9 +294,17 @@ class OpsCheckRepository:
                 ROUND(AVG(capture_ratio), 3) AS avg_capture,
                 SUM(CASE WHEN realized_pnl_pct < 0 THEN 1 ELSE 0 END) AS exits_below_zero,
                 SUM(CASE WHEN mfe_pct >= 0.30 AND realized_pnl_pct <= 0
-                         THEN 1 ELSE 0 END) AS winner_became_loser
-            FROM matched_trades
-            {where_clause}
+                         THEN 1 ELSE 0 END) AS winner_became_loser,
+                SUM(weak_entry_context) AS weak_entries,
+                ROUND(AVG(peak_lock_floor_pct), 3) AS avg_peak_lock_floor,
+                SUM(CASE WHEN peak_lock_floor_pct IS NOT NULL
+                          AND realized_pnl_pct <= peak_lock_floor_pct
+                         THEN 1 ELSE 0 END) AS floor_triggered,
+                SUM(CASE WHEN mfe_pct >= 0.40
+                          AND realized_pnl_pct <= 0
+                          AND peak_lock_floor_pct IS NOT NULL
+                         THEN 1 ELSE 0 END) AS would_have_been_winner_became_loser
+            FROM enriched
             GROUP BY peak_bucket
             ORDER BY
                 CASE peak_bucket
@@ -314,17 +352,62 @@ class OpsCheckRepository:
     def winner_became_loser_rows(self, target_date: str, mfe_threshold: float) -> list[sqlite3.Row]:
         return self._fetchall(
             """
+            WITH base AS (
+                SELECT
+                    *,
+                    CASE
+                        WHEN LOWER(COALESCE(setup_policy_action, '')) = 'error'
+                          OR LOWER(COALESCE(prediction_decision, '')) IN ('watch', 'caution')
+                          OR LOWER(COALESCE(buy_opportunity_recommendation, '')) IN ('small_buy_candidate', 'watch')
+                          OR LOWER(COALESCE(ml_prediction_bucket, '')) = 'weak_below_45'
+                          OR LOWER(COALESCE(setup_label, '')) LIKE '%fade_risk%'
+                          OR LOWER(COALESCE(setup_label, '')) LIKE '%neutral_fade%'
+                          OR LOWER(COALESCE(setup_label, '')) LIKE '%drift_risk%'
+                          OR LOWER(COALESCE(setup_label, '')) LIKE '%unclassified%'
+                        THEN 1 ELSE 0
+                    END AS weak_entry_context
+                FROM matched_trades
+            ),
+            enriched AS (
+                SELECT
+                    *,
+                    CASE
+                        WHEN weak_entry_context = 1 AND mfe_pct >= 0.50 THEN 0.25
+                        WHEN weak_entry_context = 1 AND mfe_pct >= 0.30 THEN 0.10
+                        WHEN weak_entry_context = 0 AND mfe_pct >= 1.00 THEN 0.30
+                        WHEN weak_entry_context = 0 AND mfe_pct >= 0.60 THEN 0.20
+                        WHEN weak_entry_context = 0 AND mfe_pct >= 0.30 THEN 0.10
+                        ELSE NULL
+                    END AS peak_lock_floor_pct,
+                    CASE
+                        WHEN weak_entry_context = 1 AND mfe_pct >= 0.50 THEN 'weak_tier2'
+                        WHEN weak_entry_context = 1 AND mfe_pct >= 0.30 THEN 'weak_tier1'
+                        WHEN weak_entry_context = 0 AND mfe_pct >= 1.00 THEN 'strong_tier3'
+                        WHEN weak_entry_context = 0 AND mfe_pct >= 0.60 THEN 'strong_tier2'
+                        WHEN weak_entry_context = 0 AND mfe_pct >= 0.30 THEN 'strong_tier1'
+                        ELSE NULL
+                    END AS peak_lock_tier
+                FROM base
+            )
             SELECT
                 symbol, entry_timestamp, exit_timestamp,
                 holding_minutes, realized_pnl_pct, mfe_pct, capture_ratio,
-                setup_policy_action, exit_reason
-            FROM matched_trades
+                setup_policy_action, exit_reason,
+                weak_entry_context, peak_lock_floor_pct, peak_lock_tier,
+                CASE WHEN peak_lock_floor_pct IS NOT NULL
+                       AND realized_pnl_pct <= peak_lock_floor_pct
+                     THEN 1 ELSE 0 END AS floor_triggered,
+                CASE WHEN mfe_pct >= ?
+                       AND realized_pnl_pct <= 0
+                       AND peak_lock_floor_pct IS NOT NULL
+                     THEN 1 ELSE 0 END AS would_have_been_winner_became_loser
+            FROM enriched
             WHERE DATE(exit_timestamp) = ?
               AND mfe_pct >= ?
               AND realized_pnl_pct <= 0
             ORDER BY realized_pnl_pct ASC
             """,
-            (target_date, mfe_threshold),
+            (mfe_threshold, target_date, mfe_threshold),
         )
 
     def poor_capture_rows(self, target_date: str, mfe_threshold: float) -> list[sqlite3.Row]:
@@ -346,10 +429,34 @@ class OpsCheckRepository:
     def all_mfe_rows_for_date(self, target_date: str) -> list[sqlite3.Row]:
         return self._fetchall(
             """
+            WITH base AS (
+                SELECT
+                    *,
+                    CASE
+                        WHEN LOWER(COALESCE(setup_policy_action, '')) = 'error'
+                          OR LOWER(COALESCE(prediction_decision, '')) IN ('watch', 'caution')
+                          OR LOWER(COALESCE(buy_opportunity_recommendation, '')) IN ('small_buy_candidate', 'watch')
+                          OR LOWER(COALESCE(ml_prediction_bucket, '')) = 'weak_below_45'
+                          OR LOWER(COALESCE(setup_label, '')) LIKE '%fade_risk%'
+                          OR LOWER(COALESCE(setup_label, '')) LIKE '%neutral_fade%'
+                          OR LOWER(COALESCE(setup_label, '')) LIKE '%drift_risk%'
+                          OR LOWER(COALESCE(setup_label, '')) LIKE '%unclassified%'
+                        THEN 1 ELSE 0
+                    END AS weak_entry_context
+                FROM matched_trades
+            )
             SELECT
                 symbol, realized_pnl_pct, mfe_pct, capture_ratio,
-                setup_policy_action
-            FROM matched_trades
+                setup_policy_action, weak_entry_context,
+                CASE
+                    WHEN weak_entry_context = 1 AND mfe_pct >= 0.50 THEN 0.25
+                    WHEN weak_entry_context = 1 AND mfe_pct >= 0.30 THEN 0.10
+                    WHEN weak_entry_context = 0 AND mfe_pct >= 1.00 THEN 0.30
+                    WHEN weak_entry_context = 0 AND mfe_pct >= 0.60 THEN 0.20
+                    WHEN weak_entry_context = 0 AND mfe_pct >= 0.30 THEN 0.10
+                    ELSE NULL
+                END AS peak_lock_floor_pct
+            FROM base
             WHERE DATE(exit_timestamp) = ?
               AND mfe_pct IS NOT NULL
             ORDER BY capture_ratio ASC NULLS FIRST

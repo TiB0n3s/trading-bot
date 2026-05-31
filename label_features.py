@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import logging
 import os
-import sqlite3
 import sys
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -50,9 +49,10 @@ load_env_file()
 
 import pytz
 
-from db import DB_PATH, get_connection
+from repositories.label_features_repo import LabelFeaturesRepository
 from services.market_data_service import market_data_service
 
+_repo = LabelFeaturesRepository()
 logger = logging.getLogger("label_features")
 logging.basicConfig(
     level=logging.INFO,
@@ -150,65 +150,26 @@ def outcome_label(ret_fwd_15m: float | None) -> str | None:
     return "flat"
 
 
-def unlabeled_snapshots(limit: int = 100) -> list[sqlite3.Row]:
+def unlabeled_snapshots(limit: int = 100) -> list:
     cutoff = datetime.now(ET) - timedelta(minutes=35)
-
-    with get_connection(DB_PATH) as con:
-        rows = con.execute(
-            """
-            SELECT fs.id, fs.symbol, fs.timestamp, fs.last_price
-            FROM feature_snapshots fs
-            LEFT JOIN labeled_setups ls
-              ON ls.snapshot_id = fs.id
-            WHERE ls.snapshot_id IS NULL
-              AND fs.last_price IS NOT NULL
-              AND fs.timestamp <= ?
-            ORDER BY fs.timestamp ASC
-            LIMIT ?
-            """,
-            (cutoff.isoformat(), limit),
-        ).fetchall()
-    return rows
+    return _repo.unlabeled_snapshots(cutoff, limit)
 
 
-def insert_label(row: sqlite3.Row, fwd5: float | None, fwd15: float | None, fwd30: float | None,
+def insert_label(row, fwd5: float | None, fwd15: float | None, fwd30: float | None,
                  ret5: float | None, ret15: float | None, ret30: float | None,
                  max_up_15m: float | None, max_down_15m: float | None, label: str | None) -> None:
-    with get_connection(DB_PATH) as con:
-        con.execute(
-            """
-            INSERT INTO labeled_setups (
-                snapshot_id,
-                symbol,
-                timestamp,
-                price_at_snapshot,
-                future_price_5m,
-                future_price_15m,
-                future_price_30m,
-                ret_fwd_5m,
-                ret_fwd_15m,
-                ret_fwd_30m,
-                max_up_15m,
-                max_down_15m,
-                outcome_label
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                row["id"],
-                row["symbol"],
-                row["timestamp"],
-                row["last_price"],
-                fwd5,
-                fwd15,
-                fwd30,
-                ret5,
-                ret15,
-                ret30,
-                max_up_15m,
-                max_down_15m,
-                label,
-            ),
-        )
+    _repo.insert_label(
+        row,
+        fwd5=fwd5,
+        fwd15=fwd15,
+        fwd30=fwd30,
+        ret5=ret5,
+        ret15=ret15,
+        ret30=ret30,
+        max_up_15m=max_up_15m,
+        max_down_15m=max_down_15m,
+        label=label,
+    )
 
 
 def main() -> int:

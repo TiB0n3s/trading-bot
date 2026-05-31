@@ -16,39 +16,28 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from db import DB_PATH, get_connection
+from repositories.label_v1_repo import LabelV1Repository
 
 LABEL_BUILDER_VERSION = "label_v1_builder_20260527"
 LABEL_VERSION = "label_taxonomy_v1"
 EXIT_POLICY_VERSION = "fixed_horizon_v1_no_realized_exit"
 POSITION_MANAGER_VERSION = "not_applicable_fixed_horizon"
+_repo = LabelV1Repository()
 
 
-def validate_feature_snapshot_contract(db_path: Path | str = DB_PATH) -> dict[str, Any]:
-    with get_connection(db_path) as con:
-        cols = {
-            row["name"]
-            for row in con.execute("PRAGMA table_info(feature_snapshots)").fetchall()
-        }
-        required = {
-            "feature_available_at",
-            "feature_generated_at",
-            "feature_age_seconds",
-            "source",
-            "is_stale",
-            "staleness_reason",
-        }
-        missing = sorted(required - cols)
-        stale_count = 0
-        if not missing:
-            row = con.execute(
-                """
-                SELECT COUNT(*) AS n
-                FROM feature_snapshots
-                WHERE COALESCE(is_stale, 0) != 0
-                """
-            ).fetchone()
-            stale_count = int(row["n"] or 0)
+def validate_feature_snapshot_contract(db_path: Path | str | None = None) -> dict[str, Any]:
+    repo = LabelV1Repository(db_path) if db_path is not None else _repo
+    cols = repo.feature_snapshot_columns()
+    required = {
+        "feature_available_at",
+        "feature_generated_at",
+        "feature_age_seconds",
+        "source",
+        "is_stale",
+        "staleness_reason",
+    }
+    missing = sorted(required - cols)
+    stale_count = repo.stale_feature_snapshot_count() if not missing else 0
     return {
         "ok": not missing,
         "missing_feature_audit_fields": missing,
@@ -87,9 +76,7 @@ def build_labels(limit: int = 200) -> dict[str, Any]:
 
 
 def _label_count() -> int:
-    with get_connection(DB_PATH) as con:
-        row = con.execute("SELECT COUNT(*) AS n FROM labeled_setups").fetchone()
-    return int(row["n"] or 0)
+    return _repo.label_count()
 
 
 def main() -> int:

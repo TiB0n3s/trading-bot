@@ -47,8 +47,9 @@ load_env_file()
 
 import pytz
 
-from db import DB_PATH, ensure_rejected_signal_outcomes_table, get_connection
+from repositories.rejected_signal_outcome_repo import RejectedSignalOutcomeRepository
 
+_repo = RejectedSignalOutcomeRepository()
 
 logger = logging.getLogger("rejected_signal_outcome_builder")
 logging.basicConfig(
@@ -271,75 +272,15 @@ def rejected_rows(target_date: str, limit: int | None = None, symbol: str | None
         clauses.append("UPPER(symbol) = ?")
         params.append(symbol.upper())
 
-    limit_sql = ""
-    if limit is not None:
-        limit_sql = "LIMIT ?"
-        params.append(int(limit))
-
-    with get_connection(DB_PATH) as con:
-        return con.execute(
-            f"""
-            SELECT id, timestamp, symbol, action, signal_price, rejection_reason
-            FROM trades
-            WHERE {' AND '.join(clauses)}
-            ORDER BY timestamp ASC, id ASC
-            {limit_sql}
-            """,
-            params,
-        ).fetchall()
+    return _repo.rejected_rows(clauses, params, limit=limit)
 
 
 def upsert_outcome(row, outcome: dict, source: str = "rejected_signal_outcome_builder") -> None:
-    with get_connection(DB_PATH) as con:
-        con.execute(
-            """
-            INSERT INTO rejected_signal_outcomes (
-                trade_id, timestamp, symbol, action, signal_price, rejection_reason,
-                return_5m, return_15m, return_30m, return_60m, return_eod,
-                max_favorable_60m, max_adverse_60m,
-                label_status, partial_reason, source, generated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
-            ON CONFLICT(trade_id) DO UPDATE SET
-                timestamp = excluded.timestamp,
-                symbol = excluded.symbol,
-                action = excluded.action,
-                signal_price = excluded.signal_price,
-                rejection_reason = excluded.rejection_reason,
-                return_5m = excluded.return_5m,
-                return_15m = excluded.return_15m,
-                return_30m = excluded.return_30m,
-                return_60m = excluded.return_60m,
-                return_eod = excluded.return_eod,
-                max_favorable_60m = excluded.max_favorable_60m,
-                max_adverse_60m = excluded.max_adverse_60m,
-                label_status = excluded.label_status,
-                partial_reason = excluded.partial_reason,
-                source = excluded.source,
-                generated_at = excluded.generated_at
-            """,
-            (
-                row["id"],
-                row["timestamp"],
-                row["symbol"],
-                row["action"],
-                row["signal_price"],
-                row["rejection_reason"],
-                outcome.get("return_5m"),
-                outcome.get("return_15m"),
-                outcome.get("return_30m"),
-                outcome.get("return_60m"),
-                outcome.get("return_eod"),
-                outcome.get("max_favorable_60m"),
-                outcome.get("max_adverse_60m"),
-                outcome.get("label_status") or "pending",
-                outcome.get("partial_reason"),
-                source,
-            ),
-        )
+    _repo.upsert_outcome(row, outcome, source)
 
 
 def build(target_date: str, limit: int | None = None, symbol: str | None = None) -> dict:
-    ensure_rejected_signal_outcomes_table(DB_PATH)
+    _repo.ensure_table()
     rows = rejected_rows(target_date, limit=limit, symbol=symbol)
     bars_by_symbol: dict[str, list[dict]] = {}
 

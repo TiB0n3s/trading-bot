@@ -21,9 +21,10 @@ What it measures:
 
 import argparse
 from datetime import datetime, timedelta
-from pathlib import Path
 
-from db import DB_PATH, get_connection
+from repositories.signal_outcome_repo import SignalOutcomeRepository
+
+_repo = SignalOutcomeRepository()
 
 
 def parse_dt(value):
@@ -36,57 +37,7 @@ def parse_dt(value):
 
 
 def init_table():
-    with get_connection(DB_PATH) as con:
-        con.execute("""
-            CREATE TABLE IF NOT EXISTS historical_signal_outcomes (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-
-                signal_id INTEGER NOT NULL,
-                market_date TEXT,
-                symbol TEXT,
-                action TEXT,
-                signal_timestamp TEXT,
-                signal_price REAL,
-                approved INTEGER,
-                decision_summary TEXT,
-                rejection_reason TEXT,
-
-                matched_outcome_id INTEGER,
-                outcome_source TEXT,
-                entry_timestamp TEXT,
-                exit_timestamp TEXT,
-                entry_delay_minutes REAL,
-                exit_delay_minutes REAL,
-                holding_minutes REAL,
-                qty REAL,
-                entry_price REAL,
-                exit_price REAL,
-                realized_pnl REAL,
-                realized_pnl_pct REAL,
-                exit_type TEXT,
-
-                signal_to_entry_pct REAL,
-                signal_to_exit_pct REAL,
-                entry_timing_label TEXT,
-                exit_timing_label TEXT,
-                learning_label TEXT,
-                learning_reason TEXT,
-
-                created_at TEXT NOT NULL,
-
-                UNIQUE(signal_id)
-            )
-        """)
-
-        con.execute("""
-            CREATE INDEX IF NOT EXISTS idx_historical_signal_outcomes_date_symbol
-            ON historical_signal_outcomes(market_date, symbol)
-        """)
-
-        con.execute("""
-            CREATE INDEX IF NOT EXISTS idx_historical_signal_outcomes_labels
-            ON historical_signal_outcomes(entry_timing_label, exit_timing_label, learning_label)
-        """)
+    _repo.init_table()
 
 
 def pct_change(old, new):
@@ -115,32 +66,12 @@ def load_signals(start_date=None, end_date=None, symbol=None):
         where.append("symbol = ?")
         params.append(symbol.upper())
 
-    with get_connection(DB_PATH) as con:
-        try:
-            rows = con.execute(
-                f"""
-                SELECT
-                    id,
-                    first_timestamp AS timestamp,
-                    market_date,
-                    symbol,
-                    action,
-                    signal_price,
-                    approved,
-                    order_id,
-                    rejection_reason,
-                    decision_summary
-                FROM historical_signal_events
-                WHERE {' AND '.join(where)}
-                ORDER BY first_timestamp, id
-                """,
-                params,
-            ).fetchall()
-
-            if rows:
-                return rows
-        except Exception:
-            pass
+    try:
+        rows = _repo.load_signal_events(where, params)
+        if rows:
+            return rows
+    except Exception:
+        pass
 
     # Fallback for older DBs.
     params = []
@@ -156,30 +87,12 @@ def load_signals(start_date=None, end_date=None, symbol=None):
         where.append("symbol = ?")
         params.append(symbol.upper())
 
-    with get_connection(DB_PATH) as con:
-        rows = con.execute(
-            f"""
-            SELECT *
-            FROM historical_signal_experience
-            WHERE {' AND '.join(where)}
-            ORDER BY timestamp, id
-            """,
-            params,
-        ).fetchall()
-
-    return rows
+    return _repo.load_signal_experience(where, params)
 
 
 def load_outcomes_by_symbol():
-    with get_connection(DB_PATH) as con:
-        rows = con.execute("""
-            SELECT *
-            FROM historical_trade_outcomes
-            ORDER BY entry_timestamp, exit_timestamp, id
-        """).fetchall()
-
     out = {}
-    for r in rows:
+    for r in _repo.load_trade_outcomes():
         out.setdefault(r["symbol"], []).append(r)
     return out
 
@@ -374,66 +287,7 @@ def build_row(signal, outcome, match_kind):
 
 
 def insert_rows(rows, replace=False):
-    now = datetime.now().isoformat(sep=" ", timespec="seconds")
-    inserted = 0
-
-    with get_connection(DB_PATH) as con:
-        if replace:
-            con.execute("DELETE FROM historical_signal_outcomes")
-
-        for r in rows:
-            cur = con.execute(
-                """
-                INSERT OR REPLACE INTO historical_signal_outcomes (
-                    signal_id, market_date, symbol, action, signal_timestamp,
-                    signal_price, approved, decision_summary, rejection_reason,
-
-                    matched_outcome_id, outcome_source, entry_timestamp, exit_timestamp,
-                    entry_delay_minutes, exit_delay_minutes, holding_minutes, qty,
-                    entry_price, exit_price, realized_pnl, realized_pnl_pct, exit_type,
-
-                    signal_to_entry_pct, signal_to_exit_pct, entry_timing_label,
-                    exit_timing_label, learning_label, learning_reason, created_at
-                )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    r["signal_id"],
-                    r["market_date"],
-                    r["symbol"],
-                    r["action"],
-                    r["signal_timestamp"],
-                    r["signal_price"],
-                    r["approved"],
-                    r["decision_summary"],
-                    r["rejection_reason"],
-
-                    r["matched_outcome_id"],
-                    r["outcome_source"],
-                    r["entry_timestamp"],
-                    r["exit_timestamp"],
-                    r["entry_delay_minutes"],
-                    r["exit_delay_minutes"],
-                    r["holding_minutes"],
-                    r["qty"],
-                    r["entry_price"],
-                    r["exit_price"],
-                    r["realized_pnl"],
-                    r["realized_pnl_pct"],
-                    r["exit_type"],
-
-                    r["signal_to_entry_pct"],
-                    r["signal_to_exit_pct"],
-                    r["entry_timing_label"],
-                    r["exit_timing_label"],
-                    r["learning_label"],
-                    r["learning_reason"],
-                    now,
-                ),
-            )
-            inserted += cur.rowcount
-
-    return inserted
+    return _repo.insert_signal_outcome_rows(rows, replace=replace)
 
 
 def main():

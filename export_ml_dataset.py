@@ -20,12 +20,11 @@ from __future__ import annotations
 import argparse
 import csv
 import json
-import sqlite3
 from pathlib import Path
 
-from db import DB_PATH
 from ml_platform.governance import build_dataset_manifest
 from ml_platform.pit_context import get_archive_root, pit_coverage_for_range
+from repositories.ml_export_repo import MlExportRepository
 
 
 BASE_COLUMNS = [
@@ -114,7 +113,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--start-date", help="Start snapshot date, YYYY-MM-DD")
     parser.add_argument("--end-date", help="End snapshot date, YYYY-MM-DD")
     parser.add_argument("--output", required=True, help="CSV output path")
-    parser.add_argument("--db-path", default=str(DB_PATH), help="SQLite DB path")
+    parser.add_argument("--db-path", default=str(Path(__file__).resolve().parent / "trades.db"), help="SQLite DB path")
     parser.add_argument("--manifest-output", help="Optional JSON dataset manifest output path")
     parser.add_argument("--query-version", default="ml_dataset_export_v1")
     parser.add_argument("--label-version", default="label_taxonomy_v1")
@@ -145,130 +144,12 @@ def date_filter(args: argparse.Namespace) -> tuple[str, tuple[str, ...]]:
     return "substr(fs.timestamp, 1, 10) BETWEEN ? AND ?", (args.start_date, args.end_date)
 
 
-def table_exists(con: sqlite3.Connection, table: str) -> bool:
-    row = con.execute(
-        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?",
-        (table,),
-    ).fetchone()
-    return row is not None
-
-
-def table_columns(con: sqlite3.Connection, table: str) -> set[str]:
-    if not table_exists(con, table):
-        return set()
-    return {row["name"] for row in con.execute(f"PRAGMA table_info({table})").fetchall()}
-
-
-def optional_column(columns: set[str], table_alias: str, column: str, fallback: str = "NULL") -> str:
-    return f"{table_alias}.{column}" if column in columns else f"{fallback} AS {column}"
-
-
-def fetch_rows(args: argparse.Namespace) -> list[sqlite3.Row]:
+def fetch_rows(args: argparse.Namespace) -> list:
     db_path = Path(args.db_path)
     where_sql, params = date_filter(args)
+    return MlExportRepository(db_path).fetch_rows(where_sql, params)
 
-    with sqlite3.connect(f"file:{db_path}?mode=ro", uri=True) as con:
-        con.row_factory = sqlite3.Row
-
-        required = ("feature_snapshots", "labeled_setups")
-        missing = [t for t in required if not table_exists(con, t)]
-        if missing:
-            raise SystemExit(f"Missing required table(s): {', '.join(missing)}")
-        fs_columns = table_columns(con, "feature_snapshots")
-
-        # Context/prediction tables are expected in normal operation, but left
-        # joins keep this export useful during recovery or partial rebuilds.
-        query = f"""
-            SELECT
-                fs.id AS snapshot_id,
-                substr(fs.timestamp, 1, 10) AS snapshot_date,
-                fs.timestamp,
-                fs.symbol,
-                fs.last_price,
-                fs.ret_1m,
-                fs.ret_5m,
-                fs.ret_15m,
-                fs.range_pos_15m,
-                fs.distance_from_5m_high,
-                fs.distance_from_5m_low,
-                fs.distance_from_vwap,
-                fs.volume_ratio_5m,
-                fs.benchmark_symbol,
-                fs.benchmark_ret_5m,
-                fs.relative_strength_5m,
-                fs.spread_pct,
-                fs.market_session,
-                fs.macro_regime,
-                fs.market_bias,
-                fs.trend_direction,
-                fs.trend_strength,
-                {optional_column(fs_columns, 'fs', 'feature_available_at', 'fs.timestamp')},
-                {optional_column(fs_columns, 'fs', 'feature_generated_at', 'fs.timestamp')},
-                {optional_column(fs_columns, 'fs', 'feature_age_seconds', '0')},
-                {optional_column(fs_columns, 'fs', 'source', "'feature_snapshots_legacy'")},
-                {optional_column(fs_columns, 'fs', 'is_stale', '0')},
-                {optional_column(fs_columns, 'fs', 'staleness_reason')},
-                fs.bar_timeframe,
-                fs.bar_count,
-                fs.setup_label,
-                fs.setup_recommendation,
-                fs.setup_score,
-                fs.setup_confidence,
-                fs.setup_key,
-                ls.future_price_5m,
-                ls.future_price_15m,
-                ls.future_price_30m,
-                ls.ret_fwd_5m,
-                ls.ret_fwd_15m,
-                ls.ret_fwd_30m,
-                ls.max_up_15m,
-                ls.max_down_15m,
-                ls.outcome_label,
-                c.bias AS context_bias,
-                c.confidence AS context_confidence,
-                c.risk_level AS context_risk_level,
-                c.entry_quality AS context_entry_quality,
-                c.catalyst_score AS context_catalyst_score,
-                c.relative_strength_score AS context_relative_strength_score,
-                c.sector_alignment AS context_sector_alignment,
-                c.index_alignment AS context_index_alignment,
-                p.prediction_score,
-                p.probability_of_profit,
-                p.probability_of_order,
-                p.expected_pnl,
-                p.confidence AS prediction_confidence,
-                p.sample_size AS prediction_sample_size,
-                CASE
-                    WHEN ls.snapshot_id IS NULL
-                        THEN 'unlabeled'
-                    WHEN ls.ret_fwd_5m IS NULL
-                     AND ls.ret_fwd_15m IS NULL
-                     AND ls.ret_fwd_30m IS NULL
-                        THEN 'incomplete'
-                    WHEN ls.ret_fwd_30m IS NULL
-                        THEN 'partial_near_close'
-                    ELSE 'complete'
-                END AS label_horizon_status,
-                'fixed_horizon_v1' AS label_target_family,
-                'excluded_not_training_target' AS realized_exit_label_status,
-                NULL AS exit_policy_version,
-                NULL AS position_manager_version
-            FROM feature_snapshots fs
-            LEFT JOIN labeled_setups ls
-              ON ls.snapshot_id = fs.id
-            LEFT JOIN daily_symbol_context c
-              ON c.market_date = substr(fs.timestamp, 1, 10)
-             AND c.symbol = fs.symbol
-            LEFT JOIN daily_symbol_predictions p
-              ON p.market_date = substr(fs.timestamp, 1, 10)
-             AND p.symbol = fs.symbol
-            WHERE {where_sql}
-            ORDER BY fs.timestamp, fs.symbol, fs.id
-        """
-        return con.execute(query, params).fetchall()
-
-
-def write_csv(rows: list[sqlite3.Row], output: str) -> Path:
+def write_csv(rows: list, output: str) -> Path:
     path = Path(output)
     path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -281,7 +162,7 @@ def write_csv(rows: list[sqlite3.Row], output: str) -> Path:
     return path
 
 
-def _exclusion_counts(rows: list[sqlite3.Row]) -> dict[str, int]:
+def _exclusion_counts(rows: list) -> dict[str, int]:
     counts: dict[str, int] = {}
     for r in rows:
         status = r["label_horizon_status"] or "unlabeled"
@@ -290,7 +171,7 @@ def _exclusion_counts(rows: list[sqlite3.Row]) -> dict[str, int]:
     return counts
 
 
-def training_rows(rows: list[sqlite3.Row], include_incomplete_labels: bool) -> list[sqlite3.Row]:
+def training_rows(rows: list, include_incomplete_labels: bool) -> list:
     if include_incomplete_labels:
         return rows
     return [r for r in rows if (r["label_horizon_status"] or "unlabeled") == "complete"]

@@ -22,7 +22,7 @@ from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parent
 
-from db import DB_PATH, get_connection
+from repositories.ops_check_repo import OpsCheckRepository
 
 
 def _would_gate_block(
@@ -86,50 +86,15 @@ def _build_date_clause(start_date, end_date, column="substr(ds.decision_time,1,1
     return (" AND " + " AND ".join(parts)) if parts else "", params
 
 
-def run_report(start_date=None, end_date=None, db_path=DB_PATH):
-    with get_connection(db_path) as con:
-        date_clause, date_params = _build_date_clause(start_date, end_date)
+def run_report(start_date=None, end_date=None, db_path=BASE_DIR / "trades.db"):
+    repo = OpsCheckRepository(db_path)
+    date_clause, date_params = _build_date_clause(start_date, end_date)
 
-        # Load all approved BUY decision snapshots with session fields.
-        rows = con.execute(
-            f"""
-            SELECT
-                ds.id,
-                ds.trade_id,
-                ds.symbol,
-                ds.decision_time,
-                ds.final_decision,
-                ds.approved,
-                ds.rejection_reason,
-                ds.session_trend_label,
-                ds.session_trend_score,
-                ds.setup_policy_action,
-                ds.prediction_score,
-                ds.trend_direction,
-                ds.trend_strength,
-                mt.realized_pnl,
-                mt.realized_pnl_pct
-            FROM decision_snapshots ds
-            LEFT JOIN matched_trades mt ON mt.id = ds.trade_id
-            WHERE ds.action = 'buy'
-            {date_clause}
-            ORDER BY ds.decision_time
-            """,
-            date_params,
-        ).fetchall()
+    # Load all approved BUY decision snapshots with session fields.
+    rows = repo.session_gate_snapshot_rows(date_clause, date_params)
 
-        # Load trades actually rejected by the session gate.
-        blocked_rows = con.execute(
-            f"""
-            SELECT t.symbol, t.timestamp, t.rejection_reason
-            FROM trades t
-            WHERE t.rejection_reason LIKE '%session%'
-              AND t.action = 'buy'
-            {date_clause.replace('ds.', 't.').replace('decision_time', 'timestamp')}
-            ORDER BY t.timestamp
-            """,
-            date_params,
-        ).fetchall()
+    # Load trades actually rejected by the session gate.
+    blocked_rows = repo.session_gate_blocked_trade_rows(date_clause, date_params)
 
     if not rows:
         date_range = ""

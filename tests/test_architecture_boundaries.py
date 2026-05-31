@@ -95,18 +95,15 @@ TEMPORARY_REPORT_DB_ALLOWLIST = {
     "intelligence_context_report.py",
     "intelligence_learning_report.py",
     "live_score_monitor.py",
-    "market_alignment_report.py",
     "pnl.py",
     "portfolio_replacement_report.py",
     "post_session_check.py",
     "prediction_report.py",
-    "session_gate_report.py",
     "signal_event_builder.py",
     "signal_timing_lesson_report.py",
     "strategy_intelligence_report.py",
     "strategy_learner.py",
     "strong_day_participation_report.py",
-    "trend_context_report.py",
 }
 
 TEMPORARY_BACKFILL_TRAINING_DB_ALLOWLIST = {

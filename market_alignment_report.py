@@ -16,8 +16,8 @@ from datetime import datetime
 import pytz
 
 from strategy_constants import APPROVED_SYMBOLS, SYMBOL_MARKET_ALIGNMENT
-from app import _compute_trend
-from db import DB_PATH, get_connection
+from repositories.live_features_repo import LiveFeaturesRepository
+from services.trend_context_service import compute_trend
 
 BASE_DIR = Path(__file__).resolve().parent
 MARKET_CONTEXT = BASE_DIR / "market_context.json"
@@ -37,26 +37,7 @@ def load_market_context():
 
 
 def recent_actions(symbol, limit=10):
-    with get_connection(DB_PATH) as con:
-        rows = con.execute(
-            """
-            SELECT action
-            FROM trades
-            WHERE symbol = ?
-              AND action IS NOT NULL
-              AND (
-                    approved = 1
-                 OR rejection_reason LIKE 'confidence_gate:%'
-                 OR rejection_reason LIKE 'trend_gate:%'
-                 OR rejection_reason LIKE 'trend_confirmation:%'
-              )
-            ORDER BY timestamp DESC
-            LIMIT ?
-            """,
-            (symbol, limit),
-        ).fetchall()
-
-    return [r["action"] for r in rows]
+    return LiveFeaturesRepository().recent_actions(symbol, limit=limit)
 
 
 def alignment_for(symbol, ctx):
@@ -69,7 +50,7 @@ def alignment_for(symbol, ctx):
     symbol_ctx = symbols.get(symbol) or {}
     benchmark_ctx = symbols.get(benchmark) or {}
 
-    benchmark_trend = _compute_trend(recent_actions(benchmark))
+    benchmark_trend = compute_trend(recent_actions(benchmark))
 
     symbol_bias = symbol_ctx.get("bias")
     benchmark_bias = benchmark_ctx.get("bias")

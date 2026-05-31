@@ -13,8 +13,12 @@ Usage:
 
 import argparse
 from datetime import date, timedelta
+from pathlib import Path
 
-from db import DB_PATH, get_connection
+from repositories.ops_check_repo import OpsCheckRepository
+
+
+repo = OpsCheckRepository(Path(__file__).resolve().parent / "trades.db")
 
 
 def money(v):
@@ -67,36 +71,7 @@ def build_where(args, prefix="t"):
 
 
 def fetch_bucket(group_expr, where_sql, params):
-    with get_connection(DB_PATH) as con:
-        rows = con.execute(
-            f"""
-            SELECT
-              {group_expr} AS bucket,
-              COUNT(DISTINCT t.symbol || ':' || t.market_date) AS context_rows,
-              COUNT(s.id) AS signal_rows,
-              SUM(CASE WHEN s.matched_outcome_id IS NOT NULL THEN 1 ELSE 0 END) AS matched_signals,
-              SUM(CASE WHEN s.realized_pnl > 0 THEN 1 ELSE 0 END) AS winners,
-              SUM(CASE WHEN s.realized_pnl < 0 THEN 1 ELSE 0 END) AS losers,
-              ROUND(AVG(s.realized_pnl), 2) AS avg_signal_pnl,
-              ROUND(SUM(s.realized_pnl), 2) AS total_signal_pnl,
-              ROUND(AVG(s.realized_pnl_pct), 2) AS avg_signal_pnl_pct,
-              ROUND(AVG(t.trend_1d_pct), 2) AS avg_1d,
-              ROUND(AVG(t.trend_5d_pct), 2) AS avg_5d,
-              ROUND(AVG(t.trend_10d_pct), 2) AS avg_10d,
-              ROUND(AVG(t.relative_strength_score), 1) AS avg_rs,
-              ROUND(AVG(t.distance_from_sma_20_pct), 2) AS avg_dist20
-            FROM historical_trend_context t
-            LEFT JOIN historical_signal_outcomes s
-              ON s.market_date = t.market_date
-             AND s.symbol = t.symbol
-            WHERE {where_sql}
-            GROUP BY {group_expr}
-            ORDER BY total_signal_pnl DESC, matched_signals DESC, signal_rows DESC
-            """,
-            params,
-        ).fetchall()
-
-    return rows
+    return repo.trend_context_bucket_rows(group_expr, where_sql, params)
 
 
 def print_bucket(title, rows):
@@ -146,18 +121,7 @@ def main():
 
     where_sql, params = build_where(args, "t")
 
-    with get_connection(DB_PATH) as con:
-        summary = con.execute(
-            f"""
-            SELECT
-              COUNT(*) AS context_rows,
-              COUNT(DISTINCT market_date) AS dates,
-              COUNT(DISTINCT symbol) AS symbols
-            FROM historical_trend_context t
-            WHERE {where_sql}
-            """,
-            params,
-        ).fetchone()
+    summary = repo.trend_context_summary_row(where_sql, params)
 
     by_label = fetch_bucket("t.trend_label", where_sql, params)
     by_regime = fetch_bucket("t.trend_regime", where_sql, params)

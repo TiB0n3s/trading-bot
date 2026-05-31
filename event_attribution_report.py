@@ -23,8 +23,10 @@ import argparse
 from collections import defaultdict
 from datetime import date
 
-from db import DB_PATH, get_connection
 from market_intelligence.intelligence_store import init_intelligence_tables
+from repositories.event_attribution_report_repo import EventAttributionReportRepository
+
+repo = EventAttributionReportRepository()
 
 
 def money(v):
@@ -58,55 +60,9 @@ def safe_div(a, b):
     return (a / b) if b else 0.0
 
 
-def load_events(con, target_date, symbol=None, event_type=None):
-    params = [target_date]
-    filters = ["market_date = ?"]
-
-    if symbol:
-        filters.append("symbol = ?")
-        params.append(symbol.upper())
-
-    if event_type:
-        filters.append("event_type = ?")
-        params.append(event_type)
-
-    where = " AND ".join(filters)
-
-    return con.execute(
-        f"""
-        SELECT *
-        FROM daily_symbol_events
-        WHERE {where}
-        ORDER BY symbol, event_type, id
-        """,
-        params,
-    ).fetchall()
-
-
-def load_context_by_symbol(con, target_date):
-    rows = con.execute(
-        """
-        SELECT *
-        FROM daily_symbol_context
-        WHERE market_date = ?
-        """,
-        (target_date,),
-    ).fetchall()
-    return {r["symbol"]: r for r in rows}
-
-
-def trade_stats_for_symbol(con, target_date, symbol):
+def trade_stats_for_symbol(repo, target_date, symbol):
     """Return same-day trade stats for a symbol."""
-    trades = con.execute(
-        """
-        SELECT *
-        FROM trades
-        WHERE timestamp LIKE ?
-          AND symbol = ?
-        ORDER BY timestamp ASC, id ASC
-        """,
-        (f"{target_date}%", symbol),
-    ).fetchall()
+    trades = repo.trade_rows(target_date, symbol)
 
     total_signals = len(trades)
     approved = sum(1 for r in trades if int(r["approved"] or 0) == 1)
@@ -133,21 +89,9 @@ def trade_stats_for_symbol(con, target_date, symbol):
     }
 
 
-def pnl_stats_for_symbol(con, target_date, symbol):
+def pnl_stats_for_symbol(repo, target_date, symbol):
     """Return matched-trade P&L stats for same-day exits."""
-    try:
-        rows = con.execute(
-            """
-            SELECT *
-            FROM matched_trades
-            WHERE exit_timestamp LIKE ?
-              AND symbol = ?
-            ORDER BY exit_timestamp ASC
-            """,
-            (f"{target_date}%", symbol),
-        ).fetchall()
-    except Exception:
-        rows = []
+    rows = repo.matched_rows(target_date, symbol)
 
     pnl = sum(float(r["realized_pnl"] or 0) for r in rows)
     wins = sum(1 for r in rows if float(r["realized_pnl"] or 0) > 0)
@@ -323,49 +267,48 @@ def main():
 
     init_intelligence_tables()
 
-    with get_connection(DB_PATH) as con:
-        events = load_events(con, args.date, args.symbol, args.event_type)
-        context_by_symbol = load_context_by_symbol(con, args.date)
+    events = repo.events(args.date, args.symbol, args.event_type)
+    context_by_symbol = repo.context_by_symbol(args.date)
 
-        enriched = []
-        for e in events:
-            symbol = e["symbol"]
-            ctx = context_by_symbol.get(symbol)
+    enriched = []
+    for e in events:
+        symbol = e["symbol"]
+        ctx = context_by_symbol.get(symbol)
 
-            trade_stats = trade_stats_for_symbol(con, args.date, symbol)
-            pnl_stats = pnl_stats_for_symbol(con, args.date, symbol)
+        trade_stats = trade_stats_for_symbol(repo, args.date, symbol)
+        pnl_stats = pnl_stats_for_symbol(repo, args.date, symbol)
 
-            enriched.append({
-                "event_id": e["id"],
-                "market_date": e["market_date"],
-                "symbol": symbol,
-                "event_type": e["event_type"],
-                "event_subtype": e["event_subtype"],
-                "event_summary": e["event_summary"],
-                "source": e["source"],
-                "expected_market_impact": e["expected_market_impact"],
-                "trade_relevance": e["trade_relevance"],
-                "time_horizon": e["time_horizon"],
-                "confidence": e["confidence"],
+        enriched.append({
+            "event_id": e["id"],
+            "market_date": e["market_date"],
+            "symbol": symbol,
+            "event_type": e["event_type"],
+            "event_subtype": e["event_subtype"],
+            "event_summary": e["event_summary"],
+            "source": e["source"],
+            "expected_market_impact": e["expected_market_impact"],
+            "trade_relevance": e["trade_relevance"],
+            "time_horizon": e["time_horizon"],
+            "confidence": e["confidence"],
 
-                "consumer_appetite_score": e["consumer_appetite_score"],
-                "revenue_impact_score": e["revenue_impact_score"],
-                "profit_potential_score": e["profit_potential_score"],
-                "margin_risk_score": e["margin_risk_score"],
-                "supply_chain_risk_score": e["supply_chain_risk_score"],
-                "materials_risk_score": e["materials_risk_score"],
-                "regulatory_risk_score": e["regulatory_risk_score"],
-                "competitive_risk_score": e["competitive_risk_score"],
-                "execution_risk_score": e["execution_risk_score"],
-                "macro_risk_score": e["macro_risk_score"],
+            "consumer_appetite_score": e["consumer_appetite_score"],
+            "revenue_impact_score": e["revenue_impact_score"],
+            "profit_potential_score": e["profit_potential_score"],
+            "margin_risk_score": e["margin_risk_score"],
+            "supply_chain_risk_score": e["supply_chain_risk_score"],
+            "materials_risk_score": e["materials_risk_score"],
+            "regulatory_risk_score": e["regulatory_risk_score"],
+            "competitive_risk_score": e["competitive_risk_score"],
+            "execution_risk_score": e["execution_risk_score"],
+            "macro_risk_score": e["macro_risk_score"],
 
-                "context_bias": ctx["bias"] if ctx else None,
-                "context_entry_quality": ctx["entry_quality"] if ctx else None,
-                "catalyst_score": ctx["catalyst_score"] if ctx else None,
+            "context_bias": ctx["bias"] if ctx else None,
+            "context_entry_quality": ctx["entry_quality"] if ctx else None,
+            "catalyst_score": ctx["catalyst_score"] if ctx else None,
 
-                **trade_stats,
-                **pnl_stats,
-            })
+            **trade_stats,
+            **pnl_stats,
+        })
 
     print("=" * 132)
     print(f"  Event Attribution Report — {args.date}")

@@ -22,9 +22,9 @@ from pathlib import Path
 import pytz
 
 from services.broker_service import broker_service
-from db import DB_PATH, get_connection
 from bot_events import log_event
 from policy_artifacts import atomic_write_json
+from repositories.portfolio_rotation_repo import recent_buy_signals
 
 
 ET = pytz.timezone("America/New_York")
@@ -78,55 +78,7 @@ def get_positions():
 def load_recent_buy_signals(minutes=90, limit=300):
     since = datetime.now(ET) - timedelta(minutes=minutes)
     since_s = since.strftime("%Y-%m-%d %H:%M:%S")
-
-    with get_connection(DB_PATH) as con:
-        rows = con.execute("""
-            SELECT
-                id,
-                timestamp,
-                symbol,
-                action,
-                signal_price,
-                approved,
-                rejection_reason,
-
-                market_bias,
-                market_bias_effective,
-                fundamental_score,
-                risk_level,
-                entry_quality,
-                trend_direction,
-                trend_strength,
-                momentum_direction,
-                momentum_pct,
-
-                session_trend_label,
-                session_trend_score,
-                session_return_pct,
-                session_momentum_5m_pct,
-                session_momentum_15m_pct,
-                session_momentum_30m_pct,
-                session_distance_from_vwap_pct,
-
-                prediction_score,
-                prediction_decision,
-
-                setup_label,
-                setup_policy_action,
-                setup_size_multiplier,
-
-                buy_opportunity_score,
-                buy_opportunity_recommendation,
-                buy_opportunity_reason
-            FROM trades
-            WHERE LOWER(action) = 'buy'
-              AND timestamp >= ?
-              AND signal_price IS NOT NULL
-            ORDER BY id DESC
-            LIMIT ?
-        """, (since_s, limit)).fetchall()
-
-    return rows
+    return recent_buy_signals(since_s, limit)
 
 
 def score_signal(row, held_symbols):

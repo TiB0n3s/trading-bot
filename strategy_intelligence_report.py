@@ -10,7 +10,11 @@ Usage:
 import sys
 from datetime import date
 from collections import defaultdict
-from db import DB_PATH, get_connection
+from repositories.strategy_intelligence_report_repo import (
+    StrategyIntelligenceReportRepository,
+)
+
+repo = StrategyIntelligenceReportRepository()
 
 
 def pct(n, d):
@@ -25,27 +29,6 @@ def short(text, n=80):
 def section(title):
     print()
     print("── " + title + " " + "─" * max(0, 76 - len(title)))
-
-
-def table_columns(con, table):
-    rows = con.execute(f"PRAGMA table_info({table})").fetchall()
-    return {r["name"] for r in rows}
-
-
-def select_existing(con, table, wanted, where_sql, params):
-    cols = table_columns(con, table)
-    selected = [c for c in wanted if c in cols]
-
-    if not selected:
-        return [], selected
-
-    sql = f"""
-        SELECT {", ".join(selected)}
-        FROM {table}
-        {where_sql}
-    """
-
-    return con.execute(sql, params).fetchall(), selected
 
 
 def get(row, key, default=None):
@@ -154,7 +137,7 @@ def replacement_edge_label(edge):
     return "no_replace"
 
 
-def fetch_buy_rows(con, target_date):
+def fetch_buy_rows(repo, target_date):
     wanted = [
         "timestamp", "symbol", "action", "approved", "rejection_reason",
         "buy_opportunity_score", "buy_opportunity_recommendation",
@@ -165,8 +148,7 @@ def fetch_buy_rows(con, target_date):
         "prediction_score", "prediction_decision",
         "signal_price", "fill_price",
     ]
-    return select_existing(
-        con,
+    return repo.select_existing(
         "trades",
         wanted,
         "WHERE timestamp LIKE ? AND LOWER(action) = 'buy' ORDER BY timestamp ASC",
@@ -174,15 +156,14 @@ def fetch_buy_rows(con, target_date):
     )
 
 
-def fetch_sell_rows(con, target_date):
+def fetch_sell_rows(repo, target_date):
     wanted = [
         "timestamp", "symbol", "action", "approved", "rejection_reason",
         "fill_price", "signal_price",
         "realized_pnl", "realized_pl", "profit_loss", "pnl",
         "setup_label", "market_bias", "risk_level", "entry_quality",
     ]
-    return select_existing(
-        con,
+    return repo.select_existing(
         "trades",
         wanted,
         "WHERE timestamp LIKE ? AND LOWER(action) = 'sell' ORDER BY timestamp ASC",
@@ -190,7 +171,7 @@ def fetch_sell_rows(con, target_date):
     )
 
 
-def fetch_position_momentum_rows(con, target_date):
+def fetch_position_momentum_rows(repo, target_date):
     wanted = [
         "timestamp", "symbol", "action", "severity", "reason",
         "trend_label", "trend_score",
@@ -201,8 +182,7 @@ def fetch_position_momentum_rows(con, target_date):
         "sell_pressure_score", "sell_pressure_recommendation",
         "sell_pressure_reason",
     ]
-    return select_existing(
-        con,
+    return repo.select_existing(
         "position_momentum_checks",
         wanted,
         "WHERE timestamp LIKE ? ORDER BY timestamp ASC",
@@ -539,10 +519,9 @@ def main():
     print(f"  Strategy Intelligence Report — {target_date}")
     print("=" * 100)
 
-    with get_connection(DB_PATH) as con:
-        buy_rows, buy_cols = fetch_buy_rows(con, target_date)
-        sell_rows, sell_cols = fetch_sell_rows(con, target_date)
-        pos_rows, pos_cols = fetch_position_momentum_rows(con, target_date)
+    buy_rows, buy_cols = fetch_buy_rows(repo, target_date)
+    sell_rows, sell_cols = fetch_sell_rows(repo, target_date)
+    pos_rows, pos_cols = fetch_position_momentum_rows(repo, target_date)
 
     summarize_buy_opportunity(buy_rows)
     summarize_setup_labels(buy_rows)

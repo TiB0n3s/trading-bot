@@ -17,14 +17,12 @@ Usage:
     python analytics_report.py --date 2026-05-07
 """
 import argparse
-import sqlite3
 import sys
 from collections import defaultdict, deque
 from datetime import date, timedelta
-from pathlib import Path
-from db import DB_PATH, get_connection
+from repositories.analytics_report_repo import AnalyticsReportRepository
 
-SCRIPT_DIR = Path(__file__).resolve().parent
+repo = AnalyticsReportRepository()
 
 # Order in which to display rejection categories.
 PRIORITY_CATEGORIES = [
@@ -95,72 +93,30 @@ def _section(title):
     print(f"\n── {title} {bar}")
 
 
-def _render_execution(con, clause, params):
+def _render_execution(repo, clause, params):
     _section("EXECUTION")
-    sql = f"""
-        SELECT
-          SUM(CASE WHEN action='buy'  AND (rejection_reason IS NULL
-                       OR rejection_reason NOT LIKE 'synthetic_bracket_exit:%')
-                   THEN 1 ELSE 0 END) AS filled_buys,
-          SUM(CASE WHEN action='sell' AND (rejection_reason IS NULL
-                       OR rejection_reason NOT LIKE 'synthetic_bracket_exit:%')
-                   THEN 1 ELSE 0 END) AS filled_sells,
-          SUM(CASE WHEN rejection_reason LIKE 'synthetic_bracket_exit:%'
-                   THEN 1 ELSE 0 END) AS synth_exits
-        FROM trades
-        WHERE approved = 1
-          AND order_status IN ('filled', 'partially_filled')
-          AND qty IS NOT NULL
-          AND fill_price IS NOT NULL
-          {clause}
-    """
-    row = con.execute(sql, params).fetchone()
+    row = repo.execution_summary(clause, params)
     print(f"  Filled buys              : {row['filled_buys'] or 0}")
     print(f"  Filled sells             : {row['filled_sells'] or 0}")
     print(f"  Synthetic exits          : {row['synth_exits'] or 0}")
 
     # Open tracked positions (FIFO net qty across the entire DB, not date-filtered
     # because open-position state is current, not range-bound)
-    open_rows = con.execute("""
-        SELECT symbol,
-            SUM(CASE WHEN action='buy' THEN COALESCE(qty,0)
-                     ELSE -COALESCE(qty,0) END) AS net_qty
-        FROM trades
-        WHERE order_id IS NOT NULL
-          AND order_status IN ('filled', 'partially_filled')
-        GROUP BY symbol
-        HAVING net_qty > 0
-    """).fetchall()
+    open_rows = repo.open_position_rows()
     syms = ", ".join(r['symbol'] for r in open_rows) or "—"
     print(f"  Open tracked positions   : {len(open_rows)} ({syms})")
 
     # fill_events forensic table (may not exist on older DBs)
-    try:
-        fe = con.execute(
-            f"SELECT COUNT(*) AS n FROM fill_events WHERE 1=1{clause}", params
-        ).fetchone()
-        print(f"  Fill events captured     : {fe['n']}")
-    except sqlite3.OperationalError:
+    fill_event_count = repo.fill_event_count(clause, params)
+    if fill_event_count is None:
         print(f"  Fill events captured     : (fill_events table not present)")
+    else:
+        print(f"  Fill events captured     : {fill_event_count}")
 
 
-def _render_filters(con, clause, params):
+def _render_filters(repo, clause, params):
     _section("RISK FILTERS")
-    rows = con.execute(f"""
-        SELECT
-          CASE
-            WHEN instr(rejection_reason, ':') > 0
-              THEN substr(rejection_reason, 1, instr(rejection_reason, ':') - 1)
-            ELSE 'uncategorized'
-          END AS category,
-          COUNT(*) AS n
-        FROM trades
-        WHERE approved = 0
-          AND rejection_reason IS NOT NULL
-          {clause}
-        GROUP BY category
-        ORDER BY n DESC
-    """, params).fetchall()
+    rows = repo.rejection_category_rows(clause, params)
     counts = {}
     for r in rows:
         cat = r['category']
@@ -180,24 +136,14 @@ def _render_filters(con, clause, params):
     print(f"  {'TOTAL':<26}: {sum(counts.values())}")
 
 
-def _fifo_match(con, clause, params):
+def _fifo_match(repo, clause, params):
     """FIFO-match buys to sells (per symbol). Time-respecting: a sell only
     matches against buys that came BEFORE it in chronological order.
 
     Algorithm matches trade_matcher.match_trades exactly so the two views
     agree on match counts and P&L. Includes synthetic_bracket_exit rows on
     the sell side (autonomous stop-loss / take-profit fills)."""
-    rows = con.execute(f"""
-        SELECT timestamp, symbol, action, qty, fill_price, signal_price
-        FROM trades
-        WHERE approved = 1
-          AND action IN ('buy', 'sell')
-          AND qty IS NOT NULL
-          AND fill_price IS NOT NULL
-          AND order_status IN ('filled', 'partially_filled')
-          {clause}
-        ORDER BY timestamp ASC, id ASC
-    """, params).fetchall()
+    rows = repo.fifo_trade_rows(clause, params)
 
     open_lots = defaultdict(deque)
     matches = []
@@ -229,21 +175,10 @@ def _fifo_match(con, clause, params):
                 open_lots[symbol].popleft()
     return matches
 
-def _render_session_momentum_attribution(con, clause, params):
+def _render_session_momentum_attribution(repo, clause, params):
     _section("SESSION MOMENTUM ATTRIBUTION")
 
-    rows = con.execute(f"""
-        SELECT
-            COALESCE(session_trend_label, 'unknown') AS label,
-            COUNT(*) AS total,
-            SUM(CASE WHEN approved = 1 THEN 1 ELSE 0 END) AS approved,
-            SUM(CASE WHEN approved = 0 THEN 1 ELSE 0 END) AS rejected
-        FROM trades
-        WHERE LOWER(action) = 'buy'
-          {clause}
-        GROUP BY COALESCE(session_trend_label, 'unknown')
-        ORDER BY total DESC
-    """, params).fetchall()
+    rows = repo.session_momentum_attribution_rows(clause, params)
 
     if not rows:
         print("  (no buy signals in range)")
@@ -326,24 +261,19 @@ def pct_gap(a, b):
     return abs(a - b) / denom * 100
 
 
-def _render_data_quality(con, clause, params, matches):
+def _render_data_quality(repo, clause, params, matches):
     _section("DATA QUALITY")
     mclause = _matched_clause(clause)
 
     best_effort_trade_count = len(matches)
     best_effort_pnl = sum(m['pnl'] for m in matches)
 
-    try:
-        row = con.execute(f"""
-            SELECT COUNT(*) AS n, COALESCE(SUM(realized_pnl), 0) AS pnl
-            FROM matched_trades
-            WHERE 1=1 {mclause}
-        """, params).fetchone()
-        confirmed_trade_count = row['n']
-        confirmed_pnl = row['pnl']
-    except sqlite3.OperationalError:
+    row = repo.data_quality_summary(mclause, params)
+    if row is None:
         print("  (matched_trades table not present — run trade_matcher.py first)")
         return
+    confirmed_trade_count = row['n']
+    confirmed_pnl = row['pnl']
 
     pnl_gap = pct_gap(best_effort_pnl, confirmed_pnl)
     trade_gap = pct_gap(best_effort_trade_count, confirmed_trade_count)
@@ -361,17 +291,7 @@ def _render_data_quality(con, clause, params, matches):
         print("  lack fill_price. Use confirmed-fill analytics for attribution; use")
         print("  best-effort FIFO as a broad outcome sanity check.")
 
-        bad_rows = con.execute(f"""
-            SELECT id, timestamp, symbol, action, qty, signal_price, fill_price,
-                   order_id, order_status
-            FROM trades
-            WHERE approved = 1
-              AND action IN ('buy', 'sell')
-              AND qty IS NOT NULL
-              AND fill_price IS NULL
-              {clause}
-            ORDER BY timestamp
-        """, params).fetchall()
+        bad_rows = repo.missing_fill_rows(clause, params)
         if bad_rows:
             print()
             print(f"  Rows missing fill_price ({len(bad_rows)} total):")
@@ -392,23 +312,12 @@ def _matched_clause(clause):
     return clause.replace("timestamp", "exit_timestamp")
 
 
-def _render_matched_attribution(con, clause, params):
+def _render_matched_attribution(repo, clause, params):
     _section("MATCHED-TRADE ATTRIBUTION")
     mclause = _matched_clause(clause)
 
-    try:
-        agg = con.execute(f"""
-            SELECT
-              COUNT(*) AS trades,
-              COALESCE(SUM(realized_pnl), 0) AS pnl,
-              COALESCE(AVG(realized_pnl), 0) AS expectancy,
-              CASE WHEN COUNT(*) > 0 THEN
-                SUM(CASE WHEN won = 1 THEN 1 ELSE 0 END) * 100.0 / COUNT(*)
-              ELSE 0 END AS win_rate
-            FROM matched_trades
-            WHERE 1=1 {mclause}
-        """, params).fetchone()
-    except sqlite3.OperationalError:
+    agg = repo.matched_summary(mclause, params)
+    if agg is None:
         print("  (matched_trades table not present — run trade_matcher.py first)")
         return
 
@@ -416,13 +325,7 @@ def _render_matched_attribution(con, clause, params):
         print("  (no matched trades in range)")
         return
 
-    pf_row = con.execute(f"""
-        SELECT
-          COALESCE(SUM(CASE WHEN realized_pnl > 0 THEN realized_pnl ELSE 0 END), 0) AS gross_profit,
-          COALESCE(ABS(SUM(CASE WHEN realized_pnl < 0 THEN realized_pnl ELSE 0 END)), 0) AS gross_loss
-        FROM matched_trades
-        WHERE 1=1 {mclause}
-    """, params).fetchone()
+    pf_row = repo.matched_profit_factor_row(mclause, params)
     gp = pf_row["gross_profit"]
     gl = pf_row["gross_loss"]
     if gl > 0:
@@ -440,15 +343,7 @@ def _render_matched_attribution(con, clause, params):
     print(f"  Profit factor            : {pf}")
 
     # Per-symbol from matched_trades
-    sym_rows = con.execute(f"""
-        SELECT symbol, COUNT(*) AS trades,
-               SUM(realized_pnl) AS pnl, AVG(realized_pnl) AS expectancy,
-               SUM(CASE WHEN won = 1 THEN 1 ELSE 0 END) * 100.0 / COUNT(*) AS win_rate
-        FROM matched_trades
-        WHERE 1=1 {mclause}
-        GROUP BY symbol
-        ORDER BY pnl DESC
-    """, params).fetchall()
+    sym_rows = repo.matched_symbol_rows(mclause, params)
     if sym_rows:
         print()
         print(f"  Per-symbol (from matched_trades):")
@@ -459,14 +354,7 @@ def _render_matched_attribution(con, clause, params):
 
     # Context attribution placeholders — likely empty for trades that predate
     # the schema migration; populates as new post-migration matches accumulate.
-    macro_rows = con.execute(f"""
-        SELECT macro_regime, COUNT(*) AS n,
-               SUM(realized_pnl) AS pnl, AVG(realized_pnl) AS expectancy
-        FROM matched_trades
-        WHERE macro_regime IS NOT NULL {mclause}
-        GROUP BY macro_regime
-        ORDER BY pnl DESC
-    """, params).fetchall()
+    macro_rows = repo.matched_macro_rows(mclause, params)
     print()
     print("  By macro_regime:")
     if not macro_rows:
@@ -475,14 +363,7 @@ def _render_matched_attribution(con, clause, params):
         for r in macro_rows:
             print(f"    {r['macro_regime']:<22} n={r['n']:>3}  P&L=${r['pnl']:>+9.2f}  expect=${r['expectancy']:>+7.2f}")
 
-    trend_rows = con.execute(f"""
-        SELECT trend_direction, trend_strength, COUNT(*) AS n,
-               SUM(realized_pnl) AS pnl, AVG(realized_pnl) AS expectancy
-        FROM matched_trades
-        WHERE trend_direction IS NOT NULL {mclause}
-        GROUP BY trend_direction, trend_strength
-        ORDER BY pnl DESC
-    """, params).fetchall()
+    trend_rows = repo.matched_trend_rows(mclause, params)
     print()
     print("  By trend (direction/strength):")
     if not trend_rows:
@@ -501,29 +382,26 @@ def main():
     rng.add_argument('--date', help='Single date YYYY-MM-DD (default = today)')
     args = parser.parse_args()
 
-    if not DB_PATH.exists():
-        print(f"ERROR: {DB_PATH} not found", file=sys.stderr)
+    if not repo.db_exists():
+        print(f"ERROR: {repo.db_path} not found", file=sys.stderr)
         sys.exit(1)
 
     header, clause, params = _resolve_range(args)
-
-    con = get_connection(DB_PATH)
 
     print(f"\n{'=' * 60}")
     print(f"  Trading Bot Analytics Report — {header}")
     print(f"{'=' * 60}")
 
-    _render_execution(con, clause, params)
-    _render_filters(con, clause, params)
-    matches = _fifo_match(con, clause, params)
-    _render_session_momentum_attribution(con, clause, params)
+    _render_execution(repo, clause, params)
+    _render_filters(repo, clause, params)
+    matches = _fifo_match(repo, clause, params)
+    _render_session_momentum_attribution(repo, clause, params)
     _render_performance(matches)
     _render_per_symbol(matches)
-    _render_matched_attribution(con, clause, params)
-    _render_data_quality(con, clause, params, matches)
+    _render_matched_attribution(repo, clause, params)
+    _render_data_quality(repo, clause, params, matches)
 
     print()
-    con.close()
 
 
 if __name__ == "__main__":

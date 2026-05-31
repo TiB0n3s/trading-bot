@@ -22,8 +22,12 @@ import argparse
 from collections import defaultdict
 from datetime import date, timedelta
 
-from db import DB_PATH, get_connection
 from market_intelligence.intelligence_store import init_intelligence_tables
+from repositories.intelligence_learning_report_repo import (
+    IntelligenceLearningReportRepository,
+)
+
+repo = IntelligenceLearningReportRepository()
 
 
 def money(v):
@@ -76,76 +80,8 @@ def resolve_range(args):
     return f"DATE {target}", target, next_day
 
 
-def load_event_context_rows(con, start_date, end_date, symbol=None):
-    params = []
-    where = ["1=1"]
-
-    if start_date:
-        where.append("e.market_date >= ?")
-        params.append(start_date)
-    if end_date:
-        where.append("e.market_date < ?")
-        params.append(end_date)
-    if symbol:
-        where.append("e.symbol = ?")
-        params.append(symbol.upper())
-
-    sql = f"""
-        SELECT
-            e.id AS event_id,
-            e.market_date,
-            e.symbol,
-            e.event_type,
-            e.expected_market_impact,
-            e.trade_relevance,
-            e.time_horizon,
-            e.confidence AS event_confidence,
-            e.consumer_appetite_score,
-            e.revenue_impact_score,
-            e.profit_potential_score,
-            e.margin_risk_score,
-            e.supply_chain_risk_score,
-            e.materials_risk_score,
-            e.regulatory_risk_score,
-            e.competitive_risk_score,
-            e.execution_risk_score,
-            e.macro_risk_score,
-            e.event_summary,
-
-            c.bias,
-            c.confidence AS context_confidence,
-            c.risk_level,
-            c.entry_quality,
-            c.avoid_type,
-            c.catalyst_score,
-            c.relative_strength_score,
-            c.daily_pct,
-            c.intraday_pct,
-            c.momentum_30m_pct,
-            c.sector_alignment,
-            c.index_alignment
-        FROM daily_symbol_events e
-        LEFT JOIN daily_symbol_context c
-          ON c.market_date = e.market_date
-         AND c.symbol = e.symbol
-        WHERE {' AND '.join(where)}
-        ORDER BY e.market_date, e.symbol, e.id
-    """
-
-    return con.execute(sql, params).fetchall()
-
-
-def trade_stats(con, market_date, symbol):
-    rows = con.execute(
-        """
-        SELECT *
-        FROM trades
-        WHERE timestamp LIKE ?
-          AND symbol = ?
-        """,
-        (f"{market_date}%", symbol),
-    ).fetchall()
-
+def trade_stats(repo, market_date, symbol):
+    rows = repo.trade_rows(market_date, symbol)
     signals = len(rows)
     approved = sum(1 for r in rows if int(r["approved"] or 0) == 1)
     orders = sum(1 for r in rows if r["order_id"])
@@ -164,20 +100,8 @@ def trade_stats(con, market_date, symbol):
     }
 
 
-def pnl_stats(con, market_date, symbol):
-    try:
-        rows = con.execute(
-            """
-            SELECT *
-            FROM matched_trades
-            WHERE exit_timestamp LIKE ?
-              AND symbol = ?
-            """,
-            (f"{market_date}%", symbol),
-        ).fetchall()
-    except Exception:
-        rows = []
-
+def pnl_stats(repo, market_date, symbol):
+    rows = repo.matched_rows(market_date, symbol)
     pnl = sum(float(r["realized_pnl"] or 0) for r in rows)
     wins = sum(1 for r in rows if float(r["realized_pnl"] or 0) > 0)
     losses = sum(1 for r in rows if float(r["realized_pnl"] or 0) < 0)
@@ -194,12 +118,12 @@ def pnl_stats(con, market_date, symbol):
     }
 
 
-def enrich_rows(con, rows):
+def enrich_rows(repo, rows):
     enriched = []
 
     for r in rows:
-        ts = trade_stats(con, r["market_date"], r["symbol"])
-        ps = pnl_stats(con, r["market_date"], r["symbol"])
+        ts = trade_stats(repo, r["market_date"], r["symbol"])
+        ps = pnl_stats(repo, r["market_date"], r["symbol"])
 
         item = dict(r)
         item.update(ts)
@@ -354,9 +278,8 @@ def main():
     init_intelligence_tables()
     label, start_date, end_date = resolve_range(args)
 
-    with get_connection(DB_PATH) as con:
-        rows = load_event_context_rows(con, start_date, end_date, args.symbol)
-        enriched = enrich_rows(con, rows)
+    rows = repo.event_context_rows(start_date, end_date, args.symbol)
+    enriched = enrich_rows(repo, rows)
 
     print("=" * 132)
     print(f"  Intelligence Learning Report — {label}")

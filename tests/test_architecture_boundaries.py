@@ -88,22 +88,14 @@ APPROVED_DB_ACCESS = {
 }
 
 TEMPORARY_REPORT_DB_ALLOWLIST = {
-    "analytics_report.py",
     "auto_buy_outcome_report.py",
-    "context_trade_join_report.py",
-    "event_attribution_report.py",
     "intelligence_context_report.py",
-    "intelligence_learning_report.py",
     "live_score_monitor.py",
     "pnl.py",
-    "portfolio_replacement_report.py",
     "post_session_check.py",
-    "prediction_report.py",
     "signal_event_builder.py",
     "signal_timing_lesson_report.py",
-    "strategy_intelligence_report.py",
     "strategy_learner.py",
-    "strong_day_participation_report.py",
 }
 
 TEMPORARY_BACKFILL_TRAINING_DB_ALLOWLIST = {
@@ -155,6 +147,7 @@ APPROVED_MARKET_DATA_ACCESS = {
     "services/session_momentum_service.py",
     "services/excursion_service.py",
     "services/missed_opportunity_service.py",
+    "services/strong_day_participation_service.py",
 }
 
 TEMPORARY_MARKET_DATA_ACCESS_ALLOWLIST = {
@@ -165,7 +158,6 @@ TEMPORARY_MARKET_DATA_ACCESS_ALLOWLIST = {
     "rolling_momentum.py",
     "services/policies/entry_policy.py",
     "services/policies/execution_policy.py",
-    "strong_day_participation_report.py",
 }
 
 

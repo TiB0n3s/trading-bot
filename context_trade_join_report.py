@@ -23,8 +23,10 @@ import argparse
 from collections import defaultdict
 from datetime import date, timedelta
 
-from db import DB_PATH, get_connection
 from market_intelligence.intelligence_store import init_intelligence_tables
+from repositories.context_trade_join_repo import ContextTradeJoinRepository
+
+repo = ContextTradeJoinRepository()
 
 
 def money(v):
@@ -104,45 +106,8 @@ def resolve_range(args):
     return f"DATE {target}", target, next_day
 
 
-def load_context_rows(con, start_date, end_date, symbol=None):
-    params = []
-    where = ["1=1"]
-
-    if start_date:
-        where.append("market_date >= ?")
-        params.append(start_date)
-    if end_date:
-        where.append("market_date < ?")
-        params.append(end_date)
-    if symbol:
-        where.append("symbol = ?")
-        params.append(symbol.upper())
-
-    rows = con.execute(
-        f"""
-        SELECT *
-        FROM daily_symbol_context
-        WHERE {' AND '.join(where)}
-        ORDER BY market_date, symbol
-        """,
-        params,
-    ).fetchall()
-
-    return rows
-
-
-def trade_stats(con, market_date, symbol):
-    rows = con.execute(
-        """
-        SELECT *
-        FROM trades
-        WHERE timestamp LIKE ?
-          AND symbol = ?
-        ORDER BY timestamp ASC, id ASC
-        """,
-        (f"{market_date}%", symbol),
-    ).fetchall()
-
+def trade_stats(repo, market_date, symbol):
+    rows = repo.trade_rows(market_date, symbol)
     total = len(rows)
     approved = sum(1 for r in rows if int(r["approved"] or 0) == 1)
     rejected = total - approved
@@ -168,21 +133,8 @@ def trade_stats(con, market_date, symbol):
     }
 
 
-def pnl_stats(con, market_date, symbol):
-    try:
-        rows = con.execute(
-            """
-            SELECT *
-            FROM matched_trades
-            WHERE exit_timestamp LIKE ?
-              AND symbol = ?
-            ORDER BY exit_timestamp ASC
-            """,
-            (f"{market_date}%", symbol),
-        ).fetchall()
-    except Exception:
-        rows = []
-
+def pnl_stats(repo, market_date, symbol):
+    rows = repo.matched_rows(market_date, symbol)
     total_pnl = sum(float(r["realized_pnl"] or 0) for r in rows)
     wins = sum(1 for r in rows if float(r["realized_pnl"] or 0) > 0)
     losses = sum(1 for r in rows if float(r["realized_pnl"] or 0) < 0)
@@ -199,15 +151,15 @@ def pnl_stats(con, market_date, symbol):
     }
 
 
-def enrich_context_rows(con, context_rows):
+def enrich_context_rows(repo, context_rows):
     enriched = []
 
     for ctx in context_rows:
         market_date = ctx["market_date"]
         symbol = ctx["symbol"]
 
-        ts = trade_stats(con, market_date, symbol)
-        ps = pnl_stats(con, market_date, symbol)
+        ts = trade_stats(repo, market_date, symbol)
+        ps = pnl_stats(repo, market_date, symbol)
 
         enriched.append({
             "market_date": market_date,
@@ -431,9 +383,8 @@ def main():
 
     label, start_date, end_date = resolve_range(args)
 
-    with get_connection(DB_PATH) as con:
-        context_rows = load_context_rows(con, start_date, end_date, args.symbol)
-        enriched = enrich_context_rows(con, context_rows)
+    context_rows = repo.context_rows(start_date, end_date, args.symbol)
+    enriched = enrich_context_rows(repo, context_rows)
 
     print("=" * 132)
     print(f"  Context Trade Join Report — {label}")

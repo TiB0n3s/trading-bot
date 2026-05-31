@@ -18,7 +18,9 @@ from datetime import date, timedelta
 from statistics import mean
 from typing import Sequence
 
-from db import DB_PATH, get_connection
+from repositories.prediction_repo import PredictionRepository
+
+repo = PredictionRepository()
 
 
 def pct(v: float | None) -> str:
@@ -86,72 +88,18 @@ def load_rows(
     target_date: str | None = None,
     last_n_days: int | None = None,
 ):
-    clauses = []
-    params: list = []
-
-    horizon_col = {
-        "5m": "ls.ret_fwd_5m",
-        "15m": "ls.ret_fwd_15m",
-        "30m": "ls.ret_fwd_30m",
-    }[horizon]
-    clauses.append(f"{horizon_col} IS NOT NULL")
-
-    if symbol:
-        clauses.append("fs.symbol = ?")
-        params.append(symbol.upper())
-
-    if session:
-        clauses.append("fs.market_session = ?")
-        params.append(session)
-
-    if target_date:
-        clauses.append("fs.timestamp LIKE ?")
-        params.append(f"{target_date}%")
-    elif last_n_days is not None:
+    start_date = None
+    if not target_date and last_n_days is not None:
         start_date = (date.today() - timedelta(days=last_n_days - 1)).isoformat()
-        clauses.append("substr(fs.timestamp, 1, 10) >= ?")
-        params.append(start_date)
 
-    where_sql = " AND ".join(clauses)
-
-    with get_connection(DB_PATH) as con:
-        rows = con.execute(
-            f"""
-            SELECT
-                fs.id AS snapshot_id,
-                fs.timestamp,
-                fs.symbol,
-                fs.market_session,
-                fs.market_bias,
-                fs.trend_direction,
-                fs.trend_strength,
-                fs.relative_strength_5m,
-                fs.distance_from_vwap,
-                fs.ret_5m,
-                fs.ret_15m,
-                fs.bar_timeframe,
-                fs.bar_count,
-                fs.setup_label,
-                fs.setup_recommendation,
-                fs.setup_score,
-                fs.setup_confidence,
-                fs.setup_key,
-                ls.ret_fwd_5m,
-                ls.ret_fwd_15m,
-                ls.ret_fwd_30m,
-                ls.max_up_15m,
-                ls.max_down_15m,
-                ls.outcome_label
-            FROM feature_snapshots fs
-            JOIN labeled_setups ls
-              ON ls.snapshot_id = fs.id
-            WHERE {where_sql}
-            ORDER BY fs.timestamp ASC
-            """,
-            params,
-        ).fetchall()
-
-    return rows
+    return repo.prediction_report_labeled_rows(
+        symbol=symbol,
+        horizon=horizon,
+        session=session,
+        target_date=target_date,
+        last_n_days=last_n_days,
+        start_date=start_date,
+    )
 
 def load_trade_rows(
     symbol: str | None = None,
@@ -159,51 +107,16 @@ def load_trade_rows(
     target_date: str | None = None,
     last_n_days: int | None = None,
 ):
-    clauses = []
-    params: list = []
-
-    if symbol:
-        clauses.append("symbol = ?")
-        params.append(symbol.upper())
-
-    if target_date:
-        clauses.append("timestamp LIKE ?")
-        params.append(f"{target_date}%")
-    elif last_n_days is not None:
+    start_date = None
+    if not target_date and last_n_days is not None:
         start_date = (date.today() - timedelta(days=last_n_days - 1)).isoformat()
-        clauses.append("substr(timestamp, 1, 10) >= ?")
-        params.append(start_date)
 
-    if session:
-        clauses.append("1 = 1")
-
-    where_sql = f"WHERE {' AND '.join(clauses)}" if clauses else ""
-
-    with get_connection(DB_PATH) as con:
-        rows = con.execute(
-            f"""
-            SELECT
-                id,
-                timestamp,
-                symbol,
-                action,
-                approved,
-                rejection_reason,
-                confidence,
-                market_bias,
-                trend_direction,
-                trend_strength,
-                setup_label,
-                setup_policy_action,
-                setup_policy_reason
-            FROM trades
-            {where_sql}
-            ORDER BY timestamp ASC
-            """,
-            params,
-        ).fetchall()
-
-    return rows
+    return repo.prediction_report_trade_rows(
+        symbol=symbol,
+        target_date=target_date,
+        last_n_days=last_n_days,
+        start_date=start_date,
+    )
 
 def summarize_rows(rows) -> dict:
     ret5 = [r["ret_fwd_5m"] for r in rows if r["ret_fwd_5m"] is not None]
@@ -532,7 +445,7 @@ def main() -> int:
     print("=" * 96)
     print("  Prediction Report — observe-only")
     print("=" * 96)
-    print(f"DB path            : {DB_PATH}")
+    print(f"DB path            : {repo.db_path}")
     print(f"Symbol filter      : {args.symbol.upper() if args.symbol else 'ALL'}")
     print(f"Session filter     : {args.session if args.session else 'ALL'}")
     if target_date:

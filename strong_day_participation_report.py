@@ -31,11 +31,10 @@ Usage:
 """
 
 import argparse
-import json
 import os
 import sys
 from collections import Counter
-from datetime import datetime, timezone
+from datetime import datetime
 from pathlib import Path
 
 import pytz
@@ -78,10 +77,13 @@ reexec_under_venv_if_available()
 load_env_file()
 
 from services.market_data_service import market_data_service
-from db import DB_PATH, get_connection
+from services.strong_day_participation_service import StrongDayParticipationService
+from repositories.strong_day_participation_repo import StrongDayParticipationRepository
 from symbols_config import APPROVED_SYMBOLS_LIST, SYMBOL_SIGNAL_SOURCE
 
 ET = pytz.timezone("America/New_York")
+repo = StrongDayParticipationRepository()
+strong_day_service = StrongDayParticipationService(market_data_service)
 
 MIN_SESSION_BARS = 10
 
@@ -110,96 +112,7 @@ MACRO_CAP_CATEGORIES = {"macro_position_limit", "macro_risk"}
 ROTATION_CATEGORIES = {"correlation_cap"}
 
 
-def init_strong_day_participation_table():
-    with get_connection(DB_PATH) as con:
-        con.execute(
-            """
-            CREATE TABLE IF NOT EXISTS strong_day_participation (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                market_date TEXT NOT NULL,
-                symbol TEXT NOT NULL,
-                signal_source TEXT,
-                min_session_pct REAL NOT NULL,
-                session_return_pct REAL,
-                mfe_pct REAL,
-                return_30m_pct REAL,
-                return_60m_pct REAL,
-                first_strong_time TEXT,
-                session_high_time TEXT,
-                primary_status TEXT,
-                primary_blocker TEXT,
-                buy_signal_count INTEGER,
-                approved_buy_count INTEGER,
-                rejected_buy_count INTEGER,
-                sell_signal_count INTEGER,
-                auto_buy_candidate_count INTEGER,
-                auto_buy_strong_count INTEGER,
-                auto_buy_watch_count INTEGER,
-                auto_buy_submitted_count INTEGER,
-                auto_buy_max_score REAL,
-                auto_buy_first_candidate_time TEXT,
-                auto_buy_first_strong_time TEXT,
-                prediction_score REAL,
-                prediction_decision TEXT,
-                prediction_confidence TEXT,
-                prediction_sample_size INTEGER,
-                prediction_timing_score REAL,
-                prediction_trend_score REAL,
-                prediction_trend_label TEXT,
-                raw_json TEXT,
-                generated_at TEXT NOT NULL,
-                UNIQUE(market_date, symbol, min_session_pct)
-            )
-            """
-        )
-        con.execute(
-            """
-            CREATE INDEX IF NOT EXISTS idx_strong_day_participation_date_symbol
-            ON strong_day_participation(market_date, symbol)
-            """
-        )
-        con.execute(
-            """
-            CREATE INDEX IF NOT EXISTS idx_strong_day_participation_status
-            ON strong_day_participation(market_date, primary_status)
-            """
-        )
-
-
 # ── bar helpers ──────────────────────────────────────────────────────────────
-
-def session_window_utc(date_str):
-    d = datetime.fromisoformat(date_str)
-    open_et = ET.localize(datetime(d.year, d.month, d.day, 9, 30, 0))
-    close_et = ET.localize(datetime(d.year, d.month, d.day, 16, 10, 0))
-    return open_et.astimezone(timezone.utc), close_et.astimezone(timezone.utc)
-
-
-def fetch_session_bars(symbol, date_str):
-    start_utc, end_utc = session_window_utc(date_str)
-    bars = market_data_service.get_bars_with_fallback(
-        symbol,
-        "1Min",
-        start=start_utc.isoformat(),
-        end=end_utc.isoformat(),
-        feed="iex",
-    )
-    out = []
-    for b in bars:
-        bt = b.t
-        if bt.tzinfo is None:
-            bt = bt.replace(tzinfo=timezone.utc)
-        else:
-            bt = bt.astimezone(timezone.utc)
-        out.append({
-            "timestamp": bt,
-            "open": float(b.o),
-            "high": float(b.h),
-            "low": float(b.l),
-            "close": float(b.c),
-            "volume": float(getattr(b, "v", 0) or 0),
-        })
-    return out
 
 
 def _pct_change(start, end):
@@ -255,179 +168,6 @@ def compute_session_metrics(bars, threshold_pct):
         "first_strong_return_pct": first_strong_return_pct,
         "minutes_strong": minutes_strong,
     }
-
-
-# ── DB helpers ───────────────────────────────────────────────────────────────
-
-def load_symbol_trades(target_date, symbol):
-    with get_connection(DB_PATH) as con:
-        return con.execute(
-            """
-            SELECT id, timestamp, action, approved, rejection_reason,
-                   signal_price, setup_label, setup_policy_action,
-                   session_trend_label, session_trend_score,
-                   buy_opportunity_score, buy_opportunity_recommendation,
-                   momentum_pct, prediction_score, prediction_decision
-            FROM trades
-            WHERE timestamp LIKE ?
-              AND symbol = ?
-            ORDER BY id ASC
-            """,
-            (f"{target_date}%", symbol.upper()),
-        ).fetchall()
-
-
-def load_max_setup_score(target_date, symbol):
-    with get_connection(DB_PATH) as con:
-        try:
-            row = con.execute(
-                """
-                SELECT MAX(setup_score) AS v
-                FROM feature_snapshots
-                WHERE substr(timestamp, 1, 10) = ?
-                  AND symbol = ?
-                """,
-                (target_date, symbol.upper()),
-            ).fetchone()
-            return float(row["v"]) if row and row["v"] is not None else None
-        except Exception:
-            return None
-
-
-def load_auto_buy_candidates(target_date, symbol):
-    with get_connection(DB_PATH) as con:
-        try:
-            return con.execute(
-                """
-                SELECT timestamp, decision, score, reason, hard_block_reason,
-                       order_submitted, order_id
-                FROM auto_buy_candidates
-                WHERE substr(timestamp, 1, 10) = ?
-                  AND symbol = ?
-                ORDER BY timestamp ASC, id ASC
-                """,
-                (target_date, symbol.upper()),
-            ).fetchall()
-        except Exception:
-            return []
-
-
-def load_prediction(target_date, symbol):
-    with get_connection(DB_PATH) as con:
-        try:
-            row = con.execute(
-                """
-                SELECT prediction_score, confidence, sample_size,
-                       timing_score, trend_score, trend_label
-                FROM daily_symbol_predictions
-                WHERE market_date = ?
-                  AND symbol = ?
-                """,
-                (target_date, symbol.upper()),
-            ).fetchone()
-            if not row:
-                return {}
-            prediction = dict(row)
-            prediction["prediction_decision"] = None
-            return prediction
-        except Exception:
-            return {}
-
-
-def upsert_strong_day_results(results, target_date, min_session_pct):
-    init_strong_day_participation_table()
-    generated_at = datetime.now(ET).isoformat()
-    rows_written = 0
-    with get_connection(DB_PATH) as con:
-        for r in results:
-            if r.get("error"):
-                continue
-            con.execute(
-                """
-                INSERT INTO strong_day_participation (
-                    market_date, symbol, signal_source, min_session_pct,
-                    session_return_pct, mfe_pct, return_30m_pct, return_60m_pct,
-                    first_strong_time, session_high_time,
-                    primary_status, primary_blocker,
-                    buy_signal_count, approved_buy_count, rejected_buy_count,
-                    sell_signal_count,
-                    auto_buy_candidate_count, auto_buy_strong_count,
-                    auto_buy_watch_count, auto_buy_submitted_count,
-                    auto_buy_max_score, auto_buy_first_candidate_time,
-                    auto_buy_first_strong_time,
-                    prediction_score, prediction_decision, prediction_confidence,
-                    prediction_sample_size, prediction_timing_score,
-                    prediction_trend_score, prediction_trend_label,
-                    raw_json, generated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ON CONFLICT(market_date, symbol, min_session_pct) DO UPDATE SET
-                    signal_source = excluded.signal_source,
-                    session_return_pct = excluded.session_return_pct,
-                    mfe_pct = excluded.mfe_pct,
-                    return_30m_pct = excluded.return_30m_pct,
-                    return_60m_pct = excluded.return_60m_pct,
-                    first_strong_time = excluded.first_strong_time,
-                    session_high_time = excluded.session_high_time,
-                    primary_status = excluded.primary_status,
-                    primary_blocker = excluded.primary_blocker,
-                    buy_signal_count = excluded.buy_signal_count,
-                    approved_buy_count = excluded.approved_buy_count,
-                    rejected_buy_count = excluded.rejected_buy_count,
-                    sell_signal_count = excluded.sell_signal_count,
-                    auto_buy_candidate_count = excluded.auto_buy_candidate_count,
-                    auto_buy_strong_count = excluded.auto_buy_strong_count,
-                    auto_buy_watch_count = excluded.auto_buy_watch_count,
-                    auto_buy_submitted_count = excluded.auto_buy_submitted_count,
-                    auto_buy_max_score = excluded.auto_buy_max_score,
-                    auto_buy_first_candidate_time = excluded.auto_buy_first_candidate_time,
-                    auto_buy_first_strong_time = excluded.auto_buy_first_strong_time,
-                    prediction_score = excluded.prediction_score,
-                    prediction_decision = excluded.prediction_decision,
-                    prediction_confidence = excluded.prediction_confidence,
-                    prediction_sample_size = excluded.prediction_sample_size,
-                    prediction_timing_score = excluded.prediction_timing_score,
-                    prediction_trend_score = excluded.prediction_trend_score,
-                    prediction_trend_label = excluded.prediction_trend_label,
-                    raw_json = excluded.raw_json,
-                    generated_at = excluded.generated_at
-                """,
-                (
-                    target_date,
-                    r.get("symbol"),
-                    r.get("signal_source"),
-                    min_session_pct,
-                    r.get("session_return_pct"),
-                    r.get("mfe_pct"),
-                    r.get("return_30m_pct"),
-                    r.get("return_60m_pct"),
-                    r.get("first_strong_time"),
-                    r.get("session_high_time"),
-                    r.get("primary_status"),
-                    r.get("primary_blocker"),
-                    r.get("buy_signal_count"),
-                    r.get("approved_buy_count"),
-                    r.get("rejected_buy_count"),
-                    r.get("sell_signal_count"),
-                    r.get("auto_buy_candidate_count"),
-                    r.get("auto_buy_strong_count"),
-                    r.get("auto_buy_watch_count"),
-                    r.get("auto_buy_submitted_count"),
-                    r.get("auto_buy_max_score"),
-                    r.get("auto_buy_first_candidate_time"),
-                    r.get("auto_buy_first_strong_time"),
-                    r.get("prediction_score"),
-                    r.get("prediction_decision"),
-                    r.get("prediction_confidence"),
-                    r.get("prediction_sample_size"),
-                    r.get("prediction_timing_score"),
-                    r.get("prediction_trend_score"),
-                    r.get("prediction_trend_label"),
-                    json.dumps(r, sort_keys=True, default=str),
-                    generated_at,
-                ),
-            )
-            rows_written += 1
-    return rows_written
 
 
 # ── classification helpers ───────────────────────────────────────────────────
@@ -550,7 +290,7 @@ def _auto_buy_hhmm(row):
 
 def analyze_symbol(symbol, target_date, threshold_pct):
     try:
-        bars = fetch_session_bars(symbol, target_date)
+        bars = strong_day_service.fetch_session_bars(symbol, target_date)
     except Exception as e:
         return {"symbol": symbol, "error": f"bar fetch failed: {e}"}
 
@@ -567,10 +307,10 @@ def analyze_symbol(symbol, target_date, threshold_pct):
     if metrics is None:
         return {"symbol": symbol, "error": "no session bars returned"}
 
-    all_rows = load_symbol_trades(target_date, symbol)
+    all_rows = repo.symbol_trades(target_date, symbol)
     status, blockers = classify_participation(all_rows)
-    auto_rows = load_auto_buy_candidates(target_date, symbol)
-    prediction = load_prediction(target_date, symbol)
+    auto_rows = repo.auto_buy_candidates(target_date, symbol)
+    prediction = repo.prediction(target_date, symbol)
 
     buy_rows = [r for r in all_rows if r["action"] and r["action"].lower() == "buy"]
     sell_rows = [r for r in all_rows if r["action"] and r["action"].lower() == "sell"]
@@ -621,7 +361,7 @@ def analyze_symbol(symbol, target_date, threshold_pct):
         (float(r["session_trend_score"]) for r in all_rows if r["session_trend_score"] is not None),
         default=None,
     )
-    max_setup_score = load_max_setup_score(target_date, symbol)
+    max_setup_score = repo.max_setup_score(target_date, symbol)
 
     return {
         "symbol": symbol,
@@ -1073,7 +813,7 @@ def main():
 
     print_report(results, args.date, args.min_session_pct)
     if args.write_db:
-        rows_written = upsert_strong_day_results(results, args.date, args.min_session_pct)
+        rows_written = repo.upsert_results(results, args.date, args.min_session_pct)
         print()
         print(f"[OK] wrote strong_day_participation rows: {rows_written}")
 

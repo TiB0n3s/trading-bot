@@ -125,3 +125,135 @@ class PredictionRepository:
                 """,
                 tuple(params),
             ).fetchall()
+
+    def prediction_report_labeled_rows(
+        self,
+        *,
+        symbol: str | None = None,
+        horizon: str = "15m",
+        session: str | None = None,
+        target_date: str | None = None,
+        last_n_days: int | None = None,
+        start_date: str | None = None,
+    ) -> list[sqlite3.Row]:
+        clauses = []
+        params: list[Any] = []
+
+        horizon_col = {
+            "5m": "ls.ret_fwd_5m",
+            "15m": "ls.ret_fwd_15m",
+            "30m": "ls.ret_fwd_30m",
+        }[horizon]
+        clauses.append(f"{horizon_col} IS NOT NULL")
+
+        if symbol:
+            clauses.append("fs.symbol = ?")
+            params.append(symbol.upper())
+
+        if session:
+            clauses.append("fs.market_session = ?")
+            params.append(session)
+
+        if target_date:
+            clauses.append("fs.timestamp LIKE ?")
+            params.append(f"{target_date}%")
+        elif last_n_days is not None:
+            clauses.append("substr(fs.timestamp, 1, 10) >= ?")
+            params.append(start_date)
+
+        where_sql = " AND ".join(clauses)
+
+        with sqlite3.connect(
+            f"file:{self.db_path}?mode=ro",
+            uri=True,
+            timeout=0.05,
+        ) as con:
+            con.row_factory = sqlite3.Row
+            return con.execute(
+                f"""
+                SELECT
+                    fs.id AS snapshot_id,
+                    fs.timestamp,
+                    fs.symbol,
+                    fs.market_session,
+                    fs.market_bias,
+                    fs.trend_direction,
+                    fs.trend_strength,
+                    fs.relative_strength_5m,
+                    fs.distance_from_vwap,
+                    fs.ret_5m,
+                    fs.ret_15m,
+                    fs.bar_timeframe,
+                    fs.bar_count,
+                    fs.setup_label,
+                    fs.setup_recommendation,
+                    fs.setup_score,
+                    fs.setup_confidence,
+                    fs.setup_key,
+                    ls.ret_fwd_5m,
+                    ls.ret_fwd_15m,
+                    ls.ret_fwd_30m,
+                    ls.max_up_15m,
+                    ls.max_down_15m,
+                    ls.outcome_label
+                FROM feature_snapshots fs
+                JOIN labeled_setups ls
+                  ON ls.snapshot_id = fs.id
+                WHERE {where_sql}
+                ORDER BY fs.timestamp ASC
+                """,
+                params,
+            ).fetchall()
+
+    def prediction_report_trade_rows(
+        self,
+        *,
+        symbol: str | None = None,
+        target_date: str | None = None,
+        last_n_days: int | None = None,
+        start_date: str | None = None,
+    ) -> list[sqlite3.Row]:
+        clauses = []
+        params: list[Any] = []
+
+        if symbol:
+            clauses.append("symbol = ?")
+            params.append(symbol.upper())
+
+        if target_date:
+            clauses.append("timestamp LIKE ?")
+            params.append(f"{target_date}%")
+        elif last_n_days is not None:
+            clauses.append("substr(timestamp, 1, 10) >= ?")
+            params.append(start_date)
+
+        where_sql = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+
+        with sqlite3.connect(
+            f"file:{self.db_path}?mode=ro",
+            uri=True,
+            timeout=0.05,
+        ) as con:
+            con.row_factory = sqlite3.Row
+            return con.execute(
+                f"""
+                SELECT
+                    id,
+                    timestamp,
+                    symbol,
+                    action,
+                    approved,
+                    rejection_reason,
+                    confidence,
+                    market_bias,
+                    trend_direction,
+                    trend_strength,
+                    setup_label,
+                    setup_policy_action,
+                    setup_policy_reason
+                FROM trades
+                {where_sql}
+                ORDER BY timestamp ASC
+                """,
+                params,
+            ).fetchall()

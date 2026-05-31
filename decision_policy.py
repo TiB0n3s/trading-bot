@@ -19,6 +19,7 @@ from services.decision_utility_service import estimate_decision_utility
 from services.execution_quality_service import estimate_execution_quality
 from services.market_regime_service import classify_market_regime
 from services.portfolio_decision_service import evaluate_portfolio_decision
+from services.rollout_contract_service import telemetry_only_rollout_contract
 from strategy_constants import DAILY_LOSS_LIMIT_PCT
 from strategy_memory import contextual_memory_for_signal
 
@@ -116,6 +117,7 @@ def evaluate_decision_policy(
         account_state=account_state,
         context=intelligence_context,
     ).to_dict()
+    account_state.setdefault("rollout_contract", telemetry_only_rollout_contract())
     utility_estimate = estimate_decision_utility(
         action=action,
         intelligence_context=intelligence_context,

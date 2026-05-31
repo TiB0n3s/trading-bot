@@ -64,6 +64,7 @@ TESTS = [
     "tests/test_volatility_normalization_service.py",
     "tests/test_downside_asymmetry_service.py",
     "tests/test_exit_decision_quality_service.py",
+    "tests/test_rollout_contract_service.py",
     "tests/test_confidence_calibration_service.py",
     "tests/test_portfolio_decision_service.py",
     "tests/test_execution_quality_service.py",

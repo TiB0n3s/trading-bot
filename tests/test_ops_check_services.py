@@ -19,6 +19,7 @@ from services.ops_checks.conviction_checks import (
 from services.ops_checks.advisory_authority_checks import run_advisory_authority_report
 from services.ops_checks.feature_attribution_checks import run_feature_attribution_report
 from services.ops_checks.post_trade_learning_checks import run_post_trade_learning_report
+from services.ops_checks.rollout_contract_checks import run_rollout_contract_report
 from services.ops_checks.excursion_checks import (
     run_peak_bucket_report,
     run_winner_became_loser,
@@ -37,6 +38,7 @@ def test_ops_checks_return_false_when_db_missing(tmp_path):
         lambda: run_advisory_authority_report("2026-05-30", base_dir=tmp_path),
         lambda: run_feature_attribution_report("2026-05-30", base_dir=tmp_path),
         lambda: run_post_trade_learning_report("2026-05-30", base_dir=tmp_path),
+        lambda: run_rollout_contract_report("2026-05-30", base_dir=tmp_path),
     ]
 
     buf = io.StringIO()
@@ -186,6 +188,11 @@ def test_feature_attribution_and_post_trade_learning_reports_use_lifecycle_rows(
             min_sample_size=1,
         ) is True
         assert run_post_trade_learning_report("2026-05-30", base_dir=tmp_path) is True
+        assert run_rollout_contract_report(
+            "2026-05-30",
+            base_dir=tmp_path,
+            min_sample_size=1,
+        ) is True
 
     out = buf.getvalue()
     assert "Feature Attribution Report" in out
@@ -195,6 +202,8 @@ def test_feature_attribution_and_post_trade_learning_reports_use_lifecycle_rows(
     assert "Post-Trade Learning Report" in out
     assert "report_version" in out
     assert "Expectancy by setup_label" in out
+    assert "Rollout Contract Report" in out
+    assert "rollout_contract_v1" in out
 
 
 def test_advisory_authority_report_prefers_canonical_outcomes(tmp_path):

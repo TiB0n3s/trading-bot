@@ -50,6 +50,14 @@ def test_post_trade_learning_cli_missing_db_exits_cleanly(tmp_path):
     assert "[WARN] trades.db not found" in out
 
 
+def test_rollout_contract_cli_missing_db_exits_cleanly(tmp_path):
+    code, out = _run_cli(tmp_path, "rollout-contract", "2026-05-30")
+
+    assert code == 1
+    assert "Rollout Contract Report" in out
+    assert "[WARN] trades.db not found" in out
+
+
 def test_feature_attribution_cli_empty_lifecycle_rows_warns(tmp_path):
     with sqlite3.connect(tmp_path / "trades.db") as con:
         con.execute(
@@ -100,12 +108,39 @@ def test_post_trade_learning_cli_empty_lifecycle_rows_warns(tmp_path):
     assert "[WARN] no lifecycle rows found" in out
 
 
+def test_rollout_contract_cli_empty_lifecycle_rows_warns(tmp_path):
+    with sqlite3.connect(tmp_path / "trades.db") as con:
+        con.execute(
+            """
+            CREATE TABLE decision_snapshots (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                trade_id INTEGER,
+                decision_time TEXT,
+                symbol TEXT,
+                action TEXT,
+                approved INTEGER,
+                final_decision TEXT,
+                rejection_reason TEXT,
+                canonical_intelligence_json TEXT
+            )
+            """
+        )
+
+    code, out = _run_cli(tmp_path, "rollout-contract", "2026-05-30")
+
+    assert code == 1
+    assert "report_version          : rollout_contract_v1" in out
+    assert "[WARN] no lifecycle rows with realized/counterfactual outcomes" in out
+
+
 def main():
     tests = [
         test_feature_attribution_cli_missing_db_exits_cleanly,
         test_post_trade_learning_cli_missing_db_exits_cleanly,
+        test_rollout_contract_cli_missing_db_exits_cleanly,
         test_feature_attribution_cli_empty_lifecycle_rows_warns,
         test_post_trade_learning_cli_empty_lifecycle_rows_warns,
+        test_rollout_contract_cli_empty_lifecycle_rows_warns,
     ]
     for test in tests:
         with tempfile.TemporaryDirectory() as tmp:

@@ -197,6 +197,19 @@ def _snapshot(**overrides):
                 "quote_instability_score": 0.25,
                 "net_execution_cost_pct": 0.44,
             },
+            "rollout_contract": {
+                "report_version": "rollout_contract_v1",
+                "runtime_effect": "telemetry_only_no_live_authority",
+                "assessments": [
+                    {
+                        "feature_family": "execution_quality",
+                        "status": "size_down_candidate",
+                        "review_window_start": "2026-05-30",
+                        "review_window_end": "2026-05-31",
+                        "restrictions": {"allowed_actions": ["size_down_only"]},
+                    }
+                ],
+            },
             "intelligence_context": {
                 "summary": {
                     "support_count": 3,
@@ -278,6 +291,10 @@ def test_build_canonical_snapshot_collects_core_state_and_hashes():
         ]
         == "tighten_or_partial"
     )
+    rollout = data["advisory_authority_state"]["rollout_contract"]
+    assert rollout["report_version"] == "rollout_contract_v1"
+    assert rollout["assessments"][0]["feature_family"] == "execution_quality"
+    assert rollout["assessments"][0]["status"] == "size_down_candidate"
     assert data["confidence"]["raw_confidence_labels"]["prediction_confidence"] == "medium"
     assert data["confidence"]["primary_source"] == "setup_quality"
     assert data["confidence"]["primary_realized_win_rate"] == 0.64

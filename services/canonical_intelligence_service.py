@@ -162,6 +162,7 @@ def build_canonical_intelligence_snapshot(
     exit_decision_quality = account_state.get("exit_decision_quality") or {}
     portfolio_decision = account_state.get("portfolio_decision") or {}
     execution_quality = account_state.get("execution_quality") or {}
+    rollout_contract = account_state.get("rollout_contract") or {}
 
     regime_state = {
         "macro_regime": context.get("macro_regime"),
@@ -349,6 +350,7 @@ def build_canonical_intelligence_snapshot(
         "volatility_normalization": volatility_normalization,
         "downside_asymmetry": downside_asymmetry,
         "exit_decision_quality": exit_decision_quality,
+        "rollout_contract": rollout_contract,
     }
     source_timestamps = {
         "decision_ts": decision_ts,

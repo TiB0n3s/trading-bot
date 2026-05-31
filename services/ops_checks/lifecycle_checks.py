@@ -65,11 +65,19 @@ def run_lifecycle_analysis(
             f"{_fmt(row.get('rejected_return_60m')):>8}"
         )
 
+    snapshot_only = payload.summary.get("rejected_snapshot_only_no_trade", 0)
+    if snapshot_only:
+        print()
+        print(
+            f"[INFO] {snapshot_only} rejected snapshot-only row(s) have no trade_id; "
+            "trade-row forward outcome backfill cannot link them"
+        )
+
     missing_counterfactual = payload.summary["rejected_without_counterfactual"]
     if missing_counterfactual:
         print()
         print(
-            f"[WARN] {missing_counterfactual} rejected row(s) are missing forward outcomes"
+            f"[WARN] {missing_counterfactual} trade-backed rejected row(s) are missing forward outcomes"
         )
         return False
 

@@ -51,6 +51,7 @@ done
 echo
 echo "---- source files accidentally ignored ----"
 ignored_source=0
+crontab_drift=0
 for d in "${SOURCE_DIRS[@]}"; do
   [ -d "$d" ] || continue
   while IFS= read -r f; do
@@ -76,11 +77,31 @@ git status --ignored --short \
   || true
 
 echo
+echo "---- installed crontab drift ----"
+if [ -f "ops/crontab.tradingbot.current.txt" ]; then
+  installed_cron_tmp="$(mktemp)"
+  if crontab -l > "$installed_cron_tmp" 2>/dev/null; then
+    if diff -u "ops/crontab.tradingbot.current.txt" "$installed_cron_tmp"; then
+      echo "[OK] Installed crontab matches ops/crontab.tradingbot.current.txt"
+    else
+      crontab_drift=1
+    fi
+  else
+    echo "[WARN] No installed crontab found for current user."
+    crontab_drift=1
+  fi
+  rm -f "$installed_cron_tmp"
+else
+  echo "[WARN] Missing ops/crontab.tradingbot.current.txt"
+  crontab_drift=1
+fi
+
+echo
 echo "========================================================================"
-if [ "$missing_tracked" -eq 0 ] && [ "$ignored_source" -eq 0 ]; then
+if [ "$missing_tracked" -eq 0 ] && [ "$ignored_source" -eq 0 ] && [ "$crontab_drift" -eq 0 ]; then
   echo "[OK] No untracked/ignored Python source files found in protected source dirs."
   exit 0
 fi
 
-echo "[WARN] Source files need review before cleanup/commit."
+echo "[WARN] Source files or installed crontab need review before cleanup/commit."
 exit 1

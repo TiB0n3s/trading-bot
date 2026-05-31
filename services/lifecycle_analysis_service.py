@@ -29,6 +29,8 @@ class LifecycleAnalysisService:
             return "approved_open_or_unlinked_exit"
         if row.get("rejected_outcome_id"):
             return "rejected_with_counterfactual"
+        if row.get("trade_id") is None:
+            return "rejected_snapshot_only_no_trade"
         return "rejected_without_counterfactual"
 
     def payload(
@@ -52,6 +54,7 @@ class LifecycleAnalysisService:
             "approved_with_exit": 0,
             "approved_open_or_unlinked_exit": 0,
             "rejected_with_counterfactual": 0,
+            "rejected_snapshot_only_no_trade": 0,
             "rejected_without_counterfactual": 0,
         }
         for raw in raw_rows:

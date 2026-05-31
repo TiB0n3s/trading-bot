@@ -137,6 +137,7 @@ def test_lifecycle_analysis_joins_entry_exit_and_rejected_counterfactuals():
             "approved_with_exit": 1,
             "approved_open_or_unlinked_exit": 0,
             "rejected_with_counterfactual": 1,
+            "rejected_snapshot_only_no_trade": 0,
             "rejected_without_counterfactual": 0,
         }
 
@@ -199,6 +200,56 @@ def test_lifecycle_analysis_flags_missing_rejected_counterfactuals():
         assert payload.summary["rows"] == 1
         assert payload.summary["rejected_without_counterfactual"] == 1
         assert payload.rows[0]["lifecycle_status"] == "rejected_without_counterfactual"
+
+
+def test_lifecycle_analysis_classifies_snapshot_only_rejections():
+    with tempfile.TemporaryDirectory() as tmp:
+        db_path = Path(tmp) / "test.db"
+        with sqlite3.connect(db_path) as con:
+            con.execute(
+                """
+                CREATE TABLE decision_snapshots (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    trade_id INTEGER,
+                    decision_time TEXT,
+                    symbol TEXT,
+                    action TEXT,
+                    approved INTEGER,
+                    final_decision TEXT,
+                    rejection_reason TEXT,
+                    canonical_intelligence_version TEXT,
+                    canonical_intelligence_hash TEXT
+                )
+                """
+            )
+            con.execute(
+                """
+                INSERT INTO decision_snapshots (
+                    trade_id, decision_time, symbol, action, approved,
+                    final_decision, rejection_reason, canonical_intelligence_version,
+                    canonical_intelligence_hash
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    None,
+                    "2026-05-31T14:35:00+00:00",
+                    "META",
+                    "sell",
+                    0,
+                    "no_replace_now",
+                    "recommendation=observe_only",
+                    "canonical_intelligence_v1",
+                    "b" * 64,
+                ),
+            )
+
+        service = LifecycleAnalysisService(LifecycleAnalysisRepository(db_path))
+        payload = service.payload(start_date="2026-05-31")
+
+        assert payload.summary["rows"] == 1
+        assert payload.summary["rejected_snapshot_only_no_trade"] == 1
+        assert payload.summary["rejected_without_counterfactual"] == 0
+        assert payload.rows[0]["lifecycle_status"] == "rejected_snapshot_only_no_trade"
 
 
 def test_lifecycle_analysis_tolerates_pre_canonical_schema():
@@ -277,6 +328,7 @@ def main():
     tests = [
         test_lifecycle_analysis_joins_entry_exit_and_rejected_counterfactuals,
         test_lifecycle_analysis_flags_missing_rejected_counterfactuals,
+        test_lifecycle_analysis_classifies_snapshot_only_rejections,
         test_lifecycle_analysis_tolerates_pre_canonical_schema,
     ]
     for test in tests:

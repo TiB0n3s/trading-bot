@@ -18,10 +18,10 @@ As of the latest roadmap work:
 - Runtime and report DB/market-data cleanup has moved most scripts through repositories/services, including fill stream/poller, session momentum, pre-market research, live features, prediction cache, bot events, reports, ops checks, and ML/backfill paths.
 - `/status` exposes `symbol_intelligence`, prediction-cache status, policy-artifact status, runtime config, and service-owned status payloads.
 - Daily intelligence pipeline creates `daily_symbol_context`, `daily_symbol_events`, `daily_symbol_predictions`, `strong_day_participation`, trend context, and prediction-validation reports.
-- `ops_check.py` includes performance and persistence diagnostics such as `setup-breakdown`, `conviction-stack-report`, `conviction-persistence-health`, `peak-bucket-report`, `winner-became-loser`, and prediction validation.
+- `ops_check.py` includes performance, runtime, and persistence diagnostics such as `runtime-health`, `lifecycle-analysis`, `setup-breakdown`, `conviction-stack-report`, `conviction-persistence-health`, `peak-bucket-report`, `winner-became-loser`, and prediction validation.
 - Approved BUY audit persistence records final sizing attribution, dominant limiter, active cap-derived effective cap, ML prediction bucket/score, buy-opportunity recommendation, strategy score, session label, and setup policy action.
 - `db_migrations.py` provides the idempotent migration runner; app startup no longer owns schema `ALTER TABLE` work.
-- `feature_snapshots`, `decision_snapshots`, `rejected_signal_outcomes`, `matched_trades`, and related report tables support ML governance and replay validation.
+- `feature_snapshots`, `decision_snapshots`, `rejected_signal_outcomes`, `exit_snapshots`, `matched_trades`, and related report tables support ML governance, counterfactual coverage, lifecycle analysis, and replay validation.
 - `ml_platform` remains a staged, ahead-of-live research lane with read-only readiness, replay, governance, manifest, and retraining reports.
 - `ml/models/similarity_v0/` remains a research-only metadata placeholder, not a trained model artifact.
 - Webhook/status secrets should be supplied by `X-Webhook-Secret` or `Authorization: Bearer ...`; query-string secrets are legacy fallback only.
@@ -605,6 +605,7 @@ Rejected-signal counterfactual outcomes can be populated and checked with:
 python3 rejected_signal_outcome_builder.py --date YYYY-MM-DD
 python3 ops_check.py rejected-outcomes YYYY-MM-DD
 python3 ops_check.py decision-snapshots YYYY-MM-DD
+python3 ops_check.py lifecycle-analysis YYYY-MM-DD
 python3 auto_buy_outcome_report.py --date YYYY-MM-DD
 ```
 /status Symbol Intelligence
@@ -685,7 +686,9 @@ python3 ops_check.py predictions
 python3 ops_check.py signal-lessons
 python3 ops_check.py trends
 python3 ops_check.py prediction-validation
-python3 ops_check.py historical-backfill START_DATE END_DATE
+python3 ops_check.py runtime-health YYYY-MM-DD
+python3 ops_check.py lifecycle-analysis YYYY-MM-DD
+python3 ops_check.py lifecycle-analysis YYYY-MM-DD --symbol AAPL --samples 25
 python3 ops_check.py all
 
 Useful next-session validation:

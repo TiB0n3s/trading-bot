@@ -134,11 +134,79 @@ def test_service_records_artifact_hash():
         )
 
 
+def test_service_builds_runtime_health_payload():
+    with tempfile.TemporaryDirectory() as tmp:
+        db_path = Path(tmp) / "jobs.db"
+        repo = JobRunsRepository(db_path)
+        repo.init_table()
+        repo.insert_run(
+            {
+                "job_name": "ok_job",
+                "started_at": "2026-05-31T14:00:00+00:00",
+                "finished_at": "2026-05-31T14:00:02+00:00",
+                "duration_sec": 2.0,
+                "exit_code": 0,
+                "lock_acquired": True,
+                "rows_written": 3,
+                "warnings_count": 1,
+                "command": "ok",
+            }
+        )
+        repo.insert_run(
+            {
+                "job_name": "skipped_job",
+                "started_at": "2026-05-31T14:01:00+00:00",
+                "finished_at": "2026-05-31T14:01:00+00:00",
+                "duration_sec": 0.0,
+                "exit_code": None,
+                "lock_acquired": False,
+                "skipped_reason": "lock_busy",
+                "command": "skip",
+            }
+        )
+
+        payload = JobRunsService(repo).health_payload(target_date="2026-05-31")
+
+        assert payload.summary["total_runs"] == 2
+        assert payload.summary["distinct_jobs"] == 2
+        assert payload.summary["succeeded"] == 1
+        assert payload.summary["failed"] == 0
+        assert payload.summary["skipped_lock_busy"] == 1
+        assert payload.summary["warnings_count"] == 1
+        assert payload.summary["rows_written"] == 3
+        assert payload.summary["clean"] is True
+
+
+def test_service_marks_runtime_health_unclean_on_failed_job():
+    with tempfile.TemporaryDirectory() as tmp:
+        db_path = Path(tmp) / "jobs.db"
+        repo = JobRunsRepository(db_path)
+        repo.init_table()
+        repo.insert_run(
+            {
+                "job_name": "bad_job",
+                "started_at": "2026-05-31T14:00:00+00:00",
+                "finished_at": "2026-05-31T14:00:02+00:00",
+                "duration_sec": 2.0,
+                "exit_code": 2,
+                "lock_acquired": True,
+                "command": "bad",
+            }
+        )
+
+        payload = JobRunsService(repo).health_payload(target_date="2026-05-31")
+
+        assert payload.summary["failed"] == 1
+        assert payload.summary["clean"] is False
+
+
 def main():
     tests = [
         test_job_runner_records_completed_run,
         test_job_runner_records_lock_skipped_run,
         test_service_records_artifact_hash,
+        test_service_builds_runtime_health_payload,
+        test_service_marks_runtime_health_unclean_on_failed_job,
     ]
     for test in tests:
         test()

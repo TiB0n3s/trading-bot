@@ -99,8 +99,17 @@ or destabilize the webhook path if treated as routine cleanup.
    - It unifies regime, momentum, trend, event/intelligence, prediction, setup,
      strategy, opportunity, policy-artifact, source timestamp, freshness, and
      confidence state without changing approval or execution behavior.
-   - Next step: make dataset export and replay consume this object directly
-     instead of reconstructing equivalent state from several columns.
+   - `canonical_exit_v1` is persisted through the exit snapshot substrate with
+     lifecycle links back to entry trade ids, decision snapshot ids, entry
+     canonical hashes, exit canonical hashes, realized/foregone outcome
+     summaries, and compact exit regime/momentum/trend state.
+   - `rejected_signal_outcomes` now links counterfactual forward outcomes back
+     to decision snapshot ids and canonical intelligence hashes when available.
+   - `LifecycleAnalysisService` is the first standard analysis surface joining
+     canonical entry decisions, canonical exit snapshots, and rejected-signal
+     counterfactual outcomes.
+   - Next step: make dataset export and replay consume these canonical objects
+     directly instead of reconstructing equivalent state from several columns.
 
 ## Platform Layers
 

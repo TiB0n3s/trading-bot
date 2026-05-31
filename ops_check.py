@@ -34,6 +34,8 @@ Usage:
   python3 ops_check.py policy-artifacts
   python3 ops_check.py retention
   python3 ops_check.py order-health
+  python3 ops_check.py runtime-health
+  python3 ops_check.py lifecycle-analysis
   python3 ops_check.py migration-status
   python3 ops_check.py strong-days
   python3 ops_check.py strong-days 2026-05-26
@@ -62,10 +64,12 @@ from services.ops_checks.excursion_checks import (
 )
 from services.ops_checks.feature_checks import run_feature_health, run_feature_watch
 from services.ops_checks.intelligence_checks import run_intelligence_summary
+from services.ops_checks.lifecycle_checks import run_lifecycle_analysis
 from services.ops_checks.order_checks import run_order_health
 from services.ops_checks.rejection_checks import run_rejection_summary
 from services.ops_checks.rejected_outcome_checks import run_rejected_outcomes_health
 from services.ops_checks.setup_breakdown import run_setup_breakdown
+from services.ops_checks.runtime_checks import run_runtime_health
 from services.ops_checks.snapshot_checks import run_decision_snapshot_health
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -474,6 +478,24 @@ def order_health(target_date):
     return run_order_health(target_date, base_dir=BASE_DIR)
 
 
+def runtime_health(target_date):
+    return run_runtime_health(target_date, base_dir=BASE_DIR)
+
+
+def lifecycle_analysis(target_date):
+    symbol = None
+    if "--symbol" in sys.argv:
+        idx = sys.argv.index("--symbol")
+        if idx + 1 < len(sys.argv):
+            symbol = sys.argv[idx + 1]
+    return run_lifecycle_analysis(
+        target_date,
+        base_dir=BASE_DIR,
+        symbol=symbol,
+        samples=_int_option("--samples", 15),
+    )
+
+
 def setup_breakdown(target_date: str) -> bool:
     return run_setup_breakdown(target_date, base_dir=BASE_DIR)
 
@@ -564,6 +586,12 @@ def main():
 
     if command == "order-health":
         return 0 if order_health(target_date) else 1
+
+    if command == "runtime-health":
+        return 0 if runtime_health(target_date) else 1
+
+    if command == "lifecycle-analysis":
+        return 0 if lifecycle_analysis(target_date) else 1
 
     if command == "migration-status":
         return 0 if migration_status_check() else 1

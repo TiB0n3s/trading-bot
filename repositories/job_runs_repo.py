@@ -113,3 +113,35 @@ class JobRunsRepository:
                 """,
                 params,
             ).fetchall()
+
+    def runs_for_date(self, target_date: str, *, limit: int | None = None):
+        params: list[Any] = [target_date]
+        limit_sql = ""
+        if limit is not None:
+            limit_sql = "LIMIT ?"
+            params.append(int(limit))
+
+        with get_connection(self.db_path) as con:
+            return con.execute(
+                f"""
+                SELECT
+                    id,
+                    job_name,
+                    started_at,
+                    finished_at,
+                    duration_sec,
+                    exit_code,
+                    lock_acquired,
+                    skipped_reason,
+                    rows_written,
+                    warnings_count,
+                    artifact_path,
+                    artifact_hash,
+                    command
+                FROM job_runs
+                WHERE substr(started_at, 1, 10) = ?
+                ORDER BY started_at ASC, id ASC
+                {limit_sql}
+                """,
+                params,
+            ).fetchall()

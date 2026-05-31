@@ -152,9 +152,59 @@ def test_lifecycle_analysis_joins_entry_exit_and_rejected_counterfactuals():
         assert rejected["rejected_canonical_intelligence_hash"] == "b" * 64
 
 
+def test_lifecycle_analysis_flags_missing_rejected_counterfactuals():
+    with tempfile.TemporaryDirectory() as tmp:
+        db_path = Path(tmp) / "test.db"
+        with sqlite3.connect(db_path) as con:
+            con.execute(
+                """
+                CREATE TABLE decision_snapshots (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    trade_id INTEGER,
+                    decision_time TEXT,
+                    symbol TEXT,
+                    action TEXT,
+                    approved INTEGER,
+                    final_decision TEXT,
+                    rejection_reason TEXT,
+                    canonical_intelligence_version TEXT,
+                    canonical_intelligence_hash TEXT
+                )
+                """
+            )
+            con.execute(
+                """
+                INSERT INTO decision_snapshots (
+                    trade_id, decision_time, symbol, action, approved,
+                    final_decision, rejection_reason, canonical_intelligence_version,
+                    canonical_intelligence_hash
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    20,
+                    "2026-05-31T14:35:00+00:00",
+                    "MSFT",
+                    "buy",
+                    0,
+                    "rejected",
+                    "prediction_gate:test",
+                    "canonical_intelligence_v1",
+                    "b" * 64,
+                ),
+            )
+
+        service = LifecycleAnalysisService(LifecycleAnalysisRepository(db_path))
+        payload = service.payload(start_date="2026-05-31")
+
+        assert payload.summary["rows"] == 1
+        assert payload.summary["rejected_without_counterfactual"] == 1
+        assert payload.rows[0]["lifecycle_status"] == "rejected_without_counterfactual"
+
+
 def main():
     tests = [
         test_lifecycle_analysis_joins_entry_exit_and_rejected_counterfactuals,
+        test_lifecycle_analysis_flags_missing_rejected_counterfactuals,
     ]
     for test in tests:
         test()

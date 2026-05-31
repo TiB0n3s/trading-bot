@@ -59,6 +59,22 @@ def test_initial_context_builder_hydrates_buy_context():
         def warning(self, *_args, **_kwargs):
             pass
 
+    class _SetupEngine:
+        def classify(self, _snapshot):
+            class _Result:
+                setup_label = "confirmed_near_vwap_recovery"
+                recommendation = "favorable"
+                setup_score = 91
+                confidence = "medium"
+                trend_bucket = "bullish/confirmed"
+                vwap_bucket = "near_vwap"
+                rs_bucket = "neutral"
+                setup_key = "bullish/confirmed|near_vwap|neutral"
+                rationale = "engine rationale"
+                sample_basis = "test"
+
+            return _Result()
+
     built = build_initial_signal_context(
         state,
         ContextAssemblyDeps(
@@ -79,20 +95,21 @@ def test_initial_context_builder_hydrates_buy_context():
                 "premarket_bias": premarket_bias,
             },
             setup_context_deps=SetupContextDeps(
-                build_snapshot=lambda symbol: {"setup_label": "clean"},
+                build_snapshot=lambda symbol: {"setup_label": "clean", "id": 42},
                 evaluate_setup_policy=lambda setup_label: {
                     "setup_policy_action": "boost",
                     "reason": "setup_policy:boost",
                 },
                 upsert_recent_favorable_setup=lambda **kwargs: None,
                 get_recent_favorable_setup=lambda **kwargs: {
-                    "setup_label": "clean",
+                    "setup_label": "confirmed_near_vwap_recovery",
                     "setup_policy_action": "boost",
                     "observed_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                 },
                 now=datetime.now,
                 recent_favorable_setup_ttl_minutes=15,
                 log=_Log(),
+                setup_engine=_SetupEngine(),
             ),
             log=_Log(),
         ),
@@ -104,9 +121,23 @@ def test_initial_context_builder_hydrates_buy_context():
     assert_equal(account_state["tape"]["tape_bar_age_seconds"] is not None, True, "tape age")
     assert_equal(account_state["momentum"]["premarket_bias"], "buy", "momentum bias")
     assert_equal(account_state["premarket_alignment_source"], "live_tape", "alignment source")
-    assert_equal(account_state["setup_observation"]["setup_label"], "clean", "setup")
-    assert_equal(account_state["recent_favorable_setup"]["setup_label"], "clean", "recent setup")
-    assert_equal(built.setup.data["setup_label"], "clean", "built setup")
+    assert_equal(
+        account_state["setup_observation"]["setup_label"],
+        "confirmed_near_vwap_recovery",
+        "setup",
+    )
+    assert_equal(account_state["setup_quality"]["score"], 91, "setup quality")
+    assert_equal(account_state["setup_quality"]["source"], "setup_engine", "setup source")
+    assert_equal(
+        account_state["recent_favorable_setup"]["setup_label"],
+        "confirmed_near_vwap_recovery",
+        "recent setup",
+    )
+    assert_equal(
+        built.setup.data["setup_label"],
+        "confirmed_near_vwap_recovery",
+        "built setup",
+    )
 
 
 def test_approval_service_converts_low_confidence_to_category():

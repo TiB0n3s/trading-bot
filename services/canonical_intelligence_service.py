@@ -143,6 +143,7 @@ def build_canonical_intelligence_snapshot(
     session = account_state.get("session_momentum") or {}
     prediction = account_state.get("prediction_gate") or {}
     setup = account_state.get("setup_observation") or {}
+    setup_quality = account_state.get("setup_quality") or setup.get("setup_quality") or {}
     strategy = account_state.get("strategy_observation") or {}
     trader_brain = strategy.get("trader_brain") or {}
     opportunity = account_state.get("buy_opportunity") or {}
@@ -197,6 +198,9 @@ def build_canonical_intelligence_snapshot(
         "score": setup.get("setup_score"),
         "confidence": setup.get("setup_confidence"),
         "unknown_reason": setup.get("setup_unknown_reason"),
+        "quality_source": setup_quality.get("source"),
+        "quality_recommendation": setup_quality.get("recommendation"),
+        "quality_key": setup_quality.get("key"),
     }
     event_state = {
         "support_count": summary.get("support_count"),

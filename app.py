@@ -50,6 +50,7 @@ from services.momentum_service import MomentumService
 from services.execution_adapters import ExecutionAdapterService
 from services.portfolio_rotation_service import PortfolioRotationService
 from services import trade_audit_service
+from services.setup_engine_service import build_default_setup_engine_service
 from services.setup_context_service import (
     SetupContextDeps,
     is_degraded_setup,
@@ -486,6 +487,7 @@ _momentum_service = MomentumService(
     log=logger,
 )
 get_momentum = _momentum_service.get_momentum
+_setup_engine_service = build_default_setup_engine_service()
 
 
 def _load_symbol_overrides():
@@ -655,6 +657,7 @@ def _context_assembly_deps():
             now=datetime.now,
             recent_favorable_setup_ttl_minutes=RECENT_FAVORABLE_SETUP_TTL_MINUTES,
             log=logger,
+            setup_engine=_setup_engine_service,
         ),
         log=logger,
     )

@@ -52,6 +52,11 @@ def _snapshot(**overrides):
                 "setup_policy_action": "boost",
                 "setup_score": 72,
             },
+            "setup_quality": {
+                "source": "setup_engine",
+                "recommendation": "favorable",
+                "key": "bullish/confirmed|near_vwap|neutral",
+            },
             "strategy_observation": {
                 "trader_brain": {
                     "score": 81,
@@ -87,6 +92,8 @@ def test_build_canonical_snapshot_collects_core_state_and_hashes():
     assert data["momentum_state"]["session_label"] == "strong_uptrend"
     assert data["prediction_state"]["ml_score"] == 62
     assert data["setup_state"]["policy_action"] == "boost"
+    assert data["setup_state"]["quality_source"] == "setup_engine"
+    assert data["setup_state"]["quality_recommendation"] == "favorable"
     assert data["strategy_state"]["trader_brain_score"] == 81
     assert data["opportunity_state"]["recommendation"] == "buy_candidate"
     assert data["event_state"]["support_count"] == 3

@@ -100,7 +100,6 @@ TEMPORARY_BACKFILL_TRAINING_DB_ALLOWLIST = {
     "init_prediction_db.py",
     "ml_platform/validation.py",
     "policy_backtest.py",
-    "strategy_learner.py",
 }
 
 TEMPORARY_DB_ACCESS_ALLOWLIST = (

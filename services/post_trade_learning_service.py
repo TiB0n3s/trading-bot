@@ -6,6 +6,9 @@ from dataclasses import dataclass
 from typing import Any, Iterable
 
 
+POST_TRADE_LEARNING_REPORT_VERSION = "post_trade_learning_v1"
+
+
 @dataclass(frozen=True)
 class PostTradeLearningPayload:
     summary: dict[str, Any]
@@ -184,6 +187,7 @@ def build_post_trade_learning_payload(
         "execution_quality_decision",
     ]
     summary = {
+        "report_version": POST_TRADE_LEARNING_REPORT_VERSION,
         "rows": len(rows_list),
         "approved_with_outcomes": len(approved_returns),
         "rejected_with_outcomes": len(rejected_returns),

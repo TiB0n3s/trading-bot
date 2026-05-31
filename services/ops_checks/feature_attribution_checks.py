@@ -43,6 +43,7 @@ def run_feature_attribution_report(
 
     summary = payload.summary
     baseline = summary["baseline"]
+    print(f"report_version          : {summary['report_version']}")
     print(f"rows                    : {summary['rows']}")
     print(f"rows_with_outcome       : {summary['rows_with_outcome']}")
     print(f"authority_note          : {summary['authority_note']}")
@@ -76,12 +77,25 @@ def run_feature_attribution_report(
     print()
     print("Rollout guardrails")
     for item in payload.rollout_guardrails:
+        stability = item.get("stability") or {}
         print(
             f"  {item['family']:<26} status={item['status']:<22} "
             f"sample={item['sample_size']:<5} "
             f"missing={_fmt(item['missing_rate'])} "
-            f"ev_spread={_fmt(item['ev_spread_pct'])}"
+            f"ev_spread={_fmt(item['ev_spread_pct'])} "
+            f"stable_windows={_fmt(stability.get('stable_window_share'))}"
         )
+
+    if payload.feature_overlap:
+        print()
+        print("Potential feature-family overlap")
+        for item in payload.feature_overlap[:12]:
+            print(
+                f"  {item['left_family']}={item['left_bucket']} "
+                f"<-> {item['right_family']}={item['right_bucket']} "
+                f"overlap={item['overlap_rate']:.4f} "
+                f"n={item['sample_size']} risk={item['risk']}"
+            )
 
     print()
     print("[OK] feature attribution report completed; no live authority changed")

@@ -189,9 +189,11 @@ def test_feature_attribution_and_post_trade_learning_reports_use_lifecycle_rows(
 
     out = buf.getvalue()
     assert "Feature Attribution Report" in out
+    assert "report_version          : feature_attribution_v1" in out
     assert "market_regime" in out
     assert "diagnostic_only_no_live_authority" in out
     assert "Post-Trade Learning Report" in out
+    assert "report_version" in out
     assert "Expectancy by setup_label" in out
 
 

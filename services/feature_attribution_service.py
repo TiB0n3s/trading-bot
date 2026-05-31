@@ -12,6 +12,8 @@ import json
 from typing import Any, Iterable
 
 
+FEATURE_ATTRIBUTION_REPORT_VERSION = "feature_attribution_v1"
+
 FEATURE_FAMILIES: dict[str, tuple[str, ...]] = {
     "market_regime": ("regime_state", "market_regime"),
     "execution_quality": ("regime_state", "execution_quality_decision"),
@@ -40,6 +42,7 @@ class FeatureAttributionPayload:
     summary: dict[str, Any]
     families: list[dict[str, Any]]
     rollout_guardrails: list[dict[str, Any]]
+    feature_overlap: list[dict[str, Any]]
 
 
 def _load_json(raw: Any) -> dict[str, Any]:
@@ -115,6 +118,12 @@ def _canonical(row: dict[str, Any]) -> dict[str, Any]:
 
 def _bucket(row: dict[str, Any], path: tuple[str, ...]) -> str:
     return str(_path(_canonical(row), path))
+
+
+def _decision_date(row: dict[str, Any]) -> str:
+    raw = row.get("decision_time") or row.get("exit_timestamp") or ""
+    text = str(raw)
+    return text[:10] if len(text) >= 10 else "unknown"
 
 
 def _base_metrics(rows: list[dict[str, Any]]) -> dict[str, Any]:
@@ -234,21 +243,113 @@ def _bucket_metrics(
     }
 
 
+def _family_stability(
+    *,
+    rows: list[dict[str, Any]],
+    family_path: tuple[str, ...],
+    best_bucket: str | None,
+    baseline_ev: float | None,
+) -> dict[str, Any]:
+    if not best_bucket or baseline_ev is None:
+        return {
+            "window_count": 0,
+            "stable_window_share": None,
+            "positive_windows": 0,
+            "negative_windows": 0,
+        }
+
+    by_date: dict[str, list[dict[str, Any]]] = {}
+    for row in rows:
+        by_date.setdefault(_decision_date(row), []).append(row)
+
+    positive = 0
+    negative = 0
+    evaluated = 0
+    for date_rows in by_date.values():
+        bucket_rows = [
+            row for row in date_rows if _bucket(row, family_path) == best_bucket
+        ]
+        if not bucket_rows:
+            continue
+        ev = _base_metrics(bucket_rows).get("ev_pct")
+        if ev is None:
+            continue
+        evaluated += 1
+        if ev >= baseline_ev:
+            positive += 1
+        else:
+            negative += 1
+
+    return {
+        "window_count": evaluated,
+        "stable_window_share": _rate(positive, evaluated),
+        "positive_windows": positive,
+        "negative_windows": negative,
+    }
+
+
+def _feature_overlap(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    result: list[dict[str, Any]] = []
+    families = list(FEATURE_FAMILIES.items())
+    for idx, (left_name, left_path) in enumerate(families):
+        for right_name, right_path in families[idx + 1:]:
+            counts: dict[tuple[str, str], int] = {}
+            total = 0
+            for row in rows:
+                left = _bucket(row, left_path)
+                right = _bucket(row, right_path)
+                if left == "unknown" or right == "unknown":
+                    continue
+                total += 1
+                counts[(left, right)] = counts.get((left, right), 0) + 1
+            if total == 0 or not counts:
+                continue
+            (left_bucket, right_bucket), count = max(
+                counts.items(),
+                key=lambda item: item[1],
+            )
+            overlap_rate = round(count / total, 4)
+            if overlap_rate >= 0.60:
+                result.append(
+                    {
+                        "left_family": left_name,
+                        "right_family": right_name,
+                        "left_bucket": left_bucket,
+                        "right_bucket": right_bucket,
+                        "overlap_rate": overlap_rate,
+                        "sample_size": total,
+                        "risk": "potential_duplicate_signal"
+                        if overlap_rate >= 0.85
+                        else "watch_overlap",
+                    }
+                )
+    result.sort(key=lambda item: (-item["overlap_rate"], item["left_family"]))
+    return result
+
+
 def _rollout_guardrail(family: dict[str, Any], *, min_sample_size: int) -> dict[str, Any]:
     best = family.get("best_bucket") or {}
     worst = family.get("worst_bucket") or {}
     sample_size = int(family.get("covered_rows") or 0)
     missing_rate = float(family.get("missing_rate") or 0.0)
+    stability = family.get("stability") or {}
+    stable_share = stability.get("stable_window_share")
     ev_spread = None
     if best.get("ev_pct") is not None and worst.get("ev_pct") is not None:
         ev_spread = round(float(best["ev_pct"]) - float(worst["ev_pct"]), 4)
-    stable_enough = sample_size >= min_sample_size and missing_rate <= 0.20
+    stable_enough = (
+        sample_size >= min_sample_size
+        and missing_rate <= 0.20
+        and stable_share is not None
+        and stable_share >= 0.60
+    )
     return {
         "family": family["family"],
         "sample_size": sample_size,
         "min_sample_size": min_sample_size,
         "missing_rate": missing_rate,
         "ev_spread_pct": ev_spread,
+        "stability": stability,
         "status": "eligible_for_review" if stable_enough else "insufficient_evidence",
         "required_before_authority": [
             "rolling_window_stability",
@@ -292,6 +393,12 @@ def build_feature_attribution_payload(
         known = [item for item in buckets if item["bucket"] != "unknown"]
         best = max(known, key=lambda item: item.get("ev_pct") or -999.0, default={})
         worst = min(known, key=lambda item: item.get("ev_pct") or 999.0, default={})
+        stability = _family_stability(
+            rows=outcome_rows,
+            family_path=path,
+            best_bucket=best.get("bucket"),
+            baseline_ev=baseline.get("ev_pct"),
+        )
         covered = sum(item["sample_size"] for item in known)
         missing = len(outcome_rows) - covered
         family_payload = {
@@ -303,6 +410,7 @@ def build_feature_attribution_payload(
             "missing_rate": round(missing / len(outcome_rows), 4) if outcome_rows else None,
             "best_bucket": best,
             "worst_bucket": worst,
+            "stability": stability,
             "buckets": buckets,
         }
         families.append(family_payload)
@@ -313,6 +421,7 @@ def build_feature_attribution_payload(
     ]
     return FeatureAttributionPayload(
         summary={
+            "report_version": FEATURE_ATTRIBUTION_REPORT_VERSION,
             "rows": len(rows_list),
             "rows_with_outcome": len(outcome_rows),
             "baseline": baseline,
@@ -321,4 +430,5 @@ def build_feature_attribution_payload(
         },
         families=families,
         rollout_guardrails=guardrails,
+        feature_overlap=_feature_overlap(outcome_rows),
     )

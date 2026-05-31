@@ -64,6 +64,7 @@ def test_feature_attribution_summarizes_family_deltas_and_guardrails():
     rows = [
         {
             "approved": 1,
+            "decision_time": "2026-05-30T10:00:00+00:00",
             "realized_return_pct": 1.0,
             "mfe_pct": 1.4,
             "max_adverse_excursion_pct": -0.2,
@@ -71,13 +72,31 @@ def test_feature_attribution_summarizes_family_deltas_and_guardrails():
         },
         {
             "approved": 1,
+            "decision_time": "2026-05-30T10:30:00+00:00",
             "realized_return_pct": 0.8,
             "mfe_pct": 1.0,
             "max_adverse_excursion_pct": -0.1,
             "canonical_intelligence_json": _canonical(setup="vwap_recovery"),
         },
         {
+            "approved": 0,
+            "decision_time": "2026-05-30T10:45:00+00:00",
+            "rejected_return_60m": 0.4,
+            "rejected_max_favorable_60m": 0.7,
+            "rejected_max_adverse_60m": -0.2,
+            "canonical_intelligence_json": _canonical(setup="vwap_recovery"),
+        },
+        {
+            "approved": 0,
+            "decision_time": "2026-05-30T11:00:00+00:00",
+            "rejected_return_60m": 0.2,
+            "rejected_max_favorable_60m": 0.4,
+            "rejected_max_adverse_60m": -0.3,
+            "canonical_intelligence_json": _canonical(setup="breakout"),
+        },
+        {
             "approved": 1,
+            "decision_time": "2026-05-31T10:00:00+00:00",
             "realized_return_pct": -0.6,
             "mfe_pct": 0.2,
             "max_adverse_excursion_pct": -1.1,
@@ -97,6 +116,7 @@ def test_feature_attribution_summarizes_family_deltas_and_guardrails():
         },
         {
             "approved": 0,
+            "decision_time": "2026-05-31T11:00:00+00:00",
             "rejected_return_60m": -0.4,
             "rejected_max_favorable_60m": 0.1,
             "rejected_max_adverse_60m": -0.9,
@@ -118,7 +138,8 @@ def test_feature_attribution_summarizes_family_deltas_and_guardrails():
 
     payload = build_feature_attribution_payload(rows, min_sample_size=2)
 
-    assert_equal(payload.summary["rows_with_outcome"], 4, "outcome rows")
+    assert_equal(payload.summary["rows_with_outcome"], 6, "outcome rows")
+    assert_equal(payload.summary["report_version"], "feature_attribution_v1", "version")
     assert_equal(payload.summary["authority_note"], "diagnostic_only_no_live_authority", "note")
     regime = next(item for item in payload.families if item["family"] == "market_regime")
     assert_equal(regime["best_bucket"]["bucket"], "trend_expansion", "best regime")
@@ -128,7 +149,10 @@ def test_feature_attribution_summarizes_family_deltas_and_guardrails():
     assert_true(regime["worst_bucket"]["interactions"]["setup_label"], "setup interaction")
     guard = next(item for item in payload.rollout_guardrails if item["family"] == "market_regime")
     assert_equal(guard["status"], "eligible_for_review", "guardrail status")
+    assert_equal(guard["stability"]["window_count"], 1, "stability windows")
+    assert_equal(guard["stability"]["stable_window_share"], 1.0, "stable share")
     assert_true("acceptable_calibration_error" in guard["required_before_authority"], "calibration guard")
+    assert_true(payload.feature_overlap, "overlap rows")
 
 
 def main():

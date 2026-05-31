@@ -49,6 +49,7 @@ def test_post_trade_learning_summarizes_expectancy_and_gate_value():
     )
 
     assert payload.summary["rows"] == 4
+    assert payload.summary["report_version"] == "post_trade_learning_v1"
     assert payload.summary["approved_with_outcomes"] == 2
     assert payload.summary["rejected_with_outcomes"] == 2
     setup_rows = payload.expectancy_by_dimension["setup_label"]

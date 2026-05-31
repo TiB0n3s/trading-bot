@@ -132,7 +132,6 @@ TEMPORARY_DB_ACCESS_ALLOWLIST = {
     "portfolio_replacement_report.py",
     "post_session_check.py",
     "prediction_report.py",
-    "prediction_validation_report.py",
     "rejected_signal_outcome_builder.py",
     "session_gate_report.py",
     "signal_event_builder.py",

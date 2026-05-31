@@ -13,20 +13,9 @@ from collections import defaultdict
 from datetime import date
 from typing import Any
 
-from db import DB_PATH, get_connection
-
-
-def table_exists(con, table_name: str) -> bool:
-    row = con.execute(
-        """
-        SELECT 1
-        FROM sqlite_master
-        WHERE type = 'table'
-          AND name = ?
-        """,
-        (table_name,),
-    ).fetchone()
-    return row is not None
+from services.prediction_validation_service import (
+    build_default_prediction_validation_service,
+)
 
 
 def fmt(value: Any, digits: int = 2) -> str:
@@ -67,116 +56,28 @@ def avg(values) -> float | None:
     return sum(nums) / len(nums) if nums else None
 
 
+def _service():
+    return build_default_prediction_validation_service()
+
+
 def load_predictions(con, target_date: str):
-    if not table_exists(con, "daily_symbol_predictions"):
-        return []
-    return con.execute(
-        """
-        SELECT market_date, symbol, prediction_score, probability_of_profit,
-               probability_of_order, expected_pnl, confidence, sample_size,
-               timing_score, recommended_entry_timing, trend_score,
-               trend_label, trend_regime, trend_confidence, reason
-        FROM daily_symbol_predictions
-        WHERE market_date = ?
-        ORDER BY prediction_score DESC, symbol
-        """,
-        (target_date,),
-    ).fetchall()
+    return _service().repository.load_predictions(target_date)
 
 
 def load_signal_outcomes(con, target_date: str) -> dict[str, Any]:
-    if not table_exists(con, "historical_signal_outcomes"):
-        return {}
-    rows = con.execute(
-        """
-        SELECT symbol,
-               COUNT(*) AS signals,
-               SUM(CASE WHEN approved = 1 THEN 1 ELSE 0 END) AS approved,
-               SUM(CASE WHEN approved = 0 THEN 1 ELSE 0 END) AS rejected,
-               SUM(CASE WHEN realized_pnl IS NOT NULL THEN 1 ELSE 0 END) AS closed_signals,
-               SUM(COALESCE(realized_pnl, 0)) AS realized_pnl,
-               AVG(realized_pnl) AS avg_realized_pnl
-        FROM historical_signal_outcomes
-        WHERE market_date = ?
-        GROUP BY symbol
-        """,
-        (target_date,),
-    ).fetchall()
-    return {r["symbol"]: dict(r) for r in rows}
+    return _service().repository.load_signal_outcomes(target_date)
 
 
 def load_matched_trades(con, target_date: str) -> dict[str, Any]:
-    if not table_exists(con, "matched_trades"):
-        return {}
-    rows = con.execute(
-        """
-        SELECT symbol,
-               COUNT(*) AS matched_trades,
-               SUM(COALESCE(realized_pnl, 0)) AS realized_pnl,
-               AVG(realized_pnl) AS avg_realized_pnl,
-               SUM(CASE WHEN won = 1 THEN 1 ELSE 0 END) AS wins,
-               SUM(CASE WHEN won = 0 THEN 1 ELSE 0 END) AS losses
-        FROM matched_trades
-        WHERE date(exit_timestamp) = ?
-        GROUP BY symbol
-        """,
-        (target_date,),
-    ).fetchall()
-    return {r["symbol"]: dict(r) for r in rows}
+    return _service().repository.load_matched_trades(target_date)
 
 
 def load_strong_day_participation(con, target_date: str) -> dict[str, Any]:
-    if not table_exists(con, "strong_day_participation"):
-        return {}
-    rows = con.execute(
-        """
-        SELECT *
-        FROM strong_day_participation
-        WHERE market_date = ?
-          AND min_session_pct = (
-              SELECT MIN(min_session_pct)
-              FROM strong_day_participation
-              WHERE market_date = ?
-          )
-        """,
-        (target_date, target_date),
-    ).fetchall()
-    return {r["symbol"]: dict(r) for r in rows}
+    return _service().repository.load_strong_day_participation(target_date)
 
 
 def load_gate_ml_agreement(con, target_date: str) -> list[dict[str, Any]]:
-    if not table_exists(con, "decision_snapshots"):
-        return []
-    rows = con.execute(
-        """
-        SELECT account_state_json
-        FROM decision_snapshots
-        WHERE substr(decision_time, 1, 10) = ?
-          AND lower(action) = 'buy'
-          AND account_state_json IS NOT NULL
-        """,
-        (target_date,),
-    ).fetchall()
-
-    import json
-
-    out = []
-    for row in rows:
-        try:
-            state = json.loads(row["account_state_json"] or "{}")
-            gate = state.get("prediction_gate") or {}
-            if gate.get("ml_prediction_compare_decision") is None:
-                continue
-            out.append({
-                "gate_decision": gate.get("deterministic_signal_quality_decision") or gate.get("prediction_decision"),
-                "gate_score": gate.get("deterministic_signal_quality_score") or gate.get("prediction_score"),
-                "ml_decision": gate.get("ml_prediction_compare_decision"),
-                "ml_score": gate.get("ml_prediction_score"),
-                "agrees": gate.get("ml_prediction_agrees_with_gate"),
-            })
-        except Exception:
-            continue
-    return out
+    return _service().load_gate_ml_agreement(target_date)
 
 
 def section(title: str) -> None:
@@ -364,12 +265,12 @@ def main() -> int:
     print("=" * 72)
     print("Read-only: predictions remain observe-only and do not affect trading.")
 
-    with get_connection(DB_PATH) as con:
-        predictions = load_predictions(con, target_date)
-        signals = load_signal_outcomes(con, target_date)
-        matched = load_matched_trades(con, target_date)
-        strong_days = load_strong_day_participation(con, target_date)
-        agreement_rows = load_gate_ml_agreement(con, target_date)
+    payload = _service().payload(target_date)
+    predictions = payload.predictions
+    signals = payload.signals
+    matched = payload.matched
+    strong_days = payload.strong_days
+    agreement_rows = payload.agreement_rows
 
     print()
     print(f"Predictions          : {len(predictions)}")

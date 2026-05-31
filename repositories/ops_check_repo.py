@@ -23,6 +23,21 @@ class OpsCheckRepository:
         rows = self._fetchall(f"PRAGMA table_info({table_name})")
         return {row["name"] for row in rows}
 
+    def table_count(
+        self,
+        table_name: str,
+        where_sql: str = "",
+        params: tuple[Any, ...] = (),
+    ) -> int | None:
+        if not self.table_exists(table_name):
+            return None
+
+        sql = f"SELECT COUNT(*) AS n FROM {table_name}"
+        if where_sql:
+            sql += f" WHERE {where_sql}"
+        row = self._fetchone(sql, params)
+        return int(row["n"] or 0) if row else 0
+
     def _fetchall(self, sql: str, params: tuple[Any, ...] = ()) -> list[sqlite3.Row]:
         with sqlite3.connect(f"file:{self.db_path}?mode=ro", uri=True) as con:
             con.row_factory = sqlite3.Row
@@ -730,4 +745,44 @@ class OpsCheckRepository:
             LIMIT 12
             """,
             (target_date,),
+        )
+
+    def recent_market_date_rows(self, table_name: str) -> list[sqlite3.Row]:
+        return self._fetchall(
+            f"""
+            SELECT market_date, COUNT(*) AS n
+            FROM {table_name}
+            GROUP BY market_date
+            ORDER BY market_date DESC
+            LIMIT 7
+            """
+        )
+
+    def prediction_confidence_rows(self, target_date: str) -> list[sqlite3.Row]:
+        return self._fetchall(
+            """
+            SELECT COALESCE(confidence, 'missing') AS confidence, COUNT(*) AS n
+            FROM daily_symbol_predictions
+            WHERE market_date = ?
+            GROUP BY COALESCE(confidence, 'missing')
+            ORDER BY confidence
+            """,
+            (target_date,),
+        )
+
+    def intelligence_freshness_row(self, target_date: str) -> sqlite3.Row | None:
+        return self._fetchone(
+            """
+            SELECT
+              (SELECT MAX(created_at)
+               FROM daily_symbol_events
+               WHERE market_date = ?) AS latest_event_at,
+              (SELECT MAX(updated_at)
+               FROM daily_symbol_context
+               WHERE market_date = ?) AS latest_context_at,
+              (SELECT MAX(updated_at)
+               FROM daily_symbol_predictions
+               WHERE market_date = ?) AS latest_prediction_at
+            """,
+            (target_date, target_date, target_date),
         )

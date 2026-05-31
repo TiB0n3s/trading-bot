@@ -116,14 +116,6 @@ from symbols_config import (
     IEX_THIN_SYMBOLS,
 )
 from market_time import now_et, is_market_hours, market_session, expected_market_context_date
-from db import init_db_performance_indexes
-from db import (
-    DB_PATH,
-    ensure_recent_favorable_setups_table,
-    upsert_recent_favorable_setup,
-    get_recent_favorable_setup,
-    prune_recent_favorable_setups,
-)
 from strategy_constants import (
     MARKET_OPEN_MINUTES,
     MARKET_CLOSE_MINUTES,
@@ -265,11 +257,11 @@ def _build_startup_service(app_container: ApplicationContainer | None = None) ->
             container=app_container,
             logger=logger,
             init_core_tables=lambda: context_repo.init_core_tables(DB_PATH),
-            ensure_recent_favorable_setups_table=ensure_recent_favorable_setups_table,
-            prune_recent_favorable_setups=prune_recent_favorable_setups,
+            ensure_recent_favorable_setups_table=context_repo.ensure_recent_favorable_setups_table,
+            prune_recent_favorable_setups=context_repo.prune_recent_favorable_setups,
             recent_favorable_setup_ttl_minutes=RECENT_FAVORABLE_SETUP_TTL_MINUTES,
             init_session_momentum_table=init_session_momentum_table,
-            init_db_performance_indexes=init_db_performance_indexes,
+            init_db_performance_indexes=context_repo.init_db_performance_indexes,
             start_prediction_cache_loader=start_prediction_cache_loader,
             prediction_cache_status=prediction_cache_status,
             get_signal_executor=_get_signal_executor,
@@ -658,8 +650,8 @@ def _context_assembly_deps():
         setup_context_deps=SetupContextDeps(
             build_snapshot=build_snapshot,
             evaluate_setup_policy=evaluate_setup_policy,
-            upsert_recent_favorable_setup=upsert_recent_favorable_setup,
-            get_recent_favorable_setup=get_recent_favorable_setup,
+            upsert_recent_favorable_setup=context_repo.upsert_recent_favorable_setup,
+            get_recent_favorable_setup=context_repo.get_recent_favorable_setup,
             now=datetime.now,
             recent_favorable_setup_ttl_minutes=RECENT_FAVORABLE_SETUP_TTL_MINUTES,
             log=logger,

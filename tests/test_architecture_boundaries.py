@@ -87,43 +87,21 @@ APPROVED_DB_ACCESS = {
     "db_migrations.py",
 }
 
-TEMPORARY_DB_ACCESS_ALLOWLIST = {
+TEMPORARY_REPORT_DB_ALLOWLIST = {
     "adaptive_impact_report.py",
-    "analytics_ext/attribution.py",
-    "analytics_ext/replay_engine.py",
     "analytics_report.py",
-    "app.py",
     "auto_buy_outcome_report.py",
-    "backfill_missing_fills.py",
-    "backfill_setup_labels.py",
-    "build_historical_trend_context.py",
     "buy_opportunity_report.py",
-    "collect_and_score_events.py",
     "context_trade_join_report.py",
-    "decision_engine.py",
     "drawdown_report.py",
     "event_attribution_report.py",
-    "ingest_market_context.py",
-    "init_prediction_db.py",
     "intelligence_context_report.py",
     "intelligence_learning_report.py",
     "intelligence_prediction_report.py",
     "live_score_monitor.py",
     "market_alignment_report.py",
-    "market_intelligence/experience_model.py",
-    "market_intelligence/intelligence_store.py",
-    "ml_platform/brain_features.py",
-    "ml_platform/cli.py",
-    "ml_platform/dataset_builder.py",
-    "ml_platform/datasets.py",
-    "ml_platform/governance.py",
-    "ml_platform/replay.py",
-    "ml_platform/serving.py",
-    "ml_platform/staged.py",
-    "ml_platform/validation.py",
     "ops_check.py",
     "pnl.py",
-    "policy_backtest.py",
     "portfolio_replacement_report.py",
     "post_session_check.py",
     "prediction_report.py",
@@ -136,6 +114,34 @@ TEMPORARY_DB_ACCESS_ALLOWLIST = {
     "tradingview_alert_coverage_report.py",
     "trend_context_report.py",
 }
+
+TEMPORARY_BACKFILL_TRAINING_DB_ALLOWLIST = {
+    "analytics_ext/attribution.py",
+    "analytics_ext/replay_engine.py",
+    "backfill_missing_fills.py",
+    "backfill_setup_labels.py",
+    "build_historical_trend_context.py",
+    "collect_and_score_events.py",
+    "ingest_market_context.py",
+    "init_prediction_db.py",
+    "market_intelligence/experience_model.py",
+    "market_intelligence/intelligence_store.py",
+    "ml_platform/brain_features.py",
+    "ml_platform/cli.py",
+    "ml_platform/dataset_builder.py",
+    "ml_platform/datasets.py",
+    "ml_platform/governance.py",
+    "ml_platform/replay.py",
+    "ml_platform/serving.py",
+    "ml_platform/staged.py",
+    "ml_platform/validation.py",
+    "policy_backtest.py",
+    "strategy_learner.py",
+}
+
+TEMPORARY_DB_ACCESS_ALLOWLIST = (
+    TEMPORARY_REPORT_DB_ALLOWLIST | TEMPORARY_BACKFILL_TRAINING_DB_ALLOWLIST
+)
 
 APPROVED_BROKER_ACCESS = {
     "broker.py",
@@ -223,6 +229,30 @@ def _assert_access_with_allowlist(
         if predicate(path) and rel not in approved and rel not in temporary:
             violations.append(rel)
     assert_true(not violations, f"{label} boundary violations: {violations}")
+
+
+def _runtime_python_files() -> list[Path]:
+    runtime_paths = [
+        "app.py",
+        "services",
+        "api",
+        "position_manager.py",
+        "auto_buy_manager.py",
+        "portfolio_rotation_manager.py",
+        "fill_stream.py",
+        "fill_poller.py",
+        "session_momentum.py",
+        "live_features.py",
+        "prediction_cache.py",
+    ]
+    files: list[Path] = []
+    for item in runtime_paths:
+        path = ROOT / item
+        if path.is_dir():
+            files.extend(_python_files(item))
+        elif path.exists():
+            files.append(path)
+    return sorted(set(files))
 
 
 def test_api_cannot_import_broker_directly():
@@ -321,6 +351,20 @@ def test_market_data_access_is_approved_or_tracked():
     )
 
 
+def test_no_runtime_modules_have_direct_db_or_broker_access():
+    approved_broker_runtime = APPROVED_BROKER_ACCESS | {"services/market_data_service.py"}
+    violations = []
+    for path in _runtime_python_files():
+        rel = path.relative_to(ROOT).as_posix()
+        if rel.startswith("repositories/"):
+            continue
+        if _is_db_access(path):
+            violations.append(f"{rel}: direct db access")
+        if _is_broker_access(path) and rel not in approved_broker_runtime:
+            violations.append(f"{rel}: direct broker access")
+    assert_true(not violations, f"runtime direct DB/broker leaks: {violations}")
+
+
 def main():
     tests = [
         test_api_cannot_import_broker_directly,
@@ -336,6 +380,7 @@ def main():
         test_direct_db_access_is_approved_or_tracked,
         test_direct_broker_access_is_approved_or_tracked,
         test_market_data_access_is_approved_or_tracked,
+        test_no_runtime_modules_have_direct_db_or_broker_access,
     ]
     for test in tests:
         test()

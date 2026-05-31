@@ -251,3 +251,18 @@ def weekly_symbol_performance(symbol: str, db_path=DB_PATH) -> dict[str, Any]:
         "expectancy": round(expectancy, 2),
         "avg_pnl_pct": round(avg_pnl_pct, 4),
     }
+
+
+def recent_symbol_outcomes(symbol: str, limit: int = 10, db_path=DB_PATH):
+    with get_connection(db_path) as con:
+        return con.execute(
+            """
+            SELECT won, realized_pnl_pct, holding_minutes,
+                   trend_direction, trend_strength
+            FROM matched_trades
+            WHERE symbol = ?
+            ORDER BY exit_timestamp DESC
+            LIMIT ?
+            """,
+            (symbol, int(limit)),
+        ).fetchall()

@@ -2,7 +2,15 @@
 
 from __future__ import annotations
 
-from db import DB_PATH, get_connection
+from db import (
+    DB_PATH,
+    ensure_recent_favorable_setups_table as _ensure_recent_favorable_setups_table,
+    get_connection,
+    get_recent_favorable_setup as _get_recent_favorable_setup,
+    init_db_performance_indexes as _init_db_performance_indexes,
+    prune_recent_favorable_setups as _prune_recent_favorable_setups,
+    upsert_recent_favorable_setup as _upsert_recent_favorable_setup,
+)
 
 
 def init_core_tables(db_path=DB_PATH) -> None:
@@ -28,6 +36,7 @@ def init_core_tables(db_path=DB_PATH) -> None:
             )
             """
         )
+
         con.execute(
             """
             CREATE TABLE IF NOT EXISTS cooldowns (
@@ -79,6 +88,37 @@ def init_core_tables(db_path=DB_PATH) -> None:
             )
             """
         )
+
+
+def ensure_recent_favorable_setups_table() -> None:
+    _ensure_recent_favorable_setups_table()
+
+
+def upsert_recent_favorable_setup(
+    *,
+    symbol: str,
+    observed_at: str,
+    setup_label: str | None,
+    setup_policy_action: str | None,
+) -> None:
+    _upsert_recent_favorable_setup(
+        symbol=symbol,
+        observed_at=observed_at,
+        setup_label=setup_label,
+        setup_policy_action=setup_policy_action,
+    )
+
+
+def get_recent_favorable_setup(symbol: str, ttl_minutes: int = 15):
+    return _get_recent_favorable_setup(symbol, ttl_minutes=ttl_minutes)
+
+
+def prune_recent_favorable_setups(ttl_minutes: int = 15) -> None:
+    _prune_recent_favorable_setups(ttl_minutes=ttl_minutes)
+
+
+def init_db_performance_indexes(db_path=DB_PATH) -> None:
+    _init_db_performance_indexes(db_path)
 
 
 def startup_db_open_symbols(db_path=DB_PATH):

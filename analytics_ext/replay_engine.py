@@ -11,42 +11,21 @@ signals before promoting it into live decision flow.
 from __future__ import annotations
 
 from typing import Any
+from repositories.analytics_ext_repo import AnalyticsExtRepository
 from strategy.setup_classifier import classify_setup
-from db import DB_PATH, get_connection
 from strategy.trade_scorer import score_trade
 
 
 def fetch_trade_rows(
     date_prefix: str | None = None,
     limit: int | None = None,
-    db_path=DB_PATH,
+    db_path=None,
 ) -> list[dict[str, Any]]:
     """Fetch trades rows for replay."""
-    where = "WHERE 1=1"
-    params: list[Any] = []
-
-    if date_prefix:
-        where += " AND timestamp LIKE ?"
-        params.append(f"{date_prefix}%")
-
-    limit_sql = ""
-    if limit:
-        limit_sql = " LIMIT ?"
-        params.append(int(limit))
-
-    with get_connection(db_path) as con:
-        rows = con.execute(
-            f"""
-            SELECT *
-            FROM trades
-            {where}
-            ORDER BY id ASC
-            {limit_sql}
-            """,
-            params,
-        ).fetchall()
-
-    return [dict(r) for r in rows]
+    return AnalyticsExtRepository(db_path=db_path).trade_rows(
+        date_prefix=date_prefix,
+        limit=limit,
+    )
 
 
 def trend_from_row(row: dict[str, Any]) -> dict[str, Any]:
@@ -149,7 +128,7 @@ def replay_row(row: dict[str, Any]) -> dict[str, Any]:
 def replay_trades(
     date_prefix: str | None = None,
     limit: int | None = None,
-    db_path=DB_PATH,
+    db_path=None,
 ) -> list[dict[str, Any]]:
     rows = fetch_trade_rows(date_prefix=date_prefix, limit=limit, db_path=db_path)
     return [replay_row(row) for row in rows]
@@ -158,7 +137,7 @@ def replay_trades(
 def replay_summary(
     date_prefix: str | None = None,
     limit: int | None = None,
-    db_path=DB_PATH,
+    db_path=None,
 ) -> dict[str, Any]:
     results = replay_trades(date_prefix=date_prefix, limit=limit, db_path=db_path)
     replayable = [r for r in results if r.get("replayable")]

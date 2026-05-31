@@ -90,8 +90,6 @@ APPROVED_DB_ACCESS = {
 TEMPORARY_REPORT_DB_ALLOWLIST = set()
 
 TEMPORARY_BACKFILL_TRAINING_DB_ALLOWLIST = {
-    "analytics_ext/attribution.py",
-    "analytics_ext/replay_engine.py",
     "backfill_missing_fills.py",
     "backfill_setup_labels.py",
     "init_prediction_db.py",

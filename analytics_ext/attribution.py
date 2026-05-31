@@ -15,7 +15,7 @@ from __future__ import annotations
 from collections import defaultdict
 from typing import Any
 
-from db import DB_PATH, get_connection
+from repositories.analytics_ext_repo import AnalyticsExtRepository
 
 
 def safe_float(value: Any, default: float = 0.0) -> float:
@@ -25,42 +25,16 @@ def safe_float(value: Any, default: float = 0.0) -> float:
         return default
 
 
-def table_exists(table_name: str, db_path=DB_PATH) -> bool:
-    with get_connection(db_path) as con:
-        row = con.execute(
-            "SELECT name FROM sqlite_master WHERE type='table' AND name = ?",
-            (table_name,),
-        ).fetchone()
-    return row is not None
+def table_exists(table_name: str, db_path=None) -> bool:
+    return AnalyticsExtRepository(db_path=db_path).table_exists(table_name)
 
 
 def fetch_matched_trades(
     date_prefix: str | None = None,
-    db_path=DB_PATH,
+    db_path=None,
 ) -> list[dict[str, Any]]:
     """Return matched trades as dictionaries, optionally filtered by exit date."""
-    if not table_exists("matched_trades", db_path):
-        return []
-
-    where = ""
-    params: list[Any] = []
-
-    if date_prefix:
-        where = "WHERE exit_timestamp LIKE ?"
-        params.append(f"{date_prefix}%")
-
-    with get_connection(db_path) as con:
-        rows = con.execute(
-            f"""
-            SELECT *
-            FROM matched_trades
-            {where}
-            ORDER BY exit_timestamp ASC
-            """,
-            params,
-        ).fetchall()
-
-    return [dict(r) for r in rows]
+    return AnalyticsExtRepository(db_path=db_path).matched_trades(date_prefix)
 
 
 def summarize_group(rows: list[dict[str, Any]]) -> dict[str, Any]:
@@ -126,7 +100,7 @@ def summarize_by_field(
 
 def attribution_summary(
     date_prefix: str | None = None,
-    db_path=DB_PATH,
+    db_path=None,
 ) -> dict[str, Any]:
     """Return multi-field attribution summary for matched trades."""
     rows = fetch_matched_trades(date_prefix=date_prefix, db_path=db_path)

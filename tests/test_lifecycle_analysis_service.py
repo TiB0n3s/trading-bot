@@ -201,10 +201,83 @@ def test_lifecycle_analysis_flags_missing_rejected_counterfactuals():
         assert payload.rows[0]["lifecycle_status"] == "rejected_without_counterfactual"
 
 
+def test_lifecycle_analysis_tolerates_pre_canonical_schema():
+    with tempfile.TemporaryDirectory() as tmp:
+        db_path = Path(tmp) / "test.db"
+        with sqlite3.connect(db_path) as con:
+            con.execute(
+                """
+                CREATE TABLE decision_snapshots (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    trade_id INTEGER,
+                    decision_time TEXT,
+                    symbol TEXT,
+                    action TEXT,
+                    approved INTEGER,
+                    final_decision TEXT,
+                    rejection_reason TEXT
+                )
+                """
+            )
+            con.execute(
+                """
+                INSERT INTO decision_snapshots (
+                    id, trade_id, decision_time, symbol, action, approved,
+                    final_decision, rejection_reason
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    2,
+                    20,
+                    "2026-05-29 14:35:00",
+                    "MSFT",
+                    "buy",
+                    0,
+                    "rejected",
+                    "prediction_gate:test",
+                ),
+            )
+            con.execute(
+                """
+                CREATE TABLE rejected_signal_outcomes (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    trade_id INTEGER,
+                    label_status TEXT,
+                    return_30m REAL,
+                    return_60m REAL,
+                    max_favorable_60m REAL,
+                    max_adverse_60m REAL
+                )
+                """
+            )
+            con.execute(
+                """
+                INSERT INTO rejected_signal_outcomes (
+                    trade_id, label_status, return_30m, return_60m,
+                    max_favorable_60m, max_adverse_60m
+                ) VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (20, "labeled", 0.2, 0.4, 0.7, -0.1),
+            )
+
+        service = LifecycleAnalysisService(LifecycleAnalysisRepository(db_path))
+        payload = service.payload(start_date="2026-05-29")
+
+        assert payload.summary["rows"] == 1
+        assert payload.summary["rejected_with_counterfactual"] == 1
+        row = payload.rows[0]
+        assert row["lifecycle_status"] == "rejected_with_counterfactual"
+        assert row["entry_canonical_intelligence_hash"] is None
+        assert row["entry_canonical_intelligence_version"] is None
+        assert row["rejected_canonical_intelligence_hash"] is None
+        assert row["rejected_return_60m"] == 0.4
+
+
 def main():
     tests = [
         test_lifecycle_analysis_joins_entry_exit_and_rejected_counterfactuals,
         test_lifecycle_analysis_flags_missing_rejected_counterfactuals,
+        test_lifecycle_analysis_tolerates_pre_canonical_schema,
     ]
     for test in tests:
         test()

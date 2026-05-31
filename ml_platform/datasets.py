@@ -3,44 +3,17 @@
 from __future__ import annotations
 
 import json
-import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from db import DB_PATH
-from ml_platform.config import FEATURE_VERSION
-
-
-def _table_exists(con: sqlite3.Connection, table: str) -> bool:
-    row = con.execute(
-        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?",
-        (table,),
-    ).fetchone()
-    return row is not None
-
-
-def _count(con: sqlite3.Connection, table: str, where_sql: str = "", params=()) -> int | None:
-    if not _table_exists(con, table):
-        return None
-    sql = f"SELECT COUNT(*) AS n FROM {table}"
-    if where_sql:
-        sql += f" WHERE {where_sql}"
-    return int(con.execute(sql, params).fetchone()["n"] or 0)
-
-
-def _min_max(con: sqlite3.Connection, table: str, column: str) -> dict[str, Any]:
-    if not _table_exists(con, table):
-        return {"min": None, "max": None}
-    row = con.execute(
-        f"SELECT MIN({column}) AS min_value, MAX({column}) AS max_value FROM {table}"
-    ).fetchone()
-    return {"min": row["min_value"], "max": row["max_value"]}
+from ml_platform.config import DEFAULT_DB_PATH, FEATURE_VERSION
+from repositories.training_data_repo import TrainingDataRepository
 
 
 def dataset_profile(
     *,
-    db_path: Path | str = DB_PATH,
+    db_path: Path | str = DEFAULT_DB_PATH,
     start_date: str | None = None,
     end_date: str | None = None,
 ) -> dict[str, Any]:
@@ -55,32 +28,15 @@ def dataset_profile(
     elif start_date or end_date:
         raise ValueError("Provide both start_date and end_date, or neither")
 
-    with sqlite3.connect(f"file:{db_path}?mode=ro", uri=True) as con:
-        con.row_factory = sqlite3.Row
-
-        snapshots = _count(con, "feature_snapshots", date_where, params)
-        labels = None
-        if _table_exists(con, "labeled_setups"):
-            if date_where:
-                labels = _count(con, "labeled_setups", date_where, params)
-            else:
-                labels = _count(con, "labeled_setups")
-
-        matched_trades = _count(con, "matched_trades")
-        context_rows = _count(con, "daily_symbol_context")
-        event_rows = _count(con, "daily_symbol_events")
-        prediction_rows = _count(con, "daily_symbol_predictions")
-
-        symbols = 0
-        if _table_exists(con, "feature_snapshots"):
-            where = f"WHERE {date_where}" if date_where else ""
-            row = con.execute(
-                f"SELECT COUNT(DISTINCT symbol) AS n FROM feature_snapshots {where}",
-                params,
-            ).fetchone()
-            symbols = int(row["n"] or 0)
-
-        snapshot_range = _min_max(con, "feature_snapshots", "timestamp")
+    repo = TrainingDataRepository(db_path)
+    snapshots = repo.table_count("feature_snapshots", date_where, params)
+    labels = repo.table_count("labeled_setups", date_where, params) if date_where else repo.table_count("labeled_setups")
+    matched_trades = repo.table_count("matched_trades")
+    context_rows = repo.table_count("daily_symbol_context")
+    event_rows = repo.table_count("daily_symbol_events")
+    prediction_rows = repo.table_count("daily_symbol_predictions")
+    symbols = repo.distinct_feature_snapshot_symbols(date_where, params)
+    snapshot_range = repo.min_max("feature_snapshots", "timestamp")
 
     label_coverage = (
         round((labels / snapshots) * 100.0, 2)

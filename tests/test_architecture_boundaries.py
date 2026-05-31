@@ -100,7 +100,6 @@ TEMPORARY_BACKFILL_TRAINING_DB_ALLOWLIST = {
     "init_prediction_db.py",
     "ml_platform/brain_features.py",
     "ml_platform/dataset_builder.py",
-    "ml_platform/datasets.py",
     "ml_platform/governance.py",
     "ml_platform/replay.py",
     "ml_platform/validation.py",

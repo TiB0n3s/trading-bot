@@ -88,6 +88,10 @@ AUTO_BUY_SESSION_BUFFER_MINUTES = int(os.getenv("AUTO_BUY_SESSION_BUFFER_MINUTES
 APP_BUY_COOLDOWN_MINUTES = int(os.getenv("ORDER_COOLDOWN_MINUTES", "15"))
 APP_RECENT_SELL_COOLDOWN_MINUTES = int(os.getenv("RECENT_SELL_COOLDOWN_MINUTES", "30"))
 CASH_SAFE_MAX_NEW_BUYS_PER_SYMBOL_PER_DAY = int(os.getenv("CASH_SAFE_MAX_NEW_BUYS_PER_SYMBOL_PER_DAY", "1"))
+AUTO_BUY_EXTENDED_VWAP_CAUTION_PCT = float(os.getenv("AUTO_BUY_EXTENDED_VWAP_CAUTION_PCT", "1.50"))
+AUTO_BUY_UNCLASSIFIED_EXTENDED_BLOCK_PCT = float(
+    os.getenv("AUTO_BUY_UNCLASSIFIED_EXTENDED_BLOCK_PCT", "1.50")
+)
 
 
 def _to_float(value: Any, default: float | None = None) -> float | None:
@@ -404,9 +408,9 @@ def evaluate_auto_buy_candidate(
     if 0.05 <= vwap <= 1.00:
         score += 1
         reasons.append("constructive_vwap:+1")
-    elif vwap > 1.75:
-        score -= 2
-        reasons.append("extended_vwap:-2")
+    elif vwap > AUTO_BUY_EXTENDED_VWAP_CAUTION_PCT:
+        score -= 5
+        reasons.append(f"extended_vwap>{AUTO_BUY_EXTENDED_VWAP_CAUTION_PCT:.2f}:-5")
     elif vwap < -0.25:
         score -= 1
         reasons.append("below_vwap:-1")
@@ -428,6 +432,10 @@ def evaluate_auto_buy_candidate(
     elif setup_rec == "avoid":
         score -= 4
         reasons.append("setup_avoid:-4")
+
+    if setup_label == "unclassified_transition":
+        score -= 3
+        reasons.append("setup_unclassified_transition:-3")
 
     if setup_score >= 70:
         score += 2
@@ -508,6 +516,10 @@ def evaluate_auto_buy_candidate(
         hard_block_reasons.append(f"bias_avoid:{avoid_type or 'unspecified'}")
     if setup_rec == "avoid":
         hard_block_reasons.append("setup_avoid")
+    if setup_label == "unclassified_transition" and vwap > AUTO_BUY_UNCLASSIFIED_EXTENDED_BLOCK_PCT:
+        hard_block_reasons.append(
+            f"unclassified_extended_vwap:{vwap:.3f}>{AUTO_BUY_UNCLASSIFIED_EXTENDED_BLOCK_PCT:.2f}"
+        )
     if label in ("downtrend", "fading"):
         if not bucking_negative_tape:
             hard_block_reasons.append(f"negative_session:{label}")

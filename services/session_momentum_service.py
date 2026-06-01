@@ -102,6 +102,8 @@ def classify_session_momentum(
     momentum_5m_pct: float | None,
     momentum_15m_pct: float | None,
     momentum_30m_pct: float | None,
+    momentum_60m_pct: float | None = None,
+    momentum_120m_pct: float | None = None,
     distance_from_vwap_pct: float | None,
     bar_count: int,
 ) -> dict[str, Any]:
@@ -125,6 +127,8 @@ def classify_session_momentum(
     m5 = momentum_5m_pct or 0.0
     m15 = momentum_15m_pct or 0.0
     m30 = momentum_30m_pct or 0.0
+    m60 = momentum_60m_pct or 0.0
+    m120 = momentum_120m_pct or 0.0
     vwap_dist = distance_from_vwap_pct or 0.0
 
     add(sr > 0.50, 2, "session_return_positive")
@@ -138,6 +142,12 @@ def classify_session_momentum(
 
     add(m30 > 0.35, 2, "30m_rising")
     add(m30 < -0.35, -2, "30m_falling")
+
+    add(m60 > 0.50, 1, "60m_rising")
+    add(m60 < -0.50, -1, "60m_falling")
+
+    add(m120 > 0.75, 1, "120m_rising")
+    add(m120 < -0.75, -1, "120m_falling")
 
     add(vwap_dist > 0.15, 1, "above_vwap")
     add(vwap_dist < -0.15, -1, "below_vwap")
@@ -159,6 +169,91 @@ def classify_session_momentum(
         "trend_label": label,
         "trend_score": score,
         "reason": ",".join(reasons) if reasons else "mixed_or_flat",
+    }
+
+
+def classify_momentum_regime(
+    *,
+    session_return_pct: float | None,
+    momentum_5m_pct: float | None,
+    momentum_15m_pct: float | None,
+    momentum_30m_pct: float | None,
+    momentum_60m_pct: float | None,
+    momentum_120m_pct: float | None,
+    distance_from_vwap_pct: float | None,
+    pullback_from_session_high_pct: float | None = None,
+) -> dict[str, Any]:
+    """Return longer-horizon regime and maturity context for decisions.
+
+    Fast windows still time entries. 60m/120m/session context answers whether a
+    move is persistent, mature, pulling back constructively, or reversing.
+    """
+    sr = session_return_pct or 0.0
+    m5 = momentum_5m_pct or 0.0
+    m15 = momentum_15m_pct or 0.0
+    m30 = momentum_30m_pct or 0.0
+    m60 = momentum_60m_pct or 0.0
+    m120 = momentum_120m_pct or 0.0
+    vwap_dist = distance_from_vwap_pct or 0.0
+    pullback = pullback_from_session_high_pct or 0.0
+
+    aligned_up = sum(1 for v in (m15, m30, m60, m120) if v > 0)
+    aligned_down = sum(1 for v in (m15, m30, m60, m120) if v < 0)
+    trend_persistence_score = aligned_up - aligned_down
+    if sr > 0.50:
+        trend_persistence_score += 1
+    elif sr < -0.50:
+        trend_persistence_score -= 1
+
+    pullback_with_trend_score = 0
+    if m60 > 0.30 or m120 > 0.50 or sr > 0.75:
+        if -1.20 <= pullback <= -0.15:
+            pullback_with_trend_score += 2
+        if -0.35 <= vwap_dist <= 0.75:
+            pullback_with_trend_score += 1
+        if m5 > 0 or m15 > 0:
+            pullback_with_trend_score += 1
+
+    late_chase_maturity_score = 0
+    if sr >= 1.50:
+        late_chase_maturity_score += 1
+    if m60 >= 1.00:
+        late_chase_maturity_score += 1
+    if m120 >= 1.50:
+        late_chase_maturity_score += 1
+    if vwap_dist >= 1.50:
+        late_chase_maturity_score += 1
+    if pullback >= -0.10 and m5 <= 0:
+        late_chase_maturity_score += 1
+
+    reversal_attempt_score = 0
+    if m60 < -0.30 or m120 < -0.50 or sr < -0.50:
+        if m5 > 0:
+            reversal_attempt_score += 1
+        if m15 > 0:
+            reversal_attempt_score += 1
+        if vwap_dist > -0.30:
+            reversal_attempt_score += 1
+
+    if trend_persistence_score >= 4:
+        regime = "persistent_uptrend"
+    elif trend_persistence_score <= -4:
+        regime = "persistent_downtrend"
+    elif reversal_attempt_score >= 2:
+        regime = "reversal_attempt"
+    elif late_chase_maturity_score >= 3:
+        regime = "mature_uptrend"
+    elif pullback_with_trend_score >= 3:
+        regime = "pullback_with_uptrend"
+    else:
+        regime = "mixed"
+
+    return {
+        "trend_regime": regime,
+        "trend_persistence_score": trend_persistence_score,
+        "pullback_with_trend_score": pullback_with_trend_score,
+        "late_chase_maturity_score": late_chase_maturity_score,
+        "reversal_attempt_score": reversal_attempt_score,
     }
 
 
@@ -281,8 +376,15 @@ class SessionMomentumService:
                 "momentum_5m_pct": None,
                 "momentum_15m_pct": None,
                 "momentum_30m_pct": None,
+                "momentum_60m_pct": None,
+                "momentum_120m_pct": None,
                 "vwap": None,
                 "distance_from_vwap_pct": None,
+                "trend_regime": "insufficient_data",
+                "trend_persistence_score": 0,
+                "pullback_with_trend_score": 0,
+                "late_chase_maturity_score": 0,
+                "reversal_attempt_score": 0,
                 "trend_label": "insufficient_data",
                 "trend_score": 0,
                 "reason": (
@@ -298,6 +400,8 @@ class SessionMomentumService:
         momentum_5m = _window_return(bars, 5)
         momentum_15m = _window_return(bars, 15)
         momentum_30m = _window_return(bars, 30)
+        momentum_60m = _window_return(bars, 60) if len(bars) >= 60 else None
+        momentum_120m = _window_return(bars, 120) if len(bars) >= 120 else None
 
         vwap = _compute_vwap(bars)
         distance_from_vwap = _pct_change(vwap, latest) if vwap and latest else None
@@ -307,8 +411,30 @@ class SessionMomentumService:
             momentum_5m_pct=momentum_5m,
             momentum_15m_pct=momentum_15m,
             momentum_30m_pct=momentum_30m,
+            momentum_60m_pct=momentum_60m,
+            momentum_120m_pct=momentum_120m,
             distance_from_vwap_pct=distance_from_vwap,
             bar_count=len(bars),
+        )
+
+        best_close = max(
+            (_bar_close(bar) for bar in bars),
+            default=None,
+        )
+        pullback_from_session_high = (
+            _pct_change(best_close, latest)
+            if best_close is not None and latest is not None
+            else None
+        )
+        regime = classify_momentum_regime(
+            session_return_pct=session_return,
+            momentum_5m_pct=momentum_5m,
+            momentum_15m_pct=momentum_15m,
+            momentum_30m_pct=momentum_30m,
+            momentum_60m_pct=momentum_60m,
+            momentum_120m_pct=momentum_120m,
+            distance_from_vwap_pct=distance_from_vwap,
+            pullback_from_session_high_pct=pullback_from_session_high,
         )
 
         return {
@@ -331,10 +457,21 @@ class SessionMomentumService:
             "momentum_30m_pct": round(momentum_30m, 3)
             if momentum_30m is not None
             else None,
+            "momentum_60m_pct": round(momentum_60m, 3)
+            if momentum_60m is not None
+            else None,
+            "momentum_120m_pct": round(momentum_120m, 3)
+            if momentum_120m is not None
+            else None,
             "vwap": round(vwap, 4) if vwap is not None else None,
             "distance_from_vwap_pct": round(distance_from_vwap, 3)
             if distance_from_vwap is not None
             else None,
+            "trend_regime": regime["trend_regime"],
+            "trend_persistence_score": regime["trend_persistence_score"],
+            "pullback_with_trend_score": regime["pullback_with_trend_score"],
+            "late_chase_maturity_score": regime["late_chase_maturity_score"],
+            "reversal_attempt_score": regime["reversal_attempt_score"],
             "trend_label": classification["trend_label"],
             "trend_score": classification["trend_score"],
             "reason": classification["reason"],
@@ -366,7 +503,11 @@ class SessionMomentumService:
             f"5m={row['momentum_5m_pct']}% "
             f"15m={row['momentum_15m_pct']}% "
             f"30m={row['momentum_30m_pct']}% "
+            f"60m={row.get('momentum_60m_pct')}% "
+            f"120m={row.get('momentum_120m_pct')}% "
             f"vwap_dist={row['distance_from_vwap_pct']}% "
+            f"regime={row.get('trend_regime')} "
+            f"maturity={row.get('late_chase_maturity_score')} "
             f"best_score={row.get('best_trend_score')} "
             f"best_return={row.get('best_session_return_pct')}% "
             f"minutes_strong={row.get('minutes_strong')} "

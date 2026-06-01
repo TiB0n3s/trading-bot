@@ -49,7 +49,14 @@ def build_decision_context(
         "session_momentum_5m_pct": None,
         "session_momentum_15m_pct": None,
         "session_momentum_30m_pct": None,
+        "session_momentum_60m_pct": None,
+        "session_momentum_120m_pct": None,
         "session_distance_from_vwap_pct": None,
+        "session_trend_regime": None,
+        "trend_persistence_score": None,
+        "pullback_with_trend_score": None,
+        "late_chase_maturity_score": None,
+        "reversal_attempt_score": None,
         "session_momentum_reason": None,
         "correlation_cluster": None,
         "cluster_exposure_pct": None,
@@ -105,7 +112,14 @@ def build_decision_context(
             ctx["session_momentum_5m_pct"] = session_momentum.get("momentum_5m_pct")
             ctx["session_momentum_15m_pct"] = session_momentum.get("momentum_15m_pct")
             ctx["session_momentum_30m_pct"] = session_momentum.get("momentum_30m_pct")
+            ctx["session_momentum_60m_pct"] = session_momentum.get("momentum_60m_pct")
+            ctx["session_momentum_120m_pct"] = session_momentum.get("momentum_120m_pct")
             ctx["session_distance_from_vwap_pct"] = session_momentum.get("distance_from_vwap_pct")
+            ctx["session_trend_regime"] = session_momentum.get("trend_regime")
+            ctx["trend_persistence_score"] = session_momentum.get("trend_persistence_score")
+            ctx["pullback_with_trend_score"] = session_momentum.get("pullback_with_trend_score")
+            ctx["late_chase_maturity_score"] = session_momentum.get("late_chase_maturity_score")
+            ctx["reversal_attempt_score"] = session_momentum.get("reversal_attempt_score")
             ctx["session_momentum_reason"] = session_momentum.get("reason")
 
             corr = account_state.get("correlation_exposure") or []
@@ -155,7 +169,14 @@ def _trade_columns() -> list[str]:
         "session_momentum_5m_pct",
         "session_momentum_15m_pct",
         "session_momentum_30m_pct",
+        "session_momentum_60m_pct",
+        "session_momentum_120m_pct",
         "session_distance_from_vwap_pct",
+        "session_trend_regime",
+        "trend_persistence_score",
+        "pullback_with_trend_score",
+        "late_chase_maturity_score",
+        "reversal_attempt_score",
         "session_momentum_reason",
         "prediction_score",
         "prediction_decision",
@@ -279,7 +300,14 @@ def _shared_values(
         "session_momentum_5m_pct": context["session_momentum_5m_pct"],
         "session_momentum_15m_pct": context["session_momentum_15m_pct"],
         "session_momentum_30m_pct": context["session_momentum_30m_pct"],
+        "session_momentum_60m_pct": context["session_momentum_60m_pct"],
+        "session_momentum_120m_pct": context["session_momentum_120m_pct"],
         "session_distance_from_vwap_pct": context["session_distance_from_vwap_pct"],
+        "session_trend_regime": context["session_trend_regime"],
+        "trend_persistence_score": context["trend_persistence_score"],
+        "pullback_with_trend_score": context["pullback_with_trend_score"],
+        "late_chase_maturity_score": context["late_chase_maturity_score"],
+        "reversal_attempt_score": context["reversal_attempt_score"],
         "session_momentum_reason": context["session_momentum_reason"],
         "prediction_score": prediction_gate.get("prediction_score"),
         "prediction_decision": prediction_gate.get("prediction_decision"),

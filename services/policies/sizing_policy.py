@@ -64,6 +64,13 @@ def compute_dominant_limiter(account_state: dict[str, Any]) -> str:
         caps.append(("session_momentum", account_state["session_momentum_size_cap"].get("cap_pct", 99)))
     if account_state.get("late_chase_size_cap"):
         caps.append(("late_chase", account_state["late_chase_size_cap"].get("cap_pct", 99)))
+    if account_state.get("unclassified_extended_size_cap"):
+        caps.append(
+            (
+                "unclassified_extended",
+                account_state["unclassified_extended_size_cap"].get("cap_pct", 99),
+            )
+        )
     if account_state.get("advisory_feature_size_cap"):
         caps.append(("advisory_features", account_state["advisory_feature_size_cap"].get("cap_pct", 99)))
     if account_state.get("strategy_score_size_cap"):

@@ -10,6 +10,7 @@ from services.session_momentum_service import (
     SessionMomentumService,
     _session_start_or_lookback,
     _merge_retained_strength,
+    classify_momentum_regime,
     classify_session_momentum,
 )
 
@@ -64,6 +65,37 @@ def test_build_calculates_vwap_and_strong_uptrend():
     assert row["trend_score"] == 8
     assert market_data.calls[0][0][:2] == ("AAPL", "1Min")
     assert market_data.calls[0][1]["feed"] == "iex"
+
+
+def test_build_calculates_long_horizon_regime_fields():
+    bars = [_bar(100 + i * 0.05) for i in range(130)]
+    service = SessionMomentumService(
+        repository=FakeRepository(),
+        market_data=FakeMarketData(bars),
+    )
+
+    row = service.build("aapl")
+
+    assert row["momentum_60m_pct"] is not None
+    assert row["momentum_120m_pct"] is not None
+    assert row["trend_regime"] in ("persistent_uptrend", "mature_uptrend")
+    assert row["trend_persistence_score"] >= 4
+
+
+def test_long_horizon_regime_detects_mature_chase():
+    regime = classify_momentum_regime(
+        session_return_pct=2.0,
+        momentum_5m_pct=-0.1,
+        momentum_15m_pct=0.2,
+        momentum_30m_pct=0.7,
+        momentum_60m_pct=1.2,
+        momentum_120m_pct=1.8,
+        distance_from_vwap_pct=1.7,
+        pullback_from_session_high_pct=-0.02,
+    )
+
+    assert regime["late_chase_maturity_score"] >= 3
+    assert regime["trend_regime"] in ("persistent_uptrend", "mature_uptrend")
 
 
 def test_classification_labels_for_uptrend_fading_and_downtrend():
@@ -181,6 +213,8 @@ def test_retained_strength_preserves_prior_highs_and_tracks_pullback():
 if __name__ == "__main__":
     tests = [
         test_build_calculates_vwap_and_strong_uptrend,
+        test_build_calculates_long_horizon_regime_fields,
+        test_long_horizon_regime_detects_mature_chase,
         test_classification_labels_for_uptrend_fading_and_downtrend,
         test_session_start_anchors_to_market_open_after_open,
         test_refresh_symbol_upserts_merged_row,

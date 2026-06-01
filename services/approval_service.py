@@ -296,6 +296,18 @@ def _late_chase_entry_risk(
         account_state.get("session_momentum_30m_pct")
         or session.get("momentum_30m_pct")
     )
+    m60_pct = _float_or_none(
+        account_state.get("session_momentum_60m_pct")
+        or session.get("momentum_60m_pct")
+    )
+    m120_pct = _float_or_none(
+        account_state.get("session_momentum_120m_pct")
+        or session.get("momentum_120m_pct")
+    )
+    maturity_score = _float_or_none(
+        account_state.get("late_chase_maturity_score")
+        or session.get("late_chase_maturity_score")
+    )
 
     weak_labels = {
         "above_vwap_neutral_continuation",
@@ -326,12 +338,20 @@ def _late_chase_entry_risk(
         (extension_pct is not None and extension_pct >= 8.0)
         or (vwap_dist_pct is not None and vwap_dist_pct >= 1.75)
     )
+    mature_long_chase = (
+        (maturity_score is not None and maturity_score >= 3)
+        or (
+            (m60_pct is not None and m60_pct >= 1.0)
+            and (m120_pct is not None and m120_pct >= 1.5)
+            and (vwap_dist_pct is not None and vwap_dist_pct >= 1.25)
+        )
+    )
     triggered = bool(weak_setup and (extended or fading_after_push))
-    would_block = bool(triggered and (extreme_extension or fading_after_push))
+    would_block = bool(triggered and (extreme_extension or fading_after_push or mature_long_chase))
 
     cap_pct = None
     if triggered:
-        cap_pct = 0.35 if extreme_extension or fading_after_push else 0.50
+        cap_pct = 0.35 if extreme_extension or fading_after_push or mature_long_chase else 0.50
 
     reasons = []
     if weak_setup:
@@ -342,6 +362,8 @@ def _late_chase_entry_risk(
         reasons.append("fading_after_push")
     if extreme_extension:
         reasons.append("extreme_extension")
+    if mature_long_chase:
+        reasons.append("mature_long_chase")
 
     return {
         "triggered": triggered,
@@ -357,6 +379,9 @@ def _late_chase_entry_risk(
         "session_return_pct": session_return_pct,
         "session_momentum_15m_pct": m15_pct,
         "session_momentum_30m_pct": m30_pct,
+        "session_momentum_60m_pct": m60_pct,
+        "session_momentum_120m_pct": m120_pct,
+        "late_chase_maturity_score": maturity_score,
         "reason": ",".join(reasons) if reasons else "no late-chase risk",
     }
 
@@ -1486,7 +1511,7 @@ def run_prediction_session_tape_gates(
         "advisory_decision": "block" if session_gate.get("would_block") else session_gate.get("severity"),
         "authority_mode": "enforced" if enforce_session_momentum_gate else "observe_only",
         "enforced": bool(enforce_session_momentum_gate and session_gate.get("would_block")),
-        "effect_on_size": "cap" if session_gate.get("severity") in ("soft_negative", "reversal_caution", "hard_negative") else "none",
+        "effect_on_size": "cap" if session_gate.get("severity") in ("soft_negative", "reversal_caution", "hard_negative", "mature_chase_caution") else "none",
         "effect_on_execution": "block"
         if enforce_session_momentum_gate and session_gate.get("would_block")
         else "none",
@@ -1510,6 +1535,12 @@ def run_prediction_session_tape_gates(
             f"{session_gate.get('reason')}"
         )
         account_state["session_gate_size_hint"] = "reduce"
+    elif session_gate.get("severity") == "mature_chase_caution":
+        log.info(
+            f"Mature long-horizon chase caution for {symbol} BUY — reduced sizing flagged: "
+            f"{session_gate.get('reason')}"
+        )
+        account_state["session_gate_size_hint"] = "reduce"
 
     severity = session_gate.get("severity")
     session_cap = None
@@ -1517,6 +1548,8 @@ def run_prediction_session_tape_gates(
         session_cap = env_float("SESSION_SOFT_NEGATIVE_SIZE_CAP_PCT", 0.80)
     elif severity == "reversal_caution":
         session_cap = env_float("SESSION_REVERSAL_CAUTION_SIZE_CAP_PCT", 0.90)
+    elif severity == "mature_chase_caution":
+        session_cap = env_float("SESSION_MATURE_CHASE_SIZE_CAP_PCT", 0.65)
     elif severity == "hard_negative" and not enforce_session_momentum_gate:
         session_cap = env_float("SESSION_HARD_NEGATIVE_SIZE_CAP_PCT", 0.65)
     if session_cap is not None:
@@ -1535,6 +1568,12 @@ def run_prediction_session_tape_gates(
         setup_obs=setup_obs,
     )
     account_state["late_chase_entry_gate"] = late_chase_gate
+    unclassified_extended = (
+        str(late_chase_gate.get("setup_label") or "").lower() == "unclassified_transition"
+        and late_chase_gate.get("session_distance_from_vwap_pct") is not None
+        and float(late_chase_gate.get("session_distance_from_vwap_pct") or 0)
+        >= env_float("UNCLASSIFIED_EXTENDED_VWAP_CAP_PCT", 1.50)
+    )
     if late_chase_gate.get("triggered"):
         cap_pct = float(late_chase_gate.get("cap_pct") or 0.50)
         apply_size_cap(
@@ -1549,6 +1588,42 @@ def run_prediction_session_tape_gates(
             f"setup={late_chase_gate.get('setup_label')} "
             f"ext={late_chase_gate.get('extension_from_recent_base_pct')} "
             f"vwap={late_chase_gate.get('session_distance_from_vwap_pct')}"
+        )
+
+    if unclassified_extended:
+        cap_pct = env_float("UNCLASSIFIED_EXTENDED_SIZE_CAP_PCT", 0.35)
+        apply_size_cap(
+            account_state,
+            cap_pct=cap_pct,
+            state_key="unclassified_extended_size_cap",
+            payload={
+                **late_chase_gate,
+                "cap_pct": cap_pct,
+                "reason": "unclassified_transition extended above VWAP",
+            },
+        )
+        log.warning(
+            f"Unclassified extended entry cap for {symbol}: cap={cap_pct}% "
+            f"vwap={late_chase_gate.get('session_distance_from_vwap_pct')}"
+        )
+
+    if (
+        unclassified_extended
+        and float(late_chase_gate.get("session_distance_from_vwap_pct") or 0)
+        >= env_float("UNCLASSIFIED_EXTREME_VWAP_BLOCK_PCT", 2.25)
+    ):
+        reason = (
+            "unclassified extended entry blocked: "
+            f"vwap_dist={late_chase_gate.get('session_distance_from_vwap_pct')}; "
+            f"setup_score={late_chase_gate.get('setup_score')}"
+        )
+        return StageOutcome(
+            rejected=True,
+            approval=deterministic_rejection(
+                category="unclassified_extended_entry",
+                reason=reason,
+                metadata=late_chase_gate,
+            ),
         )
 
     if late_chase_gate.get("would_block"):

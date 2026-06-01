@@ -679,6 +679,46 @@ class LiveSignalProcessor:
             session_m15_pct = float(account_state.get("session_momentum_15m_pct") or 0)
             session_m30_pct = float(account_state.get("session_momentum_30m_pct") or 0)
 
+            if setup_label == "unclassified_transition" and session_vwap_dist_pct >= float(
+                os.getenv("UNCLASSIFIED_EXTREME_VWAP_BLOCK_PCT", "2.25")
+            ):
+                reason = (
+                    f"unclassified extended entry blocked: setup_label={setup_label}, "
+                    f"vwap_dist={session_vwap_dist_pct:.3f}%"
+                )
+                return self._reject_current_signal(
+                    symbol=symbol,
+                    action=action,
+                    price=price,
+                    account_state=account_state,
+                    dedupe_key=dedupe_key,
+                    category="unclassified_extended_entry",
+                    reason=reason,
+                )
+
+            if setup_label == "unclassified_transition" and session_vwap_dist_pct >= float(
+                os.getenv("UNCLASSIFIED_EXTENDED_VWAP_CAP_PCT", "1.50")
+            ):
+                cap_pct = float(os.getenv("UNCLASSIFIED_EXTENDED_SIZE_CAP_PCT", "0.35"))
+                self.deps.apply_size_cap(
+                    account_state,
+                    cap_pct=cap_pct,
+                    state_key="unclassified_extended_size_cap",
+                    payload={
+                        "cap_pct": cap_pct,
+                        "setup_label": setup_label,
+                        "session_distance_from_vwap_pct": session_vwap_dist_pct,
+                        "reason": (
+                            "unclassified_transition above extended VWAP threshold; "
+                            "cap size until repeated evidence proves this setup"
+                        ),
+                    },
+                )
+                self.deps.log.warning(
+                    f"Unclassified extended setup size cap for {symbol}: "
+                    f"vwap={session_vwap_dist_pct:.3f}% cap={cap_pct:.2f}%"
+                )
+
             if (
                 setup_label == "late_strength_near_vwap_risk"
                 and session_return_pct > 1.5

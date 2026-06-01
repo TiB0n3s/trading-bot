@@ -80,6 +80,7 @@ from services.session_momentum_service import (  # noqa: E402
     _pct_change,
     _safe_float,
     _window_return,
+    classify_momentum_regime,
     classify_session_momentum,
     get_default_session_momentum_service,
 )

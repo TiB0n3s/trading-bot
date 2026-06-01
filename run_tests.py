@@ -80,6 +80,7 @@ TESTS = [
     "tests/test_prediction_cache.py",
     "tests/test_market_data_service.py",
     "tests/test_rejected_signal_outcomes.py",
+    "tests/test_symbol_momentum_timing_service.py",
     "tests/test_label_v1_builder.py",
     "tests/test_export_ml_dataset.py",
     "tests/test_feature_parity_contract.py",

@@ -97,6 +97,13 @@ def test_record_execution_persists_conviction_sizing_and_prediction_fields():
         "session_momentum": {
             "trend_label": "strong_uptrend",
             "trend_score": 7,
+            "momentum_60m_pct": 1.2,
+            "momentum_120m_pct": 1.8,
+            "trend_regime": "mature_uptrend",
+            "trend_persistence_score": 5,
+            "pullback_with_trend_score": 1,
+            "late_chase_maturity_score": 4,
+            "reversal_attempt_score": 0,
         },
         "final_sizing": {
             "dominant_limiter": "weak_prediction_degraded",
@@ -133,6 +140,10 @@ def test_record_execution_persists_conviction_sizing_and_prediction_fields():
     assert_true(captured["buy_opportunity_recommendation"] == "watch", "buy opportunity persisted")
     assert_true(captured["trader_brain_score"] == 64, "strategy score persisted")
     assert_true(captured["session_trend_label"] == "strong_uptrend", "session label persisted")
+    assert_true(captured["session_momentum_60m_pct"] == 1.2, "session 60m persisted")
+    assert_true(captured["session_momentum_120m_pct"] == 1.8, "session 120m persisted")
+    assert_true(captured["session_trend_regime"] == "mature_uptrend", "session regime persisted")
+    assert_true(captured["late_chase_maturity_score"] == 4, "maturity score persisted")
     assert_true(captured["setup_policy_action"] == "allow", "setup action persisted")
 
 

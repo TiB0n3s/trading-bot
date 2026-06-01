@@ -63,13 +63,20 @@ SNAPSHOT_CONTEXT_FIELDS = (
     "session_momentum_5m_pct",
     "session_momentum_15m_pct",
     "session_momentum_30m_pct",
+    "session_momentum_60m_pct",
+    "session_momentum_120m_pct",
     "session_distance_from_vwap_pct",
+    "session_trend_regime",
+    "trend_persistence_score",
+    "pullback_with_trend_score",
+    "late_chase_maturity_score",
+    "reversal_attempt_score",
     "session_momentum_reason",
     "correlation_cluster",
     "cluster_exposure_pct",
 )
 
-DECISION_SNAPSHOT_FEATURE_SEMANTIC_VERSION = "decision_snapshot_features_v2"
+DECISION_SNAPSHOT_FEATURE_SEMANTIC_VERSION = "decision_snapshot_features_v3"
 
 
 def json_dumps(value: Any) -> str:

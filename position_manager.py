@@ -188,14 +188,14 @@ BAD_ENTRY_CONTAINMENT_MAX_PEAK_PCT = float(
 PEAK_LOCK_TIER1_PEAK_PCT = float(os.getenv("POSITION_MANAGER_PEAK_LOCK_TIER1_PEAK_PCT", "0.30"))
 PEAK_LOCK_TIER1_FLOOR_PCT = float(os.getenv("POSITION_MANAGER_PEAK_LOCK_TIER1_FLOOR_PCT", "0.10"))
 PEAK_LOCK_TIER2_PEAK_PCT = float(os.getenv("POSITION_MANAGER_PEAK_LOCK_TIER2_PEAK_PCT", "0.60"))
-PEAK_LOCK_TIER2_FLOOR_PCT = float(os.getenv("POSITION_MANAGER_PEAK_LOCK_TIER2_FLOOR_PCT", "0.20"))
+PEAK_LOCK_TIER2_FLOOR_PCT = float(os.getenv("POSITION_MANAGER_PEAK_LOCK_TIER2_FLOOR_PCT", "0.30"))
 PEAK_LOCK_TIER3_PEAK_PCT = float(os.getenv("POSITION_MANAGER_PEAK_LOCK_TIER3_PEAK_PCT", "1.00"))
-PEAK_LOCK_TIER3_FLOOR_PCT = float(os.getenv("POSITION_MANAGER_PEAK_LOCK_TIER3_FLOOR_PCT", "0.30"))
+PEAK_LOCK_TIER3_FLOOR_PCT = float(os.getenv("POSITION_MANAGER_PEAK_LOCK_TIER3_FLOOR_PCT", "0.45"))
 # Weak entries (2 tiers): faster ratchet once meaningfully green.
 WEAK_PEAK_LOCK_TIER1_PEAK_PCT = float(os.getenv("POSITION_MANAGER_WEAK_PEAK_LOCK_TIER1_PEAK_PCT", "0.30"))
-WEAK_PEAK_LOCK_TIER1_FLOOR_PCT = float(os.getenv("POSITION_MANAGER_WEAK_PEAK_LOCK_TIER1_FLOOR_PCT", "0.10"))
+WEAK_PEAK_LOCK_TIER1_FLOOR_PCT = float(os.getenv("POSITION_MANAGER_WEAK_PEAK_LOCK_TIER1_FLOOR_PCT", "0.15"))
 WEAK_PEAK_LOCK_TIER2_PEAK_PCT = float(os.getenv("POSITION_MANAGER_WEAK_PEAK_LOCK_TIER2_PEAK_PCT", "0.50"))
-WEAK_PEAK_LOCK_TIER2_FLOOR_PCT = float(os.getenv("POSITION_MANAGER_WEAK_PEAK_LOCK_TIER2_FLOOR_PCT", "0.30"))
+WEAK_PEAK_LOCK_TIER2_FLOOR_PCT = float(os.getenv("POSITION_MANAGER_WEAK_PEAK_LOCK_TIER2_FLOOR_PCT", "0.35"))
 
 # Quality-split exit thresholds — three tiers:
 # Strong conviction: looser giveback tolerance, higher min-profit bar before partial exit.
@@ -215,6 +215,28 @@ WEAK_ENTRY_PROFIT_GIVEBACK_TRIGGER_PCT = float(
 )
 WEAK_ENTRY_MIN_PROFIT_PARTIAL_PCT = float(
     os.getenv("POSITION_MANAGER_WEAK_ENTRY_MIN_PROFIT_PARTIAL_PCT", "0.35")
+)
+
+PROACTIVE_PROFIT_CAPTURE_ENABLED = os.getenv(
+    "POSITION_MANAGER_PROACTIVE_PROFIT_CAPTURE_ENABLED", "true"
+).lower() in ("1", "true", "yes", "on")
+PROACTIVE_STRONG_MIN_PEAK_PCT = float(
+    os.getenv("POSITION_MANAGER_PROACTIVE_STRONG_MIN_PEAK_PCT", "0.45")
+)
+PROACTIVE_STRONG_MIN_CURRENT_PCT = float(
+    os.getenv("POSITION_MANAGER_PROACTIVE_STRONG_MIN_CURRENT_PCT", "0.20")
+)
+PROACTIVE_STRONG_GIVEBACK_PCT = float(
+    os.getenv("POSITION_MANAGER_PROACTIVE_STRONG_GIVEBACK_PCT", "45")
+)
+PROACTIVE_WEAK_MIN_PEAK_PCT = float(
+    os.getenv("POSITION_MANAGER_PROACTIVE_WEAK_MIN_PEAK_PCT", "0.30")
+)
+PROACTIVE_WEAK_MIN_CURRENT_PCT = float(
+    os.getenv("POSITION_MANAGER_PROACTIVE_WEAK_MIN_CURRENT_PCT", "0.15")
+)
+PROACTIVE_WEAK_GIVEBACK_PCT = float(
+    os.getenv("POSITION_MANAGER_PROACTIVE_WEAK_GIVEBACK_PCT", "30")
 )
 
 
@@ -546,6 +568,10 @@ def update_peak_state(state, symbol, current_price, avg_entry):
         sym_state["peak_pl_pct"] = round(current_pl_pct, 4)
         sym_state["peak_price"] = round(current_price, 4)
         sym_state["peak_seen_at"] = datetime.now(ET).strftime("%Y-%m-%d %H:%M:%S")
+        prior_capture_peak = safe_float(sym_state.get("proactive_profit_capture_peak_pct"))
+        if prior_capture_peak is not None and current_pl_pct >= prior_capture_peak + 0.75:
+            sym_state.pop("proactive_profit_capture_peak_pct", None)
+            sym_state.pop("proactive_profit_capture_at", None)
 
     peak_pl_pct = float(sym_state.get("peak_pl_pct") or current_pl_pct)
 
@@ -633,8 +659,8 @@ def peak_aware_breakeven_floor(peak_pl_pct: float, weak_entry: bool) -> float:
     round-trip.  For peaks below the lowest tier, returns the static flat
     floor so existing behavior is unchanged.
 
-    Strong entries (more room):  0.30% → 0.10,  0.60% → 0.20,  1.00% → 0.30
-    Weak entries (faster ratchet): 0.30% → 0.10,  0.50% → 0.25
+    Strong entries (more room):  0.30% → 0.10,  0.60% → 0.30,  1.00% → 0.45
+    Weak entries (faster ratchet): 0.30% → 0.15,  0.50% → 0.35
     """
     if weak_entry:
         if peak_pl_pct >= WEAK_PEAK_LOCK_TIER2_PEAK_PCT:
@@ -650,6 +676,58 @@ def peak_aware_breakeven_floor(peak_pl_pct: float, weak_entry: bool) -> float:
         if peak_pl_pct >= PEAK_LOCK_TIER1_PEAK_PCT:
             return PEAK_LOCK_TIER1_FLOOR_PCT
         return BREAKEVEN_LOCK_FLOOR_PCT
+
+
+def proactive_profit_capture_trigger(
+    *,
+    peak_pl_pct: float,
+    current_pl_pct: float,
+    giveback_pct: float,
+    weak_entry: bool,
+    retained_strength: dict | None = None,
+) -> tuple[bool, str]:
+    """Return whether a still-green winner should scale out before lock failure."""
+    if not PROACTIVE_PROFIT_CAPTURE_ENABLED:
+        return False, "proactive profit capture disabled"
+
+    retained_strength = retained_strength or {}
+    if weak_entry:
+        min_peak = PROACTIVE_WEAK_MIN_PEAK_PCT
+        min_current = PROACTIVE_WEAK_MIN_CURRENT_PCT
+        min_giveback = PROACTIVE_WEAK_GIVEBACK_PCT
+    else:
+        min_peak = PROACTIVE_STRONG_MIN_PEAK_PCT
+        min_current = PROACTIVE_STRONG_MIN_CURRENT_PCT
+        min_giveback = PROACTIVE_STRONG_GIVEBACK_PCT
+
+    if peak_pl_pct < min_peak:
+        return False, f"peak {peak_pl_pct:.2f}% < proactive min_peak {min_peak:.2f}%"
+    if current_pl_pct < min_current:
+        return False, f"current {current_pl_pct:.2f}% < proactive min_current {min_current:.2f}%"
+    if giveback_pct < min_giveback:
+        return False, f"giveback {giveback_pct:.1f}% < proactive min_giveback {min_giveback:.1f}%"
+
+    if (
+        not weak_entry
+        and retained_strength.get("retained")
+        and not retained_strength.get("broken")
+        and peak_pl_pct < POSITION_MANAGER_TIER2_PEAK_PCT
+        and giveback_pct < POSITION_MANAGER_RETAINED_TIER2_GIVEBACK_PCT
+    ):
+        return (
+            False,
+            "retained session strength intact; "
+            f"peak {peak_pl_pct:.2f}% < tier2 and giveback {giveback_pct:.1f}% "
+            f"< retained threshold {POSITION_MANAGER_RETAINED_TIER2_GIVEBACK_PCT:.1f}%",
+        )
+
+    return (
+        True,
+        f"proactive_profit_capture: peak {peak_pl_pct:.2f}%, "
+        f"current {current_pl_pct:.2f}% still >= {min_current:.2f}%, "
+        f"giveback {giveback_pct:.1f}% >= {min_giveback:.1f}%, "
+        f"weak_entry={weak_entry}",
+    )
 
 
 def is_bad_entry_containment(entry_ctx, peak_pl_pct):
@@ -790,6 +868,29 @@ def evaluate_position(position, state, session_momentum=None):
         else PEAK_LOCK_TIER1_PEAK_PCT    # 0.30 — lowest strong tier
     )
     breakeven_floor = peak_aware_breakeven_floor(peak_pl_pct, weak_entry_context)
+
+    proactive_capture, proactive_reason = proactive_profit_capture_trigger(
+        peak_pl_pct=peak_pl_pct,
+        current_pl_pct=current_pl_pct,
+        giveback_pct=giveback_pct,
+        weak_entry=weak_entry_context,
+        retained_strength=retained_strength,
+    )
+    sym_state = state.setdefault(symbol, {})
+    prior_proactive_peak = safe_float(sym_state.get("proactive_profit_capture_peak_pct"))
+    if proactive_capture and prior_proactive_peak is not None:
+        proactive_capture = False
+        proactive_reason = (
+            f"proactive profit already captured at peak {prior_proactive_peak:.2f}%; "
+            "waiting for materially higher peak before another proactive partial"
+        )
+    if action == "hold" and proactive_capture:
+        action = "sell_partial"
+        sell_fraction = PARTIAL_SELL_PCT
+        severity = "medium"
+        sym_state["proactive_profit_capture_peak_pct"] = round(peak_pl_pct, 4)
+        sym_state["proactive_profit_capture_at"] = datetime.now(ET).strftime("%Y-%m-%d %H:%M:%S")
+        reasons.append(proactive_reason)
 
     if (
         action == "hold"

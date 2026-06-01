@@ -27,6 +27,7 @@ MEMORY_HISTORY_DIR = BASE_DIR / "strategy_memory_history"
 REPORT_MEMORY_FILES = {
     "missed_opportunity_memory": BASE_DIR / "missed_opportunity_memory.json",
     "excursion_memory": BASE_DIR / "excursion_memory.json",
+    "symbol_momentum_timing_memory": BASE_DIR / "symbol_momentum_timing_memory.json",
     "policy_backtest_summary": BASE_DIR / "policy_backtest_summary.json",
 }
 MANUAL_OVERRIDES_FILE = BASE_DIR / "manual_strategy_overrides.json"

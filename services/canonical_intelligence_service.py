@@ -282,7 +282,14 @@ def build_canonical_intelligence_snapshot(
         "session_momentum_5m_pct": context.get("session_momentum_5m_pct"),
         "session_momentum_15m_pct": context.get("session_momentum_15m_pct"),
         "session_momentum_30m_pct": context.get("session_momentum_30m_pct"),
+        "session_momentum_60m_pct": context.get("session_momentum_60m_pct"),
+        "session_momentum_120m_pct": context.get("session_momentum_120m_pct"),
         "session_distance_from_vwap_pct": context.get("session_distance_from_vwap_pct"),
+        "session_trend_regime": context.get("session_trend_regime"),
+        "trend_persistence_score": context.get("trend_persistence_score"),
+        "pullback_with_trend_score": context.get("pullback_with_trend_score"),
+        "late_chase_maturity_score": context.get("late_chase_maturity_score"),
+        "reversal_attempt_score": context.get("reversal_attempt_score"),
     }
     prediction_state = {
         "deterministic_score": prediction.get("prediction_score"),

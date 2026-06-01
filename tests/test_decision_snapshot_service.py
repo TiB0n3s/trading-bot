@@ -40,7 +40,17 @@ def _record_snapshot(tmp_path, *, prediction_gate):
         signal_price=100.0,
         decision={"approved": True, "confidence": "high", "position_size_pct": 1.0},
         order={"order_id": "abc", "status": "filled"},
-        context={"market_bias": "buy", "session_trend_label": "strong_uptrend"},
+        context={
+            "market_bias": "buy",
+            "session_trend_label": "strong_uptrend",
+            "session_momentum_60m_pct": 1.2,
+            "session_momentum_120m_pct": 1.8,
+            "session_trend_regime": "mature_uptrend",
+            "trend_persistence_score": 5,
+            "pullback_with_trend_score": 1,
+            "late_chase_maturity_score": 4,
+            "reversal_attempt_score": 0,
+        },
         account_state={
             "prediction_gate": prediction_gate,
             "setup_observation": {
@@ -93,6 +103,8 @@ def test_record_decision_snapshot_builds_expected_row(tmp_path):
     assert canonical["symbol"] == "AAPL"
     assert canonical["event_state"]["support_count"] == 2
     assert canonical["prediction_state"]["ml_score"] == 63
+    assert canonical["momentum_state"]["session_momentum_60m_pct"] == 1.2
+    assert canonical["momentum_state"]["session_trend_regime"] == "mature_uptrend"
     assert canonical["feature_vector_hash"] == row["canonical_intelligence_hash"]
     assert row["trade_id"] == 7
     assert row["symbol"] == "AAPL"
@@ -101,6 +113,10 @@ def test_record_decision_snapshot_builds_expected_row(tmp_path):
     assert row["order_id"] == "abc"
     assert row["market_bias"] == "buy"
     assert row["session_trend_label"] == "strong_uptrend"
+    assert row["session_momentum_60m_pct"] == 1.2
+    assert row["session_momentum_120m_pct"] == 1.8
+    assert row["session_trend_regime"] == "mature_uptrend"
+    assert row["late_chase_maturity_score"] == 4
     assert row["prediction_score"] == 63
     assert row["prediction_confidence"] == "medium"
     assert row["prediction_sample_size"] == 42

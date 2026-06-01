@@ -477,6 +477,40 @@ def test_rejected_outcome_canonical_links_migration_adds_columns():
         assert_true(expected <= table_columns(db_path, "rejected_signal_outcomes"), "canonical rejected outcome columns")
 
 
+def test_long_horizon_session_momentum_migration_adds_columns():
+    with tempfile.TemporaryDirectory() as tmp:
+        db_path = Path(tmp) / "test.db"
+        with sqlite3.connect(db_path) as con:
+            con.execute("CREATE TABLE trades (id INTEGER PRIMARY KEY)")
+            con.execute("CREATE TABLE decision_snapshots (id INTEGER PRIMARY KEY)")
+
+        migration = next(
+            m
+            for m in MIGRATIONS
+            if m.migration_id == "20260601_021_long_horizon_session_momentum"
+        )
+        applied = apply_migration(migration, db_path)
+        assert_equal(applied, True, "apply")
+
+        expected = {
+            "session_momentum_60m_pct",
+            "session_momentum_120m_pct",
+            "session_trend_regime",
+            "trend_persistence_score",
+            "pullback_with_trend_score",
+            "late_chase_maturity_score",
+            "reversal_attempt_score",
+        }
+        assert_true(expected <= table_columns(db_path, "trades"), "long-horizon trade columns")
+        assert_true(
+            expected <= table_columns(db_path, "decision_snapshots"),
+            "long-horizon decision snapshot columns",
+        )
+
+        applied_again = apply_migration(migration, db_path)
+        assert_equal(applied_again, False, "second apply")
+
+
 if __name__ == "__main__":
     test_feature_audit_migration_is_idempotent()
     print("[OK] test_feature_audit_migration_is_idempotent")
@@ -508,4 +542,6 @@ if __name__ == "__main__":
     print("[OK] test_exit_snapshot_lifecycle_links_migration_adds_columns")
     test_rejected_outcome_canonical_links_migration_adds_columns()
     print("[OK] test_rejected_outcome_canonical_links_migration_adds_columns")
-    print("\nAll 15 DB migration tests passed.")
+    test_long_horizon_session_momentum_migration_adds_columns()
+    print("[OK] test_long_horizon_session_momentum_migration_adds_columns")
+    print("\nAll 16 DB migration tests passed.")

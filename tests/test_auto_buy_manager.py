@@ -105,6 +105,28 @@ def test_negative_session_blocks_candidate():
         raise AssertionError(f"missing hard block reason: {result['hard_block_reason']}")
 
 
+def test_unclassified_extended_vwap_blocks_candidate():
+    session = strong_session()
+    session["distance_from_vwap_pct"] = 1.65
+    feature = favorable_feature()
+    feature["setup_label"] = "unclassified_transition"
+    feature["setup_recommendation"] = "watch"
+    feature["setup_score"] = 35
+
+    result = evaluate_auto_buy_candidate(
+        symbol="VRT",
+        session=session,
+        feature=feature,
+        context=buy_context(),
+        held=set(),
+    )
+
+    assert_equal(result["decision"], "skip", "decision")
+    assert_equal(result["severity"], "blocked", "severity")
+    if "unclassified_extended_vwap" not in result["hard_block_reason"]:
+        raise AssertionError(f"missing unclassified vwap block: {result['hard_block_reason']}")
+
+
 def test_tradingview_symbols_need_higher_auto_buy_threshold():
     session = strong_session()
     session["trend_label"] = "developing_uptrend"
@@ -363,6 +385,7 @@ def main():
         test_strong_internal_candidate_scores_as_buy_candidate,
         test_held_symbol_is_skipped,
         test_negative_session_blocks_candidate,
+        test_unclassified_extended_vwap_blocks_candidate,
         test_tradingview_symbols_need_higher_auto_buy_threshold,
         test_early_session_buffer_skips_collection,
         test_live_buy_requires_market_open_and_env_flag,

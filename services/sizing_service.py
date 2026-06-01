@@ -61,6 +61,14 @@ def collect_active_caps(account_state: dict[str, Any]) -> list[SizeCap]:
                 (account_state["late_chase_size_cap"] or {}).get("reason"),
             )
         )
+    if account_state.get("unclassified_extended_size_cap"):
+        caps.append(
+            SizeCap(
+                "unclassified_extended",
+                float((account_state["unclassified_extended_size_cap"] or {}).get("cap_pct", 99)),
+                (account_state["unclassified_extended_size_cap"] or {}).get("reason"),
+            )
+        )
     if account_state.get("advisory_feature_size_cap"):
         caps.append(
             SizeCap(

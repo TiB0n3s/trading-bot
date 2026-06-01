@@ -654,6 +654,9 @@ def build_session_momentum_observation(
                 f"5m={session_momentum.get('momentum_5m_pct')} "
                 f"15m={session_momentum.get('momentum_15m_pct')} "
                 f"30m={session_momentum.get('momentum_30m_pct')} "
+                f"60m={session_momentum.get('momentum_60m_pct')} "
+                f"120m={session_momentum.get('momentum_120m_pct')} "
+                f"regime={session_momentum.get('trend_regime')} "
                 f"vwap_dist={session_momentum.get('distance_from_vwap_pct')}"
             )
         else:

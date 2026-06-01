@@ -21,6 +21,7 @@ POLICY_ARTIFACT_FILES = (
     "portfolio_replacement_memory.json",
     "excursion_memory.json",
     "missed_opportunity_memory.json",
+    "symbol_momentum_timing_memory.json",
     "policy_backtest_summary.json",
 )
 

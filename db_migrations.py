@@ -541,6 +541,26 @@ MIGRATIONS: tuple[Migration, ...] = (
             """,
         ),
     ),
+    Migration(
+        migration_id="20260601_021_long_horizon_session_momentum",
+        description="Add 60m/120m session momentum and regime/maturity audit fields.",
+        statements=(
+            "ALTER TABLE trades ADD COLUMN session_momentum_60m_pct REAL",
+            "ALTER TABLE trades ADD COLUMN session_momentum_120m_pct REAL",
+            "ALTER TABLE trades ADD COLUMN session_trend_regime TEXT",
+            "ALTER TABLE trades ADD COLUMN trend_persistence_score INTEGER",
+            "ALTER TABLE trades ADD COLUMN pullback_with_trend_score INTEGER",
+            "ALTER TABLE trades ADD COLUMN late_chase_maturity_score INTEGER",
+            "ALTER TABLE trades ADD COLUMN reversal_attempt_score INTEGER",
+            "ALTER TABLE decision_snapshots ADD COLUMN session_momentum_60m_pct REAL",
+            "ALTER TABLE decision_snapshots ADD COLUMN session_momentum_120m_pct REAL",
+            "ALTER TABLE decision_snapshots ADD COLUMN session_trend_regime TEXT",
+            "ALTER TABLE decision_snapshots ADD COLUMN trend_persistence_score INTEGER",
+            "ALTER TABLE decision_snapshots ADD COLUMN pullback_with_trend_score INTEGER",
+            "ALTER TABLE decision_snapshots ADD COLUMN late_chase_maturity_score INTEGER",
+            "ALTER TABLE decision_snapshots ADD COLUMN reversal_attempt_score INTEGER",
+        ),
+    ),
 )
 
 

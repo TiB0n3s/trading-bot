@@ -132,6 +132,7 @@ def score_buy_opportunity(symbol, signal_data, account_state):
 
     session = account_state.get("session_momentum") or {}
     session_label = _lower(session.get("trend_label"))
+    session_vwap = _num(session.get("distance_from_vwap_pct"), 0.0)
     if session_label in ("strong_uptrend", "developing_uptrend"):
         score += 10
         reasons.append(f"session_{session_label}")
@@ -144,6 +145,43 @@ def score_buy_opportunity(symbol, signal_data, account_state):
     elif session_label == "rangebound":
         score -= 3
         reasons.append("session_rangebound")
+
+    if session_vwap >= 2.25:
+        score -= 30
+        reasons.append("session_vwap_extreme")
+    elif session_vwap >= 1.50:
+        score -= 20
+        reasons.append("session_vwap_extended")
+
+    setup_quality = account_state.get("setup_quality") or {}
+    setup_label = _lower(
+        setup_quality.get("label")
+        or setup_quality.get("setup_label")
+        or (account_state.get("setup_observation") or {}).get("setup_label")
+    )
+    setup_score = _num(setup_quality.get("score"), None)
+    setup_recommendation = _lower(
+        setup_quality.get("recommendation")
+        or (account_state.get("setup_observation") or {}).get("setup_recommendation")
+    )
+
+    if setup_label == "unclassified_transition":
+        score -= 12
+        reasons.append("setup_unclassified_transition")
+    elif setup_label == "above_vwap_neutral_continuation":
+        score -= 6
+        reasons.append("setup_above_vwap_neutral")
+
+    if setup_label == "unclassified_transition" and session_vwap >= 1.50:
+        score -= 30
+        reasons.append("unclassified_extended_vwap")
+
+    if setup_recommendation == "avoid" or (setup_score is not None and setup_score < 40):
+        score -= 12
+        reasons.append("setup_quality_avoid")
+    elif setup_recommendation == "watch" or (setup_score is not None and setup_score < 55):
+        score -= 6
+        reasons.append("setup_quality_watch")
 
     rolling = account_state.get("rolling_momentum") or {}
     if rolling.get("fresh") is True:

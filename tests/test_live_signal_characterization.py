@@ -390,6 +390,73 @@ def test_extreme_late_chase_entry_rejects_before_claude():
     assert_true(not evaluate_signal.called, "approval not called")
 
 
+def test_unclassified_extended_entry_sets_heavy_size_cap_before_claude():
+    captured = {}
+
+    def _capture_decision(signal, account_state):
+        captured.update(account_state)
+        return {"approved": False, "confidence": "medium", "reason": "stop"}
+
+    with _Env(**_approved_downstream(
+        **{
+            "app.get_latest_session_momentum": MagicMock(
+                return_value={
+                    "trend_label": "strong_uptrend",
+                    "trend_score": 8,
+                    "session_return_pct": 2.2,
+                    "momentum_15m_pct": 1.0,
+                    "momentum_30m_pct": 1.8,
+                    "distance_from_vwap_pct": 1.65,
+                }
+            ),
+            "app._session_momentum_is_fresh": MagicMock(return_value=True),
+            "services.context_builder.build_setup_observation": MagicMock(
+                return_value={
+                    "setup_policy_action": "neutral",
+                    "setup_label": "unclassified_transition",
+                    "setup_score": 35,
+                }
+            ),
+            "app.evaluate_signal": MagicMock(side_effect=_capture_decision),
+        }
+    )):
+        _process_live(_buy(_dedupe_key="unclassified-extended-cap"))
+
+    assert_equal(captured["unclassified_extended_size_cap"]["cap_pct"], 0.35, "cap")
+    assert_equal(captured["max_position_size_pct_override"], 0.35, "size cap")
+
+
+def test_extreme_unclassified_extended_entry_rejects_before_claude():
+    evaluate_signal = MagicMock()
+    with _Env(**_approved_downstream(
+        **{
+            "app.get_latest_session_momentum": MagicMock(
+                return_value={
+                    "trend_label": "strong_uptrend",
+                    "trend_score": 8,
+                    "session_return_pct": 3.0,
+                    "momentum_15m_pct": 1.0,
+                    "momentum_30m_pct": 1.8,
+                    "distance_from_vwap_pct": 2.35,
+                }
+            ),
+            "app._session_momentum_is_fresh": MagicMock(return_value=True),
+            "services.context_builder.build_setup_observation": MagicMock(
+                return_value={
+                    "setup_policy_action": "neutral",
+                    "setup_label": "unclassified_transition",
+                    "setup_score": 35,
+                }
+            ),
+            "app.evaluate_signal": evaluate_signal,
+        }
+    )) as env:
+        _process_live(_buy(_dedupe_key="unclassified-extended-block"))
+
+    assert_equal(env.rejection_category(), "unclassified_extended_entry", "category")
+    assert_true(not evaluate_signal.called, "approval not called")
+
+
 def test_successful_approved_sell_submits_order_and_records_recent_sell():
     order = {"order_id": "sell-1", "status": "submitted", "qty": 1}
     place_order = MagicMock(return_value=order)
@@ -470,6 +537,8 @@ def main():
         test_buy_opportunity_cap_reduces_submitted_size,
         test_late_chase_entry_sets_heavy_size_cap_before_claude,
         test_extreme_late_chase_entry_rejects_before_claude,
+        test_unclassified_extended_entry_sets_heavy_size_cap_before_claude,
+        test_extreme_unclassified_extended_entry_rejects_before_claude,
         test_successful_approved_sell_submits_order_and_records_recent_sell,
         test_portfolio_rotation_path_continues_after_slot_freed,
     ]

@@ -295,7 +295,13 @@ def evaluate_buy_opportunity(
     session_score = float(session_momentum.get("trend_score") or 0)
     session_15m = float(session_momentum.get("momentum_15m_pct") or 0)
     session_30m = float(session_momentum.get("momentum_30m_pct") or 0)
+    session_60m = float(session_momentum.get("momentum_60m_pct") or 0)
+    session_120m = float(session_momentum.get("momentum_120m_pct") or 0)
     session_vwap = float(session_momentum.get("distance_from_vwap_pct") or 0)
+    trend_regime = session_momentum.get("trend_regime")
+    pullback_score = int(session_momentum.get("pullback_with_trend_score") or 0)
+    maturity_score = int(session_momentum.get("late_chase_maturity_score") or 0)
+    reversal_score = int(session_momentum.get("reversal_attempt_score") or 0)
 
     if session_label == "strong_uptrend" or session_score >= 6:
         score += 3
@@ -313,6 +319,23 @@ def evaluate_buy_opportunity(
     elif session_15m < 0 and session_30m < 0:
         score -= 2
         reasons.append("15m_30m_negative:-2")
+
+    if session_60m > 0 and session_120m > 0:
+        score += 1
+        reasons.append("60m_120m_positive_regime:+1")
+    elif session_60m < 0 and session_120m < 0:
+        score -= 1
+        reasons.append("60m_120m_negative_regime:-1")
+
+    if trend_regime == "pullback_with_uptrend" or pullback_score >= 3:
+        score += 2
+        reasons.append("pullback_with_uptrend:+2")
+    elif trend_regime == "mature_uptrend" or maturity_score >= 3:
+        score -= 2
+        reasons.append("mature_uptrend_chase:-2")
+    elif trend_regime == "reversal_attempt" or reversal_score >= 2:
+        score += 1
+        reasons.append("longer_reversal_attempt:+1")
 
     if session_vwap > 0.25:
         score += 1
@@ -752,6 +775,9 @@ def evaluate_session_momentum_gate(session_momentum, prediction_gate, setup_obs,
 
     session_label = session_momentum.get("trend_label")
     session_score = int(session_momentum.get("trend_score") or 0)
+    trend_regime = session_momentum.get("trend_regime")
+    maturity_score = int(session_momentum.get("late_chase_maturity_score") or 0)
+    pullback_score = int(session_momentum.get("pullback_with_trend_score") or 0)
     prediction_score = int(prediction_gate.get("prediction_score") or 0)
     setup_action = setup_obs.get("setup_policy_action")
     trend_direction = trend.get("direction")
@@ -760,6 +786,19 @@ def evaluate_session_momentum_gate(session_momentum, prediction_gate, setup_obs,
     session_hard_negative = session_label == "downtrend" or session_score <= -5
     session_soft_negative = session_label == "fading" or session_score <= -2
     session_reversal = session_label == "reversal_attempt"
+    mature_chase = trend_regime == "mature_uptrend" or maturity_score >= 4
+    constructive_pullback = trend_regime == "pullback_with_uptrend" or pullback_score >= 3
+
+    if mature_chase and setup_action != "boost" and not constructive_pullback:
+        return {
+            "would_block": False,
+            "severity": "mature_chase_caution",
+            "size_hint": "reduce",
+            "reason": (
+                f"session_regime={trend_regime} maturity_score={maturity_score} "
+                f"setup_action={setup_action} prediction_score={prediction_score}"
+            ),
+        }
 
     if session_hard_negative and setup_action != "boost":
         return {

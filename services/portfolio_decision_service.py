@@ -65,6 +65,9 @@ class PortfolioDecision:
     incremental_position_pct: float
     incremental_var_pct: float
     beta_contribution_delta: float
+    factor_overlap_score: float
+    sector_concentration_delta_pct: float
+    downside_comovement_score: float
     max_cluster_exposure_after_pct: float
     max_cluster_name: str | None
     crowded_theme: str | None
@@ -163,6 +166,9 @@ def evaluate_portfolio_decision(
             incremental_position_pct=0.0,
             incremental_var_pct=0.0,
             beta_contribution_delta=0.0,
+            factor_overlap_score=0.0,
+            sector_concentration_delta_pct=0.0,
+            downside_comovement_score=0.0,
             max_cluster_exposure_after_pct=0.0,
             max_cluster_name=None,
             crowded_theme=None,
@@ -190,6 +196,9 @@ def evaluate_portfolio_decision(
             incremental_position_pct=_candidate_position_pct(account_state),
             incremental_var_pct=0.0,
             beta_contribution_delta=0.0,
+            factor_overlap_score=0.0,
+            sector_concentration_delta_pct=0.0,
+            downside_comovement_score=0.0,
             max_cluster_exposure_after_pct=0.0,
             max_cluster_name=None,
             crowded_theme=None,
@@ -247,7 +256,9 @@ def evaluate_portfolio_decision(
         duplicate_risk_score += max(0.0, limit_utilization - 0.65) * stress_corr
 
     overlap_count = len(set(overlap_symbols))
+    factor_overlap_score = 0.0
     if overlap_count:
+        factor_overlap_score = min(1.0, overlap_count * 0.20)
         duplicate_risk_score += min(0.50, overlap_count * 0.12)
         reasons.append(f"overlaps_existing_names={','.join(sorted(set(overlap_symbols))[:6])}")
 
@@ -256,6 +267,11 @@ def evaluate_portfolio_decision(
     if candidate_clusters:
         avg_stress_corr = sum(_stress_correlation(c) for c in candidate_clusters) / len(candidate_clusters)
         incremental_var_pct = incremental_pct * (0.60 + avg_stress_corr)
+    downside_comovement_score = round(
+        min(1.0, (incremental_var_pct / max_incremental_var_pct) if max_incremental_var_pct > 0 else 0.0),
+        4,
+    )
+    sector_concentration_delta_pct = round(max_after - incremental_pct, 4) if max_after else 0.0
 
     if crowded_theme:
         reasons.append(f"crowded_theme={crowded_theme}")
@@ -289,6 +305,9 @@ def evaluate_portfolio_decision(
         incremental_position_pct=round(incremental_pct, 4),
         incremental_var_pct=round(incremental_var_pct, 4),
         beta_contribution_delta=round(beta_delta, 4),
+        factor_overlap_score=round(factor_overlap_score, 4),
+        sector_concentration_delta_pct=sector_concentration_delta_pct,
+        downside_comovement_score=downside_comovement_score,
         max_cluster_exposure_after_pct=round(max_after, 4),
         max_cluster_name=max_cluster,
         crowded_theme=crowded_theme,

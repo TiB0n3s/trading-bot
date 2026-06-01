@@ -245,6 +245,35 @@ def test_app_cannot_call_broker_directly():
     assert_true(not violations, f"app.py broker boundary: {violations}")
 
 
+def test_app_has_no_legacy_signal_or_direct_audit_execution_ownership():
+    source = (ROOT / "app.py").read_text()
+    banned_tokens = (
+        "_legacy_process_signal",
+        "legacy_process_signal",
+        "execute_legacy",
+        "run_legacy_",
+        "def log_trade",
+        "def log_rejection",
+        "log_trade(",
+        "log_rejection(",
+        "execute_order(",
+    )
+    violations = [token for token in banned_tokens if token in source]
+    assert_true(
+        not violations,
+        f"app.py must stay orchestration/composition-only; banned runtime ownership tokens: {violations}",
+    )
+
+
+def test_app_does_not_define_runtime_owner_classes():
+    tree = ast.parse((ROOT / "app.py").read_text(), filename="app.py")
+    classes = [node.name for node in tree.body if isinstance(node, ast.ClassDef)]
+    assert_true(
+        not classes,
+        f"app.py should stay composition-only and not define runtime owner classes: {classes}",
+    )
+
+
 def test_api_cannot_import_runtime_infra_directly():
     _assert_no_import(
         "api",
@@ -386,12 +415,38 @@ def test_reports_builders_and_ops_check_do_not_import_db_directly():
     assert_true(not violations, f"report/builder DB import boundary: {violations}")
 
 
+def test_ops_checks_do_not_import_db_or_market_data_directly():
+    violations = []
+    banned_imports = {"db", "sqlite3", "broker", "alpaca_trade_api"}
+    for path in _python_files("services/ops_checks"):
+        imports = _imports(path)
+        calls = _calls(path)
+        rel = path.relative_to(ROOT).as_posix()
+        for module in imports:
+            root = module.split(".", 1)[0]
+            if module in banned_imports or root in banned_imports:
+                violations.append(f"{rel} imports {module}")
+        for call in calls:
+            if (
+                call == "get_connection"
+                or call == "sqlite3.connect"
+                or call.endswith(".get_bars")
+                or call.endswith(".get_bars_with_fallback")
+                or call.endswith(".get_latest_quote")
+                or call.endswith(".get_latest_trade")
+            ):
+                violations.append(f"{rel} calls {call}")
+    assert_true(not violations, f"ops-check boundary violations: {violations}")
+
+
 def main():
     tests = [
         test_api_cannot_import_broker_directly,
         test_app_cannot_import_sqlite3,
         test_app_py_stays_under_1500_lines,
         test_app_cannot_call_broker_directly,
+        test_app_has_no_legacy_signal_or_direct_audit_execution_ownership,
+        test_app_does_not_define_runtime_owner_classes,
         test_api_cannot_import_runtime_infra_directly,
         test_repositories_cannot_import_flask,
         test_repositories_cannot_import_broker,
@@ -405,6 +460,7 @@ def main():
         test_temporary_market_data_allowlist_entries_have_todo_reasons,
         test_no_runtime_modules_have_direct_db_or_broker_access,
         test_reports_builders_and_ops_check_do_not_import_db_directly,
+        test_ops_checks_do_not_import_db_or_market_data_directly,
     ]
     for test in tests:
         test()

@@ -56,6 +56,33 @@ def run_feature_attribution_report(
         return False
 
     print()
+    print("Feature family ranking")
+    ranked = sorted(
+        payload.families,
+        key=lambda item: (
+            -abs((item.get("best_bucket") or {}).get("ev_delta_pct") or 0.0),
+            -((item.get("best_bucket") or {}).get("false_positive_reduction") or 0.0),
+            ((item.get("best_bucket") or {}).get("false_negative_increase") or 0.0),
+            item["family"],
+        ),
+    )
+    print(
+        f"  {'rank':>4} {'family':<26} {'bucket':<28} {'ev_delta':>9} "
+        f"{'hit_delta':>9} {'fp_red':>8} {'fn_cost':>8} {'stable':>8}"
+    )
+    for idx, family in enumerate(ranked, start=1):
+        best = family.get("best_bucket") or {}
+        stability = family.get("stability") or {}
+        print(
+            f"  {idx:>4} {family['family']:<26} {str(best.get('bucket') or '-')[:28]:<28} "
+            f"{_fmt(best.get('ev_delta_pct')):>9} "
+            f"{_fmt(best.get('hit_rate_delta')):>9} "
+            f"{_fmt(best.get('false_positive_reduction')):>8} "
+            f"{_fmt(best.get('false_negative_increase')):>8} "
+            f"{_fmt(stability.get('stable_window_share')):>8}"
+        )
+
+    print()
     print("Feature family attribution")
     print(
         f"  {'family':<26} {'covered':>7} {'missing':>7} "

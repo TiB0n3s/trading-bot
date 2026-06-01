@@ -284,6 +284,44 @@ def test_canonical_snapshot_payload_cannot_change_decision_by_itself():
     assert_equal(result["decision"], "allow", "canonical persistence is inert")
 
 
+def test_rollout_candidate_status_cannot_change_authority_by_itself():
+    original = decision_policy.contextual_memory_for_signal
+    try:
+        decision_policy.contextual_memory_for_signal = neutral_memory
+        result = decision_policy.evaluate_decision_policy(
+            "AAPL",
+            "buy",
+            intelligence_context={
+                "summary": {"recommended_action": "allow"},
+                "opportunity_score": {"score": 90, "decision": "allow"},
+                "prediction": {"prediction_decision": "allow", "prediction_score": 80},
+            },
+            account_state={
+                "rollout_contract": {
+                    "report_version": "rollout_contract_v1",
+                    "runtime_effect": "telemetry_only_no_live_authority",
+                    "assessments": [
+                        {
+                            "feature_family": "portfolio_decision",
+                            "status": "narrow_block_candidate",
+                        },
+                        {
+                            "feature_family": "execution_quality",
+                            "status": "size_down_candidate",
+                        },
+                    ],
+                },
+                "portfolio_decision": {"decision": "allow"},
+                "execution_quality": {"decision": "allow"},
+            },
+        )
+    finally:
+        decision_policy.contextual_memory_for_signal = original
+
+    assert_equal(result["decision"], "allow", "rollout candidates are not authority")
+    assert_equal(result["size_multiplier"], 1.0, "rollout candidates do not size")
+
+
 def test_decision_policy_module_does_not_import_order_execution():
     source = inspect.getsource(decision_policy)
 
@@ -311,6 +349,8 @@ if __name__ == "__main__":
     print("[OK] test_calibrated_confidence_cannot_change_live_authority_by_itself")
     test_canonical_snapshot_payload_cannot_change_decision_by_itself()
     print("[OK] test_canonical_snapshot_payload_cannot_change_decision_by_itself")
+    test_rollout_candidate_status_cannot_change_authority_by_itself()
+    print("[OK] test_rollout_candidate_status_cannot_change_authority_by_itself")
     test_decision_policy_module_does_not_import_order_execution()
     print("[OK] test_decision_policy_module_does_not_import_order_execution")
-    print("\nAll 10 decision policy tests passed.")
+    print("\nAll 11 decision policy tests passed.")

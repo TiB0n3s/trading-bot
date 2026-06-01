@@ -166,6 +166,12 @@ def insert_snapshot(snapshot: dict) -> None:
 def collect_all_symbols(write: bool = False, stdout: bool = False) -> tuple[int, int]:
     return get_live_features_service().collect_all_symbols(write=write, stdout=stdout)
 
+
+def collection_exit_code(success: int, failed: int) -> int:
+    """Treat partial symbol failures as degraded success, not scheduler failure."""
+    return 0 if success > 0 else 1
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--symbol", help="Approved symbol, e.g. QQQ")
@@ -186,7 +192,12 @@ def main() -> int:
 
     if args.all_symbols:
         success, failed = collect_all_symbols(write=args.write, stdout=args.stdout)
-        return 0 if success > 0 and failed == 0 else 1
+        if failed:
+            logger.warning(
+                "Live feature collection completed with partial failures: "
+                f"success={success} failed={failed}"
+            )
+        return collection_exit_code(success, failed)
 
     try:
         snapshot = build_snapshot(args.symbol)

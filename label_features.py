@@ -191,6 +191,8 @@ def main() -> int:
             logger.error(f"{row['symbol']} snapshot_id={row['id']}: failed: {e}")
 
     logger.info(f"Labeling complete: labeled={labeled}, skipped={skipped}")
+    print(f"rows_written: {labeled}")
+    print(f"label_features_summary: labeled={labeled} skipped={skipped}")
     return 0
 
 

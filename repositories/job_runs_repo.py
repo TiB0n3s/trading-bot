@@ -145,3 +145,28 @@ class JobRunsRepository:
                 """,
                 params,
             ).fetchall()
+
+    def runs_between(self, start_date: str, end_date: str):
+        with get_connection(self.db_path) as con:
+            return con.execute(
+                """
+                SELECT
+                    id,
+                    job_name,
+                    started_at,
+                    finished_at,
+                    duration_sec,
+                    exit_code,
+                    lock_acquired,
+                    skipped_reason,
+                    rows_written,
+                    warnings_count,
+                    artifact_path,
+                    artifact_hash,
+                    command
+                FROM job_runs
+                WHERE substr(started_at, 1, 10) BETWEEN ? AND ?
+                ORDER BY started_at ASC, id ASC
+                """,
+                (start_date, end_date),
+            ).fetchall()

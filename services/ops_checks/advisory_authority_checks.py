@@ -10,6 +10,9 @@ from typing import Any
 from repositories.ops_check_repo import OpsCheckRepository
 
 
+ADVISORY_AUTHORITY_REPORT_VERSION = "advisory_authority_v1"
+
+
 def _load_json(raw: str | None) -> dict[str, Any]:
     if not raw:
         return {}
@@ -118,11 +121,20 @@ def _legacy_setup_quality_outcome(account_state: dict[str, Any]) -> dict[str, An
     }
 
 
+def _canonical_nested_outcome(
+    authority_state: dict[str, Any],
+    key: str,
+) -> dict[str, Any]:
+    value = authority_state.get(key)
+    return value if isinstance(value, dict) else {}
+
+
 def run_advisory_authority_report(target_date: str, *, base_dir: Path) -> bool:
     print()
     print("=" * 72)
     print(f"  Advisory vs Authority Report - {target_date}")
     print("=" * 72)
+    print(f"report_version          : {ADVISORY_AUTHORITY_REPORT_VERSION}")
 
     db_path = base_dir / "trades.db"
     if not db_path.exists():
@@ -225,6 +237,18 @@ def run_advisory_authority_report(target_date: str, *, base_dir: Path) -> bool:
             )
         )
 
+        portfolio_outcome = _canonical_nested_outcome(authority_state, "portfolio_decision")
+        portfolio_decision = portfolio_outcome.get("decision")
+        portfolio_negative = action == "buy" and portfolio_decision in ("block", "size_down")
+        portfolio_block = action == "buy" and portfolio_decision == "block"
+        portfolio_size_down = action == "buy" and portfolio_decision == "size_down"
+
+        execution_outcome = _canonical_nested_outcome(authority_state, "execution_quality")
+        execution_decision = execution_outcome.get("decision")
+        execution_negative = action == "buy" and execution_decision in ("avoid", "block", "size_down")
+        execution_block = action == "buy" and execution_decision in ("avoid", "block")
+        execution_size_down = action == "buy" and execution_decision == "size_down"
+
         _increment_if(counts, "decision_policy_block_advisory", dp_block)
         _increment_if(counts, "decision_policy_block_but_approved", dp_block and approved)
         _increment_if(counts, "decision_policy_size_down_advisory", dp_size_down)
@@ -251,8 +275,23 @@ def run_advisory_authority_report(target_date: str, *, base_dir: Path) -> bool:
         _increment_if(counts, "session_would_block_but_approved", session_would_block and approved)
         _increment_if(counts, "weak_setup_quality_advisory", weak_setup)
         _increment_if(counts, "weak_setup_quality_but_approved", weak_setup and approved)
+        _increment_if(counts, "portfolio_negative_advisory", portfolio_negative)
+        _increment_if(counts, "portfolio_negative_but_approved", portfolio_negative and approved)
+        _increment_if(counts, "portfolio_block_advisory", portfolio_block)
+        _increment_if(counts, "portfolio_size_down_advisory", portfolio_size_down)
+        _increment_if(counts, "execution_quality_negative_advisory", execution_negative)
+        _increment_if(counts, "execution_quality_negative_but_approved", execution_negative and approved)
+        _increment_if(counts, "execution_quality_block_advisory", execution_block)
+        _increment_if(counts, "execution_quality_size_down_advisory", execution_size_down)
 
-        if approved and (dp_block or ml_negative or session_would_block or weak_setup):
+        if approved and (
+            dp_block
+            or ml_negative
+            or session_would_block
+            or weak_setup
+            or portfolio_negative
+            or execution_negative
+        ):
             examples.append(
                 {
                     "time": row.get("decision_time"),
@@ -265,6 +304,8 @@ def run_advisory_authority_report(target_date: str, *, base_dir: Path) -> bool:
                             ("ml_negative_compare", ml_negative),
                             ("session_would_block", session_would_block),
                             ("weak_setup_quality", weak_setup),
+                            ("portfolio_negative", portfolio_negative),
+                            ("execution_quality_negative", execution_negative),
                         )
                         if condition
                     ),
@@ -302,6 +343,14 @@ def run_advisory_authority_report(target_date: str, *, base_dir: Path) -> bool:
         "session_would_block_but_approved",
         "weak_setup_quality_advisory",
         "weak_setup_quality_but_approved",
+        "portfolio_negative_advisory",
+        "portfolio_negative_but_approved",
+        "portfolio_block_advisory",
+        "portfolio_size_down_advisory",
+        "execution_quality_negative_advisory",
+        "execution_quality_negative_but_approved",
+        "execution_quality_block_advisory",
+        "execution_quality_size_down_advisory",
     ):
         print(f"  {key:<42} {counts[key]:5d}")
 

@@ -60,7 +60,9 @@ load_env_file()
 from bot_events import log_event
 from market_time import ET, is_market_hours, now_et
 from repositories import auto_buy_repo
+from repositories.candidate_universe_repo import CandidateUniverseRepository
 from risk.exposure import any_cluster_limit_hit, cluster_exposure
+from services.candidate_universe_service import CandidateUniverseService
 from symbols_config import (
     APPROVED_SYMBOLS_LIST,
     CLUSTER_EXPOSURE_LIMITS,
@@ -559,6 +561,7 @@ def evaluate_auto_buy_candidate(
 def log_candidate(candidate: dict[str, Any], live_buy_enabled: bool, order: dict[str, Any] | None = None) -> None:
     order = order or {}
     timestamp = now_et().isoformat()
+    auto_buy_repo.init_tables(DB_PATH)
     auto_buy_repo.insert_candidate_and_snapshot(
         timestamp=timestamp,
         created_at=now_et().isoformat(),
@@ -569,6 +572,28 @@ def log_candidate(candidate: dict[str, Any], live_buy_enabled: bool, order: dict
         order_json=json.dumps(order, sort_keys=True, default=str),
         db_path=DB_PATH,
     )
+    try:
+        CandidateUniverseService(CandidateUniverseRepository(DB_PATH)).persist_scored_candidate(
+            candidate_ts=timestamp,
+            symbol=candidate["symbol"],
+            action="buy",
+            score=candidate.get("score"),
+            threshold=AUTO_BUY_MIN_SCORE,
+            taken=bool(order.get("order_id")),
+            source="auto_buy_manager",
+            decision=candidate.get("decision"),
+            reason=candidate.get("reason") or candidate.get("hard_block_reason"),
+            setup_label=candidate.get("setup_label"),
+            regime=candidate.get("market_bias"),
+            session_phase=candidate.get("session_trend_label"),
+            payload={
+                "candidate": candidate,
+                "order_submitted": bool(order.get("order_id")),
+                "live_buy_enabled": live_buy_enabled,
+            },
+        )
+    except Exception as exc:
+        print(f"[WARN] candidate universe capture failed for {candidate.get('symbol')}: {exc}", file=sys.stderr)
 
 
 def log_auto_buy_order(candidate: dict[str, Any], order: dict[str, Any]) -> bool:

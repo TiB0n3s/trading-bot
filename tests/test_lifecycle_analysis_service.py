@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import json
 import sqlite3
 import sys
 import tempfile
@@ -28,6 +29,7 @@ def _make_db(db_path: Path) -> None:
                 approved INTEGER,
                 final_decision TEXT,
                 rejection_reason TEXT,
+                canonical_intelligence_json TEXT,
                 canonical_intelligence_version TEXT,
                 canonical_intelligence_hash TEXT
             )
@@ -37,15 +39,38 @@ def _make_db(db_path: Path) -> None:
             """
             INSERT INTO decision_snapshots (
                 id, trade_id, decision_time, symbol, action, approved,
-                final_decision, rejection_reason, canonical_intelligence_version,
-                canonical_intelligence_hash
+                final_decision, rejection_reason, canonical_intelligence_json,
+                canonical_intelligence_version, canonical_intelligence_hash
             ) VALUES
               (1, 10, '2026-05-31T14:30:00+00:00', 'AAPL', 'buy', 1,
-               'approved', NULL, 'canonical_intelligence_v1', ?),
+               'approved', NULL, ?, 'canonical_intelligence_v1', ?),
               (2, 20, '2026-05-31T14:35:00+00:00', 'MSFT', 'buy', 0,
-               'rejected', 'prediction_gate:test', 'canonical_intelligence_v1', ?)
+               'rejected', 'prediction_gate:test', ?, 'canonical_intelligence_v1', ?)
             """,
-            ("a" * 64, "b" * 64),
+            (
+                json.dumps(
+                    {
+                        "setup_state": {"label": "breakout"},
+                        "regime_state": {
+                            "market_regime": "trend_expansion",
+                            "session_phase": "morning",
+                            "execution_quality_decision": "allow",
+                        },
+                    }
+                ),
+                "a" * 64,
+                json.dumps(
+                    {
+                        "setup_state": {"label": "late_chase"},
+                        "regime_state": {
+                            "market_regime": "compression_chop",
+                            "session_phase": "midday",
+                            "execution_quality_decision": "size_down",
+                        },
+                    }
+                ),
+                "b" * 64,
+            ),
         )
         con.execute(
             """
@@ -139,11 +164,16 @@ def test_lifecycle_analysis_joins_entry_exit_and_rejected_counterfactuals():
             "rejected_with_counterfactual": 1,
             "rejected_snapshot_only_no_trade": 0,
             "rejected_without_counterfactual": 0,
+            "rejected_counterfactual_coverage_rate": 1.0,
+            "approved_exit_link_rate": 1.0,
+            "analysis_ready": True,
         }
 
         approved = payload.rows[0]
         rejected = payload.rows[1]
         assert approved["lifecycle_status"] == "approved_with_exit"
+        assert approved["setup_label"] == "breakout"
+        assert rejected["market_regime"] == "compression_chop"
         assert approved["entry_canonical_intelligence_hash"] == "a" * 64
         assert approved["canonical_exit_hash"] == "c" * 64
         assert approved["exit_trigger"] == "peak_lock_floor"

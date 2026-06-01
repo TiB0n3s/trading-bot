@@ -164,8 +164,62 @@ class JobRunsService:
             if row.get("lock_acquired") == 0
             and row.get("skipped_reason") == "lock_busy"
         ]
+        zero_row_successes = [
+            row
+            for row in succeeded
+            if row.get("rows_written") == 0
+        ]
+        unknown_row_successes = [
+            row
+            for row in succeeded
+            if row.get("rows_written") is None
+        ]
         warnings = sum(int(row.get("warnings_count") or 0) for row in rows)
         rows_written = sum(int(row.get("rows_written") or 0) for row in rows)
+
+        consecutive_failure_rows: list[dict[str, Any]] = []
+        warning_rows: list[dict[str, Any]] = []
+        zero_row_job_rows: list[dict[str, Any]] = []
+        for job_name in sorted(job_names):
+            job_rows = [row for row in rows if row.get("job_name") == job_name]
+            job_warning_count = sum(int(row.get("warnings_count") or 0) for row in job_rows)
+            if job_warning_count:
+                warning_rows.append({
+                    "job_name": job_name,
+                    "warnings_count": job_warning_count,
+                })
+            job_zero_row_count = sum(
+                1
+                for row in job_rows
+                if row.get("lock_acquired") == 1
+                and row.get("exit_code") == 0
+                and row.get("rows_written") == 0
+            )
+            if job_zero_row_count:
+                zero_row_job_rows.append({
+                    "job_name": job_name,
+                    "zero_row_successes": job_zero_row_count,
+                })
+            streak = 0
+            for row in reversed(job_rows):
+                if row.get("lock_acquired") != 1:
+                    continue
+                failed_run = (
+                    row.get("exit_code") not in (0, None)
+                    or (
+                        row.get("exit_code") is None
+                        and not row.get("skipped_reason")
+                    )
+                )
+                if failed_run:
+                    streak += 1
+                    continue
+                break
+            if streak:
+                consecutive_failure_rows.append({
+                    "job_name": job_name,
+                    "consecutive_failures": streak,
+                })
 
         summary = {
             "total_runs": len(rows),
@@ -174,10 +228,15 @@ class JobRunsService:
             "failed": len(failed),
             "launcher_errors": len(launcher_errors),
             "skipped_lock_busy": len(skipped_lock),
+            "zero_row_successes": len(zero_row_successes),
+            "unknown_row_successes": len(unknown_row_successes),
             "warnings_count": warnings,
             "rows_written": rows_written,
             "p50_duration_sec": self._percentile(durations, 0.50),
             "p95_duration_sec": self._percentile(durations, 0.95),
+            "consecutive_failure_jobs": consecutive_failure_rows,
+            "warning_jobs": warning_rows,
+            "zero_row_jobs": zero_row_job_rows,
             "clean": bool(rows) and not failed and not launcher_errors,
         }
         return JobRunsHealthPayload(
@@ -185,6 +244,67 @@ class JobRunsService:
             rows=rows,
             summary=summary,
         )
+
+    def trend_payload(self, *, start_date: str, end_date: str) -> dict[str, Any]:
+        self.repository.init_table()
+        rows = [dict(row) for row in self.repository.runs_between(start_date, end_date)]
+        by_job: dict[str, list[dict[str, Any]]] = {}
+        for row in rows:
+            by_job.setdefault(str(row.get("job_name") or "unknown"), []).append(row)
+
+        jobs = []
+        for job_name, job_rows in sorted(by_job.items()):
+            durations = [
+                float(row["duration_sec"])
+                for row in job_rows
+                if row.get("duration_sec") is not None
+            ]
+            failures = [
+                row
+                for row in job_rows
+                if row.get("lock_acquired") == 1
+                and row.get("exit_code") not in (0, None)
+            ]
+            launcher_errors = [
+                row
+                for row in job_rows
+                if row.get("lock_acquired") == 1
+                and row.get("exit_code") is None
+                and not row.get("skipped_reason")
+            ]
+            skipped = [
+                row
+                for row in job_rows
+                if row.get("lock_acquired") == 0
+                or row.get("skipped_reason") == "lock_busy"
+            ]
+            zero_rows = [
+                row
+                for row in job_rows
+                if row.get("lock_acquired") == 1
+                and row.get("exit_code") == 0
+                and row.get("rows_written") == 0
+            ]
+            jobs.append({
+                "job_name": job_name,
+                "runs": len(job_rows),
+                "failures": len(failures),
+                "launcher_errors": len(launcher_errors),
+                "lock_skips": len(skipped),
+                "zero_row_successes": len(zero_rows),
+                "warnings_count": sum(int(row.get("warnings_count") or 0) for row in job_rows),
+                "rows_written": sum(int(row.get("rows_written") or 0) for row in job_rows),
+                "p95_duration_sec": self._percentile(durations, 0.95),
+            })
+        return {
+            "report_version": "runtime_health_trend_v1",
+            "start_date": start_date,
+            "end_date": end_date,
+            "rows": len(rows),
+            "jobs": jobs,
+            "clean": bool(rows)
+            and not any(item["failures"] or item["launcher_errors"] for item in jobs),
+        }
 
 
 def build_default_job_runs_service() -> JobRunsService:

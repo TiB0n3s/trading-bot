@@ -39,6 +39,7 @@ def test_tight_stable_quote_allows_execution():
     assert_equal(estimate.decision, "allow", "decision")
     assert_equal(estimate.fill_quality, "good", "fill quality")
     assert_lt(estimate.net_execution_cost_pct, 0.10, "net cost")
+    assert_equal(estimate.net_edge_after_cost_pct, None, "net edge absent")
 
 
 def test_wide_spread_and_thin_depth_sizes_down():
@@ -78,11 +79,26 @@ def test_suspect_quote_blocks_execution_quality():
     assert_gt(estimate.quote_instability_score, 0.5, "instability")
 
 
+def test_execution_cost_tracks_net_edge_after_cost():
+    estimate = estimate_execution_quality(
+        symbol="AAPL",
+        action="buy",
+        signal_price=100.0,
+        forecast_edge_pct=0.20,
+        quote_snapshot={"bid": 99.95, "ask": 100.05},
+        account_state={"momentum": {"volume_state": "normal"}},
+    )
+
+    assert_equal(estimate.forecast_edge_pct, 0.20, "forecast edge")
+    assert_gt(estimate.net_edge_after_cost_pct, 0.0, "net edge")
+
+
 def main():
     tests = [
         test_tight_stable_quote_allows_execution,
         test_wide_spread_and_thin_depth_sizes_down,
         test_suspect_quote_blocks_execution_quality,
+        test_execution_cost_tracks_net_edge_after_cost,
     ]
     for test in tests:
         test()

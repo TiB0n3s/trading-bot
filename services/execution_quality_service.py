@@ -25,7 +25,9 @@ class ExecutionQualityEstimate:
     top_of_book_depth_score: float | None
     expected_fill_quality_score: float
     sweep_risk: str
+    forecast_edge_pct: float | None
     net_execution_cost_pct: float
+    net_edge_after_cost_pct: float | None
     reasons: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
@@ -89,6 +91,7 @@ def estimate_execution_quality(
     quote_snapshot: dict[str, Any] | None = None,
     latest_price: Any = None,
     fees_pct: float = 0.01,
+    forecast_edge_pct: Any = None,
 ) -> ExecutionQualityEstimate:
     """Estimate execution quality and net execution cost for a signal."""
     action = (action or "").lower()
@@ -163,6 +166,17 @@ def estimate_execution_quality(
         slippage_estimate_pct += min(0.25, gap_pct * 0.35)
 
     net_cost = round(spread_cost_pct + slippage_estimate_pct + float(fees_pct or 0.0), 4)
+    forecast_edge = _float(
+        forecast_edge_pct
+        if forecast_edge_pct is not None
+        else account_state.get("forecast_edge_pct")
+        or account_state.get("expected_value_pct")
+        or (_dict(account_state.get("utility_estimate")).get("expected_value_pct"))
+        or (_dict(account_state.get("decision_policy")).get("expected_value_pct"))
+    )
+    net_edge_after_cost = (
+        round(forecast_edge - net_cost, 4) if forecast_edge is not None else None
+    )
     expected_fill_quality_score = _clamp(1.0 - net_cost / 1.5)
 
     sweep_risk = "low"
@@ -184,6 +198,11 @@ def estimate_execution_quality(
         size_multiplier = 0.75 if net_cost < 0.60 else 0.50
         fill_quality = "degraded"
         reasons.append(f"net_execution_cost={net_cost:.3f}%")
+    elif net_edge_after_cost is not None and net_edge_after_cost <= 0:
+        decision = "size_down"
+        size_multiplier = 0.75
+        fill_quality = "edge_eroded"
+        reasons.append(f"net_edge_after_cost={net_edge_after_cost:.3f}%")
     else:
         reasons.append("execution_quality_acceptable")
 
@@ -200,6 +219,8 @@ def estimate_execution_quality(
         top_of_book_depth_score=round(depth_score, 4) if depth_score is not None else None,
         expected_fill_quality_score=round(expected_fill_quality_score, 4),
         sweep_risk=sweep_risk,
+        forecast_edge_pct=round(forecast_edge, 4) if forecast_edge is not None else None,
         net_execution_cost_pct=net_cost,
+        net_edge_after_cost_pct=net_edge_after_cost,
         reasons=reasons[:12],
     )

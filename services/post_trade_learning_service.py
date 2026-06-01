@@ -117,16 +117,24 @@ def build_post_trade_learning_payload(
         "lifecycle_status",
         "setup_label",
         "market_regime",
+        "setup_regime",
+        "decision_hour",
         "session_phase",
+        "execution_cost_bucket",
         "participation_state",
         "volatility_chase_risk",
         "execution_quality_decision",
+        "portfolio_decision",
+        "downside_state",
+        "utility_decision",
+        "confidence_quality",
     ]
 
     approved_returns: list[float] = []
     rejected_returns: list[float] = []
     missing_outcomes = 0
     for row in rows_list:
+        row["setup_regime"] = f"{_bucket(row, 'setup_label')} x {_bucket(row, 'market_regime')}"
         outcome = _outcome_return(row)
         if outcome is None:
             missing_outcomes += 1
@@ -183,8 +191,12 @@ def build_post_trade_learning_payload(
     pattern_dimensions = [
         "setup_label",
         "market_regime",
+        "decision_hour",
+        "execution_cost_bucket",
         "session_phase",
         "execution_quality_decision",
+        "portfolio_decision",
+        "downside_state",
     ]
     summary = {
         "report_version": POST_TRADE_LEARNING_REPORT_VERSION,

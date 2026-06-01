@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import fcntl
 from pathlib import Path
+import re
 import subprocess
 import sys
 import time
@@ -22,6 +23,63 @@ def _append_log(path: str | None, message: str) -> None:
     p.parent.mkdir(parents=True, exist_ok=True)
     with p.open("a") as fh:
         fh.write(message.rstrip() + "\n")
+
+
+ROW_COUNT_PATTERNS = [
+    re.compile(r"\brows_written\s*[:=]\s*(\d+)\b", re.IGNORECASE),
+    re.compile(r"\brows?\s+(?:written|inserted|updated|created)\s*[:=]\s*(\d+)\b", re.IGNORECASE),
+    re.compile(r"\bInserted\s+(\d+)\s+(?:[\w_]+\s+)?rows?\b", re.IGNORECASE),
+    re.compile(r"\bApplied\s+event\s+aggregates.*\bupdated=(\d+)\b", re.IGNORECASE),
+    re.compile(r"\bsuccess(?:ful)?\s*[:=]\s*(\d+)\b", re.IGNORECASE),
+]
+
+
+def _log_size(log_file: str | None) -> int:
+    if not log_file:
+        return 0
+    p = Path(log_file)
+    if not p.exists():
+        return 0
+    try:
+        return p.stat().st_size
+    except OSError:
+        return 0
+
+
+def _read_log_tail(log_file: str | None, start_offset: int) -> str:
+    if not log_file:
+        return ""
+    p = Path(log_file)
+    if not p.exists():
+        return ""
+    try:
+        with p.open("r", errors="replace") as fh:
+            fh.seek(start_offset)
+            return fh.read()
+    except OSError:
+        return ""
+
+
+def _infer_rows_written(output: str) -> int | None:
+    matches: list[int] = []
+    for pattern in ROW_COUNT_PATTERNS:
+        for match in pattern.finditer(output or ""):
+            try:
+                matches.append(int(match.group(1)))
+            except Exception:
+                pass
+    if matches:
+        return max(matches)
+    return None
+
+
+def _infer_warnings_count(output: str) -> int:
+    warnings = 0
+    for line in (output or "").splitlines():
+        text = line.lower()
+        if "warning" in text or "[warn]" in text or " warn " in f" {text} ":
+            warnings += 1
+    return warnings
 
 
 def _run_command(command: list[str], log_file: str | None) -> int:
@@ -91,20 +149,32 @@ def main(argv: list[str] | None = None) -> int:
             return 0
 
     _append_log(args.log_file, f"{_now_iso()} job-start: {args.job_name}")
+    log_start_offset = _log_size(args.log_file)
     exit_code = 1
     try:
         exit_code = _run_command(args.command, args.log_file)
         return exit_code
     finally:
         _append_log(args.log_file, f"{_now_iso()} job-finish: {args.job_name} exit_code={exit_code}")
+        output = _read_log_tail(args.log_file, log_start_offset)
+        rows_written = (
+            args.rows_written
+            if args.rows_written is not None
+            else _infer_rows_written(output)
+        )
+        warnings_count = (
+            args.warnings_count
+            if args.warnings_count is not None
+            else _infer_warnings_count(output)
+        )
         record = service.build_record(
             job_name=args.job_name,
             started_at=started_at,
             started_monotonic=started_monotonic,
             exit_code=exit_code,
             lock_acquired=True,
-            rows_written=args.rows_written,
-            warnings_count=args.warnings_count,
+            rows_written=rows_written,
+            warnings_count=warnings_count,
             artifact_path=args.artifact_path,
             command=args.command,
         )

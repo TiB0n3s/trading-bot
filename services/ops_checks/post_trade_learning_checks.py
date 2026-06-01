@@ -56,9 +56,12 @@ def run_post_trade_learning_report(
         return False
 
     for dimension in (
+        "setup_regime",
         "setup_label",
         "market_regime",
+        "decision_hour",
         "session_phase",
+        "execution_cost_bucket",
         "execution_quality_decision",
         "participation_state",
         "volatility_chase_risk",

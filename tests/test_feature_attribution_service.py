@@ -34,6 +34,8 @@ def _canonical(
     structure="high_quality_structure",
     downside="contained_downside",
     utility="trade_candidate",
+    confidence="medium",
+    spread="tight",
     setup="breakout",
     phase="first_30m",
 ):
@@ -48,13 +50,15 @@ def _canonical(
                 "volatility_chase_risk": volatility,
                 "downside_state": downside,
                 "session_phase": phase,
+                "spread_bucket": spread,
             },
             "setup_state": {
                 "label": setup,
                 "structure_state": structure,
             },
             "advisory_authority_state": {
-                "utility_estimate": {"utility_decision": utility}
+                "utility_estimate": {"utility_decision": utility},
+                "calibrated_confidence": {"confidence_quality": confidence},
             },
         }
     )
@@ -110,6 +114,8 @@ def test_feature_attribution_summarizes_family_deltas_and_guardrails():
                 structure="messy_range",
                 downside="asymmetric_downside_high",
                 utility="do_not_trade",
+                confidence="low",
+                spread="wide",
                 setup="late_chase",
                 phase="midday",
             ),
@@ -130,6 +136,8 @@ def test_feature_attribution_summarizes_family_deltas_and_guardrails():
                 structure="messy_range",
                 downside="asymmetric_downside_high",
                 utility="do_not_trade",
+                confidence="low",
+                spread="wide",
                 setup="late_chase",
                 phase="midday",
             ),
@@ -147,6 +155,10 @@ def test_feature_attribution_summarizes_family_deltas_and_guardrails():
     assert_true(regime["best_bucket"]["hit_rate_delta"] > 0, "hit-rate delta")
     assert_true(regime["worst_bucket"]["false_positive_rate"] > 0, "false positive")
     assert_true(regime["worst_bucket"]["interactions"]["setup_label"], "setup interaction")
+    assert_true(regime["worst_bucket"]["interactions"]["spread_bucket"], "spread interaction")
+    confidence = next(item for item in payload.families if item["family"] == "calibrated_confidence")
+    assert_equal(confidence["best_bucket"]["bucket"], "medium", "confidence family")
+    assert_true(payload.summary["calibration_summary"]["market_regime"], "calibration summary")
     guard = next(item for item in payload.rollout_guardrails if item["family"] == "market_regime")
     assert_equal(guard["status"], "eligible_for_review", "guardrail status")
     assert_equal(guard["stability"]["window_count"], 1, "stability windows")

@@ -249,6 +249,24 @@ def test_rollout_contract_cli_missing_db_exits_cleanly(tmp_path):
     assert "[WARN] trades.db not found" in out
 
 
+def test_ops_reliability_cli_missing_db_exits_cleanly(tmp_path):
+    for command, title, version in (
+        ("event-source-coverage", "Event Source Coverage", "event_source_coverage_v1"),
+        ("event-context-validation", "Event Context Validation", "event_context_validation_v1"),
+        ("context-freshness", "Context Freshness", "context_freshness_v1"),
+        ("data-freshness-gate", "Data Freshness Gate", "data_freshness_gate_v1"),
+        ("portfolio-risk", "Portfolio Risk Report", "portfolio_risk_v1"),
+        ("decision-lifecycle-dashboard", "Decision Lifecycle Dashboard", None),
+        ("calibration-buckets", "Calibration Buckets", None),
+    ):
+        code, out = _run_cli(tmp_path, command, "2026-05-30")
+        assert code == 1
+        assert title in out
+        if version:
+            assert f"report_version          : {version}" in out
+        assert "[WARN] trades.db not found" in out
+
+
 def test_feature_attribution_cli_empty_lifecycle_rows_warns(tmp_path):
     with sqlite3.connect(tmp_path / "trades.db") as con:
         con.execute(
@@ -349,15 +367,33 @@ def test_rollout_contract_cli_golden_fixture_locks_report_contract(tmp_path):
     assert "capped_by:" in out
 
 
+def test_lifecycle_dashboard_and_calibration_cli_use_lifecycle_rows(tmp_path):
+    _create_lifecycle_fixture_db(tmp_path)
+
+    code, out = _run_cli(tmp_path, "decision-lifecycle-dashboard", "2026-05-30", "--samples", "2")
+    assert code == 0
+    assert "Decision Lifecycle Dashboard" in out
+    assert "report_version                 : lifecycle_dashboard_v1" in out
+    assert "Top rejected rows by forward MFE" in out
+
+    code, out = _run_cli(tmp_path, "calibration-buckets", "2026-05-30", "--min-sample-size", "1")
+    assert code == 0
+    assert "Calibration Buckets" in out
+    assert "report_version          : calibration_buckets_v1" in out
+    assert "setup=" in out
+
+
 def main():
     tests = [
         test_feature_attribution_cli_missing_db_exits_cleanly,
         test_post_trade_learning_cli_missing_db_exits_cleanly,
         test_rollout_contract_cli_missing_db_exits_cleanly,
+        test_ops_reliability_cli_missing_db_exits_cleanly,
         test_feature_attribution_cli_empty_lifecycle_rows_warns,
         test_post_trade_learning_cli_empty_lifecycle_rows_warns,
         test_rollout_contract_cli_empty_lifecycle_rows_warns,
         test_rollout_contract_cli_golden_fixture_locks_report_contract,
+        test_lifecycle_dashboard_and_calibration_cli_use_lifecycle_rows,
     ]
     for test in tests:
         with tempfile.TemporaryDirectory() as tmp:

@@ -229,6 +229,45 @@ def test_log_auto_buy_order_writes_canonical_trade_row():
         assert_equal(row[7], "strong_buy_candidate", "recommendation")
 
 
+def test_log_candidate_mirrors_to_candidate_universe():
+    with tempfile.TemporaryDirectory() as tmp:
+        db_path = Path(tmp) / "test.db"
+        old_path = auto_buy_manager.DB_PATH
+        auto_buy_manager.DB_PATH = db_path
+        try:
+            auto_buy_manager.log_candidate(
+                {
+                    "symbol": "SOFI",
+                    "decision": "watch",
+                    "score": auto_buy_manager.AUTO_BUY_MIN_SCORE - 0.5,
+                    "reason": "near threshold test",
+                    "market_bias": "buy",
+                    "session_trend_label": "strong_uptrend",
+                    "setup_label": "breakout",
+                },
+                live_buy_enabled=False,
+            )
+        finally:
+            auto_buy_manager.DB_PATH = old_path
+
+        with sqlite3.connect(db_path) as con:
+            row = con.execute(
+                """
+                SELECT symbol, action, candidate_kind, candidate_status,
+                       decision, source, runtime_effect
+                FROM candidate_universe
+                """
+            ).fetchone()
+
+        assert_equal(row[0], "SOFI", "symbol")
+        assert_equal(row[1], "buy", "action")
+        assert_equal(row[2], "entry", "kind")
+        assert_equal(row[3], "near_threshold", "status")
+        assert_equal(row[4], "watch", "decision")
+        assert_equal(row[5], "auto_buy_manager", "source")
+        assert_equal(row[6], "candidate_capture_only_no_live_authority", "effect")
+
+
 
 def test_bucking_fading_tape_does_not_hard_block():
     candidate = evaluate_auto_buy_candidate(
@@ -272,6 +311,7 @@ def main():
         test_live_buy_requires_market_open_and_env_flag,
         test_bucking_fading_tape_does_not_hard_block,
         test_log_auto_buy_order_writes_canonical_trade_row,
+        test_log_candidate_mirrors_to_candidate_universe,
     ]
 
     for test in tests:

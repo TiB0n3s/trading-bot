@@ -386,6 +386,31 @@ def test_canonical_hash_normalizes_float_formatting():
     assert first.feature_vector_hash == second.feature_vector_hash
 
 
+def test_canonical_hash_normalizes_scalar_list_order_for_set_like_fields():
+    first = _snapshot(
+        account_state={
+            "event_context": {
+                "source_tiers": ["deep_analysis", "confirmed_financial_news"],
+            },
+            "portfolio_decision": {
+                "overlap_symbols": ["NVDA", "AMD"],
+            },
+        }
+    )
+    second = _snapshot(
+        account_state={
+            "event_context": {
+                "source_tiers": ["confirmed_financial_news", "deep_analysis"],
+            },
+            "portfolio_decision": {
+                "overlap_symbols": ["AMD", "NVDA"],
+            },
+        }
+    )
+
+    assert first.feature_vector_hash == second.feature_vector_hash
+
+
 def test_canonical_snapshot_distinguishes_absent_null_and_empty_list_semantics():
     absent = _snapshot(account_state={"intelligence_context": {"summary": {}}})
     explicit_null = _snapshot(
@@ -426,6 +451,7 @@ def main():
         test_canonical_snapshot_contract_requires_sections_and_size_limit,
         test_canonical_hash_is_stable_for_dict_insertion_order,
         test_canonical_hash_normalizes_float_formatting,
+        test_canonical_hash_normalizes_scalar_list_order_for_set_like_fields,
         test_canonical_snapshot_distinguishes_absent_null_and_empty_list_semantics,
         test_canonical_snapshot_stays_below_size_limit,
     ]

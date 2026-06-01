@@ -35,7 +35,18 @@ Usage:
   python3 ops_check.py retention
   python3 ops_check.py order-health
   python3 ops_check.py runtime-health
+  python3 ops_check.py runtime-health-trend START_DATE END_DATE
+  python3 ops_check.py context-freshness
+  python3 ops_check.py data-freshness-gate
+  python3 ops_check.py event-source-coverage
+  python3 ops_check.py event-context-validation
+  python3 ops_check.py log-ledger-consistency
+  python3 ops_check.py portfolio-risk
+  python3 ops_check.py production-evidence
   python3 ops_check.py lifecycle-analysis
+  python3 ops_check.py decision-lifecycle-dashboard
+  python3 ops_check.py candidate-universe
+  python3 ops_check.py calibration-buckets
   python3 ops_check.py feature-attribution
   python3 ops_check.py post-trade-learning
   python3 ops_check.py rollout-contract
@@ -69,6 +80,9 @@ from services.ops_checks.excursion_checks import (
 from services.ops_checks.feature_checks import run_feature_health, run_feature_watch
 from services.ops_checks.intelligence_checks import run_intelligence_summary
 from services.ops_checks.lifecycle_checks import run_lifecycle_analysis
+from services.ops_checks.lifecycle_dashboard_checks import run_lifecycle_dashboard
+from services.ops_checks.candidate_universe_checks import run_candidate_universe_report
+from services.ops_checks.calibration_bucket_checks import run_calibration_buckets
 from services.ops_checks.feature_attribution_checks import run_feature_attribution_report
 from services.ops_checks.post_trade_learning_checks import run_post_trade_learning_report
 from services.ops_checks.rollout_contract_checks import run_rollout_contract_report
@@ -77,7 +91,13 @@ from services.ops_checks.order_checks import run_order_health
 from services.ops_checks.rejection_checks import run_rejection_summary
 from services.ops_checks.rejected_outcome_checks import run_rejected_outcomes_health
 from services.ops_checks.setup_breakdown import run_setup_breakdown
-from services.ops_checks.runtime_checks import run_runtime_health
+from services.ops_checks.runtime_checks import run_runtime_health, run_runtime_health_trend
+from services.ops_checks.context_freshness_checks import run_context_freshness, run_data_freshness_gate
+from services.ops_checks.event_source_checks import run_event_source_coverage
+from services.ops_checks.event_context_validation_checks import run_event_context_validation
+from services.ops_checks.log_ledger_checks import run_log_ledger_consistency
+from services.ops_checks.portfolio_risk_checks import run_portfolio_risk_report
+from services.ops_checks.point_in_time_archive_checks import run_point_in_time_archive
 from services.ops_checks.snapshot_checks import run_decision_snapshot_health
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -490,6 +510,56 @@ def runtime_health(target_date):
     return run_runtime_health(target_date, base_dir=BASE_DIR)
 
 
+def runtime_health_trend(start_date, end_date):
+    return run_runtime_health_trend(start_date, end_date=end_date, base_dir=BASE_DIR)
+
+
+def context_freshness(target_date):
+    return run_context_freshness(target_date, base_dir=BASE_DIR)
+
+
+def data_freshness_gate(target_date):
+    return run_data_freshness_gate(target_date, base_dir=BASE_DIR)
+
+
+def event_source_coverage(target_date):
+    return run_event_source_coverage(target_date, base_dir=BASE_DIR)
+
+
+def event_context_validation(target_date):
+    return run_event_context_validation(target_date, base_dir=BASE_DIR)
+
+
+def log_ledger_consistency():
+    return run_log_ledger_consistency(base_dir=BASE_DIR)
+
+
+def portfolio_risk(target_date):
+    return run_portfolio_risk_report(target_date, base_dir=BASE_DIR)
+
+
+def production_evidence(target_date):
+    checks = [
+        runtime_health(target_date),
+        log_ledger_consistency(),
+        context_freshness(target_date),
+        event_source_coverage(target_date),
+        event_context_validation(target_date),
+        portfolio_risk(target_date),
+        lifecycle_analysis(target_date),
+        setup_breakdown(target_date),
+        conviction_persistence_health(target_date),
+        feature_attribution(target_date),
+    ]
+    print()
+    print("=" * 72)
+    if all(checks):
+        print("[OK] production evidence checks completed successfully")
+        return True
+    print("[WARN] production evidence checks found gaps")
+    return False
+
+
 def lifecycle_analysis(target_date):
     symbol = None
     if "--symbol" in sys.argv:
@@ -501,6 +571,48 @@ def lifecycle_analysis(target_date):
         base_dir=BASE_DIR,
         symbol=symbol,
         samples=_int_option("--samples", 15),
+    )
+
+
+def decision_lifecycle_dashboard(target_date):
+    symbol = None
+    if "--symbol" in sys.argv:
+        idx = sys.argv.index("--symbol")
+        if idx + 1 < len(sys.argv):
+            symbol = sys.argv[idx + 1]
+    return run_lifecycle_dashboard(
+        target_date,
+        base_dir=BASE_DIR,
+        symbol=symbol,
+        samples=_int_option("--samples", 15),
+    )
+
+
+def candidate_universe(target_date):
+    symbol = None
+    if "--symbol" in sys.argv:
+        idx = sys.argv.index("--symbol")
+        if idx + 1 < len(sys.argv):
+            symbol = sys.argv[idx + 1]
+    return run_candidate_universe_report(
+        target_date,
+        base_dir=BASE_DIR,
+        symbol=symbol,
+    )
+
+
+def calibration_buckets(target_date):
+    symbol = None
+    if "--symbol" in sys.argv:
+        idx = sys.argv.index("--symbol")
+        if idx + 1 < len(sys.argv):
+            symbol = sys.argv[idx + 1]
+    return run_calibration_buckets(
+        target_date,
+        base_dir=BASE_DIR,
+        symbol=symbol,
+        min_sample_size=_int_option("--min-sample-size", 5),
+        limit=_int_option("--limit", 20),
     )
 
 
@@ -591,6 +703,15 @@ def claude_context_audit(target_date: str) -> bool:
 def advisory_authority_report(target_date: str) -> bool:
     return run_advisory_authority_report(target_date, base_dir=BASE_DIR)
 
+
+def point_in_time_archive(target_date: str) -> bool:
+    reason = "operator_snapshot"
+    if "--reason" in sys.argv:
+        idx = sys.argv.index("--reason")
+        if idx + 1 < len(sys.argv):
+            reason = sys.argv[idx + 1]
+    return run_point_in_time_archive(target_date, base_dir=BASE_DIR, reason=reason)
+
 def main():
     env_loaded = load_env_file()
     print(f"env_file_loaded={env_loaded}")
@@ -643,8 +764,42 @@ def main():
     if command == "runtime-health":
         return 0 if runtime_health(target_date) else 1
 
+    if command == "runtime-health-trend":
+        end_date = sys.argv[3] if len(sys.argv) > 3 and not sys.argv[3].startswith("--") else target_date
+        return 0 if runtime_health_trend(target_date, end_date) else 1
+
+    if command == "context-freshness":
+        return 0 if context_freshness(target_date) else 1
+
+    if command == "data-freshness-gate":
+        return 0 if data_freshness_gate(target_date) else 1
+
+    if command == "event-source-coverage":
+        return 0 if event_source_coverage(target_date) else 1
+
+    if command == "event-context-validation":
+        return 0 if event_context_validation(target_date) else 1
+
+    if command == "log-ledger-consistency":
+        return 0 if log_ledger_consistency() else 1
+
+    if command == "portfolio-risk":
+        return 0 if portfolio_risk(target_date) else 1
+
+    if command == "production-evidence":
+        return 0 if production_evidence(target_date) else 1
+
     if command == "lifecycle-analysis":
         return 0 if lifecycle_analysis(target_date) else 1
+
+    if command == "decision-lifecycle-dashboard":
+        return 0 if decision_lifecycle_dashboard(target_date) else 1
+
+    if command == "candidate-universe":
+        return 0 if candidate_universe(target_date) else 1
+
+    if command == "calibration-buckets":
+        return 0 if calibration_buckets(target_date) else 1
 
     if command == "feature-attribution":
         return 0 if feature_attribution(target_date) else 1
@@ -654,6 +809,9 @@ def main():
 
     if command == "rollout-contract":
         return 0 if rollout_contract(target_date) else 1
+
+    if command == "point-in-time-archive":
+        return 0 if point_in_time_archive(target_date) else 1
 
     if command == "migration-status":
         return 0 if migration_status_check() else 1

@@ -125,14 +125,20 @@ def main() -> int:
 
     service = get_default_session_momentum_service()
     symbols = APPROVED_SYMBOLS_LIST if args.all else [args.symbol.upper()]
+    success = 0
+    failed = 0
 
     for symbol in symbols:
         try:
             row = service.refresh_symbol(symbol)
             service.print_row(row)
+            success += 1
         except Exception as e:
+            failed += 1
             logger.error(f"session momentum refresh failed for {symbol}: {e}")
 
+    print(f"rows_written: {success}")
+    print(f"session_momentum_summary: success={success} failed={failed}")
     return 0
 
 

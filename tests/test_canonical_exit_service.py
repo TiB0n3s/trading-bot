@@ -156,6 +156,21 @@ def test_canonical_exit_hash_normalizes_float_formatting():
     assert first.exit_snapshot_hash == second.exit_snapshot_hash
 
 
+def test_canonical_exit_hash_normalizes_scalar_list_order_in_entry_state():
+    first = _snapshot(
+        canonical_intelligence=_canonical_intelligence(
+            regime_state={"overlap_symbols": ["NVDA", "AMD"]}
+        )
+    )
+    second = _snapshot(
+        canonical_intelligence=_canonical_intelligence(
+            regime_state={"overlap_symbols": ["AMD", "NVDA"]}
+        )
+    )
+
+    assert first.exit_snapshot_hash == second.exit_snapshot_hash
+
+
 def test_canonical_exit_persistence_writes_queryable_row():
     with tempfile.TemporaryDirectory() as tmp:
         db_path = Path(tmp) / "exit.db"
@@ -200,6 +215,7 @@ def main():
         test_canonical_exit_contract_requires_sections_and_size_limit,
         test_canonical_exit_hash_is_stable_for_dict_insertion_order,
         test_canonical_exit_hash_normalizes_float_formatting,
+        test_canonical_exit_hash_normalizes_scalar_list_order_in_entry_state,
         test_canonical_exit_persistence_writes_queryable_row,
         test_canonical_exit_snapshot_stays_below_size_limit,
     ]

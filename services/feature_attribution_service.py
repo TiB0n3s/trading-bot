@@ -28,12 +28,22 @@ FEATURE_FAMILIES: dict[str, tuple[str, ...]] = {
         "utility_estimate",
         "utility_decision",
     ),
+    "calibrated_confidence": (
+        "advisory_authority_state",
+        "calibrated_confidence",
+        "confidence_quality",
+    ),
 }
 
 INTERACTION_FIELDS: dict[str, tuple[str, ...]] = {
     "setup_label": ("setup_state", "label"),
     "regime": ("regime_state", "market_regime"),
     "session_phase": ("regime_state", "session_phase"),
+    "spread_bucket": ("regime_state", "spread_bucket"),
+    "participation_state": ("regime_state", "participation_state"),
+    "volatility_chase_risk": ("regime_state", "volatility_chase_risk"),
+    "execution_quality": ("regime_state", "execution_quality_decision"),
+    "portfolio_risk": ("regime_state", "portfolio_decision"),
 }
 
 
@@ -359,6 +369,28 @@ def _rollout_guardrail(family: dict[str, Any], *, min_sample_size: int) -> dict[
     }
 
 
+def _calibration_quality(
+    *,
+    sample_size: int,
+    missing_rate: float | None,
+    stable_share: float | None,
+    calibration_error: float | None,
+) -> str:
+    if sample_size <= 0:
+        return "unavailable"
+    if sample_size < 20:
+        return "thin_sample"
+    if missing_rate is None or missing_rate > 0.20:
+        return "low"
+    if calibration_error is None:
+        return "low"
+    if sample_size >= 100 and stable_share is not None and stable_share >= 0.75 and calibration_error <= 0.06:
+        return "high"
+    if sample_size >= 50 and stable_share is not None and stable_share >= 0.60 and calibration_error <= 0.10:
+        return "medium"
+    return "low"
+
+
 def build_feature_attribution_payload(
     rows: Iterable[dict[str, Any]],
     *,
@@ -401,13 +433,25 @@ def build_feature_attribution_payload(
         )
         covered = sum(item["sample_size"] for item in known)
         missing = len(outcome_rows) - covered
+        missing_rate = round(missing / len(outcome_rows), 4) if outcome_rows else None
+        calibration_error = None
+        if best.get("hit_rate") is not None and baseline.get("hit_rate") is not None:
+            calibration_error = round(abs(best["hit_rate"] - baseline["hit_rate"]), 4)
+        calibration_quality = _calibration_quality(
+            sample_size=covered,
+            missing_rate=missing_rate,
+            stable_share=stability.get("stable_window_share"),
+            calibration_error=calibration_error,
+        )
         family_payload = {
             "family": family,
             "feature_path": ".".join(path),
             "rows_with_outcome": len(outcome_rows),
             "covered_rows": covered,
             "missing_rows": missing,
-            "missing_rate": round(missing / len(outcome_rows), 4) if outcome_rows else None,
+            "missing_rate": missing_rate,
+            "calibration_quality": calibration_quality,
+            "calibration_error": calibration_error,
             "best_bucket": best,
             "worst_bucket": worst,
             "stability": stability,
@@ -427,6 +471,14 @@ def build_feature_attribution_payload(
             "baseline": baseline,
             "min_sample_size": min_sample_size,
             "authority_note": "diagnostic_only_no_live_authority",
+            "calibration_summary": {
+                family["family"]: {
+                    "calibration_quality": family.get("calibration_quality"),
+                    "calibration_error": family.get("calibration_error"),
+                    "sample_size": family.get("covered_rows"),
+                }
+                for family in families
+            },
         },
         families=families,
         rollout_guardrails=guardrails,

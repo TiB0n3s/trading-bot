@@ -25,6 +25,12 @@ from services.ops_checks.excursion_checks import (
     run_winner_became_loser,
 )
 from services.ops_checks.setup_breakdown import run_setup_breakdown
+from services.ops_checks.context_freshness_checks import run_context_freshness
+from services.ops_checks.event_source_checks import run_event_source_coverage
+from services.ops_checks.event_context_validation_checks import run_event_context_validation
+from services.ops_checks.log_ledger_checks import run_log_ledger_consistency
+from services.ops_checks.portfolio_risk_checks import run_portfolio_risk_report
+from services.ops_checks.runtime_checks import run_runtime_health
 
 
 def test_ops_checks_return_false_when_db_missing(tmp_path):
@@ -39,6 +45,11 @@ def test_ops_checks_return_false_when_db_missing(tmp_path):
         lambda: run_feature_attribution_report("2026-05-30", base_dir=tmp_path),
         lambda: run_post_trade_learning_report("2026-05-30", base_dir=tmp_path),
         lambda: run_rollout_contract_report("2026-05-30", base_dir=tmp_path),
+        lambda: run_event_source_coverage("2026-05-30", base_dir=tmp_path),
+        lambda: run_event_context_validation("2026-05-30", base_dir=tmp_path),
+        lambda: run_portfolio_risk_report("2026-05-30", base_dir=tmp_path),
+        lambda: run_context_freshness("2026-05-30", base_dir=tmp_path),
+        lambda: run_runtime_health("2026-05-30", base_dir=tmp_path),
     ]
 
     buf = io.StringIO()
@@ -48,6 +59,132 @@ def test_ops_checks_return_false_when_db_missing(tmp_path):
 
     out = buf.getvalue()
     assert out.count("[WARN] trades.db not found") == len(funcs)
+    assert "report_version          : runtime_health_v1" in out
+
+
+def test_event_source_coverage_reports_reliability_mix(tmp_path):
+    db_path = tmp_path / "trades.db"
+    with sqlite3.connect(db_path) as con:
+        con.execute(
+            """
+            CREATE TABLE daily_symbol_events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                market_date TEXT,
+                symbol TEXT,
+                event_type TEXT,
+                confidence TEXT,
+                source TEXT,
+                source_url TEXT,
+                raw_json TEXT,
+                created_at TEXT
+            )
+            """
+        )
+        rows = [
+            ("2026-05-30", "AAPL", "filing", "high", "SEC", "https://sec.gov/x", {"source_tier": "official", "trusted_source": True, "search_scope": "company_direct"}),
+            ("2026-05-30", "MSFT", "news", "medium", "Reuters", "https://reuters.com/x", {"source_tier": "confirmed_financial_news", "trusted_source": True, "search_scope": "company_direct"}),
+            ("2026-05-30", "NVDA", "supplier", "low", "Yahoo Finance", "https://finance.yahoo.com/x", {"source_tier": "medium_confidence", "trusted_source": False, "search_scope": "company_peripheral", "peripheral_context": True}),
+        ]
+        con.executemany(
+            """
+            INSERT INTO daily_symbol_events (
+                market_date, symbol, event_type, confidence, source, source_url, raw_json, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, '2026-05-30T10:00:00+00:00')
+            """,
+            [(a, b, c, d, e, f, json.dumps(g)) for a, b, c, d, e, f, g in rows],
+        )
+
+    buf = io.StringIO()
+    with redirect_stdout(buf):
+        assert run_event_source_coverage("2026-05-30", base_dir=tmp_path) is True
+
+    out = buf.getvalue()
+    assert "Event Source Coverage" in out
+    assert "report_version          : event_source_coverage_v1" in out
+    assert "official" in out
+    assert "top_tier" in out
+    assert "peripheral" in out
+    assert "trusted_source_rate" in out
+
+
+def test_portfolio_risk_report_reads_canonical_portfolio_state(tmp_path):
+    db_path = tmp_path / "trades.db"
+    canonical = {
+        "regime_state": {
+            "portfolio_decision": "size_down",
+            "portfolio_duplicate_risk_score": 0.62,
+            "incremental_var_pct": 1.7,
+            "beta_contribution_delta": 1.3,
+            "crowded_theme": "semiconductors",
+        },
+        "advisory_authority_state": {
+            "portfolio_decision": {
+                "decision": "size_down",
+                "duplicate_risk_score": 0.62,
+                "incremental_var_pct": 1.7,
+                "beta_contribution_delta": 1.3,
+                "factor_overlap_score": 0.4,
+                "sector_concentration_delta_pct": 12.0,
+                "downside_comovement_score": 0.8,
+                "crowded_theme": "semiconductors",
+                "overlap_symbols": ["NVDA", "AMD"],
+            }
+        },
+    }
+    with sqlite3.connect(db_path) as con:
+        con.execute(
+            """
+            CREATE TABLE decision_snapshots (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                decision_time TEXT,
+                symbol TEXT,
+                action TEXT,
+                approved INTEGER,
+                final_decision TEXT,
+                rejection_reason TEXT,
+                account_state_json TEXT,
+                canonical_intelligence_json TEXT
+            )
+            """
+        )
+        con.execute(
+            """
+            INSERT INTO decision_snapshots (
+                decision_time, symbol, action, approved, final_decision,
+                rejection_reason, account_state_json, canonical_intelligence_json
+            ) VALUES ('2026-05-30T10:00:00+00:00', 'TSM', 'buy', 1, 'approved', NULL, '{}', ?)
+            """,
+            (json.dumps(canonical),),
+        )
+
+    buf = io.StringIO()
+    with redirect_stdout(buf):
+        assert run_portfolio_risk_report("2026-05-30", base_dir=tmp_path) is True
+
+    out = buf.getvalue()
+    assert "Portfolio Risk Report" in out
+    assert "report_version          : portfolio_risk_v1" in out
+    assert "semiconductors" in out
+    assert "avg_factor_overlap_score" in out
+    assert "NVDA" in out
+
+
+def test_log_ledger_consistency_flags_unwrapped_cron(tmp_path):
+    ops_dir = tmp_path / "ops"
+    ops_dir.mkdir()
+    (ops_dir / "crontab.tradingbot.current.txt").write_text(
+        "* * * * * cd /repo && python job_runner.py --job-name ok --lock-file /tmp/x --log-file /tmp/x.log -- echo ok\n"
+        "* * * * * cd /repo && python direct_script.py\n"
+    )
+
+    buf = io.StringIO()
+    with redirect_stdout(buf):
+        assert run_log_ledger_consistency(base_dir=tmp_path) is False
+
+    out = buf.getvalue()
+    assert "report_version          : log_ledger_consistency_v1" in out
+    assert "unwrapped_entries : 1" in out
+    assert "direct_script.py" in out
 
 
 def _canonical_lifecycle_json(
@@ -300,6 +437,7 @@ def test_advisory_authority_report_prefers_canonical_outcomes(tmp_path):
         assert run_advisory_authority_report("2026-05-30", base_dir=tmp_path) is True
 
     out = buf.getvalue()
+    assert "report_version          : advisory_authority_v1" in out
     for key in (
         "decision_policy_block_advisory",
         "decision_policy_block_but_approved",
@@ -422,6 +560,9 @@ def test_setup_breakdown_prints_prominent_fallback_health(tmp_path):
 def main():
     tests = [
         test_ops_checks_return_false_when_db_missing,
+        test_event_source_coverage_reports_reliability_mix,
+        test_portfolio_risk_report_reads_canonical_portfolio_state,
+        test_log_ledger_consistency_flags_unwrapped_cron,
         test_feature_attribution_and_post_trade_learning_reports_use_lifecycle_rows,
         test_advisory_authority_report_prefers_canonical_outcomes,
         test_setup_breakdown_prints_prominent_fallback_health,

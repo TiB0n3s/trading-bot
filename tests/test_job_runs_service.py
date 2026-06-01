@@ -64,6 +64,39 @@ def test_job_runner_records_completed_run():
         assert "job-finish: unit_job exit_code=0" in log_path.read_text()
 
 
+def test_job_runner_infers_rows_and_warnings_from_log_output():
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp_path = Path(tmp)
+        db_path = tmp_path / "jobs.db"
+        log_path = tmp_path / "job.log"
+
+        result = subprocess.run(
+            [
+                sys.executable,
+                str(ROOT / "job_runner.py"),
+                "--job-name",
+                "row_job",
+                "--log-file",
+                str(log_path),
+                "--db-path",
+                str(db_path),
+                "--",
+                sys.executable,
+                "-c",
+                "print('Inserted 12 daily_symbol_events rows.'); print('[WARN] fallback used')",
+            ],
+            cwd=ROOT,
+            text=True,
+            capture_output=True,
+        )
+
+        assert result.returncode == 0, result.stderr
+        rows = _rows(db_path)
+        assert len(rows) == 1
+        assert rows[0]["rows_written"] == 12
+        assert rows[0]["warnings_count"] == 1
+
+
 def test_job_runner_records_lock_skipped_run():
     with tempfile.TemporaryDirectory() as tmp:
         tmp_path = Path(tmp)
@@ -174,6 +207,9 @@ def test_service_builds_runtime_health_payload():
         assert payload.summary["skipped_lock_busy"] == 1
         assert payload.summary["warnings_count"] == 1
         assert payload.summary["rows_written"] == 3
+        assert payload.summary["zero_row_successes"] == 0
+        assert payload.summary["unknown_row_successes"] == 0
+        assert payload.summary["consecutive_failure_jobs"] == []
         assert payload.summary["clean"] is True
 
 
@@ -200,13 +236,62 @@ def test_service_marks_runtime_health_unclean_on_failed_job():
         assert payload.summary["clean"] is False
 
 
+def test_service_builds_runtime_health_trend_payload():
+    with tempfile.TemporaryDirectory() as tmp:
+        db_path = Path(tmp) / "jobs.db"
+        repo = JobRunsRepository(db_path)
+        repo.init_table()
+        repo.insert_run(
+            {
+                "job_name": "live_features",
+                "started_at": "2026-05-31T14:00:00+00:00",
+                "finished_at": "2026-05-31T14:00:02+00:00",
+                "duration_sec": 2.0,
+                "exit_code": 0,
+                "lock_acquired": True,
+                "rows_written": 0,
+                "warnings_count": 1,
+                "command": "ok",
+            }
+        )
+        repo.insert_run(
+            {
+                "job_name": "live_features",
+                "started_at": "2026-06-01T14:00:00+00:00",
+                "finished_at": "2026-06-01T14:00:03+00:00",
+                "duration_sec": 3.0,
+                "exit_code": 1,
+                "lock_acquired": True,
+                "rows_written": 4,
+                "warnings_count": 0,
+                "command": "bad",
+            }
+        )
+
+        payload = JobRunsService(repo).trend_payload(
+            start_date="2026-05-31",
+            end_date="2026-06-01",
+        )
+
+        assert payload["report_version"] == "runtime_health_trend_v1"
+        assert payload["rows"] == 2
+        assert payload["clean"] is False
+        job = payload["jobs"][0]
+        assert job["job_name"] == "live_features"
+        assert job["failures"] == 1
+        assert job["zero_row_successes"] == 1
+        assert job["rows_written"] == 4
+
+
 def main():
     tests = [
         test_job_runner_records_completed_run,
+        test_job_runner_infers_rows_and_warnings_from_log_output,
         test_job_runner_records_lock_skipped_run,
         test_service_records_artifact_hash,
         test_service_builds_runtime_health_payload,
         test_service_marks_runtime_health_unclean_on_failed_job,
+        test_service_builds_runtime_health_trend_payload,
     ]
     for test in tests:
         test()

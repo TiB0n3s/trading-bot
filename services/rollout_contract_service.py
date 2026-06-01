@@ -36,6 +36,8 @@ class RolloutThresholds:
     min_false_positive_reduction_size_down: float = 0.03
     min_false_positive_reduction_block: float = 0.05
     min_calibration_quality: str = "medium"
+    max_calibration_error_size_down: float = 0.10
+    max_calibration_error_block: float = 0.06
     block_candidate_allowlist: tuple[str, ...] = (
         "portfolio_decision",
     )
@@ -68,6 +70,7 @@ class RolloutAssessment:
     false_positive_reduction: float | None
     false_negative_cost: float | None
     calibration_quality: str
+    calibration_error: float | None = None
     guardrail_failures: list[str] = field(default_factory=list)
     promotion_reasons: list[str] = field(default_factory=list)
     restrictions: dict[str, Any] = field(default_factory=dict)
@@ -238,6 +241,7 @@ def assess_feature_family_rollout(
     if false_negative_cost is not None:
         false_negative_cost = max(0.0, false_negative_cost)
     calibration = calibration_quality or family_payload.get("calibration_quality") or "unknown"
+    calibration_error = _float(family_payload.get("calibration_error"))
 
     failures: list[str] = []
     reasons: list[str] = []
@@ -258,6 +262,12 @@ def assess_feature_family_rollout(
     overlap_promotable = overlap_risk <= thresholds.max_overlap_risk_for_promotion
     if not calibration_ok and not hard_not_ready:
         failures.append("calibration_quality_below_threshold")
+    if (
+        calibration_error is not None
+        and calibration_error > thresholds.max_calibration_error_size_down
+        and not hard_not_ready
+    ):
+        failures.append("calibration_error_too_high")
     if not overlap_promotable and not hard_not_ready:
         failures.append("overlap_risk_caps_promotion")
 
@@ -268,6 +278,10 @@ def assess_feature_family_rollout(
     if (
         not hard_not_ready
         and calibration_ok
+        and (
+            calibration_error is None
+            or calibration_error <= thresholds.max_calibration_error_size_down
+        )
         and overlap_promotable
         and fp_for_size
         and fn_for_size
@@ -292,6 +306,10 @@ def assess_feature_family_rollout(
         and stable_for_block
         and fp_for_block
         and fn_for_block
+        and (
+            calibration_error is None
+            or calibration_error <= thresholds.max_calibration_error_block
+        )
     ):
         status = RolloutStatus.NARROW_BLOCK_CANDIDATE
         reasons.append("explicit_block_allowlist")
@@ -317,6 +335,7 @@ def assess_feature_family_rollout(
         false_positive_reduction=false_positive_reduction,
         false_negative_cost=false_negative_cost,
         calibration_quality=str(calibration),
+        calibration_error=calibration_error,
         guardrail_failures=failures,
         promotion_reasons=reasons,
         restrictions=_restrictions(status=status, feature_family=feature_family, best_bucket=best),

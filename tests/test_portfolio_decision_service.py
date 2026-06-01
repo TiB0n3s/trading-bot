@@ -40,6 +40,9 @@ def test_semiconductor_stack_is_duplicate_risk():
     assert_equal(decision.decision, "block", "decision")
     assert_equal(decision.crowded_theme, "mega_cap_tech", "crowded theme")
     assert_gt(decision.duplicate_risk_score, 0.7, "duplicate risk")
+    assert_gt(decision.factor_overlap_score, 0.0, "factor overlap")
+    assert_gt(decision.downside_comovement_score, 0.0, "downside comovement")
+    assert_gt(decision.sector_concentration_delta_pct, 0.0, "sector concentration")
     assert_equal("AMD" in decision.overlap_symbols, True, "overlap AMD")
     assert_equal("NVDA" in decision.overlap_symbols, True, "overlap NVDA")
 

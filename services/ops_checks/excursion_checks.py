@@ -101,6 +101,22 @@ def run_winner_became_loser(target_date: str, *, base_dir: Path) -> bool:
                 f"{r['weak_entry_context']:>4} {floor_s} "
                 f"{(r['peak_lock_tier'] or 'none'):<12} {r['floor_triggered']:>3} {exit_s}"
             )
+            if r["exit_snapshot_id"] is not None:
+                print(
+                    f"      exit_snapshot={r['exit_snapshot_id']} "
+                    f"trigger={r['exit_snapshot_trigger'] or '-'} "
+                    f"missed_lock={r['would_have_been_winner_became_loser']} "
+                    f"avoided_dd={r['avoided_drawdown_pct'] if r['avoided_drawdown_pct'] is not None else EM_DASH} "
+                    f"missed_upside={r['missed_upside_pct'] if r['missed_upside_pct'] is not None else EM_DASH} "
+                    f"post30={r['post_exit_return_30m_pct'] if r['post_exit_return_30m_pct'] is not None else EM_DASH} "
+                    f"post60={r['post_exit_return_60m_pct'] if r['post_exit_return_60m_pct'] is not None else EM_DASH} "
+                    f"reentry={r['reentry_window_summary'] or '-'}"
+                )
+            else:
+                print(
+                    f"      exit_snapshot=missing missed_lock={r['would_have_been_winner_became_loser']} "
+                    f"post_exit_recovery=unknown"
+                )
     else:
         print(f"  No winner-became-loser trades for {target_date}.")
 

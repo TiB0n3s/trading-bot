@@ -37,12 +37,14 @@ def _family(
     stability=0.70,
     fp=0.04,
     fn=0.05,
+    calibration_error=0.04,
 ):
     return {
         "family": name,
         "covered_rows": covered,
         "missing_rate": missing,
         "stability": {"stable_window_share": stability, "window_count": 4},
+        "calibration_error": calibration_error,
         "best_bucket": {
             "bucket": "bad_state",
             "interactions": {
@@ -75,6 +77,8 @@ def _thresholds():
         max_false_negative_cost_block=0.10,
         min_false_positive_reduction_size_down=0.03,
         min_false_positive_reduction_block=0.05,
+        max_calibration_error_size_down=0.10,
+        max_calibration_error_block=0.06,
         max_status_by_family={
             "portfolio_decision": RolloutStatus.NARROW_BLOCK_CANDIDATE,
             "execution_quality": RolloutStatus.NARROW_BLOCK_CANDIDATE,
@@ -138,6 +142,23 @@ def test_calibration_caps_to_observe_only():
 
     assert_equal(assessment.status, RolloutStatus.OBSERVE_ONLY, "status")
     assert_true("calibration_quality_below_threshold" in assessment.guardrail_failures, "calibration cap")
+
+
+def test_calibration_error_caps_promotion():
+    assessment = assess_feature_family_rollout(
+        family_payload=_family(
+            "execution_quality",
+            covered=240,
+            stability=0.80,
+            fp=0.07,
+            calibration_error=0.18,
+        ),
+        calibration_quality="high",
+        thresholds=_thresholds(),
+    )
+
+    assert_equal(assessment.status, RolloutStatus.OBSERVE_ONLY, "status")
+    assert_true("calibration_error_too_high" in assessment.guardrail_failures, "error cap")
 
 
 def test_overlap_caps_promotion():
@@ -226,6 +247,7 @@ def main():
         test_size_down_candidate_requires_evidence_and_calibration,
         test_narrow_block_candidate_requires_allowlist_and_stronger_thresholds,
         test_calibration_caps_to_observe_only,
+        test_calibration_error_caps_promotion,
         test_overlap_caps_promotion,
         test_assess_all_payload_is_versioned_and_deterministic,
         test_default_initial_family_caps_match_rollout_ladder,

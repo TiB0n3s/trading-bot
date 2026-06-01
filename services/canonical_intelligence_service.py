@@ -36,7 +36,10 @@ def _normalize(value: Any) -> Any:
     if isinstance(value, tuple):
         value = list(value)
     if isinstance(value, list):
-        return [_normalize(item) for item in value]
+        normalized = [_normalize(item) for item in value]
+        if all(item is None or isinstance(item, (str, int, float, bool)) for item in normalized):
+            return sorted(normalized, key=lambda item: (str(type(item)), str(item)))
+        return normalized
     if isinstance(value, float):
         return round(value, 10)
     return value

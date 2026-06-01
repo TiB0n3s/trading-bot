@@ -381,8 +381,36 @@ class OpsCheckRepository:
         )
 
     def winner_became_loser_rows(self, target_date: str, mfe_threshold: float) -> list[sqlite3.Row]:
-        return self._fetchall(
+        has_exit_snapshots = self.table_exists("exit_snapshots")
+        exit_cols = self.table_columns("exit_snapshots") if has_exit_snapshots else set()
+        join_sql = (
+            "LEFT JOIN exit_snapshots es ON es.matched_trade_id = enriched.id"
+            if has_exit_snapshots and "matched_trade_id" in exit_cols
+            else ""
+        )
+        exit_fields = (
             """
+                es.id AS exit_snapshot_id,
+                es.exit_trigger AS exit_snapshot_trigger,
+                es.avoided_drawdown_pct,
+                es.missed_upside_pct,
+                es.post_exit_return_30m_pct,
+                es.post_exit_return_60m_pct,
+                es.reentry_window_summary,
+            """
+            if join_sql
+            else """
+                NULL AS exit_snapshot_id,
+                NULL AS exit_snapshot_trigger,
+                NULL AS avoided_drawdown_pct,
+                NULL AS missed_upside_pct,
+                NULL AS post_exit_return_30m_pct,
+                NULL AS post_exit_return_60m_pct,
+                NULL AS reentry_window_summary,
+            """
+        )
+        return self._fetchall(
+            f"""
             WITH base AS (
                 SELECT
                     *,
@@ -421,9 +449,10 @@ class OpsCheckRepository:
                 FROM base
             )
             SELECT
-                symbol, entry_timestamp, exit_timestamp,
-                holding_minutes, realized_pnl_pct, mfe_pct, capture_ratio,
-                setup_policy_action, exit_reason,
+                {exit_fields}
+                enriched.symbol, enriched.entry_timestamp, enriched.exit_timestamp,
+                enriched.holding_minutes, enriched.realized_pnl_pct, enriched.mfe_pct, enriched.capture_ratio,
+                enriched.setup_policy_action, enriched.exit_reason,
                 weak_entry_context, peak_lock_floor_pct, peak_lock_tier,
                 CASE WHEN peak_lock_floor_pct IS NOT NULL
                        AND realized_pnl_pct <= peak_lock_floor_pct
@@ -433,10 +462,11 @@ class OpsCheckRepository:
                        AND peak_lock_floor_pct IS NOT NULL
                      THEN 1 ELSE 0 END AS would_have_been_winner_became_loser
             FROM enriched
-            WHERE DATE(exit_timestamp) = ?
-              AND mfe_pct >= ?
-              AND realized_pnl_pct <= 0
-            ORDER BY realized_pnl_pct ASC
+            {join_sql}
+            WHERE DATE(enriched.exit_timestamp) = ?
+              AND enriched.mfe_pct >= ?
+              AND enriched.realized_pnl_pct <= 0
+            ORDER BY enriched.realized_pnl_pct ASC
             """,
             (mfe_threshold, target_date, mfe_threshold),
         )
@@ -1105,6 +1135,82 @@ class OpsCheckRepository:
             """,
             (target_date, target_date, target_date),
         )
+
+    def event_source_rows(self, target_date: str) -> list[sqlite3.Row]:
+        if not self.table_exists("daily_symbol_events"):
+            return []
+        columns = self.table_columns("daily_symbol_events")
+        raw_expr = "raw_json" if "raw_json" in columns else "NULL AS raw_json"
+        summary_expr = (
+            "event_summary" if "event_summary" in columns else "NULL AS event_summary"
+        )
+        impact_expr = (
+            "expected_market_impact"
+            if "expected_market_impact" in columns
+            else "NULL AS expected_market_impact"
+        )
+        relevance_expr = (
+            "trade_relevance" if "trade_relevance" in columns else "NULL AS trade_relevance"
+        )
+        return self._fetchall(
+            f"""
+            SELECT
+                symbol,
+                event_type,
+                {summary_expr},
+                {impact_expr},
+                {relevance_expr},
+                confidence,
+                source,
+                source_url,
+                {raw_expr},
+                created_at
+            FROM daily_symbol_events
+            WHERE market_date = ?
+            ORDER BY created_at ASC, id ASC
+            """,
+            (target_date,),
+        )
+
+    def context_freshness_row(self, target_date: str) -> dict[str, Any]:
+        def latest(table: str, column: str, where_column: str | None = None):
+            if not self.table_exists(table):
+                return None
+            if column not in self.table_columns(table):
+                return None
+            where_sql = ""
+            params: tuple[Any, ...] = ()
+            if where_column and where_column in self.table_columns(table):
+                where_sql = f"WHERE {where_column} = ?"
+                params = (target_date,)
+            row = self._fetchone(
+                f"SELECT MAX({column}) AS latest_at FROM {table} {where_sql}",
+                params,
+            )
+            return row["latest_at"] if row else None
+
+        def count(table: str, where_column: str | None = None):
+            if not self.table_exists(table):
+                return None
+            where_sql = ""
+            params: tuple[Any, ...] = ()
+            if where_column and where_column in self.table_columns(table):
+                where_sql = f"{where_column} = ?"
+                params = (target_date,)
+            return self.table_count(table, where_sql, params)
+
+        return {
+            "daily_symbol_context_latest_at": latest("daily_symbol_context", "updated_at", "market_date"),
+            "daily_symbol_context_rows": count("daily_symbol_context", "market_date"),
+            "daily_symbol_events_latest_at": latest("daily_symbol_events", "created_at", "market_date"),
+            "daily_symbol_events_rows": count("daily_symbol_events", "market_date"),
+            "daily_symbol_predictions_latest_at": latest("daily_symbol_predictions", "updated_at", "market_date"),
+            "daily_symbol_predictions_rows": count("daily_symbol_predictions", "market_date"),
+            "feature_snapshots_latest_at": latest("feature_snapshots", "timestamp"),
+            "feature_snapshots_rows": count("feature_snapshots"),
+            "session_momentum_latest_at": latest("session_momentum", "updated_at"),
+            "session_momentum_rows": count("session_momentum"),
+        }
 
     def intelligence_row_count(self, table_name: str, target_date: str) -> int:
         row = self._fetchone(

@@ -23,6 +23,7 @@ import xml.etree.ElementTree as ET
 from datetime import datetime
 from email.utils import parsedate_to_datetime
 
+from market_intelligence.source_reliability import classify_source, normalize_source_name
 from symbols_config import APPROVED_SYMBOLS_LIST
 
 logger = logging.getLogger(__name__)
@@ -258,12 +259,22 @@ def fetch_rss_items(url: str, timeout: int = 12) -> list[dict]:
     return items
 
 
+def publisher_from_google_news_title(title: str | None) -> str | None:
+    if not title or " - " not in title:
+        return None
+    publisher = title.rsplit(" - ", 1)[-1].strip()
+    return publisher or None
+
+
 def event_from_item(market_date: str, symbol: str, item: dict) -> dict:
     title = item.get("title") or ""
     desc = item.get("description") or ""
     text = f"{title}. {desc}".strip()
 
     event_type, subtype = classify_event_type(text)
+    publisher = publisher_from_google_news_title(title)
+    source_policy = classify_source(publisher, url=item.get("link"))
+    source_name = source_policy["source_name"]
 
     return {
         "market_date": market_date,
@@ -271,10 +282,16 @@ def event_from_item(market_date: str, symbol: str, item: dict) -> dict:
         "event_type": event_type,
         "event_subtype": subtype,
         "event_summary": title or desc[:220],
-        "source": "google_news_rss",
+        # Google News RSS is the transport, not a reference source. If the
+        # publisher cannot be extracted, keep the event low-confidence under an
+        # explicit unknown-publisher source instead of crediting Google News.
+        "source": source_name if source_name != "unknown" else "unknown_publisher",
         "source_url": item.get("link"),
         "time_horizon": infer_time_horizon(event_type),
-        "confidence": "low",
+        "confidence": "medium" if source_policy["trusted_source"] else "low",
+        "collector": "google_news_rss",
+        "publisher": normalize_source_name(publisher),
+        **source_policy,
         "raw_collected_at": datetime.now().isoformat(timespec="seconds"),
         "raw_published_at": item.get("published_at"),
         "raw_headline": title,

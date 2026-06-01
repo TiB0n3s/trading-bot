@@ -1,10 +1,14 @@
+import sqlite3
 import sys
+import tempfile
 from pathlib import Path
 from types import SimpleNamespace
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
+from pre_market_research_data import apply_event_enrichment
+from repositories.pre_market_research_repo import PreMarketResearchRepository
 from services.pre_market_research_service import (
     PreMarketResearchConfig,
     PreMarketResearchService,
@@ -131,11 +135,81 @@ def test_repository_reads_are_delegated():
     assert service.get_strategy_memory_context("AAPL")["trades"] == 3
 
 
+def test_repository_event_enrichment_includes_source_metadata(tmp_path):
+    db_path = tmp_path / "trades.db"
+    repo = PreMarketResearchRepository(db_path)
+    repo.event_enrichment("2026-05-30")
+
+    with sqlite3.connect(db_path) as con:
+        con.execute(
+            """
+            INSERT INTO daily_symbol_context (
+                market_date, symbol, catalyst_score, consumer_appetite_score,
+                revenue_impact_score, profit_potential_score, margin_risk_score,
+                supply_chain_risk_score, materials_risk_score, competitive_risk_score,
+                execution_risk_score, created_at, updated_at
+            ) VALUES (
+                '2026-05-30', 'AAPL', 72, 65, 66, 67, 20, 21, 22, 23, 24,
+                '2026-05-30T09:00:00', '2026-05-30T09:00:00'
+            )
+            """
+        )
+        con.executemany(
+            """
+            INSERT INTO daily_symbol_events (
+                market_date, symbol, event_type, source, created_at, updated_at
+            ) VALUES ('2026-05-30', 'AAPL', 'guidance', ?, '2026-05-30T09:00:00', '2026-05-30T09:00:00')
+            """,
+            [("reuters",), ("morningstar",), ("reuters",)],
+        )
+
+    enrichment = repo.event_enrichment("2026-05-30")["AAPL"]
+
+    assert enrichment["event_count"] == 3
+    assert enrichment["source_count"] == 2
+    assert set(enrichment["sources"]) == {"reuters", "morningstar"}
+    assert enrichment["trusted_source_count"] == 2
+    assert enrichment["confidence_cap"] == "two_independent_reputable_sources"
+    assert enrichment["catalyst_score"] == 72
+
+
+def test_apply_event_enrichment_uses_multisource_confidence_text():
+    entry = {"reason": "base", "key_risks": [], "key_catalysts": []}
+    apply_event_enrichment(
+        entry,
+        {
+            "catalyst_score": 72,
+            "event_count": 3,
+            "source_count": 2,
+            "sources": ["reuters", "morningstar"],
+            "source_tiers": ["confirmed_financial_news", "deep_analysis"],
+            "trusted_source_count": 2,
+            "confidence_cap": "two_independent_reputable_sources",
+            "consumer_appetite_score": 70,
+        },
+    )
+
+    context = entry["event_context"]
+    assert context["source_count"] == 2
+    assert context["sources"] == ["reuters", "morningstar"]
+    assert context["trusted_source_count"] == 2
+    assert context["confidence_cap"] == "two_independent_reputable_sources"
+    assert "confidence_cap=two_independent_reputable_sources" in entry["reason"]
+    assert "trusted_sources=2" in entry["key_catalysts"][0]
+    assert "event context is single-source headline-level only" not in entry["key_risks"]
+
+
 if __name__ == "__main__":
+    def _repo_metadata_test():
+        with tempfile.TemporaryDirectory() as tmp:
+            test_repository_event_enrichment_includes_source_metadata(Path(tmp))
+
     tests = [
         test_get_recent_bars_combines_daily_and_minute_context,
         test_daily_failure_skips_minute_when_configured,
         test_repository_reads_are_delegated,
+        _repo_metadata_test,
+        test_apply_event_enrichment_uses_multisource_confidence_text,
     ]
     for test in tests:
         test()

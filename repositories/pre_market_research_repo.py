@@ -6,6 +6,10 @@ from typing import Any
 
 from db import DB_PATH, get_connection
 from market_intelligence.intelligence_store import init_intelligence_tables
+from market_intelligence.source_reliability import (
+    classify_source,
+    confidence_cap_for_sources,
+)
 
 
 class PreMarketResearchRepository:
@@ -13,28 +17,61 @@ class PreMarketResearchRepository:
         self.db_path = db_path
 
     def event_enrichment(self, market_date: str) -> dict[str, dict[str, Any]]:
-        init_intelligence_tables()
+        init_intelligence_tables(self.db_path)
         with get_connection(self.db_path) as con:
             rows = con.execute(
                 """
-                SELECT symbol,
-                       catalyst_score,
-                       consumer_appetite_score,
-                       revenue_impact_score,
-                       profit_potential_score,
-                       margin_risk_score,
-                       supply_chain_risk_score,
-                       materials_risk_score,
-                       competitive_risk_score,
-                       execution_risk_score
-                FROM daily_symbol_context
-                WHERE market_date = ?
+                SELECT c.symbol,
+                       c.catalyst_score,
+                       c.consumer_appetite_score,
+                       c.revenue_impact_score,
+                       c.profit_potential_score,
+                       c.margin_risk_score,
+                       c.supply_chain_risk_score,
+                       c.materials_risk_score,
+                       c.competitive_risk_score,
+                       c.execution_risk_score,
+                       e.event_count,
+                       e.source_count,
+                       e.sources,
+                       e.trusted_source_count,
+                       e.source_tiers
+                FROM daily_symbol_context c
+                LEFT JOIN (
+                    SELECT symbol,
+                           COUNT(*) AS event_count,
+                           COUNT(DISTINCT COALESCE(source, 'unknown')) AS source_count,
+                           GROUP_CONCAT(DISTINCT COALESCE(source, 'unknown')) AS sources,
+                           GROUP_CONCAT(raw_json, '|||') AS raw_events_json,
+                           0 AS trusted_source_count,
+                           NULL AS source_tiers
+                    FROM daily_symbol_events
+                    WHERE market_date = ?
+                    GROUP BY symbol
+                ) e ON e.symbol = c.symbol
+                WHERE c.market_date = ?
                 """,
-                (market_date,),
+                (market_date, market_date),
             ).fetchall()
 
         out = {}
         for row in rows:
+            sources = [
+                source
+                for source in str(row["sources"] or "").split(",")
+                if source
+            ]
+            source_tiers = []
+            trusted_source_count = 0
+            for source in sources:
+                source_policy = classify_source(source)
+                tier = str(source_policy["source_tier"])
+                source_tiers.append(tier)
+                trusted_source_count += int(bool(source_policy["trusted_source"]))
+            confidence_cap = confidence_cap_for_sources(
+                source_tiers,
+                int(row["source_count"] or 0),
+            )
             out[row["symbol"]] = {
                 "catalyst_score": row["catalyst_score"],
                 "consumer_appetite_score": row["consumer_appetite_score"],
@@ -45,6 +82,12 @@ class PreMarketResearchRepository:
                 "materials_risk_score": row["materials_risk_score"],
                 "competitive_risk_score": row["competitive_risk_score"],
                 "execution_risk_score": row["execution_risk_score"],
+                "event_count": row["event_count"],
+                "source_count": row["source_count"],
+                "sources": sources,
+                "trusted_source_count": trusted_source_count,
+                "source_tiers": sorted(set(source_tiers)),
+                "confidence_cap": confidence_cap,
             }
         return out
 

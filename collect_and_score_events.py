@@ -170,11 +170,15 @@ def main():
     by_impact = Counter(e.get("expected_market_impact") for e in new_events)
     by_relevance = Counter(e.get("trade_relevance") for e in new_events)
     by_symbol = Counter(e.get("symbol") for e in new_events)
+    by_source = Counter(e.get("source") or "unknown" for e in new_events)
+    by_source_tier = Counter(e.get("source_tier") or "unknown" for e in new_events)
 
     print()
     print(f"  Event types   : {dict(by_type)}")
     print(f"  Impacts       : {dict(by_impact)}")
     print(f"  Relevance     : {dict(by_relevance)}")
+    print(f"  Sources       : {dict(by_source)}")
+    print(f"  Source tiers  : {dict(by_source_tier)}")
     print(f"  Top symbols   : {dict(by_symbol.most_common(15))}")
 
     print_table(new_events)

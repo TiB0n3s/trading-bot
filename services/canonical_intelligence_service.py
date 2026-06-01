@@ -316,11 +316,29 @@ def build_canonical_intelligence_snapshot(
         "reward_risk_state": setup_structure.get("reward_risk_state"),
         "structure_score": setup_structure.get("structure_score"),
     }
+    event_context = account_state.get("event_context") or {}
     event_state = {
         "support_count": summary.get("support_count"),
         "risk_count": summary.get("risk_count"),
         "primary_supports": summary.get("primary_supports"),
         "primary_risks": summary.get("primary_risks"),
+        "available": event_context.get("available"),
+        "event_signal": event_context.get("event_signal"),
+        "authority": event_context.get("authority"),
+        "event_count": event_context.get("event_count"),
+        "source_count": event_context.get("source_count"),
+        "trusted_source_count": event_context.get("trusted_source_count"),
+        "confidence_cap": event_context.get("confidence_cap"),
+        "source_tiers": event_context.get("source_tiers"),
+        "catalyst_score": event_context.get("catalyst_score"),
+        "consumer_appetite_score": event_context.get("consumer_appetite_score"),
+        "revenue_impact_score": event_context.get("revenue_impact_score"),
+        "profit_potential_score": event_context.get("profit_potential_score"),
+        "margin_risk_score": event_context.get("margin_risk_score"),
+        "supply_chain_risk_score": event_context.get("supply_chain_risk_score"),
+        "materials_risk_score": event_context.get("materials_risk_score"),
+        "competitive_risk_score": event_context.get("competitive_risk_score"),
+        "execution_risk_score": event_context.get("execution_risk_score"),
     }
     strategy_state = {
         "trader_brain_score": trader_brain.get("score"),

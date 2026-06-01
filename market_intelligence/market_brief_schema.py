@@ -166,6 +166,7 @@ def normalize_symbol_entry(symbol: str, entry: dict[str, Any] | None) -> dict[st
         "notes": normalize_string(entry.get("notes")),
 
         # Event-enrichment fields; observe-only metadata for reporting/scoring.
+        "event_context": entry.get("event_context") if isinstance(entry.get("event_context"), dict) else None,
         "event_catalyst_score_raw": entry.get("event_catalyst_score_raw"),
         "consumer_appetite_score": entry.get("consumer_appetite_score"),
         "revenue_impact_score": entry.get("revenue_impact_score"),

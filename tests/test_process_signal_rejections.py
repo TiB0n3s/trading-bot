@@ -111,6 +111,7 @@ def _base_patches(**overrides):
     patches = {
         # Market state loading — filesystem I/O, no-op in tests
         "app._load_market_context": MagicMock(),
+        "app._market_bias": {},
         # Fail-open advisory context
         "app.rolling_symbol_context": MagicMock(return_value=None),
         "app.prior_session_context": MagicMock(return_value=None),

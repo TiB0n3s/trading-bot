@@ -446,15 +446,68 @@ def load_event_enrichment(market_date: str) -> dict:
         return {}
 
 
+def _event_enrichment_num(value):
+    try:
+        return None if value is None else round(float(value), 2)
+    except Exception:
+        return None
+
+
+def _event_enrichment_signal(enrichment: dict) -> str:
+    upside = max(
+        _event_enrichment_num(enrichment.get("consumer_appetite_score")) or 0.0,
+        _event_enrichment_num(enrichment.get("revenue_impact_score")) or 0.0,
+        _event_enrichment_num(enrichment.get("profit_potential_score")) or 0.0,
+    )
+    risk = max(
+        _event_enrichment_num(enrichment.get("margin_risk_score")) or 0.0,
+        _event_enrichment_num(enrichment.get("supply_chain_risk_score")) or 0.0,
+        _event_enrichment_num(enrichment.get("materials_risk_score")) or 0.0,
+        _event_enrichment_num(enrichment.get("competitive_risk_score")) or 0.0,
+        _event_enrichment_num(enrichment.get("execution_risk_score")) or 0.0,
+    )
+    catalyst = _event_enrichment_num(enrichment.get("catalyst_score")) or 0.0
+
+    if risk >= 70:
+        return "risk_caution"
+    if catalyst >= 70 and upside >= 65 and risk < 55:
+        return "constructive_watch"
+    return "headline_watch"
+
+
 def apply_event_enrichment(symbol_entry: dict, enrichment: dict) -> None:
-    """Overlay event aggregate scores onto one market-context symbol entry."""
+    """Overlay capped event aggregate scores onto one market-context symbol entry.
+
+    Event enrichment may come through headline transports, but sources should be
+    original publishers or official channels. Transport names such as Google
+    News RSS must not be treated as reference sources. This is context/risk
+    metadata only; it must not create standalone BUY authority.
+    """
     if not enrichment:
         return
 
+    event_score_keys = (
+        "catalyst_score",
+        "consumer_appetite_score",
+        "revenue_impact_score",
+        "profit_potential_score",
+        "margin_risk_score",
+        "supply_chain_risk_score",
+        "materials_risk_score",
+        "competitive_risk_score",
+        "execution_risk_score",
+    )
+
     applied = False
-    for key, value in enrichment.items():
+    event_scores = {}
+
+    for key in event_score_keys:
+        value = enrichment.get(key)
         if value is None:
             continue
+
+        rounded_value = _event_enrichment_num(value)
+        event_scores[key] = rounded_value if rounded_value is not None else value
 
         if key == "catalyst_score":
             try:
@@ -467,23 +520,72 @@ def apply_event_enrichment(symbol_entry: dict, enrichment: dict) -> None:
             applied = True
             continue
 
-        symbol_entry[key] = value
+        symbol_entry[key] = event_scores[key]
         applied = True
 
     if not applied:
         return
+
+    signal = _event_enrichment_signal(enrichment)
+    source_count = int(enrichment.get("source_count") or 1)
+    event_count = enrichment.get("event_count")
+    sources = enrichment.get("sources") or ["unknown_publisher"]
+    source_tiers = enrichment.get("source_tiers") or []
+    trusted_source_count = int(enrichment.get("trusted_source_count") or 0)
+    confidence_cap = (
+        enrichment.get("confidence_cap")
+        or (
+            "single_source_low"
+            if source_count <= 1
+            else "multi_source_required_review"
+        )
+    )
+
+    symbol_entry["event_context"] = {
+        "available": True,
+        "source_count": source_count,
+        "sources": sources,
+        "source_tiers": source_tiers,
+        "trusted_source_count": trusted_source_count,
+        "confidence_cap": confidence_cap,
+        "event_count": event_count,
+        "event_signal": signal,
+        "authority": "context_only_no_standalone_buy_authority",
+        **event_scores,
+    }
+
+    risks = symbol_entry.setdefault("key_risks", [])
+    if isinstance(risks, list) and source_count <= 1:
+        note = "event context is single-source headline-level only"
+        if note not in risks:
+            risks.append(note)
 
     catalyst_score = enrichment.get("catalyst_score")
     if catalyst_score is not None:
         try:
             catalyst_f = float(catalyst_score)
             catalysts = symbol_entry.setdefault("key_catalysts", [])
-            note = f"Event-enriched catalyst score {catalyst_f:.2f} from daily_symbol_context."
+            source_note = (
+                "single-source headline-level, confirmation required"
+                if source_count <= 1
+                else f"multi-source headline-level aggregate, trusted_sources={trusted_source_count}, review still required"
+            )
+            note = f"Event context catalyst score {catalyst_f:.2f}; {source_note}."
             if note not in catalysts:
                 catalysts.insert(0, note)
             symbol_entry["notes"] = "event_enriched"
         except Exception:
             pass
+
+    reason = symbol_entry.get("reason") or ""
+    if "Event context:" not in reason:
+        count_text = f"{event_count} " if event_count is not None else ""
+        symbol_entry["reason"] = (
+            reason
+            + f" Event context: {count_text}headline event aggregate(s), "
+              f"sources={source_count}, trusted_sources={trusted_source_count}, "
+              f"signal={signal}, confidence_cap={confidence_cap}."
+        ).strip()
 
 
 

@@ -28,6 +28,13 @@ def _compact_dict(d, allowed_keys=None):
     return {k: d.get(k) for k in allowed_keys if d.get(k) is not None}
 
 
+def _as_int(value, default=0):
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
 def _summarize_context(ctx):
     """
     Create a plain-English summary and recommended action from existing evidence.
@@ -92,6 +99,41 @@ def _summarize_context(ctx):
         supports.append("rolling momentum rising")
     elif rolling_direction == "falling":
         risks.append("rolling momentum falling")
+
+    event_context = ctx.get("event_context") or {}
+    event_signal = event_context.get("event_signal")
+    confidence_cap = event_context.get("confidence_cap")
+    source_count = _as_int(event_context.get("source_count"))
+    trusted_source_count = _as_int(event_context.get("trusted_source_count"))
+    authority = event_context.get("authority")
+
+    if event_signal == "constructive_watch":
+        if trusted_source_count >= 2 or confidence_cap in (
+            "official_source_high",
+            "two_independent_reputable_sources",
+        ):
+            supports.append(
+                "event context constructive "
+                f"(trusted_sources={trusted_source_count}, confidence_cap={confidence_cap})"
+            )
+        else:
+            risks.append(
+                "event context constructive but not fully confirmed "
+                f"(sources={source_count}, trusted_sources={trusted_source_count}, confidence_cap={confidence_cap})"
+            )
+    elif event_signal == "risk_caution":
+        risks.append(
+            "event context risk caution "
+            f"(sources={source_count}, trusted_sources={trusted_source_count}, confidence_cap={confidence_cap})"
+        )
+    elif event_signal == "headline_watch":
+        risks.append(
+            "event context headline watch "
+            f"(sources={source_count}, trusted_sources={trusted_source_count}, confidence_cap={confidence_cap})"
+        )
+
+    if authority == "context_only_no_standalone_buy_authority" and source_count <= 1:
+        risks.append("event context is context-only and single-source")
 
     prior_session = ctx.get("prior_session") or {}
     prior_return = prior_session.get("session_return_pct")
@@ -202,6 +244,7 @@ def build_intelligence_context(symbol, action, account_state):
         "action": action,
         "market_brief": _compact_dict(market_brief),
         "macro": _compact_dict(account_state.get("macro_risk")),
+        "event_context": _compact_dict(account_state.get("event_context")),
         "setup": setup_quality,
         "setup_quality": setup_quality,
         "setup_observation": setup_observation,

@@ -80,6 +80,21 @@ def _snapshot(**overrides):
                 "buy_opportunity_score": 66,
                 "buy_opportunity_recommendation": "buy_candidate",
             },
+            "event_context": {
+                "available": True,
+                "event_signal": "constructive_watch",
+                "authority": "context_only_no_standalone_buy_authority",
+                "event_count": 3,
+                "source_count": 2,
+                "trusted_source_count": 2,
+                "confidence_cap": "two_independent_reputable_sources",
+                "source_tiers": ["confirmed_financial_news", "deep_analysis"],
+                "catalyst_score": 72,
+                "consumer_appetite_score": 70,
+                "revenue_impact_score": 68,
+                "profit_potential_score": 66,
+                "margin_risk_score": 20,
+            },
             "ml_outcome": {
                 "advisory_decision": "avoid",
                 "authority_mode": "observe_only_compare",
@@ -255,6 +270,10 @@ def test_build_canonical_snapshot_collects_core_state_and_hashes():
     assert data["regime_state"]["net_execution_cost_pct"] == 0.44
     assert data["trend_state"]["direction"] == "bullish"
     assert data["momentum_state"]["session_label"] == "strong_uptrend"
+    assert data["event_state"]["event_signal"] == "constructive_watch"
+    assert data["event_state"]["confidence_cap"] == "two_independent_reputable_sources"
+    assert data["event_state"]["trusted_source_count"] == 2
+    assert data["event_state"]["catalyst_score"] == 72
     assert data["prediction_state"]["ml_score"] == 62
     assert data["setup_state"]["policy_action"] == "boost"
     assert data["setup_state"]["quality_source"] == "setup_engine"

@@ -60,10 +60,61 @@ def test_summary_uses_setup_quality_source_for_supportive_context():
     )
 
 
+def test_summary_reads_canonical_event_context_without_granting_authority():
+    account_state = {
+        "event_context": {
+            "available": True,
+            "event_signal": "constructive_watch",
+            "source_count": 1,
+            "trusted_source_count": 1,
+            "confidence_cap": "single_reputable_source_review",
+            "authority": "context_only_no_standalone_buy_authority",
+        },
+    }
+
+    with patch("decision_context.load_portfolio_replacement_memory", return_value={}):
+        ctx = build_intelligence_context("AAPL", "buy", account_state)
+
+    assert ctx["event_context"] == account_state["event_context"]
+    assert ctx["summary"]["recommended_action"] == "size_down"
+    assert any(
+        "event context constructive but not fully confirmed" in risk
+        for risk in ctx["summary"]["primary_risks"]
+    )
+    assert any(
+        "event context is context-only and single-source" in risk
+        for risk in ctx["summary"]["primary_risks"]
+    )
+
+
+def test_summary_treats_multi_source_event_context_as_supportive_context():
+    account_state = {
+        "event_context": {
+            "available": True,
+            "event_signal": "constructive_watch",
+            "source_count": 2,
+            "trusted_source_count": 2,
+            "confidence_cap": "two_independent_reputable_sources",
+            "authority": "context_only_no_standalone_buy_authority",
+        },
+    }
+
+    with patch("decision_context.load_portfolio_replacement_memory", return_value={}):
+        ctx = build_intelligence_context("AAPL", "buy", account_state)
+
+    assert ctx["summary"]["recommended_action"] == "allow"
+    assert any(
+        "event context constructive" in support
+        for support in ctx["summary"]["primary_supports"]
+    )
+
+
 def main():
     tests = [
         test_summary_prefers_canonical_setup_quality_over_legacy_observation,
         test_summary_uses_setup_quality_source_for_supportive_context,
+        test_summary_reads_canonical_event_context_without_granting_authority,
+        test_summary_treats_multi_source_event_context_as_supportive_context,
     ]
     for test in tests:
         test()

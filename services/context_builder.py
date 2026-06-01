@@ -900,6 +900,27 @@ def apply_market_bias_context(
     if bias_entry.get("entry_quality"):
         account_state["entry_quality"] = bias_entry["entry_quality"]
 
+    # Preserve event-enriched market context in BUY decision state.
+    # These fields are context/risk modifiers only. Single-source headline
+    # events remain confidence-capped upstream and must not create standalone
+    # BUY authority.
+    for event_key in (
+        "event_context",
+        "catalyst_score",
+        "consumer_appetite_score",
+        "revenue_impact_score",
+        "profit_potential_score",
+        "margin_risk_score",
+        "supply_chain_risk_score",
+        "materials_risk_score",
+        "competitive_risk_score",
+        "execution_risk_score",
+        "key_catalysts",
+        "key_risks",
+    ):
+        if bias_entry.get(event_key) is not None:
+            account_state[event_key] = bias_entry.get(event_key)
+
 
 def hydrate_buy_momentum_context(context_runtime: SignalContextRuntime) -> None:
     state = context_runtime.state

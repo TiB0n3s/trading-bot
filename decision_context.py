@@ -77,7 +77,7 @@ def _summarize_context(ctx):
     elif buy_rec == "avoid":
         risks.append(f"buy opportunity avoid ({buy_score})")
 
-    opportunity = ctx.get("opportunity_score") or {}
+    opportunity = ctx.get("opportunity_score_0_100") or ctx.get("opportunity_score") or {}
     opp_decision = opportunity.get("decision")
     opp_score = opportunity.get("score")
     if opp_decision in ("allow", "pass"):
@@ -256,6 +256,10 @@ def build_intelligence_context(symbol, action, account_state):
         "session_momentum_gate": _compact_dict(account_state.get("session_momentum_gate")),
         "prediction": _compact_dict(account_state.get("prediction_gate")),
         "buy_opportunity": _compact_dict(account_state.get("buy_opportunity")),
+        "opportunity_score_0_100": _compact_dict(
+            account_state.get("opportunity_score_0_100")
+            or account_state.get("opportunity_score")
+        ),
         "opportunity_score": _compact_dict(account_state.get("opportunity_score")),
         "strategy_memory": _compact_dict(account_state.get("strategy_memory")),
         "portfolio_replacement": _compact_dict(load_portfolio_replacement_memory()),

@@ -236,6 +236,205 @@ def _ml_prediction_age_seconds(ml_prediction: dict[str, Any]) -> float | None:
     return max(0.0, (datetime.now(timezone.utc) - parsed).total_seconds())
 
 
+def _float_or_none(value: Any) -> float | None:
+    try:
+        if value is None or value == "":
+            return None
+        return float(value)
+    except Exception:
+        return None
+
+
+def _late_chase_entry_risk(
+    *,
+    account_state: dict[str, Any],
+    setup_obs: dict[str, Any],
+) -> dict[str, Any]:
+    setup_quality = account_state.get("setup_quality") or {}
+    rolling = account_state.get("rolling_momentum") or {}
+    session = account_state.get("session_momentum") or {}
+    momentum = account_state.get("momentum") or {}
+
+    setup_label = (
+        setup_quality.get("label")
+        or setup_obs.get("setup_label")
+        or setup_obs.get("label")
+        or ""
+    )
+    setup_action = (
+        setup_quality.get("policy_action")
+        or setup_obs.get("setup_policy_action")
+        or ""
+    )
+    setup_rec = setup_quality.get("recommendation") or setup_obs.get("recommendation") or ""
+    setup_score = _float_or_none(
+        setup_quality.get("score")
+        or setup_obs.get("setup_score")
+        or setup_obs.get("score")
+    )
+    setup_score_value = setup_score if setup_score is not None else 0.0
+
+    special_labels = {
+        str(label).lower()
+        for label in (rolling.get("special_labels") or [])
+        if label is not None
+    }
+    extension_pct = _float_or_none(rolling.get("extension_from_recent_base_pct"))
+    vwap_dist_pct = _float_or_none(
+        account_state.get("session_distance_from_vwap_pct")
+        or session.get("distance_from_vwap_pct")
+        or momentum.get("distance_from_vwap_pct")
+    )
+    session_return_pct = _float_or_none(
+        account_state.get("session_return_pct") or session.get("session_return_pct")
+    )
+    m15_pct = _float_or_none(
+        account_state.get("session_momentum_15m_pct")
+        or session.get("momentum_15m_pct")
+    )
+    m30_pct = _float_or_none(
+        account_state.get("session_momentum_30m_pct")
+        or session.get("momentum_30m_pct")
+    )
+
+    weak_labels = {
+        "above_vwap_neutral_continuation",
+        "unclassified_transition",
+        "balanced_transition_state",
+        "above_vwap_strength_continuation",
+        "late_strength_near_vwap_risk",
+    }
+    weak_setup = (
+        str(setup_label).lower() in weak_labels
+        or str(setup_action).lower() not in {"boost", "allow"}
+        or str(setup_rec).lower() in {"watch", "neutral", "avoid"}
+        or setup_score_value < 55
+    )
+    extended = (
+        "gap_up_chase_risk" in special_labels
+        or "extended_above_recent_base" in special_labels
+        or (extension_pct is not None and extension_pct >= 5.0)
+        or (vwap_dist_pct is not None and vwap_dist_pct >= 1.25)
+    )
+    fading_after_push = (
+        (session_return_pct is not None and session_return_pct >= 0.75)
+        and (vwap_dist_pct is not None and vwap_dist_pct >= 0.75)
+        and (m15_pct is not None and m15_pct <= 0)
+        and (m30_pct is not None and m30_pct <= 0)
+    )
+    extreme_extension = (
+        (extension_pct is not None and extension_pct >= 8.0)
+        or (vwap_dist_pct is not None and vwap_dist_pct >= 1.75)
+    )
+    triggered = bool(weak_setup and (extended or fading_after_push))
+    would_block = bool(triggered and (extreme_extension or fading_after_push))
+
+    cap_pct = None
+    if triggered:
+        cap_pct = 0.35 if extreme_extension or fading_after_push else 0.50
+
+    reasons = []
+    if weak_setup:
+        reasons.append("weak_setup")
+    if extended:
+        reasons.append("extended")
+    if fading_after_push:
+        reasons.append("fading_after_push")
+    if extreme_extension:
+        reasons.append("extreme_extension")
+
+    return {
+        "triggered": triggered,
+        "would_block": would_block,
+        "cap_pct": cap_pct,
+        "setup_label": setup_label,
+        "setup_action": setup_action,
+        "setup_recommendation": setup_rec,
+        "setup_score": setup_score,
+        "special_labels": sorted(special_labels),
+        "extension_from_recent_base_pct": extension_pct,
+        "session_distance_from_vwap_pct": vwap_dist_pct,
+        "session_return_pct": session_return_pct,
+        "session_momentum_15m_pct": m15_pct,
+        "session_momentum_30m_pct": m30_pct,
+        "reason": ",".join(reasons) if reasons else "no late-chase risk",
+    }
+
+
+def _advisory_feature_size_cap(account_state: dict[str, Any]) -> dict[str, Any]:
+    micro = account_state.get("market_microstructure") or {}
+    participation = account_state.get("market_participation") or {}
+    volatility = account_state.get("volatility_normalization") or {}
+    downside = account_state.get("downside_asymmetry") or {}
+
+    caps: list[tuple[str, float, str]] = []
+
+    if volatility.get("chase_risk") == "high":
+        caps.append(("volatility_normalization", 0.60, "high volatility chase risk"))
+    elif volatility.get("chase_risk") == "elevated":
+        caps.append(("volatility_normalization", 0.80, "elevated volatility chase risk"))
+
+    if micro.get("reversion_risk") == "high":
+        caps.append(("market_microstructure", 0.70, "high microstructure reversion risk"))
+    elif micro.get("breakout_quality") == "liquidity_vacuum_breakout":
+        caps.append(("market_microstructure", 0.75, "breakout in liquidity vacuum"))
+
+    if (
+        participation.get("participation_state") == "isolated_or_weak"
+        or participation.get("isolated_move_risk") == "high"
+    ):
+        caps.append(("market_participation", 0.70, "isolated or weak market participation"))
+    elif participation.get("isolated_move_risk") == "elevated":
+        caps.append(("market_participation", 0.85, "elevated isolated-move risk"))
+
+    downside_score = _float_or_none(downside.get("downside_score"))
+    if downside.get("downside_state") == "asymmetric_downside_high" or (
+        downside_score is not None and downside_score >= 0.65
+    ):
+        caps.append(("downside_asymmetry", 0.70, "high asymmetric downside"))
+    elif downside.get("downside_state") == "asymmetric_downside_elevated" or (
+        downside_score is not None and downside_score >= 0.42
+    ):
+        caps.append(("downside_asymmetry", 0.85, "elevated asymmetric downside"))
+
+    if not caps:
+        return {
+            "triggered": False,
+            "effect_on_size": "none",
+            "reason": "no advisory feature size cap",
+        }
+
+    source, cap_pct, reason = min(caps, key=lambda item: item[1])
+    return {
+        "triggered": True,
+        "effect_on_size": "cap",
+        "source": source,
+        "cap_pct": cap_pct,
+        "reason": reason,
+        "all_caps": [
+            {"source": item[0], "cap_pct": item[1], "reason": item[2]}
+            for item in caps
+        ],
+        "market_microstructure": {
+            "breakout_quality": micro.get("breakout_quality"),
+            "reversion_risk": micro.get("reversion_risk"),
+            "liquidity_state": micro.get("liquidity_state"),
+        },
+        "market_participation": {
+            "participation_state": participation.get("participation_state"),
+            "isolated_move_risk": participation.get("isolated_move_risk"),
+        },
+        "volatility_normalization": {
+            "stretch_state": volatility.get("stretch_state"),
+            "chase_risk": volatility.get("chase_risk"),
+        },
+        "downside_asymmetry": {
+            "downside_state": downside.get("downside_state"),
+            "downside_score": downside_score,
+        },
+    }
+
+
 def _ml_authority_safety_blockers(
     *,
     mode: str,
@@ -1331,6 +1530,46 @@ def run_prediction_session_tape_gates(
             f"Session momentum size cap for {symbol}: severity={severity} → {session_cap}%"
         )
 
+    late_chase_gate = _late_chase_entry_risk(
+        account_state=account_state,
+        setup_obs=setup_obs,
+    )
+    account_state["late_chase_entry_gate"] = late_chase_gate
+    if late_chase_gate.get("triggered"):
+        cap_pct = float(late_chase_gate.get("cap_pct") or 0.50)
+        apply_size_cap(
+            account_state,
+            cap_pct=cap_pct,
+            state_key="late_chase_size_cap",
+            payload={**late_chase_gate, "cap_pct": cap_pct},
+        )
+        log.warning(
+            f"Late-chase entry cap for {symbol}: cap={cap_pct}% "
+            f"reason={late_chase_gate.get('reason')} "
+            f"setup={late_chase_gate.get('setup_label')} "
+            f"ext={late_chase_gate.get('extension_from_recent_base_pct')} "
+            f"vwap={late_chase_gate.get('session_distance_from_vwap_pct')}"
+        )
+
+    if late_chase_gate.get("would_block"):
+        reason = (
+            f"late-chase entry blocked: {late_chase_gate.get('reason')}; "
+            f"setup={late_chase_gate.get('setup_label')}; "
+            f"setup_score={late_chase_gate.get('setup_score')}; "
+            f"extension={late_chase_gate.get('extension_from_recent_base_pct')}; "
+            f"vwap_dist={late_chase_gate.get('session_distance_from_vwap_pct')}; "
+            f"15m={late_chase_gate.get('session_momentum_15m_pct')}; "
+            f"30m={late_chase_gate.get('session_momentum_30m_pct')}"
+        )
+        return StageOutcome(
+            rejected=True,
+            approval=deterministic_rejection(
+                category="late_chase_entry",
+                reason=reason,
+                metadata=late_chase_gate,
+            ),
+        )
+
     return StageOutcome()
 
 
@@ -1451,12 +1690,15 @@ def run_final_approval_gates(
     if action == "buy":
         opportunity = score_buy_opportunity(symbol, signal, account_state)
         account_state["opportunity_score"] = opportunity
+        account_state["opportunity_score_0_100"] = opportunity
         claude_account_state["opportunity_score"] = opportunity
+        claude_account_state["opportunity_score_0_100"] = opportunity
 
         strategy_memory = memory_for_signal(
             symbol,
             {
                 "opportunity_score": opportunity,
+                "opportunity_score_0_100": opportunity,
                 "buy_opportunity": account_state.get("buy_opportunity") or {},
                 "setup_observation": account_state.get("setup_observation") or {},
                 "setup_quality": account_state.get("setup_quality") or {},
@@ -1549,6 +1791,27 @@ def run_final_approval_gates(
         f"primary_supports={summary.get('primary_supports')} "
         f"primary_risks={summary.get('primary_risks')}"
     )
+
+    if action == "buy":
+        advisory_cap = _advisory_feature_size_cap(account_state)
+        account_state["advisory_feature_size_gate"] = advisory_cap
+        claude_account_state["advisory_feature_size_gate"] = advisory_cap
+        if advisory_cap.get("triggered"):
+            cap_pct = float(advisory_cap.get("cap_pct") or 1.0)
+            existing = account_state.get("max_position_size_pct_override")
+            account_state["max_position_size_pct_override"] = (
+                min(float(existing), cap_pct) if existing is not None else cap_pct
+            )
+            account_state["advisory_feature_size_cap"] = advisory_cap
+            claude_account_state["advisory_feature_size_cap"] = advisory_cap
+            claude_account_state["advisory_feature_max_position_size_pct"] = account_state[
+                "max_position_size_pct_override"
+            ]
+            log.warning(
+                f"Advisory feature size cap for {symbol}: "
+                f"source={advisory_cap.get('source')} cap={cap_pct}% "
+                f"reason={advisory_cap.get('reason')}"
+            )
 
     decision_policy = evaluate_decision_policy(
         symbol=symbol,

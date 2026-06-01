@@ -12,7 +12,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from services.approval_service import evaluate_approval_decision
+from services.approval_service import _advisory_feature_size_cap, evaluate_approval_decision
 from services.context_builder import (
     ContextAssemblyDeps,
     build_final_signal_context,
@@ -20,7 +20,7 @@ from services.context_builder import (
 )
 from services.setup_context_service import SetupContextDeps
 from services.signal_models import SignalRuntimeState
-from services.sizing_service import apply_final_sizing, apply_size_cap, build_conviction_stack
+from services.sizing_service import apply_final_sizing, apply_size_cap, build_conviction_stack, collect_active_caps
 from services.policies import sizing_policy
 
 
@@ -247,7 +247,37 @@ def test_conviction_stack_sets_dominant_limiter():
     assert_equal(account_state["dominant_limiter"], "weak_prediction_degraded", "limiter")
 
 
-def test_setup_quality_sizing_is_disabled_by_default():
+def test_advisory_features_produce_size_cap_and_limiter():
+    account_state = {
+        "market_microstructure": {
+            "breakout_quality": "liquidity_vacuum_breakout",
+            "reversion_risk": "high",
+        },
+        "market_participation": {
+            "participation_state": "isolated_or_weak",
+            "isolated_move_risk": "high",
+        },
+        "volatility_normalization": {
+            "stretch_state": "extreme_stretch",
+            "chase_risk": "high",
+        },
+        "downside_asymmetry": {
+            "downside_state": "asymmetric_downside_high",
+            "downside_score": 0.70,
+        },
+    }
+
+    cap = _advisory_feature_size_cap(account_state)
+    account_state["advisory_feature_size_cap"] = cap
+
+    assert_equal(cap["triggered"], True, "triggered")
+    assert_equal(cap["source"], "volatility_normalization", "tightest source")
+    assert_equal(cap["cap_pct"], 0.6, "cap pct")
+    active_caps = collect_active_caps(account_state)
+    assert_equal(active_caps[0].source, "advisory_features", "active cap source")
+
+
+def test_setup_quality_sizing_is_enabled_by_default():
     account_state = {
         "setup_quality": {
             "recommendation": "watch",
@@ -274,7 +304,38 @@ def test_setup_quality_sizing_is_disabled_by_default():
             ),
         )
 
-    assert_equal(sizing.final_size_pct, 1.1, "strong buy lift remains active")
+    assert_equal(sizing.final_size_pct, 0.5, "setup quality watch cap")
+    assert_equal(account_state["setup_quality_size_cap"]["cap_pct"], 0.5, "setup cap pct")
+
+
+def test_strong_buy_lift_requires_supportive_setup_quality():
+    account_state = {
+        "setup_quality": {
+            "recommendation": "buy",
+            "score": 75,
+            "source": "setup_engine",
+            "policy_action": "allow",
+        },
+        "buy_opportunity": {
+            "buy_opportunity_recommendation": "strong_buy_candidate",
+            "buy_opportunity_score": 12,
+        },
+        "strategy_observation": {"trader_brain": {"score": 80}},
+        "session_momentum_gate": {"severity": "pass"},
+    }
+    with _temporary_env(SETUP_QUALITY_SIZING_ENABLED=None):
+        sizing = apply_final_sizing(
+            symbol="AAPL",
+            action="buy",
+            decision={"position_size_pct": 1.0},
+            risk_multiplier=1.0,
+            account_state=account_state,
+            apply_buy_opportunity_sizing=lambda **kwargs: (
+                sizing_policy.apply_buy_opportunity_sizing(**kwargs)
+            ),
+        )
+
+    assert_equal(sizing.final_size_pct, 1.1, "supportive setup permits strong buy lift")
     assert_equal("setup_quality_size_cap" in account_state, False, "setup cap absent")
 
 
@@ -305,8 +366,8 @@ def test_setup_quality_sizing_caps_when_enabled_without_fighting_tighter_caps():
             ),
         )
 
-    assert_equal(sizing.final_size_pct, 0.8, "setup quality watch cap")
-    assert_equal(account_state["setup_quality_size_cap"]["cap_pct"], 0.8, "setup cap pct")
+    assert_equal(sizing.final_size_pct, 0.5, "setup quality watch cap")
+    assert_equal(account_state["setup_quality_size_cap"]["cap_pct"], 0.5, "setup cap pct")
     assert_equal(sizing.dominant_limiter, "setup_quality", "setup limiter")
 
     account_state = {
@@ -348,7 +409,9 @@ def main():
         test_sizing_service_preserves_sell_default_size,
         test_apply_size_cap_keeps_tightest_cap,
         test_conviction_stack_sets_dominant_limiter,
-        test_setup_quality_sizing_is_disabled_by_default,
+        test_advisory_features_produce_size_cap_and_limiter,
+        test_setup_quality_sizing_is_enabled_by_default,
+        test_strong_buy_lift_requires_supportive_setup_quality,
         test_setup_quality_sizing_caps_when_enabled_without_fighting_tighter_caps,
     ]
     for test in tests:

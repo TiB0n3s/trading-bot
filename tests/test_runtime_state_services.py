@@ -80,11 +80,13 @@ def test_market_context_service_loads_same_day_bias_and_clears_stale():
         service.load()
         assert market_bias["AAPL"]["bias"] == "buy"
         assert market_bias["AAPL"]["risk_level"] is None
+        assert service.macro_risk()["macro_regime"] == "risk_on"
 
         service.mtime = 0
         path.write_text(json.dumps({"market_date": "2026-05-29", "symbols": {}}))
         service.load()
         assert market_bias == {}
+        assert service.macro_risk()["macro_regime"] == "stale"
 
 
 def test_trend_state_service_builds_refreshes_and_updates():

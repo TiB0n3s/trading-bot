@@ -68,7 +68,7 @@ from session_momentum import (
 )
 from decision_engine import evaluate_signal, get_mock_account_state
 from opportunity_score import score_buy_opportunity
-from macro_risk import get_macro_risk
+from macro_risk import get_macro_risk as _legacy_get_macro_risk
 from setup_classifier import classify_setup
 from strategy_memory import memory_for_signal
 from decision_context import build_intelligence_context
@@ -473,6 +473,19 @@ _market_context_service = MarketContextService(
     expected_market_context_date=expected_market_context_date,
     log=logger,
 )
+
+
+def get_macro_risk(base_dir: Path | None = None):
+    """Return macro policy from the same validated market context used for bias."""
+    if (
+        base_dir is None
+        or Path(base_dir).resolve() == Path(__file__).parent.resolve()
+        or not (Path(base_dir) / "market_context.json").exists()
+    ):
+        return _market_context_service.macro_risk()
+    return _legacy_get_macro_risk(base_dir)
+
+
 _trend_state_service = TrendStateService(
     approved_symbols=APPROVED_SYMBOLS,
     signal_history=_signal_history,

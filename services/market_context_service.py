@@ -6,6 +6,8 @@ import json
 from pathlib import Path
 from typing import Any, Callable
 
+from risk.macro_policy import DEFAULT_MACRO_POLICY, policy_from_market_context
+
 
 class MarketContextService:
     def __init__(
@@ -21,6 +23,8 @@ class MarketContextService:
         self.expected_market_context_date = expected_market_context_date
         self.log = log
         self.mtime = 0.0
+        self.context: dict[str, Any] = {}
+        self.context_status: str = "not_loaded"
 
     def load(self) -> None:
         """Load same-day pre-market research into the shared market-bias dict."""
@@ -37,7 +41,9 @@ class MarketContextService:
             market_date = ctx.get("market_date")
             expected_date = self.expected_market_context_date().isoformat()
             self.market_bias.clear()
+            self.context = {}
             if market_date != expected_date:
+                self.context_status = "stale"
                 self.log.warning(
                     "market_context.json is stale "
                     f"(market_date={market_date}, expected={expected_date}) — "
@@ -45,6 +51,8 @@ class MarketContextService:
                 )
                 return
 
+            self.context = ctx
+            self.context_status = "loaded"
             symbols = ctx.get("symbols") or {}
             for sym, entry in symbols.items():
                 if isinstance(entry, dict) and entry.get("bias") in (
@@ -78,6 +86,8 @@ class MarketContextService:
                 f"macro={macro})"
             )
         except Exception as exc:
+            self.context = {}
+            self.context_status = "error"
             self.log.error(f"market context load failed: {exc}")
 
     def file_summary(self) -> tuple[str | None, str | None]:
@@ -86,3 +96,26 @@ class MarketContextService:
             return None, None
         ctx = json.loads(self.path.read_text())
         return ctx.get("market_date"), ctx.get("macro_sentiment")
+
+    def macro_risk(self) -> dict[str, Any]:
+        """Return same-day macro policy from the loaded canonical context."""
+        self.load()
+        if not self.context:
+            if self.context_status == "stale":
+                return {
+                    **DEFAULT_MACRO_POLICY,
+                    "macro_regime": "stale",
+                    "risk_multiplier": 0.75,
+                    "max_new_positions": 8,
+                    "block_new_buys": False,
+                    "reason": "market_context.json stale; using caution defaults",
+                }
+            return {
+                **DEFAULT_MACRO_POLICY,
+                "macro_regime": "unknown",
+                "risk_multiplier": 0.75,
+                "max_new_positions": 8,
+                "block_new_buys": False,
+                "reason": "market_context.json unavailable; using caution defaults",
+            }
+        return policy_from_market_context(self.context)

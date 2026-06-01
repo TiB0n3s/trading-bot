@@ -41,7 +41,8 @@ def reexec_under_venv_if_available() -> None:
     )
 
 
-reexec_under_venv_if_available()
+if __name__ == "__main__":
+    reexec_under_venv_if_available()
 
 
 def load_env_file(path: Path = ENV_FILE) -> bool:

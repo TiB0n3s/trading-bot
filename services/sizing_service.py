@@ -53,6 +53,22 @@ def collect_active_caps(account_state: dict[str, Any]) -> list[SizeCap]:
                 float((account_state["session_momentum_size_cap"] or {}).get("cap_pct", 99)),
             )
         )
+    if account_state.get("late_chase_size_cap"):
+        caps.append(
+            SizeCap(
+                "late_chase",
+                float((account_state["late_chase_size_cap"] or {}).get("cap_pct", 99)),
+                (account_state["late_chase_size_cap"] or {}).get("reason"),
+            )
+        )
+    if account_state.get("advisory_feature_size_cap"):
+        caps.append(
+            SizeCap(
+                "advisory_features",
+                float((account_state["advisory_feature_size_cap"] or {}).get("cap_pct", 99)),
+                (account_state["advisory_feature_size_cap"] or {}).get("reason"),
+            )
+        )
     if account_state.get("strategy_score_size_cap"):
         caps.append(
             SizeCap(

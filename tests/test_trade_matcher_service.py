@@ -41,6 +41,7 @@ def test_match_trades_uses_fifo_and_preserves_open_lots():
                 "action": "buy",
                 "qty": 2,
                 "fill_price": 100,
+                "order_id": "buy-1",
                 "setup_label": "test_setup",
             },
             {
@@ -66,6 +67,8 @@ def test_match_trades_uses_fifo_and_preserves_open_lots():
     assert matched[0]["qty"] == 1.0
     assert matched[0]["realized_pnl"] == 5.0
     assert matched[0]["setup_label"] == "test_setup"
+    assert matched[0]["entry_order_id"] == "buy-1"
+    assert matched[0]["entry_source"] == "webhook_buy"
     assert matched[0]["exit_order_id"] == "sell-1"
     assert matched[0]["signal_source"] == "tradingview"
     assert open_lots["QQQ"][0]["qty"] == 1.0
@@ -98,12 +101,46 @@ def test_rebuild_initializes_and_replaces_rows():
     assert repo.replaced[0] == matched
     assert "symbol" in repo.replaced[1]
     assert "match_source" in repo.replaced[1]
+    assert "entry_order_id" in repo.replaced[1]
+
+
+def test_auto_buy_entries_are_labeled_in_lifecycle_matches():
+    repo = FakeRepository(
+        [
+            {
+                "timestamp": "2026-05-30T10:00:00",
+                "symbol": "SOFI",
+                "action": "buy",
+                "qty": 1,
+                "fill_price": 10,
+                "order_id": "auto-buy-1",
+                "confidence": "auto_buy_manager",
+                "rejection_reason": "auto_buy_manager: internal bar-derived buy submitted",
+            },
+            {
+                "timestamp": "2026-05-30T10:20:00",
+                "symbol": "SOFI",
+                "action": "sell",
+                "qty": 1,
+                "fill_price": 10.5,
+                "order_id": "sell-1",
+            },
+        ]
+    )
+    service = TradeMatcherService(repository=repo)
+
+    matched, _ = service.match_trades()
+
+    assert len(matched) == 1
+    assert matched[0]["entry_source"] == "auto_buy_manager"
+    assert matched[0]["entry_order_id"] == "auto-buy-1"
 
 
 if __name__ == "__main__":
     tests = [
         test_match_trades_uses_fifo_and_preserves_open_lots,
         test_rebuild_initializes_and_replaces_rows,
+        test_auto_buy_entries_are_labeled_in_lifecycle_matches,
     ]
     for test in tests:
         test()

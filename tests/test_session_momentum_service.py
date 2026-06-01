@@ -1,12 +1,14 @@
 import sys
 from pathlib import Path
 from types import SimpleNamespace
+from datetime import datetime, timezone
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from services.session_momentum_service import (
     SessionMomentumService,
+    _session_start_or_lookback,
     _merge_retained_strength,
     classify_session_momentum,
 )
@@ -95,6 +97,15 @@ def test_classification_labels_for_uptrend_fading_and_downtrend():
     assert downtrend["trend_label"] == "downtrend"
 
 
+def test_session_start_anchors_to_market_open_after_open():
+    start = _session_start_or_lookback(
+        datetime(2026, 6, 1, 16, 0, tzinfo=timezone.utc),
+        240,
+    )
+
+    assert start == datetime(2026, 6, 1, 13, 30, tzinfo=timezone.utc)
+
+
 def test_refresh_symbol_upserts_merged_row():
     previous = {
         "symbol": "AAPL",
@@ -171,6 +182,7 @@ if __name__ == "__main__":
     tests = [
         test_build_calculates_vwap_and_strong_uptrend,
         test_classification_labels_for_uptrend_fading_and_downtrend,
+        test_session_start_anchors_to_market_open_after_open,
         test_refresh_symbol_upserts_merged_row,
         test_missing_bars_returns_insufficient_data_safely,
         test_retained_strength_preserves_prior_highs_and_tracks_pullback,

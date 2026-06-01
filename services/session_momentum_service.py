@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 import logging
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from repositories.session_momentum_repo import SessionMomentumRepository
 from services.market_data_service import market_data_service
@@ -12,6 +13,7 @@ from services.market_data_service import market_data_service
 
 MIN_BARS = 5
 LOOKBACK_MINUTES = 240
+ET = ZoneInfo("America/New_York")
 
 
 def _pct_change(start: float | None, end: float | None) -> float | None:
@@ -83,6 +85,15 @@ def _window_return(bars: list[Any], window: int) -> float | None:
     first = _bar_close(scoped[0])
     last = _bar_close(scoped[-1])
     return _pct_change(first, last)
+
+
+def _session_start_or_lookback(now_utc: datetime, lookback_minutes: int) -> datetime:
+    """Use regular-session open once market hours have started; fallback before open."""
+    now_et = now_utc.astimezone(ET)
+    session_open_et = now_et.replace(hour=9, minute=30, second=0, microsecond=0)
+    if now_et >= session_open_et:
+        return session_open_et.astimezone(timezone.utc)
+    return now_utc - timedelta(minutes=lookback_minutes)
 
 
 def classify_session_momentum(
@@ -245,8 +256,9 @@ class SessionMomentumService:
 
     def build(self, symbol: str) -> dict[str, Any]:
         symbol = symbol.upper()
-        start = (
-            datetime.now(timezone.utc) - timedelta(minutes=self.lookback_minutes)
+        start = _session_start_or_lookback(
+            datetime.now(timezone.utc),
+            self.lookback_minutes,
         ).isoformat()
 
         bars = self.market_data.get_bars_with_fallback(

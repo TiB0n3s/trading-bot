@@ -73,6 +73,9 @@ from symbols_config import (
 
 
 AUTO_BUY_LIVE_BUYS = os.getenv("AUTO_BUY_LIVE_BUYS", "false").lower() in ("1", "true", "yes", "on")
+AUTO_BUY_ALLOW_TRADINGVIEW_LIVE = os.getenv(
+    "AUTO_BUY_ALLOW_TRADINGVIEW_LIVE", "false"
+).lower() in ("1", "true", "yes", "on")
 AUTO_BUY_MIN_SCORE = float(os.getenv("AUTO_BUY_MIN_SCORE", "13"))
 AUTO_BUY_WATCH_SCORE = float(os.getenv("AUTO_BUY_WATCH_SCORE", "7"))
 AUTO_BUY_POSITION_SIZE_PCT = float(os.getenv("AUTO_BUY_POSITION_SIZE_PCT", "0.50"))
@@ -520,10 +523,15 @@ def evaluate_auto_buy_candidate(
             reasons.append(f"30m_falling_soft:{m30:.3f}")
     hard_block_reason = "; ".join(hard_block_reasons) if hard_block_reasons else None
 
+    strong_threshold = AUTO_BUY_MIN_SCORE
+    if signal_source == "tradingview_alert" and not AUTO_BUY_ALLOW_TRADINGVIEW_LIVE:
+        strong_threshold = AUTO_BUY_MIN_SCORE + 4.0
+        reasons.append(f"webhook_symbol_candidate_threshold:{strong_threshold:.1f}")
+
     if hard_block_reasons:
         decision = "skip"
         severity = "blocked"
-    elif score >= AUTO_BUY_MIN_SCORE:
+    elif score >= strong_threshold:
         decision = "strong_buy_candidate"
         severity = "high"
     elif score >= AUTO_BUY_WATCH_SCORE:
@@ -539,6 +547,7 @@ def evaluate_auto_buy_candidate(
         "decision": decision,
         "severity": severity,
         "score": round(score, 2),
+        "strong_buy_threshold": strong_threshold,
         "reason": "; ".join(reasons) if reasons else "no positive auto-buy evidence",
         "hard_block_reason": hard_block_reason,
         "market_bias": bias,
@@ -632,6 +641,14 @@ def maybe_execute_auto_buy(candidate: dict[str, Any], market_open: bool, live_re
         return None
     if candidate.get("decision") != "strong_buy_candidate":
         candidate["live_block_reason"] = f"decision={candidate.get('decision')}"
+        return None
+    if (
+        candidate.get("signal_source") == "tradingview_alert"
+        and not AUTO_BUY_ALLOW_TRADINGVIEW_LIVE
+    ):
+        candidate["live_block_reason"] = (
+            "tradingview alert symbol requires webhook approval path"
+        )
         return None
 
     daily_orders = auto_buy_orders_today()

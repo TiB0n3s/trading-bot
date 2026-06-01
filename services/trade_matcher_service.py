@@ -14,6 +14,7 @@ MATCH_SOURCE_FIELDS = [
     "signal_source",
     "match_source",
     "entry_source",
+    "entry_order_id",
     "exit_order_id",
     "exit_reason",
 ]
@@ -69,6 +70,14 @@ def row_get(row, key, default=None):
         return row[key]
     except Exception:
         return default
+
+
+def entry_source_for_row(row) -> str:
+    confidence = str(row_get(row, "confidence") or "").lower()
+    reason = str(row_get(row, "rejection_reason") or "").lower()
+    if confidence == "auto_buy_manager" or reason.startswith("auto_buy_manager:"):
+        return "auto_buy_manager"
+    return "webhook_buy"
 
 
 class TradeMatcherService:
@@ -153,7 +162,8 @@ class TradeMatcherService:
                         item[field] = row_get(entry_row, field)
 
                     item["match_source"] = "fifo_match"
-                    item["entry_source"] = "webhook_buy"
+                    item["entry_source"] = entry_source_for_row(entry_row)
+                    item["entry_order_id"] = row_get(entry_row, "order_id")
                     item["exit_order_id"] = row_get(row, "order_id")
                     item["exit_reason"] = row_get(row, "rejection_reason")
                     item["signal_source"] = self.symbol_signal_source.get(
@@ -268,6 +278,7 @@ class TradeMatcherService:
             "buy_opportunity_reason": None,
             "match_source": "synthetic_position_manager_exit",
             "entry_source": "position_manager_avg_entry",
+            "entry_order_id": None,
             "exit_order_id": sell_row["order_id"],
             "exit_reason": sell_row["rejection_reason"],
         }

@@ -195,12 +195,12 @@ PEAK_LOCK_TIER3_FLOOR_PCT = float(os.getenv("POSITION_MANAGER_PEAK_LOCK_TIER3_FL
 WEAK_PEAK_LOCK_TIER1_PEAK_PCT = float(os.getenv("POSITION_MANAGER_WEAK_PEAK_LOCK_TIER1_PEAK_PCT", "0.30"))
 WEAK_PEAK_LOCK_TIER1_FLOOR_PCT = float(os.getenv("POSITION_MANAGER_WEAK_PEAK_LOCK_TIER1_FLOOR_PCT", "0.10"))
 WEAK_PEAK_LOCK_TIER2_PEAK_PCT = float(os.getenv("POSITION_MANAGER_WEAK_PEAK_LOCK_TIER2_PEAK_PCT", "0.50"))
-WEAK_PEAK_LOCK_TIER2_FLOOR_PCT = float(os.getenv("POSITION_MANAGER_WEAK_PEAK_LOCK_TIER2_FLOOR_PCT", "0.25"))
+WEAK_PEAK_LOCK_TIER2_FLOOR_PCT = float(os.getenv("POSITION_MANAGER_WEAK_PEAK_LOCK_TIER2_FLOOR_PCT", "0.30"))
 
 # Quality-split exit thresholds — three tiers:
 # Strong conviction: looser giveback tolerance, higher min-profit bar before partial exit.
 # Normal strong: standard room (60% giveback, 0.75% min).
-# Weak: managed tightly once green (40% giveback, 0.50% min).
+# Weak: managed tightly once green (35% giveback, 0.35% min).
 STRONG_CONVICTION_PROFIT_GIVEBACK_TRIGGER_PCT = float(
     os.getenv("POSITION_MANAGER_STRONG_CONVICTION_GIVEBACK_TRIGGER_PCT", "70")
 )
@@ -211,10 +211,10 @@ STRONG_ENTRY_PROFIT_GIVEBACK_TRIGGER_PCT = float(
     os.getenv("POSITION_MANAGER_STRONG_ENTRY_PROFIT_GIVEBACK_PCT", "60")
 )
 WEAK_ENTRY_PROFIT_GIVEBACK_TRIGGER_PCT = float(
-    os.getenv("POSITION_MANAGER_WEAK_ENTRY_PROFIT_GIVEBACK_PCT", "40")
+    os.getenv("POSITION_MANAGER_WEAK_ENTRY_PROFIT_GIVEBACK_PCT", "35")
 )
 WEAK_ENTRY_MIN_PROFIT_PARTIAL_PCT = float(
-    os.getenv("POSITION_MANAGER_WEAK_ENTRY_MIN_PROFIT_PARTIAL_PCT", "0.50")
+    os.getenv("POSITION_MANAGER_WEAK_ENTRY_MIN_PROFIT_PARTIAL_PCT", "0.35")
 )
 
 
@@ -573,9 +573,11 @@ def is_weak_entry_context(entry_ctx):
     ml_bucket = str(entry_ctx.get("entry_ml_prediction_bucket") or "").lower()
 
     weak_tokens = (
+        "above_vwap_neutral",
         "fade_risk",
         "neutral_fade",
         "drift_risk",
+        "late_strength",
         "unclassified",
     )
 
@@ -620,7 +622,7 @@ def is_strong_conviction_entry(entry_ctx: dict) -> bool:
         ml_bucket in ("high_55_plus", "mid_50_55")
         and buy_opp_rec == "strong_buy_candidate"
         and opp_score >= 10
-        and setup_action in ("boost", "allow", "neutral")
+        and setup_action in ("boost", "allow")
     )
 
 
@@ -760,7 +762,7 @@ def evaluate_position(position, state, session_momentum=None):
     # Three-tier quality-split thresholds:
     #   strong_conviction: all signals aligned → most room (70% giveback, 1.0% min)
     #   normal strong:     standard room (60% giveback, 0.75% min)
-    #   weak:              managed tightly (40% giveback, 0.50% min)
+    #   weak:              managed tightly (35% giveback, 0.35% min)
     # is_strong_conviction_entry is only evaluated when entry is NOT already weak.
     strong_conviction_entry = (
         is_strong_conviction_entry(entry_ctx) if not weak_entry_context else False
@@ -770,8 +772,8 @@ def evaluate_position(position, state, session_momentum=None):
         giveback_trigger_pct = STRONG_CONVICTION_PROFIT_GIVEBACK_TRIGGER_PCT   # 70%
         min_profit_partial_pct = STRONG_CONVICTION_MIN_PROFIT_PARTIAL_PCT       # 1.0%
     elif weak_entry_context:
-        giveback_trigger_pct = WEAK_ENTRY_PROFIT_GIVEBACK_TRIGGER_PCT           # 40%
-        min_profit_partial_pct = WEAK_ENTRY_MIN_PROFIT_PARTIAL_PCT              # 0.50%
+        giveback_trigger_pct = WEAK_ENTRY_PROFIT_GIVEBACK_TRIGGER_PCT           # 35%
+        min_profit_partial_pct = WEAK_ENTRY_MIN_PROFIT_PARTIAL_PCT              # 0.35%
     else:
         giveback_trigger_pct = STRONG_ENTRY_PROFIT_GIVEBACK_TRIGGER_PCT         # 60%
         min_profit_partial_pct = MIN_PROFIT_PARTIAL_PCT                          # 0.75%

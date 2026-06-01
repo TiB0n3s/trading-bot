@@ -322,6 +322,8 @@ def score_buy_opportunity(symbol, signal_data, account_state):
 
     return {
         "score": score,
+        "opportunity_score_0_100": score,
+        "score_scale": "0_100",
         "bucket": bucket,
         "decision": decision,
         "size_multiplier": size_multiplier,

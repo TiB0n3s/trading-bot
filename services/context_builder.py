@@ -710,6 +710,11 @@ def build_buy_opportunity_observation(
         recent_favorable_setup=recent_favorable_setup,
         adaptive_buy_confirmation=adaptive_confirmation,
     )
+    opportunity.setdefault(
+        "buy_opportunity_points_score",
+        opportunity.get("buy_opportunity_score"),
+    )
+    opportunity.setdefault("score_scale", "points")
     account_state["buy_opportunity"] = opportunity
 
     log.info(

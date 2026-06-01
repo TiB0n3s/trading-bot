@@ -172,26 +172,6 @@ def _classify_base(snapshot: dict[str, Any]) -> SetupResult:
     if (
         trend_bucket == "neutral/weak"
         and vwap_bucket == "above_vwap"
-        and rs_bucket == "neutral"
-    ):
-        return SetupResult(
-            setup_label="above_vwap_neutral_continuation",
-            recommendation="watch",
-            setup_score=57,
-            confidence="low",
-            trend_bucket=trend_bucket,
-            vwap_bucket=vwap_bucket,
-            rs_bucket=rs_bucket,
-            setup_key=setup_key,
-            rationale=(
-                "Neutral/weak trend above VWAP with neutral RS has shown mild positive expectancy."
-            ),
-            sample_basis="derived from latest combined setup leaderboard",
-        )
-
-    if (
-        trend_bucket == "neutral/weak"
-        and vwap_bucket == "above_vwap"
         and rs_bucket == "strong"
     ):
         return SetupResult(

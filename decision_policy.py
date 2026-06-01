@@ -173,7 +173,13 @@ def evaluate_decision_policy(
     elif recommended_action == "allow":
         supports.append("intelligence context allows")
 
-    opportunity = intelligence_context.get("opportunity_score") or account_state.get("opportunity_score") or {}
+    opportunity = (
+        intelligence_context.get("opportunity_score_0_100")
+        or account_state.get("opportunity_score_0_100")
+        or intelligence_context.get("opportunity_score")
+        or account_state.get("opportunity_score")
+        or {}
+    )
     opp_score = _normalize_score(opportunity.get("score"))
     opp_decision = opportunity.get("decision")
 

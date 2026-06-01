@@ -105,6 +105,36 @@ def test_negative_session_blocks_candidate():
         raise AssertionError(f"missing hard block reason: {result['hard_block_reason']}")
 
 
+def test_tradingview_symbols_need_higher_auto_buy_threshold():
+    session = strong_session()
+    session["trend_label"] = "developing_uptrend"
+    session["trend_score"] = 3
+    session["momentum_5m_pct"] = 0.0
+    session["momentum_15m_pct"] = 0.0
+    session["momentum_30m_pct"] = 0.0
+
+    internal = evaluate_auto_buy_candidate(
+        symbol="AMZN",
+        session=session,
+        feature=favorable_feature(),
+        context=buy_context(),
+        held=set(),
+        signal_source="internal_bar_only",
+    )
+    webhook_symbol = evaluate_auto_buy_candidate(
+        symbol="AMZN",
+        session=session,
+        feature=favorable_feature(),
+        context=buy_context(),
+        held=set(),
+        signal_source="tradingview_alert",
+    )
+
+    assert_equal(internal["decision"], "strong_buy_candidate", "internal decision")
+    assert_equal(webhook_symbol["decision"], "watch", "webhook-symbol decision")
+    assert_equal(webhook_symbol["strong_buy_threshold"], auto_buy_manager.AUTO_BUY_MIN_SCORE + 4.0, "threshold")
+
+
 def test_early_session_buffer_skips_collection():
     import pytz
     from datetime import datetime
@@ -128,6 +158,32 @@ def test_live_buy_requires_market_open_and_env_flag():
 
     assert_equal(order, None, "order")
     assert_equal(candidate["live_block_reason"], "live not requested or AUTO_BUY_LIVE_BUYS is false", "block reason")
+
+
+def test_live_auto_buy_does_not_execute_tradingview_alert_symbols_by_default():
+    old_live = auto_buy_manager.AUTO_BUY_LIVE_BUYS
+    old_allow = auto_buy_manager.AUTO_BUY_ALLOW_TRADINGVIEW_LIVE
+    auto_buy_manager.AUTO_BUY_LIVE_BUYS = True
+    auto_buy_manager.AUTO_BUY_ALLOW_TRADINGVIEW_LIVE = False
+    try:
+        candidate = {
+            "symbol": "AMZN",
+            "decision": "strong_buy_candidate",
+            "signal_source": "tradingview_alert",
+            "risk_level": "medium",
+        }
+
+        order = maybe_execute_auto_buy(candidate, market_open=True, live_requested=True)
+    finally:
+        auto_buy_manager.AUTO_BUY_LIVE_BUYS = old_live
+        auto_buy_manager.AUTO_BUY_ALLOW_TRADINGVIEW_LIVE = old_allow
+
+    assert_equal(order, None, "order")
+    assert_equal(
+        candidate["live_block_reason"],
+        "tradingview alert symbol requires webhook approval path",
+        "block reason",
+    )
 
 
 def test_log_auto_buy_order_writes_canonical_trade_row():
@@ -307,8 +363,10 @@ def main():
         test_strong_internal_candidate_scores_as_buy_candidate,
         test_held_symbol_is_skipped,
         test_negative_session_blocks_candidate,
+        test_tradingview_symbols_need_higher_auto_buy_threshold,
         test_early_session_buffer_skips_collection,
         test_live_buy_requires_market_open_and_env_flag,
+        test_live_auto_buy_does_not_execute_tradingview_alert_symbols_by_default,
         test_bucking_fading_tape_does_not_hard_block,
         test_log_auto_buy_order_writes_canonical_trade_row,
         test_log_candidate_mirrors_to_candidate_universe,

@@ -449,6 +449,8 @@ def evaluate_buy_opportunity(
 
     return {
         "buy_opportunity_score": score,
+        "buy_opportunity_points_score": score,
+        "score_scale": "points",
         "buy_opportunity_recommendation": recommendation,
         "buy_opportunity_reason": ",".join(reasons),
     }

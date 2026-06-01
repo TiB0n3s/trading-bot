@@ -55,6 +55,22 @@ def test_score_modifiers_preserve_label_and_adjust_score():
     assert "vol_surge" in result.rationale
 
 
+def test_above_vwap_neutral_continuation_has_single_canonical_mapping():
+    result = classify_feature_snapshot(
+        {
+            "trend_direction": "neutral",
+            "trend_strength": "weak",
+            "distance_from_vwap": 0.30,
+            "relative_strength_5m": 0.0,
+        }
+    )
+
+    assert result.setup_label == "above_vwap_neutral_continuation"
+    assert result.recommendation == "neutral"
+    assert result.setup_score == 48
+    assert result.sample_basis == "retuned from latest setup-label report"
+
+
 class FakeRepository:
     def __init__(self):
         self.loaded_id = None
@@ -132,6 +148,7 @@ if __name__ == "__main__":
         test_classify_known_setup_preserves_label_and_score,
         test_classify_unknown_snapshot_uses_existing_fallback,
         test_score_modifiers_preserve_label_and_adjust_score,
+        test_above_vwap_neutral_continuation_has_single_canonical_mapping,
         test_service_delegates_snapshot_reads_to_repository,
     ]
     for test in tests:

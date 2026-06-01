@@ -137,6 +137,54 @@ EVENT_KEYWORDS = [
         ],
     ),
     (
+        "supplier_signal",
+        [
+            "supplier", "suppliers", "supply agreement", "supplier agreement",
+            "component", "components", "vendor", "manufacturing partner",
+            "foundry", "contract manufacturer", "production partner",
+        ],
+    ),
+    (
+        "customer_contract",
+        [
+            "contract", "customer", "customers", "purchase agreement",
+            "selected by", "awarded", "wins order", "large order",
+            "backlog", "booking", "bookings",
+        ],
+    ),
+    (
+        "strategic_partnership",
+        [
+            "partnership", "partners with", "joint venture",
+            "strategic collaboration", "strategic investment",
+            "distribution agreement",
+        ],
+    ),
+    (
+        "leadership_personnel",
+        [
+            "ceo", "cfo", "chief executive", "chief financial",
+            "resigns", "resignation", "steps down", "appointed",
+            "names new", "hires",
+        ],
+    ),
+    (
+        "mna_deal_chatter",
+        [
+            "acquisition", "acquires", "merger", "takeover", "buyout",
+            "deal talks", "explores sale", "strategic alternatives",
+            "private equity", "stake sale", "backdoor deal",
+        ],
+    ),
+    (
+        "insider_transaction",
+        [
+            "insider buying", "insider bought", "insider purchase",
+            "insider selling", "insider sold", "insider sale",
+            "director bought", "director sold",
+        ],
+    ),
+    (
         "regulatory",
         [
             "regulator", "regulatory", "antitrust", "lawsuit", "sues",
@@ -176,6 +224,16 @@ EVENT_KEYWORDS = [
     ),
 ]
 
+EVENT_TYPE_PRIORITY = {
+    "leadership_personnel": 1,
+    "mna_deal_chatter": 2,
+    "insider_transaction": 3,
+    "customer_contract": 4,
+    "strategic_partnership": 5,
+    "supplier_signal": 6,
+    "supply_chain": 7,
+}
+
 
 def _clean_text(value: str | None) -> str:
     if not value:
@@ -194,32 +252,55 @@ def classify_event_type(text: str) -> tuple[str, str | None]:
     for event_type, keywords in EVENT_KEYWORDS:
         hits = [kw for kw in keywords if kw in lowered]
         if hits:
-            scores.append((len(hits), event_type, hits[0]))
+            scores.append((
+                len(hits),
+                -EVENT_TYPE_PRIORITY.get(event_type, 100),
+                event_type,
+                hits[0],
+            ))
 
     if not scores:
         return "industry_demand", "headline_watch"
 
     scores.sort(reverse=True)
-    _, event_type, first_hit = scores[0]
+    _, _, event_type, first_hit = scores[0]
     return event_type, first_hit.replace(" ", "_")
 
 
 def infer_time_horizon(event_type: str) -> str:
-    if event_type in ("product_launch", "industry_demand", "ai_infrastructure_demand"):
+    if event_type in (
+        "product_launch",
+        "industry_demand",
+        "ai_infrastructure_demand",
+        "supplier_signal",
+        "customer_contract",
+        "strategic_partnership",
+    ):
         return "weeks_to_quarters"
-    if event_type in ("earnings", "guidance", "analyst_action"):
+    if event_type in ("earnings", "guidance", "analyst_action", "leadership_personnel", "insider_transaction"):
         return "days_to_weeks"
-    if event_type in ("regulatory", "supply_chain", "macro_geopolitical"):
+    if event_type in ("regulatory", "supply_chain", "macro_geopolitical", "mna_deal_chatter"):
         return "weeks_to_months"
     return "days_to_weeks"
 
 
-def rss_url_for_symbol(symbol: str) -> str:
+def rss_urls_for_symbol(symbol: str) -> list[tuple[str, str]]:
     name = COMPANY_QUERY_NAMES.get(symbol, symbol)
     # "when:1d" keeps results recent in Google News search syntax.
-    query = f'("{name}" OR "{symbol}") stock when:1d'
-    encoded = urllib.parse.quote_plus(query)
-    return f"https://news.google.com/rss/search?q={encoded}&hl=en-US&gl=US&ceid=US:en"
+    base_query = f'("{name}" OR "{symbol}") stock when:1d'
+    peripheral_query = (
+        f'("{name}" OR "{symbol}") '
+        '(supplier OR customer OR contract OR partnership OR acquisition OR merger '
+        'OR CEO OR CFO OR insider) stock when:3d'
+    )
+    return [
+        ("company_direct", f"https://news.google.com/rss/search?q={urllib.parse.quote_plus(base_query)}&hl=en-US&gl=US&ceid=US:en"),
+        ("company_peripheral", f"https://news.google.com/rss/search?q={urllib.parse.quote_plus(peripheral_query)}&hl=en-US&gl=US&ceid=US:en"),
+    ]
+
+
+def rss_url_for_symbol(symbol: str) -> str:
+    return rss_urls_for_symbol(symbol)[0][1]
 
 
 def fetch_rss_items(url: str, timeout: int = 12) -> list[dict]:
@@ -266,7 +347,7 @@ def publisher_from_google_news_title(title: str | None) -> str | None:
     return publisher or None
 
 
-def event_from_item(market_date: str, symbol: str, item: dict) -> dict:
+def event_from_item(market_date: str, symbol: str, item: dict, search_scope: str = "company_direct") -> dict:
     title = item.get("title") or ""
     desc = item.get("description") or ""
     text = f"{title}. {desc}".strip()
@@ -290,6 +371,8 @@ def event_from_item(market_date: str, symbol: str, item: dict) -> dict:
         "time_horizon": infer_time_horizon(event_type),
         "confidence": "medium" if source_policy["trusted_source"] else "low",
         "collector": "google_news_rss",
+        "search_scope": search_scope,
+        "peripheral_context": search_scope == "company_peripheral",
         "publisher": normalize_source_name(publisher),
         **source_policy,
         "raw_collected_at": datetime.now().isoformat(timespec="seconds"),
@@ -315,26 +398,28 @@ def collect_company_news_events(
             logger.warning("Skipping non-approved symbol: %s", symbol)
             continue
 
-        url = rss_url_for_symbol(symbol)
-        try:
-            items = fetch_rss_items(url, timeout=timeout)
-        except Exception as e:
-            logger.warning("News RSS fetch failed for %s: %s", symbol, e)
-            continue
-
         seen_titles = set()
         added = 0
 
-        for item in items:
-            title = item.get("title") or ""
-            if not title or title in seen_titles:
+        for search_scope, url in rss_urls_for_symbol(symbol):
+            try:
+                items = fetch_rss_items(url, timeout=timeout)
+            except Exception as e:
+                logger.warning("News RSS fetch failed for %s scope=%s: %s", symbol, search_scope, e)
                 continue
-            seen_titles.add(title)
 
-            event = event_from_item(market_date, symbol, item)
-            out.append(event)
-            added += 1
+            for item in items:
+                title = item.get("title") or ""
+                if not title or title in seen_titles:
+                    continue
+                seen_titles.add(title)
 
+                event = event_from_item(market_date, symbol, item, search_scope=search_scope)
+                out.append(event)
+                added += 1
+
+                if added >= max_per_symbol:
+                    break
             if added >= max_per_symbol:
                 break
 

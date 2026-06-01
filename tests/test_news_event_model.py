@@ -66,11 +66,67 @@ def test_trusted_source_can_support_bullish_inference():
     assert event["net_event_score"] >= 12
 
 
+def test_supplier_signal_models_risk_without_untrusted_bullish_jump():
+    event = score_event(
+        {
+            "market_date": "2026-06-01",
+            "symbol": "NVDA",
+            "event_type": "supplier_signal",
+            "event_summary": "Key supplier warns of component shortage and delayed factory output",
+            "source": "industry blog",
+            "source_tier": "unclassified",
+            "trusted_source": False,
+        }
+    )
+
+    assert event["expected_market_impact"] in ("neutral", "moderately_bearish")
+    assert event["supply_chain_risk_score"] > 40
+    assert event["execution_risk_score"] > 35
+
+
+def test_untrusted_deal_chatter_requires_confirmation():
+    event = score_event(
+        {
+            "market_date": "2026-06-01",
+            "symbol": "CRM",
+            "event_type": "mna_deal_chatter",
+            "event_summary": "Salesforce in backdoor deal talks for acquisition after strong growth reports",
+            "source": "message board",
+            "source_tier": "low_confidence",
+            "trusted_source": False,
+        }
+    )
+
+    assert event["expected_market_impact"] == "neutral"
+    assert event["trade_relevance"] in ("watch_only", "watch_for_confirmation")
+    assert "rumor-sensitive peripheral event requires trusted confirmation" in event["scoring_reason"]
+
+
+def test_leadership_departure_is_execution_risk_not_bullish():
+    event = score_event(
+        {
+            "market_date": "2026-06-01",
+            "symbol": "AAPL",
+            "event_type": "leadership_personnel",
+            "event_summary": "Apple CFO resigns as company names interim finance chief",
+            "source": "reuters",
+            "source_tier": "confirmed_financial_news",
+            "trusted_source": True,
+        }
+    )
+
+    assert event["expected_market_impact"] in ("neutral", "moderately_bearish")
+    assert event["execution_risk_score"] > 40
+
+
 def main():
     tests = [
         test_neutral_headline_baseline_does_not_infer_bullish,
         test_unclassified_source_caps_weak_bullish_inference,
         test_trusted_source_can_support_bullish_inference,
+        test_supplier_signal_models_risk_without_untrusted_bullish_jump,
+        test_untrusted_deal_chatter_requires_confirmation,
+        test_leadership_departure_is_execution_risk_not_bullish,
     ]
     for test in tests:
         test()

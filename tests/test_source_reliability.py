@@ -10,8 +10,10 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from market_intelligence.event_collectors.company_news_collector import (
+    classify_event_type,
     event_from_item,
     publisher_from_google_news_title,
+    rss_urls_for_symbol,
 )
 from market_intelligence.source_reliability import (
     classify_source,
@@ -80,6 +82,44 @@ def test_google_news_transport_is_not_used_as_source_when_publisher_unknown():
     assert_equal(event["trusted_source"], False, "trusted")
 
 
+def test_peripheral_scope_is_preserved_on_collected_event():
+    item = {
+        "title": "Apple CFO resigns as supplier contract is reviewed - Reuters",
+        "link": "https://news.google.com/rss/articles/example",
+        "description": "Leadership and supplier context changed.",
+        "published_at": "2026-06-01T12:00:00+00:00",
+    }
+
+    event = event_from_item(
+        "2026-06-01",
+        "AAPL",
+        item,
+        search_scope="company_peripheral",
+    )
+
+    assert_equal(event["search_scope"], "company_peripheral", "search scope")
+    assert_equal(event["peripheral_context"], True, "peripheral context")
+    assert event["event_type"] in {
+        "leadership_personnel",
+        "supplier_signal",
+        "customer_contract",
+    }
+
+
+def test_symbol_has_direct_and_peripheral_news_queries():
+    urls = rss_urls_for_symbol("AAPL")
+
+    assert_equal([scope for scope, _ in urls], ["company_direct", "company_peripheral"], "scopes")
+    assert "supplier" in urls[1][1].lower()
+    assert "cfo" in urls[1][1].lower()
+
+
+def test_classifies_peripheral_event_types():
+    event_type, _ = classify_event_type("CEO resigns after supplier shortage")
+
+    assert event_type in {"leadership_personnel", "supplier_signal"}
+
+
 def test_confidence_cap_prefers_official_and_two_reputable_sources():
     assert_equal(
         confidence_cap_for_sources(["official"], 1),
@@ -112,6 +152,9 @@ def main():
         test_classifies_source_from_url_when_available,
         test_google_news_publisher_becomes_event_source_of_record,
         test_google_news_transport_is_not_used_as_source_when_publisher_unknown,
+        test_peripheral_scope_is_preserved_on_collected_event,
+        test_symbol_has_direct_and_peripheral_news_queries,
+        test_classifies_peripheral_event_types,
         test_confidence_cap_prefers_official_and_two_reputable_sources,
     ]
     for test in tests:

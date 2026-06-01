@@ -38,6 +38,12 @@ VALID_EVENT_TYPES = {
     "margin_pressure",
     "capital_spending",
     "ai_infrastructure_demand",
+    "supplier_signal",
+    "customer_contract",
+    "strategic_partnership",
+    "leadership_personnel",
+    "mna_deal_chatter",
+    "insider_transaction",
 }
 
 
@@ -132,6 +138,56 @@ COMPETITIVE_RISK_WORDS = {
     "android",
     "cloud competition",
     "gpu alternative",
+}
+
+DEAL_WORDS = {
+    "acquisition",
+    "acquire",
+    "merger",
+    "takeover",
+    "buyout",
+    "deal",
+    "strategic investment",
+    "joint venture",
+    "partnership",
+    "partner",
+}
+
+LEADERSHIP_WORDS = {
+    "ceo",
+    "cfo",
+    "chief executive",
+    "chief financial",
+    "resigns",
+    "resignation",
+    "steps down",
+    "appointed",
+    "names",
+    "hires",
+}
+
+INSIDER_WORDS = {
+    "insider buying",
+    "insider bought",
+    "insider purchase",
+    "insider selling",
+    "insider sold",
+    "insider sale",
+    "director bought",
+    "director sold",
+}
+
+CUSTOMER_CONTRACT_WORDS = {
+    "contract",
+    "customer",
+    "order",
+    "booking",
+    "backlog",
+    "purchase agreement",
+    "supply agreement",
+    "selected",
+    "award",
+    "awarded",
 }
 
 
@@ -306,6 +362,51 @@ def score_event(event: dict[str, Any]) -> dict[str, Any]:
         profit_potential += bullish * 0.5 - bearish * 0.4
         reason_bits.append("industry_demand scoring applied")
 
+    elif event_type == "supplier_signal":
+        supply_chain_risk += 12 + supply * 0.8 + bearish * 0.4
+        materials_risk += 10 + supply * 0.7
+        execution_risk += 8 + bearish * 0.4
+        revenue_impact += bullish * 0.3 - bearish * 0.4
+        profit_potential += bullish * 0.2 - bearish * 0.4
+        reason_bits.append("supplier_signal scoring applied")
+
+    elif event_type == "customer_contract":
+        contract = text_score(text, CUSTOMER_CONTRACT_WORDS, per_hit=7, cap=35)
+        revenue_impact += contract * 0.8 + bullish * 0.4 - bearish * 0.4
+        profit_potential += contract * 0.4 + bullish * 0.3 - bearish * 0.3
+        execution_risk += bearish * 0.4
+        reason_bits.append("customer_contract scoring applied")
+
+    elif event_type == "strategic_partnership":
+        deal = text_score(text, DEAL_WORDS, per_hit=7, cap=35)
+        revenue_impact += deal * 0.4 + bullish * 0.3 - bearish * 0.3
+        profit_potential += deal * 0.3 + bullish * 0.2 - bearish * 0.3
+        execution_risk += 5 + bearish * 0.4
+        reason_bits.append("strategic_partnership scoring applied")
+
+    elif event_type == "leadership_personnel":
+        leadership = text_score(text, LEADERSHIP_WORDS, per_hit=7, cap=35)
+        execution_risk += 8 + leadership * 0.4 + bearish * 0.6
+        profit_potential += bullish * 0.2 - bearish * 0.5
+        reason_bits.append("leadership_personnel scoring applied")
+
+    elif event_type == "mna_deal_chatter":
+        deal = text_score(text, DEAL_WORDS, per_hit=7, cap=35)
+        revenue_impact += deal * 0.3 + bullish * 0.2 - bearish * 0.2
+        profit_potential += deal * 0.25 + bullish * 0.2 - bearish * 0.2
+        execution_risk += 10 + bearish * 0.4
+        regulatory_risk += regulatory * 0.3
+        reason_bits.append("mna_deal_chatter scoring applied")
+
+    elif event_type == "insider_transaction":
+        insider = text_score(text, INSIDER_WORDS, per_hit=7, cap=35)
+        if "sell" in text or "sold" in text or "sale" in text:
+            execution_risk += 8 + insider * 0.5
+            profit_potential -= insider * 0.3
+        elif "buy" in text or "bought" in text or "purchase" in text:
+            profit_potential += insider * 0.2
+        reason_bits.append("insider_transaction scoring applied")
+
     else:
         consumer_appetite += bullish * 0.4 - bearish * 0.3
         revenue_impact += bullish * 0.4 - bearish * 0.4
@@ -390,6 +491,14 @@ def score_event(event: dict[str, Any]) -> dict[str, Any]:
 
     trusted_bullish_source = _is_trusted_bullish_source(event)
     source_tier = _source_tier(event)
+    peripheral_types = {
+        "supplier_signal",
+        "customer_contract",
+        "strategic_partnership",
+        "leadership_personnel",
+        "mna_deal_chatter",
+        "insider_transaction",
+    }
     if impact in ("strongly_bullish", "moderately_bullish") and not trusted_bullish_source:
         if net < 20 or source_tier in ("unclassified", "low_confidence", "unknown"):
             impact = "neutral"
@@ -403,6 +512,15 @@ def score_event(event: dict[str, Any]) -> dict[str, Any]:
             reason_bits.append(
                 f"strong bullish inference capped by source reliability tier={source_tier}"
             )
+    if event_type in peripheral_types:
+        if impact == "strongly_bullish":
+            impact = "moderately_bullish"
+            relevance = "watch_for_confirmation"
+            reason_bits.append("peripheral event capped below strong bullish")
+        if event_type in ("mna_deal_chatter", "insider_transaction") and not trusted_bullish_source:
+            impact = "neutral"
+            relevance = "watch_for_confirmation" if net >= 8 else "watch_only"
+            reason_bits.append("rumor-sensitive peripheral event requires trusted confirmation")
 
     # Let explicit values override labels if provided.
     if event.get("expected_market_impact"):
@@ -422,11 +540,19 @@ def score_event(event: dict[str, Any]) -> dict[str, Any]:
 
 
 def default_time_horizon(event_type: str) -> str:
-    if event_type in ("product_launch", "industry_demand", "capital_spending", "ai_infrastructure_demand"):
+    if event_type in (
+        "product_launch",
+        "industry_demand",
+        "capital_spending",
+        "ai_infrastructure_demand",
+        "supplier_signal",
+        "customer_contract",
+        "strategic_partnership",
+    ):
         return "weeks_to_quarters"
-    if event_type in ("earnings", "guidance", "analyst_action"):
+    if event_type in ("earnings", "guidance", "analyst_action", "leadership_personnel", "insider_transaction"):
         return "days_to_weeks"
-    if event_type in ("regulatory", "lawsuit", "macro_geopolitical"):
+    if event_type in ("regulatory", "lawsuit", "macro_geopolitical", "mna_deal_chatter"):
         return "weeks_to_months"
     return "days_to_weeks"
 

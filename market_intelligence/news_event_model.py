@@ -155,6 +155,13 @@ class EventScores:
     scoring_reason: str
 
 
+TRUSTED_BULLISH_SOURCE_TIERS = {
+    "official",
+    "confirmed_financial_news",
+    "deep_analysis",
+}
+
+
 def clamp(value: float, low: float = 0, high: float = 100) -> float:
     return max(low, min(high, float(value)))
 
@@ -196,6 +203,16 @@ def normalize_event_type(value: str | None) -> str:
         return "industry_demand"
     v = str(value).strip().lower().replace("-", "_").replace(" ", "_")
     return v if v in VALID_EVENT_TYPES else v
+
+
+def _is_trusted_bullish_source(event: dict[str, Any]) -> bool:
+    if event.get("trusted_source") is True:
+        return True
+    return str(event.get("source_tier") or "") in TRUSTED_BULLISH_SOURCE_TIERS
+
+
+def _source_tier(event: dict[str, Any]) -> str:
+    return str(event.get("source_tier") or "unknown")
 
 
 def score_event(event: dict[str, Any]) -> dict[str, Any]:
@@ -341,7 +358,19 @@ def score_event(event: dict[str, Any]) -> dict[str, Any]:
         + scores.execution_risk_score * 0.15
         + scores.macro_risk_score * 0.10
     )
-    net = upside - risk
+    raw_net = upside - risk
+    neutral_upside = 50 * 0.25 + 50 * 0.30 + 50 * 0.25
+    neutral_risk = (
+        35 * 0.15
+        + 30 * 0.15
+        + 20 * 0.15
+        + 30 * 0.15
+        + 30 * 0.15
+        + 25 * 0.10
+    )
+    # A neutral event should score neutral. The previous raw upside-risk spread
+    # had a positive baseline, which made weak/unrelated headlines look bullish.
+    net = raw_net - (neutral_upside - neutral_risk)
 
     if net >= 25:
         impact = "strongly_bullish"
@@ -359,6 +388,22 @@ def score_event(event: dict[str, Any]) -> dict[str, Any]:
         impact = "neutral"
         relevance = "watch_only"
 
+    trusted_bullish_source = _is_trusted_bullish_source(event)
+    source_tier = _source_tier(event)
+    if impact in ("strongly_bullish", "moderately_bullish") and not trusted_bullish_source:
+        if net < 20 or source_tier in ("unclassified", "low_confidence", "unknown"):
+            impact = "neutral"
+            relevance = "watch_for_confirmation" if net >= 12 else "watch_only"
+            reason_bits.append(
+                f"bullish inference capped by source reliability tier={source_tier}"
+            )
+        elif impact == "strongly_bullish":
+            impact = "moderately_bullish"
+            relevance = "watch_for_confirmation"
+            reason_bits.append(
+                f"strong bullish inference capped by source reliability tier={source_tier}"
+            )
+
     # Let explicit values override labels if provided.
     if event.get("expected_market_impact"):
         impact = str(event["expected_market_impact"])
@@ -371,6 +416,7 @@ def score_event(event: dict[str, Any]) -> dict[str, Any]:
     out["expected_market_impact"] = impact
     out["trade_relevance"] = relevance
     out["net_event_score"] = round(net, 2)
+    out["scoring_reason"] = "; ".join(reason_bits)
 
     return out
 

@@ -12,6 +12,11 @@ becomes an ML-driven trading system.
 - Current prediction influence is limited to logged downside size caps for weak
   prediction evidence. Hard prediction blocking remains disabled unless
   explicitly promoted through paper-session validation.
+- `decision_snapshot_features_v4` now carries compact observe-only
+  `analytics_state` inside canonical decision intelligence.
+- Optional supervised, HMM regime, sentiment, and Timescale storage surfaces
+  exist for research and feature engineering, but they have no runtime trade
+  authority.
 - Any future additional prediction influence must be paper-only,
   environment-controlled, logged, reversible, and limited to soft risk reduction
   until validated.
@@ -90,9 +95,9 @@ or destabilize the webhook path if treated as routine cleanup.
    - `tests/test_feature_parity_contract.py` verifies matching field names
      across `decision_snapshots` and `ml_platform.dataset_builder.ROW_COLUMNS`,
      documented null semantics, and point-in-time cutoff rules.
-   - Next parity step: expand the contract from the current high-value
-     decision features into the canonical intelligence snapshot once that
-     snapshot exists.
+   - Next parity step: expand dataset/replay consumption of canonical
+     intelligence and `analytics_state` without recreating equivalent state from
+     ad hoc columns.
 9. Canonical intelligence snapshot:
    - `canonical_intelligence_v1` is persisted with each decision snapshot as
      JSON plus hash/version.
@@ -108,6 +113,11 @@ or destabilize the webhook path if treated as routine cleanup.
    - `LifecycleAnalysisService` is the first standard analysis surface joining
      canonical entry decisions, canonical exit snapshots, and rejected-signal
      counterfactual outcomes.
+   - `analytics_state` adds predictive/descriptive/diagnostic/prescriptive
+     summaries, technical features, portfolio/risk toolkit context, optional
+     dependency status, sentiment availability, regime-risk protocol status,
+     dashboard alerts, persistent lockout visibility, and optional storage
+     context.
    - Next step: make dataset export and replay consume these canonical objects
      directly instead of reconstructing equivalent state from several columns.
 
@@ -129,8 +139,12 @@ Current state:
   research/operator tools.
 - `decision_snapshots` records immutable point-in-time decision context for new
   approvals/rejections.
+- `decision_snapshots` include canonical intelligence hashes and
+  feature-semantic version `decision_snapshot_features_v4`.
 - `feature_snapshots` carries leakage/audit fields required by the governance
   contract.
+- Optional TimescaleDB storage mirrors compact feature ticks to `stock_ticks`
+  only when `TIMESCALE_DB_URI` is configured.
 - Repositories/services own DB and market-data access for runtime files,
   reports, ops checks, ML builders, and backfill/training scripts.
 - Architecture tests enforce approved DB, broker, market-data, Flask, policy,
@@ -189,9 +203,11 @@ Required before training:
 - Evaluate "would this have improved decisions?" against both approved and
   rejected opportunities.
 
-Status: identified as a hard blocker for real model training. The existing
-`signal_outcome_builder.py`/bar-data infrastructure should be reviewed after
-Tuesday and promoted into the canonical dataset path if suitable.
+Status: partially addressed. `rejected_signal_outcomes` and
+`rejected_signal_outcome_builder.py` provide the current counterfactual outcome
+surface for rejected signals. Treat coverage, near-close partials, and
+action-adjusted MFE/MAE checks as required evidence before any model claims it
+can improve decisions across both approved and rejected opportunities.
 
 ### Point-In-Time Context Layer
 
@@ -223,7 +239,7 @@ implemented.
 ### Symbol Universe Expansion
 
 Goal: reduce survivorship bias and improve future-forward data coverage without
-changing Tuesday's paper-trading behavior.
+changing current paper-trading behavior.
 
 Promoted to approved collection on 2026-05-26 as
 `approved_universe_2026_05_26_internal_bar_expansion_v1`:

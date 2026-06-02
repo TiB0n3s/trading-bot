@@ -70,6 +70,36 @@ snapshots are at least 35 minutes old, `labeled_setups` should begin increasing.
 An `eligible_35m_plus` backlog means label_features has snapshots old enough to
 label but has not labeled them yet.
 
+## AI Analytics And Storage Checks
+
+Use these checks after dependency installs, DB restore, or Timescale changes:
+
+```bash
+cd ~/trading-bot
+set -a && . /etc/trading-bot.env && set +a
+. venv/bin/activate
+
+python3 ai_dependency_status.py
+python3 risk_lockout.py status
+python3 timescale_smoke_test.py --symbol AAPL --price 123.45 --volume 100
+python3 score_financial_sentiment.py --text "Example headline text"
+python3 score_financial_sentiment.py --text "Example headline text" --finbert
+```
+
+`TIMESCALE_DB_URI` controls optional TimescaleDB storage. When configured,
+`services/live_features_service.py` mirrors compact feature ticks into the
+`stock_ticks` hypertable through `services/timescale_tick_writer_service.py`.
+Unset the env var to disable storage mirroring. Timescale writes are for
+research and feature engineering only; they do not affect broker calls,
+position sizing, approvals, or risk gates.
+
+`ai_dependency_status.py` reports which heavy ML/NLP/storage packages are
+available. `score_financial_sentiment.py --finbert` uses the transformer path
+when available; without `--finbert`, the lexicon fallback keeps the command
+usable in lighter environments. `risk_lockout.py status` inspects persistent
+lockout/rebuilding state. Creating lockout state does not currently enforce a
+live buy block unless a future runtime integration explicitly wires it in.
+
 
 ## Trade Decision Summaries
 

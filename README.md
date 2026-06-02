@@ -22,8 +22,10 @@ As of the latest roadmap work:
 - Approved BUY audit persistence records final sizing attribution, dominant limiter, active cap-derived effective cap, ML prediction bucket/score, buy-opportunity recommendation, strategy score, session label, and setup policy action.
 - `db_migrations.py` provides the idempotent migration runner; app startup no longer owns schema `ALTER TABLE` work.
 - `feature_snapshots`, `decision_snapshots`, `rejected_signal_outcomes`, `exit_snapshots`, `matched_trades`, and related report tables support ML governance, counterfactual coverage, lifecycle analysis, and replay validation.
+- `decision_snapshots` now use feature semantic version `decision_snapshot_features_v4`; canonical intelligence includes observe-only `analytics_state` from the predictive/descriptive/diagnostic/prescriptive toolkit.
 - `ml_platform` remains a staged, ahead-of-live research lane with read-only readiness, replay, governance, manifest, and retraining reports.
-- `ml/models/similarity_v0/` remains a research-only metadata placeholder, not a trained model artifact.
+- `ml/models/similarity_v0/` remains a research-only metadata placeholder, while optional supervised and HMM artifacts can be trained under `ml/models/` for offline review only.
+- Optional TimescaleDB storage can mirror compact live feature ticks into `stock_ticks` when `TIMESCALE_DB_URI` is configured. This storage path has no trade authority.
 - Webhook/status secrets should be supplied by `X-Webhook-Secret` or `Authorization: Bearer ...`; query-string secrets are legacy fallback only.
 - Prediction gate mode defaults to warn-only for hard blocking. Weak ML predictions can only reduce risk through explicit size caps; they do not place orders, loosen gates, or override broker/order safeguards.
 
@@ -98,6 +100,7 @@ ALPACA_SECRET_KEY
 LOG_LEVEL
 EXECUTION_MODE
 LIVE_TRADING_ENABLED
+TIMESCALE_DB_URI
 
 ## Fresh Checkout Bootstrap
 
@@ -480,6 +483,12 @@ live webhook, broker, order, and hard risk-control paths.
 
 Current staged pieces:
 
+ai_dependency_status.py
+score_financial_sentiment.py
+timescale_smoke_test.py
+train_regime_model.py
+train_supervised_predictions.py
+risk_lockout.py
 ml_platform/brain_features.py
 ml_platform/governance.py
 ml_platform/readiness.py
@@ -493,6 +502,17 @@ tests/staged/
 
 Useful read-only commands:
 
+python3 ai_dependency_status.py
+python3 score_financial_sentiment.py --text "Example headline text"
+python3 score_financial_sentiment.py --text "Example headline text" --finbert
+python3 risk_lockout.py status
+python3 timescale_smoke_test.py --symbol AAPL --price 123.45 --volume 100
+python3 train_supervised_predictions.py \
+  --limit 5000 \
+  --artifact-output ml/models/supervised_entry_v1/model.joblib
+python3 train_regime_model.py \
+  --limit 1000 \
+  --artifact-output ml/models/regime_hmm_v1/model.joblib
 python3 run_staged_tests.py
 python3 -m ml_platform.cli staged-readiness \
   --start-date 2026-05-26 \
@@ -509,6 +529,21 @@ python3 -m ml_platform.cli retraining-readiness \
 The staged readiness report composes dataset profile, dataset manifest, brain
 feature manifest, replay decision-delta audit, prediction-provider contract,
 retraining readiness, and promotion gates. It reports `runtime_effect: none`.
+
+The newer AI analytics services add structured observe-only context around the
+same trading decisions: dependency status, technical features, portfolio/risk
+analytics, sentiment scoring, async-pipeline architecture notes, regime-risk
+protocols, dashboard alerts, persistent lockout state, and optional storage.
+`services/canonical_intelligence_service.py` includes the compact
+`analytics_state` payload inside canonical decision intelligence. The payload is
+intended for replay, audit, and future dataset features; it cannot submit
+orders, increase sizing, bypass gates, or override broker controls.
+
+`TIMESCALE_DB_URI` enables optional asynchronous tick mirroring from
+`services/live_features_service.py` through
+`services/timescale_tick_writer_service.py`. The writer creates/verifies the
+`stock_ticks` hypertable and writes compact symbol/price/volume rows for later
+feature engineering. Leave the env var unset to disable this path cleanly.
 
 `prediction_cache.py` is the runtime-safe bridge for ML prediction reads. It
 preloads `daily_symbol_predictions` into an in-memory dict keyed by symbol,

@@ -74,6 +74,18 @@ Recent completed roadmap items:
   `daily_symbol_predictions` in the live signal path: preload/background
   refresh outside webhook handling, 60-second TTL, memory-only signal-path
   reads, fail-open to no ML prediction.
+- `decision_snapshots` use feature semantic version
+  `decision_snapshot_features_v4`. Canonical intelligence includes compact
+  observe-only `analytics_state` from the predictive/descriptive/diagnostic/
+  prescriptive AI analytics toolkit.
+- Optional TimescaleDB tick storage is enabled only by `TIMESCALE_DB_URI`.
+  `services/live_features_service.py` mirrors compact ticks through
+  `services/timescale_tick_writer_service.py`; this path is storage-only and
+  has no order, sizing, or risk-gate authority.
+- New AI analytics command surfaces exist for operator/research review:
+  `ai_dependency_status.py`, `score_financial_sentiment.py`,
+  `timescale_smoke_test.py`, `train_supervised_predictions.py`,
+  `train_regime_model.py`, and `risk_lockout.py`.
 - The legacy `prediction_gate` fields in trades/snapshots are deterministic
   signal-quality gate fields. Actual ML prediction values must use
   `ml_prediction_*` names; weak buckets may reduce size only through explicit
@@ -147,10 +159,24 @@ python3 run_staged_tests.py
 python3 -m ml_platform.cli staged-readiness --start-date 2026-05-26 --end-date 2026-05-26 --candidate-model similarity_v0 --prediction-symbol AAPL
 python3 -m ml_platform.cli retraining-readiness --start-date 2026-05-26 --end-date 2026-05-26 --trading-sessions-observed 0
 python3 export_ml_dataset.py --date 2026-05-26 --output /tmp/ml_dataset_2026-05-26.csv --manifest-output /tmp/ml_dataset_2026-05-26.manifest.json
+python3 ai_dependency_status.py
+python3 score_financial_sentiment.py --text "Example headline text"
+python3 timescale_smoke_test.py --symbol AAPL --price 123.45 --volume 100
+python3 train_supervised_predictions.py --limit 5000 --artifact-output ml/models/supervised_entry_v1/model.joblib
+python3 train_regime_model.py --limit 1000 --artifact-output ml/models/regime_hmm_v1/model.joblib
+python3 risk_lockout.py status
 
 These commands are read-only with respect to `trades.db`, broker state, orders,
-position sizing, and risk controls. `similarity_v0` is metadata-only until an
-operator explicitly promotes a real artifact through review.
+position sizing, and risk controls, except that the training commands may write
+local model artifacts under `ml/models/` and the Timescale smoke test may write
+a test row to `stock_ticks` when `TIMESCALE_DB_URI` is configured.
+`similarity_v0` is metadata-only until an operator explicitly promotes a real
+artifact through review.
+
+`risk_lockout.py` and `services/persistent_lockout_service.py` can create and
+inspect lockout/rebuilding state for operational safety. The live buy/order
+paths are not wired to enforce that state unless future work explicitly adds
+tests, logging, env flags, and rollback.
 
 Dataset exports default to complete fixed-horizon label rows only. Incomplete,
 unlabeled, and near-close partial rows are excluded from the CSV and counted in

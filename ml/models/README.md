@@ -3,6 +3,23 @@
 Future model artifacts should be registered before any runtime or reporting
 surface consumes them.
 
+Current expected local artifact paths:
+
+- `similarity_v0/`: metadata-only research placeholder.
+- `supervised_entry_v1/model.joblib`: optional sklearn supervised entry
+  artifact from `train_supervised_predictions.py`.
+- `supervised_entry_v1/model.metadata.json`: training metadata, feature/target
+  context, and dependency/runtime details for the supervised artifact.
+- `regime_hmm_v1/model.joblib`: optional hmmlearn GaussianHMM regime artifact
+  from `train_regime_model.py`.
+- `regime_hmm_v1/model.metadata.json`: training metadata and regime-feature
+  context for the HMM artifact.
+
+The supervised and HMM paths can be created locally for smoke tests and offline
+review. They are not live runtime dependencies and do not have authority to
+approve trades, block trades, increase sizing, submit orders, or override risk
+controls.
+
 Suggested fields:
 
 ```json
@@ -60,6 +77,12 @@ Anything beyond `research` requires explicit operator approval and code review.
 Promotion requires a matching demotion path and rollback plan.
 Automatic retraining is disabled by default; after-close learning should create
 readiness evidence for manual review first.
+
+Before promoting either `supervised_entry_v1` or `regime_hmm_v1`, require at
+minimum a model card, dataset manifest, point-in-time feature audit,
+out-of-sample validation, calibration/drift review, replay decision-delta
+report, default-off runtime flag, explicit demotion trigger, and rollback
+procedure.
 
 ## Policy Artifacts
 

@@ -37,6 +37,9 @@ python3 -m ml_platform.cli list-models
 - No broker/order calls.
 - Registry status defaults to `research`.
 - ML kill switches default off.
+- Root-level AI analytics/training CLIs may write local research artifacts or
+  optional Timescale smoke-test rows, but they do not place orders or change
+  live signal authority.
 
 Promotion beyond research requires explicit operator approval, tests, reports,
 environment flags defaulting off, and rollback.
@@ -127,6 +130,38 @@ documented null/default semantics and point-in-time cutoff rules.
 regime, momentum, trend, event/intelligence, prediction, setup, strategy,
 opportunity, policy-artifact, freshness, confidence, and source timestamp state
 for replay and later dataset exports.
+
+`decision_snapshot_features_v4` adds compact `analytics_state` to canonical
+intelligence. That state is built from the AI analytics toolkit services:
+technical feature engineering, analytics method summaries, portfolio/risk
+toolkit context, optional dependency status, sentiment scoring availability,
+async-pipeline architecture notes, regime-risk protocol status, dashboard
+alerts, and persistent lockout visibility. It is an audit/research feature
+surface, not a trading authority.
+
+## Research Training Surfaces
+
+The current root-level training and scoring commands are:
+
+```bash
+python3 ai_dependency_status.py
+python3 train_supervised_predictions.py --limit 5000 --artifact-output ml/models/supervised_entry_v1/model.joblib
+python3 train_regime_model.py --limit 1000 --artifact-output ml/models/regime_hmm_v1/model.joblib
+python3 score_financial_sentiment.py --text "Example headline text"
+python3 score_financial_sentiment.py --text "Example headline text" --finbert
+python3 risk_lockout.py status
+```
+
+`train_supervised_predictions.py` can create a sklearn RandomForest artifact and
+metadata JSON for offline entry prediction experiments. `train_regime_model.py`
+can create a hmmlearn GaussianHMM artifact and metadata JSON for regime
+research. Both artifacts remain observe-only unless an explicit future
+promotion process adds validation, model-card review, default-off env flags,
+runtime tests, and rollback.
+
+`score_financial_sentiment.py` separates the lightweight lexicon fallback from
+the optional FinBERT transformer path. Use it to generate sentiment evidence,
+not to directly approve, reject, size, or exit trades.
 
 ## Staged Readiness
 

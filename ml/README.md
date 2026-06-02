@@ -7,6 +7,9 @@ in behind tests, logging, environment flags, and rollback.
 ## Current Rule
 
 ML output is observe-only.
+Generated model artifacts under `ml/models/` are research artifacts unless a
+future promotion explicitly changes their status through review, tests, default
+off env flags, logging, and rollback.
 
 ## Planned Layers
 
@@ -44,7 +47,7 @@ python3 -m ml_platform.cli env-policy
 ```
 
 These commands are research scaffolds. They do not write to `trades.db`, call a
-broker, or affect Tuesday's paper-trading runtime.
+broker, or affect the current paper-trading runtime.
 
 ## Current Scaffolding
 
@@ -54,6 +57,10 @@ python3 -m ml_platform.cli export-brain-features --date 2026-05-26 --output /tmp
 python3 -m ml_platform.cli create-experiment setup_baseline --dataset-start 2026-05-20 --dataset-end 2026-05-26
 python3 -m ml_platform.cli integration-contract
 python3 -m ml_platform.cli list-models
+python3 ai_dependency_status.py
+python3 train_supervised_predictions.py --limit 5000 --artifact-output ml/models/supervised_entry_v1/model.joblib
+python3 train_regime_model.py --limit 1000 --artifact-output ml/models/regime_hmm_v1/model.joblib
+python3 score_financial_sentiment.py --text "Example headline text"
 python3 run_staged_tests.py
 ```
 
@@ -63,3 +70,15 @@ by default. Promote only reviewed metadata/artifacts intentionally.
 `models/similarity_v0/` is the first versioned research placeholder. It contains
 metadata only: no trained model artifact, no runtime import, and no permission
 to influence orders, position sizing, or risk controls.
+
+`models/supervised_entry_v1/` is the intended local path for supervised entry
+prediction experiments from `train_supervised_predictions.py`. The smoke-tested
+implementation uses sklearn RandomForest when dependencies and training rows are
+available.
+
+`models/regime_hmm_v1/` is the intended local path for HMM regime experiments
+from `train_regime_model.py`. HMM convergence warnings should be treated as
+research evidence to review, not as a runtime failure or promotion signal.
+
+The optional sentiment command can use FinBERT when the transformer dependency
+is installed, but sentiment output remains supporting evidence only.

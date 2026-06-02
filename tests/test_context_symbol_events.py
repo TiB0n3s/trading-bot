@@ -33,6 +33,19 @@ def test_context_only_event_aggregates_into_linked_approved_symbol(tmp_path):
             "linked_symbols": ["NVDA", "AMD", "TSM"],
             "relationship_type": "semiconductor_peer",
             "relationship_themes": ["semiconductors", "ai_infra", "memory"],
+            "ai_event_context": {
+                "version": "ai_event_context_v1",
+                "provider": "deterministic_fallback",
+                "runtime_effect": "context_only_no_live_authority",
+                "authority": "context_only_no_standalone_buy_authority",
+                "summary": "Memory demand context for linked AI infrastructure symbols.",
+                "intent": "demand_or_revenue_signal",
+                "affected_symbols": ["NVDA", "AMD", "TSM"],
+                "market_alignment": "neutral_context",
+                "confirmation_status": "reputable_reported",
+                "missing_evidence": [],
+                "risk_notes": ["context-only"],
+            },
         }
     )
     insert_daily_symbol_event(event, db_path=db_path)
@@ -44,6 +57,9 @@ def test_context_only_event_aggregates_into_linked_approved_symbol(tmp_path):
     assert nvda["event_count"] == 1
     assert nvda["event_context"]["linked_context_event_count"] == 1
     assert nvda["event_context"]["linked_context_symbols"] == ["MU"]
+    assert nvda["event_context"]["ai_interpretation_count"] == 1
+    assert nvda["event_context"]["ai_providers"] == ["deterministic_fallback"]
+    assert nvda["event_context"]["ai_market_alignment"] == ["neutral_context"]
     assert "demand_or_revenue_signal" in nvda["event_context"]["intent_categories"]
     assert aapl["has_events"] is False
 

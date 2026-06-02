@@ -564,6 +564,12 @@ def apply_event_enrichment(symbol_entry: dict, enrichment: dict) -> None:
         "direct_event_count": interpreted_context.get("direct_event_count"),
         "linked_context_event_count": interpreted_context.get("linked_context_event_count"),
         "linked_context_symbols": interpreted_context.get("linked_context_symbols") or [],
+        "ai_interpretation_count": interpreted_context.get("ai_interpretation_count"),
+        "ai_event_context_version": interpreted_context.get("ai_event_context_version"),
+        "ai_providers": interpreted_context.get("ai_providers") or [],
+        "ai_intents": interpreted_context.get("ai_intents") or [],
+        "ai_market_alignment": interpreted_context.get("ai_market_alignment") or [],
+        "ai_summaries": interpreted_context.get("ai_summaries") or [],
         "event_intent_version": interpreted_context.get("event_intent_version"),
         **event_scores,
     }
@@ -595,6 +601,9 @@ def apply_event_enrichment(symbol_entry: dict, enrichment: dict) -> None:
             linked_symbols = interpreted_context.get("linked_context_symbols") or []
             if linked_symbols:
                 intent_text += f" linked_context={','.join(linked_symbols[:4])}."
+            ai_alignment = interpreted_context.get("ai_market_alignment") or []
+            if ai_alignment:
+                intent_text += f" ai_alignment={','.join(ai_alignment[:3])}."
             note = f"Event context catalyst score {catalyst_f:.2f}; {source_note}."
             if intent_text:
                 note += intent_text

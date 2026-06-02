@@ -416,11 +416,41 @@ def aggregate_symbol_events(market_date: str, symbol: str, db_path: Path | str =
         for e in raw_events
         if e.get("confirmation_status")
     ]
+    ai_contexts = [
+        e.get("ai_event_context")
+        for e in raw_events
+        if isinstance(e.get("ai_event_context"), dict)
+    ]
+    ai_summaries = [
+        str(ctx.get("summary"))
+        for ctx in ai_contexts
+        if ctx.get("summary")
+    ]
+    ai_market_alignment = [
+        str(ctx.get("market_alignment"))
+        for ctx in ai_contexts
+        if ctx.get("market_alignment")
+    ]
+    ai_intents = [
+        str(ctx.get("intent"))
+        for ctx in ai_contexts
+        if ctx.get("intent")
+    ]
+    ai_providers = [
+        str(ctx.get("provider"))
+        for ctx in ai_contexts
+        if ctx.get("provider")
+    ]
     missing_evidence = []
     for e in raw_events:
         missing = e.get("missing_evidence") or []
         if isinstance(missing, list):
             missing_evidence.extend(str(item) for item in missing if item)
+        ai_context = e.get("ai_event_context")
+        if isinstance(ai_context, dict):
+            ai_missing = ai_context.get("missing_evidence") or []
+            if isinstance(ai_missing, list):
+                missing_evidence.extend(str(item) for item in ai_missing if item)
 
     out["event_impacts"] = ", ".join(sorted(set(impacts))) if impacts else None
     out["event_relevance"] = ", ".join(sorted(set(relevance))) if relevance else None
@@ -436,6 +466,12 @@ def aggregate_symbol_events(market_date: str, symbol: str, db_path: Path | str =
         "intent_scopes": sorted(set(intent_scopes)),
         "confirmation_statuses": sorted(set(confirmation_statuses)),
         "missing_evidence": sorted(set(missing_evidence)),
+        "ai_interpretation_count": len(ai_contexts),
+        "ai_event_context_version": "ai_event_context_aggregate_v1",
+        "ai_providers": sorted(set(ai_providers)),
+        "ai_intents": sorted(set(ai_intents)),
+        "ai_market_alignment": sorted(set(ai_market_alignment)),
+        "ai_summaries": ai_summaries[:5],
         "authority": "context_only_no_standalone_buy_authority",
     }
 

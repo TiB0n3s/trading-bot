@@ -149,6 +149,42 @@ class PreMarketResearchRepository:
                     "event_count": row["event_count"],
                     "linked_context_symbols": linked_context_symbols,
                     "linked_context_event_count": linked_context_event_count,
+                    "ai_interpretation_count": sum(
+                        1
+                        for event in raw_events
+                        if isinstance(event.get("ai_event_context"), dict)
+                    ),
+                    "ai_event_context_version": "ai_event_context_aggregate_v1",
+                    "ai_providers": sorted(
+                        {
+                            str((event.get("ai_event_context") or {}).get("provider"))
+                            for event in raw_events
+                            if isinstance(event.get("ai_event_context"), dict)
+                            and (event.get("ai_event_context") or {}).get("provider")
+                        }
+                    ),
+                    "ai_intents": sorted(
+                        {
+                            str((event.get("ai_event_context") or {}).get("intent"))
+                            for event in raw_events
+                            if isinstance(event.get("ai_event_context"), dict)
+                            and (event.get("ai_event_context") or {}).get("intent")
+                        }
+                    ),
+                    "ai_market_alignment": sorted(
+                        {
+                            str((event.get("ai_event_context") or {}).get("market_alignment"))
+                            for event in raw_events
+                            if isinstance(event.get("ai_event_context"), dict)
+                            and (event.get("ai_event_context") or {}).get("market_alignment")
+                        }
+                    ),
+                    "ai_summaries": [
+                        str((event.get("ai_event_context") or {}).get("summary"))
+                        for event in raw_events
+                        if isinstance(event.get("ai_event_context"), dict)
+                        and (event.get("ai_event_context") or {}).get("summary")
+                    ][:5],
                     "intent_directions": intent_directions,
                     "intent_categories": intent_categories,
                     "intent_scopes": intent_scopes,

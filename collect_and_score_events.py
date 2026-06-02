@@ -41,6 +41,11 @@ from market_intelligence.event_collectors.company_news_collector import (
 )
 from market_intelligence.experience_model import predict_all_symbols
 from repositories.market_intelligence_repo import MarketIntelligenceRepository
+from services.ai_event_context_service import (
+    AIEventContextConfig,
+    AIEventContextService,
+    anthropic_event_context_provider,
+)
 from alerts import send_alert
 
 
@@ -96,6 +101,19 @@ def print_table(events):
         )
 
 
+def build_ai_event_context_service(provider_name: str) -> AIEventContextService:
+    provider_name = str(provider_name or "deterministic").strip().lower()
+    if provider_name == "anthropic":
+        return AIEventContextService(
+            config=AIEventContextConfig(enabled=True, provider_name="anthropic"),
+            provider=anthropic_event_context_provider(),
+        )
+    return AIEventContextService(
+        config=AIEventContextConfig(enabled=True, provider_name="deterministic"),
+        provider=None,
+    )
+
+
 def write_json(path, payload):
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -118,6 +136,17 @@ def main():
         "--include-context-symbols",
         action="store_true",
         help="Also collect non-tradable context-only symbols for relationship/context enrichment",
+    )
+    parser.add_argument(
+        "--ai-interpret-events",
+        action="store_true",
+        help="Add context-only AI interpretation metadata to scored events",
+    )
+    parser.add_argument(
+        "--ai-event-provider",
+        default="deterministic",
+        choices=("deterministic", "anthropic"),
+        help="Provider for --ai-interpret-events; anthropic uses a lazy API call",
     )
     args = parser.parse_args()
 
@@ -143,6 +172,7 @@ def main():
     print(f"  Date          : {args.date}")
     print(f"  Symbols       : {len(symbols)}")
     print(f"  Context syms  : {args.include_context_symbols}")
+    print(f"  AI context    : {args.ai_interpret_events} ({args.ai_event_provider})")
     print(f"  Max/symbol    : {args.max_per_symbol}")
     print(f"  Dry run       : {args.dry_run}")
     print(f"  Apply context : {args.apply_context}")
@@ -158,10 +188,18 @@ def main():
 
     scored = []
     errors = []
+    ai_context_service = (
+        build_ai_event_context_service(args.ai_event_provider)
+        if args.ai_interpret_events
+        else None
+    )
 
     for e in raw_events:
         try:
-            scored.append(score_event(e))
+            scored_event = score_event(e)
+            if ai_context_service is not None:
+                scored_event["ai_event_context"] = ai_context_service.interpret(scored_event)
+            scored.append(scored_event)
         except Exception as exc:
             errors.append(f"{e.get('symbol')} {e.get('event_summary')}: {exc}")
 
@@ -208,6 +246,10 @@ def main():
     by_symbol = Counter(e.get("symbol") for e in new_events)
     by_source = Counter(e.get("source") or "unknown" for e in new_events)
     by_source_tier = Counter(e.get("source_tier") or "unknown" for e in new_events)
+    by_ai_provider = Counter(
+        ((e.get("ai_event_context") or {}).get("provider") or "none")
+        for e in new_events
+    )
 
     print()
     print(f"  Event types   : {dict(by_type)}")
@@ -215,6 +257,8 @@ def main():
     print(f"  Relevance     : {dict(by_relevance)}")
     print(f"  Sources       : {dict(by_source)}")
     print(f"  Source tiers  : {dict(by_source_tier)}")
+    if args.ai_interpret_events:
+        print(f"  AI providers  : {dict(by_ai_provider)}")
     print(f"  Top symbols   : {dict(by_symbol.most_common(15))}")
 
     print_table(new_events)

@@ -586,7 +586,10 @@ class OpsCheckRepository:
                             buy_opportunity_recommendation IS NOT NULL
                             AND buy_opportunity_recommendation != ''
                           )
-                          AND trader_brain_score IS NOT NULL
+                          AND (
+                            trader_brain_score IS NOT NULL
+                            OR confidence = 'auto_buy_manager'
+                          )
                           AND (
                             session_trend_label IS NOT NULL
                             AND session_trend_label != ''
@@ -637,7 +640,10 @@ class OpsCheckRepository:
                             buy_opportunity_recommendation IS NOT NULL
                             AND buy_opportunity_recommendation != ''
                           )
-                          AND trader_brain_score IS NOT NULL
+                          AND (
+                            trader_brain_score IS NOT NULL
+                            OR confidence = 'auto_buy_manager'
+                          )
                           AND (
                             session_trend_label IS NOT NULL
                             AND session_trend_label != ''

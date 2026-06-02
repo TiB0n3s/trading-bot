@@ -121,7 +121,7 @@ def run_conviction_persistence_health(
         ("active_caps", "not persisted as a dedicated column"),
         ("buy_opportunity_score", "trades.buy_opportunity_score"),
         ("buy_opportunity_bucket", "trades.buy_opportunity_recommendation"),
-        ("strategy_score", "trades.trader_brain_score"),
+        ("strategy_score", "trades.trader_brain_score (not applicable to auto_buy_manager rows)"),
         ("session_momentum_label", "trades.session_trend_label"),
         ("ml_prediction_bucket", "trades.ml_prediction_bucket"),
         ("setup_policy_action", "trades.setup_policy_action"),

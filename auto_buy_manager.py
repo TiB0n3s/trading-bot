@@ -61,9 +61,11 @@ from bot_events import log_event
 from market_time import ET, is_market_hours, now_et
 from repositories import auto_buy_repo
 from repositories.candidate_universe_repo import CandidateUniverseRepository
+from repositories.prediction_repo import PredictionRepository
 from risk.exposure import any_cluster_limit_hit, cluster_exposure
 from services.candidate_universe_service import CandidateUniverseService
 from services.ai_momentum_pattern_service import deterministic_momentum_pattern
+from services.policies.entry_policy import ml_prediction_bucket
 from symbols_config import (
     APPROVED_SYMBOLS_LIST,
     CLUSTER_EXPOSURE_LIMITS,
@@ -94,6 +96,15 @@ AUTO_BUY_EXTENDED_VWAP_CAUTION_PCT = float(os.getenv("AUTO_BUY_EXTENDED_VWAP_CAU
 AUTO_BUY_UNCLASSIFIED_EXTENDED_BLOCK_PCT = float(
     os.getenv("AUTO_BUY_UNCLASSIFIED_EXTENDED_BLOCK_PCT", "1.50")
 )
+AUTO_BUY_ML_WEAK_BLOCK_ENABLED = os.getenv(
+    "AUTO_BUY_ML_WEAK_BLOCK_ENABLED", "true"
+).strip().lower() in ("1", "true", "yes", "on")
+AUTO_BUY_ML_WEAK_BLOCK_SCORE = float(os.getenv("AUTO_BUY_ML_WEAK_BLOCK_SCORE", "45"))
+AUTO_BUY_ML_WEAK_BLOCK_MIN_SAMPLE_SIZE = int(
+    os.getenv("AUTO_BUY_ML_WEAK_BLOCK_MIN_SAMPLE_SIZE", "20")
+)
+
+_prediction_context_cache: dict[str, dict[str, Any]] = {}
 
 
 def _to_float(value: Any, default: float | None = None) -> float | None:
@@ -119,6 +130,50 @@ def _parse_et_timestamp(raw_ts: Any) -> datetime | None:
     if ts.tzinfo is None:
         return ts
     return ts.astimezone(ET).replace(tzinfo=None)
+
+
+def auto_buy_prediction_context(symbol: str) -> dict[str, Any]:
+    symbol = str(symbol or "").upper()
+    if not symbol:
+        return {"available": False, "ml_prediction_bucket": "unknown"}
+    if symbol in _prediction_context_cache:
+        return dict(_prediction_context_cache[symbol])
+
+    result: dict[str, Any] = {
+        "available": False,
+        "ml_prediction_bucket": "unknown",
+        "ml_prediction_score": None,
+        "ml_prediction_confidence": None,
+        "ml_prediction_sample_size": None,
+        "ml_prediction_reason": None,
+        "prediction_generated_at": None,
+    }
+    try:
+        row = PredictionRepository(DB_PATH).serving_prediction_row(_today(), symbol)
+    except Exception as exc:
+        result["lookup_error"] = str(exc)
+        _prediction_context_cache[symbol] = dict(result)
+        return result
+
+    if row:
+        score = row.get("prediction_score")
+        result.update(
+            {
+                "available": True,
+                "prediction_score": score,
+                "prediction_decision": "observe_only",
+                "prediction_reason": row.get("reason"),
+                "ml_prediction_score": score,
+                "ml_prediction_bucket": ml_prediction_bucket(score),
+                "ml_prediction_confidence": row.get("confidence"),
+                "ml_prediction_sample_size": row.get("sample_size"),
+                "ml_prediction_reason": row.get("reason"),
+                "prediction_generated_at": row.get("prediction_generated_at"),
+            }
+        )
+
+    _prediction_context_cache[symbol] = dict(result)
+    return result
 
 
 def session_elapsed_minutes(now=None) -> float:
@@ -595,6 +650,20 @@ def evaluate_auto_buy_candidate(
     hard_block_reasons = []
 
     volume_ratio = _to_float(feature.get("volume_ratio_5m"), 0) or 0
+    prediction_context = auto_buy_prediction_context(symbol)
+    ml_score = _to_float(prediction_context.get("ml_prediction_score"))
+    ml_sample = int(_to_float(prediction_context.get("ml_prediction_sample_size"), 0) or 0)
+    if prediction_context.get("lookup_error"):
+        reasons.append(f"ml_prediction_lookup_error:{prediction_context['lookup_error']}")
+    elif prediction_context.get("available"):
+        reasons.append(
+            "ml_prediction:"
+            f"{prediction_context.get('ml_prediction_bucket')}"
+            f":score={ml_score}"
+            f":sample={ml_sample}"
+        )
+    else:
+        reasons.append("ml_prediction:unavailable")
 
     # A symbol can occasionally buck its own fading/downtrend session label via two paths:
     # 1. Full-session: strong session return + relative strength confirm sustained divergence.
@@ -649,6 +718,18 @@ def evaluate_auto_buy_candidate(
             hard_block_reasons.append(f"30m_falling:{m30:.3f}")
         else:
             reasons.append(f"30m_falling_soft:{m30:.3f}")
+    if (
+        AUTO_BUY_ML_WEAK_BLOCK_ENABLED
+        and ml_score is not None
+        and ml_score < AUTO_BUY_ML_WEAK_BLOCK_SCORE
+        and ml_sample >= AUTO_BUY_ML_WEAK_BLOCK_MIN_SAMPLE_SIZE
+    ):
+        hard_block_reasons.append(
+            "ml_prediction_weak:"
+            f"{ml_score:.2f}<"
+            f"{AUTO_BUY_ML_WEAK_BLOCK_SCORE:.2f};"
+            f"sample={ml_sample}"
+        )
     hard_block_reason = "; ".join(hard_block_reasons) if hard_block_reasons else None
 
     strong_threshold = AUTO_BUY_MIN_SCORE
@@ -698,6 +779,7 @@ def evaluate_auto_buy_candidate(
         "setup_recommendation": setup_rec,
         "setup_score": setup_score,
         "feature_snapshot_id": feature.get("id"),
+        **prediction_context,
         **pattern,
     }
 
@@ -754,6 +836,8 @@ def log_auto_buy_order(candidate: dict[str, Any], order: dict[str, Any]) -> bool
     if auto_buy_repo.trade_order_exists(order_id, DB_PATH):
         return False
 
+    enrich_auto_buy_trade_context(candidate)
+
     auto_buy_repo.insert_auto_buy_trade(
         timestamp=now_et().strftime("%Y-%m-%d %H:%M:%S"),
         candidate=candidate,
@@ -765,6 +849,42 @@ def log_auto_buy_order(candidate: dict[str, Any], order: dict[str, Any]) -> bool
         db_path=DB_PATH,
     )
     return True
+
+
+def enrich_auto_buy_trade_context(candidate: dict[str, Any]) -> None:
+    """Attach audit attribution fields before direct auto-buy trade persistence."""
+    symbol = str(candidate.get("symbol") or "").upper()
+    prediction_score = candidate.get("ml_prediction_score")
+    if prediction_score is None and symbol:
+        try:
+            prediction = PredictionRepository(DB_PATH).serving_prediction_row(_today(), symbol)
+        except Exception as exc:
+            prediction = None
+            candidate["ml_prediction_lookup_error"] = str(exc)
+    else:
+        prediction = None
+
+    if prediction:
+        prediction_score = prediction.get("prediction_score")
+        candidate["prediction_score"] = prediction_score
+        candidate["prediction_decision"] = "observe_only"
+        candidate["prediction_reason"] = prediction.get("reason")
+        candidate["ml_prediction_score"] = prediction_score
+        candidate["ml_prediction_confidence"] = prediction.get("confidence")
+        candidate["ml_prediction_sample_size"] = prediction.get("sample_size")
+        candidate["ml_prediction_generated_at"] = prediction.get("prediction_generated_at")
+    elif prediction_score is not None:
+        candidate["prediction_score"] = candidate.get("prediction_score") or prediction_score
+        candidate["prediction_decision"] = candidate.get("prediction_decision") or "observe_only"
+
+    candidate["ml_prediction_bucket"] = ml_prediction_bucket(prediction_score)
+    candidate["effective_size_cap_pct"] = AUTO_BUY_POSITION_SIZE_PCT
+    candidate["dominant_limiter"] = "auto_buy_fixed_size"
+    candidate["session_momentum_severity"] = (
+        "pass"
+        if candidate.get("session_trend_label") in {"strong_uptrend", "developing_uptrend"}
+        else "observe"
+    )
 
 
 def maybe_execute_auto_buy(candidate: dict[str, Any], market_open: bool, live_requested: bool) -> dict[str, Any] | None:

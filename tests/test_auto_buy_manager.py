@@ -113,6 +113,36 @@ def test_negative_session_blocks_candidate():
         raise AssertionError(f"missing hard block reason: {result['hard_block_reason']}")
 
 
+def test_weak_ml_prediction_blocks_auto_buy_candidate():
+    old_prediction_context = auto_buy_manager.auto_buy_prediction_context
+    auto_buy_manager.auto_buy_prediction_context = lambda symbol: {
+        "available": True,
+        "prediction_score": 41.0,
+        "prediction_decision": "observe_only",
+        "prediction_reason": "test weak prediction",
+        "ml_prediction_score": 41.0,
+        "ml_prediction_bucket": "weak_below_45",
+        "ml_prediction_confidence": "medium",
+        "ml_prediction_sample_size": 30,
+    }
+    try:
+        result = evaluate_auto_buy_candidate(
+            symbol="AMZN",
+            session=strong_session(),
+            feature=favorable_feature(),
+            context=buy_context(),
+            held=set(),
+        )
+    finally:
+        auto_buy_manager.auto_buy_prediction_context = old_prediction_context
+
+    assert_equal(result["decision"], "skip", "decision")
+    assert_equal(result["severity"], "blocked", "severity")
+    assert_equal(result["ml_prediction_bucket"], "weak_below_45", "bucket")
+    if "ml_prediction_weak" not in result["hard_block_reason"]:
+        raise AssertionError(f"missing ML weak block: {result['hard_block_reason']}")
+
+
 def test_unclassified_extended_vwap_blocks_candidate():
     session = strong_session()
     session["distance_from_vwap_pct"] = 1.65
@@ -317,9 +347,17 @@ def test_log_auto_buy_order_writes_canonical_trade_row():
                     setup_label TEXT,
                     setup_policy_action TEXT,
                     setup_policy_reason TEXT,
+                    prediction_score REAL,
+                    prediction_decision TEXT,
+                    prediction_reason TEXT,
+                    ml_prediction_score REAL,
+                    ml_prediction_bucket TEXT,
                     buy_opportunity_score REAL,
                     buy_opportunity_recommendation TEXT,
-                    buy_opportunity_reason TEXT
+                    buy_opportunity_reason TEXT,
+                    session_momentum_severity TEXT,
+                    effective_size_cap_pct REAL,
+                    dominant_limiter TEXT
                 )
                 """
             )
@@ -364,7 +402,8 @@ def test_log_auto_buy_order_writes_canonical_trade_row():
             row = con.execute(
                 """
                 SELECT symbol, action, approved, order_id, order_status,
-                       qty, buy_opportunity_score, buy_opportunity_recommendation
+                       qty, buy_opportunity_score, buy_opportunity_recommendation,
+                       ml_prediction_bucket, effective_size_cap_pct, dominant_limiter
                 FROM trades
                 """
             ).fetchone()
@@ -379,6 +418,9 @@ def test_log_auto_buy_order_writes_canonical_trade_row():
         assert_equal(row[5], 10, "qty")
         assert_equal(row[6], 18.0, "score")
         assert_equal(row[7], "strong_buy_candidate", "recommendation")
+        assert_equal(row[8], "unknown", "missing prediction bucket")
+        assert_equal(row[9], auto_buy_manager.AUTO_BUY_POSITION_SIZE_PCT, "auto-buy size cap")
+        assert_equal(row[10], "auto_buy_fixed_size", "auto-buy limiter")
 
 
 def test_log_candidate_mirrors_to_candidate_universe():
@@ -463,6 +505,7 @@ def main():
         test_strong_internal_candidate_scores_as_buy_candidate,
         test_held_symbol_is_skipped,
         test_negative_session_blocks_candidate,
+        test_weak_ml_prediction_blocks_auto_buy_candidate,
         test_unclassified_extended_vwap_blocks_candidate,
         test_tradingview_symbols_need_higher_auto_buy_threshold,
         test_early_session_buffer_skips_collection,
@@ -477,8 +520,18 @@ def main():
     ]
 
     for test in tests:
-        test()
-        print(f"[OK] {test.__name__}")
+        old_prediction_context = auto_buy_manager.auto_buy_prediction_context
+        auto_buy_manager.auto_buy_prediction_context = lambda symbol: {
+            "available": False,
+            "ml_prediction_bucket": "unknown",
+            "ml_prediction_score": None,
+            "ml_prediction_sample_size": None,
+        }
+        try:
+            test()
+            print(f"[OK] {test.__name__}")
+        finally:
+            auto_buy_manager.auto_buy_prediction_context = old_prediction_context
 
     print()
     print(f"All {len(tests)} auto-buy manager tests passed.")

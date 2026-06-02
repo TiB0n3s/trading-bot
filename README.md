@@ -18,7 +18,7 @@ As of the latest roadmap work:
 - Runtime and report DB/market-data cleanup has moved most scripts through repositories/services, including fill stream/poller, session momentum, pre-market research, live features, prediction cache, bot events, reports, ops checks, and ML/backfill paths.
 - `/status` exposes `symbol_intelligence`, prediction-cache status, policy-artifact status, runtime config, and service-owned status payloads.
 - Daily intelligence pipeline creates `daily_symbol_context`, `daily_symbol_events`, `daily_symbol_predictions`, `strong_day_participation`, trend context, and prediction-validation reports.
-- `ops_check.py` includes performance, runtime, and persistence diagnostics such as `runtime-health`, `lifecycle-analysis`, `setup-breakdown`, `conviction-stack-report`, `conviction-persistence-health`, `peak-bucket-report`, `winner-became-loser`, and prediction validation.
+- `ops_check.py` includes performance, runtime, resource, and persistence diagnostics such as `runtime-health`, `resource-readiness`, `lifecycle-analysis`, `setup-breakdown`, `conviction-stack-report`, `conviction-persistence-health`, `peak-bucket-report`, `winner-became-loser`, and prediction validation.
 - Approved BUY audit persistence records final sizing attribution, dominant limiter, active cap-derived effective cap, ML prediction bucket/score, buy-opportunity recommendation, strategy score, session label, and setup policy action.
 - `db_migrations.py` provides the idempotent migration runner; app startup no longer owns schema `ALTER TABLE` work.
 - `feature_snapshots`, `decision_snapshots`, `rejected_signal_outcomes`, `exit_snapshots`, `matched_trades`, and related report tables support ML governance, counterfactual coverage, lifecycle analysis, and replay validation.
@@ -723,6 +723,7 @@ python3 ops_check.py signal-lessons
 python3 ops_check.py trends
 python3 ops_check.py prediction-validation
 python3 ops_check.py runtime-health YYYY-MM-DD
+python3 ops_check.py resource-readiness
 python3 ops_check.py lifecycle-analysis YYYY-MM-DD
 python3 ops_check.py lifecycle-analysis YYYY-MM-DD --symbol AAPL --samples 25
 python3 ops_check.py ai-intelligence-review YYYY-MM-DD
@@ -741,6 +742,26 @@ python3 ops_check.py events "$TARGET_DATE"
 python3 ops_check.py predictions "$TARGET_DATE"
 python3 ops_check.py trends "$TARGET_DATE"
 python3 ops_check.py prediction-validation "$TARGET_DATE"
+
+Resource readiness:
+
+`ops_check.py resource-readiness` inventories optional VM integrations without
+loading provider SDKs or making network calls. It reports whether credentials
+and Python packages are present for future resource adapters such as Polygon or
+Databento market data, SEC EDGAR disclosures, premium news APIs, local
+embedding/vector search, DuckDB/Parquet research exports, and Prometheus-style
+metrics. A configured resource is still observe-only until explicitly wired
+through a service boundary and validated by reports/tests.
+
+Common resource environment variables:
+
+```text
+POLYGON_API_KEY
+DATABENTO_API_KEY
+SEC_EDGAR_USER_AGENT
+NEWS_API_KEY
+ANTHROPIC_API_KEY
+```
 Prediction Validation Report
 
 prediction_validation_report.py compares predictions to later signal/trade

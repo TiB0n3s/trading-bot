@@ -427,11 +427,19 @@ def insert_auto_buy_trade(
                 setup_label,
                 setup_policy_action,
                 setup_policy_reason,
+                prediction_score,
+                prediction_decision,
+                prediction_reason,
+                ml_prediction_score,
+                ml_prediction_bucket,
                 buy_opportunity_score,
                 buy_opportunity_recommendation,
-                buy_opportunity_reason
+                buy_opportunity_reason,
+                session_momentum_severity,
+                effective_size_cap_pct,
+                dominant_limiter
             ) VALUES (?, ?, 'buy', ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, NULL,
-                      ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                      ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 timestamp,
@@ -458,8 +466,16 @@ def insert_auto_buy_trade(
                 candidate.get("setup_label"),
                 candidate.get("setup_recommendation"),
                 candidate.get("reason"),
+                candidate.get("prediction_score"),
+                candidate.get("prediction_decision"),
+                candidate.get("prediction_reason"),
+                candidate.get("ml_prediction_score"),
+                candidate.get("ml_prediction_bucket"),
                 candidate.get("score"),
                 candidate.get("decision"),
                 candidate.get("reason"),
+                candidate.get("session_momentum_severity"),
+                candidate.get("effective_size_cap_pct"),
+                candidate.get("dominant_limiter"),
             ),
         )

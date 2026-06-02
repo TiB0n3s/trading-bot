@@ -304,6 +304,17 @@ def test_ops_reliability_cli_missing_db_exits_cleanly(tmp_path):
         assert "[WARN] trades.db not found" in out
 
 
+def test_resource_readiness_cli_does_not_require_db(tmp_path):
+    code, out = _run_cli(tmp_path, "resource-readiness", "2026-05-30")
+
+    assert code == 0
+    assert "VM Resource Readiness" in out
+    assert "report_version          : vm_resource_readiness_v1" in out
+    assert "runtime_effect          : readiness_only_no_live_authority" in out
+    assert "polygon_market_data" in out
+    assert "sec_edgar_official_disclosures" in out
+
+
 def test_feature_attribution_cli_empty_lifecycle_rows_warns(tmp_path):
     with sqlite3.connect(tmp_path / "trades.db") as con:
         con.execute(

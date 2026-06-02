@@ -43,6 +43,7 @@ Usage:
   python3 ops_check.py log-ledger-consistency
   python3 ops_check.py portfolio-risk
   python3 ops_check.py production-evidence
+  python3 ops_check.py resource-readiness
   python3 ops_check.py lifecycle-analysis
   python3 ops_check.py decision-lifecycle-dashboard
   python3 ops_check.py exit-snapshot-backfill YYYY-MM-DD [--dry-run]
@@ -109,6 +110,7 @@ from services.ops_checks.event_context_validation_checks import run_event_contex
 from services.ops_checks.log_ledger_checks import run_log_ledger_consistency
 from services.ops_checks.portfolio_risk_checks import run_portfolio_risk_report
 from services.ops_checks.point_in_time_archive_checks import run_point_in_time_archive
+from services.ops_checks.resource_readiness_checks import run_resource_readiness
 from services.ops_checks.snapshot_checks import run_decision_snapshot_health
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -578,6 +580,10 @@ def production_evidence(target_date):
     return False
 
 
+def resource_readiness():
+    return run_resource_readiness(base_dir=BASE_DIR)
+
+
 def lifecycle_analysis(target_date):
     symbol = None
     if "--symbol" in sys.argv:
@@ -869,6 +875,9 @@ def main():
 
     if command == "production-evidence":
         return 0 if production_evidence(target_date) else 1
+
+    if command == "resource-readiness":
+        return 0 if resource_readiness() else 1
 
     if command == "lifecycle-analysis":
         return 0 if lifecycle_analysis(target_date) else 1

@@ -94,6 +94,15 @@ def collect_active_caps(account_state: dict[str, Any]) -> list[SizeCap]:
                 (account_state["setup_quality_size_cap"] or {}).get("reason"),
             )
         )
+    buy_opportunity_sizing = account_state.get("buy_opportunity_sizing") or {}
+    if buy_opportunity_sizing.get("cap_pct") is not None:
+        caps.append(
+            SizeCap(
+                "buy_opportunity",
+                float(buy_opportunity_sizing.get("cap_pct")),
+                buy_opportunity_sizing.get("reason"),
+            )
+        )
     if account_state.get("max_position_size_pct_override") is not None:
         caps.append(
             SizeCap(
@@ -180,13 +189,32 @@ def apply_final_sizing(
         risk_multiplier=risk_multiplier,
         account_state=account_state,
     )
+    active_caps = collect_active_caps(account_state)
+    tightest_cap = min(active_caps, key=lambda cap: cap.cap_pct) if active_caps else None
+    dominant_limiter = (
+        tightest_cap.source
+        if tightest_cap is not None
+        else account_state.get("dominant_limiter") or "uncapped"
+    )
+    if action == "buy":
+        account_state["dominant_limiter"] = dominant_limiter
+        conviction_stack = dict(account_state.get("conviction_stack") or {})
+        if conviction_stack:
+            conviction_stack["effective_cap_pct"] = (
+                tightest_cap.cap_pct
+                if tightest_cap is not None
+                else account_state.get("max_position_size_pct_override")
+            )
+            account_state["conviction_stack"] = conviction_stack
+    else:
+        conviction_stack = account_state.get("conviction_stack") or {}
 
     return SizingDecision(
         requested_size_pct=requested,
         final_size_pct=final_pct,
-        dominant_limiter=account_state.get("dominant_limiter"),
-        active_caps=collect_active_caps(account_state),
-        conviction_stack=account_state.get("conviction_stack") or {},
+        dominant_limiter=dominant_limiter,
+        active_caps=active_caps,
+        conviction_stack=conviction_stack,
     )
 
 

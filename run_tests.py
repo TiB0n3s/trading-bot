@@ -86,6 +86,7 @@ TESTS = [
     "tests/test_async_ai_pipeline_architecture_service.py",
     "tests/test_regime_risk_protocol_service.py",
     "tests/test_optional_dependency_service.py",
+    "tests/test_vm_resource_readiness_service.py",
     "tests/test_persistent_lockout_service.py",
     "tests/test_financial_sentiment_service.py",
     "tests/test_ai_event_context_service.py",

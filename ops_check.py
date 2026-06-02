@@ -45,6 +45,7 @@ Usage:
   python3 ops_check.py production-evidence
   python3 ops_check.py lifecycle-analysis
   python3 ops_check.py decision-lifecycle-dashboard
+  python3 ops_check.py exit-snapshot-backfill YYYY-MM-DD [--dry-run]
   python3 ops_check.py candidate-universe
   python3 ops_check.py calibration-buckets
   python3 ops_check.py feature-attribution
@@ -87,6 +88,7 @@ from services.ops_checks.feature_checks import run_feature_health, run_feature_w
 from services.ops_checks.intelligence_checks import run_intelligence_summary
 from services.ops_checks.lifecycle_checks import run_lifecycle_analysis
 from services.ops_checks.lifecycle_dashboard_checks import run_lifecycle_dashboard
+from services.ops_checks.exit_snapshot_backfill_checks import run_exit_snapshot_backfill
 from services.ops_checks.candidate_universe_checks import run_candidate_universe_report
 from services.ops_checks.calibration_bucket_checks import run_calibration_buckets
 from services.ops_checks.feature_attribution_checks import run_feature_attribution_report
@@ -604,6 +606,18 @@ def decision_lifecycle_dashboard(target_date):
     )
 
 
+def exit_snapshot_backfill(target_date):
+    end_date = None
+    if len(sys.argv) > 3 and not sys.argv[3].startswith("--"):
+        end_date = sys.argv[3]
+    return run_exit_snapshot_backfill(
+        target_date,
+        end_date=end_date,
+        dry_run="--dry-run" in sys.argv,
+        limit=_int_option("--limit", 0) or None,
+    )
+
+
 def candidate_universe(target_date):
     symbol = None
     if "--symbol" in sys.argv:
@@ -861,6 +875,9 @@ def main():
 
     if command == "decision-lifecycle-dashboard":
         return 0 if decision_lifecycle_dashboard(target_date) else 1
+
+    if command == "exit-snapshot-backfill":
+        return 0 if exit_snapshot_backfill(target_date) else 1
 
     if command == "candidate-universe":
         return 0 if candidate_universe(target_date) else 1

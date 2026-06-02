@@ -105,6 +105,80 @@ class ExitSnapshotRepository:
             )
             return int(cur.lastrowid)
 
+    def approved_matched_exit_rows_missing_snapshots(
+        self,
+        *,
+        start_date: str,
+        end_date: str | None = None,
+        limit: int | None = None,
+    ):
+        """Return approved BUY entries with matched exits but no exit snapshot.
+
+        Historical matching can produce multiple rows for partial exits. For
+        the lifecycle-level repair path, use the latest matched exit per entry
+        order so one approved entry maps to one canonical exit snapshot.
+        """
+        self.init_table()
+        end_date = end_date or start_date
+        limit_sql = "LIMIT ?" if limit else ""
+        params: list[Any] = [start_date, end_date]
+        if limit:
+            params.append(limit)
+
+        with get_connection(self.db_path) as con:
+            return con.execute(
+                f"""
+                WITH latest_match AS (
+                    SELECT entry_order_id, MAX(id) AS matched_trade_id
+                    FROM matched_trades
+                    WHERE entry_order_id IS NOT NULL
+                    GROUP BY entry_order_id
+                )
+                SELECT
+                    ds.id AS decision_snapshot_id,
+                    ds.decision_time AS decision_time,
+                    ds.trade_id AS entry_trade_id,
+                    ds.symbol AS symbol,
+                    ds.canonical_intelligence_version AS entry_canonical_intelligence_version,
+                    ds.canonical_intelligence_hash AS entry_canonical_intelligence_hash,
+                    ds.canonical_intelligence_json AS canonical_intelligence_json,
+                    t.order_id AS entry_order_id,
+                    t.qty AS entry_qty,
+                    t.fill_price AS entry_fill_price,
+                    mt.id AS matched_trade_id,
+                    mt.exit_order_id AS exit_order_id,
+                    mt.exit_timestamp AS exit_timestamp,
+                    mt.exit_reason AS exit_reason,
+                    mt.holding_minutes AS holding_minutes,
+                    mt.qty AS exit_qty,
+                    mt.entry_price AS matched_entry_price,
+                    mt.exit_price AS exit_price,
+                    mt.realized_pnl AS realized_pnl,
+                    mt.realized_pnl_pct AS realized_return_pct,
+                    mt.mfe_pct AS mfe_pct,
+                    mt.capture_ratio AS capture_ratio
+                FROM decision_snapshots ds
+                JOIN trades t
+                  ON t.id = ds.trade_id
+                JOIN latest_match lm
+                  ON lm.entry_order_id = t.order_id
+                JOIN matched_trades mt
+                  ON mt.id = lm.matched_trade_id
+                LEFT JOIN exit_snapshots es
+                  ON es.decision_snapshot_id = ds.id
+                  OR es.matched_trade_id = mt.id
+                  OR es.entry_trade_id = ds.trade_id
+                WHERE ds.approved = 1
+                  AND lower(COALESCE(ds.action, '')) = 'buy'
+                  AND mt.exit_timestamp IS NOT NULL
+                  AND es.id IS NULL
+                  AND date(ds.decision_time) BETWEEN ? AND ?
+                ORDER BY ds.decision_time, ds.id
+                {limit_sql}
+                """,
+                params,
+            ).fetchall()
+
     def latest_for_symbol(self, symbol: str, limit: int = 20):
         self.init_table()
         with get_connection(self.db_path) as con:

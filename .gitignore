@@ -72,6 +72,7 @@ policy_backtest_summary.json
 
 # Generated strategy memory snapshots
 strategy_memory_history/
+runtime_state/
 
 # Generated portfolio replacement intelligence
 portfolio_replacement_memory.json

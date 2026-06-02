@@ -79,6 +79,7 @@ TESTS = [
     "tests/test_regime_switching_service.py",
     "tests/test_regime_switching_service_extended.py",
     "tests/test_regime_model_router_service.py",
+    "tests/test_regime_observation_service.py",
     "tests/test_regime_circuit_breaker_service.py",
     "tests/test_regime_rebuilder_service.py",
     "tests/test_async_ai_pipeline_architecture_service.py",

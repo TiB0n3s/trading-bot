@@ -111,6 +111,31 @@ def _age_seconds(decision_ts: str | None, source_ts: Any) -> float | None:
     return round((decision_dt - source_dt).total_seconds(), 3)
 
 
+def _bucket_execution_spread(spread_pct: Any, net_cost_pct: Any) -> str:
+    try:
+        spread = float(spread_pct)
+    except Exception:
+        spread = None
+    try:
+        net_cost = float(net_cost_pct)
+    except Exception:
+        net_cost = None
+
+    if spread is not None:
+        if spread <= 0.05:
+            return "tight"
+        if spread <= 0.20:
+            return "moderate"
+        return "wide"
+    if net_cost is not None:
+        if net_cost <= 0.10:
+            return "tight"
+        if net_cost <= 0.35:
+            return "moderate"
+        return "wide"
+    return "unknown"
+
+
 @dataclass(frozen=True)
 class CanonicalIntelligenceSnapshot:
     version: str
@@ -169,9 +194,33 @@ def build_canonical_intelligence_snapshot(
     portfolio_decision = account_state.get("portfolio_decision") or {}
     execution_quality = account_state.get("execution_quality") or {}
     rollout_contract = account_state.get("rollout_contract") or {}
+    regime_observation = account_state.get("regime_observation") or {}
+    regime_routing_decision = account_state.get("regime_routing_decision") or {}
+    regime_observation_context = account_state.get("regime_observation_context") or {}
+    spread_bucket = _bucket_execution_spread(
+        execution_quality.get("spread_pct"),
+        execution_quality.get("net_execution_cost_pct"),
+    )
 
     regime_state = {
         "macro_regime": context.get("macro_regime"),
+        "inferred_regime_id": regime_observation.get("regime_id"),
+        "inferred_regime_label": regime_observation.get("regime_label"),
+        "inferred_regime_confidence": regime_observation.get("confidence"),
+        "inferred_regime_stable": regime_observation.get("stable"),
+        "inferred_regime_source": regime_observation_context.get(
+            "regime_observation_source"
+        ),
+        "regime_model_slot": regime_routing_decision.get("active_model_slot"),
+        "regime_sub_model_strategy": regime_routing_decision.get(
+            "sub_model_strategy"
+        ),
+        "regime_routing_size_modifier": regime_routing_decision.get(
+            "size_modifier"
+        ),
+        "regime_routing_allow_new_longs": regime_routing_decision.get(
+            "allow_new_longs"
+        ),
         "market_regime": market_regime.get("composite_regime"),
         "trend_regime": market_regime.get("trend_regime"),
         "volatility_regime": market_regime.get("volatility_regime"),
@@ -260,6 +309,7 @@ def build_canonical_intelligence_snapshot(
         "overlap_symbols": portfolio_decision.get("overlap_symbols") or [],
         "execution_quality_decision": execution_quality.get("decision"),
         "fill_quality": execution_quality.get("fill_quality"),
+        "spread_bucket": spread_bucket,
         "spread_pct": execution_quality.get("spread_pct"),
         "slippage_estimate_pct": execution_quality.get("slippage_estimate_pct"),
         "signal_executable_gap_pct": execution_quality.get("signal_executable_gap_pct"),
@@ -376,6 +426,8 @@ def build_canonical_intelligence_snapshot(
         ),
         "portfolio_decision": portfolio_decision,
         "execution_quality": execution_quality,
+        "regime_observation": regime_observation,
+        "regime_routing_decision": regime_routing_decision,
         "market_microstructure": market_microstructure,
         "market_participation": market_participation,
         "volatility_normalization": volatility_normalization,

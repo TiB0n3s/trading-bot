@@ -231,7 +231,7 @@ def evaluate_decision_policy(
     execution_quality = account_state.get("execution_quality") or {}
     execution_action = execution_quality.get("decision")
     if execution_action == "block":
-        risks.append("execution quality says block")
+        risks.append("execution quality says block candidate")
         evidence.append(
             f"net_execution_cost_pct={execution_quality.get('net_execution_cost_pct')}"
         )
@@ -294,7 +294,6 @@ def evaluate_decision_policy(
             opp_decision == "block"
             or pred_decision == "block"
             or portfolio_action == "block"
-            or execution_action == "block"
         ):
             decision = "block"
             size_multiplier = 0.0
@@ -327,13 +326,13 @@ def evaluate_decision_policy(
                 float(portfolio_decision.get("size_multiplier") or 0.75),
             )
             reason = "portfolio duplicate risk; reduce size"
-        elif execution_action == "size_down":
+        elif execution_action in {"block", "size_down"}:
             decision = "size_down"
             size_multiplier = min(
                 0.75,
                 float(execution_quality.get("size_multiplier") or 0.75),
             )
-            reason = "execution quality cost; reduce size"
+            reason = "execution quality cost/block-candidate; reduce size"
         elif recommended_action == "caution" or len(risks) >= 2:
             decision = "size_down"
             size_multiplier = 0.75

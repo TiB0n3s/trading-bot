@@ -190,6 +190,7 @@ class ContextAssemblyDeps:
     get_momentum: Callable[..., dict[str, Any] | None]
     setup_context_deps: SetupContextDeps
     log: Any
+    regime_observation_provider: Callable[[], dict[str, Any]] | None = None
 
 
 class SignalContextRuntime:
@@ -542,6 +543,24 @@ def build_initial_signal_context(
 
     account_state["execution_mode"] = deps.execution_mode
     hydrate_buy_live_context(state, deps)
+
+    if deps.regime_observation_provider and "regime_observation" not in account_state:
+        try:
+            regime_payload = deps.regime_observation_provider()
+            if isinstance(regime_payload, dict):
+                observation = regime_payload.get("regime_observation")
+                routing = regime_payload.get("regime_routing_decision")
+                if isinstance(observation, dict):
+                    account_state["regime_observation"] = observation
+                if isinstance(routing, dict):
+                    account_state["regime_routing_decision"] = routing
+                account_state["regime_observation_context"] = {
+                    key: value
+                    for key, value in regime_payload.items()
+                    if key not in {"regime_observation", "regime_routing_decision"}
+                }
+        except Exception as exc:
+            deps.log.warning(f"regime observation unavailable for {symbol}: {exc}")
 
     setup_obs = build_setup_observation(
         symbol,

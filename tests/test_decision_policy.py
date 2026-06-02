@@ -172,6 +172,36 @@ def test_execution_quality_can_size_down_policy():
     )
 
 
+def test_execution_quality_block_candidate_sizes_down_not_block():
+    original = decision_policy.contextual_memory_for_signal
+    try:
+        decision_policy.contextual_memory_for_signal = neutral_memory
+        result = decision_policy.evaluate_decision_policy(
+            "AAPL",
+            "buy",
+            intelligence_context={
+                "summary": {"recommended_action": "allow"},
+                "opportunity_score": {"score": 90, "decision": "allow"},
+                "prediction": {"prediction_decision": "allow", "prediction_score": 80},
+            },
+            account_state={
+                "portfolio_decision": {"decision": "allow"},
+                "execution_quality": {
+                    "decision": "block",
+                    "size_multiplier": 0.40,
+                    "net_execution_cost_pct": 1.20,
+                    "fill_quality": "poor",
+                },
+            },
+        )
+    finally:
+        decision_policy.contextual_memory_for_signal = original
+
+    assert_equal(result["decision"], "size_down", "execution block candidate decision")
+    assert_lte(result["size_multiplier"], 0.40, "execution block candidate size")
+    assert_true("execution quality says block candidate" in result["risks"], "risk reason")
+
+
 def test_duplicate_portfolio_risk_blocks_even_with_strong_standalone_chart():
     original = decision_policy.contextual_memory_for_signal
     try:
@@ -341,6 +371,8 @@ if __name__ == "__main__":
     print("[OK] test_portfolio_duplicate_risk_can_size_down_policy")
     test_execution_quality_can_size_down_policy()
     print("[OK] test_execution_quality_can_size_down_policy")
+    test_execution_quality_block_candidate_sizes_down_not_block()
+    print("[OK] test_execution_quality_block_candidate_sizes_down_not_block")
     test_duplicate_portfolio_risk_blocks_even_with_strong_standalone_chart()
     print("[OK] test_duplicate_portfolio_risk_blocks_even_with_strong_standalone_chart")
     test_utility_estimate_cannot_block_or_size_by_itself()
@@ -353,4 +385,4 @@ if __name__ == "__main__":
     print("[OK] test_rollout_candidate_status_cannot_change_authority_by_itself")
     test_decision_policy_module_does_not_import_order_execution()
     print("[OK] test_decision_policy_module_does_not_import_order_execution")
-    print("\nAll 11 decision policy tests passed.")
+    print("\nAll 12 decision policy tests passed.")

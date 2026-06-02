@@ -212,6 +212,23 @@ def _snapshot(**overrides):
                 "quote_instability_score": 0.25,
                 "net_execution_cost_pct": 0.44,
             },
+            "regime_observation": {
+                "regime_id": 0,
+                "regime_label": "quiet_bull",
+                "confidence": "medium",
+                "stable": True,
+                "runtime_effect": "observe_only_no_order_authority",
+            },
+            "regime_routing_decision": {
+                "active_model_slot": "regime_0_model",
+                "sub_model_strategy": "random_forest_trend_continuation",
+                "size_modifier": 1.0,
+                "allow_new_longs": True,
+                "runtime_effect": "observe_only_no_order_authority",
+            },
+            "regime_observation_context": {
+                "regime_observation_source": "deterministic_fallback",
+            },
             "rollout_contract": {
                 "report_version": "rollout_contract_v1",
                 "runtime_effect": "telemetry_only_no_live_authority",
@@ -245,6 +262,11 @@ def test_build_canonical_snapshot_collects_core_state_and_hashes():
     assert data["version"] == CANONICAL_INTELLIGENCE_VERSION
     assert data["symbol"] == "AAPL"
     assert data["regime_state"]["macro_regime"] == "risk_on"
+    assert data["regime_state"]["inferred_regime_id"] == 0
+    assert data["regime_state"]["inferred_regime_label"] == "quiet_bull"
+    assert data["regime_state"]["inferred_regime_source"] == "deterministic_fallback"
+    assert data["regime_state"]["regime_model_slot"] == "regime_0_model"
+    assert data["regime_state"]["regime_sub_model_strategy"] == "random_forest_trend_continuation"
     assert data["regime_state"]["market_regime"] == "trend_expansion"
     assert data["regime_state"]["trend_regime"] == "trend_continuation"
     assert data["regime_state"]["volatility_regime"] == "high_volatility_expansion"
@@ -267,6 +289,7 @@ def test_build_canonical_snapshot_collects_core_state_and_hashes():
     assert data["regime_state"]["crowded_theme"] == "ai_infra"
     assert data["regime_state"]["execution_quality_decision"] == "size_down"
     assert data["regime_state"]["fill_quality"] == "degraded"
+    assert data["regime_state"]["spread_bucket"] == "wide"
     assert data["regime_state"]["net_execution_cost_pct"] == 0.44
     assert data["trend_state"]["direction"] == "bullish"
     assert data["momentum_state"]["session_label"] == "strong_uptrend"
@@ -289,6 +312,8 @@ def test_build_canonical_snapshot_collects_core_state_and_hashes():
     )
     assert data["advisory_authority_state"]["portfolio_decision"]["decision"] == "size_down"
     assert data["advisory_authority_state"]["execution_quality"]["decision"] == "size_down"
+    assert data["advisory_authority_state"]["regime_observation"]["regime_label"] == "quiet_bull"
+    assert data["advisory_authority_state"]["regime_routing_decision"]["active_model_slot"] == "regime_0_model"
     assert (
         data["advisory_authority_state"]["market_microstructure"]["session_phase"]
         == "first_30m"
@@ -320,6 +345,8 @@ def test_build_canonical_snapshot_collects_core_state_and_hashes():
     assert data["confidence"]["confidence_quality"] == "medium"
     assert data["event_state"]["support_count"] == 3
     assert data["analytics_state"]["runtime_effect"] == "canonical_audit_and_ml_context_only"
+    assert data["analytics_state"]["model_router"]["current_regime_label"] == "quiet_bull"
+    assert data["analytics_state"]["model_router"]["active_model_slot"] == "regime_0_model"
     assert "predictive" in data["analytics_state"]["active_families"]
     assert "sentiment_nlp" in data["analytics_state"]["active_families"]
     assert data["analytics_state"]["families"]["alternative_data"]["status"] == "not_integrated"

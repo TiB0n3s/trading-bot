@@ -51,6 +51,7 @@ from services.execution_adapters import ExecutionAdapterService
 from services.portfolio_rotation_service import PortfolioRotationService
 from services import trade_audit_service
 from services.setup_engine_service import build_default_setup_engine_service
+from services.regime_observation_service import build_default_regime_observation_service
 from services.setup_context_service import (
     SetupContextDeps,
     is_degraded_setup,
@@ -507,6 +508,10 @@ _momentum_service = MomentumService(
 )
 get_momentum = _momentum_service.get_momentum
 _setup_engine_service = build_default_setup_engine_service()
+_regime_observation_service = build_default_regime_observation_service(
+    base_dir=Path(__file__).resolve().parent,
+    log=logger,
+)
 
 
 def _load_symbol_overrides():
@@ -679,6 +684,7 @@ def _context_assembly_deps():
             setup_engine=_setup_engine_service,
         ),
         log=logger,
+        regime_observation_provider=_regime_observation_service.observe,
     )
 
 def validate_secret(req):

@@ -142,6 +142,23 @@ def test_initial_context_builder_hydrates_buy_context():
                 setup_engine=_SetupEngine(),
             ),
             log=_Log(),
+            regime_observation_provider=lambda: {
+                "regime_observation": {
+                    "regime_id": 0,
+                    "regime_label": "quiet_bull",
+                    "confidence": "medium",
+                    "stable": True,
+                    "runtime_effect": "observe_only_no_order_authority",
+                },
+                "regime_routing_decision": {
+                    "active_model_slot": "regime_0_model",
+                    "sub_model_strategy": "random_forest_trend_continuation",
+                    "size_modifier": 1.0,
+                    "allow_new_longs": True,
+                    "runtime_effect": "observe_only_no_order_authority",
+                },
+                "regime_observation_source": "test_provider",
+            },
         ),
     )
 
@@ -168,6 +185,17 @@ def test_initial_context_builder_hydrates_buy_context():
     )
     assert_equal(account_state["setup_quality"]["score"], 91, "setup quality")
     assert_equal(account_state["setup_quality"]["source"], "setup_engine", "setup source")
+    assert_equal(account_state["regime_observation"]["regime_label"], "quiet_bull", "regime obs")
+    assert_equal(
+        account_state["regime_routing_decision"]["active_model_slot"],
+        "regime_0_model",
+        "regime routing",
+    )
+    assert_equal(
+        account_state["regime_observation_context"]["regime_observation_source"],
+        "test_provider",
+        "regime source",
+    )
     assert_equal(
         account_state["setup_quality"]["structure_state"],
         "high_quality_structure",

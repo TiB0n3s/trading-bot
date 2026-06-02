@@ -69,6 +69,7 @@ def build_analytics_method_state(
     )
     market_microstructure = _dict(account_state.get("market_microstructure"))
     regime_observation = _dict(account_state.get("regime_observation"))
+    regime_routing = _dict(account_state.get("regime_routing_decision"))
     market_participation = _dict(account_state.get("market_participation"))
     volatility = _dict(account_state.get("volatility_normalization"))
     downside = _dict(account_state.get("downside_asymmetry"))
@@ -281,9 +282,14 @@ def build_analytics_method_state(
         "optional_dependency_status": dependency_payload,
         "portfolio_toolkit": symbol_ai_tool_profile(symbol),
         "model_router": {
-            "status": "contract_defined",
+            "status": "active" if regime_routing else "contract_defined",
             "current_regime_id": regime_observation.get("regime_id"),
             "current_regime_label": regime_observation.get("regime_label"),
+            "active_model_slot": regime_routing.get("active_model_slot"),
+            "sub_model_strategy": regime_routing.get("sub_model_strategy"),
+            "size_modifier": regime_routing.get("size_modifier"),
+            "allow_new_longs": regime_routing.get("allow_new_longs"),
+            "routing_runtime_effect": regime_routing.get("runtime_effect"),
             "routing_matrix": model_routing_matrix(),
         },
         "async_pipeline": pipeline_payload,

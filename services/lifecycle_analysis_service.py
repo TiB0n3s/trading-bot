@@ -87,6 +87,10 @@ class LifecycleAnalysisService:
                 "calibrated_confidence",
                 "confidence_quality",
             ),
+            "symbol_pattern": ("pattern_state", "pattern_label"),
+            "pattern_directional_bias": ("pattern_state", "directional_bias"),
+            "pattern_confidence_quality": ("pattern_state", "confidence_quality"),
+            "pattern_runtime_effect": ("pattern_state", "runtime_effect"),
             "net_execution_cost_pct": (
                 "regime_state",
                 "net_execution_cost_pct",

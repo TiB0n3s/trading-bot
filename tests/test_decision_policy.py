@@ -352,6 +352,42 @@ def test_rollout_candidate_status_cannot_change_authority_by_itself():
     assert_equal(result["size_multiplier"], 1.0, "rollout candidates do not size")
 
 
+def test_symbol_pattern_observation_cannot_change_authority_by_itself():
+    original = decision_policy.contextual_memory_for_signal
+    try:
+        decision_policy.contextual_memory_for_signal = neutral_memory
+        result = decision_policy.evaluate_decision_policy(
+            "AAPL",
+            "buy",
+            intelligence_context={
+                "summary": {"recommended_action": "allow"},
+                "opportunity_score": {"score": 90, "decision": "allow"},
+                "prediction": {"prediction_decision": "allow", "prediction_score": 80},
+            },
+            account_state={
+                "pattern_state": {
+                    "pattern_label": "momentum_deterioration",
+                    "directional_bias": "risk_negative",
+                    "favorable_move_probability": 0.05,
+                    "expected_mae_pct": -3.0,
+                    "authority": "observe_only_no_live_authority",
+                },
+                "ai_momentum_pattern": {
+                    "pattern_label": "momentum_deterioration",
+                    "directional_bias": "risk_negative",
+                    "runtime_effect": "observe_only_no_live_authority",
+                },
+                "portfolio_decision": {"decision": "allow"},
+                "execution_quality": {"decision": "allow"},
+            },
+        )
+    finally:
+        decision_policy.contextual_memory_for_signal = original
+
+    assert_equal(result["decision"], "allow", "pattern telemetry is not authority")
+    assert_equal(result["size_multiplier"], 1.0, "pattern telemetry does not size")
+
+
 def test_decision_policy_module_does_not_import_order_execution():
     source = inspect.getsource(decision_policy)
 
@@ -383,6 +419,8 @@ if __name__ == "__main__":
     print("[OK] test_canonical_snapshot_payload_cannot_change_decision_by_itself")
     test_rollout_candidate_status_cannot_change_authority_by_itself()
     print("[OK] test_rollout_candidate_status_cannot_change_authority_by_itself")
+    test_symbol_pattern_observation_cannot_change_authority_by_itself()
+    print("[OK] test_symbol_pattern_observation_cannot_change_authority_by_itself")
     test_decision_policy_module_does_not_import_order_execution()
     print("[OK] test_decision_policy_module_does_not_import_order_execution")
-    print("\nAll 12 decision policy tests passed.")
+    print("\nAll 13 decision policy tests passed.")

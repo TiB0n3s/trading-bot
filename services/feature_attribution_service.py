@@ -33,6 +33,7 @@ FEATURE_FAMILIES: dict[str, tuple[str, ...]] = {
         "calibrated_confidence",
         "confidence_quality",
     ),
+    "symbol_pattern": ("pattern_state", "pattern_label"),
 }
 
 DEFAULT_BUCKETS_BY_FAMILY: dict[str, set[str]] = {
@@ -45,6 +46,7 @@ DEFAULT_BUCKETS_BY_FAMILY: dict[str, set[str]] = {
     "downside_asymmetry": {"downside_contained_or_unknown", "unknown"},
     "utility_estimate": {"not_applicable", "unknown"},
     "calibrated_confidence": {"unknown"},
+    "symbol_pattern": {"mixed_or_unclassified_pattern", "unknown"},
 }
 
 INTERACTION_FIELDS: dict[str, tuple[str, ...]] = {
@@ -56,6 +58,7 @@ INTERACTION_FIELDS: dict[str, tuple[str, ...]] = {
     "volatility_chase_risk": ("regime_state", "volatility_chase_risk"),
     "execution_quality": ("regime_state", "execution_quality_decision"),
     "portfolio_risk": ("regime_state", "portfolio_decision"),
+    "symbol_pattern": ("pattern_state", "pattern_label"),
 }
 
 

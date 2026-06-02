@@ -56,6 +56,12 @@ def _make_db(db_path: Path) -> None:
                             "session_phase": "morning",
                             "execution_quality_decision": "allow",
                         },
+                        "pattern_state": {
+                            "pattern_label": "trend_continuation_with_participation",
+                            "directional_bias": "constructive",
+                            "confidence_quality": "constructive_prior_needs_outcome_calibration",
+                            "runtime_effect": "observe_only_no_live_authority",
+                        },
                     }
                 ),
                 "a" * 64,
@@ -66,6 +72,12 @@ def _make_db(db_path: Path) -> None:
                             "market_regime": "compression_chop",
                             "session_phase": "midday",
                             "execution_quality_decision": "size_down",
+                        },
+                        "pattern_state": {
+                            "pattern_label": "momentum_deterioration",
+                            "directional_bias": "risk_negative",
+                            "confidence_quality": "directional_risk_prior",
+                            "runtime_effect": "observe_only_no_live_authority",
                         },
                     }
                 ),
@@ -176,7 +188,11 @@ def test_lifecycle_analysis_joins_entry_exit_and_rejected_counterfactuals():
         rejected = payload.rows[1]
         assert approved["lifecycle_status"] == "approved_with_exit"
         assert approved["setup_label"] == "breakout"
+        assert approved["symbol_pattern"] == "trend_continuation_with_participation"
+        assert approved["pattern_directional_bias"] == "constructive"
+        assert approved["pattern_runtime_effect"] == "observe_only_no_live_authority"
         assert rejected["market_regime"] == "compression_chop"
+        assert rejected["symbol_pattern"] == "momentum_deterioration"
         assert approved["entry_canonical_intelligence_hash"] == "a" * 64
         assert approved["canonical_exit_hash"] == "c" * 64
         assert approved["exit_trigger"] == "peak_lock_floor"

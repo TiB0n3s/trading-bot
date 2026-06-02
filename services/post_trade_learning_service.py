@@ -130,6 +130,8 @@ def build_post_trade_learning_payload(
         "execution_quality_decision",
         "portfolio_decision",
         "downside_state",
+        "symbol_pattern",
+        "pattern_directional_bias",
         "utility_decision",
         "confidence_quality",
     ]
@@ -201,6 +203,7 @@ def build_post_trade_learning_payload(
         "execution_quality_decision",
         "portfolio_decision",
         "downside_state",
+        "symbol_pattern",
     ]
     summary = {
         "report_version": POST_TRADE_LEARNING_REPORT_VERSION,

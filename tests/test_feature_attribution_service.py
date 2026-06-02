@@ -35,6 +35,7 @@ def _canonical(
     downside="contained_downside",
     utility="trade_candidate",
     confidence="medium",
+    pattern="trend_continuation_with_participation",
     spread="tight",
     setup="breakout",
     phase="first_30m",
@@ -55,6 +56,11 @@ def _canonical(
             "setup_state": {
                 "label": setup,
                 "structure_state": structure,
+            },
+            "pattern_state": {
+                "pattern_label": pattern,
+                "runtime_effect": "observe_only_no_live_authority",
+                "authority": "observe_only_no_live_authority",
             },
             "advisory_authority_state": {
                 "utility_estimate": {"utility_decision": utility},
@@ -115,6 +121,7 @@ def test_feature_attribution_summarizes_family_deltas_and_guardrails():
                 downside="asymmetric_downside_high",
                 utility="do_not_trade",
                 confidence="low",
+                pattern="momentum_deterioration",
                 spread="wide",
                 setup="late_chase",
                 phase="midday",
@@ -137,6 +144,7 @@ def test_feature_attribution_summarizes_family_deltas_and_guardrails():
                 downside="asymmetric_downside_high",
                 utility="do_not_trade",
                 confidence="low",
+                pattern="momentum_deterioration",
                 spread="wide",
                 setup="late_chase",
                 phase="midday",
@@ -163,6 +171,17 @@ def test_feature_attribution_summarizes_family_deltas_and_guardrails():
     assert_true(regime["worst_bucket"]["interactions"]["spread_bucket"], "spread interaction")
     confidence = next(item for item in payload.families if item["family"] == "calibrated_confidence")
     assert_equal(confidence["best_bucket"]["bucket"], "medium", "confidence family")
+    pattern = next(item for item in payload.families if item["family"] == "symbol_pattern")
+    assert_equal(
+        pattern["best_bucket"]["bucket"],
+        "trend_continuation_with_participation",
+        "best pattern",
+    )
+    assert_equal(
+        pattern["worst_bucket"]["bucket"],
+        "momentum_deterioration",
+        "worst pattern",
+    )
     assert_true(payload.summary["calibration_summary"]["market_regime"], "calibration summary")
     guard = next(item for item in payload.rollout_guardrails if item["family"] == "market_regime")
     assert_equal(guard["status"], "eligible_for_review", "guardrail status")

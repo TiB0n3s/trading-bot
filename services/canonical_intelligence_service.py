@@ -19,6 +19,7 @@ CANONICAL_INTELLIGENCE_REQUIRED_SECTIONS = (
     "trend_state",
     "event_state",
     "prediction_state",
+    "pattern_state",
     "setup_state",
     "strategy_state",
     "opportunity_state",
@@ -29,7 +30,7 @@ CANONICAL_INTELLIGENCE_REQUIRED_SECTIONS = (
     "freshness_sec",
     "confidence",
 )
-CANONICAL_INTELLIGENCE_MAX_JSON_BYTES = 18_432
+CANONICAL_INTELLIGENCE_MAX_JSON_BYTES = 19_456
 
 
 def _normalize(value: Any) -> Any:
@@ -148,6 +149,7 @@ class CanonicalIntelligenceSnapshot:
     trend_state: dict[str, Any]
     event_state: dict[str, Any]
     prediction_state: dict[str, Any]
+    pattern_state: dict[str, Any]
     setup_state: dict[str, Any]
     strategy_state: dict[str, Any]
     opportunity_state: dict[str, Any]
@@ -499,6 +501,32 @@ def build_canonical_intelligence_snapshot(
         context=context,
         account_state=account_state,
     )
+    ai_pattern = analytics_state.get("ai_momentum_pattern") or {}
+    prediction_layer = ai_pattern.get("prediction_layer") or {}
+    pattern_state = {
+        "version": ai_pattern.get("version") or "ai_momentum_pattern_v2",
+        "runtime_effect": (
+            ai_pattern.get("runtime_effect")
+            or "observe_only_no_live_authority"
+        ),
+        "pattern_label": ai_pattern.get("pattern_label"),
+        "directional_bias": ai_pattern.get("directional_bias"),
+        "failure_mode": ai_pattern.get("failure_mode"),
+        "expected_horizon": ai_pattern.get("expected_horizon"),
+        "favorable_move_probability": ai_pattern.get(
+            "favorable_move_probability"
+        ),
+        "expected_mfe_pct": ai_pattern.get("expected_mfe_pct"),
+        "expected_mae_pct": ai_pattern.get("expected_mae_pct"),
+        "confidence": ai_pattern.get("confidence"),
+        "confidence_quality": ai_pattern.get("confidence_quality"),
+        "historical_sample_size": ai_pattern.get("historical_sample_size"),
+        "historical_status": ai_pattern.get("historical_status"),
+        "prediction_status": prediction_layer.get("status"),
+        "missing_evidence": ai_pattern.get("missing_evidence") or [],
+        "provider": ai_pattern.get("provider") or "deterministic_fallback",
+        "authority": "observe_only_no_live_authority",
+    }
 
     feature_vector = {
         "regime_state": regime_state,
@@ -506,6 +534,7 @@ def build_canonical_intelligence_snapshot(
         "trend_state": trend_state,
         "event_state": event_state,
         "prediction_state": prediction_state,
+        "pattern_state": pattern_state,
         "setup_state": setup_state,
         "strategy_state": strategy_state,
         "opportunity_state": opportunity_state,
@@ -528,6 +557,7 @@ def build_canonical_intelligence_snapshot(
         trend_state=trend_state,
         event_state=event_state,
         prediction_state=prediction_state,
+        pattern_state=pattern_state,
         setup_state=setup_state,
         strategy_state=strategy_state,
         opportunity_state=opportunity_state,

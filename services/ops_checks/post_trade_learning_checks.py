@@ -65,6 +65,8 @@ def run_post_trade_learning_report(
         "execution_quality_decision",
         "participation_state",
         "volatility_chase_risk",
+        "symbol_pattern",
+        "pattern_directional_bias",
     ):
         _print_rows(
             f"Expectancy by {dimension}",

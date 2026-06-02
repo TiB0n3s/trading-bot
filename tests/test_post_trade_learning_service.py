@@ -21,6 +21,8 @@ def test_post_trade_learning_summarizes_expectancy_and_gate_value():
                 "realized_return_pct": 0.6,
                 "setup_label": "clean_breakout",
                 "market_regime": "trend_expansion",
+                "symbol_pattern": "trend_continuation_with_participation",
+                "pattern_directional_bias": "constructive",
             },
             {
                 "symbol": "MSFT",
@@ -28,6 +30,8 @@ def test_post_trade_learning_summarizes_expectancy_and_gate_value():
                 "realized_return_pct": -0.3,
                 "setup_label": "messy_breakout",
                 "market_regime": "compression_chop",
+                "symbol_pattern": "momentum_deterioration",
+                "pattern_directional_bias": "risk_negative",
             },
             {
                 "symbol": "META",
@@ -36,6 +40,8 @@ def test_post_trade_learning_summarizes_expectancy_and_gate_value():
                 "rejected_return_60m": -0.4,
                 "setup_label": "messy_breakout",
                 "market_regime": "compression_chop",
+                "symbol_pattern": "momentum_deterioration",
+                "pattern_directional_bias": "risk_negative",
             },
             {
                 "symbol": "NVDA",
@@ -44,6 +50,8 @@ def test_post_trade_learning_summarizes_expectancy_and_gate_value():
                 "rejected_return_eod": 0.5,
                 "setup_label": "clean_breakout",
                 "market_regime": "trend_expansion",
+                "symbol_pattern": "trend_continuation_with_participation",
+                "pattern_directional_bias": "constructive",
             },
         ]
     )
@@ -56,6 +64,14 @@ def test_post_trade_learning_summarizes_expectancy_and_gate_value():
     clean = [row for row in setup_rows if row["bucket"] == "clean_breakout"][0]
     assert clean["count"] == 2
     assert clean["avg_return_pct"] == 0.55
+    pattern_rows = payload.expectancy_by_dimension["symbol_pattern"]
+    continuation = [
+        row
+        for row in pattern_rows
+        if row["bucket"] == "trend_continuation_with_participation"
+    ][0]
+    assert continuation["count"] == 2
+    assert continuation["avg_return_pct"] == 0.55
     prediction_gate = [
         row for row in payload.gate_value if row["gate"] == "prediction_gate"
     ][0]

@@ -300,6 +300,15 @@ def test_build_canonical_snapshot_collects_core_state_and_hashes():
     assert data["event_state"]["trusted_source_count"] == 2
     assert data["event_state"]["catalyst_score"] == 72
     assert data["prediction_state"]["ml_score"] == 62
+    assert data["pattern_state"]["runtime_effect"] == "observe_only_no_live_authority"
+    assert data["pattern_state"]["authority"] == "observe_only_no_live_authority"
+    assert data["pattern_state"]["pattern_label"] == "trend_continuation_with_participation"
+    assert data["pattern_state"]["directional_bias"] == "constructive"
+    assert data["pattern_state"]["favorable_move_probability"] == 0.56
+    assert data["pattern_state"]["expected_mfe_pct"] == 0.85
+    assert data["pattern_state"]["expected_mae_pct"] == -0.45
+    assert data["pattern_state"]["historical_status"] == "needs_lifecycle_outcomes"
+    assert data["pattern_state"]["prediction_status"] == "observe_only"
     assert data["setup_state"]["policy_action"] == "boost"
     assert data["setup_state"]["quality_source"] == "setup_engine"
     assert data["setup_state"]["quality_recommendation"] == "favorable"

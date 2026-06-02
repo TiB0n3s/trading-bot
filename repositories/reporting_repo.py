@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from db import DB_PATH, get_connection
+from repositories.trade_accounting import fill_bearing_order_condition
 
 
 class ReportingRepository:
@@ -241,16 +242,17 @@ class ReportingRepository:
             ).fetchall()
 
     def daily_realized_pnl_rows(self, target_date: str) -> list[Any]:
+        fill_bearing = fill_bearing_order_condition()
         with get_connection(self.db_path) as con:
             return con.execute(
-                """
+                f"""
                 SELECT timestamp, symbol, action, qty, fill_price
                 FROM trades
                 WHERE approved = 1
                   AND action IN ('buy', 'sell')
                   AND qty IS NOT NULL
                   AND fill_price IS NOT NULL
-                  AND order_status IN ('filled', 'partially_filled')
+                  AND {fill_bearing}
                   AND timestamp LIKE ?
                 ORDER BY timestamp ASC, id ASC
                 """,
@@ -274,9 +276,10 @@ class ReportingRepository:
             ).fetchall()
 
     def db_open_position_rows(self) -> list[Any]:
+        fill_bearing = fill_bearing_order_condition()
         with get_connection(self.db_path) as con:
             return con.execute(
-                """
+                f"""
                 SELECT symbol,
                        SUM(CASE
                                WHEN LOWER(action) = 'buy'  THEN COALESCE(qty, 0)
@@ -285,7 +288,7 @@ class ReportingRepository:
                            END) AS net_qty
                 FROM trades
                 WHERE order_id IS NOT NULL
-                  AND order_status IN ('filled', 'partially_filled')
+                  AND {fill_bearing}
                 GROUP BY symbol
                 HAVING net_qty > 0
                 ORDER BY symbol

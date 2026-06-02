@@ -8,6 +8,7 @@ from typing import Any
 import pytz
 
 from db import DB_PATH, get_connection
+from repositories.trade_accounting import fill_bearing_order_condition
 
 
 def insert_trade_row(columns: list[str], values: list[Any], db_path=DB_PATH) -> int:
@@ -38,16 +39,17 @@ def successful_buys_today(symbol: str, db_path=DB_PATH) -> int:
 
 def filled_buys_today(symbol: str, db_path=DB_PATH) -> int:
     today = datetime.now(pytz.timezone("America/New_York")).strftime("%Y-%m-%d")
+    fill_bearing = fill_bearing_order_condition()
     with get_connection(db_path) as con:
         row = con.execute(
-            """
+            f"""
             SELECT COUNT(*)
             FROM trades
             WHERE symbol = ?
               AND LOWER(action) = 'buy'
               AND approved = 1
               AND order_id IS NOT NULL
-              AND order_status IN ('filled', 'partially_filled')
+              AND {fill_bearing}
               AND timestamp LIKE ?
             """,
             (symbol, f"{today}%"),
@@ -73,16 +75,17 @@ def cash_safe_buys_today(symbol: str, db_path=DB_PATH) -> int:
 
 
 def has_open_position(symbol: str, db_path=DB_PATH) -> bool:
+    fill_bearing = fill_bearing_order_condition()
     with get_connection(db_path) as con:
         row = con.execute(
-            """
+            f"""
             SELECT SUM(CASE WHEN LOWER(action)='buy'  THEN COALESCE(qty, 0)
                            WHEN LOWER(action)='sell' THEN -COALESCE(qty, 0)
                            ELSE 0 END) AS net_qty
             FROM trades
             WHERE symbol = ?
               AND order_id IS NOT NULL
-              AND order_status IN ('filled', 'partially_filled')
+              AND {fill_bearing}
             """,
             (symbol,),
         ).fetchone()
@@ -125,9 +128,10 @@ def recent_actions_for_trend(symbol: str, db_path=DB_PATH):
 
 
 def open_entry_rows(symbol: str, db_path=DB_PATH):
+    fill_bearing = fill_bearing_order_condition()
     with get_connection(db_path) as con:
         return con.execute(
-            """
+            f"""
             SELECT id, timestamp, symbol, action, qty, fill_price, signal_price,
                    order_status, order_id,
                    market_bias, risk_level, entry_quality,
@@ -138,7 +142,7 @@ def open_entry_rows(symbol: str, db_path=DB_PATH):
             FROM trades
             WHERE symbol = ?
               AND order_id IS NOT NULL
-              AND order_status IN ('filled', 'partially_filled')
+              AND {fill_bearing}
               AND LOWER(action) IN ('buy', 'sell')
               AND qty IS NOT NULL
             ORDER BY timestamp ASC, id ASC

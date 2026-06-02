@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from db import DB_PATH, get_connection
+from repositories.trade_accounting import fill_bearing_order_condition
 
 
 class TradeMatcherRepository:
@@ -14,30 +15,32 @@ class TradeMatcherRepository:
         self.db_path = db_path
 
     def load_filled_trades(self) -> list[dict[str, Any]]:
+        fill_bearing = fill_bearing_order_condition()
         with get_connection(self.db_path) as con:
             rows = con.execute(
-                """
+                f"""
                 SELECT *
                 FROM trades
                 WHERE approved = 1
                   AND action IN ('buy', 'sell')
                   AND qty IS NOT NULL
                   AND fill_price IS NOT NULL
-                  AND order_status IN ('filled', 'partially_filled')
+                  AND {fill_bearing}
                 ORDER BY timestamp ASC, id ASC
                 """
             ).fetchall()
         return [dict(row) for row in rows]
 
     def load_position_manager_sells(self) -> list[dict[str, Any]]:
+        fill_bearing = fill_bearing_order_condition()
         with get_connection(self.db_path) as con:
             rows = con.execute(
-                """
+                f"""
                 SELECT *
                 FROM trades
                 WHERE action = 'sell'
                   AND approved = 1
-                  AND order_status = 'filled'
+                  AND {fill_bearing}
                   AND fill_price IS NOT NULL
                   AND rejection_reason LIKE 'position_manager_%'
                 ORDER BY timestamp ASC

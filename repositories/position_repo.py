@@ -5,12 +5,14 @@ from __future__ import annotations
 from typing import Any
 
 from db import DB_PATH, get_connection
+from repositories.trade_accounting import fill_bearing_order_condition
 
 
 def entry_context_rows(symbol: str, db_path=DB_PATH):
+    fill_bearing = fill_bearing_order_condition()
     with get_connection(db_path) as con:
         return con.execute(
-            """
+            f"""
             SELECT
                 timestamp, symbol, action, qty, fill_price,
                 market_bias, market_bias_effective,
@@ -24,7 +26,7 @@ def entry_context_rows(symbol: str, db_path=DB_PATH):
             FROM trades
             WHERE symbol = ?
               AND approved = 1
-              AND order_status IN ('filled', 'partially_filled')
+              AND {fill_bearing}
               AND qty IS NOT NULL
               AND fill_price IS NOT NULL
               AND action IN ('buy', 'sell')

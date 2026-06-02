@@ -11,6 +11,7 @@ from db import (
     prune_recent_favorable_setups as _prune_recent_favorable_setups,
     upsert_recent_favorable_setup as _upsert_recent_favorable_setup,
 )
+from repositories.trade_accounting import fill_bearing_order_condition
 
 
 def init_core_tables(db_path=DB_PATH) -> None:
@@ -122,13 +123,14 @@ def init_db_performance_indexes(db_path=DB_PATH) -> None:
 
 
 def startup_db_open_symbols(db_path=DB_PATH):
+    fill_bearing = fill_bearing_order_condition()
     with get_connection(db_path) as con:
         return con.execute(
-            """
+            f"""
             SELECT symbol,
                    SUM(CASE WHEN action='buy' THEN qty ELSE -qty END) AS net_qty
             FROM trades
-            WHERE order_status IN ('filled', 'partially_filled')
+            WHERE {fill_bearing}
               AND order_id IS NOT NULL
             GROUP BY symbol
             HAVING net_qty > 0

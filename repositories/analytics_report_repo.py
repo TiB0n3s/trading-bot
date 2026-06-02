@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from db import DB_PATH, get_connection
+from repositories.trade_accounting import fill_bearing_order_condition
 
 
 class AnalyticsReportRepository:
@@ -17,6 +18,7 @@ class AnalyticsReportRepository:
         return self.db_path.exists()
 
     def execution_summary(self, clause: str, params: tuple[Any, ...]) -> dict[str, Any]:
+        fill_bearing = fill_bearing_order_condition()
         with get_connection(self.db_path) as con:
             row = con.execute(
                 f"""
@@ -31,7 +33,7 @@ class AnalyticsReportRepository:
                            THEN 1 ELSE 0 END) AS synth_exits
                 FROM trades
                 WHERE approved = 1
-                  AND order_status IN ('filled', 'partially_filled')
+                  AND {fill_bearing}
                   AND qty IS NOT NULL
                   AND fill_price IS NOT NULL
                   {clause}
@@ -41,15 +43,16 @@ class AnalyticsReportRepository:
         return dict(row)
 
     def open_position_rows(self) -> list[Any]:
+        fill_bearing = fill_bearing_order_condition()
         with get_connection(self.db_path) as con:
             return con.execute(
-                """
+                f"""
                 SELECT symbol,
                     SUM(CASE WHEN action='buy' THEN COALESCE(qty,0)
                              ELSE -COALESCE(qty,0) END) AS net_qty
                 FROM trades
                 WHERE order_id IS NOT NULL
-                  AND order_status IN ('filled', 'partially_filled')
+                  AND {fill_bearing}
                 GROUP BY symbol
                 HAVING net_qty > 0
                 """
@@ -88,6 +91,7 @@ class AnalyticsReportRepository:
             ).fetchall()
 
     def fifo_trade_rows(self, clause: str, params: tuple[Any, ...]) -> list[Any]:
+        fill_bearing = fill_bearing_order_condition()
         with get_connection(self.db_path) as con:
             return con.execute(
                 f"""
@@ -97,7 +101,7 @@ class AnalyticsReportRepository:
                   AND action IN ('buy', 'sell')
                   AND qty IS NOT NULL
                   AND fill_price IS NOT NULL
-                  AND order_status IN ('filled', 'partially_filled')
+                  AND {fill_bearing}
                   {clause}
                 ORDER BY timestamp ASC, id ASC
                 """,

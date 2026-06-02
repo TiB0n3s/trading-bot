@@ -96,6 +96,7 @@ class TradeMatcherService:
     def match_trades(self):
         rows = self.load_filled_trades()
         open_lots = defaultdict(deque)
+        net_qty_by_symbol = defaultdict(float)
         matched = []
 
         for row in rows:
@@ -106,6 +107,11 @@ class TradeMatcherService:
 
             if not symbol or qty <= 0 or price <= 0:
                 continue
+
+            if action == "buy":
+                net_qty_by_symbol[symbol] += qty
+            elif action == "sell":
+                net_qty_by_symbol[symbol] -= qty
 
             if action == "buy":
                 open_lots[symbol].append(
@@ -182,7 +188,36 @@ class TradeMatcherService:
         if synthetic:
             matched.extend(synthetic)
 
+        self._reconcile_open_lots_to_net_qty(open_lots, net_qty_by_symbol)
         return matched, open_lots
+
+    @staticmethod
+    def _reconcile_open_lots_to_net_qty(open_lots, net_qty_by_symbol) -> None:
+        """Keep the open-lot view aligned with net executed quantity.
+
+        Historical data can contain unmatched sell rows, usually synthetic exits
+        or partial-fill/cancel broker events whose original entry row was not
+        available. FIFO correctly avoids creating short lots, but without this
+        reconciliation a later buy can appear open even when net execution
+        accounting is flat.
+        """
+
+        for symbol, lots in list(open_lots.items()):
+            net_qty = max(float(net_qty_by_symbol.get(symbol, 0.0)), 0.0)
+            open_qty = sum(float(lot.get("qty") or 0.0) for lot in lots)
+            excess = open_qty - net_qty
+
+            while excess > 0 and lots:
+                lot = lots[0]
+                lot_qty = float(lot.get("qty") or 0.0)
+                reduction = min(excess, lot_qty)
+                lot["qty"] = lot_qty - reduction
+                excess -= reduction
+                if float(lot.get("qty") or 0.0) <= 0:
+                    lots.popleft()
+
+            if not lots:
+                open_lots.pop(symbol, None)
 
     def _synthetic_position_manager_matches(self, matched):
         synthetic = []

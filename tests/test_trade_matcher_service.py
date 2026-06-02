@@ -136,11 +136,41 @@ def test_auto_buy_entries_are_labeled_in_lifecycle_matches():
     assert matched[0]["entry_order_id"] == "auto-buy-1"
 
 
+def test_unmatched_prior_sell_prevents_false_open_lot_when_net_flat():
+    repo = FakeRepository(
+        [
+            {
+                "timestamp": "2026-05-30T09:30:00",
+                "symbol": "DKS",
+                "action": "sell",
+                "qty": 2,
+                "fill_price": 229,
+                "order_id": "unmatched-exit",
+            },
+            {
+                "timestamp": "2026-05-30T10:00:00",
+                "symbol": "DKS",
+                "action": "buy",
+                "qty": 2,
+                "fill_price": 231,
+                "order_id": "later-buy",
+            },
+        ]
+    )
+    service = TradeMatcherService(repository=repo)
+
+    matched, open_lots = service.match_trades()
+
+    assert matched == []
+    assert "DKS" not in open_lots
+
+
 if __name__ == "__main__":
     tests = [
         test_match_trades_uses_fifo_and_preserves_open_lots,
         test_rebuild_initializes_and_replaces_rows,
         test_auto_buy_entries_are_labeled_in_lifecycle_matches,
+        test_unmatched_prior_sell_prevents_false_open_lot_when_net_flat,
     ]
     for test in tests:
         test()

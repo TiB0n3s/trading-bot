@@ -70,7 +70,6 @@ from session_momentum import (
 from decision_engine import evaluate_signal, get_mock_account_state
 from opportunity_score import score_buy_opportunity
 from macro_risk import get_macro_risk as _legacy_get_macro_risk
-from setup_classifier import classify_setup
 from strategy_memory import memory_for_signal
 from decision_context import build_intelligence_context
 from decision_policy import evaluate_decision_policy

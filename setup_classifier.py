@@ -1,12 +1,11 @@
 #!/usr/bin/env python3
 """
-Live setup intelligence engine.
+Legacy setup classifier compatibility module.
 
-This is intentionally deterministic:
-- Scores BUY setup quality before Claude
-- Can hard-block poor setups pre-Claude
-- Produces structured setup context for Claude
-- Does not affect SELL signals
+Live setup quality is owned by `services.setup_engine_service` through
+`services.setup_context_service`. This module remains available for historical
+scripts or manual analysis that still import `classify_setup`, but it must not
+be wired into the live Flask/signal path.
 """
 
 from __future__ import annotations

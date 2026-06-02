@@ -227,6 +227,14 @@ def test_app_cannot_import_sqlite3():
     assert_true("sqlite3" not in imports, "app.py sqlite3 boundary")
 
 
+def test_app_cannot_import_legacy_root_setup_classifier():
+    imports = _imports(ROOT / "app.py")
+    assert_true(
+        "setup_classifier" not in imports,
+        "app.py must use setup-engine/service-owned setup quality, not root setup_classifier",
+    )
+
+
 def test_app_py_stays_under_1500_lines():
     line_count = (ROOT / "app.py").read_text().count("\n") + 1
     assert_true(line_count < 1500, f"app.py line count {line_count} < 1500")
@@ -443,6 +451,7 @@ def main():
     tests = [
         test_api_cannot_import_broker_directly,
         test_app_cannot_import_sqlite3,
+        test_app_cannot_import_legacy_root_setup_classifier,
         test_app_py_stays_under_1500_lines,
         test_app_cannot_call_broker_directly,
         test_app_has_no_legacy_signal_or_direct_audit_execution_ownership,

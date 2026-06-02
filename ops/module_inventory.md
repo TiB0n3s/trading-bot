@@ -1,110 +1,116 @@
 # Module Inventory
 
-Purpose: clarify which package areas affect the current paper session, which are
-scheduled/ops support, and which are research scaffolding.
+Purpose: identify which modules affect live trading, which are scheduled
+support, which are operator/reporting tools, and which are research-only.
 
 ## Live Runtime
 
-These modules are imported by the Flask/Gunicorn webhook path or broker path.
-
-- `execution/`
-  - `execution.order_policy` is imported by `broker.py`.
-  - Used for buy quantity, bracket price calculation, and cash order cap
-    comparison.
-- `risk/`
-  - `risk.account_risk`, `risk.live_guards`, and `risk.macro_policy` are
-    imported by `app.py`.
-  - Current role is mostly status/compare/live-guard visibility.
-  - `risk.exposure` exists as helper scaffolding and is not yet the main live
-    exposure path.
-- `strategy/`
-  - `strategy.strategy_engine` is imported by `app.py` in observe mode.
-  - It is not a live decision authority.
-- `data_layer/`
-  - `data_layer.ledger` is imported by `app.py` for read-only ledger/status
-    visibility.
-  - It is not yet the DB write abstraction.
+- `app.py`
+  - Flask composition root only: app creation, startup entry point, container
+    selection, route registration, and `process_signal()` compatibility.
+  - Must not own trading policy, broker calls, SQL, or setup classification.
+- `services/live_signal_processor.py`
+  - Owns live signal orchestration.
+  - Calls preflight, context, approval, sizing, execution, and audit services.
+- `services/context_builder.py`
+  - Builds decision/runtime context.
+  - Includes setup quality, prediction context, regime observation, momentum,
+    trend, market bias, portfolio, execution-quality, and canonical context
+    inputs.
+- `services/setup_context_service.py` and `services/setup_engine_service.py`
+  - Canonical live setup-quality path.
+  - Root `setup_classifier.py` is compatibility-only and must not be imported
+    by `app.py`.
+- `services/approval_service.py`
+  - Owns deterministic approval gates and Claude/confidence normalization.
+  - New intelligence families must remain observe-only unless routed through an
+    explicit authority path and tests.
+- `services/sizing_service.py` and `services/policies/sizing_policy.py`
+  - Own final size caps and dominant-limiter attribution.
+- `services/execution_service.py`, `services/execution_adapters.py`,
+  `services/broker_service.py`, and `broker.py`
+  - Own final safety checks, quote/spread checks, broker abstraction, and order
+    submission.
+- `position_manager.py` and `position_momentum_monitor.py`
+  - Service/repository-backed exit and position-monitoring entrypoints.
 
 ## Scheduled Intelligence
 
-These modules are used by cron jobs and session readiness workflows.
+- `pre_market_research_data.py`
+  - Deterministic market-context generation through
+    `services/pre_market_research_service.py`.
+- `collect_and_score_events.py`
+  - Event collection/scoring and market-context overlay.
+  - Source reliability and context validation are reported through
+    `ops_check.py`.
+- `live_features.py`, `session_momentum.py`, `rolling_momentum.py`,
+  `label_v1_builder.py`
+  - Thin or service-backed cron entrypoints for intraday and post-session
+    feature/state production.
+- `services/canonical_intelligence_service.py`,
+  `services/canonical_exit_service.py`,
+  `services/lifecycle_analysis_service.py`
+  - Immutable entry/exit/lifecycle substrate for audit, replay, reports, and ML
+    exports.
+- `services/job_runs_service.py` and `job_runner.py`
+  - Durable cron/job ledger and runtime-health substrate.
 
-- `market_intelligence/`
-  - Used by `pre_market_research_data.py` for deterministic market context.
-  - Used by `collect_and_score_events.py` for event scoring, context updates,
-    and observe-only predictions.
-  - `experience_model.py` writes `daily_symbol_predictions`; these remain
-    observe-only.
-- `services/canonical_intelligence_service.py`
-  - Builds canonical decision intelligence for snapshots and replay.
-  - Includes observe-only `analytics_state` from the AI analytics toolkit.
-- `services/live_features_service.py`
-  - Writes feature snapshots and, when `TIMESCALE_DB_URI` is set, mirrors
-    compact ticks to optional TimescaleDB storage.
-  - Timescale mirroring has no trade authority.
+## Reporting And Ops
 
-## Ops Reporting
-
-- `ops/`
-  - Runbooks, checklists, QA automation, and local evidence.
-  - Does not run inside the trading runtime unless an operator invokes it.
 - `ops_check.py`
-  - Read-only operator reports and wrappers.
-  - Some wrapped commands may call external APIs, but the added QA/reporting
-    checks do not place orders or change trading behavior.
+  - Main operator report router.
+  - Reports should read through services/repositories, not direct SQL or
+    direct market-data calls.
+- `*_report.py`, `*_builder.py`, and `ops/tuesday_qa_runner.py`
+  - Report, labeling, QA, and post-session tools.
+  - They must not change live policy without an explicit config/policy artifact
+    path.
+- `live_score_monitor.py` and `intelligence_status.py`
+  - Standalone read-only operator tools.
+  - They are not cron/runtime dependencies.
+- `risk_lockout.py`, `regime_status.py`, `ai_dependency_status.py`,
+  `timescale_smoke_test.py`
+  - Operator/status tools for optional infrastructure or risk-state inspection.
 
 ## Research Only
 
+- `ml_platform/`
+  - Offline/research platform, staged contracts, dataset builders, validation,
+    replay, and dormant serving provider.
+  - No `ml_platform` output should affect live decisions without explicit
+    promotion, authority-leak tests, and operator config.
 - `analytics_ext/`
-  - Used by `replay_report.py`.
-  - Research/replay support, not Tuesday live decision flow.
-- `ml/`
-  - Planned research platform area for dataset specs, experiments, and model
-    registry conventions.
-  - No model in this directory should affect runtime decisions without an
-    explicit future promotion process.
-- Root AI analytics CLIs
-  - `ai_dependency_status.py` checks optional heavy dependencies.
-  - `score_financial_sentiment.py` scores text through lexicon fallback or
-    optional FinBERT.
-  - `train_supervised_predictions.py` writes optional supervised research
-    artifacts.
-  - `train_regime_model.py` writes optional HMM regime research artifacts.
-  - `timescale_smoke_test.py` verifies optional Timescale schema/write access.
-  - `risk_lockout.py` inspects or changes persistent lockout state.
-- AI analytics services
-  - `services/analytics_method_service.py` summarizes predictive,
-    descriptive, diagnostic, and prescriptive context.
-  - `services/portfolio_ai_toolkit_service.py` holds per-symbol portfolio,
-    correlation, macro, event, and external-workflow profiles.
-  - `services/technical_feature_engineering_service.py`,
-    `services/financial_sentiment_service.py`,
-    `services/regime_switching_service.py`,
-    `services/supervised_prediction_training_service.py`, and
-    `services/timescale_tick_writer_service.py` support research/training or
-    optional storage paths.
-  - `services/regime_risk_protocol_service.py`,
-    `services/dashboard_alert_service.py`,
-    `services/persistent_lockout_service.py`, and
-    `services/async_ai_pipeline_architecture_service.py` expose safety,
-    alerting, state, and architecture context. They do not place orders.
+  - Replay/attribution support.
+- `strategy/trade_scorer.py` and `strategy/setup_classifier.py`
+  - Research/replay-oriented strategy scoring/classification.
+  - Not live authority.
+- `train_supervised_predictions.py`, `train_regime_model.py`,
+  `score_financial_sentiment.py`
+  - Research/training/operator utilities. Artifacts are observe-only until a
+    promotion contract approves otherwise.
 
-## Naming Risks To Resolve After Tuesday
+## Compatibility-Only Modules
 
-- Root `setup_classifier.py` and `strategy/setup_classifier.py` coexist.
-- The live deterministic `prediction_gate` legacy fields are now documented as
-  deterministic signal-quality fields. Actual ML/database predictions are
-  surfaced separately as `ml_prediction_*` compare-only fields from
-  `prediction_cache.py`.
-- Some SQL access remains in `app.py` rather than `db.py`/`data_layer`.
+- `setup_classifier.py`
+  - Legacy deterministic setup classifier retained for historical/manual
+    imports.
+  - Live setup quality comes from `services.setup_engine_service`.
+- `prediction_cache.py`, `prior_session_context.py`, `session_momentum.py`,
+  `live_features.py`, `bot_events.py`
+  - Public compatibility wrappers over service/repository implementations.
 
-## Integration Targets
+## Local Artifacts
 
-1. Extract signal-processing logic from `app.py` behind tests.
-2. Move exposure checks into `risk/exposure.py` deliberately.
-3. Pick one setup-classifier path and deprecate or merge the other.
-4. Consolidate durable DB access into `db.py` or `data_layer/`.
-5. Keep ML outputs observe-only until feature, label, and matched-trade data
-   coverage is strong enough for validation.
-6. Wire persistent lockout state into live buy/order paths only if explicitly
-   requested, tested, logged, and guarded by default-off config.
+Runtime logs, rotated logs, `session_logs/`, and timestamped `.bak_*` files are
+local evidence or backup artifacts, not source. They should remain untracked and
+can be cleaned with `ops/clean_local_artifacts.sh` when no longer needed.
+
+## Current Integration Targets
+
+1. Keep `app.py` composition-only through architecture tests.
+2. Keep root `setup_classifier.py` out of live wiring.
+3. Continue moving report/script reads through services and repositories.
+4. Treat ML/regime/analytics additions as observe-only unless explicit
+   authority tests and rollout contracts promote them.
+5. Use canonical entry/exit/lifecycle snapshots as the default analysis and ML
+   substrate.

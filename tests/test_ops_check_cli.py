@@ -282,6 +282,7 @@ def test_ops_reliability_cli_missing_db_exits_cleanly(tmp_path):
         ("portfolio-risk", "Portfolio Risk Report", "portfolio_risk_v1"),
         ("decision-lifecycle-dashboard", "Decision Lifecycle Dashboard", None),
         ("calibration-buckets", "Calibration Buckets", None),
+        ("learning-readiness", "Learning Readiness", None),
         ("ai-intelligence-review", "AI Intelligence Integration Review", "ai_intelligence_review_v1"),
     ):
         code, out = _run_cli(tmp_path, command, "2026-05-30")
@@ -457,6 +458,146 @@ def test_lifecycle_dashboard_and_calibration_cli_use_lifecycle_rows(tmp_path):
     assert "setup=" in out
 
 
+def test_learning_readiness_cli_golden_fixture_summarizes_holistic_evidence(tmp_path):
+    _create_lifecycle_fixture_db(tmp_path)
+    with sqlite3.connect(tmp_path / "trades.db") as con:
+        con.execute(
+            """
+            CREATE TABLE job_runs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                job_name TEXT NOT NULL,
+                started_at TEXT NOT NULL,
+                finished_at TEXT NOT NULL,
+                duration_sec REAL NOT NULL,
+                exit_code INTEGER,
+                lock_acquired INTEGER NOT NULL,
+                skipped_reason TEXT,
+                rows_written INTEGER,
+                warnings_count INTEGER,
+                artifact_path TEXT,
+                artifact_hash TEXT,
+                command TEXT
+            )
+            """
+        )
+        con.executemany(
+            """
+            INSERT INTO job_runs (
+                job_name, started_at, finished_at, duration_sec, exit_code,
+                lock_acquired, rows_written, warnings_count, command
+            ) VALUES (?, ?, ?, ?, 0, 1, ?, 0, ?)
+            """,
+            [
+                (
+                    "live_features",
+                    "2026-05-30T09:30:00+00:00",
+                    "2026-05-30T09:30:05+00:00",
+                    5.0,
+                    4,
+                    "job_runner live_features",
+                ),
+                (
+                    "candidate_universe",
+                    "2026-05-30T16:05:00+00:00",
+                    "2026-05-30T16:05:02+00:00",
+                    2.0,
+                    4,
+                    "job_runner candidate_universe",
+                ),
+            ],
+        )
+        con.execute(
+            """
+            CREATE TABLE candidate_universe (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                created_at TEXT NOT NULL,
+                candidate_ts TEXT NOT NULL,
+                symbol TEXT NOT NULL,
+                action TEXT NOT NULL,
+                candidate_kind TEXT NOT NULL,
+                candidate_status TEXT NOT NULL,
+                score REAL,
+                threshold REAL,
+                threshold_distance REAL,
+                decision TEXT,
+                reason TEXT,
+                source TEXT,
+                setup_label TEXT,
+                regime TEXT,
+                session_phase TEXT,
+                canonical_intelligence_hash TEXT,
+                canonical_intelligence_version TEXT,
+                candidate_json TEXT NOT NULL,
+                runtime_effect TEXT NOT NULL DEFAULT 'candidate_capture_only_no_live_authority'
+            )
+            """
+        )
+        con.executemany(
+            """
+            INSERT INTO candidate_universe (
+                created_at, candidate_ts, symbol, action, candidate_kind,
+                candidate_status, score, threshold, threshold_distance,
+                decision, reason, source, setup_label, regime, session_phase,
+                candidate_json
+            ) VALUES (?, ?, ?, 'buy', 'entry', ?, ?, 50, ?, ?, ?, ?, ?, ?, ?, '{}')
+            """,
+            [
+                (
+                    "2026-05-30T10:00:00+00:00",
+                    "2026-05-30T10:00:00+00:00",
+                    "AAPL",
+                    "taken",
+                    65,
+                    15,
+                    "approved",
+                    "approved",
+                    "auto_buy",
+                    "breakout",
+                    "trend_expansion",
+                    "first_30m",
+                ),
+                (
+                    "2026-05-30T10:15:00+00:00",
+                    "2026-05-30T10:15:00+00:00",
+                    "MSFT",
+                    "near_threshold",
+                    48,
+                    -2,
+                    "not_taken",
+                    "near_threshold",
+                    "auto_buy",
+                    "pullback",
+                    "orderly_pullback",
+                    "late_morning",
+                ),
+            ],
+        )
+
+    code, out = _run_cli(
+        tmp_path,
+        "learning-readiness",
+        "2026-05-30",
+        "--feature-min-sample-size",
+        "1",
+        "--pattern-min-sample-size",
+        "1",
+        "--calibration-min-sample-size",
+        "1",
+    )
+
+    assert code == 0
+    assert "Learning Readiness — 2026-05-30 to 2026-05-30" in out
+    assert "report_version                : learning_readiness_v1" in out
+    assert "runtime_effect                : diagnostic_only_no_live_authority" in out
+    assert "readiness_stage               : baseline_collection" in out
+    assert "sessions_with_lifecycle_rows  : 1" in out
+    assert "rows_with_outcome             : 4" in out
+    assert "Candidate universe" in out
+    assert "near_threshold" in out
+    assert "Intelligence diagnostics" in out
+    assert "[OK] learning readiness has no blockers; review manually before promotion" in out
+
+
 def test_regime_status_json_smoke(tmp_path):
     state_path = tmp_path / "regime_state.json"
     result = subprocess.run(
@@ -496,6 +637,7 @@ def main():
         test_symbol_patterns_cli_golden_fixture_locks_report_contract,
         test_ai_intelligence_review_cli_golden_fixture_covers_ten_recommendations,
         test_lifecycle_dashboard_and_calibration_cli_use_lifecycle_rows,
+        test_learning_readiness_cli_golden_fixture_summarizes_holistic_evidence,
         test_regime_status_json_smoke,
     ]
     for test in tests:

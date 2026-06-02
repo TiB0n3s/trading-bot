@@ -106,3 +106,31 @@ class CandidateUniverseRepository:
                 """,
                 params,
             ).fetchall()
+
+    def rows_between(
+        self,
+        start_date: str,
+        end_date: str,
+        *,
+        symbol: str | None = None,
+        candidate_kind: str | None = None,
+    ) -> list[Any]:
+        self.init_table()
+        clauses = ["substr(candidate_ts, 1, 10) BETWEEN ? AND ?"]
+        params: list[Any] = [start_date, end_date]
+        if symbol:
+            clauses.append("UPPER(symbol) = ?")
+            params.append(symbol.upper())
+        if candidate_kind:
+            clauses.append("candidate_kind = ?")
+            params.append(candidate_kind)
+        with get_connection(self.db_path) as con:
+            return con.execute(
+                f"""
+                SELECT *
+                FROM candidate_universe
+                WHERE {' AND '.join(clauses)}
+                ORDER BY candidate_ts ASC, id ASC
+                """,
+                params,
+            ).fetchall()

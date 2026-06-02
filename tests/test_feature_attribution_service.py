@@ -226,10 +226,64 @@ def test_feature_attribution_caps_default_bucket_collapse():
     assert_equal(execution_guard["status"], "insufficient_evidence", "default collapse guard")
 
 
+def test_feature_attribution_reads_historical_analytics_pattern():
+    rows = [
+        {
+            "approved": 1,
+            "decision_time": "2026-05-30T10:00:00+00:00",
+            "realized_return_pct": 0.8,
+            "canonical_intelligence_json": json.dumps(
+                {
+                    "analytics_state": {
+                        "ai_momentum_pattern": {
+                            "pattern_label": "historical_continuation",
+                            "runtime_effect": "observe_only_no_live_authority",
+                        }
+                    }
+                }
+            ),
+        },
+        {
+            "approved": 1,
+            "decision_time": "2026-05-30T10:10:00+00:00",
+            "realized_return_pct": -0.2,
+            "canonical_intelligence_json": json.dumps(
+                {
+                    "analytics_state": {
+                        "ai_momentum_pattern": {
+                            "pattern_label": "historical_deterioration",
+                            "runtime_effect": "observe_only_no_live_authority",
+                        }
+                    }
+                }
+            ),
+        },
+    ]
+
+    payload = build_feature_attribution_payload(
+        rows,
+        min_sample_size=1,
+        rolling_window_size=1,
+    )
+
+    pattern = next(item for item in payload.families if item["family"] == "symbol_pattern")
+    assert_equal(
+        pattern["best_bucket"]["bucket"],
+        "historical_continuation",
+        "historical best pattern",
+    )
+    assert_equal(
+        pattern["worst_bucket"]["bucket"],
+        "historical_deterioration",
+        "historical worst pattern",
+    )
+
+
 def main():
     tests = [
         test_feature_attribution_summarizes_family_deltas_and_guardrails,
         test_feature_attribution_caps_default_bucket_collapse,
+        test_feature_attribution_reads_historical_analytics_pattern,
     ]
     for test in tests:
         test()

@@ -7,6 +7,7 @@ import json
 from typing import Any
 
 from repositories.lifecycle_analysis_repo import LifecycleAnalysisRepository
+from services.symbol_pattern_backfill_service import canonical_symbol_pattern_state
 
 
 @dataclass(frozen=True)
@@ -115,6 +116,16 @@ class LifecycleAnalysisService:
         for output, path in mappings.items():
             if row.get(output) in (None, ""):
                 row[output] = self._path(canonical, *path)
+        pattern = canonical_symbol_pattern_state(canonical)
+        pattern_mappings = {
+            "symbol_pattern": "pattern_label",
+            "pattern_directional_bias": "directional_bias",
+            "pattern_confidence_quality": "confidence_quality",
+            "pattern_runtime_effect": "runtime_effect",
+        }
+        for output, key in pattern_mappings.items():
+            if row.get(output) in (None, ""):
+                row[output] = pattern.get(key)
         decision_time = str(row.get("decision_time") or "")
         row["decision_hour"] = (
             decision_time[11:13]

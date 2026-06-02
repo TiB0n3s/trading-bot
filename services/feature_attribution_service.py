@@ -11,6 +11,8 @@ from dataclasses import dataclass
 import json
 from typing import Any, Iterable
 
+from services.symbol_pattern_backfill_service import canonical_symbol_pattern_state
+
 
 FEATURE_ATTRIBUTION_REPORT_VERSION = "feature_attribution_v1"
 
@@ -83,6 +85,11 @@ def _load_json(raw: Any) -> dict[str, Any]:
 
 
 def _path(data: dict[str, Any], path: tuple[str, ...], default: str = "unknown") -> Any:
+    if path and path[0] == "pattern_state":
+        pattern = canonical_symbol_pattern_state(data)
+        value = pattern.get(path[-1])
+        return default if value in (None, "") else value
+
     cur: Any = data
     for key in path:
         if not isinstance(cur, dict):

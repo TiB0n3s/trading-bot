@@ -69,6 +69,21 @@ def _canonical_lifecycle_json(
             "advisory_authority_state": {
                 "utility_estimate": {"utility_decision": utility}
             },
+            "pattern_state": {
+                "pattern_label": (
+                    "trend_continuation_with_participation"
+                    if regime in {"trend_expansion", "orderly_pullback"}
+                    else "momentum_deterioration"
+                ),
+                "directional_bias": (
+                    "constructive"
+                    if regime in {"trend_expansion", "orderly_pullback"}
+                    else "risk_negative"
+                ),
+                "confidence_quality": "uncalibrated_prior",
+                "runtime_effect": "observe_only_no_live_authority",
+                "source": "canonical_pattern_state",
+            },
         }
     )
 
@@ -250,6 +265,14 @@ def test_rollout_contract_cli_missing_db_exits_cleanly(tmp_path):
     assert "[WARN] trades.db not found" in out
 
 
+def test_symbol_patterns_cli_missing_db_exits_cleanly(tmp_path):
+    code, out = _run_cli(tmp_path, "symbol-patterns", "2026-05-30")
+
+    assert code == 1
+    assert "Symbol Pattern Outcomes" in out
+    assert "[WARN] trades.db not found" in out
+
+
 def test_ops_reliability_cli_missing_db_exits_cleanly(tmp_path):
     for command, title, version in (
         ("event-source-coverage", "Event Source Coverage", "event_source_coverage_v1"),
@@ -369,6 +392,28 @@ def test_rollout_contract_cli_golden_fixture_locks_report_contract(tmp_path):
     assert "capped_by:" in out
 
 
+def test_symbol_patterns_cli_golden_fixture_locks_report_contract(tmp_path):
+    _create_lifecycle_fixture_db(tmp_path)
+
+    code, out = _run_cli(
+        tmp_path,
+        "symbol-patterns",
+        "2026-05-30",
+        "--min-sample-size",
+        "1",
+    )
+
+    assert code == 0
+    assert "Symbol Pattern Outcomes - 2026-05-30" in out
+    assert "report_version          : symbol_pattern_outcomes_v1" in out
+    assert "runtime_effect          : diagnostic_only_no_live_authority" in out
+    assert "Pattern outcomes" in out
+    assert "trend_continuation_with_participation" in out
+    assert "momentum_deterioration" in out
+    assert "Rollout governance" in out
+    assert "[OK] symbol pattern diagnostics completed; no live authority changed" in out
+
+
 def test_ai_intelligence_review_cli_golden_fixture_covers_ten_recommendations(tmp_path):
     _create_lifecycle_fixture_db(tmp_path)
 
@@ -442,11 +487,13 @@ def main():
         test_feature_attribution_cli_missing_db_exits_cleanly,
         test_post_trade_learning_cli_missing_db_exits_cleanly,
         test_rollout_contract_cli_missing_db_exits_cleanly,
+        test_symbol_patterns_cli_missing_db_exits_cleanly,
         test_ops_reliability_cli_missing_db_exits_cleanly,
         test_feature_attribution_cli_empty_lifecycle_rows_warns,
         test_post_trade_learning_cli_empty_lifecycle_rows_warns,
         test_rollout_contract_cli_empty_lifecycle_rows_warns,
         test_rollout_contract_cli_golden_fixture_locks_report_contract,
+        test_symbol_patterns_cli_golden_fixture_locks_report_contract,
         test_ai_intelligence_review_cli_golden_fixture_covers_ten_recommendations,
         test_lifecycle_dashboard_and_calibration_cli_use_lifecycle_rows,
         test_regime_status_json_smoke,

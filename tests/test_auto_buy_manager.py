@@ -71,6 +71,13 @@ def test_strong_internal_candidate_scores_as_buy_candidate():
 
     assert_equal(result["decision"], "strong_buy_candidate", "decision")
     assert_equal(result["severity"], "high", "severity")
+    assert_equal(
+        result["pattern_runtime_effect"],
+        "observe_only_no_live_authority",
+        "pattern runtime effect",
+    )
+    if not result.get("symbol_pattern"):
+        raise AssertionError("missing symbol pattern")
 
 
 def test_held_symbol_is_skipped():
@@ -389,6 +396,8 @@ def test_log_candidate_mirrors_to_candidate_universe():
                     "market_bias": "buy",
                     "session_trend_label": "strong_uptrend",
                     "setup_label": "breakout",
+                    "symbol_pattern": "trend_continuation_with_participation",
+                    "pattern_runtime_effect": "observe_only_no_live_authority",
                 },
                 live_buy_enabled=False,
             )
@@ -399,7 +408,7 @@ def test_log_candidate_mirrors_to_candidate_universe():
             row = con.execute(
                 """
                 SELECT symbol, action, candidate_kind, candidate_status,
-                       decision, source, runtime_effect
+                       decision, source, runtime_effect, candidate_json
                 FROM candidate_universe
                 """
             ).fetchone()
@@ -411,6 +420,8 @@ def test_log_candidate_mirrors_to_candidate_universe():
         assert_equal(row[4], "watch", "decision")
         assert_equal(row[5], "auto_buy_manager", "source")
         assert_equal(row[6], "candidate_capture_only_no_live_authority", "effect")
+        if "trend_continuation_with_participation" not in row[7]:
+            raise AssertionError("candidate universe payload did not include symbol pattern")
 
 
 

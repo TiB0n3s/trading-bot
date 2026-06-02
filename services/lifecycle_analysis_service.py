@@ -122,6 +122,7 @@ class LifecycleAnalysisService:
             "pattern_directional_bias": "directional_bias",
             "pattern_confidence_quality": "confidence_quality",
             "pattern_runtime_effect": "runtime_effect",
+            "pattern_source": "source",
         }
         for output, key in pattern_mappings.items():
             if row.get(output) in (None, ""):

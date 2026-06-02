@@ -112,6 +112,7 @@ TESTS = [
     "tests/test_decision_snapshot_service.py",
     "tests/test_canonical_intelligence_service.py",
     "tests/test_symbol_pattern_backfill_service.py",
+    "tests/test_symbol_pattern_outcome_service.py",
     "tests/test_canonical_exit_service.py",
     "tests/test_lifecycle_analysis_service.py",
     "tests/test_lifecycle_dashboard_service.py",

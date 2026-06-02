@@ -49,6 +49,7 @@ Usage:
   python3 ops_check.py calibration-buckets
   python3 ops_check.py feature-attribution
   python3 ops_check.py post-trade-learning
+  python3 ops_check.py symbol-patterns
   python3 ops_check.py rollout-contract
   python3 ops_check.py advisory-authority-report
   python3 ops_check.py ai-intelligence-review
@@ -89,6 +90,7 @@ from services.ops_checks.candidate_universe_checks import run_candidate_universe
 from services.ops_checks.calibration_bucket_checks import run_calibration_buckets
 from services.ops_checks.feature_attribution_checks import run_feature_attribution_report
 from services.ops_checks.post_trade_learning_checks import run_post_trade_learning_report
+from services.ops_checks.symbol_pattern_checks import run_symbol_pattern_outcomes
 from services.ops_checks.rollout_contract_checks import run_rollout_contract_report
 from services.ops_checks.advisory_authority_checks import run_advisory_authority_report
 from services.ops_checks.ai_intelligence_review_checks import run_ai_intelligence_review
@@ -656,6 +658,21 @@ def post_trade_learning(target_date):
     )
 
 
+def symbol_patterns(target_date):
+    symbol = None
+    if "--symbol" in sys.argv:
+        idx = sys.argv.index("--symbol")
+        if idx + 1 < len(sys.argv):
+            symbol = sys.argv[idx + 1]
+    return run_symbol_pattern_outcomes(
+        target_date,
+        base_dir=BASE_DIR,
+        symbol=symbol,
+        min_sample_size=_int_option("--min-sample-size", 30),
+        limit=_int_option("--limit", 20),
+    )
+
+
 def rollout_contract(target_date):
     symbol = None
     if "--symbol" in sys.argv:
@@ -833,6 +850,9 @@ def main():
 
     if command == "post-trade-learning":
         return 0 if post_trade_learning(target_date) else 1
+
+    if command == "symbol-patterns":
+        return 0 if symbol_patterns(target_date) else 1
 
     if command == "rollout-contract":
         return 0 if rollout_contract(target_date) else 1

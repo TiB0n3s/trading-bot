@@ -82,13 +82,24 @@ def run_candidate_universe_report(
         for row in lifecycle_rows
         if row.get("entry_canonical_intelligence_hash")
     }
+    by_pattern_status: dict[tuple[str, str], int] = {}
     proven_good = 0
     proven_bad = 0
     top_missed = []
     for row in rows:
         matched = by_hash.get(row.get("canonical_intelligence_hash"))
+        payload = _load_json(row.get("candidate_json"))
+        candidate_payload = payload.get("candidate") if isinstance(payload.get("candidate"), dict) else {}
+        pattern = (
+            (matched or {}).get("symbol_pattern")
+            or candidate_payload.get("symbol_pattern")
+            or payload.get("symbol_pattern")
+            or "unknown"
+        )
+        status = row.get("candidate_status") or "unknown"
+        key = (str(pattern), str(status))
+        by_pattern_status[key] = by_pattern_status.get(key, 0) + 1
         if not matched:
-            payload = _load_json(row.get("candidate_json"))
             mfe = _float(payload.get("forward_mfe_pct") or payload.get("max_favorable_60m"))
             ret = _float(payload.get("forward_return_pct") or payload.get("return_60m"))
         elif matched.get("approved"):
@@ -109,6 +120,7 @@ def run_candidate_universe_report(
                 "candidate_status": row.get("candidate_status"),
                 "score": row.get("score"),
                 "threshold_distance": row.get("threshold_distance"),
+                "pattern": pattern,
                 "mfe": mfe,
                 "return": ret,
                 "reason": row.get("reason"),
@@ -126,15 +138,28 @@ def run_candidate_universe_report(
     for (kind, status), count in sorted(by_kind_status.items()):
         print(f"  {kind:<8} {status:<28} {count:>6}")
 
+    if by_pattern_status:
+        print()
+        print("By symbol pattern/status")
+        for (pattern, status), count in sorted(
+            by_pattern_status.items(),
+            key=lambda item: (-item[1], item[0][0], item[0][1]),
+        )[:20]:
+            print(f"  {pattern[:38]:<38} {status:<28} {count:>6}")
+
     if top_missed:
         print()
         print("Top non-taken candidates by forward MFE")
-        print(f"  {'time':<19} {'sym':<6} {'status':<24} {'score':>8} {'mfe':>8} {'ret':>8} reason")
+        print(
+            f"  {'time':<19} {'sym':<6} {'status':<24} {'pattern':<28} "
+            f"{'score':>8} {'mfe':>8} {'ret':>8} reason"
+        )
         for item in top_missed[:15]:
             print(
                 f"  {str(item['candidate_ts'] or '-')[:19]:<19} "
                 f"{str(item['symbol'] or '-'):<6} "
                 f"{str(item['candidate_status'] or '-'):<24} "
+                f"{str(item.get('pattern') or '-')[:28]:<28} "
                 f"{str(item['score'] if item['score'] is not None else '-'):>8} "
                 f"{item['mfe']:>8.4f} "
                 f"{str(item['return'] if item['return'] is not None else '-'):>8} "

@@ -63,6 +63,7 @@ from repositories import auto_buy_repo
 from repositories.candidate_universe_repo import CandidateUniverseRepository
 from risk.exposure import any_cluster_limit_hit, cluster_exposure
 from services.candidate_universe_service import CandidateUniverseService
+from services.ai_momentum_pattern_service import deterministic_momentum_pattern
 from symbols_config import (
     APPROVED_SYMBOLS_LIST,
     CLUSTER_EXPOSURE_LIMITS,
@@ -324,6 +325,82 @@ def risk_cross_check(symbol: str) -> tuple[bool, str, dict[str, Any]]:
     return True, "risk cross-check passed", {"correlation_exposure": cluster_checks}
 
 
+def auto_buy_symbol_pattern(
+    *,
+    symbol: str,
+    session: dict[str, Any],
+    feature: dict[str, Any],
+    context: dict[str, Any],
+) -> dict[str, Any]:
+    """Build observe-only symbol pattern metadata for candidate review.
+
+    This intentionally has no scoring authority. It records the same pattern
+    vocabulary used by canonical intelligence so auto-buy candidates can be
+    compared against later lifecycle outcomes.
+    """
+
+    label = session.get("trend_label")
+    session_score = _to_float(session.get("trend_score"), 0) or 0
+    m5 = _to_float(session.get("momentum_5m_pct"), 0) or 0
+    m15 = _to_float(session.get("momentum_15m_pct"), 0) or 0
+    m30 = _to_float(session.get("momentum_30m_pct"), 0) or 0
+    vwap = _to_float(session.get("distance_from_vwap_pct"), 0) or 0
+    volume_ratio = _to_float(feature.get("volume_ratio_5m"), 0) or 0
+    acceleration = _to_float(feature.get("momentum_acceleration_pct"))
+    relative_strength = _to_float(feature.get("relative_strength_5m"), 0) or 0
+    trend_direction = "neutral"
+    trend_strength = "unknown"
+    if label in {"strong_uptrend", "developing_uptrend"} or session_score >= 3:
+        trend_direction = "bullish"
+        trend_strength = "confirmed" if session_score >= 6 else "developing"
+    elif label in {"downtrend", "fading"} or session_score <= -2:
+        trend_direction = "bearish"
+        trend_strength = "confirmed"
+
+    if acceleration is not None:
+        momentum_state = "accelerating" if acceleration >= 0.03 else "decelerating" if acceleration <= -0.03 else "mixed"
+    elif m5 > 0 and m15 > 0 and m30 > 0:
+        momentum_state = "accelerating"
+    elif m15 < 0 or m30 < 0:
+        momentum_state = "decelerating"
+    else:
+        momentum_state = "mixed"
+
+    pattern = deterministic_momentum_pattern(
+        symbol=symbol,
+        action="buy",
+        regime_state={
+            "session_phase": "auto_buy_scan",
+            "breakout_quality": context.get("entry_quality") or "unknown",
+            "vwap_state": "above_vwap" if vwap >= 0 else "below_vwap",
+            "participation_state": (
+                "confirmed"
+                if relative_strength >= 0.30
+                else "not_confirmed"
+            ),
+            "volatility_stretch_state": "overextended" if vwap > 1.50 else "normal",
+            "microstructure_liquidity_state": "unknown",
+        },
+        momentum_state={
+            "state": momentum_state,
+            "session_label": label,
+            "volume_state": "surge" if volume_ratio >= 1.8 else "normal",
+        },
+        trend_state={
+            "direction": trend_direction,
+            "strength": trend_strength,
+        },
+        event_state={},
+    )
+    return {
+        "symbol_pattern": pattern.get("pattern_label"),
+        "pattern_directional_bias": pattern.get("directional_bias"),
+        "pattern_confidence_quality": pattern.get("confidence_quality"),
+        "pattern_runtime_effect": pattern.get("runtime_effect"),
+        "pattern_source": "auto_buy_deterministic_pattern",
+    }
+
+
 def market_session_label() -> tuple[str | None, str]:
     """Return (trend_label, reason) for the overall market using QQQ then SPY as proxy.
 
@@ -369,6 +446,11 @@ def evaluate_auto_buy_candidate(
             "score": 0,
             "severity": "held",
             "reason": "symbol already held",
+            "symbol_pattern": "held_symbol_not_evaluated",
+            "pattern_directional_bias": "not_applicable",
+            "pattern_confidence_quality": "not_applicable",
+            "pattern_runtime_effect": "observe_only_no_live_authority",
+            "pattern_source": "auto_buy_held_short_circuit",
         }
 
     score = 0.0
@@ -587,6 +669,12 @@ def evaluate_auto_buy_candidate(
         decision = "skip"
         severity = "low"
 
+    pattern = auto_buy_symbol_pattern(
+        symbol=symbol,
+        session=session,
+        feature=feature,
+        context=context,
+    )
     return {
         "symbol": symbol,
         "signal_source": signal_source,
@@ -610,6 +698,7 @@ def evaluate_auto_buy_candidate(
         "setup_recommendation": setup_rec,
         "setup_score": setup_score,
         "feature_snapshot_id": feature.get("id"),
+        **pattern,
     }
 
 
@@ -826,15 +915,16 @@ def render(candidates: list[dict[str, Any]], scope: str, market_open: bool) -> N
     print()
     print(
         f"{'Sym':<6} {'Source':<18} {'Decision':<22} {'Score':>6} "
-        f"{'Session':<20} {'Setup':<34} Reason"
+        f"{'Session':<20} {'Pattern':<30} {'Setup':<30} Reason"
     )
-    print("-" * 132)
+    print("-" * 148)
     for c in candidates:
         print(
             f"{c['symbol']:<6} {c.get('signal_source', '-'):<18} "
             f"{c['decision']:<22} {c['score']:>6.1f} "
             f"{str(c.get('session_trend_label')) + '/' + str(c.get('session_trend_score')):<20} "
-            f"{str(c.get('setup_label') or '-'):<34} "
+            f"{str(c.get('symbol_pattern') or '-')[:30]:<30} "
+            f"{str(c.get('setup_label') or '-')[:30]:<30} "
             f"{c.get('hard_block_reason') or c.get('reason')}"
         )
 

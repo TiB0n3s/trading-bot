@@ -315,6 +315,22 @@ def test_resource_readiness_cli_does_not_require_db(tmp_path):
     assert "sec_edgar_official_disclosures" in out
 
 
+def test_market_data_parity_cli_requires_symbol(tmp_path):
+    code, out = _run_cli(tmp_path, "market-data-parity")
+
+    assert code == 1
+    assert "Market Data Parity - UNKNOWN" in out
+    assert "[WARN] symbol is required" in out
+
+
+def test_market_data_parity_bars_cli_requires_date(tmp_path):
+    code, out = _run_cli(tmp_path, "market-data-parity", "AAPL", "--bars")
+
+    assert code == 1
+    assert "Market Data Parity - AAPL" in out
+    assert "[WARN] --date is required for --bars mode" in out
+
+
 def test_feature_attribution_cli_empty_lifecycle_rows_warns(tmp_path):
     with sqlite3.connect(tmp_path / "trades.db") as con:
         con.execute(
@@ -478,6 +494,43 @@ def test_lifecycle_dashboard_and_calibration_cli_use_lifecycle_rows(tmp_path):
     assert "Calibration Buckets" in out
     assert "report_version          : calibration_buckets_v1" in out
     assert "setup=" in out
+
+
+def test_research_export_cli_writes_daily_manifest(tmp_path):
+    try:
+        import duckdb  # noqa: F401
+        import pyarrow  # noqa: F401
+    except Exception:
+        print("skipping: duckdb/pyarrow unavailable")
+        return
+
+    with sqlite3.connect(tmp_path / "trades.db") as con:
+        con.execute(
+            """
+            CREATE TABLE decision_snapshots (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                decision_time TEXT,
+                symbol TEXT,
+                action TEXT,
+                approved INTEGER
+            )
+            """
+        )
+        con.execute(
+            """
+            INSERT INTO decision_snapshots (decision_time, symbol, action, approved)
+            VALUES (?, ?, ?, ?)
+            """,
+            ("2026-06-02T10:00:00+00:00", "AAPL", "buy", 1),
+        )
+
+    code, out = _run_cli(tmp_path, "research-export", "2026-06-02")
+
+    assert code == 0
+    assert "Research Export" in out
+    assert "research_export_v1" in out
+    assert "[OK] research export complete" in out
+    assert (tmp_path / "research_exports" / "2026-06-02" / "manifest.json").exists()
 
 
 def test_learning_readiness_cli_golden_fixture_summarizes_holistic_evidence(tmp_path):
@@ -664,6 +717,7 @@ def main():
         test_symbol_patterns_cli_golden_fixture_locks_report_contract,
         test_ai_intelligence_review_cli_golden_fixture_covers_ten_recommendations,
         test_lifecycle_dashboard_and_calibration_cli_use_lifecycle_rows,
+        test_research_export_cli_writes_daily_manifest,
         test_learning_readiness_cli_golden_fixture_summarizes_holistic_evidence,
         test_regime_status_json_smoke,
     ]

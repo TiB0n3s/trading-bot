@@ -112,6 +112,7 @@ TEMPORARY_BROKER_ACCESS_ALLOWLIST = set()
 APPROVED_MARKET_DATA_BOUNDARIES = {
     "broker.py",
     "services/market_data_service.py",
+    "services/market_data_parity_service.py",
     "services/execution_adapters.py",
     "services/momentum_service.py",
     "services/pre_market_research_service.py",

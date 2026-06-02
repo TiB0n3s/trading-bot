@@ -762,6 +762,22 @@ SEC_EDGAR_USER_AGENT
 NEWS_API_KEY
 ANTHROPIC_API_KEY
 ```
+
+SEC EDGAR does not require an account or login. Configure a responsible user
+agent string instead:
+
+```bash
+SEC_EDGAR_USER_AGENT="trading-bot your-email@example.com"
+```
+
+Polygon market-data validation requires only the API key:
+
+```bash
+POLYGON_API_KEY="..."
+```
+
+Both adapters are report/research resources by default. Adding these variables
+does not replace Alpaca market data and does not grant live trading authority.
 Prediction Validation Report
 
 prediction_validation_report.py compares predictions to later signal/trade

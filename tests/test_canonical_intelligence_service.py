@@ -353,6 +353,9 @@ def test_build_canonical_snapshot_collects_core_state_and_hashes():
     assert ai_pattern["runtime_effect"] == "observe_only_no_live_authority"
     assert ai_pattern["pattern_label"] == "trend_continuation_with_participation"
     assert ai_pattern["directional_bias"] == "constructive"
+    ai_review = data["analytics_state"]["ai_review_suite"]
+    assert ai_review["r"] == "observe_only_no_live_authority"
+    assert ai_review["n"] == 10
     assert "predictive" in data["analytics_state"]["active_families"]
     assert "sentiment_nlp" in data["analytics_state"]["active_families"]
     assert data["analytics_state"]["families"]["alternative_data"]["status"] == "not_integrated"

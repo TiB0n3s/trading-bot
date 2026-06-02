@@ -11,6 +11,7 @@ from typing import Any
 
 from services.async_ai_pipeline_architecture_service import async_pipeline_contract
 from services.ai_momentum_pattern_service import deterministic_momentum_pattern
+from services.ai_review_suite_service import build_ai_review_suite
 from services.optional_dependency_service import optional_dependency_status
 from services.portfolio_ai_toolkit_service import symbol_ai_tool_profile
 from services.regime_risk_protocol_service import crash_risk_protocol, reentry_protocol
@@ -63,6 +64,13 @@ def _compact_ai_pattern(pattern: dict[str, Any]) -> dict[str, Any]:
     return compact
 
 
+def _compact_ai_review_suite(review: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "r": review.get("runtime_effect"),
+        "n": 10,
+    }
+
+
 def build_analytics_method_state(
     *,
     symbol: str | None = None,
@@ -98,6 +106,8 @@ def build_analytics_method_state(
         or _dict(account_state.get("decision_policy")).get("utility_estimate")
     )
     ai_momentum_pattern = _dict(account_state.get("ai_momentum_pattern"))
+    existing_ai_review_suite = _dict(account_state.get("ai_review_suite"))
+    rollout_contract = _dict(account_state.get("rollout_contract"))
 
     predictive_active = _has_any(
         prediction,
@@ -295,40 +305,70 @@ def build_analytics_method_state(
         else pipeline
     )
 
+    ai_pattern_payload = _compact_ai_pattern(
+        ai_momentum_pattern or deterministic_momentum_pattern(
+            symbol=symbol,
+            action=context.get("action") or account_state.get("action"),
+            regime_state={
+                "session_phase": market_microstructure.get("session_phase"),
+                "breakout_quality": market_microstructure.get("breakout_quality"),
+                "vwap_state": market_microstructure.get("vwap_state"),
+                "participation_state": market_participation.get("participation_state"),
+                "volatility_stretch_state": volatility.get("stretch_state"),
+                "microstructure_liquidity_state": market_microstructure.get("liquidity_state"),
+            },
+            momentum_state={
+                "state": context.get("momentum_state") or momentum.get("momentum_state"),
+                "session_label": context.get("session_trend_label") or session.get("trend_label"),
+                "volume_state": context.get("volume_state") or momentum.get("volume_state"),
+                "momentum_pct": context.get("momentum_pct") or momentum.get("momentum_pct"),
+                "session_momentum_30m_pct": (
+                    context.get("session_momentum_30m_pct")
+                    or session.get("momentum_30m_pct")
+                ),
+            },
+            trend_state={
+                "direction": context.get("trend_direction"),
+                "strength": context.get("trend_strength"),
+            },
+            event_state=event_context,
+        )
+    )
+    ai_review_suite = existing_ai_review_suite or build_ai_review_suite(
+        symbol=symbol,
+        canonical={
+            "advisory_authority_state": {
+                "decision_policy_outcome": account_state.get("decision_policy_outcome") or {},
+                "session_gate_outcome": account_state.get("session_gate_outcome") or {},
+                "setup_quality_outcome": account_state.get("setup_quality_outcome") or {},
+                "ml_outcome": account_state.get("ml_outcome") or {},
+                "portfolio_decision": portfolio,
+                "execution_quality": execution,
+            },
+            "setup_state": {
+                "quality_recommendation": setup_quality.get("recommendation"),
+                "structure_state": _dict(setup_quality.get("structure")).get("structure_state"),
+                "failed_breakout_risk": _dict(setup_quality.get("structure")).get("failed_breakout_risk"),
+            },
+            "regime_state": {
+                "exit_pressure_state": _dict(account_state.get("exit_decision_quality")).get("exit_pressure_state"),
+            },
+        },
+        event=event_context,
+        ops_inputs={
+            "context_freshness": {"ok": not bool(account_state.get("stale_context_warning"))},
+        },
+        feature_families=(account_state.get("feature_families") or []),
+        rollout_assessment=_dict(rollout_contract).get("assessment") or rollout_contract,
+    )
+
     return {
         "version": ANALYTICS_METHOD_STATE_VERSION,
         "runtime_effect": "canonical_audit_and_ml_context_only",
         "optional_dependency_status": dependency_payload,
         "portfolio_toolkit": symbol_ai_tool_profile(symbol),
-        "ai_momentum_pattern": _compact_ai_pattern(
-            ai_momentum_pattern or deterministic_momentum_pattern(
-                symbol=symbol,
-                action=context.get("action") or account_state.get("action"),
-                regime_state={
-                    "session_phase": market_microstructure.get("session_phase"),
-                    "breakout_quality": market_microstructure.get("breakout_quality"),
-                    "vwap_state": market_microstructure.get("vwap_state"),
-                    "participation_state": market_participation.get("participation_state"),
-                    "volatility_stretch_state": volatility.get("stretch_state"),
-                    "microstructure_liquidity_state": market_microstructure.get("liquidity_state"),
-                },
-                momentum_state={
-                    "state": context.get("momentum_state") or momentum.get("momentum_state"),
-                    "session_label": context.get("session_trend_label") or session.get("trend_label"),
-                    "volume_state": context.get("volume_state") or momentum.get("volume_state"),
-                    "momentum_pct": context.get("momentum_pct") or momentum.get("momentum_pct"),
-                    "session_momentum_30m_pct": (
-                        context.get("session_momentum_30m_pct")
-                        or session.get("momentum_30m_pct")
-                    ),
-                },
-                trend_state={
-                    "direction": context.get("trend_direction"),
-                    "strength": context.get("trend_strength"),
-                },
-                event_state=event_context,
-            )
-        ),
+        "ai_momentum_pattern": ai_pattern_payload,
+        "ai_review_suite": _compact_ai_review_suite(ai_review_suite),
         "model_router": {
             "status": "active" if regime_routing else "contract_defined",
             "current_regime_id": regime_observation.get("regime_id"),
@@ -354,7 +394,7 @@ def build_analytics_method_state(
         },
         "active_family_count": len(active_families),
         "active_families": active_families,
-        "gaps": gaps,
+        **({} if compact else {"gaps": gaps}),
         "families": analytics_families,
         "guardrails": {
             "no_new_trade_authority": True,

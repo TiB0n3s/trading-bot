@@ -71,6 +71,9 @@ def test_build_analytics_method_state_maps_existing_bot_layers():
     assert state["families"]["alternative_data"]["status"] == "not_integrated"
     assert state["families"]["reinforcement_learning"]["status"] == "not_integrated"
     assert state["guardrails"]["no_new_trade_authority"] is True
+    review = state["ai_review_suite"]
+    assert review["r"] == "observe_only_no_live_authority"
+    assert review["n"] == 10
 
 
 def test_build_analytics_method_state_does_not_infer_unwired_model_types():

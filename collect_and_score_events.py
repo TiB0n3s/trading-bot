@@ -22,6 +22,7 @@ Usage:
 import argparse
 import json
 from collections import Counter, defaultdict
+from datetime import datetime, timezone
 from pathlib import Path
 
 from symbols_config import (
@@ -84,6 +85,64 @@ def affected_approved_symbols(event: dict) -> set[str]:
     return out
 
 
+def _event_from_row(row) -> dict:
+    try:
+        event = json.loads(row["raw_json"] or "{}")
+        if not isinstance(event, dict):
+            event = {}
+    except Exception:
+        event = {}
+    for key in (
+        "market_date",
+        "symbol",
+        "event_type",
+        "event_subtype",
+        "event_summary",
+        "source",
+        "source_url",
+        "product_name",
+        "company_segment",
+        "industry",
+        "expected_market_impact",
+        "trade_relevance",
+        "time_horizon",
+        "confidence",
+    ):
+        value = row[key] if key in row.keys() else None
+        if value is not None and event.get(key) in (None, ""):
+            event[key] = value
+    return event
+
+
+def backfill_ai_event_context(
+    market_date: str,
+    *,
+    provider_name: str = "deterministic",
+    force: bool = False,
+) -> tuple[int, dict[str, set[str]]]:
+    """Add context-only AI interpretation to existing same-day event rows."""
+    repo = MarketIntelligenceRepository()
+    service = build_ai_event_context_service(provider_name)
+    updated = 0
+    affected_by_date: dict[str, set[str]] = defaultdict(set)
+    updated_at = datetime.now(timezone.utc).isoformat()
+
+    for row in repo.daily_symbol_event_rows_for_date(market_date):
+        event = _event_from_row(row)
+        if not force and isinstance(event.get("ai_event_context"), dict):
+            continue
+        event["ai_event_context"] = service.interpret(event)
+        repo.update_daily_symbol_event_raw_json(
+            int(row["id"]),
+            json.dumps(event, sort_keys=True),
+            updated_at,
+        )
+        updated += 1
+        for affected in affected_approved_symbols(event):
+            affected_by_date[event["market_date"]].add(affected)
+    return updated, affected_by_date
+
+
 def print_table(events):
     print()
     print(f"  {'#':>3} {'Sym':<7} {'Type':<22} {'Impact':<20} {'Relevance':<22} {'Net':>7} Summary")
@@ -143,6 +202,21 @@ def main():
         help="Add context-only AI interpretation metadata to scored events",
     )
     parser.add_argument(
+        "--backfill-ai-context",
+        action="store_true",
+        help="Add context-only AI interpretation metadata to existing same-day event rows",
+    )
+    parser.add_argument(
+        "--backfill-ai-context-only",
+        action="store_true",
+        help="Only backfill existing same-day event rows; skip fresh collection",
+    )
+    parser.add_argument(
+        "--force-ai-context",
+        action="store_true",
+        help="Recompute AI event context even when an event already has it",
+    )
+    parser.add_argument(
         "--ai-event-provider",
         default="deterministic",
         choices=("deterministic", "anthropic"),
@@ -173,45 +247,73 @@ def main():
     print(f"  Symbols       : {len(symbols)}")
     print(f"  Context syms  : {args.include_context_symbols}")
     print(f"  AI context    : {args.ai_interpret_events} ({args.ai_event_provider})")
+    print(f"  AI backfill   : {args.backfill_ai_context or args.backfill_ai_context_only}")
     print(f"  Max/symbol    : {args.max_per_symbol}")
     print(f"  Dry run       : {args.dry_run}")
     print(f"  Apply context : {args.apply_context}")
 
     init_intelligence_tables()
 
-    raw_events = collect_company_news_events(
-        market_date=args.date,
-        symbols=symbols,
-        max_per_symbol=args.max_per_symbol,
-        timeout=args.timeout,
-    )
+    updated_symbols_by_date = defaultdict(set)
 
-    scored = []
-    errors = []
-    ai_context_service = (
-        build_ai_event_context_service(args.ai_event_provider)
-        if args.ai_interpret_events
-        else None
-    )
+    if args.backfill_ai_context or args.backfill_ai_context_only:
+        updated, affected = backfill_ai_event_context(
+            args.date,
+            provider_name=args.ai_event_provider,
+            force=args.force_ai_context,
+        )
+        for market_date, syms in affected.items():
+            updated_symbols_by_date[market_date].update(syms)
+        print(f"Backfilled AI event context rows: {updated}")
 
-    for e in raw_events:
-        try:
-            scored_event = score_event(e)
-            if ai_context_service is not None:
-                scored_event["ai_event_context"] = ai_context_service.interpret(scored_event)
-            scored.append(scored_event)
-        except Exception as exc:
-            errors.append(f"{e.get('symbol')} {e.get('event_summary')}: {exc}")
+    if args.backfill_ai_context_only:
+        inserted = []
+        new_events = []
+        errors = []
+        duplicates = 0
+        scored = []
+        raw_events = []
+        print("Fresh collection skipped due to --backfill-ai-context-only.")
+        if not args.apply_context and not args.predict:
+            return 0
+        goto_apply_context = True
+    else:
+        goto_apply_context = False
 
-    existing = existing_event_keys(args.date) if not args.no_dedupe else set()
-    new_events = []
-    duplicates = 0
+    if not goto_apply_context:
+        raw_events = collect_company_news_events(
+            market_date=args.date,
+            symbols=symbols,
+            max_per_symbol=args.max_per_symbol,
+            timeout=args.timeout,
+        )
 
-    for e in scored:
-        if event_key(e) in existing:
-            duplicates += 1
-            continue
-        new_events.append(e)
+        scored = []
+        errors = []
+        ai_context_service = (
+            build_ai_event_context_service(args.ai_event_provider)
+            if args.ai_interpret_events
+            else None
+        )
+
+        for e in raw_events:
+            try:
+                scored_event = score_event(e)
+                if ai_context_service is not None:
+                    scored_event["ai_event_context"] = ai_context_service.interpret(scored_event)
+                scored.append(scored_event)
+            except Exception as exc:
+                errors.append(f"{e.get('symbol')} {e.get('event_summary')}: {exc}")
+
+        existing = existing_event_keys(args.date) if not args.no_dedupe else set()
+        new_events = []
+        duplicates = 0
+
+        for e in scored:
+            if event_key(e) in existing:
+                duplicates += 1
+                continue
+            new_events.append(e)
 
     print()
     print(f"  Raw collected : {len(raw_events)}")
@@ -287,13 +389,13 @@ def main():
     print()
     print(f"Inserted {len(inserted)} daily_symbol_events rows.")
 
-    updated_symbols_by_date = defaultdict(set)
-
     if args.apply_context:
         by_date_symbol = defaultdict(set)
         for _, e in inserted:
             for affected in affected_approved_symbols(e):
                 by_date_symbol[e["market_date"]].add(affected)
+        for market_date, syms in updated_symbols_by_date.items():
+            by_date_symbol[market_date].update(syms)
 
         updated = 0
         skipped = 0

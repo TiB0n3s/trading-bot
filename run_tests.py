@@ -89,6 +89,7 @@ TESTS = [
     "tests/test_persistent_lockout_service.py",
     "tests/test_financial_sentiment_service.py",
     "tests/test_ai_event_context_service.py",
+    "tests/test_event_collection_ai_backfill.py",
     "tests/test_ai_momentum_pattern_service.py",
     "tests/test_ai_review_suite_service.py",
     "tests/test_supervised_prediction_training_service.py",

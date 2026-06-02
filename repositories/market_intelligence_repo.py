@@ -216,6 +216,35 @@ class MarketIntelligenceRepository:
             for row in rows
         }
 
+    def daily_symbol_event_rows_for_date(self, market_date: str):
+        with get_connection(self.db_path) as con:
+            return con.execute(
+                """
+                SELECT *
+                FROM daily_symbol_events
+                WHERE market_date = ?
+                ORDER BY id ASC
+                """,
+                (market_date,),
+            ).fetchall()
+
+    def update_daily_symbol_event_raw_json(
+        self,
+        event_id: int,
+        raw_json: str,
+        updated_at: str,
+    ) -> None:
+        with get_connection(self.db_path) as con:
+            con.execute(
+                """
+                UPDATE daily_symbol_events
+                SET raw_json = ?,
+                    updated_at = ?
+                WHERE id = ?
+                """,
+                (raw_json, updated_at, event_id),
+            )
+
     def context_symbols(self, market_date: str) -> list[str]:
         with get_connection(self.db_path) as con:
             rows = con.execute(

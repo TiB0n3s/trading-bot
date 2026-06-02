@@ -235,6 +235,7 @@ def test_auto_buy_negative_position_size_rejected():
 def test_auto_buy_partial_override_preserves_defaults():
     cfg = load_auto_buy_config(max_daily_orders=5)
     assert cfg.max_daily_orders == 5
+    assert cfg.max_active_positions == AutoBuyConfig.max_active_positions
     assert cfg.min_score == AutoBuyConfig.min_score
     assert cfg.cooldown_minutes == AutoBuyConfig.cooldown_minutes
     assert cfg.bucking_tape_min_volume_ratio == AutoBuyConfig.bucking_tape_min_volume_ratio
@@ -242,13 +243,16 @@ def test_auto_buy_partial_override_preserves_defaults():
 
 def test_auto_buy_no_env_dependency():
     env_vars = [
-        "AUTO_BUY_LIVE_BUYS", "AUTO_BUY_MIN_SCORE", "AUTO_BUY_MAX_DAILY_ORDERS",
-        "AUTO_BUY_COOLDOWN_MINUTES", "AUTO_BUY_BUCKING_TAPE_MIN_VOLUME_RATIO",
+        "AUTO_BUY_LIVE_BUYS", "AUTO_BUY_MIN_SCORE", "AUTO_BUY_MAX_ACTIVE_POSITIONS",
+        "AUTO_BUY_MAX_DAILY_ORDERS", "AUTO_BUY_COOLDOWN_MINUTES",
+        "AUTO_BUY_BUCKING_TAPE_MIN_VOLUME_RATIO",
     ]
     with _CleanEnv(*env_vars):
         cfg = load_auto_buy_config()
     assert cfg.live_buys is False
     assert cfg.min_score == 13.0
+    assert cfg.max_active_positions == 3
+    assert cfg.max_daily_orders == 12
     assert cfg.bucking_tape_min_volume_ratio == 1.8
 
 

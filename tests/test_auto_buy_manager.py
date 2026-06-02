@@ -14,6 +14,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from auto_buy_manager import evaluate_auto_buy_candidate
+from auto_buy_manager import auto_buy_capacity_check
 from auto_buy_manager import log_auto_buy_order
 from auto_buy_manager import maybe_execute_auto_buy
 from auto_buy_manager import should_collect_candidates
@@ -208,6 +209,72 @@ def test_live_auto_buy_does_not_execute_tradingview_alert_symbols_by_default():
     )
 
 
+def test_auto_buy_capacity_blocks_when_active_position_cap_is_full():
+    old_active_cap = auto_buy_manager.AUTO_BUY_MAX_ACTIVE_POSITIONS
+    old_daily_cap = auto_buy_manager.AUTO_BUY_MAX_DAILY_ORDERS
+    old_held_symbols = auto_buy_manager.held_symbols
+    old_orders_today = auto_buy_manager.auto_buy_orders_today
+    auto_buy_manager.AUTO_BUY_MAX_ACTIVE_POSITIONS = 2
+    auto_buy_manager.AUTO_BUY_MAX_DAILY_ORDERS = 12
+    auto_buy_manager.held_symbols = lambda: {"AAPL", "MSFT"}
+    auto_buy_manager.auto_buy_orders_today = lambda: 0
+    try:
+        ok, reason = auto_buy_capacity_check()
+    finally:
+        auto_buy_manager.AUTO_BUY_MAX_ACTIVE_POSITIONS = old_active_cap
+        auto_buy_manager.AUTO_BUY_MAX_DAILY_ORDERS = old_daily_cap
+        auto_buy_manager.held_symbols = old_held_symbols
+        auto_buy_manager.auto_buy_orders_today = old_orders_today
+
+    assert_equal(ok, False, "capacity ok")
+    if "active auto-buy position cap reached" not in reason:
+        raise AssertionError(f"unexpected capacity reason: {reason}")
+
+
+def test_auto_buy_capacity_allows_replacement_when_flat_under_gross_cap():
+    old_active_cap = auto_buy_manager.AUTO_BUY_MAX_ACTIVE_POSITIONS
+    old_daily_cap = auto_buy_manager.AUTO_BUY_MAX_DAILY_ORDERS
+    old_held_symbols = auto_buy_manager.held_symbols
+    old_orders_today = auto_buy_manager.auto_buy_orders_today
+    auto_buy_manager.AUTO_BUY_MAX_ACTIVE_POSITIONS = 3
+    auto_buy_manager.AUTO_BUY_MAX_DAILY_ORDERS = 12
+    auto_buy_manager.held_symbols = lambda: set()
+    auto_buy_manager.auto_buy_orders_today = lambda: 3
+    try:
+        ok, reason = auto_buy_capacity_check()
+    finally:
+        auto_buy_manager.AUTO_BUY_MAX_ACTIVE_POSITIONS = old_active_cap
+        auto_buy_manager.AUTO_BUY_MAX_DAILY_ORDERS = old_daily_cap
+        auto_buy_manager.held_symbols = old_held_symbols
+        auto_buy_manager.auto_buy_orders_today = old_orders_today
+
+    assert_equal(ok, True, "capacity ok")
+    if "daily_orders=3/12" not in reason:
+        raise AssertionError(f"unexpected capacity reason: {reason}")
+
+
+def test_auto_buy_capacity_blocks_at_gross_daily_circuit_cap():
+    old_active_cap = auto_buy_manager.AUTO_BUY_MAX_ACTIVE_POSITIONS
+    old_daily_cap = auto_buy_manager.AUTO_BUY_MAX_DAILY_ORDERS
+    old_held_symbols = auto_buy_manager.held_symbols
+    old_orders_today = auto_buy_manager.auto_buy_orders_today
+    auto_buy_manager.AUTO_BUY_MAX_ACTIVE_POSITIONS = 3
+    auto_buy_manager.AUTO_BUY_MAX_DAILY_ORDERS = 3
+    auto_buy_manager.held_symbols = lambda: set()
+    auto_buy_manager.auto_buy_orders_today = lambda: 3
+    try:
+        ok, reason = auto_buy_capacity_check()
+    finally:
+        auto_buy_manager.AUTO_BUY_MAX_ACTIVE_POSITIONS = old_active_cap
+        auto_buy_manager.AUTO_BUY_MAX_DAILY_ORDERS = old_daily_cap
+        auto_buy_manager.held_symbols = old_held_symbols
+        auto_buy_manager.auto_buy_orders_today = old_orders_today
+
+    assert_equal(ok, False, "capacity ok")
+    if "daily auto-buy gross order cap reached" not in reason:
+        raise AssertionError(f"unexpected capacity reason: {reason}")
+
+
 def test_log_auto_buy_order_writes_canonical_trade_row():
     with tempfile.TemporaryDirectory() as tmp:
         db_path = Path(tmp) / "test.db"
@@ -390,6 +457,9 @@ def main():
         test_early_session_buffer_skips_collection,
         test_live_buy_requires_market_open_and_env_flag,
         test_live_auto_buy_does_not_execute_tradingview_alert_symbols_by_default,
+        test_auto_buy_capacity_blocks_when_active_position_cap_is_full,
+        test_auto_buy_capacity_allows_replacement_when_flat_under_gross_cap,
+        test_auto_buy_capacity_blocks_at_gross_daily_circuit_cap,
         test_bucking_fading_tape_does_not_hard_block,
         test_log_auto_buy_order_writes_canonical_trade_row,
         test_log_candidate_mirrors_to_candidate_universe,

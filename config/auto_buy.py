@@ -15,7 +15,8 @@ class AutoBuyConfig:
     stop_loss_pct: float = 1.00
     take_profit_pct: float = 2.00
     max_orders_per_run: int = 1
-    max_daily_orders: int = 3
+    max_active_positions: int = 3
+    max_daily_orders: int = 12
     max_signals_per_symbol: int = 2
 
     # Score thresholds
@@ -60,6 +61,11 @@ class AutoBuyConfig:
             self.max_orders_per_run >= 1,
             "max_orders_per_run", "AUTO_BUY_MAX_ORDERS_PER_RUN",
             self.max_orders_per_run, "must be >= 1",
+        )
+        _check(
+            self.max_active_positions >= 1,
+            "max_active_positions", "AUTO_BUY_MAX_ACTIVE_POSITIONS",
+            self.max_active_positions, "must be >= 1",
         )
         _check(
             self.max_daily_orders >= 1,
@@ -131,7 +137,8 @@ def load_auto_buy_config(**overrides) -> AutoBuyConfig:
         stop_loss_pct=env_float("AUTO_BUY_STOP_LOSS_PCT", 1.00),
         take_profit_pct=env_float("AUTO_BUY_TAKE_PROFIT_PCT", 2.00),
         max_orders_per_run=env_int("AUTO_BUY_MAX_ORDERS_PER_RUN", 1),
-        max_daily_orders=env_int("AUTO_BUY_MAX_DAILY_ORDERS", 3),
+        max_active_positions=env_int("AUTO_BUY_MAX_ACTIVE_POSITIONS", 3),
+        max_daily_orders=env_int("AUTO_BUY_MAX_DAILY_ORDERS", 12),
         max_signals_per_symbol=env_int("AUTO_BUY_MAX_SIGNALS_PER_SYMBOL", 2),
         min_score=env_float("AUTO_BUY_MIN_SCORE", 13.0),
         watch_score=env_float("AUTO_BUY_WATCH_SCORE", 7.0),

@@ -82,7 +82,8 @@ AUTO_BUY_POSITION_SIZE_PCT = float(os.getenv("AUTO_BUY_POSITION_SIZE_PCT", "0.50
 AUTO_BUY_STOP_LOSS_PCT = float(os.getenv("AUTO_BUY_STOP_LOSS_PCT", "1.00"))
 AUTO_BUY_TAKE_PROFIT_PCT = float(os.getenv("AUTO_BUY_TAKE_PROFIT_PCT", "2.00"))
 AUTO_BUY_MAX_ORDERS_PER_RUN = int(os.getenv("AUTO_BUY_MAX_ORDERS_PER_RUN", "1"))
-AUTO_BUY_MAX_DAILY_ORDERS = int(os.getenv("AUTO_BUY_MAX_DAILY_ORDERS", "3"))
+AUTO_BUY_MAX_ACTIVE_POSITIONS = int(os.getenv("AUTO_BUY_MAX_ACTIVE_POSITIONS", "3"))
+AUTO_BUY_MAX_DAILY_ORDERS = int(os.getenv("AUTO_BUY_MAX_DAILY_ORDERS", "12"))
 AUTO_BUY_COOLDOWN_MINUTES = int(os.getenv("AUTO_BUY_COOLDOWN_MINUTES", "60"))
 AUTO_BUY_SESSION_BUFFER_MINUTES = int(os.getenv("AUTO_BUY_SESSION_BUFFER_MINUTES", "10"))
 APP_BUY_COOLDOWN_MINUTES = int(os.getenv("ORDER_COOLDOWN_MINUTES", "15"))
@@ -176,6 +177,39 @@ def client_order_id(symbol: str) -> str:
 
 def auto_buy_orders_today() -> int:
     return auto_buy_repo.auto_buy_orders_today(_today(), DB_PATH)
+
+
+def auto_buy_capacity_check() -> tuple[bool, str]:
+    """Return whether auto-buy has room for another submitted order.
+
+    Active exposure and gross daily attempts are intentionally separate. The
+    position manager can exit early, so a small gross daily cap can leave the
+    bot flat while still preventing fresh buys in a constructive market.
+    """
+
+    active_positions = held_symbols()
+    active_count = len(active_positions)
+    if active_count >= AUTO_BUY_MAX_ACTIVE_POSITIONS:
+        return (
+            False,
+            "active auto-buy position cap reached: "
+            f"{active_count} >= {AUTO_BUY_MAX_ACTIVE_POSITIONS}",
+        )
+
+    daily_orders = auto_buy_orders_today()
+    if daily_orders >= AUTO_BUY_MAX_DAILY_ORDERS:
+        return (
+            False,
+            "daily auto-buy gross order cap reached: "
+            f"{daily_orders} >= {AUTO_BUY_MAX_DAILY_ORDERS}",
+        )
+
+    return (
+        True,
+        "auto-buy capacity ok: "
+        f"active_positions={active_count}/{AUTO_BUY_MAX_ACTIVE_POSITIONS}, "
+        f"daily_orders={daily_orders}/{AUTO_BUY_MAX_DAILY_ORDERS}",
+    )
 
 
 def recently_auto_bought(symbol: str, cooldown_minutes: int = AUTO_BUY_COOLDOWN_MINUTES) -> tuple[bool, str]:
@@ -663,11 +697,10 @@ def maybe_execute_auto_buy(candidate: dict[str, Any], market_open: bool, live_re
         )
         return None
 
-    daily_orders = auto_buy_orders_today()
-    if daily_orders >= AUTO_BUY_MAX_DAILY_ORDERS:
-        candidate["live_block_reason"] = (
-            f"daily auto-buy order cap reached: {daily_orders} >= {AUTO_BUY_MAX_DAILY_ORDERS}"
-        )
+    capacity_ok, capacity_reason = auto_buy_capacity_check()
+    candidate["auto_buy_capacity_reason"] = capacity_reason
+    if not capacity_ok:
+        candidate["live_block_reason"] = capacity_reason
         return None
 
     cooldown_active, cooldown_reason = recently_auto_bought(candidate["symbol"])
@@ -787,7 +820,8 @@ def render(candidates: list[dict[str, Any]], scope: str, market_open: bool) -> N
     print(f"  market_open    : {market_open}")
     print(f"  live_buy_flag  : {AUTO_BUY_LIVE_BUYS}")
     print(f"  min_score      : {AUTO_BUY_MIN_SCORE}")
-    print(f"  daily_cap      : {AUTO_BUY_MAX_DAILY_ORDERS}")
+    print(f"  active_cap     : {AUTO_BUY_MAX_ACTIVE_POSITIONS}")
+    print(f"  daily_gross_cap: {AUTO_BUY_MAX_DAILY_ORDERS}")
     print(f"  cooldown_min   : {AUTO_BUY_COOLDOWN_MINUTES}")
     print()
     print(

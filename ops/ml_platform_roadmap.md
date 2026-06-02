@@ -281,7 +281,10 @@ Initial auto-buy methodology:
   `AUTO_BUY_POSITION_SIZE_PCT=0.50`, `AUTO_BUY_STOP_LOSS_PCT=1.00`, and
   `AUTO_BUY_TAKE_PROFIT_PCT=2.00`.
 - Live execution is capped by `AUTO_BUY_MAX_ORDERS_PER_RUN`,
-  `AUTO_BUY_MAX_DAILY_ORDERS`, and `AUTO_BUY_COOLDOWN_MINUTES`.
+  `AUTO_BUY_MAX_ACTIVE_POSITIONS`, `AUTO_BUY_MAX_DAILY_ORDERS`, and
+  `AUTO_BUY_COOLDOWN_MINUTES`. The active-position cap controls concurrent
+  exposure; the daily-order cap is a gross churn circuit so exited auto-buys can
+  be replaced in constructive markets.
 - Before submitting a live paper order, auto-buy cross-checks shared app
   cooldowns, recent-sell churn state, per-symbol app buy count, and
   correlation-cluster exposure. Candidate collection skips closed-market runs

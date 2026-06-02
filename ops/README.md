@@ -128,8 +128,11 @@ coverage for rejected signals after `rejected_signal_outcome_builder.py` runs.
 approved universe so scored-but-not-taken opportunities are persisted for later
 counterfactual review. Live paper buys require both `--live` and
 `AUTO_BUY_LIVE_BUYS=true`, and are constrained by
-`AUTO_BUY_MAX_ORDERS_PER_RUN`, `AUTO_BUY_MAX_DAILY_ORDERS`, and
-`AUTO_BUY_COOLDOWN_MINUTES`. The cron remains Central-time localized, but
+`AUTO_BUY_MAX_ORDERS_PER_RUN`, `AUTO_BUY_MAX_ACTIVE_POSITIONS`,
+`AUTO_BUY_MAX_DAILY_ORDERS`, and `AUTO_BUY_COOLDOWN_MINUTES`.
+`AUTO_BUY_MAX_ACTIVE_POSITIONS` limits concurrent auto-buy exposure, while
+`AUTO_BUY_MAX_DAILY_ORDERS` is a gross daily circuit cap so early exits can be
+replaced while still limiting churn. The cron remains Central-time localized, but
 `auto_buy_manager.py` skips closed-market runs and the first
 `AUTO_BUY_SESSION_BUFFER_MINUTES` of the regular session before writing
 candidate rows. Before any live paper buy it also cross-checks shared app

@@ -147,11 +147,47 @@ def test_record_execution_persists_conviction_sizing_and_prediction_fields():
     assert_true(captured["setup_policy_action"] == "allow", "setup action persisted")
 
 
+def test_record_execution_persists_opportunity_score_fallback():
+    captured = {}
+
+    def _insert(columns, values):
+        captured.update(dict(zip(columns, values)))
+        return 123
+
+    account_state = {
+        "opportunity_score": {
+            "score": 91,
+            "recommendation": "strong_buy_candidate",
+            "reason": "trend participation",
+        },
+    }
+
+    with (
+        patch("builtins.open", mock_open()),
+        patch("services.trade_audit_service.trades_repo.insert_trade_row", side_effect=_insert),
+        patch("services.trade_audit_service.snapshots_repo.record_snapshot"),
+    ):
+        _service().record_execution(
+            signal={"symbol": "AAPL", "action": "buy", "price": 100},
+            decision={"approved": False, "reason": "confidence_gate: low"},
+            order=None,
+            account_state=account_state,
+        )
+
+    assert_true(captured["buy_opportunity_score"] == 91, "fallback score persisted")
+    assert_true(
+        captured["buy_opportunity_recommendation"] == "strong_buy_candidate",
+        "fallback recommendation persisted",
+    )
+    assert_true(captured["buy_opportunity_reason"] == "trend participation", "fallback reason persisted")
+
+
 def main():
     tests = [
         test_record_rejection_delegates_through_service_boundary,
         test_record_execution_delegates_through_service_boundary,
         test_record_execution_persists_conviction_sizing_and_prediction_fields,
+        test_record_execution_persists_opportunity_score_fallback,
     ]
     for test in tests:
         test()

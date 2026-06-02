@@ -26,6 +26,8 @@ PRICE_SANITY = "price_sanity"
 PAYLOAD_VALIDATION = "payload_validation"
 BROKER_REJECTED = "broker_rejected"
 CLAUDE_REJECTED = "claude_rejected"
+CLAUDE_PARSE_ERROR = "claude_parse_error"
+CLAUDE_ENGINE_ERROR = "claude_engine_error"
 PREDICTION_GATE = "prediction_gate"
 DUPLICATE_SIGNAL = "duplicate_signal"
 DUPLICATE_WEBHOOK = "duplicate_webhook"
@@ -84,6 +86,8 @@ ALL_REJECTION_CATEGORIES = {
     PAYLOAD_VALIDATION,
     BROKER_REJECTED,
     CLAUDE_REJECTED,
+    CLAUDE_PARSE_ERROR,
+    CLAUDE_ENGINE_ERROR,
     PREDICTION_GATE,
     DUPLICATE_SIGNAL,
     DUPLICATE_WEBHOOK,

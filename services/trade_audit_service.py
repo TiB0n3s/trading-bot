@@ -249,6 +249,26 @@ def _shared_values(
         or account_state.get("conviction_stack")
         or {}
     )
+    buy_opportunity = dict(account_state.get("buy_opportunity") or {})
+    opportunity_score = account_state.get("opportunity_score")
+    if not buy_opportunity and isinstance(opportunity_score, dict):
+        buy_opportunity = {
+            "buy_opportunity_score": (
+                opportunity_score.get("buy_opportunity_score")
+                or opportunity_score.get("score")
+            ),
+            "buy_opportunity_recommendation": (
+                opportunity_score.get("buy_opportunity_recommendation")
+                or opportunity_score.get("recommendation")
+                or opportunity_score.get("decision")
+            ),
+            "buy_opportunity_reason": (
+                opportunity_score.get("buy_opportunity_reason")
+                or opportunity_score.get("reason")
+            ),
+        }
+    elif not buy_opportunity and opportunity_score is not None:
+        buy_opportunity = {"buy_opportunity_score": opportunity_score}
     active_caps = final_sizing.get("active_caps") or []
     active_cap_values = [
         cap.get("cap_pct")
@@ -322,9 +342,9 @@ def _shared_values(
         "setup_unknown_reason": setup_obs.get("setup_unknown_reason"),
         "ml_prediction_score": ml_score,
         "ml_prediction_bucket": ml_bucket,
-        "buy_opportunity_score": account_state.get("buy_opportunity", {}).get("buy_opportunity_score"),
-        "buy_opportunity_recommendation": account_state.get("buy_opportunity", {}).get("buy_opportunity_recommendation"),
-        "buy_opportunity_reason": account_state.get("buy_opportunity", {}).get("buy_opportunity_reason"),
+        "buy_opportunity_score": buy_opportunity.get("buy_opportunity_score"),
+        "buy_opportunity_recommendation": buy_opportunity.get("buy_opportunity_recommendation"),
+        "buy_opportunity_reason": buy_opportunity.get("buy_opportunity_reason"),
         "trader_brain_score": trader_brain.get("score"),
         "trader_brain_setup_type": trader_brain.get("setup_type"),
         "trader_brain_approved": (

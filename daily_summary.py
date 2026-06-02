@@ -139,6 +139,8 @@ def _bucket_rejection_reason(reason: str | None) -> str:
         "strategy_memory":      "Strategy memory gate",
         "decision_policy":      "Decision policy gate",
         "confidence_gate": "Low confidence (Claude)",
+        "claude_parse_error": "Claude parse error",
+        "claude_engine_error": "Claude engine/timeout error",
         "entry_quality": "Entry quality / pullback requirement",
         "second_look": "Second-look market check",
         "cash_safe_symbol": "Cash-safe symbol block",
@@ -225,6 +227,8 @@ def _render(rows, matched, header, trade_rows=None):
         "live_bias_downgrade": "Live bias downgrade",
         "chase_prevention":     "Chase prevention (do_not_chase)",
         "confidence_gate":      "Low confidence (Claude)",
+        "claude_parse_error":   "Claude parse error",
+        "claude_engine_error":  "Claude engine/timeout error",
         "entry_quality":        "Entry quality / pullback requirement",
     }
 

@@ -10,6 +10,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Callable
 
+from services import rejection_categories as categories
 from services.signal_models import ApprovalResult, DecisionContext
 
 
@@ -638,6 +639,22 @@ def normalize_claude_decision(
     return normalized
 
 
+def _claude_infrastructure_rejection(reason: str) -> tuple[str, str] | None:
+    reason_text = str(reason or "").strip()
+    reason_lower = reason_text.lower()
+    if "parse error" in reason_lower:
+        return categories.CLAUDE_PARSE_ERROR, "Claude response parse error"
+    if (
+        "engine error" in reason_lower
+        or "request timed out" in reason_lower
+        or "network timeout" in reason_lower
+        or "dropped connection" in reason_lower
+        or "request cancellation" in reason_lower
+    ):
+        return categories.CLAUDE_ENGINE_ERROR, "Claude engine error or timeout"
+    return None
+
+
 def evaluate_approval_decision(
     *,
     signal: dict[str, Any],
@@ -654,6 +671,23 @@ def evaluate_approval_decision(
     decision = normalize_claude_decision(action=action, decision=raw_decision)
     confidence = decision.get("confidence")
     reason = str(decision.get("reason", ""))
+
+    if action == "buy":
+        infrastructure_rejection = _claude_infrastructure_rejection(reason)
+        if infrastructure_rejection:
+            category, summary = infrastructure_rejection
+            return ApprovalDecision(
+                approved=False,
+                source=category,
+                confidence=confidence,
+                reason=f"{summary}: {reason}",
+                category=category,
+                claude_payload=decision,
+                metadata={
+                    "raw_decision": raw_decision,
+                    "failure_type": category,
+                },
+            )
 
     if action == "buy" and cash_safe_mode and confidence != "high":
         return ApprovalDecision(

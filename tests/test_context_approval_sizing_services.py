@@ -233,6 +233,48 @@ def test_approval_service_converts_low_confidence_to_category():
     assert_equal(result.category, "confidence_gate", "category")
 
 
+def test_approval_service_separates_claude_parse_error_from_confidence_gate():
+    result = evaluate_approval_decision(
+        signal={"symbol": "AAPL", "action": "buy"},
+        action="buy",
+        claude_account_state={},
+        evaluate_signal=lambda *_: {
+            "approved": False,
+            "confidence": "low",
+            "reason": "Parse error - rejecting for safety",
+        },
+        cash_safe_mode=False,
+        market_bias={},
+        account_state={},
+        medium_confidence_override=lambda **_: (False, "no override"),
+        tape_exception_enabled=False,
+    )
+    assert_equal(result.approved, False, "approved")
+    assert_equal(result.category, "claude_parse_error", "category")
+    assert_equal(result.source, "claude_parse_error", "source")
+
+
+def test_approval_service_separates_claude_engine_error_from_confidence_gate():
+    result = evaluate_approval_decision(
+        signal={"symbol": "AAPL", "action": "buy"},
+        action="buy",
+        claude_account_state={},
+        evaluate_signal=lambda *_: {
+            "approved": False,
+            "confidence": "low",
+            "reason": "Engine error: Request timed out or interrupted.",
+        },
+        cash_safe_mode=False,
+        market_bias={},
+        account_state={},
+        medium_confidence_override=lambda **_: (False, "no override"),
+        tape_exception_enabled=False,
+    )
+    assert_equal(result.approved, False, "approved")
+    assert_equal(result.category, "claude_engine_error", "category")
+    assert_equal(result.source, "claude_engine_error", "source")
+
+
 def test_sizing_service_preserves_sell_default_size():
     decision = {"position_size_pct": 0}
     sizing = apply_final_sizing(
@@ -434,6 +476,8 @@ def main():
         test_context_builder_sanitizes_claude_context,
         test_initial_context_builder_hydrates_buy_context,
         test_approval_service_converts_low_confidence_to_category,
+        test_approval_service_separates_claude_parse_error_from_confidence_gate,
+        test_approval_service_separates_claude_engine_error_from_confidence_gate,
         test_sizing_service_preserves_sell_default_size,
         test_apply_size_cap_keeps_tightest_cap,
         test_conviction_stack_sets_dominant_limiter,

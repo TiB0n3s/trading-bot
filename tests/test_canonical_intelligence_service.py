@@ -35,6 +35,8 @@ def _snapshot(**overrides):
             "trend_strength": "confirmed",
             "momentum_direction": "rising",
             "momentum_pct": 0.25,
+            "momentum_state": "accelerating",
+            "volume_state": "surge",
             "session_trend_label": "strong_uptrend",
             "session_trend_score": 4,
             "tape_bar_age_seconds": 12.5,
@@ -347,6 +349,10 @@ def test_build_canonical_snapshot_collects_core_state_and_hashes():
     assert data["analytics_state"]["runtime_effect"] == "canonical_audit_and_ml_context_only"
     assert data["analytics_state"]["model_router"]["current_regime_label"] == "quiet_bull"
     assert data["analytics_state"]["model_router"]["active_model_slot"] == "regime_0_model"
+    ai_pattern = data["analytics_state"]["ai_momentum_pattern"]
+    assert ai_pattern["runtime_effect"] == "observe_only_no_live_authority"
+    assert ai_pattern["pattern_label"] == "trend_continuation_with_participation"
+    assert ai_pattern["directional_bias"] == "constructive"
     assert "predictive" in data["analytics_state"]["active_families"]
     assert "sentiment_nlp" in data["analytics_state"]["active_families"]
     assert data["analytics_state"]["families"]["alternative_data"]["status"] == "not_integrated"

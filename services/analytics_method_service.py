@@ -10,6 +10,7 @@ from __future__ import annotations
 from typing import Any
 
 from services.async_ai_pipeline_architecture_service import async_pipeline_contract
+from services.ai_momentum_pattern_service import deterministic_momentum_pattern
 from services.optional_dependency_service import optional_dependency_status
 from services.portfolio_ai_toolkit_service import symbol_ai_tool_profile
 from services.regime_risk_protocol_service import crash_risk_protocol, reentry_protocol
@@ -43,6 +44,23 @@ def _status(active: bool, partial: bool = False) -> str:
     if partial:
         return "partial"
     return "not_integrated"
+
+
+def _compact_ai_pattern(pattern: dict[str, Any]) -> dict[str, Any]:
+    compact = {
+        "runtime_effect": pattern.get("runtime_effect"),
+        "pattern_label": pattern.get("pattern_label"),
+        "directional_bias": pattern.get("directional_bias"),
+        "failure_mode": pattern.get("failure_mode"),
+        "confidence": pattern.get("confidence"),
+    }
+    missing = pattern.get("missing_evidence") or []
+    if missing:
+        compact["missing_evidence"] = missing
+    provider = pattern.get("provider")
+    if provider and provider != "deterministic_fallback":
+        compact["provider"] = provider
+    return compact
 
 
 def build_analytics_method_state(
@@ -79,6 +97,7 @@ def build_analytics_method_state(
         account_state.get("utility_estimate")
         or _dict(account_state.get("decision_policy")).get("utility_estimate")
     )
+    ai_momentum_pattern = _dict(account_state.get("ai_momentum_pattern"))
 
     predictive_active = _has_any(
         prediction,
@@ -205,8 +224,8 @@ def build_analytics_method_state(
             "source_tiers": event_context.get("source_tiers") or [],
         },
         "pattern_recognition": {
-            "status": _status(pattern_active),
-            "sources": ["setup_engine", "setup_structure_service"],
+            "status": _status(pattern_active or _present(ai_momentum_pattern)),
+            "sources": ["setup_engine", "setup_structure_service", "ai_momentum_pattern_service"],
         },
         "risk_analytics": {
             "status": _status(risk_active),
@@ -281,6 +300,35 @@ def build_analytics_method_state(
         "runtime_effect": "canonical_audit_and_ml_context_only",
         "optional_dependency_status": dependency_payload,
         "portfolio_toolkit": symbol_ai_tool_profile(symbol),
+        "ai_momentum_pattern": _compact_ai_pattern(
+            ai_momentum_pattern or deterministic_momentum_pattern(
+                symbol=symbol,
+                action=context.get("action") or account_state.get("action"),
+                regime_state={
+                    "session_phase": market_microstructure.get("session_phase"),
+                    "breakout_quality": market_microstructure.get("breakout_quality"),
+                    "vwap_state": market_microstructure.get("vwap_state"),
+                    "participation_state": market_participation.get("participation_state"),
+                    "volatility_stretch_state": volatility.get("stretch_state"),
+                    "microstructure_liquidity_state": market_microstructure.get("liquidity_state"),
+                },
+                momentum_state={
+                    "state": context.get("momentum_state") or momentum.get("momentum_state"),
+                    "session_label": context.get("session_trend_label") or session.get("trend_label"),
+                    "volume_state": context.get("volume_state") or momentum.get("volume_state"),
+                    "momentum_pct": context.get("momentum_pct") or momentum.get("momentum_pct"),
+                    "session_momentum_30m_pct": (
+                        context.get("session_momentum_30m_pct")
+                        or session.get("momentum_30m_pct")
+                    ),
+                },
+                trend_state={
+                    "direction": context.get("trend_direction"),
+                    "strength": context.get("trend_strength"),
+                },
+                event_state=event_context,
+            )
+        ),
         "model_router": {
             "status": "active" if regime_routing else "contract_defined",
             "current_regime_id": regime_observation.get("regime_id"),

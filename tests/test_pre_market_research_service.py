@@ -157,10 +157,23 @@ def test_repository_event_enrichment_includes_source_metadata(tmp_path):
         con.executemany(
             """
             INSERT INTO daily_symbol_events (
-                market_date, symbol, event_type, source, created_at, updated_at
-            ) VALUES ('2026-05-30', 'AAPL', 'guidance', ?, '2026-05-30T09:00:00', '2026-05-30T09:00:00')
+                market_date, symbol, event_type, source, raw_json, created_at, updated_at
+            ) VALUES ('2026-05-30', 'AAPL', 'guidance', ?, ?, '2026-05-30T09:00:00', '2026-05-30T09:00:00')
             """,
-            [("reuters",), ("morningstar",), ("reuters",)],
+            [
+                (
+                    "reuters",
+                    '{"intent_direction": "constructive", "intent_category": "company_fundamental_update", "intent_scope": "direct_company", "confirmation_status": "reputable_reported", "missing_evidence": []}',
+                ),
+                (
+                    "morningstar",
+                    '{"intent_direction": "constructive", "intent_category": "company_fundamental_update", "intent_scope": "direct_company", "confirmation_status": "reputable_reported", "missing_evidence": []}',
+                ),
+                (
+                    "reuters",
+                    '{"intent_direction": "constructive", "intent_category": "company_fundamental_update", "intent_scope": "direct_company", "confirmation_status": "reputable_reported", "missing_evidence": []}',
+                ),
+            ],
         )
 
     enrichment = repo.event_enrichment("2026-05-30")["AAPL"]
@@ -171,6 +184,8 @@ def test_repository_event_enrichment_includes_source_metadata(tmp_path):
     assert enrichment["trusted_source_count"] == 2
     assert enrichment["confidence_cap"] == "two_independent_reputable_sources"
     assert enrichment["catalyst_score"] == 72
+    assert enrichment["event_context"]["intent_directions"] == ["constructive"]
+    assert enrichment["event_context"]["intent_categories"] == ["company_fundamental_update"]
 
 
 def test_apply_event_enrichment_uses_multisource_confidence_text():
@@ -186,6 +201,14 @@ def test_apply_event_enrichment_uses_multisource_confidence_text():
             "trusted_source_count": 2,
             "confidence_cap": "two_independent_reputable_sources",
             "consumer_appetite_score": 70,
+            "event_context": {
+                "event_intent_version": "event_intent_aggregate_v1",
+                "intent_directions": ["constructive"],
+                "intent_categories": ["company_fundamental_update"],
+                "intent_scopes": ["direct_company"],
+                "confirmation_statuses": ["reputable_reported"],
+                "missing_evidence": [],
+            },
         },
     )
 
@@ -194,7 +217,10 @@ def test_apply_event_enrichment_uses_multisource_confidence_text():
     assert context["sources"] == ["reuters", "morningstar"]
     assert context["trusted_source_count"] == 2
     assert context["confidence_cap"] == "two_independent_reputable_sources"
+    assert context["intent_directions"] == ["constructive"]
+    assert context["intent_categories"] == ["company_fundamental_update"]
     assert "confidence_cap=two_independent_reputable_sources" in entry["reason"]
+    assert "intent=constructive" in entry["reason"]
     assert "trusted_sources=2" in entry["key_catalysts"][0]
     assert "event context is single-source headline-level only" not in entry["key_risks"]
 

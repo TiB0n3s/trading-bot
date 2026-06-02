@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from typing import Any
 
 from db import DB_PATH, get_connection
@@ -35,7 +36,9 @@ class PreMarketResearchRepository:
                        e.source_count,
                        e.sources,
                        e.trusted_source_count,
-                       e.source_tiers
+                       e.source_tiers,
+                       c.raw_json AS context_raw_json,
+                       e.raw_events_json
                 FROM daily_symbol_context c
                 LEFT JOIN (
                     SELECT symbol,
@@ -56,6 +59,22 @@ class PreMarketResearchRepository:
 
         out = {}
         for row in rows:
+            raw_context = {}
+            try:
+                loaded = json.loads(row["context_raw_json"] or "{}")
+                raw_context = loaded if isinstance(loaded, dict) else {}
+            except Exception:
+                raw_context = {}
+            raw_events = []
+            for raw in str(row["raw_events_json"] or "").split("|||"):
+                if not raw:
+                    continue
+                try:
+                    loaded = json.loads(raw)
+                    if isinstance(loaded, dict):
+                        raw_events.append(loaded)
+                except Exception:
+                    pass
             sources = [
                 source
                 for source in str(row["sources"] or "").split(",")
@@ -72,6 +91,59 @@ class PreMarketResearchRepository:
                 source_tiers,
                 int(row["source_count"] or 0),
             )
+            event_context = raw_context.get("event_context")
+            if not isinstance(event_context, dict):
+                intent_directions = sorted(
+                    {
+                        str(event.get("intent_direction"))
+                        for event in raw_events
+                        if event.get("intent_direction")
+                    }
+                )
+                intent_categories = sorted(
+                    {
+                        str(event.get("intent_category"))
+                        for event in raw_events
+                        if event.get("intent_category")
+                    }
+                )
+                intent_scopes = sorted(
+                    {
+                        str(event.get("intent_scope"))
+                        for event in raw_events
+                        if event.get("intent_scope")
+                    }
+                )
+                confirmation_statuses = sorted(
+                    {
+                        str(event.get("confirmation_status"))
+                        for event in raw_events
+                        if event.get("confirmation_status")
+                    }
+                )
+                missing_evidence = sorted(
+                    {
+                        str(item)
+                        for event in raw_events
+                        for item in (
+                            event.get("missing_evidence")
+                            if isinstance(event.get("missing_evidence"), list)
+                            else []
+                        )
+                        if item
+                    }
+                )
+                event_context = {
+                    "event_intent_version": "event_intent_aggregate_v1",
+                    "available": bool(raw_events),
+                    "event_count": row["event_count"],
+                    "intent_directions": intent_directions,
+                    "intent_categories": intent_categories,
+                    "intent_scopes": intent_scopes,
+                    "confirmation_statuses": confirmation_statuses,
+                    "missing_evidence": missing_evidence,
+                    "authority": "context_only_no_standalone_buy_authority",
+                }
             out[row["symbol"]] = {
                 "catalyst_score": row["catalyst_score"],
                 "consumer_appetite_score": row["consumer_appetite_score"],
@@ -88,6 +160,7 @@ class PreMarketResearchRepository:
                 "trusted_source_count": trusted_source_count,
                 "source_tiers": sorted(set(source_tiers)),
                 "confidence_cap": confidence_cap,
+                "event_context": event_context,
             }
         return out
 

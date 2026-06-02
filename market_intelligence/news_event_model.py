@@ -21,6 +21,8 @@ from __future__ import annotations
 from dataclasses import dataclass, asdict
 from typing import Any
 
+from market_intelligence.source_reliability import confidence_cap_for_sources
+
 
 VALID_EVENT_TYPES = {
     "product_launch",
@@ -217,6 +219,8 @@ TRUSTED_BULLISH_SOURCE_TIERS = {
     "deep_analysis",
 }
 
+EVENT_INTENT_VERSION = "event_intent_v1"
+
 
 def clamp(value: float, low: float = 0, high: float = 100) -> float:
     return max(low, min(high, float(value)))
@@ -269,6 +273,142 @@ def _is_trusted_bullish_source(event: dict[str, Any]) -> bool:
 
 def _source_tier(event: dict[str, Any]) -> str:
     return str(event.get("source_tier") or "unknown")
+
+
+def _search_scope(event: dict[str, Any]) -> str:
+    return str(event.get("search_scope") or event.get("relevance_scope") or "unknown")
+
+
+def _confirmation_status(event: dict[str, Any], source_tier: str) -> str:
+    explicit = str(event.get("confirmation_status") or "").strip().lower()
+    if explicit:
+        return explicit
+    if source_tier == "official":
+        return "official_confirmed"
+    if source_tier in TRUSTED_BULLISH_SOURCE_TIERS:
+        return "reputable_reported"
+    if source_tier in ("medium_confidence",):
+        return "needs_confirmation"
+    return "unconfirmed"
+
+
+def _intent_scope(event: dict[str, Any], event_type: str) -> str:
+    scope = _search_scope(event)
+    if scope in ("company_direct", "direct", "symbol_direct"):
+        return "direct_company"
+    if scope in ("company_peripheral", "peripheral", "supplier", "customer"):
+        return "peripheral_company"
+    if event_type in ("supplier_signal", "customer_contract", "leadership_personnel", "mna_deal_chatter", "insider_transaction"):
+        return "peripheral_company"
+    if event_type in ("macro_geopolitical",):
+        return "macro"
+    return "direct_company" if event.get("symbol") else "market_wide"
+
+
+def _event_intent_category(event_type: str, scores: EventScores, impact: str) -> str:
+    if event_type in ("earnings", "guidance"):
+        return "company_fundamental_update"
+    if event_type in ("supplier_signal", "supply_chain"):
+        return "supply_chain_or_input_risk"
+    if event_type in ("customer_contract", "industry_demand", "ai_infrastructure_demand"):
+        return "demand_or_revenue_signal"
+    if event_type in ("leadership_personnel",):
+        return "management_execution_signal"
+    if event_type in ("mna_deal_chatter", "strategic_partnership"):
+        return "strategic_transaction_signal"
+    if event_type in ("regulatory", "lawsuit", "macro_geopolitical"):
+        return "external_risk_signal"
+    if event_type in ("insider_transaction",):
+        return "insider_activity_signal"
+    if impact in ("strongly_bearish", "moderately_bearish"):
+        return "risk_signal"
+    if impact in ("strongly_bullish", "moderately_bullish"):
+        return "upside_catalyst_signal"
+    return "context_signal"
+
+
+def interpret_event_intent(
+    *,
+    event: dict[str, Any],
+    event_type: str,
+    scores: EventScores,
+    impact: str,
+    relevance: str,
+    net_score: float,
+    reason_bits: list[str],
+) -> dict[str, Any]:
+    """Build a structured event-intent interpretation.
+
+    This is intentionally deterministic and advisory. It interprets event
+    intent from event type, source quality, scope, and score dimensions rather
+    than just headline keywords.
+    """
+    source_tier = _source_tier(event)
+    source_tiers = [source_tier]
+    confirmation_status = _confirmation_status(event, source_tier)
+    confidence_cap = confidence_cap_for_sources(source_tiers, 1)
+    scope = _intent_scope(event, event_type)
+    risk_dimensions = {
+        "margin": scores.margin_risk_score,
+        "supply_chain": scores.supply_chain_risk_score,
+        "materials": scores.materials_risk_score,
+        "regulatory": scores.regulatory_risk_score,
+        "competitive": scores.competitive_risk_score,
+        "execution": scores.execution_risk_score,
+        "macro": scores.macro_risk_score,
+    }
+    upside_dimensions = {
+        "consumer_appetite": scores.consumer_appetite_score,
+        "revenue": scores.revenue_impact_score,
+        "profit": scores.profit_potential_score,
+    }
+    dominant_risk = max(risk_dimensions.items(), key=lambda item: item[1])
+    dominant_upside = max(upside_dimensions.items(), key=lambda item: item[1])
+    if impact in ("strongly_bullish", "moderately_bullish"):
+        direction = "constructive"
+    elif impact in ("strongly_bearish", "moderately_bearish"):
+        direction = "risk_negative"
+    elif dominant_risk[1] >= 65:
+        direction = "risk_watch"
+    elif dominant_upside[1] >= 65:
+        direction = "constructive_watch"
+    else:
+        direction = "neutral_context"
+
+    evidence = [
+        f"event_type={event_type}",
+        f"source_tier={source_tier}",
+        f"scope={scope}",
+        f"dominant_upside={dominant_upside[0]}:{round(float(dominant_upside[1]), 2)}",
+        f"dominant_risk={dominant_risk[0]}:{round(float(dominant_risk[1]), 2)}",
+        f"net_event_score={round(float(net_score), 2)}",
+    ]
+    if reason_bits:
+        evidence.extend(reason_bits[:3])
+
+    missing_evidence = []
+    if confirmation_status in ("unconfirmed", "needs_confirmation"):
+        missing_evidence.append("official_or_second_reputable_source")
+    if scope == "peripheral_company":
+        missing_evidence.append("direct_company_confirmation")
+    if source_tier in ("unclassified", "low_confidence", "unknown"):
+        missing_evidence.append("trusted_source_attribution")
+
+    return {
+        "event_intent_version": EVENT_INTENT_VERSION,
+        "intent_category": _event_intent_category(event_type, scores, impact),
+        "intent_direction": direction,
+        "intent_scope": scope,
+        "confirmation_status": confirmation_status,
+        "confidence_cap": confidence_cap,
+        "authority": "context_only_no_standalone_buy_authority",
+        "expected_market_impact": impact,
+        "trade_relevance": relevance,
+        "dominant_upside_dimension": dominant_upside[0],
+        "dominant_risk_dimension": dominant_risk[0],
+        "evidence": evidence,
+        "missing_evidence": missing_evidence,
+    }
 
 
 def score_event(event: dict[str, Any]) -> dict[str, Any]:
@@ -527,10 +667,21 @@ def score_event(event: dict[str, Any]) -> dict[str, Any]:
         impact = str(event["expected_market_impact"])
     if event.get("trade_relevance"):
         relevance = str(event["trade_relevance"])
+    intent = interpret_event_intent(
+        event=event,
+        event_type=event_type,
+        scores=scores,
+        impact=impact,
+        relevance=relevance,
+        net_score=net,
+        reason_bits=reason_bits,
+    )
 
     out = dict(event)
     out["event_type"] = event_type
     out.update(asdict(scores))
+    out.update(intent)
+    out["event_intent"] = intent
     out["expected_market_impact"] = impact
     out["trade_relevance"] = relevance
     out["net_event_score"] = round(net, 2)

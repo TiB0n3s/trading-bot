@@ -28,6 +28,8 @@ def test_neutral_headline_baseline_does_not_infer_bullish():
     assert event["expected_market_impact"] == "neutral"
     assert event["trade_relevance"] == "watch_only"
     assert event["net_event_score"] == 0.0
+    assert event["event_intent"]["intent_direction"] == "neutral_context"
+    assert event["event_intent"]["authority"] == "context_only_no_standalone_buy_authority"
 
 
 def test_unclassified_source_caps_weak_bullish_inference():
@@ -82,6 +84,9 @@ def test_supplier_signal_models_risk_without_untrusted_bullish_jump():
     assert event["expected_market_impact"] in ("neutral", "moderately_bearish")
     assert event["supply_chain_risk_score"] > 40
     assert event["execution_risk_score"] > 35
+    assert event["intent_category"] == "supply_chain_or_input_risk"
+    assert event["intent_scope"] == "peripheral_company"
+    assert "direct_company_confirmation" in event["missing_evidence"]
 
 
 def test_untrusted_deal_chatter_requires_confirmation():
@@ -100,6 +105,8 @@ def test_untrusted_deal_chatter_requires_confirmation():
     assert event["expected_market_impact"] == "neutral"
     assert event["trade_relevance"] in ("watch_only", "watch_for_confirmation")
     assert "rumor-sensitive peripheral event requires trusted confirmation" in event["scoring_reason"]
+    assert event["confirmation_status"] == "unconfirmed"
+    assert "official_or_second_reputable_source" in event["missing_evidence"]
 
 
 def test_leadership_departure_is_execution_risk_not_bullish():
@@ -117,6 +124,7 @@ def test_leadership_departure_is_execution_risk_not_bullish():
 
     assert event["expected_market_impact"] in ("neutral", "moderately_bearish")
     assert event["execution_risk_score"] > 40
+    assert event["intent_category"] == "management_execution_signal"
 
 
 def main():

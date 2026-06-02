@@ -540,6 +540,11 @@ def apply_event_enrichment(symbol_entry: dict, enrichment: dict) -> None:
             else "multi_source_required_review"
         )
     )
+    interpreted_context = (
+        enrichment.get("event_context")
+        if isinstance(enrichment.get("event_context"), dict)
+        else {}
+    )
 
     symbol_entry["event_context"] = {
         "available": True,
@@ -551,6 +556,12 @@ def apply_event_enrichment(symbol_entry: dict, enrichment: dict) -> None:
         "event_count": event_count,
         "event_signal": signal,
         "authority": "context_only_no_standalone_buy_authority",
+        "intent_directions": interpreted_context.get("intent_directions") or [],
+        "intent_categories": interpreted_context.get("intent_categories") or [],
+        "intent_scopes": interpreted_context.get("intent_scopes") or [],
+        "confirmation_statuses": interpreted_context.get("confirmation_statuses") or [],
+        "missing_evidence": interpreted_context.get("missing_evidence") or [],
+        "event_intent_version": interpreted_context.get("event_intent_version"),
         **event_scores,
     }
 
@@ -570,7 +581,17 @@ def apply_event_enrichment(symbol_entry: dict, enrichment: dict) -> None:
                 if source_count <= 1
                 else f"multi-source headline-level aggregate, trusted_sources={trusted_source_count}, review still required"
             )
+            intent_text = ""
+            directions = interpreted_context.get("intent_directions") or []
+            categories = interpreted_context.get("intent_categories") or []
+            if directions or categories:
+                intent_text = (
+                    f" intent={','.join(directions[:3]) or '-'}"
+                    f"/{','.join(categories[:3]) or '-'}."
+                )
             note = f"Event context catalyst score {catalyst_f:.2f}; {source_note}."
+            if intent_text:
+                note += intent_text
             if note not in catalysts:
                 catalysts.insert(0, note)
             symbol_entry["notes"] = "event_enriched"
@@ -584,7 +605,8 @@ def apply_event_enrichment(symbol_entry: dict, enrichment: dict) -> None:
             reason
             + f" Event context: {count_text}headline event aggregate(s), "
               f"sources={source_count}, trusted_sources={trusted_source_count}, "
-              f"signal={signal}, confidence_cap={confidence_cap}."
+              f"signal={signal}, confidence_cap={confidence_cap}, "
+              f"intent={','.join((interpreted_context.get('intent_directions') or [])[:3]) or 'unknown'}."
         ).strip()
 
 

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Any
 
@@ -244,6 +245,7 @@ class MarketIntelligenceRepository:
                     materials_risk_score = ?,
                     competitive_risk_score = ?,
                     execution_risk_score = ?,
+                    raw_json = ?,
                     updated_at = ?
                 WHERE market_date = ?
                   AND symbol = ?
@@ -258,6 +260,7 @@ class MarketIntelligenceRepository:
                     agg.get("materials_risk_score"),
                     agg.get("competitive_risk_score"),
                     agg.get("execution_risk_score"),
+                    json.dumps(agg, sort_keys=True),
                     updated_at,
                     market_date,
                     symbol,

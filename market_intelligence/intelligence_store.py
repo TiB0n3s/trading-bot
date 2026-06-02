@@ -357,9 +357,54 @@ def aggregate_symbol_events(market_date: str, symbol: str, db_path: Path | str =
 
     impacts = [e["expected_market_impact"] for e in events if e["expected_market_impact"]]
     relevance = [e["trade_relevance"] for e in events if e["trade_relevance"]]
+    raw_events = []
+    for e in events:
+        try:
+            raw = json.loads(e["raw_json"] or "{}")
+            if isinstance(raw, dict):
+                raw_events.append(raw)
+        except Exception:
+            pass
+
+    intent_directions = [
+        str(e.get("intent_direction"))
+        for e in raw_events
+        if e.get("intent_direction")
+    ]
+    intent_categories = [
+        str(e.get("intent_category"))
+        for e in raw_events
+        if e.get("intent_category")
+    ]
+    intent_scopes = [
+        str(e.get("intent_scope"))
+        for e in raw_events
+        if e.get("intent_scope")
+    ]
+    confirmation_statuses = [
+        str(e.get("confirmation_status"))
+        for e in raw_events
+        if e.get("confirmation_status")
+    ]
+    missing_evidence = []
+    for e in raw_events:
+        missing = e.get("missing_evidence") or []
+        if isinstance(missing, list):
+            missing_evidence.extend(str(item) for item in missing if item)
 
     out["event_impacts"] = ", ".join(sorted(set(impacts))) if impacts else None
     out["event_relevance"] = ", ".join(sorted(set(relevance))) if relevance else None
+    out["event_context"] = {
+        "event_intent_version": "event_intent_aggregate_v1",
+        "available": True,
+        "event_count": len(events),
+        "intent_directions": sorted(set(intent_directions)),
+        "intent_categories": sorted(set(intent_categories)),
+        "intent_scopes": sorted(set(intent_scopes)),
+        "confirmation_statuses": sorted(set(confirmation_statuses)),
+        "missing_evidence": sorted(set(missing_evidence)),
+        "authority": "context_only_no_standalone_buy_authority",
+    }
 
     return out
 

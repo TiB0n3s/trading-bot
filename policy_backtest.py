@@ -244,8 +244,6 @@ def load_rows(args):
         extra += " AND symbol = ?"
         params.append(args.symbol.upper())
 
-    params.append(args.limit)
-
     return PolicyBacktestRepository().buy_rows(
         extra_sql=extra,
         params=params,

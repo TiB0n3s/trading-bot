@@ -20,7 +20,7 @@ log_event(
     severity="critical",
     reason="after-close learning failed before completion; policy artifacts may be stale",
     source="run_after_close_learning.sh",
-    context={"exit_code": ${exit_code}},
+    payload={"exit_code": ${exit_code}},
 )
 PY2
     echo "After-close learning failed with exit code ${exit_code}: $(date)" >&2

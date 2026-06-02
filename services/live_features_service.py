@@ -17,6 +17,7 @@ from prior_session_context import prior_session_context
 from repositories.live_features_repo import LiveFeaturesRepository
 from rolling_context import rolling_symbol_context
 from services.market_data_service import market_data_service
+from services.timescale_tick_writer_service import write_ticks_sync
 from setup_engine import classify_feature_snapshot as classify_setup
 from strategy_constants import SYMBOL_MARKET_ALIGNMENT
 from symbols_config import APPROVED_SYMBOLS
@@ -267,6 +268,24 @@ class LiveFeaturesService:
 
     def insert_snapshot(self, snapshot: dict[str, Any]) -> None:
         self.repository.insert_snapshot(snapshot)
+        try:
+            result = write_ticks_sync(
+                [
+                    {
+                        "timestamp": snapshot.get("timestamp"),
+                        "ticker": snapshot.get("symbol"),
+                        "price": snapshot.get("last_price"),
+                        "volume": snapshot.get("volume_ratio_5m") or 0,
+                    }
+                ]
+            )
+            if result.get("enabled") and not result.get("ok"):
+                self.logger.warning(
+                    "Timescale feature tick write failed: %s",
+                    result.get("reason"),
+                )
+        except Exception as exc:
+            self.logger.warning(f"Timescale feature tick write skipped: {exc}")
 
     def collect_all_symbols(self, write: bool = False, stdout: bool = False) -> tuple[int, int]:
         self.reset_bar_cache()

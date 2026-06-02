@@ -319,6 +319,10 @@ def test_build_canonical_snapshot_collects_core_state_and_hashes():
     assert data["confidence"]["primary_realized_win_rate"] == 0.64
     assert data["confidence"]["confidence_quality"] == "medium"
     assert data["event_state"]["support_count"] == 3
+    assert data["analytics_state"]["runtime_effect"] == "canonical_audit_and_ml_context_only"
+    assert "predictive" in data["analytics_state"]["active_families"]
+    assert "sentiment_nlp" in data["analytics_state"]["active_families"]
+    assert data["analytics_state"]["families"]["alternative_data"]["status"] == "not_integrated"
     assert data["policy_artifact_ref"]["state_hash"] == "abc"
     assert data["freshness_sec"]["market_context"] == 1800.0
     assert data["freshness_sec"]["session_momentum"] == 60.0

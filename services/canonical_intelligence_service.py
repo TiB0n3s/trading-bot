@@ -9,6 +9,7 @@ import json
 from typing import Any
 
 from services.confidence_calibration_service import build_calibrated_confidence
+from services.analytics_method_service import build_analytics_method_state
 
 
 CANONICAL_INTELLIGENCE_VERSION = "canonical_intelligence_v1"
@@ -22,6 +23,7 @@ CANONICAL_INTELLIGENCE_REQUIRED_SECTIONS = (
     "strategy_state",
     "opportunity_state",
     "advisory_authority_state",
+    "analytics_state",
     "policy_artifact_ref",
     "source_timestamps",
     "freshness_sec",
@@ -125,6 +127,7 @@ class CanonicalIntelligenceSnapshot:
     strategy_state: dict[str, Any]
     opportunity_state: dict[str, Any]
     advisory_authority_state: dict[str, Any]
+    analytics_state: dict[str, Any]
     policy_artifact_ref: dict[str, Any]
     source_timestamps: dict[str, Any]
     freshness_sec: dict[str, Any]
@@ -424,6 +427,11 @@ def build_canonical_intelligence_snapshot(
         ),
         "confidence_quality": calibrated_confidence.get("confidence_quality"),
     }
+    analytics_state = build_analytics_method_state(
+        symbol=symbol,
+        context=context,
+        account_state=account_state,
+    )
 
     feature_vector = {
         "regime_state": regime_state,
@@ -435,6 +443,7 @@ def build_canonical_intelligence_snapshot(
         "strategy_state": strategy_state,
         "opportunity_state": opportunity_state,
         "advisory_authority_state": advisory_authority_state,
+        "analytics_state": analytics_state,
         "policy_artifact_ref": policy_artifact_ref,
         "source_timestamps": source_timestamps,
         "freshness_sec": freshness_sec,
@@ -456,6 +465,7 @@ def build_canonical_intelligence_snapshot(
         strategy_state=strategy_state,
         opportunity_state=opportunity_state,
         advisory_authority_state=advisory_authority_state,
+        analytics_state=analytics_state,
         policy_artifact_ref=policy_artifact_ref,
         source_timestamps=source_timestamps,
         freshness_sec=freshness_sec,

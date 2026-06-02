@@ -76,7 +76,7 @@ SNAPSHOT_CONTEXT_FIELDS = (
     "cluster_exposure_pct",
 )
 
-DECISION_SNAPSHOT_FEATURE_SEMANTIC_VERSION = "decision_snapshot_features_v3"
+DECISION_SNAPSHOT_FEATURE_SEMANTIC_VERSION = "decision_snapshot_features_v4"
 
 
 def json_dumps(value: Any) -> str:

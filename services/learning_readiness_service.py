@@ -8,11 +8,13 @@ coverage for calibration, replay, and future authority promotion work.
 from __future__ import annotations
 
 from dataclasses import dataclass
+import json
 from typing import Any, Iterable
 
 
 LEARNING_READINESS_REPORT_VERSION = "learning_readiness_v1"
 LEARNING_READINESS_RUNTIME_EFFECT = "diagnostic_only_no_live_authority"
+DEFAULT_FULL_READINESS_INTEGRATED_OUTCOME_TARGET = 750
 
 
 @dataclass(frozen=True)
@@ -24,6 +26,7 @@ class LearningReadinessPayload:
     symbol_patterns: dict[str, Any]
     feature_attribution: dict[str, Any]
     calibration: dict[str, Any]
+    progress: dict[str, Any]
     blockers: list[str]
     next_actions: list[str]
 
@@ -62,6 +65,142 @@ def _candidate_summary(rows: Iterable[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
+def _float(value: Any) -> float | None:
+    try:
+        if value is None or value == "":
+            return None
+        return float(value)
+    except Exception:
+        return None
+
+
+def _outcome(row: dict[str, Any]) -> float | None:
+    if row.get("approved"):
+        return _float(row.get("realized_return_pct"))
+    return _float(
+        row.get("rejected_return_60m")
+        or row.get("rejected_return_30m")
+        or row.get("rejected_return_eod")
+    )
+
+
+def _canonical(row: dict[str, Any]) -> dict[str, Any]:
+    raw = row.get("canonical_intelligence_json")
+    if isinstance(raw, dict):
+        return raw
+    if not raw:
+        return {}
+    try:
+        loaded = json.loads(str(raw))
+        return loaded if isinstance(loaded, dict) else {}
+    except Exception:
+        return {}
+
+
+def _path(data: dict[str, Any], *keys: str) -> Any:
+    cur: Any = data
+    for key in keys:
+        if not isinstance(cur, dict):
+            return None
+        cur = cur.get(key)
+    return cur
+
+
+def _meaningful(value: Any, *, default_values: set[str] | None = None) -> bool:
+    if value is None or value == "":
+        return False
+    text = str(value).strip().lower()
+    defaults = default_values or {"unknown", "none", "not_applicable"}
+    return text not in defaults
+
+
+def _integrated_outcome_progress(
+    rows: Iterable[dict[str, Any]],
+    *,
+    full_readiness_target: int,
+) -> dict[str, Any]:
+    rows_with_outcome = [dict(row) for row in rows if _outcome(dict(row)) is not None]
+    pattern_defaults = {
+        "unknown",
+        "mixed_or_unclassified_pattern",
+        "unclassified",
+        "none",
+    }
+    momentum_defaults = {
+        "unknown",
+        "insufficient_data",
+        "not_applicable",
+        "none",
+    }
+    prediction_defaults = {
+        "unknown",
+        "not_applicable",
+        "none",
+        "no_prediction",
+    }
+
+    pattern_rows = 0
+    momentum_rows = 0
+    prediction_rows = 0
+    fully_integrated = 0
+    for row in rows_with_outcome:
+        canonical = _canonical(row)
+        pattern_value = (
+            row.get("symbol_pattern")
+            or _path(canonical, "pattern_state", "pattern_label")
+        )
+        has_pattern = _meaningful(pattern_value, default_values=pattern_defaults)
+        momentum_values = [
+            _path(canonical, "momentum_state", "session_label"),
+            _path(canonical, "momentum_state", "state"),
+            _path(canonical, "momentum_state", "direction"),
+            row.get("session_trend_label"),
+        ]
+        has_momentum = any(
+            _meaningful(value, default_values=momentum_defaults)
+            for value in momentum_values
+        )
+        prediction_values = [
+            _path(canonical, "prediction_state", "ml_bucket"),
+            _path(canonical, "prediction_state", "ml_score"),
+            _path(canonical, "prediction_state", "deterministic_decision"),
+            _path(canonical, "prediction_state", "deterministic_score"),
+            row.get("ml_prediction_bucket"),
+            row.get("prediction_score"),
+        ]
+        has_prediction = any(
+            _meaningful(value, default_values=prediction_defaults)
+            for value in prediction_values
+        )
+        if has_pattern:
+            pattern_rows += 1
+        if has_momentum:
+            momentum_rows += 1
+        if has_prediction:
+            prediction_rows += 1
+        if has_pattern and has_momentum and has_prediction:
+            fully_integrated += 1
+
+    target = max(1, int(full_readiness_target or 1))
+    return {
+        "full_readiness_integrated_outcome_target": target,
+        "outcome_rows": len(rows_with_outcome),
+        "pattern_integrated_outcome_rows": pattern_rows,
+        "momentum_integrated_outcome_rows": momentum_rows,
+        "prediction_integrated_outcome_rows": prediction_rows,
+        "fully_integrated_outcome_rows": fully_integrated,
+        "outcome_rows_pct_of_full": min(1.0, round(len(rows_with_outcome) / target, 4)),
+        "pattern_integrated_pct_of_full": min(1.0, round(pattern_rows / target, 4)),
+        "momentum_integrated_pct_of_full": min(1.0, round(momentum_rows / target, 4)),
+        "prediction_integrated_pct_of_full": min(1.0, round(prediction_rows / target, 4)),
+        "fully_integrated_pct_of_full": min(1.0, round(fully_integrated / target, 4)),
+        "fully_integrated_rate_of_outcomes": _rate(
+            fully_integrated,
+            len(rows_with_outcome),
+        ),
+    }
+
+
 def _stage(*, sessions: int, rows_with_outcome: int, blockers: list[str]) -> str:
     hard_blockers = {
         "missing_runtime_job_runs",
@@ -93,6 +232,7 @@ def build_learning_readiness_payload(
     feature_summary: dict[str, Any] | None = None,
     feature_guardrails: list[dict[str, Any]] | None = None,
     calibration_summary: dict[str, Any] | None = None,
+    full_readiness_target: int = DEFAULT_FULL_READINESS_INTEGRATED_OUTCOME_TARGET,
 ) -> LearningReadinessPayload:
     rows = [dict(row) for row in lifecycle_rows]
     sessions = len({date for row in rows if (date := _decision_date(row))})
@@ -121,19 +261,12 @@ def build_learning_readiness_payload(
         rows_with_outcome = sum(
             1
             for row in rows
-            if (
-                row.get("approved")
-                and row.get("realized_return_pct") is not None
-            )
-            or (
-                not row.get("approved")
-                and (
-                    row.get("rejected_return_60m") is not None
-                    or row.get("rejected_return_30m") is not None
-                    or row.get("rejected_return_eod") is not None
-                )
-            )
+            if _outcome(row) is not None
         )
+    progress = _integrated_outcome_progress(
+        rows,
+        full_readiness_target=full_readiness_target,
+    )
 
     rejected_coverage = lifecycle_summary.get("rejected_counterfactual_coverage_rate")
     approved_exit_rate = lifecycle_summary.get("approved_exit_link_rate")
@@ -156,6 +289,8 @@ def build_learning_readiness_payload(
         blockers.append("missing_symbol_pattern_rows")
     if int(calibration_summary.get("ready_bucket_count") or 0) == 0 and rows_with_outcome:
         blockers.append("no_ready_calibration_buckets")
+    if rows_with_outcome and not progress["fully_integrated_outcome_rows"]:
+        blockers.append("missing_fully_integrated_pattern_momentum_prediction_outcomes")
 
     not_ready_features = [
         item
@@ -202,6 +337,8 @@ def build_learning_readiness_payload(
         next_actions.append("verify candidate-universe capture is running with scope=all")
     if "no_ready_calibration_buckets" in blockers:
         next_actions.append("collect more outcomes before using bucket calibration for promotion")
+    if "missing_fully_integrated_pattern_momentum_prediction_outcomes" in blockers:
+        next_actions.append("verify canonical rows include outcome + pattern + momentum + prediction fields")
     if not next_actions:
         next_actions.append("review feature candidates manually before any authority wiring")
 
@@ -249,6 +386,7 @@ def build_learning_readiness_payload(
             "ready_bucket_count": int(calibration_summary.get("ready_bucket_count") or 0),
             "missing_outcome_rows": int(calibration_summary.get("missing_outcome_rows") or 0),
         },
+        progress=progress,
         blockers=blockers,
         next_actions=next_actions,
     )

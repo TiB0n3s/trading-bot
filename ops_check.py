@@ -692,6 +692,7 @@ def learning_readiness(start_date):
         min_feature_sample_size=_int_option("--feature-min-sample-size", 30),
         min_pattern_sample_size=_int_option("--pattern-min-sample-size", 30),
         min_calibration_sample_size=_int_option("--calibration-min-sample-size", 5),
+        full_readiness_target=_int_option("--full-readiness-target", 750),
     )
 
 

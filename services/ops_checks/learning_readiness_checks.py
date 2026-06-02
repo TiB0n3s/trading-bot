@@ -23,6 +23,15 @@ def _fmt(value) -> str:
     return str(value)
 
 
+def _pct(value) -> str:
+    if value is None:
+        return "-"
+    try:
+        return f"{float(value) * 100:.2f}%"
+    except Exception:
+        return str(value)
+
+
 def run_learning_readiness(
     start_date: str,
     *,
@@ -32,6 +41,7 @@ def run_learning_readiness(
     min_feature_sample_size: int = 30,
     min_pattern_sample_size: int = 30,
     min_calibration_sample_size: int = 5,
+    full_readiness_target: int = 750,
 ) -> bool:
     end = end_date or start_date
     print()
@@ -88,6 +98,7 @@ def run_learning_readiness(
         feature_summary=feature_payload.summary,
         feature_guardrails=feature_payload.rollout_guardrails,
         calibration_summary=calibration_payload.summary,
+        full_readiness_target=full_readiness_target,
     )
 
     summary = payload.summary
@@ -100,6 +111,30 @@ def run_learning_readiness(
     print(f"authority_note                : {summary['authority_note']}")
     if symbol:
         print(f"symbol                        : {symbol.upper()}")
+
+    print()
+    print("Full readiness progress")
+    print(
+        f"  {'target_integrated_outcomes':<38} "
+        f"{payload.progress['full_readiness_integrated_outcome_target']}"
+    )
+    for key, pct_key in (
+        ("outcome_rows", "outcome_rows_pct_of_full"),
+        ("pattern_integrated_outcome_rows", "pattern_integrated_pct_of_full"),
+        ("momentum_integrated_outcome_rows", "momentum_integrated_pct_of_full"),
+        ("prediction_integrated_outcome_rows", "prediction_integrated_pct_of_full"),
+        ("fully_integrated_outcome_rows", "fully_integrated_pct_of_full"),
+    ):
+        print(
+            f"  {key:<38} "
+            f"{payload.progress[key]:>8} / "
+            f"{payload.progress['full_readiness_integrated_outcome_target']:<8} "
+            f"{_pct(payload.progress[pct_key]):>8}"
+        )
+    print(
+        f"  {'fully_integrated_rate_of_outcomes':<38} "
+        f"{_pct(payload.progress['fully_integrated_rate_of_outcomes'])}"
+    )
 
     print()
     print("Runtime health")

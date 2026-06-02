@@ -66,6 +66,17 @@ def _canonical_lifecycle_json(
                 "label": setup,
                 "structure_state": structure,
             },
+            "momentum_state": {
+                "direction": "bullish" if regime != "risk_off_unwind" else "bearish",
+                "state": "accelerating" if regime == "trend_expansion" else "mixed",
+                "session_label": "uptrend" if regime != "risk_off_unwind" else "fading",
+            },
+            "prediction_state": {
+                "ml_score": 62 if regime != "risk_off_unwind" else 38,
+                "ml_bucket": "high_55_plus" if regime != "risk_off_unwind" else "weak_below_45",
+                "ml_sample_size": 80,
+                "runtime_effect": "observe_only_compare",
+            },
             "advisory_authority_state": {
                 "utility_estimate": {"utility_decision": utility}
             },
@@ -583,6 +594,8 @@ def test_learning_readiness_cli_golden_fixture_summarizes_holistic_evidence(tmp_
         "1",
         "--calibration-min-sample-size",
         "1",
+        "--full-readiness-target",
+        "4",
     )
 
     assert code == 0
@@ -592,6 +605,9 @@ def test_learning_readiness_cli_golden_fixture_summarizes_holistic_evidence(tmp_
     assert "readiness_stage               : baseline_collection" in out
     assert "sessions_with_lifecycle_rows  : 1" in out
     assert "rows_with_outcome             : 4" in out
+    assert "Full readiness progress" in out
+    assert "fully_integrated_outcome_rows" in out
+    assert "100.00%" in out
     assert "Candidate universe" in out
     assert "near_threshold" in out
     assert "Intelligence diagnostics" in out

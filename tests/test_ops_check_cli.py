@@ -259,6 +259,7 @@ def test_ops_reliability_cli_missing_db_exits_cleanly(tmp_path):
         ("portfolio-risk", "Portfolio Risk Report", "portfolio_risk_v1"),
         ("decision-lifecycle-dashboard", "Decision Lifecycle Dashboard", None),
         ("calibration-buckets", "Calibration Buckets", None),
+        ("ai-intelligence-review", "AI Intelligence Integration Review", "ai_intelligence_review_v1"),
     ):
         code, out = _run_cli(tmp_path, command, "2026-05-30")
         assert code == 1
@@ -368,6 +369,33 @@ def test_rollout_contract_cli_golden_fixture_locks_report_contract(tmp_path):
     assert "capped_by:" in out
 
 
+def test_ai_intelligence_review_cli_golden_fixture_covers_ten_recommendations(tmp_path):
+    _create_lifecycle_fixture_db(tmp_path)
+
+    code, out = _run_cli(tmp_path, "ai-intelligence-review", "2026-05-30")
+
+    assert code == 0
+    assert "AI Intelligence Integration Review - 2026-05-30" in out
+    assert "report_version          : ai_intelligence_review_v1" in out
+    assert "ai_review_version       : ai_review_suite_v1" in out
+    assert "runtime_effect          : observe_only_no_live_authority" in out
+    assert "authority               : review_only_no_trade_authority" in out
+    for label in (
+        "1. Context interpreter",
+        "2. Pattern summarizer",
+        "3. Disagreement reviewer",
+        "4. Post-trade analyst",
+        "5. Governance assistant",
+        "6. Source reliability auditor",
+        "7. Candidate-universe reviewer",
+        "8. Explicit AI contract",
+        "9. Promotion path reviewer",
+        "10. Practical integration tasks",
+    ):
+        assert label in out
+    assert "[OK] AI intelligence review completed; no live authority changed" in out
+
+
 def test_lifecycle_dashboard_and_calibration_cli_use_lifecycle_rows(tmp_path):
     _create_lifecycle_fixture_db(tmp_path)
 
@@ -419,6 +447,7 @@ def main():
         test_post_trade_learning_cli_empty_lifecycle_rows_warns,
         test_rollout_contract_cli_empty_lifecycle_rows_warns,
         test_rollout_contract_cli_golden_fixture_locks_report_contract,
+        test_ai_intelligence_review_cli_golden_fixture_covers_ten_recommendations,
         test_lifecycle_dashboard_and_calibration_cli_use_lifecycle_rows,
         test_regime_status_json_smoke,
     ]

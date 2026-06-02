@@ -51,6 +51,7 @@ Usage:
   python3 ops_check.py post-trade-learning
   python3 ops_check.py rollout-contract
   python3 ops_check.py advisory-authority-report
+  python3 ops_check.py ai-intelligence-review
   python3 ops_check.py migration-status
   python3 ops_check.py strong-days
   python3 ops_check.py strong-days 2026-05-26
@@ -90,6 +91,7 @@ from services.ops_checks.feature_attribution_checks import run_feature_attributi
 from services.ops_checks.post_trade_learning_checks import run_post_trade_learning_report
 from services.ops_checks.rollout_contract_checks import run_rollout_contract_report
 from services.ops_checks.advisory_authority_checks import run_advisory_authority_report
+from services.ops_checks.ai_intelligence_review_checks import run_ai_intelligence_review
 from services.ops_checks.order_checks import run_order_health
 from services.ops_checks.rejection_checks import run_rejection_summary
 from services.ops_checks.rejected_outcome_checks import run_rejected_outcomes_health
@@ -559,6 +561,7 @@ def production_evidence(target_date):
         conviction_persistence_health(target_date),
         feature_attribution(target_date),
         post_trade_learning(target_date),
+        ai_intelligence_review(target_date),
     ]
     print()
     print("=" * 72)
@@ -664,6 +667,20 @@ def rollout_contract(target_date):
         base_dir=BASE_DIR,
         symbol=symbol,
         min_sample_size=_int_option("--min-sample-size", 30),
+    )
+
+
+def ai_intelligence_review(target_date):
+    symbol = None
+    if "--symbol" in sys.argv:
+        idx = sys.argv.index("--symbol")
+        if idx + 1 < len(sys.argv):
+            symbol = sys.argv[idx + 1]
+    return run_ai_intelligence_review(
+        target_date,
+        base_dir=BASE_DIR,
+        symbol=symbol,
+        samples=_int_option("--samples", 10),
     )
 
 
@@ -820,6 +837,9 @@ def main():
     if command == "rollout-contract":
         return 0 if rollout_contract(target_date) else 1
 
+    if command == "ai-intelligence-review":
+        return 0 if ai_intelligence_review(target_date) else 1
+
     if command == "point-in-time-archive":
         return 0 if point_in_time_archive(target_date) else 1
 
@@ -887,6 +907,7 @@ def main():
         checks.append(run("Auto-Buy Candidates", ["ops_check.py", "auto-buy", target_date]))
         checks.append(run("Auto-Buy Outcomes", ["auto_buy_outcome_report.py", "--date", target_date]))
         checks.append(run("Decision Snapshots", ["ops_check.py", "decision-snapshots", target_date]))
+        checks.append(run("AI Intelligence Review", ["ops_check.py", "ai-intelligence-review", target_date]))
         checks.append(run("Policy Artifacts", ["ops_check.py", "policy-artifacts"]))
         checks.append(run("Retention Policy", ["ops_check.py", "retention"]))
         checks.append(run("Drawdown Report", ["drawdown_report.py", target_date]))

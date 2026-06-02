@@ -641,6 +641,7 @@ python3 rejected_signal_outcome_builder.py --date YYYY-MM-DD
 python3 ops_check.py rejected-outcomes YYYY-MM-DD
 python3 ops_check.py decision-snapshots YYYY-MM-DD
 python3 ops_check.py lifecycle-analysis YYYY-MM-DD
+python3 ops_check.py ai-intelligence-review YYYY-MM-DD
 python3 auto_buy_outcome_report.py --date YYYY-MM-DD
 ```
 /status Symbol Intelligence
@@ -724,6 +725,7 @@ python3 ops_check.py prediction-validation
 python3 ops_check.py runtime-health YYYY-MM-DD
 python3 ops_check.py lifecycle-analysis YYYY-MM-DD
 python3 ops_check.py lifecycle-analysis YYYY-MM-DD --symbol AAPL --samples 25
+python3 ops_check.py ai-intelligence-review YYYY-MM-DD
 python3 ops_check.py all
 
 Useful next-session validation:

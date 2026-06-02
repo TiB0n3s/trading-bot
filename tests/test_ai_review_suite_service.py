@@ -28,6 +28,8 @@ from services.ai_review_suite_service import (  # noqa: E402
 def _assert_review_only(payload):
     assert payload["runtime_effect"] == AI_REVIEW_RUNTIME_EFFECT
     assert payload["authority"] == "review_only_no_trade_authority"
+    assert payload["decision_effect"] == "none"
+    assert payload["schema_version"] == "ai_review_suite_v1"
 
 
 def test_policy_disagreement_explainer_flags_mixed_authority_state():
@@ -137,6 +139,9 @@ def test_build_ai_review_suite_contains_all_ten_sections():
         rollout_assessment={"status": "observe_only"},
     )
     assert payload["runtime_effect"] == AI_REVIEW_RUNTIME_EFFECT
+    assert payload["authority"] == "review_only_no_trade_authority"
+    assert payload["decision_effect"] == "none"
+    assert payload["schema_version"] == "ai_review_suite_v1"
     for key in (
         "policy_disagreement",
         "lifecycle_trade_review",

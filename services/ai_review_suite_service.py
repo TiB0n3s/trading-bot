@@ -37,9 +37,12 @@ def _float(value: Any) -> float | None:
 def _base(kind: str) -> dict[str, Any]:
     return {
         "version": AI_REVIEW_SUITE_VERSION,
+        "schema_version": AI_REVIEW_SUITE_VERSION,
         "kind": kind,
         "runtime_effect": AI_REVIEW_RUNTIME_EFFECT,
         "authority": "review_only_no_trade_authority",
+        "decision_effect": "none",
+        "allowed_surfaces": ["reports", "replay", "operator_review"],
     }
 
 
@@ -281,7 +284,10 @@ def build_ai_review_suite(
     canonical = _dict(canonical)
     return {
         "version": AI_REVIEW_SUITE_VERSION,
+        "schema_version": AI_REVIEW_SUITE_VERSION,
         "runtime_effect": AI_REVIEW_RUNTIME_EFFECT,
+        "authority": "review_only_no_trade_authority",
+        "decision_effect": "none",
         "symbol": symbol,
         "policy_disagreement": policy_disagreement_explainer(
             advisory_authority_state=canonical.get("advisory_authority_state"),
@@ -300,4 +306,3 @@ def build_ai_review_suite(
         "setup_structure": setup_structure_explainer(canonical.get("setup_state")),
         "remediation_tasks": remediation_task_generator(ops_inputs),
     }
-

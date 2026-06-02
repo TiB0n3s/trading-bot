@@ -102,7 +102,11 @@ def _rate(count: int, total: int) -> float | None:
 def _outcome(row: dict[str, Any]) -> float | None:
     if row.get("approved"):
         return _float(row.get("realized_return_pct"))
-    return _float(row.get("rejected_return_60m") or row.get("rejected_return_30m"))
+    return _float(
+        row.get("rejected_return_60m")
+        or row.get("rejected_return_30m")
+        or row.get("rejected_return_eod")
+    )
 
 
 def _mfe(row: dict[str, Any]) -> float | None:
@@ -259,6 +263,7 @@ def _family_stability(
     family_path: tuple[str, ...],
     best_bucket: str | None,
     baseline_ev: float | None,
+    rolling_window_size: int,
 ) -> dict[str, Any]:
     if not best_bucket or baseline_ev is None:
         return {
@@ -266,35 +271,84 @@ def _family_stability(
             "stable_window_share": None,
             "positive_windows": 0,
             "negative_windows": 0,
+            "daily_window_count": 0,
+            "daily_stable_window_share": None,
+            "daily_positive_windows": 0,
+            "daily_negative_windows": 0,
+            "rolling_window_count": 0,
+            "rolling_window_size": rolling_window_size,
+            "rolling_stable_window_share": None,
+            "rolling_positive_windows": 0,
+            "rolling_negative_windows": 0,
         }
 
     by_date: dict[str, list[dict[str, Any]]] = {}
     for row in rows:
         by_date.setdefault(_decision_date(row), []).append(row)
 
-    positive = 0
-    negative = 0
-    evaluated = 0
-    for date_rows in by_date.values():
-        bucket_rows = [
-            row for row in date_rows if _bucket(row, family_path) == best_bucket
-        ]
-        if not bucket_rows:
-            continue
-        ev = _base_metrics(bucket_rows).get("ev_pct")
-        if ev is None:
-            continue
-        evaluated += 1
-        if ev >= baseline_ev:
-            positive += 1
-        else:
-            negative += 1
+    def evaluate_windows(windows: list[list[dict[str, Any]]]) -> dict[str, Any]:
+        positive = 0
+        negative = 0
+        evaluated = 0
+        for window_rows in windows:
+            bucket_rows = [
+                row for row in window_rows if _bucket(row, family_path) == best_bucket
+            ]
+            if not bucket_rows:
+                continue
+            ev = _base_metrics(bucket_rows).get("ev_pct")
+            if ev is None:
+                continue
+            evaluated += 1
+            if ev >= baseline_ev:
+                positive += 1
+            else:
+                negative += 1
+        return {
+            "count": evaluated,
+            "share": _rate(positive, evaluated),
+            "positive": positive,
+            "negative": negative,
+        }
+
+    daily = evaluate_windows(list(by_date.values()))
+
+    ordered = sorted(
+        rows,
+        key=lambda row: (
+            str(row.get("decision_time") or row.get("exit_timestamp") or ""),
+            str(row.get("symbol") or ""),
+        ),
+    )
+    rolling_windows: list[list[dict[str, Any]]] = []
+    if rolling_window_size > 0 and len(ordered) >= rolling_window_size:
+        for start in range(0, len(ordered), rolling_window_size):
+            window = ordered[start : start + rolling_window_size]
+            if len(window) >= rolling_window_size:
+                rolling_windows.append(window)
+
+    rolling = evaluate_windows(rolling_windows)
+    shares = [
+        value
+        for value in (daily["share"], rolling["share"])
+        if value is not None
+    ]
+    combined_share = round(min(shares), 4) if shares else None
 
     return {
-        "window_count": evaluated,
-        "stable_window_share": _rate(positive, evaluated),
-        "positive_windows": positive,
-        "negative_windows": negative,
+        "window_count": daily["count"],
+        "stable_window_share": combined_share,
+        "positive_windows": daily["positive"],
+        "negative_windows": daily["negative"],
+        "daily_window_count": daily["count"],
+        "daily_stable_window_share": daily["share"],
+        "daily_positive_windows": daily["positive"],
+        "daily_negative_windows": daily["negative"],
+        "rolling_window_count": rolling["count"],
+        "rolling_window_size": rolling_window_size,
+        "rolling_stable_window_share": rolling["share"],
+        "rolling_positive_windows": rolling["positive"],
+        "rolling_negative_windows": rolling["negative"],
     }
 
 
@@ -395,6 +449,7 @@ def build_feature_attribution_payload(
     rows: Iterable[dict[str, Any]],
     *,
     min_sample_size: int = 30,
+    rolling_window_size: int = 50,
 ) -> FeatureAttributionPayload:
     rows_list = [dict(row) for row in rows]
     outcome_rows = [row for row in rows_list if _outcome(row) is not None]
@@ -430,6 +485,7 @@ def build_feature_attribution_payload(
             family_path=path,
             best_bucket=best.get("bucket"),
             baseline_ev=baseline.get("ev_pct"),
+            rolling_window_size=rolling_window_size,
         )
         covered = sum(item["sample_size"] for item in known)
         missing = len(outcome_rows) - covered
@@ -470,6 +526,7 @@ def build_feature_attribution_payload(
             "rows_with_outcome": len(outcome_rows),
             "baseline": baseline,
             "min_sample_size": min_sample_size,
+            "rolling_window_size": rolling_window_size,
             "authority_note": "diagnostic_only_no_live_authority",
             "calibration_summary": {
                 family["family"]: {

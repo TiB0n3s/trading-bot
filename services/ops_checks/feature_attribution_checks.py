@@ -23,6 +23,7 @@ def run_feature_attribution_report(
     base_dir: Path,
     symbol: str | None = None,
     min_sample_size: int = 30,
+    rolling_window_size: int = 50,
 ) -> bool:
     print()
     print("=" * 72)
@@ -39,6 +40,7 @@ def run_feature_attribution_report(
     payload = build_feature_attribution_payload(
         lifecycle_payload.rows,
         min_sample_size=min_sample_size,
+        rolling_window_size=rolling_window_size,
     )
 
     summary = payload.summary
@@ -50,6 +52,7 @@ def run_feature_attribution_report(
     print(f"baseline_hit_rate       : {_fmt(baseline.get('hit_rate'))}")
     print(f"baseline_ev_pct         : {_fmt(baseline.get('ev_pct'))}")
     print(f"min_sample_size         : {summary['min_sample_size']}")
+    print(f"rolling_window_size     : {summary['rolling_window_size']}")
 
     if not summary["rows_with_outcome"]:
         print("[WARN] no lifecycle rows with realized/counterfactual outcomes")
@@ -68,7 +71,7 @@ def run_feature_attribution_report(
     )
     print(
         f"  {'rank':>4} {'family':<26} {'bucket':<28} {'ev_delta':>9} "
-        f"{'hit_delta':>9} {'fp_red':>8} {'fn_cost':>8} {'stable':>8}"
+        f"{'hit_delta':>9} {'fp_red':>8} {'fn_cost':>8} {'stable':>8} {'roll':>8}"
     )
     for idx, family in enumerate(ranked, start=1):
         best = family.get("best_bucket") or {}
@@ -79,7 +82,8 @@ def run_feature_attribution_report(
             f"{_fmt(best.get('hit_rate_delta')):>9} "
             f"{_fmt(best.get('false_positive_reduction')):>8} "
             f"{_fmt(best.get('false_negative_increase')):>8} "
-            f"{_fmt(stability.get('stable_window_share')):>8}"
+            f"{_fmt(stability.get('stable_window_share')):>8} "
+            f"{_fmt(stability.get('rolling_stable_window_share')):>8}"
         )
 
     print()
@@ -110,7 +114,9 @@ def run_feature_attribution_report(
             f"sample={item['sample_size']:<5} "
             f"missing={_fmt(item['missing_rate'])} "
             f"ev_spread={_fmt(item['ev_spread_pct'])} "
-            f"stable_windows={_fmt(stability.get('stable_window_share'))}"
+            f"stable_windows={_fmt(stability.get('stable_window_share'))} "
+            f"daily={_fmt(stability.get('daily_stable_window_share'))} "
+            f"rolling={_fmt(stability.get('rolling_stable_window_share'))}"
         )
 
     if payload.feature_overlap:

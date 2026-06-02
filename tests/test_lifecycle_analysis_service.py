@@ -131,6 +131,7 @@ def _make_db(db_path: Path) -> None:
                 label_status TEXT,
                 return_30m REAL,
                 return_60m REAL,
+                return_eod REAL,
                 max_favorable_60m REAL,
                 max_adverse_60m REAL,
                 canonical_intelligence_hash TEXT
@@ -141,11 +142,11 @@ def _make_db(db_path: Path) -> None:
             """
             INSERT INTO rejected_signal_outcomes (
                 trade_id, decision_snapshot_id, label_status, return_30m,
-                return_60m, max_favorable_60m, max_adverse_60m,
+                return_60m, return_eod, max_favorable_60m, max_adverse_60m,
                 canonical_intelligence_hash
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            (20, 2, "labeled", 0.3, 0.6, 0.9, -0.2, "b" * 64),
+            (20, 2, "labeled", 0.3, 0.6, 0.7, 0.9, -0.2, "b" * 64),
         )
 
 
@@ -181,6 +182,7 @@ def test_lifecycle_analysis_joins_entry_exit_and_rejected_counterfactuals():
         assert rejected["lifecycle_status"] == "rejected_with_counterfactual"
         assert rejected["rejected_label_status"] == "labeled"
         assert rejected["rejected_canonical_intelligence_hash"] == "b" * 64
+        assert rejected["rejected_return_eod"] == 0.7
 
 
 def test_lifecycle_analysis_flags_missing_rejected_counterfactuals():
@@ -326,6 +328,7 @@ def test_lifecycle_analysis_tolerates_pre_canonical_schema():
                     label_status TEXT,
                     return_30m REAL,
                     return_60m REAL,
+                    return_eod REAL,
                     max_favorable_60m REAL,
                     max_adverse_60m REAL
                 )
@@ -335,10 +338,10 @@ def test_lifecycle_analysis_tolerates_pre_canonical_schema():
                 """
                 INSERT INTO rejected_signal_outcomes (
                     trade_id, label_status, return_30m, return_60m,
-                    max_favorable_60m, max_adverse_60m
-                ) VALUES (?, ?, ?, ?, ?, ?)
+                    return_eod, max_favorable_60m, max_adverse_60m
+                ) VALUES (?, ?, ?, ?, ?, ?, ?)
                 """,
-                (20, "labeled", 0.2, 0.4, 0.7, -0.1),
+                (20, "labeled", 0.2, 0.4, 0.5, 0.7, -0.1),
             )
 
         service = LifecycleAnalysisService(LifecycleAnalysisRepository(db_path))
@@ -352,6 +355,7 @@ def test_lifecycle_analysis_tolerates_pre_canonical_schema():
         assert row["entry_canonical_intelligence_version"] is None
         assert row["rejected_canonical_intelligence_hash"] is None
         assert row["rejected_return_60m"] == 0.4
+        assert row["rejected_return_eod"] == 0.5
 
 
 def main():

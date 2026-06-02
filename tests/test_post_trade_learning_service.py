@@ -41,7 +41,7 @@ def test_post_trade_learning_summarizes_expectancy_and_gate_value():
                 "symbol": "NVDA",
                 "approved": 0,
                 "rejection_reason": "trend_confirmation",
-                "rejected_return_60m": 0.5,
+                "rejected_return_eod": 0.5,
                 "setup_label": "clean_breakout",
                 "market_regime": "trend_expansion",
             },

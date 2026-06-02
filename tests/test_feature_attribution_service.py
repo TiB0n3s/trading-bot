@@ -144,11 +144,16 @@ def test_feature_attribution_summarizes_family_deltas_and_guardrails():
         },
     ]
 
-    payload = build_feature_attribution_payload(rows, min_sample_size=2)
+    payload = build_feature_attribution_payload(
+        rows,
+        min_sample_size=2,
+        rolling_window_size=2,
+    )
 
     assert_equal(payload.summary["rows_with_outcome"], 6, "outcome rows")
     assert_equal(payload.summary["report_version"], "feature_attribution_v1", "version")
     assert_equal(payload.summary["authority_note"], "diagnostic_only_no_live_authority", "note")
+    assert_equal(payload.summary["rolling_window_size"], 2, "rolling window size")
     regime = next(item for item in payload.families if item["family"] == "market_regime")
     assert_equal(regime["best_bucket"]["bucket"], "trend_expansion", "best regime")
     assert_equal(regime["worst_bucket"]["bucket"], "compression_chop", "worst regime")
@@ -163,6 +168,10 @@ def test_feature_attribution_summarizes_family_deltas_and_guardrails():
     assert_equal(guard["status"], "eligible_for_review", "guardrail status")
     assert_equal(guard["stability"]["window_count"], 1, "stability windows")
     assert_equal(guard["stability"]["stable_window_share"], 1.0, "stable share")
+    assert_equal(guard["stability"]["daily_window_count"], 1, "daily stability windows")
+    assert_equal(guard["stability"]["daily_stable_window_share"], 1.0, "daily stable share")
+    assert_equal(guard["stability"]["rolling_window_count"], 2, "rolling stability windows")
+    assert_equal(guard["stability"]["rolling_stable_window_share"], 1.0, "rolling stable share")
     assert_true("acceptable_calibration_error" in guard["required_before_authority"], "calibration guard")
     assert_true(payload.feature_overlap, "overlap rows")
 

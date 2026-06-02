@@ -30,6 +30,8 @@ ROW_COUNT_PATTERNS = [
     re.compile(r"\brows?\s+(?:written|inserted|updated|created)\s*[:=]\s*(\d+)\b", re.IGNORECASE),
     re.compile(r"\bInserted\s+(\d+)\s+(?:[\w_]+\s+)?rows?\b", re.IGNORECASE),
     re.compile(r"\bApplied\s+event\s+aggregates.*\bupdated=(\d+)\b", re.IGNORECASE),
+    re.compile(r"\bPoll\s+complete\s+-\s+checked:\s*\d+,\s+updated:\s*(\d+),\s+skipped:\s*\d+\b", re.IGNORECASE),
+    re.compile(r"\bWrote\s+refreshed\s+market_context\.json\s+\((\d+)\s+symbols\)", re.IGNORECASE),
     re.compile(r"\bsuccess(?:ful)?\s*[:=]\s*(\d+)\b", re.IGNORECASE),
 ]
 

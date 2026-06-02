@@ -54,6 +54,7 @@ def build_lifecycle_dashboard_payload(
     approved_returns: list[float] = []
     rejected_returns: list[float] = []
     rejected_missing = 0
+    rejected_snapshot_only = 0
     approved_missing_exit = 0
     top_missed: list[dict[str, Any]] = []
 
@@ -74,7 +75,15 @@ def build_lifecycle_dashboard_payload(
                 approved_returns.append(realized)
             continue
 
-        rejected_return = _float(row.get("rejected_return_60m") or row.get("rejected_return_30m"))
+        if status == "rejected_snapshot_only_no_trade":
+            rejected_snapshot_only += 1
+            continue
+
+        rejected_return = _float(
+            row.get("rejected_return_60m")
+            or row.get("rejected_return_30m")
+            or row.get("rejected_return_eod")
+        )
         rejected_mfe = _float(row.get("rejected_max_favorable_60m"))
         if rejected_return is None and rejected_mfe is None:
             rejected_missing += 1
@@ -88,6 +97,7 @@ def build_lifecycle_dashboard_payload(
                     "symbol": row.get("symbol"),
                     "rejection_reason": row.get("rejection_reason"),
                     "rejected_return_60m": rejected_return,
+                    "rejected_return_eod": row.get("rejected_return_eod"),
                     "rejected_max_favorable_60m": rejected_mfe,
                     "setup_label": row.get("setup_label"),
                     "market_regime": row.get("market_regime"),
@@ -109,6 +119,7 @@ def build_lifecycle_dashboard_payload(
         "approved_rows": sum(1 for row in rows_list if row.get("approved")),
         "rejected_rows": sum(1 for row in rows_list if not row.get("approved")),
         "approved_exit_link_gaps": approved_missing_exit,
+        "rejected_snapshot_only_rows": rejected_snapshot_only,
         "rejected_forward_outcome_gaps": rejected_missing,
         "approved_avg_return_pct": _mean(approved_returns),
         "rejected_counterfactual_avg_return_pct": _mean(rejected_returns),

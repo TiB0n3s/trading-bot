@@ -33,7 +33,11 @@ def _mean(values: list[float]) -> float | None:
 def _outcome(row: dict[str, Any]) -> float | None:
     if row.get("approved"):
         return _float(row.get("realized_return_pct"))
-    return _float(row.get("rejected_return_60m") or row.get("rejected_return_30m"))
+    return _float(
+        row.get("rejected_return_60m")
+        or row.get("rejected_return_30m")
+        or row.get("rejected_return_eod")
+    )
 
 
 def _mfe(row: dict[str, Any]) -> float | None:

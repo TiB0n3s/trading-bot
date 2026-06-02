@@ -140,6 +140,7 @@ class LifecycleAnalysisRepository:
                 {label_status},
                 {return_30m},
                 {return_60m},
+                {return_eod},
                 {max_favorable_60m},
                 {max_adverse_60m},
                 {canonical_intelligence_hash}
@@ -147,6 +148,7 @@ class LifecycleAnalysisRepository:
                 label_status=sel(rejected_cols, "rso", "label_status", "rejected_label_status"),
                 return_30m=sel(rejected_cols, "rso", "return_30m", "rejected_return_30m"),
                 return_60m=sel(rejected_cols, "rso", "return_60m", "rejected_return_60m"),
+                return_eod=sel(rejected_cols, "rso", "return_eod", "rejected_return_eod"),
                 max_favorable_60m=sel(
                     rejected_cols,
                     "rso",
@@ -170,6 +172,7 @@ class LifecycleAnalysisRepository:
                 NULL AS rejected_label_status,
                 NULL AS rejected_return_30m,
                 NULL AS rejected_return_60m,
+                NULL AS rejected_return_eod,
                 NULL AS rejected_max_favorable_60m,
                 NULL AS rejected_max_adverse_60m,
                 NULL AS rejected_canonical_intelligence_hash

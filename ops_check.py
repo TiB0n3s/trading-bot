@@ -553,9 +553,12 @@ def production_evidence(target_date):
         event_context_validation(target_date),
         portfolio_risk(target_date),
         lifecycle_analysis(target_date),
+        decision_lifecycle_dashboard(target_date),
+        calibration_buckets(target_date),
         setup_breakdown(target_date),
         conviction_persistence_health(target_date),
         feature_attribution(target_date),
+        post_trade_learning(target_date),
     ]
     print()
     print("=" * 72)
@@ -633,6 +636,7 @@ def feature_attribution(target_date):
         base_dir=BASE_DIR,
         symbol=symbol,
         min_sample_size=_int_option("--min-sample-size", 30),
+        rolling_window_size=_int_option("--rolling-window-size", 50),
     )
 
 

@@ -97,6 +97,41 @@ def test_job_runner_infers_rows_and_warnings_from_log_output():
         assert rows[0]["warnings_count"] == 1
 
 
+def test_job_runner_infers_rows_from_common_runtime_log_patterns():
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp_path = Path(tmp)
+        db_path = tmp_path / "jobs.db"
+        log_path = tmp_path / "job.log"
+
+        result = subprocess.run(
+            [
+                sys.executable,
+                str(ROOT / "job_runner.py"),
+                "--job-name",
+                "poll_job",
+                "--log-file",
+                str(log_path),
+                "--db-path",
+                str(db_path),
+                "--",
+                sys.executable,
+                "-c",
+                (
+                    "print('Poll complete - checked: 12, updated: 4, skipped: 8'); "
+                    "print('Wrote refreshed market_context.json (37 symbols)')"
+                ),
+            ],
+            cwd=ROOT,
+            text=True,
+            capture_output=True,
+        )
+
+        assert result.returncode == 0, result.stderr
+        rows = _rows(db_path)
+        assert len(rows) == 1
+        assert rows[0]["rows_written"] == 37
+
+
 def test_job_runner_records_lock_skipped_run():
     with tempfile.TemporaryDirectory() as tmp:
         tmp_path = Path(tmp)
@@ -287,6 +322,7 @@ def main():
     tests = [
         test_job_runner_records_completed_run,
         test_job_runner_infers_rows_and_warnings_from_log_output,
+        test_job_runner_infers_rows_from_common_runtime_log_patterns,
         test_job_runner_records_lock_skipped_run,
         test_service_records_artifact_hash,
         test_service_builds_runtime_health_payload,

@@ -48,6 +48,7 @@ def run_lifecycle_dashboard(
     print(f"approved_rows                  : {summary['approved_rows']}")
     print(f"rejected_rows                  : {summary['rejected_rows']}")
     print(f"approved_exit_link_gaps        : {summary['approved_exit_link_gaps']}")
+    print(f"rejected_snapshot_only_rows    : {summary['rejected_snapshot_only_rows']}")
     print(f"rejected_forward_outcome_gaps  : {summary['rejected_forward_outcome_gaps']}")
     print(f"approved_avg_return_pct        : {_fmt(summary['approved_avg_return_pct'])}")
     print(

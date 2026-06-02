@@ -41,7 +41,7 @@ def test_calibration_buckets_compute_realized_win_ev_and_error_counts():
                 "market_regime": "trend_expansion",
                 "decision_hour": "10",
                 "volatility_chase_risk": "low",
-                "rejected_return_60m": 0.4,
+                "rejected_return_eod": 0.4,
                 "rejected_max_favorable_60m": 0.9,
                 "rejected_max_adverse_60m": -0.1,
             },

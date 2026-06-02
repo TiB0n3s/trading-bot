@@ -21,7 +21,7 @@ from __future__ import annotations
 from dataclasses import dataclass, asdict
 from typing import Any
 
-from market_intelligence.source_reliability import confidence_cap_for_sources
+from market_intelligence.source_reliability import classify_source, confidence_cap_for_sources
 
 
 VALID_EVENT_TYPES = {
@@ -46,6 +46,7 @@ VALID_EVENT_TYPES = {
     "leadership_personnel",
     "mna_deal_chatter",
     "insider_transaction",
+    "congressional_trade_disclosure",
 }
 
 
@@ -179,6 +180,21 @@ INSIDER_WORDS = {
     "director sold",
 }
 
+CONGRESSIONAL_DISCLOSURE_WORDS = {
+    "congress",
+    "congressional",
+    "senator",
+    "representative",
+    "lawmaker",
+    "politician",
+    "stock act",
+    "periodic transaction report",
+    "public financial disclosure",
+    "house disclosure",
+    "senate disclosure",
+    "quiver quantitative",
+}
+
 CUSTOMER_CONTRACT_WORDS = {
     "contract",
     "customer",
@@ -300,6 +316,8 @@ def _intent_scope(event: dict[str, Any], event_type: str) -> str:
         return "peripheral_company"
     if event_type in ("supplier_signal", "customer_contract", "leadership_personnel", "mna_deal_chatter", "insider_transaction"):
         return "peripheral_company"
+    if event_type in ("congressional_trade_disclosure",):
+        return "public_official_disclosure"
     if event_type in ("macro_geopolitical",):
         return "macro"
     return "direct_company" if event.get("symbol") else "market_wide"
@@ -320,6 +338,8 @@ def _event_intent_category(event_type: str, scores: EventScores, impact: str) ->
         return "external_risk_signal"
     if event_type in ("insider_transaction",):
         return "insider_activity_signal"
+    if event_type in ("congressional_trade_disclosure",):
+        return "public_official_trade_disclosure"
     if impact in ("strongly_bearish", "moderately_bearish"):
         return "risk_signal"
     if impact in ("strongly_bullish", "moderately_bullish"):
@@ -393,6 +413,16 @@ def interpret_event_intent(
         missing_evidence.append("direct_company_confirmation")
     if source_tier in ("unclassified", "low_confidence", "unknown"):
         missing_evidence.append("trusted_source_attribution")
+    if event_type == "congressional_trade_disclosure":
+        disclosure_limitations = [
+            "delayed_stock_act_reporting",
+            "broad_dollar_range_not_exact_size",
+            "may_include_spouse_or_dependent_trade",
+            "does_not_prove_trade_was_informed_or_timely",
+        ]
+        missing_evidence.extend(disclosure_limitations)
+        if source_tier != "official":
+            missing_evidence.append("official_house_or_senate_filing")
 
     return {
         "event_intent_version": EVENT_INTENT_VERSION,
@@ -413,6 +443,11 @@ def interpret_event_intent(
 
 def score_event(event: dict[str, Any]) -> dict[str, Any]:
     """Return event payload enriched with normalized scores."""
+    event = dict(event)
+    if not event.get("source_tier"):
+        source_policy = classify_source(event.get("source"), url=event.get("source_url"))
+        event.update({k: v for k, v in source_policy.items() if event.get(k) is None})
+
     event_type = normalize_event_type(event.get("event_type"))
     summary = str(event.get("event_summary") or event.get("summary") or "")
     subtype = str(event.get("event_subtype") or "")
@@ -547,6 +582,18 @@ def score_event(event: dict[str, Any]) -> dict[str, Any]:
             profit_potential += insider * 0.2
         reason_bits.append("insider_transaction scoring applied")
 
+    elif event_type == "congressional_trade_disclosure":
+        disclosure = text_score(text, CONGRESSIONAL_DISCLOSURE_WORDS, per_hit=6, cap=30)
+        # STOCK Act disclosures are delayed and range-based. They are useful
+        # as governance/context signals, not as copy-trading evidence.
+        execution_risk += 4 + disclosure * 0.15
+        macro_risk += disclosure * 0.10
+        if "sell" in text or "sold" in text or "sale" in text:
+            execution_risk += 4
+        elif "buy" in text or "bought" in text or "purchase" in text:
+            profit_potential += 1
+        reason_bits.append("congressional_trade_disclosure context-only scoring applied")
+
     else:
         consumer_appetite += bullish * 0.4 - bearish * 0.3
         revenue_impact += bullish * 0.4 - bearish * 0.4
@@ -638,6 +685,7 @@ def score_event(event: dict[str, Any]) -> dict[str, Any]:
         "leadership_personnel",
         "mna_deal_chatter",
         "insider_transaction",
+        "congressional_trade_disclosure",
     }
     if impact in ("strongly_bullish", "moderately_bullish") and not trusted_bullish_source:
         if net < 20 or source_tier in ("unclassified", "low_confidence", "unknown"):
@@ -661,12 +709,26 @@ def score_event(event: dict[str, Any]) -> dict[str, Any]:
             impact = "neutral"
             relevance = "watch_for_confirmation" if net >= 8 else "watch_only"
             reason_bits.append("rumor-sensitive peripheral event requires trusted confirmation")
+    if event_type == "congressional_trade_disclosure":
+        if impact in ("strongly_bullish", "moderately_bullish"):
+            impact = "neutral"
+        relevance = "watch_only"
+        reason_bits.append(
+            "congressional disclosures are delayed/range-based and never standalone trade authority"
+        )
 
     # Let explicit values override labels if provided.
     if event.get("expected_market_impact"):
         impact = str(event["expected_market_impact"])
     if event.get("trade_relevance"):
         relevance = str(event["trade_relevance"])
+    if event_type == "congressional_trade_disclosure":
+        # Do not let manual overrides or aggregator payloads convert delayed
+        # disclosures into directional authority.
+        if impact in ("strongly_bullish", "moderately_bullish"):
+            impact = "neutral"
+        relevance = "watch_only"
+
     intent = interpret_event_intent(
         event=event,
         event_type=event_type,
@@ -703,6 +765,8 @@ def default_time_horizon(event_type: str) -> str:
         return "weeks_to_quarters"
     if event_type in ("earnings", "guidance", "analyst_action", "leadership_personnel", "insider_transaction"):
         return "days_to_weeks"
+    if event_type in ("congressional_trade_disclosure",):
+        return "delayed_disclosure_context"
     if event_type in ("regulatory", "lawsuit", "macro_geopolitical", "mna_deal_chatter"):
         return "weeks_to_months"
     return "days_to_weeks"

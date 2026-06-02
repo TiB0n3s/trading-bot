@@ -127,6 +127,90 @@ def test_leadership_departure_is_execution_risk_not_bullish():
     assert event["intent_category"] == "management_execution_signal"
 
 
+def test_congressional_trade_disclosure_is_context_only_even_when_official():
+    event = score_event(
+        {
+            "market_date": "2026-06-01",
+            "symbol": "NVDA",
+            "event_type": "congressional_trade_disclosure",
+            "event_summary": (
+                "Senator filed a periodic transaction report under the STOCK Act "
+                "showing a purchase of NVDA in the $1,001-$15,000 range"
+            ),
+            "source": "Senate Public Disclosure",
+            "source_tier": "official",
+            "trusted_source": True,
+        }
+    )
+
+    assert event["expected_market_impact"] == "neutral"
+    assert event["trade_relevance"] == "watch_only"
+    assert event["intent_category"] == "public_official_trade_disclosure"
+    assert event["intent_scope"] == "public_official_disclosure"
+    assert event["confirmation_status"] == "official_confirmed"
+    assert event["authority"] == "context_only_no_standalone_buy_authority"
+    assert "delayed_stock_act_reporting" in event["missing_evidence"]
+    assert "broad_dollar_range_not_exact_size" in event["missing_evidence"]
+    assert "does_not_prove_trade_was_informed_or_timely" in event["missing_evidence"]
+
+
+def test_congressional_trade_aggregator_requires_official_filing_confirmation():
+    event = score_event(
+        {
+            "market_date": "2026-06-01",
+            "symbol": "AAPL",
+            "event_type": "congressional_trade_disclosure",
+            "event_summary": "Quiver Quantitative flags a lawmaker bought AAPL shares",
+            "source": "Quiver Quantitative",
+            "source_tier": "medium_confidence",
+            "trusted_source": False,
+        }
+    )
+
+    assert event["expected_market_impact"] == "neutral"
+    assert event["trade_relevance"] == "watch_only"
+    assert event["confirmation_status"] == "needs_confirmation"
+    assert "official_house_or_senate_filing" in event["missing_evidence"]
+
+
+def test_score_event_classifies_official_disclosure_url_when_tier_missing():
+    event = score_event(
+        {
+            "market_date": "2026-06-01",
+            "symbol": "MSFT",
+            "event_type": "congressional_trade_disclosure",
+            "event_summary": "House periodic transaction report shows a disclosed sale of MSFT",
+            "source": "manual",
+            "source_url": "https://disclosures-clerk.house.gov/FinancialDisclosure/ViewPTR",
+        }
+    )
+
+    assert event["source_tier"] == "official"
+    assert event["trusted_source"] is True
+    assert event["confirmation_status"] == "official_confirmed"
+    assert event["expected_market_impact"] == "neutral"
+
+
+def test_congressional_trade_disclosure_ignores_bullish_manual_override():
+    event = score_event(
+        {
+            "market_date": "2026-06-01",
+            "symbol": "NVDA",
+            "event_type": "congressional_trade_disclosure",
+            "event_summary": "Senator disclosed purchase of NVDA under the STOCK Act",
+            "source": "Senate Public Disclosure",
+            "source_tier": "official",
+            "trusted_source": True,
+            "expected_market_impact": "strongly_bullish",
+            "trade_relevance": "potential_catalyst",
+        }
+    )
+
+    assert event["expected_market_impact"] == "neutral"
+    assert event["trade_relevance"] == "watch_only"
+    assert event["event_intent"]["authority"] == "context_only_no_standalone_buy_authority"
+
+
 def main():
     tests = [
         test_neutral_headline_baseline_does_not_infer_bullish,
@@ -135,6 +219,10 @@ def main():
         test_supplier_signal_models_risk_without_untrusted_bullish_jump,
         test_untrusted_deal_chatter_requires_confirmation,
         test_leadership_departure_is_execution_risk_not_bullish,
+        test_congressional_trade_disclosure_is_context_only_even_when_official,
+        test_congressional_trade_aggregator_requires_official_filing_confirmation,
+        test_score_event_classifies_official_disclosure_url_when_tier_missing,
+        test_congressional_trade_disclosure_ignores_bullish_manual_override,
     ]
     for test in tests:
         test()

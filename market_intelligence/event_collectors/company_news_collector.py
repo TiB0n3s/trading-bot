@@ -185,6 +185,27 @@ EVENT_KEYWORDS = [
         ],
     ),
     (
+        "congressional_trade_disclosure",
+        [
+            "congressional stock trade",
+            "congressional trading",
+            "stock act",
+            "periodic transaction report",
+            "public financial disclosure",
+            "house disclosure",
+            "senate disclosure",
+            "senator bought",
+            "senator sold",
+            "representative bought",
+            "representative sold",
+            "politician bought",
+            "politician sold",
+            "lawmakers bought",
+            "lawmakers sold",
+            "quiver quantitative",
+        ],
+    ),
+    (
         "regulatory",
         [
             "regulator", "regulatory", "antitrust", "lawsuit", "sues",
@@ -227,7 +248,8 @@ EVENT_KEYWORDS = [
 EVENT_TYPE_PRIORITY = {
     "leadership_personnel": 1,
     "mna_deal_chatter": 2,
-    "insider_transaction": 3,
+    "congressional_trade_disclosure": 3,
+    "insider_transaction": 4,
     "customer_contract": 4,
     "strategic_partnership": 5,
     "supplier_signal": 6,
@@ -279,6 +301,8 @@ def infer_time_horizon(event_type: str) -> str:
         return "weeks_to_quarters"
     if event_type in ("earnings", "guidance", "analyst_action", "leadership_personnel", "insider_transaction"):
         return "days_to_weeks"
+    if event_type in ("congressional_trade_disclosure",):
+        return "delayed_disclosure_context"
     if event_type in ("regulatory", "supply_chain", "macro_geopolitical", "mna_deal_chatter"):
         return "weeks_to_months"
     return "days_to_weeks"
@@ -291,7 +315,8 @@ def rss_urls_for_symbol(symbol: str) -> list[tuple[str, str]]:
     peripheral_query = (
         f'("{name}" OR "{symbol}") '
         '(supplier OR customer OR contract OR partnership OR acquisition OR merger '
-        'OR CEO OR CFO OR insider) stock when:3d'
+        'OR CEO OR CFO OR insider OR "STOCK Act" OR "congressional trading" '
+        'OR "periodic transaction report") stock when:3d'
     )
     return [
         ("company_direct", f"https://news.google.com/rss/search?q={urllib.parse.quote_plus(base_query)}&hl=en-US&gl=US&ceid=US:en"),

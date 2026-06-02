@@ -48,6 +48,19 @@ def test_classifies_source_from_url_when_available():
     assert_equal(result["source_reliability"], "high", "reliability")
 
 
+def test_classifies_public_disclosure_sources():
+    house = classify_source(url="https://disclosures-clerk.house.gov/FinancialDisclosure")
+    senate = classify_source(url="https://efdsearch.senate.gov/search/")
+    quiver = classify_source("Quiver Quantitative")
+
+    assert_equal(house["source_tier"], "official", "House disclosure tier")
+    assert_equal(house["trusted_source"], True, "House disclosure trusted")
+    assert_equal(senate["source_tier"], "official", "Senate disclosure tier")
+    assert_equal(senate["trusted_source"], True, "Senate disclosure trusted")
+    assert_equal(quiver["source_tier"], "medium_confidence", "Quiver tier")
+    assert_equal(quiver["trusted_source"], False, "Quiver trusted")
+
+
 def test_google_news_publisher_becomes_event_source_of_record():
     item = {
         "title": "Apple shares rise on product demand - Reuters",
@@ -120,6 +133,14 @@ def test_classifies_peripheral_event_types():
     assert event_type in {"leadership_personnel", "supplier_signal"}
 
 
+def test_classifies_congressional_trade_disclosure_event_type():
+    event_type, _ = classify_event_type(
+        "Senator filed a periodic transaction report under the STOCK Act after buying NVDA"
+    )
+
+    assert_equal(event_type, "congressional_trade_disclosure", "event type")
+
+
 def test_confidence_cap_prefers_official_and_two_reputable_sources():
     assert_equal(
         confidence_cap_for_sources(["official"], 1),
@@ -150,11 +171,13 @@ def main():
     tests = [
         test_classifies_official_and_top_tier_sources,
         test_classifies_source_from_url_when_available,
+        test_classifies_public_disclosure_sources,
         test_google_news_publisher_becomes_event_source_of_record,
         test_google_news_transport_is_not_used_as_source_when_publisher_unknown,
         test_peripheral_scope_is_preserved_on_collected_event,
         test_symbol_has_direct_and_peripheral_news_queries,
         test_classifies_peripheral_event_types,
+        test_classifies_congressional_trade_disclosure_event_type,
         test_confidence_cap_prefers_official_and_two_reputable_sources,
     ]
     for test in tests:

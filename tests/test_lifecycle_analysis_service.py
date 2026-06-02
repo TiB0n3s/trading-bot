@@ -228,6 +228,25 @@ def test_lifecycle_analysis_backfills_pattern_from_historical_analytics_state():
     assert row["pattern_runtime_effect"] == "observe_only_no_live_authority"
 
 
+def test_lifecycle_analysis_backfills_pattern_from_historical_snapshot_columns():
+    service = LifecycleAnalysisService(LifecycleAnalysisRepository(":memory:"))
+    row = {
+        "canonical_intelligence_json": json.dumps({}),
+        "decision_time": "2026-05-31T14:30:00+00:00",
+        "session_trend_label": "strong_uptrend",
+        "momentum_state": "accelerating",
+        "momentum_direction": "rising",
+        "prediction_decision": "pass",
+    }
+
+    service._add_analysis_fields(row)
+
+    assert row["symbol_pattern"] == "constructive_momentum_prediction_alignment"
+    assert row["pattern_directional_bias"] == "constructive"
+    assert row["pattern_runtime_effect"] == "observe_only_no_live_authority"
+    assert row["pattern_source"] == "derived_from_historical_snapshot_columns"
+
+
 def test_lifecycle_analysis_flags_missing_rejected_counterfactuals():
     with tempfile.TemporaryDirectory() as tmp:
         db_path = Path(tmp) / "test.db"
@@ -494,6 +513,7 @@ def main():
     tests = [
         test_lifecycle_analysis_joins_entry_exit_and_rejected_counterfactuals,
         test_lifecycle_analysis_backfills_pattern_from_historical_analytics_state,
+        test_lifecycle_analysis_backfills_pattern_from_historical_snapshot_columns,
         test_lifecycle_analysis_flags_missing_rejected_counterfactuals,
         test_lifecycle_analysis_classifies_snapshot_only_rejections,
         test_lifecycle_analysis_tolerates_pre_canonical_schema,

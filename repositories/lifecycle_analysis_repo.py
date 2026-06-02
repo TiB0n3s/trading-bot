@@ -83,6 +83,89 @@ class LifecycleAnalysisRepository:
                 qty=sel(trade_cols, "t", "qty", "trade_qty")
                 if can_join_trades else "NULL AS trade_qty",
             )
+            historical_context_select = """
+                {momentum_direction},
+                {momentum_pct},
+                {momentum_acceleration_pct},
+                {momentum_state},
+                {session_trend_label},
+                {session_trend_score},
+                {session_return_pct},
+                {session_momentum_5m_pct},
+                {session_momentum_15m_pct},
+                {session_momentum_30m_pct},
+                {session_momentum_60m_pct},
+                {session_momentum_120m_pct},
+                {session_distance_from_vwap_pct},
+                {session_trend_regime},
+                {prediction_score},
+                {prediction_decision},
+                {prediction_reason},
+                {prediction_confidence},
+                {prediction_sample_size},
+                {setup_label},
+                {setup_score},
+                {setup_policy_action},
+                {setup_policy_reason},
+                {setup_confidence}
+            """.format(
+                momentum_direction=sel(decision_cols, "ds", "momentum_direction"),
+                momentum_pct=sel(decision_cols, "ds", "momentum_pct"),
+                momentum_acceleration_pct=sel(
+                    decision_cols,
+                    "ds",
+                    "momentum_acceleration_pct",
+                ),
+                momentum_state=sel(decision_cols, "ds", "momentum_state"),
+                session_trend_label=sel(decision_cols, "ds", "session_trend_label"),
+                session_trend_score=sel(decision_cols, "ds", "session_trend_score"),
+                session_return_pct=sel(decision_cols, "ds", "session_return_pct"),
+                session_momentum_5m_pct=sel(
+                    decision_cols,
+                    "ds",
+                    "session_momentum_5m_pct",
+                ),
+                session_momentum_15m_pct=sel(
+                    decision_cols,
+                    "ds",
+                    "session_momentum_15m_pct",
+                ),
+                session_momentum_30m_pct=sel(
+                    decision_cols,
+                    "ds",
+                    "session_momentum_30m_pct",
+                ),
+                session_momentum_60m_pct=sel(
+                    decision_cols,
+                    "ds",
+                    "session_momentum_60m_pct",
+                ),
+                session_momentum_120m_pct=sel(
+                    decision_cols,
+                    "ds",
+                    "session_momentum_120m_pct",
+                ),
+                session_distance_from_vwap_pct=sel(
+                    decision_cols,
+                    "ds",
+                    "session_distance_from_vwap_pct",
+                ),
+                session_trend_regime=sel(decision_cols, "ds", "session_trend_regime"),
+                prediction_score=sel(decision_cols, "ds", "prediction_score"),
+                prediction_decision=sel(decision_cols, "ds", "prediction_decision"),
+                prediction_reason=sel(decision_cols, "ds", "prediction_reason"),
+                prediction_confidence=sel(decision_cols, "ds", "prediction_confidence"),
+                prediction_sample_size=sel(
+                    decision_cols,
+                    "ds",
+                    "prediction_sample_size",
+                ),
+                setup_label=sel(decision_cols, "ds", "setup_label"),
+                setup_score=sel(decision_cols, "ds", "setup_score"),
+                setup_policy_action=sel(decision_cols, "ds", "setup_policy_action"),
+                setup_policy_reason=sel(decision_cols, "ds", "setup_policy_reason"),
+                setup_confidence=sel(decision_cols, "ds", "setup_confidence"),
+            )
 
             can_join_matched = (
                 has_matched_trades
@@ -289,6 +372,7 @@ class LifecycleAnalysisRepository:
                     {sel(decision_cols, "ds", "canonical_intelligence_json")},
                     {sel(decision_cols, "ds", "canonical_intelligence_version", "entry_canonical_intelligence_version")},
                     {sel(decision_cols, "ds", "canonical_intelligence_hash", "entry_canonical_intelligence_hash")},
+                    {historical_context_select},
                     {exit_select},
                     {rejected_select}
                 FROM decision_snapshots ds

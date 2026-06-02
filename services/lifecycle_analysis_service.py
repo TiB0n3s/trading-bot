@@ -63,6 +63,64 @@ class LifecycleAnalysisService:
             cur = cur.get(key)
         return cur
 
+    @staticmethod
+    def _historical_symbol_pattern_state(row: dict[str, Any]) -> dict[str, Any]:
+        """Derive a conservative pattern label from pre-pattern snapshot columns."""
+        session = str(row.get("session_trend_label") or "").strip().lower()
+        momentum = str(row.get("momentum_state") or "").strip().lower()
+        direction = str(row.get("momentum_direction") or "").strip().lower()
+        prediction = str(row.get("prediction_decision") or "").strip().lower()
+
+        if not any((session, momentum, direction, prediction)):
+            return {}
+
+        base = {
+            "version": "historical_symbol_pattern_backfill_v1",
+            "runtime_effect": "observe_only_no_live_authority",
+            "authority": "observe_only_no_live_authority",
+            "confidence_quality": "historical_row_derived",
+            "provider": "deterministic_historical_backfill",
+            "source": "derived_from_historical_snapshot_columns",
+        }
+        if (
+            session in {"strong_uptrend", "developing_uptrend"}
+            and momentum == "accelerating"
+            and direction in {"rising", "bullish", "up"}
+            and prediction in {"pass", "watch", "allow"}
+        ):
+            return {
+                **base,
+                "pattern_label": "constructive_momentum_prediction_alignment",
+                "directional_bias": "constructive",
+                "failure_mode": "momentum_deceleration_or_prediction_deterioration",
+                "expected_horizon": "15m_to_60m",
+                "confidence": "medium",
+            }
+        if (
+            session in {"fading", "downtrend", "reversal_attempt"}
+            or momentum == "decelerating"
+            or direction in {"falling", "bearish", "down"}
+            or prediction == "block"
+        ):
+            return {
+                **base,
+                "pattern_label": "momentum_prediction_risk",
+                "directional_bias": "risk_negative",
+                "failure_mode": "failed_follow_through_or_prediction_block",
+                "expected_horizon": "5m_to_60m",
+                "confidence": "medium",
+            }
+        if session == "rangebound" or momentum == "flat" or direction == "flat":
+            return {
+                **base,
+                "pattern_label": "rangebound_mixed_momentum",
+                "directional_bias": "neutral",
+                "failure_mode": "chop_or_false_breakout",
+                "expected_horizon": "15m_to_60m",
+                "confidence": "low",
+            }
+        return {}
+
     def _add_analysis_fields(self, row: dict[str, Any]) -> None:
         canonical = self._canonical(row)
         mappings = {
@@ -117,6 +175,13 @@ class LifecycleAnalysisService:
             if row.get(output) in (None, ""):
                 row[output] = self._path(canonical, *path)
         pattern = canonical_symbol_pattern_state(canonical)
+        if pattern.get("pattern_label") in {
+            None,
+            "",
+            "unknown",
+            "mixed_or_unclassified_pattern",
+        }:
+            pattern = self._historical_symbol_pattern_state(row) or pattern
         pattern_mappings = {
             "symbol_pattern": "pattern_label",
             "pattern_directional_bias": "directional_bias",

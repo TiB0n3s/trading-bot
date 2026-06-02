@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -11,6 +12,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 import app as _app
+from services.persistent_lockout_service import LockoutState
 from tests.test_process_signal_rejections import _Env, _account, _buy, _sell, _PRICE
 
 
@@ -39,6 +41,21 @@ class _StrategyResult:
                 "risk_factors": [],
             }
         }
+
+
+class _LockedRegimeService:
+    def __init__(self, _path):
+        pass
+
+    def read(self):
+        return LockoutState(
+            version="risk_lockout_state_v1",
+            active=True,
+            status="lockout",
+            reason="test_regime_lockout",
+            updated_at="2026-06-01T00:00:00+00:00",
+            payload={},
+        )
 
 
 def _process_live(raw_signal):
@@ -129,6 +146,20 @@ def test_stale_signal_rejection_stops_before_approval():
         _process_live(_buy())
 
     assert_equal(env.rejection_category(), "stale_signal", "category")
+    assert_true(not evaluate_signal.called, "approval not called")
+
+
+def test_regime_circuit_breaker_blocks_buy_before_approval():
+    evaluate_signal = MagicMock()
+    with patch.dict(os.environ, {"REGIME_CIRCUIT_BREAKER_MODE": "block"}):
+        with patch("services.signal_runtime_wiring.PersistentLockoutService", _LockedRegimeService):
+            with _Env(**_approved_downstream(
+                **{"app.evaluate_signal": evaluate_signal}
+            )) as env:
+                _process_live(_buy(_dedupe_key="regime-lockout"))
+
+    assert_equal(env.rejection_category(), "circuit_breaker", "category")
+    assert_true("regime circuit breaker" in env.rejection_reason(), "reason")
     assert_true(not evaluate_signal.called, "approval not called")
 
 
@@ -527,6 +558,7 @@ def main():
     tests = [
         test_successful_approved_buy_submits_order_and_logs_trade,
         test_stale_signal_rejection_stops_before_approval,
+        test_regime_circuit_breaker_blocks_buy_before_approval,
         test_second_look_rejection_blocks_order_submission,
         test_broker_order_failure_marks_decision_unapproved_and_submit_failed,
         test_claude_low_confidence_rejection_never_submits_order,

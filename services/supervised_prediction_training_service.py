@@ -8,12 +8,12 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
-import json
 from pathlib import Path
-import sqlite3
 from typing import Any
 
-from db import DB_PATH
+from repositories.supervised_prediction_training_repo import (
+    fetch_training_rows as repo_fetch_training_rows,
+)
 from services.optional_dependency_service import optional_dependency_status
 from policy_artifacts import atomic_write_json
 
@@ -79,56 +79,14 @@ def _label(row: dict[str, Any], horizon: str) -> int | None:
 
 def fetch_training_rows(
     *,
-    db_path: Path | str = DB_PATH,
+    db_path: Path | str | None = None,
     symbol: str | None = None,
     limit: int = 5000,
 ) -> list[dict[str, Any]]:
-    path = Path(db_path)
-    if not path.exists():
-        return []
-    symbol_sql = ""
-    params: list[Any] = []
-    if symbol:
-        symbol_sql = "AND fs.symbol = ?"
-        params.append(symbol.upper())
-    params.append(limit)
-    with sqlite3.connect(f"file:{path}?mode=ro", uri=True) as con:
-        con.row_factory = sqlite3.Row
-        exists = con.execute(
-            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='feature_snapshots'"
-        ).fetchone()
-        labels = con.execute(
-            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='labeled_setups'"
-        ).fetchone()
-        if not exists or not labels:
-            return []
-        rows = con.execute(
-            f"""
-            SELECT
-                fs.symbol,
-                fs.timestamp,
-                fs.ret_1m,
-                fs.ret_5m,
-                fs.ret_15m,
-                fs.range_pos_15m,
-                fs.distance_from_vwap,
-                fs.volume_ratio_5m,
-                fs.relative_strength_5m,
-                fs.spread_pct,
-                fs.setup_score,
-                ls.ret_fwd_5m,
-                ls.ret_fwd_15m,
-                ls.ret_fwd_30m
-            FROM feature_snapshots fs
-            JOIN labeled_setups ls ON ls.snapshot_id = fs.id
-            WHERE ls.ret_fwd_15m IS NOT NULL
-              {symbol_sql}
-            ORDER BY fs.timestamp DESC
-            LIMIT ?
-            """,
-            params,
-        ).fetchall()
-    return [dict(row) for row in rows]
+    kwargs: dict[str, Any] = {"symbol": symbol, "limit": limit}
+    if db_path is not None:
+        kwargs["db_path"] = db_path
+    return repo_fetch_training_rows(**kwargs)
 
 
 def train_supervised_prediction_model(

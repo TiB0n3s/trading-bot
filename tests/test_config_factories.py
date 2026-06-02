@@ -161,6 +161,15 @@ def test_risk_override_goes_through_validation():
     assert "RISK_POLICY_MODE" in str(exc)
 
 
+def test_risk_circuit_breaker_mode_validation():
+    cfg = load_risk_config(regime_circuit_breaker_mode="block")
+    assert cfg.regime_circuit_breaker_mode == "block"
+
+    exc = _raises(ValueError, load_risk_config, regime_circuit_breaker_mode="panic")
+    assert "regime_circuit_breaker_mode" in str(exc)
+    assert "REGIME_CIRCUIT_BREAKER_MODE" in str(exc)
+
+
 def test_risk_override_loss_pct_sign():
     exc = _raises(
         ValueError, load_risk_config,
@@ -183,6 +192,7 @@ def test_risk_no_env_dependency():
     env_vars = [
         "MACRO_POSITION_COUNT_FLOOR", "PORTFOLIO_ROTATION_ENABLED",
         "PORTFOLIO_REPLACEMENT_MODE", "RISK_POLICY_MODE",
+        "REGIME_CIRCUIT_BREAKER_MODE",
         "ENFORCE_SESSION_MOMENTUM_GATE", "ENFORCE_ADAPTIVE_CHURN_REENTRY",
     ]
     with _CleanEnv(*env_vars):
@@ -190,6 +200,13 @@ def test_risk_no_env_dependency():
     assert cfg.macro_position_count_floor == 500.0
     assert cfg.portfolio_rotation_enabled is False
     assert cfg.risk_policy_mode == "compare"
+    assert cfg.regime_circuit_breaker_mode == "off"
+
+
+def test_risk_circuit_breaker_env_var_is_read_when_no_override():
+    with _PatchEnv(REGIME_CIRCUIT_BREAKER_MODE="warn"):
+        cfg = load_risk_config()
+    assert cfg.regime_circuit_breaker_mode == "warn"
 
 
 # ===========================================================================
@@ -393,9 +410,11 @@ def main():
         # RiskConfig
         test_risk_override_bypasses_env,
         test_risk_override_goes_through_validation,
+        test_risk_circuit_breaker_mode_validation,
         test_risk_override_loss_pct_sign,
         test_risk_partial_override_preserves_defaults,
         test_risk_no_env_dependency,
+        test_risk_circuit_breaker_env_var_is_read_when_no_override,
         # AutoBuyConfig
         test_auto_buy_override_bypasses_env,
         test_auto_buy_override_goes_through_validation,

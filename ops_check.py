@@ -55,6 +55,9 @@ Usage:
   python3 ops_check.py strong-days
   python3 ops_check.py strong-days 2026-05-26
   python3 ops_check.py conviction-persistence-health 2026-05-29
+  python3 ops_check.py regime
+  python3 ops_check.py regime-json
+  python3 ops_check.py regime-matrix
   python3 ops_check.py all
   python3 ops_check.py filters 2026-05-08
 """
@@ -170,6 +173,9 @@ COMMANDS = {
     "prediction-validation": ["prediction_validation_report.py"],
     "auto-buy-outcomes": ["auto_buy_outcome_report.py"],
     "strong-days": ["strong_day_participation_report.py"],
+    "regime": ["regime_status.py"],
+    "regime-json": ["regime_status.py", "--json"],
+    "regime-matrix": ["regime_status.py", "--routing-matrix"],
 }
 
 

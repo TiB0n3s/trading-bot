@@ -24,6 +24,7 @@ from services.approval_service import (
     setup_policy_rejection,
 )
 from services.execution_service import execute_approved_order
+from services.regime_circuit_breaker_service import check_circuit_breaker
 from services.signal_models import ExecutionResult, PipelineResult, SignalContext, SignalRuntimeState
 
 
@@ -84,6 +85,8 @@ class LiveSignalProcessorDeps:
     cash_safe_max_new_buys_per_symbol_per_day: int
     cash_safe_buys_today: Callable[[str], int]
     symbol_override_block: Callable[[str, str], str | None]
+    read_regime_lockout_state: Callable[[], Any]
+    regime_circuit_breaker_mode: str
     enforce_setup_policy_blocks: bool
     apply_size_cap: Callable[..., Any]
     trend_table: dict[str, Any]
@@ -198,6 +201,16 @@ class LiveSignalProcessor:
             dedupe_key=dedupe_key,
         )
         if stale_result.rejected:
+            return self._result(context)
+
+        circuit_result = self.check_regime_circuit_breaker(
+            symbol=symbol,
+            action=action,
+            price=price,
+            account_state=account_state,
+            dedupe_key=dedupe_key,
+        )
+        if circuit_result.rejected:
             return self._result(context)
 
         setup_stage_result = self.apply_setup_stage(
@@ -544,6 +557,50 @@ class LiveSignalProcessor:
                 account_state=account_state,
                 dedupe_key=dedupe_key,
                 approval=decision.approval,
+            )
+
+        return StageResult()
+
+    def check_regime_circuit_breaker(self, *, symbol, action, price, account_state, dedupe_key):
+        try:
+            decision = check_circuit_breaker(
+                signal_action=action,
+                lockout_state=self.deps.read_regime_lockout_state(),
+                mode=self.deps.regime_circuit_breaker_mode,
+            )
+        except Exception as exc:
+            self.deps.log.warning(
+                f"Regime circuit breaker unavailable for {symbol}; fail-open: {exc}"
+            )
+            return StageResult()
+
+        payload = decision.to_dict()
+        if decision.action in {"warn", "block"} or decision.mode in {"observe", "warn", "block"}:
+            account_state["regime_circuit_breaker"] = payload
+
+        if decision.action == "warn":
+            self.deps.log.warning(
+                f"Regime circuit breaker warning for {symbol} {action.upper()}: "
+                f"{decision.lockout_status} {decision.lockout_reason}"
+            )
+            return StageResult()
+
+        if decision.action == "block":
+            reason = (
+                "regime circuit breaker lockout active: "
+                f"status={decision.lockout_status} reason={decision.lockout_reason}"
+            )
+            return self._reject_approval_decision(
+                symbol=symbol,
+                action=action,
+                price=price,
+                account_state=account_state,
+                dedupe_key=dedupe_key,
+                approval=deterministic_rejection(
+                    category="circuit_breaker",
+                    reason=reason,
+                    metadata={"regime_circuit_breaker": payload},
+                ),
             )
 
         return StageResult()

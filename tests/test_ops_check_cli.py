@@ -6,6 +6,7 @@ from __future__ import annotations
 import io
 import json
 import sqlite3
+import subprocess
 import sys
 import tempfile
 from contextlib import redirect_stdout
@@ -383,6 +384,31 @@ def test_lifecycle_dashboard_and_calibration_cli_use_lifecycle_rows(tmp_path):
     assert "setup=" in out
 
 
+def test_regime_status_json_smoke(tmp_path):
+    state_path = tmp_path / "regime_state.json"
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(ROOT / "regime_status.py"),
+            "--json",
+            "--no-save",
+            "--state",
+            str(state_path),
+            "--lockout-path",
+            str(tmp_path / "risk_lockout.json"),
+        ],
+        cwd=ROOT,
+        text=True,
+        capture_output=True,
+    )
+
+    assert result.returncode == 0, result.stderr
+    payload = json.loads(result.stdout)
+    assert "regime" in payload
+    assert "routing" in payload
+    assert "tranche_plan" in payload
+
+
 def main():
     tests = [
         test_feature_attribution_cli_missing_db_exits_cleanly,
@@ -394,6 +420,7 @@ def main():
         test_rollout_contract_cli_empty_lifecycle_rows_warns,
         test_rollout_contract_cli_golden_fixture_locks_report_contract,
         test_lifecycle_dashboard_and_calibration_cli_use_lifecycle_rows,
+        test_regime_status_json_smoke,
     ]
     for test in tests:
         with tempfile.TemporaryDirectory() as tmp:

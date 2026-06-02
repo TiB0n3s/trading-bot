@@ -7,6 +7,8 @@ container -> app.py import cycle and to preserve existing test patch points.
 
 from __future__ import annotations
 
+import os
+from pathlib import Path
 from typing import Any
 
 from services.live_signal_processor import (
@@ -15,7 +17,27 @@ from services.live_signal_processor import (
     build_context_runtime as live_build_context_runtime,
     build_runtime_state as live_build_runtime_state,
 )
+from services.persistent_lockout_service import PersistentLockoutService
+from services.regime_circuit_breaker_service import VALID_MODES as CIRCUIT_BREAKER_MODES
 from services.signal_pipeline import SignalPipelineDeps
+
+
+def _runtime_base_dir(runtime: Any) -> Path:
+    runtime_file = getattr(runtime, "__file__", None)
+    if runtime_file:
+        return Path(runtime_file).resolve().parent
+    return Path.cwd()
+
+
+def _read_risk_lockout(runtime: Any):
+    return PersistentLockoutService(
+        _runtime_base_dir(runtime) / "runtime_state" / "risk_lockout.json"
+    ).read()
+
+
+def _regime_circuit_breaker_mode() -> str:
+    mode = os.getenv("REGIME_CIRCUIT_BREAKER_MODE", "off").strip().lower()
+    return mode if mode in CIRCUIT_BREAKER_MODES else "off"
 
 
 def build_live_signal_processor(*, container: Any, runtime: Any) -> LiveSignalProcessor:
@@ -44,6 +66,8 @@ def build_live_signal_processor(*, container: Any, runtime: Any) -> LiveSignalPr
             cash_safe_max_new_buys_per_symbol_per_day=runtime.CASH_SAFE_MAX_NEW_BUYS_PER_SYMBOL_PER_DAY,
             cash_safe_buys_today=container.repositories.trades.cash_safe_buys_today,
             symbol_override_block=runtime._symbol_override_block,
+            read_regime_lockout_state=lambda: _read_risk_lockout(runtime),
+            regime_circuit_breaker_mode=_regime_circuit_breaker_mode(),
             enforce_setup_policy_blocks=runtime.ENFORCE_SETUP_POLICY_BLOCKS,
             apply_size_cap=runtime.apply_size_cap,
             trend_table=runtime._trend_table,

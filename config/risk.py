@@ -16,6 +16,7 @@ from config._env import (
 
 _VALID_REPLACEMENT_MODES = {"observe_only", "active", "off"}
 _VALID_RISK_POLICY_MODES = {"off", "compare"}
+_VALID_CIRCUIT_BREAKER_MODES = {"off", "observe", "warn", "block"}
 
 
 @dataclass(frozen=True)
@@ -49,6 +50,10 @@ class RiskConfig:
 
     # Risk policy mode
     risk_policy_mode: str = "compare"
+
+    # Regime circuit breaker enforcement mode
+    # off=no effect (default); observe=log only; warn=annotate; block=reject buys
+    regime_circuit_breaker_mode: str = "off"
 
     # Misc signal-level risk gates
     enforce_session_momentum_gate: bool = True
@@ -105,6 +110,12 @@ class RiskConfig:
             self.risk_policy_mode,
             f"must be one of {sorted(_VALID_RISK_POLICY_MODES)}",
         )
+        _check(
+            self.regime_circuit_breaker_mode in _VALID_CIRCUIT_BREAKER_MODES,
+            "regime_circuit_breaker_mode", "REGIME_CIRCUIT_BREAKER_MODE",
+            self.regime_circuit_breaker_mode,
+            f"must be one of {sorted(_VALID_CIRCUIT_BREAKER_MODES)}",
+        )
 
 
 def load_risk_config(**overrides) -> RiskConfig:
@@ -160,6 +171,7 @@ def load_risk_config(**overrides) -> RiskConfig:
             "PORTFOLIO_REPLACEMENT_WEAK_HOLDING_PLPC", -1.00
         ),
         risk_policy_mode=env_str("RISK_POLICY_MODE", "compare").lower(),
+        regime_circuit_breaker_mode=env_str("REGIME_CIRCUIT_BREAKER_MODE", "off").lower(),
         enforce_session_momentum_gate=env_bool("ENFORCE_SESSION_MOMENTUM_GATE", True),
         enforce_adaptive_churn_reentry=env_bool("ENFORCE_ADAPTIVE_CHURN_REENTRY", True),
     )

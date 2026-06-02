@@ -11,6 +11,7 @@ This is the single source of truth for:
 """
 
 SYMBOL_UNIVERSE_VERSION = "approved_universe_2026_05_26_internal_bar_expansion_v1"
+CONTEXT_SYMBOL_UNIVERSE_VERSION = "context_only_universe_2026_06_02_v1"
 
 INTERNAL_BAR_ONLY_SYMBOLS_LIST = [
     "AMZN",
@@ -112,6 +113,99 @@ SYMBOL_CONFIG = {
 APPROVED_SYMBOLS_LIST = list(SYMBOL_CONFIG.keys())
 APPROVED_SYMBOLS = set(APPROVED_SYMBOLS_LIST)
 APPROVED_SYMBOLS_CSV = ", ".join(APPROVED_SYMBOLS_LIST)
+
+# Non-traded symbols used only to enrich context for approved symbols. These
+# symbols must never become trade candidates unless explicitly moved into
+# SYMBOL_CONFIG and approved by normal risk/ops review.
+CONTEXT_ONLY_SYMBOL_CONFIG = {
+    # Semiconductor / AI infrastructure suppliers and peers
+    "MU": {
+        "name": "Micron Technology",
+        "relationship_type": "semiconductor_peer",
+        "linked_symbols": ["NVDA", "AMD", "AVGO", "TSM", "ASML"],
+        "themes": ["semiconductors", "ai_infra", "memory"],
+    },
+    "KLAC": {
+        "name": "KLA",
+        "relationship_type": "semiconductor_equipment_peer",
+        "linked_symbols": ["ASML", "TSM", "NVDA", "AMD"],
+        "themes": ["semiconductors", "equipment"],
+    },
+    "AMAT": {
+        "name": "Applied Materials",
+        "relationship_type": "semiconductor_equipment_peer",
+        "linked_symbols": ["ASML", "TSM", "NVDA", "AMD"],
+        "themes": ["semiconductors", "equipment"],
+    },
+    "LRCX": {
+        "name": "Lam Research",
+        "relationship_type": "semiconductor_equipment_peer",
+        "linked_symbols": ["ASML", "TSM", "NVDA", "AMD"],
+        "themes": ["semiconductors", "equipment"],
+    },
+    "SMCI": {
+        "name": "Super Micro Computer",
+        "relationship_type": "ai_hardware_peer",
+        "linked_symbols": ["NVDA", "AMD", "DELL", "VRT"],
+        "themes": ["ai_infra", "hardware_infra"],
+    },
+    "ARM": {
+        "name": "Arm Holdings",
+        "relationship_type": "semiconductor_ip_peer",
+        "linked_symbols": ["NVDA", "AMD", "TSM", "AAPL"],
+        "themes": ["semiconductors", "mobile", "ai_infra"],
+    },
+    # Cloud, enterprise software, and data-center demand context
+    "NOW": {
+        "name": "ServiceNow",
+        "relationship_type": "software_peer",
+        "linked_symbols": ["CRM", "ORCL", "MSFT", "SNPS"],
+        "themes": ["software_infra", "enterprise_software"],
+    },
+    "PANW": {
+        "name": "Palo Alto Networks",
+        "relationship_type": "cybersecurity_peer",
+        "linked_symbols": ["ZS", "OKTA", "MSFT"],
+        "themes": ["cybersecurity", "software_infra"],
+    },
+    "CRWD": {
+        "name": "CrowdStrike",
+        "relationship_type": "cybersecurity_peer",
+        "linked_symbols": ["ZS", "OKTA", "MSFT"],
+        "themes": ["cybersecurity", "software_infra"],
+    },
+    # Consumer / retail peers
+    "WMT": {
+        "name": "Walmart",
+        "relationship_type": "consumer_retail_peer",
+        "linked_symbols": ["COST", "TSCO", "BURL", "DKS"],
+        "themes": ["consumer", "retail"],
+    },
+    "TGT": {
+        "name": "Target",
+        "relationship_type": "consumer_retail_peer",
+        "linked_symbols": ["COST", "BURL", "DKS", "TSCO"],
+        "themes": ["consumer", "retail"],
+    },
+    # Healthcare / pharma context
+    "NVO": {
+        "name": "Novo Nordisk",
+        "relationship_type": "pharma_peer",
+        "linked_symbols": ["LLY", "PFE", "MRK", "ABBV"],
+        "themes": ["healthcare", "glp1"],
+    },
+    "REGN": {
+        "name": "Regeneron",
+        "relationship_type": "biotech_peer",
+        "linked_symbols": ["VRTX", "MRNA", "CRSP", "LLY"],
+        "themes": ["healthcare", "biotech"],
+    },
+}
+
+CONTEXT_ONLY_SYMBOLS_LIST = list(CONTEXT_ONLY_SYMBOL_CONFIG.keys())
+CONTEXT_ONLY_SYMBOLS = set(CONTEXT_ONLY_SYMBOLS_LIST)
+EVENT_CONTEXT_SYMBOLS_LIST = APPROVED_SYMBOLS_LIST + CONTEXT_ONLY_SYMBOLS_LIST
+EVENT_CONTEXT_SYMBOLS = set(EVENT_CONTEXT_SYMBOLS_LIST)
 TRADINGVIEW_ALERT_SYMBOLS_LIST = [
     symbol for symbol in APPROVED_SYMBOLS_LIST
     if symbol not in INTERNAL_BAR_ONLY_SYMBOLS

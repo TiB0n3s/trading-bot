@@ -561,6 +561,9 @@ def apply_event_enrichment(symbol_entry: dict, enrichment: dict) -> None:
         "intent_scopes": interpreted_context.get("intent_scopes") or [],
         "confirmation_statuses": interpreted_context.get("confirmation_statuses") or [],
         "missing_evidence": interpreted_context.get("missing_evidence") or [],
+        "direct_event_count": interpreted_context.get("direct_event_count"),
+        "linked_context_event_count": interpreted_context.get("linked_context_event_count"),
+        "linked_context_symbols": interpreted_context.get("linked_context_symbols") or [],
         "event_intent_version": interpreted_context.get("event_intent_version"),
         **event_scores,
     }
@@ -589,6 +592,9 @@ def apply_event_enrichment(symbol_entry: dict, enrichment: dict) -> None:
                     f" intent={','.join(directions[:3]) or '-'}"
                     f"/{','.join(categories[:3]) or '-'}."
                 )
+            linked_symbols = interpreted_context.get("linked_context_symbols") or []
+            if linked_symbols:
+                intent_text += f" linked_context={','.join(linked_symbols[:4])}."
             note = f"Event context catalyst score {catalyst_f:.2f}; {source_note}."
             if intent_text:
                 note += intent_text

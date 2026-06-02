@@ -172,6 +172,30 @@ class MarketIntelligenceRepository:
                 (market_date, symbol),
             ).fetchall()
 
+    def daily_symbol_events_for_context(self, market_date: str, symbol: str):
+        symbol = symbol.upper().strip()
+        linked_symbol_token = f'"{symbol}"'
+        with get_connection(self.db_path) as con:
+            return con.execute(
+                """
+                SELECT *
+                FROM daily_symbol_events
+                WHERE market_date = ?
+                  AND (
+                    symbol = ?
+                    OR (
+                      raw_json LIKE ?
+                      AND raw_json LIKE '%"context_only": true%'
+                      AND raw_json LIKE '%"linked_symbols"%'
+                    )
+                  )
+                ORDER BY
+                  CASE WHEN symbol = ? THEN 0 ELSE 1 END,
+                  id
+                """,
+                (market_date, symbol, f"%{linked_symbol_token}%", symbol),
+            ).fetchall()
+
     def daily_symbol_event_keys(self, market_date: str) -> set[tuple[str, str, str, str]]:
         with get_connection(self.db_path) as con:
             rows = con.execute(

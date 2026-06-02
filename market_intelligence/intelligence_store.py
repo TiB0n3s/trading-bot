@@ -302,7 +302,28 @@ def aggregate_symbol_events(market_date: str, symbol: str, db_path: Path | str =
     Risk fields use max because one serious supply-chain/regulatory/execution
     risk is enough to matter.
     """
-    events = MarketIntelligenceRepository(db_path).daily_symbol_events(market_date, symbol)
+    event_rows = MarketIntelligenceRepository(db_path).daily_symbol_events_for_context(market_date, symbol)
+    events = []
+    raw_by_event_id = {}
+    target_symbol = symbol.upper()
+    for row in event_rows:
+        raw = {}
+        try:
+            loaded = json.loads(row["raw_json"] or "{}")
+            raw = loaded if isinstance(loaded, dict) else {}
+        except Exception:
+            raw = {}
+
+        row_symbol = str(row["symbol"] or "").upper()
+        linked_symbols = {
+            str(s).upper()
+            for s in (raw.get("linked_symbols") or [])
+        }
+        if row_symbol == target_symbol or (
+            raw.get("context_only") is True and target_symbol in linked_symbols
+        ):
+            events.append(row)
+            raw_by_event_id[row["id"]] = raw
 
     if not events:
         return {
@@ -358,11 +379,20 @@ def aggregate_symbol_events(market_date: str, symbol: str, db_path: Path | str =
     impacts = [e["expected_market_impact"] for e in events if e["expected_market_impact"]]
     relevance = [e["trade_relevance"] for e in events if e["trade_relevance"]]
     raw_events = []
+    linked_context_symbols = []
+    direct_event_count = 0
+    linked_event_count = 0
     for e in events:
         try:
-            raw = json.loads(e["raw_json"] or "{}")
+            raw = raw_by_event_id.get(e["id"]) or json.loads(e["raw_json"] or "{}")
             if isinstance(raw, dict):
                 raw_events.append(raw)
+                if str(e["symbol"]).upper() == symbol.upper():
+                    direct_event_count += 1
+                elif raw.get("context_only") is True:
+                    linked_event_count += 1
+                    if raw.get("symbol"):
+                        linked_context_symbols.append(str(raw["symbol"]).upper())
         except Exception:
             pass
 
@@ -398,6 +428,9 @@ def aggregate_symbol_events(market_date: str, symbol: str, db_path: Path | str =
         "event_intent_version": "event_intent_aggregate_v1",
         "available": True,
         "event_count": len(events),
+        "direct_event_count": direct_event_count,
+        "linked_context_event_count": linked_event_count,
+        "linked_context_symbols": sorted(set(linked_context_symbols)),
         "intent_directions": sorted(set(intent_directions)),
         "intent_categories": sorted(set(intent_categories)),
         "intent_scopes": sorted(set(intent_scopes)),

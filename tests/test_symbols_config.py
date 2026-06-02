@@ -13,6 +13,9 @@ sys.path.insert(0, str(ROOT))
 
 from symbols_config import (
     APPROVED_SYMBOLS,
+    CONTEXT_ONLY_SYMBOL_CONFIG,
+    CONTEXT_ONLY_SYMBOLS,
+    EVENT_CONTEXT_SYMBOLS,
     INTERNAL_BAR_ONLY_SYMBOLS,
     INTERNAL_BAR_ONLY_SYMBOLS_LIST,
     PRICE_RANGES,
@@ -60,10 +63,25 @@ def test_internal_bar_only_symbols_have_ranges_and_source_metadata():
         assert SYMBOL_SIGNAL_SOURCE[symbol] == "internal_bar_only"
 
 
+def test_context_only_symbols_are_non_tradable_and_link_to_approved_symbols():
+    assert CONTEXT_ONLY_SYMBOLS
+    assert CONTEXT_ONLY_SYMBOLS.isdisjoint(APPROVED_SYMBOLS)
+    assert EVENT_CONTEXT_SYMBOLS == APPROVED_SYMBOLS | CONTEXT_ONLY_SYMBOLS
+
+    for symbol, cfg in CONTEXT_ONLY_SYMBOL_CONFIG.items():
+        assert symbol in CONTEXT_ONLY_SYMBOLS
+        assert cfg.get("name")
+        assert cfg.get("relationship_type")
+        linked = set(cfg.get("linked_symbols") or [])
+        assert linked
+        assert linked <= APPROVED_SYMBOLS
+
+
 def main():
     tests = [
         test_internal_bar_only_symbols_are_approved_but_not_tradingview,
         test_internal_bar_only_symbols_have_ranges_and_source_metadata,
+        test_context_only_symbols_are_non_tradable_and_link_to_approved_symbols,
     ]
 
     for test in tests:

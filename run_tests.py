@@ -66,6 +66,7 @@ TESTS = [
     "tests/test_exit_decision_quality_service.py",
     "tests/test_news_event_model.py",
     "tests/test_source_reliability.py",
+    "tests/test_context_symbol_events.py",
     "tests/test_hard_blocker_taxonomy.py",
     "tests/test_rollout_contract_service.py",
     "tests/test_confidence_calibration_service.py",

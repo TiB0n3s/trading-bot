@@ -133,10 +133,22 @@ class PreMarketResearchRepository:
                         if item
                     }
                 )
+                linked_context_symbols = sorted(
+                    {
+                        str(event.get("symbol")).upper()
+                        for event in raw_events
+                        if event.get("context_only") is True and event.get("symbol")
+                    }
+                )
+                linked_context_event_count = sum(
+                    1 for event in raw_events if event.get("context_only") is True
+                )
                 event_context = {
                     "event_intent_version": "event_intent_aggregate_v1",
                     "available": bool(raw_events),
                     "event_count": row["event_count"],
+                    "linked_context_symbols": linked_context_symbols,
+                    "linked_context_event_count": linked_context_event_count,
                     "intent_directions": intent_directions,
                     "intent_categories": intent_categories,
                     "intent_scopes": intent_scopes,

@@ -24,7 +24,12 @@ import json
 from collections import Counter, defaultdict
 from pathlib import Path
 
-from symbols_config import APPROVED_SYMBOLS_LIST
+from symbols_config import (
+    APPROVED_SYMBOLS,
+    APPROVED_SYMBOLS_LIST,
+    CONTEXT_ONLY_SYMBOLS_LIST,
+    EVENT_CONTEXT_SYMBOLS,
+)
 from market_intelligence.news_event_model import score_event
 from market_intelligence.intelligence_store import (
     init_intelligence_tables,
@@ -59,6 +64,19 @@ def event_key(event: dict) -> tuple:
         event.get("event_summary") or "",
         event.get("source_url") or "",
     )
+
+
+def affected_approved_symbols(event: dict) -> set[str]:
+    """Return approved symbols whose context should include this event."""
+    out = set()
+    symbol = str(event.get("symbol") or "").upper().strip()
+    if symbol in APPROVED_SYMBOLS:
+        out.add(symbol)
+    for linked in event.get("linked_symbols") or []:
+        linked_symbol = str(linked).upper().strip()
+        if linked_symbol in APPROVED_SYMBOLS:
+            out.add(linked_symbol)
+    return out
 
 
 def print_table(events):
@@ -96,17 +114,35 @@ def main():
     parser.add_argument("--output", help="Optional JSON output path for collected/scored events")
     parser.add_argument("--no-dedupe", action="store_true", help="Insert duplicates instead of skipping existing same-day events")
     parser.add_argument("--predict", action="store_true", help="Generate observe-only symbol predictions after event/context updates")
+    parser.add_argument(
+        "--include-context-symbols",
+        action="store_true",
+        help="Also collect non-tradable context-only symbols for relationship/context enrichment",
+    )
     args = parser.parse_args()
 
-    symbols = [s.upper() for s in args.symbol] if args.symbol else APPROVED_SYMBOLS_LIST
-    invalid = sorted(set(symbols) - set(APPROVED_SYMBOLS_LIST))
+    if args.symbol:
+        symbols = [s.upper() for s in args.symbol]
+    else:
+        symbols = list(APPROVED_SYMBOLS_LIST)
+        if args.include_context_symbols:
+            symbols.extend(CONTEXT_ONLY_SYMBOLS_LIST)
+
+    allowed_symbols = EVENT_CONTEXT_SYMBOLS if args.include_context_symbols else APPROVED_SYMBOLS
+    invalid = sorted(set(symbols) - set(allowed_symbols))
     if invalid:
-        raise SystemExit(f"ERROR: non-approved symbols requested: {invalid}")
+        if args.include_context_symbols:
+            raise SystemExit(f"ERROR: non-approved/non-context symbols requested: {invalid}")
+        raise SystemExit(
+            f"ERROR: non-approved symbols requested: {invalid}; "
+            "use --include-context-symbols for configured context-only symbols"
+        )
 
     print()
     print("=== Collect and score events ===")
     print(f"  Date          : {args.date}")
     print(f"  Symbols       : {len(symbols)}")
+    print(f"  Context syms  : {args.include_context_symbols}")
     print(f"  Max/symbol    : {args.max_per_symbol}")
     print(f"  Dry run       : {args.dry_run}")
     print(f"  Apply context : {args.apply_context}")
@@ -212,7 +248,8 @@ def main():
     if args.apply_context:
         by_date_symbol = defaultdict(set)
         for _, e in inserted:
-            by_date_symbol[e["market_date"]].add(e["symbol"])
+            for affected in affected_approved_symbols(e):
+                by_date_symbol[e["market_date"]].add(affected)
 
         updated = 0
         skipped = 0
@@ -236,8 +273,14 @@ def main():
                     prediction_count += len(preds)
         else:
             # If no new events were inserted or --apply-context was not used,
-            # still generate predictions for the requested symbol set/date.
-            for sym in symbols:
+            # still generate predictions for approved symbols only.
+            prediction_symbols = [
+                sym for sym in symbols
+                if sym in APPROVED_SYMBOLS
+            ]
+            for e in new_events:
+                prediction_symbols.extend(sorted(affected_approved_symbols(e)))
+            for sym in sorted(set(prediction_symbols)):
                 try:
                     preds = predict_all_symbols(args.date, symbol=sym, write=True)
                     prediction_count += len(preds)

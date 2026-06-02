@@ -95,6 +95,24 @@ def test_google_news_transport_is_not_used_as_source_when_publisher_unknown():
     assert_equal(event["trusted_source"], False, "trusted")
 
 
+def test_context_only_symbol_is_marked_non_tradable_and_linked():
+    item = {
+        "title": "Micron memory demand improves for AI suppliers - Reuters",
+        "link": "https://news.google.com/rss/articles/example",
+        "description": "Memory demand improved.",
+        "published_at": "2026-06-01T12:00:00+00:00",
+    }
+
+    event = event_from_item("2026-06-01", "MU", item)
+
+    assert_equal(event["symbol"], "MU", "symbol")
+    assert_equal(event["tradable"], False, "tradable")
+    assert_equal(event["context_only"], True, "context only")
+    assert "NVDA" in event["linked_symbols"]
+    assert "AMD" in event["linked_symbols"]
+    assert_equal(event["context_symbol_universe"], "context_only", "universe")
+
+
 def test_peripheral_scope_is_preserved_on_collected_event():
     item = {
         "title": "Apple CFO resigns as supplier contract is reviewed - Reuters",
@@ -174,6 +192,7 @@ def main():
         test_classifies_public_disclosure_sources,
         test_google_news_publisher_becomes_event_source_of_record,
         test_google_news_transport_is_not_used_as_source_when_publisher_unknown,
+        test_context_only_symbol_is_marked_non_tradable_and_linked,
         test_peripheral_scope_is_preserved_on_collected_event,
         test_symbol_has_direct_and_peripheral_news_queries,
         test_classifies_peripheral_event_types,

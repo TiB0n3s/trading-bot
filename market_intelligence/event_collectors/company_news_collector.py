@@ -24,7 +24,12 @@ from datetime import datetime
 from email.utils import parsedate_to_datetime
 
 from market_intelligence.source_reliability import classify_source, normalize_source_name
-from symbols_config import APPROVED_SYMBOLS_LIST
+from symbols_config import (
+    APPROVED_SYMBOLS,
+    APPROVED_SYMBOLS_LIST,
+    CONTEXT_ONLY_SYMBOL_CONFIG,
+    EVENT_CONTEXT_SYMBOLS,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -96,6 +101,9 @@ COMPANY_QUERY_NAMES = {
     "KEY": "KeyCorp",
     "KHC": "Kraft Heinz",
 }
+
+for _symbol, _cfg in CONTEXT_ONLY_SYMBOL_CONFIG.items():
+    COMPANY_QUERY_NAMES.setdefault(_symbol, _cfg.get("name", _symbol))
 
 
 EVENT_KEYWORDS = [
@@ -372,6 +380,24 @@ def publisher_from_google_news_title(title: str | None) -> str | None:
     return publisher or None
 
 
+def _context_symbol_metadata(symbol: str) -> dict:
+    symbol = symbol.upper().strip()
+    cfg = CONTEXT_ONLY_SYMBOL_CONFIG.get(symbol) or {}
+    is_tradable = symbol in APPROVED_SYMBOLS
+    return {
+        "tradable": is_tradable,
+        "context_only": not is_tradable,
+        "linked_symbols": [
+            str(s).upper()
+            for s in (cfg.get("linked_symbols") or [])
+            if str(s).upper() in APPROVED_SYMBOLS
+        ],
+        "relationship_type": cfg.get("relationship_type"),
+        "relationship_themes": cfg.get("themes") or [],
+        "context_symbol_universe": "approved" if is_tradable else "context_only",
+    }
+
+
 def event_from_item(market_date: str, symbol: str, item: dict, search_scope: str = "company_direct") -> dict:
     title = item.get("title") or ""
     desc = item.get("description") or ""
@@ -404,6 +430,7 @@ def event_from_item(market_date: str, symbol: str, item: dict, search_scope: str
         "raw_published_at": item.get("published_at"),
         "raw_headline": title,
         "raw_description": desc,
+        **_context_symbol_metadata(symbol),
     }
 
 
@@ -419,8 +446,8 @@ def collect_company_news_events(
 
     for symbol in symbols:
         symbol = symbol.upper().strip()
-        if symbol not in APPROVED_SYMBOLS_LIST:
-            logger.warning("Skipping non-approved symbol: %s", symbol)
+        if symbol not in EVENT_CONTEXT_SYMBOLS:
+            logger.warning("Skipping non-approved/non-context symbol: %s", symbol)
             continue
 
         seen_titles = set()

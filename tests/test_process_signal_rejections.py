@@ -170,7 +170,9 @@ def _base_patches(**overrides):
         # Session momentum — unavailable by default (fail-open)
         "app.get_latest_session_momentum": MagicMock(return_value=None),
         "app._session_momentum_is_fresh": MagicMock(return_value=False),
-        "app.entry_policy.evaluate_session_momentum_gate": MagicMock(return_value=False),
+        "app.entry_policy.evaluate_session_momentum_gate": MagicMock(
+            return_value={"would_block": False, "severity": "pass", "reason": "test"}
+        ),
         # Trend confirmation helpers
         "app._required_buy_confirmations": MagicMock(
             return_value={"required_buy_confirmations": 3, "reason": "default"}
@@ -271,6 +273,39 @@ def test_webhook_rejects_wrong_secret():
         headers={"X-Webhook-Secret": "wrong-secret"},
     )
     assert_equal(resp.status_code, 401, "wrong secret → 401")
+
+
+def test_webhook_rejects_query_string_secret_by_default():
+    _app.app.testing = True
+    client = _app.app.test_client()
+    with patch.object(_app, "ALLOW_QUERY_STRING_SECRET", False):
+        resp = client.post(
+            f"/webhook?secret={_SECRET}",
+            json=_buy(),
+        )
+    assert_equal(resp.status_code, 401, "query-string secret default → 401")
+
+
+def test_webhook_query_string_secret_requires_explicit_compat_flag():
+    _app.app.testing = True
+    submit_mock = MagicMock()
+    executor_mock = MagicMock()
+    executor_mock.submit = submit_mock
+    with patch.object(_app, "ALLOW_QUERY_STRING_SECRET", True):
+        with patch("app._signal_executor", executor_mock):
+            with patch("app._record_webhook_event", return_value=True):
+                with patch(
+                    "services.trade_audit_service.TradeAuditService.record_webhook_status",
+                    MagicMock(),
+                ):
+                    client = _app.app.test_client()
+                    resp = client.post(
+                        f"/webhook?secret={_SECRET}",
+                        json=_buy(),
+                    )
+
+    assert_equal(resp.status_code, 200, "query-string secret with compat flag → 200")
+    assert_true(submit_mock.called, "signal submitted to executor")
 
 
 def test_webhook_rejects_non_json():
@@ -566,48 +601,36 @@ def test_trend_confirmation_blocks_sell_non_bearish():
 
 def test_fundamental_score_blocks_bearish_buy():
     """BUY blocked when pre-market bias flags a bearish fundamental score."""
-    original = _app._market_bias.get(_SYMBOL)
-    _app._market_bias[_SYMBOL] = {
+    market_bias = {
         "bias": "neutral",
         "fundamental_score": "bearish",
         "risk_level": "high",
         "entry_quality": "neutral",
         "reason": "",
     }
-    try:
-        with _Env(**{
-            "app.get_mock_account_state": MagicMock(return_value=_account()),
-        }) as env:
-            _app.process_signal(_buy())
-        assert_equal(env.rejection_category(), "fundamental_score", "category")
-    finally:
-        if original is None:
-            _app._market_bias.pop(_SYMBOL, None)
-        else:
-            _app._market_bias[_SYMBOL] = original
+    with _Env(**{
+        "app._market_bias": {_SYMBOL: market_bias},
+        "app.get_mock_account_state": MagicMock(return_value=_account()),
+    }) as env:
+        _app.process_signal(_buy())
+    assert_equal(env.rejection_category(), "fundamental_score", "category")
 
 
 def test_chase_prevention_blocks_do_not_chase():
     """BUY blocked when entry_quality is do_not_chase."""
-    original = _app._market_bias.get(_SYMBOL)
-    _app._market_bias[_SYMBOL] = {
+    market_bias = {
         "bias": "neutral",
         "fundamental_score": "neutral",
         "risk_level": "high",
         "entry_quality": "do_not_chase",
         "reason": "",
     }
-    try:
-        with _Env(**{
-            "app.get_mock_account_state": MagicMock(return_value=_account()),
-        }) as env:
-            _app.process_signal(_buy())
-        assert_equal(env.rejection_category(), "chase_prevention", "category")
-    finally:
-        if original is None:
-            _app._market_bias.pop(_SYMBOL, None)
-        else:
-            _app._market_bias[_SYMBOL] = original
+    with _Env(**{
+        "app._market_bias": {_SYMBOL: market_bias},
+        "app.get_mock_account_state": MagicMock(return_value=_account()),
+    }) as env:
+        _app.process_signal(_buy())
+    assert_equal(env.rejection_category(), "chase_prevention", "category")
 
 
 def test_sell_profit_threshold_blocks_small_profit_without_bearish_pressure():
@@ -674,6 +697,8 @@ _TESTS = [
     # /webhook HTTP layer
     test_webhook_rejects_missing_secret,
     test_webhook_rejects_wrong_secret,
+    test_webhook_rejects_query_string_secret_by_default,
+    test_webhook_query_string_secret_requires_explicit_compat_flag,
     test_webhook_rejects_non_json,
     test_webhook_rejects_invalid_action,
     test_webhook_rejects_unapproved_symbol,

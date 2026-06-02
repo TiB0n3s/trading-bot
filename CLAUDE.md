@@ -64,7 +64,8 @@ Recent completed roadmap items:
   `ops_check.py migration-status`.
 - App startup no longer owns schema `ALTER TABLE` migration work.
 - Webhook/status secrets should use `X-Webhook-Secret` or
-  `Authorization: Bearer ...`; query-string secrets are legacy fallback only.
+  `Authorization: Bearer ...`; query-string secrets are rejected unless
+  `ALLOW_QUERY_STRING_SECRET=true` is explicitly set for temporary compatibility.
 - Prediction gate mode defaults to warn-only for hard blocking until labeled
   paper-session outcomes justify promotion.
 - Cached ML predictions are still conservative: weak prediction evidence can

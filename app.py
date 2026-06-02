@@ -413,6 +413,10 @@ def evaluate_prediction_gate(**kwargs):
     return entry_policy.evaluate_prediction_gate(**kwargs)
 
 WEBHOOK_SECRET = os.environ.get("WEBHOOK_SECRET", "changeme")
+ALLOW_QUERY_STRING_SECRET = os.environ.get(
+    "ALLOW_QUERY_STRING_SECRET",
+    "false",
+).strip().lower() in ("1", "true", "yes", "on")
 
 def _webhook_dedupe_key(symbol, action, price):
     """Build a loose duplicate key for near-identical TradingView alerts.
@@ -683,16 +687,26 @@ def validate_secret(req):
     if auth_header.lower().startswith("bearer "):
         bearer_secret = auth_header.split(" ", 1)[1].strip()
 
-    secret = (
-        req.headers.get("X-Webhook-Secret")
-        or bearer_secret
-        or req.args.get("secret", "")
-    )
+    query_secret = req.args.get("secret", "")
+    if query_secret and not ALLOW_QUERY_STRING_SECRET:
+        logger.warning(
+            f"Query-string secret rejected from {req.remote_addr}; "
+            "use X-Webhook-Secret or Authorization header"
+        )
+        abort(401)
+
+    secret = req.headers.get("X-Webhook-Secret") or bearer_secret
+    if not secret and ALLOW_QUERY_STRING_SECRET:
+        secret = query_secret
+
     if secret != WEBHOOK_SECRET:
         logger.warning(f"Invalid secret from {req.remote_addr}")
         abort(401)
-    if req.args.get("secret"):
-        logger.warning("Secret accepted from query parameter; prefer X-Webhook-Secret or Authorization header")
+    if query_secret and ALLOW_QUERY_STRING_SECRET:
+        logger.warning(
+            "Secret accepted from query parameter due to ALLOW_QUERY_STRING_SECRET; "
+            "prefer X-Webhook-Secret or Authorization header"
+        )
 
 def _open_entry_context(symbol):
     """Return the oldest currently-open buy lot context for a symbol."""

@@ -239,6 +239,33 @@ PROACTIVE_WEAK_GIVEBACK_PCT = float(
     os.getenv("POSITION_MANAGER_PROACTIVE_WEAK_GIVEBACK_PCT", "30")
 )
 
+# Exit-pattern pressure:
+# A bounded profit-protection layer for positions that are already green.
+# It does not buy, increase size, weaken hard stops, or turn a red position into
+# a hold. It can only trigger a partial profit capture when live momentum/VWAP
+# pattern evidence suggests a winner is starting to fail.
+EXIT_PATTERN_PROFIT_CAPTURE_ENABLED = os.getenv(
+    "POSITION_MANAGER_EXIT_PATTERN_PROFIT_CAPTURE_ENABLED", "true"
+).lower() in ("1", "true", "yes", "on")
+EXIT_PATTERN_STRONG_MIN_PEAK_PCT = float(
+    os.getenv("POSITION_MANAGER_EXIT_PATTERN_STRONG_MIN_PEAK_PCT", "0.40")
+)
+EXIT_PATTERN_STRONG_MIN_CURRENT_PCT = float(
+    os.getenv("POSITION_MANAGER_EXIT_PATTERN_STRONG_MIN_CURRENT_PCT", "0.18")
+)
+EXIT_PATTERN_WEAK_MIN_PEAK_PCT = float(
+    os.getenv("POSITION_MANAGER_EXIT_PATTERN_WEAK_MIN_PEAK_PCT", "0.25")
+)
+EXIT_PATTERN_WEAK_MIN_CURRENT_PCT = float(
+    os.getenv("POSITION_MANAGER_EXIT_PATTERN_WEAK_MIN_CURRENT_PCT", "0.10")
+)
+EXIT_PATTERN_MIN_ADVERSE_SIGNALS = int(
+    os.getenv("POSITION_MANAGER_EXIT_PATTERN_MIN_ADVERSE_SIGNALS", "2")
+)
+EXIT_PATTERN_WEAK_GIVEBACK_PCT = float(
+    os.getenv("POSITION_MANAGER_EXIT_PATTERN_WEAK_GIVEBACK_PCT", "20")
+)
+
 
 def now_utc():
     return datetime.now(timezone.utc)
@@ -730,6 +757,129 @@ def proactive_profit_capture_trigger(
     )
 
 
+def exit_pattern_pressure_state(
+    *,
+    peak_pl_pct: float,
+    current_pl_pct: float,
+    giveback_pct: float,
+    momentum_5m: float | None,
+    momentum_15m: float | None,
+    momentum_30m: float | None,
+    vwap_dist_pct: float | None,
+    weak_entry: bool,
+    retained_strength: dict | None = None,
+    entry_ctx: dict | None = None,
+) -> dict:
+    """Classify whether a green winner is showing failure-pattern pressure.
+
+    This is deliberately bounded to profitable positions. It is a sell-side
+    profit-capture signal, not a general exit authority.
+    """
+    retained_strength = retained_strength or {}
+    entry_ctx = entry_ctx or {}
+    adverse_signals = []
+    supportive_signals = []
+
+    if not EXIT_PATTERN_PROFIT_CAPTURE_ENABLED:
+        return {
+            "state": "disabled",
+            "action_hint": "hold",
+            "triggered": False,
+            "adverse_signals": adverse_signals,
+            "supportive_signals": supportive_signals,
+            "reason": "exit pattern profit capture disabled",
+        }
+
+    min_peak = (
+        EXIT_PATTERN_WEAK_MIN_PEAK_PCT
+        if weak_entry
+        else EXIT_PATTERN_STRONG_MIN_PEAK_PCT
+    )
+    min_current = (
+        EXIT_PATTERN_WEAK_MIN_CURRENT_PCT
+        if weak_entry
+        else EXIT_PATTERN_STRONG_MIN_CURRENT_PCT
+    )
+    if peak_pl_pct < min_peak:
+        return {
+            "state": "not_armed",
+            "action_hint": "hold",
+            "triggered": False,
+            "adverse_signals": adverse_signals,
+            "supportive_signals": supportive_signals,
+            "reason": f"peak {peak_pl_pct:.2f}% < exit-pattern min_peak {min_peak:.2f}%",
+        }
+    if current_pl_pct < min_current:
+        return {
+            "state": "not_armed",
+            "action_hint": "hold",
+            "triggered": False,
+            "adverse_signals": adverse_signals,
+            "supportive_signals": supportive_signals,
+            "reason": f"current {current_pl_pct:.2f}% < exit-pattern min_current {min_current:.2f}%",
+        }
+
+    if momentum_5m is not None:
+        if momentum_5m <= -0.10:
+            adverse_signals.append(f"5m_rollover={momentum_5m:.2f}%")
+        elif momentum_5m >= 0.10:
+            supportive_signals.append(f"5m_support={momentum_5m:.2f}%")
+    if momentum_15m is not None:
+        if momentum_15m <= -0.05:
+            adverse_signals.append(f"15m_rollover={momentum_15m:.2f}%")
+        elif momentum_15m >= 0.10:
+            supportive_signals.append(f"15m_support={momentum_15m:.2f}%")
+    if momentum_30m is not None:
+        if momentum_30m <= -0.10:
+            adverse_signals.append(f"30m_rollover={momentum_30m:.2f}%")
+        elif momentum_30m >= 0.15:
+            supportive_signals.append(f"30m_support={momentum_30m:.2f}%")
+    if vwap_dist_pct is not None:
+        if vwap_dist_pct <= -0.05:
+            adverse_signals.append(f"vwap_loss={vwap_dist_pct:.2f}%")
+        elif vwap_dist_pct >= 0.10:
+            supportive_signals.append(f"above_vwap={vwap_dist_pct:.2f}%")
+    if retained_strength.get("broken"):
+        adverse_signals.append("retained_session_strength_broken")
+    elif retained_strength.get("retained"):
+        supportive_signals.append("retained_session_strength")
+
+    ml_bucket = str(entry_ctx.get("entry_ml_prediction_bucket") or "").lower()
+    if ml_bucket == "weak_below_45" and giveback_pct >= EXIT_PATTERN_WEAK_GIVEBACK_PCT:
+        adverse_signals.append(
+            f"weak_ml_bucket_giveback={giveback_pct:.1f}%"
+        )
+    if weak_entry and giveback_pct >= EXIT_PATTERN_WEAK_GIVEBACK_PCT:
+        adverse_signals.append(
+            f"weak_entry_giveback={giveback_pct:.1f}%"
+        )
+
+    required = EXIT_PATTERN_MIN_ADVERSE_SIGNALS
+    if weak_entry:
+        required = max(1, required - 1)
+    if retained_strength.get("retained") and not retained_strength.get("broken"):
+        required += 1
+
+    triggered = len(adverse_signals) >= required
+    state = "profit_failure_pressure" if triggered else "monitor"
+    action_hint = "sell_partial" if triggered else "hold"
+    reason = (
+        f"exit_pattern_pressure: adverse={len(adverse_signals)} required={required}; "
+        f"signals={', '.join(adverse_signals) or '-'}; "
+        f"support={', '.join(supportive_signals) or '-'}; "
+        f"weak_entry={weak_entry}"
+    )
+    return {
+        "state": state,
+        "action_hint": action_hint,
+        "triggered": triggered,
+        "required_adverse_signals": required,
+        "adverse_signals": adverse_signals,
+        "supportive_signals": supportive_signals,
+        "reason": reason,
+    }
+
+
 def is_bad_entry_containment(entry_ctx, peak_pl_pct):
     """
     Return (True, reason) when a weak entry never showed constructive
@@ -876,6 +1026,18 @@ def evaluate_position(position, state, session_momentum=None):
         weak_entry=weak_entry_context,
         retained_strength=retained_strength,
     )
+    exit_pattern_pressure = exit_pattern_pressure_state(
+        peak_pl_pct=peak_pl_pct,
+        current_pl_pct=current_pl_pct,
+        giveback_pct=giveback_pct,
+        momentum_5m=momentum_5m,
+        momentum_15m=momentum_15m,
+        momentum_30m=momentum_30m,
+        vwap_dist_pct=vwap_dist_pct,
+        weak_entry=weak_entry_context,
+        retained_strength=retained_strength,
+        entry_ctx=entry_ctx,
+    )
     sym_state = state.setdefault(symbol, {})
     prior_proactive_peak = safe_float(sym_state.get("proactive_profit_capture_peak_pct"))
     if proactive_capture and prior_proactive_peak is not None:
@@ -891,6 +1053,12 @@ def evaluate_position(position, state, session_momentum=None):
         sym_state["proactive_profit_capture_peak_pct"] = round(peak_pl_pct, 4)
         sym_state["proactive_profit_capture_at"] = datetime.now(ET).strftime("%Y-%m-%d %H:%M:%S")
         reasons.append(proactive_reason)
+
+    if action == "hold" and exit_pattern_pressure.get("triggered"):
+        action = "sell_partial"
+        sell_fraction = PARTIAL_SELL_PCT
+        severity = "medium"
+        reasons.append(exit_pattern_pressure["reason"])
 
     if (
         action == "hold"
@@ -1042,6 +1210,7 @@ def evaluate_position(position, state, session_momentum=None):
         "vwap_dist_pct": round(vwap_dist_pct, 3) if vwap_dist_pct is not None else None,
         "session_momentum": session_momentum or {},
         "retained_session_strength": retained_strength,
+        "exit_pattern_pressure": exit_pattern_pressure,
         "locked_profit_floor_pct": locked_profit_floor,
         "high_gain_lock_enabled": POSITION_MANAGER_HIGH_GAIN_LOCK_ENABLED,
         "session_trend_label": retained_strength.get("session_label"),

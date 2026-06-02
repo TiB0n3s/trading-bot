@@ -29,7 +29,7 @@ CANONICAL_INTELLIGENCE_REQUIRED_SECTIONS = (
     "freshness_sec",
     "confidence",
 )
-CANONICAL_INTELLIGENCE_MAX_JSON_BYTES = 16_384
+CANONICAL_INTELLIGENCE_MAX_JSON_BYTES = 18_432
 
 
 def _normalize(value: Any) -> Any:

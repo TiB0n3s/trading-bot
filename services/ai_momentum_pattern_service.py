@@ -12,7 +12,7 @@ import json
 from typing import Any, Callable
 
 
-AI_MOMENTUM_PATTERN_VERSION = "ai_momentum_pattern_v1"
+AI_MOMENTUM_PATTERN_VERSION = "ai_momentum_pattern_v2"
 AI_MOMENTUM_PATTERN_AUTHORITY = "observe_only_no_live_authority"
 
 Provider = Callable[[str], dict[str, Any] | str]
@@ -33,6 +33,15 @@ def _safe_str(value: Any, default: str = "unknown", max_len: int = 300) -> str:
     if not text:
         text = default
     return text[:max_len]
+
+
+def _safe_float(value: Any) -> float | None:
+    try:
+        if value is None or value == "":
+            return None
+        return float(value)
+    except Exception:
+        return None
 
 
 def _as_list(value: Any, *, max_items: int = 8) -> list[str]:
@@ -70,9 +79,94 @@ def build_momentum_pattern_prompt(
         "Interpret this trading setup's momentum/trend pattern for review "
         "only. Do not approve, reject, size, or recommend an order. Return JSON "
         "only with keys: pattern_label, directional_bias, continuation_assessment, "
-        "failure_mode, confidence, missing_evidence, rationale.\n\n"
+        "failure_mode, expected_horizon, favorable_move_probability, "
+        "expected_mfe_pct, expected_mae_pct, confidence, missing_evidence, "
+        "rationale. Use null for uncalibrated numeric fields.\n\n"
         f"STATE_JSON={json.dumps(compact, sort_keys=True)}"
     )
+
+
+def _pattern_forecast(
+    *,
+    pattern_label: str,
+    directional_bias: str,
+    confidence: str,
+) -> dict[str, Any]:
+    """Return conservative, explicitly uncalibrated pattern forecast metadata."""
+    profile = {
+        "trend_continuation_with_participation": {
+            "expected_horizon": "15m_to_60m",
+            "favorable_move_probability": 0.56,
+            "expected_mfe_pct": 0.85,
+            "expected_mae_pct": -0.45,
+            "holding_time_decay": "moderate_after_60m",
+        },
+        "late_breakout_liquidity_vacuum": {
+            "expected_horizon": "5m_to_30m",
+            "favorable_move_probability": 0.43,
+            "expected_mfe_pct": 0.35,
+            "expected_mae_pct": -0.55,
+            "holding_time_decay": "fast",
+        },
+        "momentum_deterioration": {
+            "expected_horizon": "5m_to_30m",
+            "favorable_move_probability": 0.38,
+            "expected_mfe_pct": 0.25,
+            "expected_mae_pct": -0.70,
+            "holding_time_decay": "fast_against_long_entries",
+        },
+        "stretched_momentum_chase": {
+            "expected_horizon": "5m_to_30m",
+            "favorable_move_probability": 0.44,
+            "expected_mfe_pct": 0.40,
+            "expected_mae_pct": -0.65,
+            "holding_time_decay": "fast_if_volume_fades",
+        },
+        "isolated_move_without_breadth": {
+            "expected_horizon": "15m_to_60m",
+            "favorable_move_probability": 0.47,
+            "expected_mfe_pct": 0.45,
+            "expected_mae_pct": -0.55,
+            "holding_time_decay": "moderate",
+        },
+    }.get(
+        pattern_label,
+        {
+            "expected_horizon": "unknown",
+            "favorable_move_probability": 0.50,
+            "expected_mfe_pct": None,
+            "expected_mae_pct": None,
+            "holding_time_decay": "unknown",
+        },
+    )
+    confidence_quality = "uncalibrated_prior"
+    if directional_bias in {"risk_negative", "caution"} and confidence == "medium":
+        confidence_quality = "directional_risk_prior"
+    if pattern_label == "trend_continuation_with_participation":
+        confidence_quality = "constructive_prior_needs_outcome_calibration"
+
+    return {
+        **profile,
+        "confidence_quality": confidence_quality,
+        "historical_bucket": {
+            "sample_size": 0,
+            "win_rate": None,
+            "avg_mfe_pct": None,
+            "avg_mae_pct": None,
+            "ev_pct": None,
+            "calibration_error": None,
+            "status": "needs_lifecycle_outcomes",
+        },
+        "prediction_layer": {
+            "status": "observe_only",
+            "promotion_status": "not_ready",
+            "promotion_blockers": [
+                "requires_sample_size",
+                "requires_calibration_error",
+                "requires_rolling_window_stability",
+            ],
+        },
+    }
 
 
 def deterministic_momentum_pattern(
@@ -180,6 +274,11 @@ def deterministic_momentum_pattern(
     event_alignment = event_state.get("ai_market_alignment") or event_state.get("intent_directions")
     if event_alignment:
         rationale.append(f"event_alignment={event_alignment}")
+    forecast = _pattern_forecast(
+        pattern_label=pattern,
+        directional_bias=directional_bias,
+        confidence=confidence,
+    )
 
     return {
         "version": AI_MOMENTUM_PATTERN_VERSION,
@@ -192,6 +291,14 @@ def deterministic_momentum_pattern(
         "directional_bias": directional_bias,
         "continuation_assessment": continuation,
         "failure_mode": failure_mode,
+        "expected_horizon": forecast["expected_horizon"],
+        "favorable_move_probability": forecast["favorable_move_probability"],
+        "expected_mfe_pct": forecast["expected_mfe_pct"],
+        "expected_mae_pct": forecast["expected_mae_pct"],
+        "holding_time_decay": forecast["holding_time_decay"],
+        "confidence_quality": forecast["confidence_quality"],
+        "historical_bucket": forecast["historical_bucket"],
+        "prediction_layer": forecast["prediction_layer"],
         "confidence": confidence,
         "missing_evidence": missing,
         "rationale": rationale,
@@ -222,6 +329,21 @@ def normalize_ai_momentum_pattern(
 
     rationale = _as_list(raw.get("rationale") or fallback.get("rationale"))
     rationale.append("ai_pattern_observe_only")
+    pattern_label = _safe_str(raw.get("pattern_label") or fallback.get("pattern_label"))
+    directional_bias = _safe_str(raw.get("directional_bias") or fallback.get("directional_bias"))
+    confidence = _safe_str(raw.get("confidence") or fallback.get("confidence"))
+    forecast = _pattern_forecast(
+        pattern_label=pattern_label,
+        directional_bias=directional_bias,
+        confidence=confidence,
+    )
+    historical_bucket = _dict(raw.get("historical_bucket")) or _dict(fallback.get("historical_bucket"))
+    if not historical_bucket:
+        historical_bucket = forecast["historical_bucket"]
+    historical_bucket["status"] = _safe_str(
+        historical_bucket.get("status"),
+        default="needs_lifecycle_outcomes",
+    )
     return {
         "version": AI_MOMENTUM_PATTERN_VERSION,
         "provider": provider_name,
@@ -229,13 +351,46 @@ def normalize_ai_momentum_pattern(
         "authority": AI_MOMENTUM_PATTERN_AUTHORITY,
         "symbol": fallback.get("symbol"),
         "action": fallback.get("action"),
-        "pattern_label": _safe_str(raw.get("pattern_label") or fallback.get("pattern_label")),
-        "directional_bias": _safe_str(raw.get("directional_bias") or fallback.get("directional_bias")),
+        "pattern_label": pattern_label,
+        "directional_bias": directional_bias,
         "continuation_assessment": _safe_str(
             raw.get("continuation_assessment") or fallback.get("continuation_assessment")
         ),
         "failure_mode": _safe_str(raw.get("failure_mode") or fallback.get("failure_mode")),
-        "confidence": _safe_str(raw.get("confidence") or fallback.get("confidence")),
+        "expected_horizon": _safe_str(
+            raw.get("expected_horizon") or fallback.get("expected_horizon") or forecast["expected_horizon"]
+        ),
+        "favorable_move_probability": (
+            _safe_float(raw.get("favorable_move_probability"))
+            if _safe_float(raw.get("favorable_move_probability")) is not None
+            else fallback.get("favorable_move_probability", forecast["favorable_move_probability"])
+        ),
+        "expected_mfe_pct": (
+            _safe_float(raw.get("expected_mfe_pct"))
+            if _safe_float(raw.get("expected_mfe_pct")) is not None
+            else fallback.get("expected_mfe_pct", forecast["expected_mfe_pct"])
+        ),
+        "expected_mae_pct": (
+            _safe_float(raw.get("expected_mae_pct"))
+            if _safe_float(raw.get("expected_mae_pct")) is not None
+            else fallback.get("expected_mae_pct", forecast["expected_mae_pct"])
+        ),
+        "holding_time_decay": _safe_str(
+            raw.get("holding_time_decay") or fallback.get("holding_time_decay") or forecast["holding_time_decay"]
+        ),
+        "confidence": confidence,
+        "confidence_quality": _safe_str(
+            raw.get("confidence_quality")
+            or fallback.get("confidence_quality")
+            or forecast["confidence_quality"],
+        ),
+        "historical_bucket": historical_bucket,
+        "prediction_layer": {
+            **forecast["prediction_layer"],
+            **_dict(fallback.get("prediction_layer")),
+            **_dict(raw.get("prediction_layer")),
+            "status": "observe_only",
+        },
         "missing_evidence": _as_list(raw.get("missing_evidence") or fallback.get("missing_evidence")),
         "rationale": rationale,
     }
@@ -297,4 +452,3 @@ class AIMomentumPatternService:
             fallback["provider"] = f"{self.config.provider_name}_error_fallback"
             fallback["provider_error"] = str(exc)[:240]
             return fallback
-

@@ -53,8 +53,22 @@ def _compact_ai_pattern(pattern: dict[str, Any]) -> dict[str, Any]:
         "pattern_label": pattern.get("pattern_label"),
         "directional_bias": pattern.get("directional_bias"),
         "failure_mode": pattern.get("failure_mode"),
+        "expected_horizon": pattern.get("expected_horizon"),
+        "favorable_move_probability": pattern.get("favorable_move_probability"),
+        "expected_mfe_pct": pattern.get("expected_mfe_pct"),
+        "expected_mae_pct": pattern.get("expected_mae_pct"),
+        "confidence_quality": pattern.get("confidence_quality"),
         "confidence": pattern.get("confidence"),
     }
+    prediction_layer = pattern.get("prediction_layer") or {}
+    if prediction_layer:
+        compact["prediction_layer"] = {
+            "status": prediction_layer.get("status"),
+        }
+    historical_bucket = pattern.get("historical_bucket") or {}
+    if historical_bucket:
+        compact["historical_sample_size"] = historical_bucket.get("sample_size")
+        compact["historical_status"] = historical_bucket.get("status")
     missing = pattern.get("missing_evidence") or []
     if missing:
         compact["missing_evidence"] = missing

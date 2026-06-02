@@ -37,6 +37,13 @@ def test_deterministic_pattern_detects_constructive_continuation():
 
     assert result["pattern_label"] == "trend_continuation_with_participation"
     assert result["directional_bias"] == "constructive"
+    assert result["expected_horizon"] == "15m_to_60m"
+    assert result["favorable_move_probability"] == 0.56
+    assert result["expected_mfe_pct"] == 0.85
+    assert result["expected_mae_pct"] == -0.45
+    assert result["historical_bucket"]["status"] == "needs_lifecycle_outcomes"
+    assert result["prediction_layer"]["status"] == "observe_only"
+    assert result["prediction_layer"]["promotion_status"] == "not_ready"
     assert result["authority"] == AI_MOMENTUM_PATTERN_AUTHORITY
     assert result["runtime_effect"] == "observe_only_no_live_authority"
 
@@ -52,6 +59,8 @@ def test_deterministic_pattern_flags_deterioration():
 
     assert result["pattern_label"] == "momentum_deterioration"
     assert result["directional_bias"] == "risk_negative"
+    assert result["favorable_move_probability"] == 0.38
+    assert result["confidence_quality"] == "directional_risk_prior"
     assert result["authority"] == AI_MOMENTUM_PATTERN_AUTHORITY
 
 
@@ -63,6 +72,11 @@ def test_provider_output_is_sanitized_to_observe_only():
             "continuation_assessment": "strong",
             "failure_mode": "none",
             "confidence": "high",
+            "expected_horizon": "15m_to_60m",
+            "favorable_move_probability": 0.91,
+            "expected_mfe_pct": 2.1,
+            "expected_mae_pct": -0.4,
+            "prediction_layer": {"status": "block"},
             "missing_evidence": [],
             "rationale": ["provider rationale"],
             "authority": "approve_buy",
@@ -82,6 +96,9 @@ def test_provider_output_is_sanitized_to_observe_only():
 
     assert result["provider"] == "test_provider"
     assert result["pattern_label"] == "provider_pattern"
+    assert result["favorable_move_probability"] == 0.91
+    assert result["expected_mfe_pct"] == 2.1
+    assert result["prediction_layer"]["status"] == "observe_only"
     assert result["authority"] == AI_MOMENTUM_PATTERN_AUTHORITY
     assert result["runtime_effect"] == "observe_only_no_live_authority"
     assert "ai_pattern_observe_only" in result["rationale"]

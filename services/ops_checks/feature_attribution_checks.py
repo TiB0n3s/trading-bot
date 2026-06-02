@@ -90,7 +90,8 @@ def run_feature_attribution_report(
     print("Feature family attribution")
     print(
         f"  {'family':<26} {'covered':>7} {'missing':>7} "
-        f"{'best_bucket':<34} {'best_ev':>8} {'worst_bucket':<34} {'worst_ev':>8}"
+        f"{'default':>7} {'best_bucket':<34} {'best_ev':>8} "
+        f"{'worst_bucket':<34} {'worst_ev':>8}"
     )
     for family in payload.families:
         best = family.get("best_bucket") or {}
@@ -99,6 +100,7 @@ def run_feature_attribution_report(
             f"  {family['family']:<26} "
             f"{family['covered_rows']:>7} "
             f"{family['missing_rows']:>7} "
+            f"{_fmt(family.get('default_bucket_rate')):>7} "
             f"{str(best.get('bucket') or '-')[:34]:<34} "
             f"{_fmt(best.get('ev_pct')):>8} "
             f"{str(worst.get('bucket') or '-')[:34]:<34} "
@@ -113,6 +115,7 @@ def run_feature_attribution_report(
             f"  {item['family']:<26} status={item['status']:<22} "
             f"sample={item['sample_size']:<5} "
             f"missing={_fmt(item['missing_rate'])} "
+            f"default={_fmt(item.get('default_bucket_rate'))} "
             f"ev_spread={_fmt(item['ev_spread_pct'])} "
             f"stable_windows={_fmt(stability.get('stable_window_share'))} "
             f"daily={_fmt(stability.get('daily_stable_window_share'))} "

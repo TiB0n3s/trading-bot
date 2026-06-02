@@ -166,6 +166,7 @@ def test_feature_attribution_summarizes_family_deltas_and_guardrails():
     assert_true(payload.summary["calibration_summary"]["market_regime"], "calibration summary")
     guard = next(item for item in payload.rollout_guardrails if item["family"] == "market_regime")
     assert_equal(guard["status"], "eligible_for_review", "guardrail status")
+    assert_equal(guard["default_bucket_rate"], 0.0, "default bucket rate")
     assert_equal(guard["stability"]["window_count"], 1, "stability windows")
     assert_equal(guard["stability"]["stable_window_share"], 1.0, "stable share")
     assert_equal(guard["stability"]["daily_window_count"], 1, "daily stability windows")
@@ -173,11 +174,44 @@ def test_feature_attribution_summarizes_family_deltas_and_guardrails():
     assert_equal(guard["stability"]["rolling_window_count"], 2, "rolling stability windows")
     assert_equal(guard["stability"]["rolling_stable_window_share"], 1.0, "rolling stable share")
     assert_true("acceptable_calibration_error" in guard["required_before_authority"], "calibration guard")
+    assert_true("non_default_bucket_diversity" in guard["required_before_authority"], "diversity guard")
+    execution = next(item for item in payload.families if item["family"] == "execution_quality")
+    assert_equal(execution["default_bucket_rate"], 0.6667, "execution default bucket rate")
     assert_true(payload.feature_overlap, "overlap rows")
 
 
+def test_feature_attribution_caps_default_bucket_collapse():
+    rows = [
+        {
+            "approved": 0,
+            "decision_time": f"2026-05-30T10:{idx:02d}:00+00:00",
+            "rejected_return_eod": 0.1 if idx % 2 else -0.1,
+            "canonical_intelligence_json": _canonical(execution="allow"),
+        }
+        for idx in range(10)
+    ]
+
+    payload = build_feature_attribution_payload(
+        rows,
+        min_sample_size=5,
+        rolling_window_size=5,
+    )
+
+    execution_guard = next(
+        item for item in payload.rollout_guardrails if item["family"] == "execution_quality"
+    )
+    execution_family = next(
+        item for item in payload.families if item["family"] == "execution_quality"
+    )
+    assert_equal(execution_family["default_bucket_rate"], 1.0, "collapsed default rate")
+    assert_equal(execution_guard["status"], "insufficient_evidence", "default collapse guard")
+
+
 def main():
-    tests = [test_feature_attribution_summarizes_family_deltas_and_guardrails]
+    tests = [
+        test_feature_attribution_summarizes_family_deltas_and_guardrails,
+        test_feature_attribution_caps_default_bucket_collapse,
+    ]
     for test in tests:
         test()
         print(f"[OK] {test.__name__}")

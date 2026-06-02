@@ -20,4 +20,5 @@ def poll_fills():
 
 
 if __name__ == "__main__":
-    poll_fills()
+    result = poll_fills()
+    print(f"rows_written: {result.updated}")

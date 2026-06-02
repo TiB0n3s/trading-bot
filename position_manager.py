@@ -1250,6 +1250,7 @@ def main():
             source="position_manager.py",
             payload=d,
         )
+    print(f"rows_written: {len(decisions)}")
 
     if args.json:
         print(json.dumps(decisions, indent=2, sort_keys=True))

@@ -35,6 +35,18 @@ FEATURE_FAMILIES: dict[str, tuple[str, ...]] = {
     ),
 }
 
+DEFAULT_BUCKETS_BY_FAMILY: dict[str, set[str]] = {
+    "execution_quality": {"allow", "unknown"},
+    "portfolio_decision": {"not_applicable", "unknown"},
+    "market_microstructure": {"neutral", "unknown"},
+    "market_participation": {"mixed", "unknown"},
+    "volatility_normalization": {"normal", "unknown"},
+    "setup_structure": {"mixed_structure", "unknown"},
+    "downside_asymmetry": {"downside_contained_or_unknown", "unknown"},
+    "utility_estimate": {"not_applicable", "unknown"},
+    "calibrated_confidence": {"unknown"},
+}
+
 INTERACTION_FIELDS: dict[str, tuple[str, ...]] = {
     "setup_label": ("setup_state", "label"),
     "regime": ("regime_state", "market_regime"),
@@ -396,6 +408,7 @@ def _rollout_guardrail(family: dict[str, Any], *, min_sample_size: int) -> dict[
     worst = family.get("worst_bucket") or {}
     sample_size = int(family.get("covered_rows") or 0)
     missing_rate = float(family.get("missing_rate") or 0.0)
+    default_bucket_rate = family.get("default_bucket_rate")
     stability = family.get("stability") or {}
     stable_share = stability.get("stable_window_share")
     ev_spread = None
@@ -404,6 +417,7 @@ def _rollout_guardrail(family: dict[str, Any], *, min_sample_size: int) -> dict[
     stable_enough = (
         sample_size >= min_sample_size
         and missing_rate <= 0.20
+        and (default_bucket_rate is None or float(default_bucket_rate) <= 0.85)
         and stable_share is not None
         and stable_share >= 0.60
     )
@@ -412,10 +426,12 @@ def _rollout_guardrail(family: dict[str, Any], *, min_sample_size: int) -> dict[
         "sample_size": sample_size,
         "min_sample_size": min_sample_size,
         "missing_rate": missing_rate,
+        "default_bucket_rate": default_bucket_rate,
         "ev_spread_pct": ev_spread,
         "stability": stability,
         "status": "eligible_for_review" if stable_enough else "insufficient_evidence",
         "required_before_authority": [
+            "non_default_bucket_diversity",
             "rolling_window_stability",
             "acceptable_calibration_error",
             "replay_validation",
@@ -478,6 +494,17 @@ def build_feature_attribution_payload(
             )
         )
         known = [item for item in buckets if item["bucket"] != "unknown"]
+        default_bucket_names = DEFAULT_BUCKETS_BY_FAMILY.get(family, {"unknown"})
+        default_bucket_rows = sum(
+            item["sample_size"]
+            for item in buckets
+            if item["bucket"] in default_bucket_names
+        )
+        default_bucket_rate = (
+            round(default_bucket_rows / len(outcome_rows), 4)
+            if outcome_rows
+            else None
+        )
         best = max(known, key=lambda item: item.get("ev_pct") or -999.0, default={})
         worst = min(known, key=lambda item: item.get("ev_pct") or 999.0, default={})
         stability = _family_stability(
@@ -506,6 +533,8 @@ def build_feature_attribution_payload(
             "covered_rows": covered,
             "missing_rows": missing,
             "missing_rate": missing_rate,
+            "default_bucket_rows": default_bucket_rows,
+            "default_bucket_rate": default_bucket_rate,
             "calibration_quality": calibration_quality,
             "calibration_error": calibration_error,
             "best_bucket": best,

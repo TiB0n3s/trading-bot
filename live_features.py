@@ -193,6 +193,10 @@ def main() -> int:
 
     if args.all_symbols:
         success, failed = collect_all_symbols(write=args.write, stdout=args.stdout)
+        if args.write:
+            print(f"rows_written: {success}")
+        else:
+            print(f"rows_processed: {success}")
         if failed:
             logger.warning(
                 "Live feature collection completed with partial failures: "
@@ -214,6 +218,7 @@ def main() -> int:
         logger.info(
             f"Inserted feature snapshot for {snapshot['symbol']} at {snapshot['timestamp']}"
         )
+        print("rows_written: 1")
 
     return 0
 

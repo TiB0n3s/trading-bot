@@ -258,6 +258,7 @@ def main():
             reason=err,
             source="portfolio_rotation_manager.py",
         )
+        print("rows_written: 0")
         return
 
     decision = evaluate_rotation(memory)
@@ -282,6 +283,7 @@ def main():
 
     if decision.get("decision") != "replace_now_live":
         record_rotation_snapshot(decision, None, None)
+        print("rows_written: 1")
         return
 
     symbol = decision.get("symbol_to_sell")
@@ -302,6 +304,7 @@ def main():
         source="portfolio_rotation_manager.py",
         payload={"decision": decision, "order": result},
     )
+    print("rows_written: 1")
 
 
 if __name__ == "__main__":

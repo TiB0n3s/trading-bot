@@ -27,6 +27,12 @@ class LifecycleAnalysisService:
         if row.get("approved") and row.get("exit_snapshot_id"):
             return "approved_with_exit"
         if row.get("approved"):
+            try:
+                matched_exit_count = int(row.get("matched_exit_count") or 0)
+            except Exception:
+                matched_exit_count = 0
+            if matched_exit_count > 0:
+                return "approved_matched_exit_missing_snapshot"
             return "approved_open_or_unlinked_exit"
         if row.get("rejected_outcome_id"):
             return "rejected_with_counterfactual"
@@ -143,6 +149,7 @@ class LifecycleAnalysisService:
         summary: dict[str, Any] = {
             "rows": 0,
             "approved_with_exit": 0,
+            "approved_matched_exit_missing_snapshot": 0,
             "approved_open_or_unlinked_exit": 0,
             "rejected_with_counterfactual": 0,
             "rejected_snapshot_only_no_trade": 0,
@@ -163,6 +170,7 @@ class LifecycleAnalysisService:
         )
         approved_rows = (
             summary["approved_with_exit"]
+            + summary["approved_matched_exit_missing_snapshot"]
             + summary["approved_open_or_unlinked_exit"]
         )
         summary["rejected_counterfactual_coverage_rate"] = (
@@ -172,6 +180,18 @@ class LifecycleAnalysisService:
         )
         summary["approved_exit_link_rate"] = (
             round(summary["approved_with_exit"] / approved_rows, 4)
+            if approved_rows
+            else None
+        )
+        summary["approved_matched_exit_coverage_rate"] = (
+            round(
+                (
+                    summary["approved_with_exit"]
+                    + summary["approved_matched_exit_missing_snapshot"]
+                )
+                / approved_rows,
+                4,
+            )
             if approved_rows
             else None
         )

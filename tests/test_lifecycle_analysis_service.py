@@ -161,12 +161,14 @@ def test_lifecycle_analysis_joins_entry_exit_and_rejected_counterfactuals():
         assert payload.summary == {
             "rows": 2,
             "approved_with_exit": 1,
+            "approved_matched_exit_missing_snapshot": 0,
             "approved_open_or_unlinked_exit": 0,
             "rejected_with_counterfactual": 1,
             "rejected_snapshot_only_no_trade": 0,
             "rejected_without_counterfactual": 0,
             "rejected_counterfactual_coverage_rate": 1.0,
             "approved_exit_link_rate": 1.0,
+            "approved_matched_exit_coverage_rate": 1.0,
             "analysis_ready": True,
         }
 
@@ -358,12 +360,102 @@ def test_lifecycle_analysis_tolerates_pre_canonical_schema():
         assert row["rejected_return_eod"] == 0.5
 
 
+def test_lifecycle_analysis_classifies_matched_exit_missing_snapshot():
+    with tempfile.TemporaryDirectory() as tmp:
+        db_path = Path(tmp) / "test.db"
+        with sqlite3.connect(db_path) as con:
+            con.execute(
+                """
+                CREATE TABLE decision_snapshots (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    trade_id INTEGER,
+                    decision_time TEXT,
+                    symbol TEXT,
+                    action TEXT,
+                    approved INTEGER,
+                    final_decision TEXT,
+                    rejection_reason TEXT
+                )
+                """
+            )
+            con.execute(
+                """
+                CREATE TABLE trades (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    order_id TEXT,
+                    order_status TEXT,
+                    fill_price REAL,
+                    qty REAL
+                )
+                """
+            )
+            con.execute(
+                """
+                CREATE TABLE matched_trades (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    entry_order_id TEXT,
+                    exit_timestamp TEXT,
+                    realized_pnl REAL,
+                    exit_order_id TEXT
+                )
+                """
+            )
+            con.execute(
+                """
+                INSERT INTO trades (id, order_id, order_status, fill_price, qty)
+                VALUES (10, 'entry-10', 'filled', 100.0, 2)
+                """
+            )
+            con.execute(
+                """
+                INSERT INTO decision_snapshots (
+                    id, trade_id, decision_time, symbol, action, approved,
+                    final_decision, rejection_reason
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    1,
+                    10,
+                    "2026-05-31T14:30:00+00:00",
+                    "AAPL",
+                    "buy",
+                    1,
+                    "approved",
+                    None,
+                ),
+            )
+            con.execute(
+                """
+                INSERT INTO matched_trades (
+                    entry_order_id, exit_timestamp, realized_pnl, exit_order_id
+                ) VALUES (?, ?, ?, ?)
+                """,
+                ("entry-10", "2026-05-31T15:30:00+00:00", 4.2, "exit-10"),
+            )
+
+        service = LifecycleAnalysisService(LifecycleAnalysisRepository(db_path))
+        payload = service.payload(start_date="2026-05-31")
+
+        assert payload.summary["rows"] == 1
+        assert payload.summary["approved_with_exit"] == 0
+        assert payload.summary["approved_matched_exit_missing_snapshot"] == 1
+        assert payload.summary["approved_open_or_unlinked_exit"] == 0
+        assert payload.summary["approved_exit_link_rate"] == 0.0
+        assert payload.summary["approved_matched_exit_coverage_rate"] == 1.0
+        assert payload.summary["analysis_ready"] is True
+        row = payload.rows[0]
+        assert row["lifecycle_status"] == "approved_matched_exit_missing_snapshot"
+        assert row["matched_exit_count"] == 1
+        assert row["matched_realized_pnl"] == 4.2
+
+
 def main():
     tests = [
         test_lifecycle_analysis_joins_entry_exit_and_rejected_counterfactuals,
         test_lifecycle_analysis_flags_missing_rejected_counterfactuals,
         test_lifecycle_analysis_classifies_snapshot_only_rejections,
         test_lifecycle_analysis_tolerates_pre_canonical_schema,
+        test_lifecycle_analysis_classifies_matched_exit_missing_snapshot,
     ]
     for test in tests:
         test()

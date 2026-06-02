@@ -6,6 +6,4 @@ set -a
 . /etc/trading-bot.env
 set +a
 
-source venv/bin/activate
-
-python3 label_v1_builder.py >> label_features.log 2>&1
+/home/tradingbot/trading-bot/venv/bin/python label_v1_builder.py

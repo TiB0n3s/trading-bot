@@ -81,10 +81,43 @@ def test_lifecycle_dashboard_tracks_snapshot_only_rejections_separately():
     assert payload.summary["analysis_ready"] is True
 
 
+def test_lifecycle_dashboard_splits_matched_exit_snapshot_gaps():
+    payload = build_lifecycle_dashboard_payload(
+        [
+            {
+                "decision_time": "2026-06-01T10:00:00+00:00",
+                "symbol": "CRM",
+                "action": "buy",
+                "approved": 1,
+                "final_decision": "approved",
+                "lifecycle_status": "approved_matched_exit_missing_snapshot",
+                "exit_snapshot_id": None,
+                "matched_exit_count": 1,
+                "matched_realized_pnl": 2.4,
+            },
+            {
+                "decision_time": "2026-06-01T10:05:00+00:00",
+                "symbol": "GLD",
+                "action": "buy",
+                "approved": 1,
+                "final_decision": "approved",
+                "lifecycle_status": "approved_open_or_unlinked_exit",
+                "exit_snapshot_id": None,
+            },
+        ]
+    )
+
+    assert payload.summary["approved_exit_link_gaps"] == 2
+    assert payload.summary["approved_matched_exit_missing_snapshot"] == 1
+    assert payload.summary["approved_open_or_unlinked_exit"] == 1
+    assert payload.summary["analysis_ready"] is False
+
+
 def main():
     tests = [
         test_lifecycle_dashboard_summarizes_full_path_and_missed_rejections,
         test_lifecycle_dashboard_tracks_snapshot_only_rejections_separately,
+        test_lifecycle_dashboard_splits_matched_exit_snapshot_gaps,
     ]
     for test in tests:
         test()

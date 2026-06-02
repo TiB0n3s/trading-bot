@@ -67,6 +67,7 @@ def main():
     print(f"  Output  : {OUTPUT_FILE}")
     print(f"  Symbols : {len(results)}")
     print(f"  Elapsed : {elapsed:.1f}s")
+    print(f"rows_written: {len(results)}")
     print()
     print(f"{'Symbol':<7} {'Context':<32} {'Score':>5} {'5d%':>8} {'Pre%':>8} {'Gap%':>8} {'Sess%':>8} {'Special'}")
     print(f"{'-'*7} {'-'*32} {'-'*5} {'-'*8} {'-'*8} {'-'*8} {'-'*8} {'-'*30}")

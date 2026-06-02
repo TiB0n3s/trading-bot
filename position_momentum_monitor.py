@@ -864,6 +864,7 @@ def main() -> int:
 
     if not positions:
         print("No open Alpaca positions.")
+        print("rows_written: 0")
         return 0
 
     rows = []
@@ -928,6 +929,7 @@ def main() -> int:
         pressure_part = f" sell_pressure={pressure}/{rec}" if pressure is not None else ""
         print(f"  {decision['symbol']:<6} {decision['action']:<15} {decision['reason']}{pressure_part}")
 
+    print(f"rows_written: {len(rows)}")
     return 0
 
 

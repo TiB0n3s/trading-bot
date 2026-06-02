@@ -47,17 +47,92 @@ class LifecycleAnalysisRepository:
             if not self._table_exists(con, "decision_snapshots"):
                 return []
 
+            has_trades = self._table_exists(con, "trades")
+            has_matched_trades = self._table_exists(con, "matched_trades")
             has_exit = self._table_exists(con, "exit_snapshots")
             has_rejected = self._table_exists(con, "rejected_signal_outcomes")
             decision_cols = self._table_columns(con, "decision_snapshots")
+            trade_cols = self._table_columns(con, "trades")
+            matched_cols = self._table_columns(con, "matched_trades")
             exit_cols = self._table_columns(con, "exit_snapshots")
             rejected_cols = self._table_columns(con, "rejected_signal_outcomes")
             sel = self._select
+
+            can_join_trades = (
+                has_trades
+                and "trade_id" in decision_cols
+                and "id" in trade_cols
+            )
+            trade_join = (
+                "LEFT JOIN trades t ON t.id = ds.trade_id"
+                if can_join_trades
+                else ""
+            )
+            trade_select = """
+                {order_status},
+                {order_id},
+                {fill_price},
+                {qty}
+            """.format(
+                order_status=sel(trade_cols, "t", "order_status", "trade_order_status")
+                if can_join_trades else "NULL AS trade_order_status",
+                order_id=sel(trade_cols, "t", "order_id", "trade_order_id")
+                if can_join_trades else "NULL AS trade_order_id",
+                fill_price=sel(trade_cols, "t", "fill_price", "trade_fill_price")
+                if can_join_trades else "NULL AS trade_fill_price",
+                qty=sel(trade_cols, "t", "qty", "trade_qty")
+                if can_join_trades else "NULL AS trade_qty",
+            )
+
+            can_join_matched = (
+                has_matched_trades
+                and can_join_trades
+                and "entry_order_id" in matched_cols
+                and "order_id" in trade_cols
+            )
+            matched_join = ""
+            if can_join_matched:
+                matched_join = """
+                LEFT JOIN (
+                    SELECT
+                        entry_order_id,
+                        MAX(id) AS matched_trade_id,
+                        COUNT(*) AS matched_exit_count,
+                        MAX(exit_timestamp) AS matched_exit_timestamp,
+                        SUM(COALESCE(realized_pnl, 0)) AS matched_realized_pnl,
+                        MAX(exit_order_id) AS matched_exit_order_id
+                    FROM matched_trades
+                    WHERE entry_order_id IS NOT NULL
+                    GROUP BY entry_order_id
+                ) mt ON mt.entry_order_id = t.order_id
+                """
+            matched_select = """
+                {matched_trade_id},
+                {matched_exit_count},
+                {matched_exit_timestamp},
+                {matched_realized_pnl},
+                {matched_exit_order_id}
+            """.format(
+                matched_trade_id="mt.matched_trade_id AS matched_trade_id"
+                if can_join_matched else "NULL AS matched_trade_id",
+                matched_exit_count="mt.matched_exit_count AS matched_exit_count"
+                if can_join_matched else "NULL AS matched_exit_count",
+                matched_exit_timestamp="mt.matched_exit_timestamp AS matched_exit_timestamp"
+                if can_join_matched else "NULL AS matched_exit_timestamp",
+                matched_realized_pnl="mt.matched_realized_pnl AS matched_realized_pnl"
+                if can_join_matched else "NULL AS matched_realized_pnl",
+                matched_exit_order_id="mt.matched_exit_order_id AS matched_exit_order_id"
+                if can_join_matched else "NULL AS matched_exit_order_id",
+            )
 
             exit_join_terms = []
             if has_exit:
                 if "entry_trade_id" in exit_cols and "trade_id" in decision_cols:
                     exit_join_terms.append("es.entry_trade_id = ds.trade_id")
+                if can_join_matched and "matched_trade_id" in exit_cols:
+                    exit_join_terms.append("es.matched_trade_id = mt.matched_trade_id")
+                if "decision_snapshot_id" in exit_cols:
+                    exit_join_terms.append("es.decision_snapshot_id = ds.id")
                 if (
                     "entry_canonical_intelligence_hash" in exit_cols
                     and "canonical_intelligence_hash" in decision_cols
@@ -209,12 +284,16 @@ class LifecycleAnalysisRepository:
                     ds.approved,
                     ds.final_decision,
                     ds.rejection_reason,
+                    {trade_select},
+                    {matched_select},
                     {sel(decision_cols, "ds", "canonical_intelligence_json")},
                     {sel(decision_cols, "ds", "canonical_intelligence_version", "entry_canonical_intelligence_version")},
                     {sel(decision_cols, "ds", "canonical_intelligence_hash", "entry_canonical_intelligence_hash")},
                     {exit_select},
                     {rejected_select}
                 FROM decision_snapshots ds
+                {trade_join}
+                {matched_join}
                 {exit_join}
                 {rejected_join}
                 WHERE {' AND '.join(clauses)}

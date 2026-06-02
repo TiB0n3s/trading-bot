@@ -73,6 +73,26 @@ def run_lifecycle_analysis(
             "trade-row forward outcome backfill cannot link them"
         )
 
+    matched_without_snapshot = payload.summary.get(
+        "approved_matched_exit_missing_snapshot", 0
+    )
+    if matched_without_snapshot:
+        print()
+        print(
+            f"[INFO] {matched_without_snapshot} approved row(s) have matched exits "
+            "but no canonical exit snapshot; run/repair exit snapshot capture for "
+            "full lifecycle attribution"
+        )
+
+    open_or_unlinked = payload.summary.get("approved_open_or_unlinked_exit", 0)
+    if open_or_unlinked:
+        print()
+        print(
+            f"[WARN] {open_or_unlinked} approved row(s) are still open or lack "
+            "matched exit linkage"
+        )
+        return False
+
     missing_counterfactual = payload.summary["rejected_without_counterfactual"]
     if missing_counterfactual:
         print()

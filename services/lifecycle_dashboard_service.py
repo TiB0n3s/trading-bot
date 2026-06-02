@@ -55,7 +55,9 @@ def build_lifecycle_dashboard_payload(
     rejected_returns: list[float] = []
     rejected_missing = 0
     rejected_snapshot_only = 0
-    approved_missing_exit = 0
+    approved_missing_exit_snapshot = 0
+    approved_matched_exit_missing_snapshot = 0
+    approved_open_or_unlinked = 0
     top_missed: list[dict[str, Any]] = []
 
     for row in rows_list:
@@ -69,7 +71,11 @@ def build_lifecycle_dashboard_payload(
             if row.get("exit_snapshot_id"):
                 exit_triggers[str(row.get("exit_trigger") or "unknown")] += 1
             else:
-                approved_missing_exit += 1
+                approved_missing_exit_snapshot += 1
+                if status == "approved_matched_exit_missing_snapshot":
+                    approved_matched_exit_missing_snapshot += 1
+                else:
+                    approved_open_or_unlinked += 1
             realized = _float(row.get("realized_return_pct"))
             if realized is not None:
                 approved_returns.append(realized)
@@ -118,12 +124,14 @@ def build_lifecycle_dashboard_payload(
         "rows": len(rows_list),
         "approved_rows": sum(1 for row in rows_list if row.get("approved")),
         "rejected_rows": sum(1 for row in rows_list if not row.get("approved")),
-        "approved_exit_link_gaps": approved_missing_exit,
+        "approved_exit_link_gaps": approved_missing_exit_snapshot,
+        "approved_matched_exit_missing_snapshot": approved_matched_exit_missing_snapshot,
+        "approved_open_or_unlinked_exit": approved_open_or_unlinked,
         "rejected_snapshot_only_rows": rejected_snapshot_only,
         "rejected_forward_outcome_gaps": rejected_missing,
         "approved_avg_return_pct": _mean(approved_returns),
         "rejected_counterfactual_avg_return_pct": _mean(rejected_returns),
-        "analysis_ready": approved_missing_exit == 0 and rejected_missing == 0,
+        "analysis_ready": approved_open_or_unlinked == 0 and rejected_missing == 0,
     }
 
     return LifecycleDashboardPayload(

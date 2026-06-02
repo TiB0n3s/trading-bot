@@ -46,7 +46,7 @@
 
 */2 8-15 * * 1-5 cd /home/tradingbot/trading-bot && /home/tradingbot/trading-bot/venv/bin/python job_runner.py --job-name session_momentum --lock-file /tmp/tradingbot_session_momentum.lock --log-file /home/tradingbot/trading-bot/session_momentum.log -- bash -lc 'set -a && . /etc/trading-bot.env && set +a && /home/tradingbot/trading-bot/venv/bin/python session_momentum.py --all'
 
-*/2 8-15 * * 1-5 cd /home/tradingbot/trading-bot && /home/tradingbot/trading-bot/venv/bin/python job_runner.py --job-name auto_buy_manager --lock-file /tmp/tradingbot_auto_buy_manager.lock --log-file /home/tradingbot/trading-bot/auto_buy.log -- bash -lc 'set -a && . /etc/trading-bot.env && set +a && /home/tradingbot/trading-bot/venv/bin/python auto_buy_manager.py --scope all --live'
+*/2 8-15 * * 1-5 cd /home/tradingbot/trading-bot && /home/tradingbot/trading-bot/venv/bin/python job_runner.py --job-name auto_buy_manager --lock-file /tmp/tradingbot_auto_buy_manager.lock --log-file /home/tradingbot/trading-bot/auto_buy.log -- bash -lc 'set -a && . /etc/trading-bot.env && set +a && export AUTO_BUY_MAX_ACTIVE_POSITIONS="${AUTO_BUY_MAX_ACTIVE_POSITIONS_OVERRIDE:-3}" AUTO_BUY_MAX_DAILY_ORDERS="${AUTO_BUY_MAX_DAILY_ORDERS_OVERRIDE:-12}" && /home/tradingbot/trading-bot/venv/bin/python auto_buy_manager.py --scope all --live'
 
 1-59/2 8-15 * * 1-5 cd /home/tradingbot/trading-bot && /home/tradingbot/trading-bot/venv/bin/python job_runner.py --job-name position_momentum_monitor --lock-file /tmp/tradingbot_position_momentum_monitor.lock --log-file /home/tradingbot/trading-bot/position_momentum_monitor.log -- bash -lc 'set -a && . /etc/trading-bot.env && set +a && /home/tradingbot/trading-bot/venv/bin/python position_momentum_monitor.py'
 

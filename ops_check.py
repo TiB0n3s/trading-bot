@@ -45,6 +45,7 @@ Usage:
   python3 ops_check.py portfolio-risk
   python3 ops_check.py production-evidence
   python3 ops_check.py resource-readiness
+  python3 ops_check.py trading-education-health
   python3 ops_check.py market-data-parity AAPL
   python3 ops_check.py market-data-parity AAPL --bars --date YYYY-MM-DD
   python3 ops_check.py research-export YYYY-MM-DD
@@ -126,6 +127,7 @@ from services.ops_checks.log_ledger_checks import run_log_ledger_consistency
 from services.ops_checks.portfolio_risk_checks import run_portfolio_risk_report
 from services.ops_checks.point_in_time_archive_checks import run_point_in_time_archive
 from services.ops_checks.resource_readiness_checks import run_resource_readiness
+from services.ops_checks.trading_education_checks import run_trading_education_health
 from services.ops_checks.market_data_parity_checks import run_market_data_parity
 from services.ops_checks.research_export_checks import run_research_export
 from services.ops_checks.snapshot_checks import run_decision_snapshot_health
@@ -605,6 +607,10 @@ def resource_readiness():
     return run_resource_readiness(base_dir=BASE_DIR)
 
 
+def trading_education_health():
+    return run_trading_education_health()
+
+
 def market_data_parity(symbol):
     mode = "bars" if "--bars" in sys.argv else "quote"
     target_date = None
@@ -988,6 +994,9 @@ def main():
 
     if command == "resource-readiness":
         return 0 if resource_readiness() else 1
+
+    if command == "trading-education-health":
+        return 0 if trading_education_health() else 1
 
     if command == "market-data-parity":
         symbol = sys.argv[2] if len(sys.argv) > 2 else ""

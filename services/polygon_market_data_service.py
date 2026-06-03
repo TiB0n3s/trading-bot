@@ -9,7 +9,7 @@ from __future__ import annotations
 import json
 import os
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, datetime, timezone
 from typing import Any, Callable
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
@@ -81,6 +81,53 @@ class PolygonMarketDataService:
             sort=sort,
             limit=limit,
         )
+
+    def aggregate_bar_dicts(
+        self,
+        symbol: str,
+        *,
+        from_date: str | date,
+        to_date: str | date,
+        multiplier: int = 5,
+        timespan: str = "minute",
+        adjusted: bool = True,
+        sort: str = "asc",
+        limit: int = 50000,
+    ) -> list[dict[str, Any]]:
+        payload = self.aggregate_bars(
+            symbol,
+            from_date=from_date,
+            to_date=to_date,
+            multiplier=multiplier,
+            timespan=timespan,
+            adjusted=adjusted,
+            sort=sort,
+            limit=limit,
+        )
+        bars = []
+        for row in payload.get("results") or []:
+            ts = row.get("t")
+            if ts is not None:
+                try:
+                    timestamp = datetime.fromtimestamp(
+                        float(ts) / 1000.0,
+                        tz=timezone.utc,
+                    ).isoformat()
+                except Exception:
+                    timestamp = str(ts)
+            else:
+                timestamp = ""
+            bars.append(
+                {
+                    "timestamp": timestamp,
+                    "open": row.get("o"),
+                    "high": row.get("h"),
+                    "low": row.get("l"),
+                    "close": row.get("c"),
+                    "volume": row.get("v"),
+                }
+            )
+        return bars
 
     def latest_quote_summary(self, symbol: str) -> dict[str, Any]:
         payload = self.latest_quote(symbol)

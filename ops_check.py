@@ -58,6 +58,7 @@ Usage:
   python3 ops_check.py post-trade-learning
   python3 ops_check.py symbol-patterns
   python3 ops_check.py pattern-learning-inputs
+  python3 ops_check.py bar-pattern-backfill YYYY-MM-DD --symbol AAPL [--dry-run]
   python3 ops_check.py learning-readiness START_DATE [END_DATE]
   python3 ops_check.py learning-effectiveness START_DATE [END_DATE]
   python3 ops_check.py rollout-contract
@@ -105,6 +106,7 @@ from services.ops_checks.feature_attribution_checks import run_feature_attributi
 from services.ops_checks.post_trade_learning_checks import run_post_trade_learning_report
 from services.ops_checks.symbol_pattern_checks import run_symbol_pattern_outcomes
 from services.ops_checks.pattern_learning_inputs_checks import run_pattern_learning_inputs_report
+from services.ops_checks.bar_pattern_checks import run_bar_pattern_backfill
 from services.ops_checks.learning_readiness_checks import (
     run_learning_effectiveness,
     run_learning_readiness,
@@ -748,6 +750,29 @@ def pattern_learning_inputs(target_date):
     )
 
 
+def _str_option(name: str, default: str = "") -> str:
+    if name not in sys.argv:
+        return default
+    idx = sys.argv.index(name)
+    if idx + 1 >= len(sys.argv):
+        return default
+    return sys.argv[idx + 1]
+
+
+def bar_pattern_backfill(target_date: str) -> bool:
+    symbol = _str_option("--symbol", "")
+    if not symbol and len(sys.argv) > 3 and not sys.argv[3].startswith("--"):
+        symbol = sys.argv[3]
+    return run_bar_pattern_backfill(
+        target_date,
+        base_dir=BASE_DIR,
+        symbol=symbol,
+        dry_run="--dry-run" in sys.argv,
+        timeframe_minutes=_int_option("--timeframe-minutes", 5),
+        horizon_bars=_int_option("--horizon-bars", 12),
+    )
+
+
 def learning_readiness(start_date):
     end_date = None
     if len(sys.argv) > 3 and not sys.argv[3].startswith("--"):
@@ -1000,6 +1025,9 @@ def main():
 
     if command == "pattern-learning-inputs":
         return 0 if pattern_learning_inputs(target_date) else 1
+
+    if command == "bar-pattern-backfill":
+        return 0 if bar_pattern_backfill(target_date) else 1
 
     if command == "learning-readiness":
         return 0 if learning_readiness(target_date) else 1

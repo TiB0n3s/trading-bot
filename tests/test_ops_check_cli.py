@@ -303,6 +303,14 @@ def test_symbol_patterns_cli_missing_db_exits_cleanly(tmp_path):
     assert "[WARN] trades.db not found" in out
 
 
+def test_bar_pattern_backfill_cli_missing_db_exits_cleanly(tmp_path):
+    code, out = _run_cli(tmp_path, "bar-pattern-backfill", "2026-05-30", "--symbol", "AAPL")
+
+    assert code == 1
+    assert "EFI/PVT Bar Pattern Backfill" in out
+    assert "[WARN] trades.db not found" in out
+
+
 def test_ops_reliability_cli_missing_db_exits_cleanly(tmp_path):
     for command, title, version in (
         ("event-source-coverage", "Event Source Coverage", "event_source_coverage_v1"),
@@ -1076,6 +1084,7 @@ def main():
         test_post_trade_learning_cli_missing_db_exits_cleanly,
         test_rollout_contract_cli_missing_db_exits_cleanly,
         test_symbol_patterns_cli_missing_db_exits_cleanly,
+        test_bar_pattern_backfill_cli_missing_db_exits_cleanly,
         test_ops_reliability_cli_missing_db_exits_cleanly,
         test_signal_source_readiness_cli_flags_legacy_source_gate,
         test_signal_source_readiness_cli_passes_when_internal_all_active,

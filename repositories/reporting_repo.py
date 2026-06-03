@@ -550,3 +550,38 @@ class ReportingRepository:
                 """,
                 (cutoff,),
             ).fetchall()
+
+    def bar_pattern_strategy_rows(self, cutoff: str) -> list[Any]:
+        if not self.table_exists("bar_pattern_features"):
+            return []
+        columns = self.table_columns("bar_pattern_features")
+
+        def expr(name: str, alias: str | None = None) -> str:
+            alias = alias or name
+            return name if name in columns else f"NULL AS {alias}"
+
+        with get_connection(self.db_path) as con:
+            return con.execute(
+                f"""
+                SELECT
+                    symbol,
+                    bar_timestamp,
+                    {expr("timeframe")},
+                    {expr("pattern_label")},
+                    {expr("pattern_score")},
+                    {expr("opportunity_action")},
+                    {expr("opportunity_quality")},
+                    {expr("long_opportunity_score")},
+                    {expr("sell_opportunity_score")},
+                    {expr("forward_return_pct")},
+                    {expr("forward_mfe_pct")},
+                    {expr("forward_mae_pct")},
+                    {expr("horizon_bars")},
+                    {expr("feature_version")},
+                    {expr("runtime_effect")}
+                FROM bar_pattern_features
+                WHERE substr(bar_timestamp, 1, 10) >= ?
+                ORDER BY bar_timestamp ASC, symbol ASC
+                """,
+                (cutoff,),
+            ).fetchall()

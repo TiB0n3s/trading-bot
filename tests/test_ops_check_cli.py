@@ -676,6 +676,75 @@ def test_pattern_learning_inputs_cli_uses_trade_and_candidate_rows(tmp_path):
             )
             """
         )
+        con.execute(
+            """
+            CREATE TABLE bar_pattern_features (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                symbol TEXT,
+                bar_timestamp TEXT,
+                timeframe TEXT,
+                pattern_label TEXT,
+                pattern_score REAL,
+                opportunity_action TEXT,
+                opportunity_quality TEXT,
+                long_opportunity_score REAL,
+                sell_opportunity_score REAL,
+                forward_return_pct REAL,
+                forward_mfe_pct REAL,
+                forward_mae_pct REAL,
+                horizon_bars INTEGER,
+                feature_version TEXT,
+                runtime_effect TEXT
+            )
+            """
+        )
+        con.executemany(
+            """
+            INSERT INTO bar_pattern_features (
+                symbol, bar_timestamp, timeframe, pattern_label, pattern_score,
+                opportunity_action, opportunity_quality,
+                long_opportunity_score, sell_opportunity_score,
+                forward_return_pct, forward_mfe_pct, forward_mae_pct,
+                horizon_bars, feature_version, runtime_effect
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            [
+                (
+                    "AAPL",
+                    "2026-05-30T10:10:00",
+                    "5m",
+                    "efi_pvt_breakout_confirmation",
+                    74.0,
+                    "long_candidate",
+                    "best_buy_window",
+                    82.5,
+                    10.0,
+                    0.9,
+                    1.6,
+                    -0.1,
+                    12,
+                    "efi_pvt_bar_pattern_v1",
+                    "observe_only_pattern_learning_no_live_authority",
+                ),
+                (
+                    "AAPL",
+                    "2026-05-30T11:20:00",
+                    "5m",
+                    "efi_fading_pvt_flat",
+                    42.0,
+                    "sell_or_avoid_candidate",
+                    "risk_window",
+                    12.0,
+                    75.0,
+                    -0.4,
+                    0.1,
+                    -0.8,
+                    12,
+                    "efi_pvt_bar_pattern_v1",
+                    "observe_only_pattern_learning_no_live_authority",
+                ),
+            ],
+        )
 
     code, out = _run_cli(tmp_path, "pattern-learning-inputs", "2026-05-30")
 
@@ -686,6 +755,12 @@ def test_pattern_learning_inputs_cli_uses_trade_and_candidate_rows(tmp_path):
     assert "fully_integrated_pattern_outcomes : 1 (100.0%)" in out
     assert "good_buy_good_sell" in out
     assert "rows_with_forward_outcome         : 1 (100.0%)" in out
+    assert "EFI/PVT bar-pattern strategy evidence" in out
+    assert "bar_pattern_rows                  : 2" in out
+    assert "long_candidate|best_buy_window" in out
+    assert "sell_or_avoid_candidate|risk_window" in out
+    assert "Top EFI/PVT buy windows" in out
+    assert "Top EFI/PVT sell-or-avoid windows" in out
     assert "[OK] pattern learning inputs summarized; no live authority changed" in out
 
 

@@ -120,6 +120,63 @@ def test_memory_for_signal_preserves_symbol_memory_without_context(tmp_path):
     assert [m["label"] for m in result["context_matches"]] == ["symbol"]
 
 
+def test_bar_pattern_evidence_does_not_change_live_recommendation(tmp_path):
+    path = tmp_path / "strategy_memory.json"
+    path.write_text(
+        json.dumps(
+            {
+                "symbols": {
+                    "AAPL": {
+                        "recommendation": "neutral",
+                        "min_setup_score": 55,
+                        "reason": "normal symbol memory",
+                    }
+                },
+                "bar_pattern_runtime_effect": "observe_only_pattern_learning_no_live_authority",
+                "symbol_bar_pattern_label_context": {
+                    "AAPL|efi_pvt_breakout_confirmation": {
+                        "rows": 120,
+                        "recommendation": "observe",
+                        "authority_ready": False,
+                        "runtime_effect": "observe_only_pattern_learning_no_live_authority",
+                        "evidence_label": "constructive_buy_pattern",
+                    }
+                },
+                "symbol_bar_pattern_opportunity_context": {
+                    "AAPL|long_candidate|best_buy_window": {
+                        "rows": 30,
+                        "recommendation": "observe",
+                        "authority_ready": False,
+                        "runtime_effect": "observe_only_pattern_learning_no_live_authority",
+                        "evidence_label": "constructive_buy_pattern",
+                    }
+                },
+            }
+        )
+    )
+    _reset_memory(path)
+
+    result = strategy_memory.memory_for_signal("aapl")
+
+    assert result["recommendation"] == "neutral"
+    assert result["min_setup_score"] == 55
+    assert [m["label"] for m in result["context_matches"]] == ["symbol"]
+    assert result["bar_pattern_evidence"]["available"] is True
+    assert result["bar_pattern_evidence"]["authority_ready"] is False
+    assert (
+        result["bar_pattern_evidence"]["runtime_effect"]
+        == "observe_only_pattern_learning_no_live_authority"
+    )
+    assert (
+        "efi_pvt_breakout_confirmation"
+        in result["bar_pattern_evidence"]["symbol_bar_pattern_label_context"]
+    )
+    assert (
+        "long_candidate|best_buy_window"
+        in result["bar_pattern_evidence"]["symbol_bar_pattern_opportunity_context"]
+    )
+
+
 def test_strategy_memory_context_normalizes_malformed_context():
     with _capture_strategy_memory_warnings() as warnings:
         result = strategy_memory.normalize_strategy_memory_context("not-a-dict")
@@ -210,6 +267,7 @@ def main():
     tests = [
         test_memory_for_signal_uses_context_matches,
         test_memory_for_signal_preserves_symbol_memory_without_context,
+        test_bar_pattern_evidence_does_not_change_live_recommendation,
         test_strategy_memory_context_normalizes_malformed_context,
         test_strategy_memory_context_accepts_current_aliases,
         test_strategy_memory_context_logs_malformed_nested_and_unknown_enums,

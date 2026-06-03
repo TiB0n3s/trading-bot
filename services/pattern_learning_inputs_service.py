@@ -22,6 +22,7 @@ class PatternLearningInputsPayload:
     executed_trade_quality: list[dict[str, Any]]
     expectancy_by_dimension: dict[str, list[dict[str, Any]]]
     candidate_label_coverage: dict[str, Any]
+    bar_pattern_evidence: dict[str, Any]
     learning_actions: list[str]
 
 
@@ -197,12 +198,124 @@ def _candidate_coverage(candidate_rows: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
+def _bar_pattern_evidence(bar_pattern_rows: list[dict[str, Any]]) -> dict[str, Any]:
+    opportunity_counts: dict[str, int] = {}
+    pattern_counts: dict[str, int] = {}
+    runtime_effects: dict[str, int] = {}
+    symbols: set[str] = set()
+    rows_with_forward_outcome = 0
+    rows_with_forward_mfe = 0
+    rows_with_opportunity_label = 0
+    long_scores: list[float] = []
+    sell_scores: list[float] = []
+    forward_returns_by_opportunity: dict[str, list[float]] = {}
+    top_buy_windows: list[dict[str, Any]] = []
+    top_sell_or_avoid_windows: list[dict[str, Any]] = []
+
+    for row in bar_pattern_rows:
+        symbol = str(row.get("symbol") or "").upper()
+        if symbol:
+            symbols.add(symbol)
+
+        pattern = _bucket(row, "pattern_label")
+        pattern_counts[pattern] = pattern_counts.get(pattern, 0) + 1
+
+        action = _bucket(row, "opportunity_action")
+        quality = _bucket(row, "opportunity_quality")
+        opportunity_key = f"{action}|{quality}"
+        opportunity_counts[opportunity_key] = opportunity_counts.get(opportunity_key, 0) + 1
+        if action != "unknown" or quality != "unknown":
+            rows_with_opportunity_label += 1
+
+        runtime_effect = _bucket(row, "runtime_effect")
+        runtime_effects[runtime_effect] = runtime_effects.get(runtime_effect, 0) + 1
+
+        forward_return = _float(row.get("forward_return_pct"))
+        forward_mfe = _float(row.get("forward_mfe_pct"))
+        forward_mae = _float(row.get("forward_mae_pct"))
+        long_score = _float(row.get("long_opportunity_score"))
+        sell_score = _float(row.get("sell_opportunity_score"))
+
+        if forward_return is not None:
+            rows_with_forward_outcome += 1
+            forward_returns_by_opportunity.setdefault(opportunity_key, []).append(forward_return)
+        if forward_mfe is not None:
+            rows_with_forward_mfe += 1
+        if long_score is not None:
+            long_scores.append(long_score)
+        if sell_score is not None:
+            sell_scores.append(sell_score)
+
+        item = {
+            "symbol": symbol,
+            "bar_timestamp": row.get("bar_timestamp"),
+            "timeframe": row.get("timeframe"),
+            "pattern_label": pattern,
+            "opportunity_action": action,
+            "opportunity_quality": quality,
+            "long_opportunity_score": round(long_score, 4) if long_score is not None else None,
+            "sell_opportunity_score": round(sell_score, 4) if sell_score is not None else None,
+            "forward_return_pct": round(forward_return, 4) if forward_return is not None else None,
+            "forward_mfe_pct": round(forward_mfe, 4) if forward_mfe is not None else None,
+            "forward_mae_pct": round(forward_mae, 4) if forward_mae is not None else None,
+        }
+        if action == "long_candidate" and long_score is not None:
+            top_buy_windows.append(item)
+        if action == "sell_or_avoid_candidate" and sell_score is not None:
+            top_sell_or_avoid_windows.append(item)
+
+    top_buy_windows.sort(
+        key=lambda item: (
+            -float(item.get("long_opportunity_score") or 0.0),
+            str(item.get("bar_timestamp") or ""),
+        )
+    )
+    top_sell_or_avoid_windows.sort(
+        key=lambda item: (
+            -float(item.get("sell_opportunity_score") or 0.0),
+            str(item.get("bar_timestamp") or ""),
+        )
+    )
+
+    opportunity_expectancy = []
+    for opportunity, values in forward_returns_by_opportunity.items():
+        opportunity_expectancy.append(
+            {
+                "opportunity": opportunity,
+                "rows": len(values),
+                "win_rate": _rate(sum(1 for value in values if value > 0), len(values)),
+                "avg_forward_return_pct": _mean(values),
+            }
+        )
+    opportunity_expectancy.sort(key=lambda item: (-(item["rows"] or 0), item["opportunity"]))
+
+    return {
+        "rows": len(bar_pattern_rows),
+        "symbols": len(symbols),
+        "rows_with_forward_outcome": rows_with_forward_outcome,
+        "rows_with_forward_mfe": rows_with_forward_mfe,
+        "rows_with_opportunity_label": rows_with_opportunity_label,
+        "forward_outcome_coverage_rate": _rate(rows_with_forward_outcome, len(bar_pattern_rows)),
+        "opportunity_label_coverage_rate": _rate(rows_with_opportunity_label, len(bar_pattern_rows)),
+        "avg_long_opportunity_score": _mean(long_scores),
+        "avg_sell_opportunity_score": _mean(sell_scores),
+        "pattern_counts": dict(sorted(pattern_counts.items(), key=lambda item: (-item[1], item[0]))),
+        "opportunity_counts": dict(sorted(opportunity_counts.items(), key=lambda item: (-item[1], item[0]))),
+        "runtime_effects": dict(sorted(runtime_effects.items())),
+        "opportunity_expectancy": opportunity_expectancy,
+        "top_buy_windows": top_buy_windows[:15],
+        "top_sell_or_avoid_windows": top_sell_or_avoid_windows[:15],
+    }
+
+
 def build_pattern_learning_inputs_payload(
     matched_rows: Iterable[dict[str, Any]],
     candidate_rows: Iterable[dict[str, Any]],
+    bar_pattern_rows: Iterable[dict[str, Any]] | None = None,
 ) -> PatternLearningInputsPayload:
     matched = [dict(row) for row in matched_rows]
     candidates = [dict(row) for row in candidate_rows]
+    bar_patterns = [dict(row) for row in (bar_pattern_rows or [])]
 
     for row in matched:
         row["trade_quality"] = _trade_quality(row)
@@ -239,6 +352,7 @@ def build_pattern_learning_inputs_payload(
         quality_counts[quality] = quality_counts.get(quality, 0) + 1
 
     candidate_coverage = _candidate_coverage(candidates)
+    bar_pattern_evidence = _bar_pattern_evidence(bar_patterns)
     learning_actions = []
     if matched and len(fully_integrated_rows) < len(matched):
         learning_actions.append(
@@ -252,6 +366,12 @@ def build_pattern_learning_inputs_payload(
         learning_actions.append("no matched trades available for executed buy/sell pattern learning")
     if not candidates:
         learning_actions.append("no candidate_universe rows available for missed-opportunity learning")
+    if bar_patterns and not bar_pattern_evidence["rows_with_opportunity_label"]:
+        learning_actions.append(
+            "rerun bar-pattern backfill to populate hindsight buy/sell opportunity labels"
+        )
+    if not bar_patterns:
+        learning_actions.append("no bar_pattern_features rows available for EFI/PVT pattern learning")
 
     summary = {
         "report_version": PATTERN_LEARNING_INPUTS_VERSION,
@@ -265,6 +385,13 @@ def build_pattern_learning_inputs_payload(
         "candidate_rows": len(candidates),
         "candidate_rows_with_forward_outcome": candidate_coverage["rows_with_forward_outcome"],
         "candidate_rows_with_forward_mfe": candidate_coverage["rows_with_forward_mfe"],
+        "bar_pattern_rows": len(bar_patterns),
+        "bar_pattern_rows_with_forward_outcome": bar_pattern_evidence[
+            "rows_with_forward_outcome"
+        ],
+        "bar_pattern_rows_with_opportunity_label": bar_pattern_evidence[
+            "rows_with_opportunity_label"
+        ],
         "quality_counts": dict(sorted(quality_counts.items())),
         "authority_ready": False,
         "authority_note": "diagnostic only; cannot approve, block, size, or execute trades",
@@ -281,5 +408,6 @@ def build_pattern_learning_inputs_payload(
             "buy_opportunity_recommendation": _expectancy(matched, "buy_opportunity_recommendation"),
         },
         candidate_label_coverage=candidate_coverage,
+        bar_pattern_evidence=bar_pattern_evidence,
         learning_actions=learning_actions,
     )

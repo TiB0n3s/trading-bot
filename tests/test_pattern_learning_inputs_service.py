@@ -45,6 +45,36 @@ def test_pattern_learning_inputs_classifies_trade_and_candidate_coverage():
                 "candidate_json": "{}",
             },
         ],
+        [
+            {
+                "symbol": "AAPL",
+                "bar_timestamp": "2026-05-30T10:10:00",
+                "timeframe": "5m",
+                "pattern_label": "efi_pvt_breakout_confirmation",
+                "opportunity_action": "long_candidate",
+                "opportunity_quality": "best_buy_window",
+                "long_opportunity_score": 82.5,
+                "sell_opportunity_score": 10.0,
+                "forward_return_pct": 0.9,
+                "forward_mfe_pct": 1.6,
+                "forward_mae_pct": -0.1,
+                "runtime_effect": "observe_only_pattern_learning_no_live_authority",
+            },
+            {
+                "symbol": "AAPL",
+                "bar_timestamp": "2026-05-30T11:20:00",
+                "timeframe": "5m",
+                "pattern_label": "efi_fading_pvt_flat",
+                "opportunity_action": "sell_or_avoid_candidate",
+                "opportunity_quality": "risk_window",
+                "long_opportunity_score": 12.0,
+                "sell_opportunity_score": 75.0,
+                "forward_return_pct": -0.4,
+                "forward_mfe_pct": 0.1,
+                "forward_mae_pct": -0.8,
+                "runtime_effect": "observe_only_pattern_learning_no_live_authority",
+            },
+        ],
     )
 
     assert payload.summary["report_version"] == "pattern_learning_inputs_v1"
@@ -58,6 +88,14 @@ def test_pattern_learning_inputs_classifies_trade_and_candidate_coverage():
     assert payload.candidate_label_coverage["rows_with_forward_outcome"] == 1
     assert payload.candidate_label_coverage["proven_good"] == 1
     assert payload.candidate_label_coverage["top_missed_by_mfe"][0]["symbol"] == "NVDA"
+    assert payload.summary["bar_pattern_rows"] == 2
+    assert payload.summary["bar_pattern_rows_with_opportunity_label"] == 2
+    assert payload.bar_pattern_evidence["rows_with_forward_outcome"] == 2
+    assert payload.bar_pattern_evidence["opportunity_counts"][
+        "long_candidate|best_buy_window"
+    ] == 1
+    assert payload.bar_pattern_evidence["top_buy_windows"][0]["symbol"] == "AAPL"
+    assert payload.bar_pattern_evidence["top_sell_or_avoid_windows"][0]["symbol"] == "AAPL"
 
 
 if __name__ == "__main__":

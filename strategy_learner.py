@@ -119,6 +119,95 @@ def finalize_bucket(bucket):
     }
 
 
+def new_pattern_bucket():
+    return {
+        "rows": 0,
+        "forward_outcome_rows": 0,
+        "forward_return_total": 0.0,
+        "forward_mfe_total": 0.0,
+        "forward_mae_total": 0.0,
+        "long_score_total": 0.0,
+        "sell_score_total": 0.0,
+        "best_buy_windows": 0,
+        "good_buy_windows": 0,
+        "sell_or_avoid_windows": 0,
+    }
+
+
+def add_pattern_row(bucket, row):
+    bucket["rows"] += 1
+    opportunity_quality = row["opportunity_quality"] or "unknown"
+    opportunity_action = row["opportunity_action"] or "unknown"
+    if opportunity_quality == "best_buy_window":
+        bucket["best_buy_windows"] += 1
+    if opportunity_quality in ("best_buy_window", "good_buy_window"):
+        bucket["good_buy_windows"] += 1
+    if opportunity_action == "sell_or_avoid_candidate":
+        bucket["sell_or_avoid_windows"] += 1
+
+    forward_return = row["forward_return_pct"]
+    forward_mfe = row["forward_mfe_pct"]
+    forward_mae = row["forward_mae_pct"]
+    if forward_return is not None:
+        bucket["forward_outcome_rows"] += 1
+        bucket["forward_return_total"] += float(forward_return or 0)
+    if forward_mfe is not None:
+        bucket["forward_mfe_total"] += float(forward_mfe or 0)
+    if forward_mae is not None:
+        bucket["forward_mae_total"] += float(forward_mae or 0)
+    if row["long_opportunity_score"] is not None:
+        bucket["long_score_total"] += float(row["long_opportunity_score"] or 0)
+    if row["sell_opportunity_score"] is not None:
+        bucket["sell_score_total"] += float(row["sell_opportunity_score"] or 0)
+
+
+def finalize_pattern_bucket(bucket):
+    rows = bucket["rows"]
+    outcome_rows = bucket["forward_outcome_rows"]
+    if not rows:
+        return {
+            "rows": 0,
+            "recommendation": "observe",
+            "authority_ready": False,
+            "runtime_effect": "observe_only_pattern_learning_no_live_authority",
+            "reason": "no bar-pattern samples",
+        }
+
+    avg_return = bucket["forward_return_total"] / outcome_rows if outcome_rows else None
+    avg_mfe = bucket["forward_mfe_total"] / outcome_rows if outcome_rows else None
+    avg_mae = bucket["forward_mae_total"] / outcome_rows if outcome_rows else None
+    avg_long = bucket["long_score_total"] / rows
+    avg_sell = bucket["sell_score_total"] / rows
+    best_buy_rate = pct(bucket["best_buy_windows"], rows)
+    sell_or_avoid_rate = pct(bucket["sell_or_avoid_windows"], rows)
+
+    if rows < 30:
+        evidence_label = "thin_sample"
+    elif best_buy_rate >= 25 and avg_return is not None and avg_return > 0:
+        evidence_label = "constructive_buy_pattern"
+    elif sell_or_avoid_rate >= 25 and avg_return is not None and avg_return < 0:
+        evidence_label = "sell_or_avoid_pattern"
+    else:
+        evidence_label = "mixed_pattern"
+
+    return {
+        "rows": rows,
+        "forward_outcome_rows": outcome_rows,
+        "avg_forward_return_pct": round(avg_return, 4) if avg_return is not None else None,
+        "avg_forward_mfe_pct": round(avg_mfe, 4) if avg_mfe is not None else None,
+        "avg_forward_mae_pct": round(avg_mae, 4) if avg_mae is not None else None,
+        "avg_long_opportunity_score": round(avg_long, 2),
+        "avg_sell_opportunity_score": round(avg_sell, 2),
+        "best_buy_window_rate_pct": best_buy_rate,
+        "sell_or_avoid_window_rate_pct": sell_or_avoid_rate,
+        "evidence_label": evidence_label,
+        "recommendation": "observe",
+        "authority_ready": False,
+        "runtime_effect": "observe_only_pattern_learning_no_live_authority",
+        "reason": "bar-pattern memory is evidence-only until promotion guardrails pass",
+    }
+
+
 
 
 def load_report_memories():
@@ -272,8 +361,14 @@ def main():
     by_symbol_prediction_decision = defaultdict(new_bucket)
     by_symbol_buy_opportunity = defaultdict(new_bucket)
     by_symbol_session_trend = defaultdict(new_bucket)
+    by_bar_pattern_label = defaultdict(new_pattern_bucket)
+    by_bar_pattern_opportunity = defaultdict(new_pattern_bucket)
+    by_symbol_bar_pattern_label = defaultdict(new_pattern_bucket)
+    by_symbol_bar_pattern_opportunity = defaultdict(new_pattern_bucket)
 
-    rows = ReportingRepository().strategy_learner_rows(cutoff)
+    repo = ReportingRepository()
+    rows = repo.strategy_learner_rows(cutoff)
+    bar_pattern_rows = repo.bar_pattern_strategy_rows(cutoff)
 
     for r in rows:
         symbol = r["symbol"] or "UNKNOWN"
@@ -324,6 +419,18 @@ def main():
         add_trade(by_symbol_prediction_decision[symbol_prediction_key], pnl)
         add_trade(by_symbol_buy_opportunity[symbol_buy_opp_key], pnl)
         add_trade(by_symbol_session_trend[symbol_session_key], pnl)
+
+    for r in bar_pattern_rows:
+        symbol = r["symbol"] or "UNKNOWN"
+        label = r["pattern_label"] or "unknown"
+        opportunity = "|".join([
+            r["opportunity_action"] or "unknown",
+            r["opportunity_quality"] or "unknown",
+        ])
+        add_pattern_row(by_bar_pattern_label[label], r)
+        add_pattern_row(by_bar_pattern_opportunity[opportunity], r)
+        add_pattern_row(by_symbol_bar_pattern_label[f"{symbol}|{label}"], r)
+        add_pattern_row(by_symbol_bar_pattern_opportunity[f"{symbol}|{opportunity}"], r)
 
     memory = {
         "generated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
@@ -400,12 +507,30 @@ def main():
             k: finalize_bucket(v)
             for k, v in sorted(by_symbol_session_trend.items())
         },
+        "bar_pattern_label_context": {
+            k: finalize_pattern_bucket(v)
+            for k, v in sorted(by_bar_pattern_label.items())
+        },
+        "bar_pattern_opportunity_context": {
+            k: finalize_pattern_bucket(v)
+            for k, v in sorted(by_bar_pattern_opportunity.items())
+        },
+        "symbol_bar_pattern_label_context": {
+            k: finalize_pattern_bucket(v)
+            for k, v in sorted(by_symbol_bar_pattern_label.items())
+        },
+        "symbol_bar_pattern_opportunity_context": {
+            k: finalize_pattern_bucket(v)
+            for k, v in sorted(by_symbol_bar_pattern_opportunity.items())
+        },
         "symbol_context": {
             k: finalize_bucket(v)
             for k, v in sorted(by_symbol_context.items())
         },
         "report_memories": load_report_memories(),
         "trade_count": len(rows),
+        "bar_pattern_rows": len(bar_pattern_rows),
+        "bar_pattern_runtime_effect": "observe_only_pattern_learning_no_live_authority",
     }
 
     memory = apply_manual_overrides(memory)

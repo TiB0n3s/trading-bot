@@ -41,7 +41,12 @@ def run_pattern_learning_inputs_report(
     repo = OpsCheckRepository(db_path)
     matched_rows = [dict(row) for row in repo.pattern_learning_matched_rows(target_date)]
     candidate_rows = [dict(row) for row in repo.pattern_learning_candidate_rows(target_date)]
-    payload = build_pattern_learning_inputs_payload(matched_rows, candidate_rows)
+    bar_pattern_rows = [dict(row) for row in repo.pattern_learning_bar_pattern_rows(target_date)]
+    payload = build_pattern_learning_inputs_payload(
+        matched_rows,
+        candidate_rows,
+        bar_pattern_rows,
+    )
     summary = payload.summary
 
     print(f"report_version                      : {summary['report_version']}")
@@ -140,14 +145,90 @@ def run_pattern_learning_inputs_report(
                 f"{item.get('reason') or '-'}"
             )
 
+    bar_patterns = payload.bar_pattern_evidence
+    print()
+    print("EFI/PVT bar-pattern strategy evidence")
+    print(f"  bar_pattern_rows                  : {bar_patterns['rows']}")
+    print(f"  symbols                           : {bar_patterns['symbols']}")
+    print(
+        "  rows_with_forward_outcome         : "
+        f"{bar_patterns['rows_with_forward_outcome']} "
+        f"({_pct(bar_patterns['rows_with_forward_outcome'], bar_patterns['rows'])})"
+    )
+    print(
+        "  rows_with_opportunity_label       : "
+        f"{bar_patterns['rows_with_opportunity_label']} "
+        f"({_pct(bar_patterns['rows_with_opportunity_label'], bar_patterns['rows'])})"
+    )
+    print(
+        "  avg_long_opportunity_score        : "
+        f"{_fmt(bar_patterns['avg_long_opportunity_score'])}"
+    )
+    print(
+        "  avg_sell_opportunity_score        : "
+        f"{_fmt(bar_patterns['avg_sell_opportunity_score'])}"
+    )
+
+    if bar_patterns["opportunity_counts"]:
+        print()
+        print("Bar-pattern opportunity counts")
+        for opportunity, count in bar_patterns["opportunity_counts"].items():
+            print(f"  {opportunity:<42} {count:>6}")
+
+    if bar_patterns["opportunity_expectancy"]:
+        print()
+        print("Bar-pattern opportunity expectancy")
+        for row in bar_patterns["opportunity_expectancy"][:limit]:
+            print(
+                f"  {row['opportunity'][:42]:<42} "
+                f"n={row['rows']:<4} win={_fmt(row.get('win_rate')):<8} "
+                f"ret={_fmt(row.get('avg_forward_return_pct'))}"
+            )
+
+    if bar_patterns["top_buy_windows"]:
+        print()
+        print("Top EFI/PVT buy windows")
+        print(
+            f"  {'time':<19} {'sym':<6} {'pattern':<28} "
+            f"{'quality':<20} {'long':>8} {'mfe':>8} {'ret':>8}"
+        )
+        for item in bar_patterns["top_buy_windows"][:limit]:
+            print(
+                f"  {str(item.get('bar_timestamp') or '-')[:19]:<19} "
+                f"{str(item.get('symbol') or '-'):<6} "
+                f"{str(item.get('pattern_label') or '-')[:28]:<28} "
+                f"{str(item.get('opportunity_quality') or '-')[:20]:<20} "
+                f"{_fmt(item.get('long_opportunity_score')):>8} "
+                f"{_fmt(item.get('forward_mfe_pct')):>8} "
+                f"{_fmt(item.get('forward_return_pct')):>8}"
+            )
+
+    if bar_patterns["top_sell_or_avoid_windows"]:
+        print()
+        print("Top EFI/PVT sell-or-avoid windows")
+        print(
+            f"  {'time':<19} {'sym':<6} {'pattern':<28} "
+            f"{'quality':<20} {'sell':>8} {'mae':>8} {'ret':>8}"
+        )
+        for item in bar_patterns["top_sell_or_avoid_windows"][:limit]:
+            print(
+                f"  {str(item.get('bar_timestamp') or '-')[:19]:<19} "
+                f"{str(item.get('symbol') or '-'):<6} "
+                f"{str(item.get('pattern_label') or '-')[:28]:<28} "
+                f"{str(item.get('opportunity_quality') or '-')[:20]:<20} "
+                f"{_fmt(item.get('sell_opportunity_score')):>8} "
+                f"{_fmt(item.get('forward_mae_pct')):>8} "
+                f"{_fmt(item.get('forward_return_pct')):>8}"
+            )
+
     if payload.learning_actions:
         print()
         print("Learning actions")
         for action in payload.learning_actions:
             print(f"  - {action}")
 
-    if not summary["matched_trades"] and not coverage["rows"]:
-        print("[WARN] no matched trades or candidate rows available")
+    if not summary["matched_trades"] and not coverage["rows"] and not bar_patterns["rows"]:
+        print("[WARN] no matched trades, candidate rows, or bar-pattern rows available")
         return False
 
     print()

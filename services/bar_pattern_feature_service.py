@@ -92,6 +92,10 @@ def _pct_change(old: float | None, new: float | None) -> float | None:
     return (new - old) / old * 100.0
 
 
+def _clamp(value: float, low: float = 0.0, high: float = 100.0) -> float:
+    return max(low, min(high, value))
+
+
 def _label_pattern(
     *,
     close: float,
@@ -139,6 +143,35 @@ def _label_pattern(
     return "mixed_bar_pattern", max(0.0, min(100.0, score))
 
 
+def _label_hindsight_opportunity(
+    *,
+    forward_return: float | None,
+    forward_mfe: float | None,
+    forward_mae: float | None,
+) -> tuple[str, str, float | None, float | None]:
+    if forward_return is None or forward_mfe is None or forward_mae is None:
+        return "unknown", "insufficient_forward_bars", None, None
+
+    adverse = abs(min(0.0, forward_mae))
+    upside = max(0.0, forward_mfe)
+    downside = abs(min(0.0, forward_mae))
+    favorable_return = max(0.0, forward_return)
+    negative_return = abs(min(0.0, forward_return))
+
+    long_score = _clamp(50.0 + upside * 28.0 + favorable_return * 18.0 - adverse * 22.0)
+    sell_score = _clamp(50.0 + downside * 28.0 + negative_return * 18.0 - upside * 20.0)
+
+    if forward_mfe >= 0.75 and forward_return >= 0.25 and forward_mae > -0.45:
+        return "buy_candidate", "best_buy_window", long_score, sell_score
+    if forward_mfe >= 0.40 and forward_return >= 0.05 and forward_mae > -0.65:
+        return "buy_candidate", "good_buy_window", long_score, sell_score
+    if forward_mae <= -0.75 and forward_return <= -0.25:
+        return "sell_or_avoid_candidate", "best_sell_or_avoid_window", long_score, sell_score
+    if forward_mae <= -0.40 and forward_return <= -0.05:
+        return "sell_or_avoid_candidate", "good_sell_or_avoid_window", long_score, sell_score
+    return "hold_or_wait", "mixed_forward_window", long_score, sell_score
+
+
 def _avg(values: list[float]) -> float | None:
     if not values:
         return None
@@ -183,6 +216,65 @@ def _summarize_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return sorted(summary, key=lambda row: (-int(row["rows"]), str(row["pattern_label"])))
 
 
+def _summarize_opportunities(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    by_label: dict[tuple[str, str], list[dict[str, Any]]] = {}
+    for row in rows:
+        key = (
+            str(row.get("opportunity_action") or "unknown"),
+            str(row.get("opportunity_quality") or "unknown"),
+        )
+        by_label.setdefault(key, []).append(row)
+
+    summary = []
+    for (action, quality), label_rows in by_label.items():
+        summary.append(
+            {
+                "opportunity_action": action,
+                "opportunity_quality": quality,
+                "rows": len(label_rows),
+                "avg_long_opportunity_score": _avg(
+                    [
+                        float(row["long_opportunity_score"])
+                        for row in label_rows
+                        if row.get("long_opportunity_score") is not None
+                    ]
+                ),
+                "avg_sell_opportunity_score": _avg(
+                    [
+                        float(row["sell_opportunity_score"])
+                        for row in label_rows
+                        if row.get("sell_opportunity_score") is not None
+                    ]
+                ),
+                "avg_forward_return_pct": _avg(
+                    [
+                        float(row["forward_return_pct"])
+                        for row in label_rows
+                        if row.get("forward_return_pct") is not None
+                    ]
+                ),
+                "avg_forward_mfe_pct": _avg(
+                    [
+                        float(row["forward_mfe_pct"])
+                        for row in label_rows
+                        if row.get("forward_mfe_pct") is not None
+                    ]
+                ),
+                "avg_forward_mae_pct": _avg(
+                    [
+                        float(row["forward_mae_pct"])
+                        for row in label_rows
+                        if row.get("forward_mae_pct") is not None
+                    ]
+                ),
+            }
+        )
+    return sorted(
+        summary,
+        key=lambda row: (-int(row["rows"]), str(row["opportunity_action"]), str(row["opportunity_quality"])),
+    )
+
+
 @dataclass(frozen=True)
 class BarPatternBackfillResult:
     report_version: str
@@ -195,6 +287,7 @@ class BarPatternBackfillResult:
     persisted_rows: int
     rows_with_forward_outcome: int
     label_summary: list[dict[str, Any]]
+    opportunity_summary: list[dict[str, Any]]
     error: str | None = None
 
 
@@ -263,6 +356,11 @@ class BarPatternFeatureService:
             forward_return = _pct_change(close, future_closes[-1]) if future_closes else None
             forward_mfe = _pct_change(close, max(future_highs)) if future_highs else None
             forward_mae = _pct_change(close, min(future_lows)) if future_lows else None
+            opportunity_action, opportunity_quality, long_score, sell_score = _label_hindsight_opportunity(
+                forward_return=forward_return,
+                forward_mfe=forward_mfe,
+                forward_mae=forward_mae,
+            )
 
             feature_json = {
                 "close": close,
@@ -276,6 +374,10 @@ class BarPatternFeatureService:
                 "pvt_new_high_30": pvt_new_high_30,
                 "price_return_5": price_return_5,
                 "price_vs_sma_20_pct": price_vs_sma,
+                "opportunity_action": opportunity_action,
+                "opportunity_quality": opportunity_quality,
+                "long_opportunity_score": long_score,
+                "sell_opportunity_score": sell_score,
             }
             rows.append(
                 {
@@ -296,6 +398,10 @@ class BarPatternFeatureService:
                     "breakout_20": 1 if prev_high_20 is not None and close >= prev_high_20 else 0,
                     "pattern_label": pattern_label,
                     "pattern_score": _round(pattern_score, 4),
+                    "opportunity_action": opportunity_action,
+                    "opportunity_quality": opportunity_quality,
+                    "long_opportunity_score": _round(long_score, 4),
+                    "sell_opportunity_score": _round(sell_score, 4),
                     "forward_return_pct": _round(forward_return),
                     "forward_mfe_pct": _round(forward_mfe),
                     "forward_mae_pct": _round(forward_mae),
@@ -324,6 +430,7 @@ class BarPatternFeatureService:
             horizon_bars=horizon_bars,
         )
         label_summary = _summarize_rows(rows)
+        opportunity_summary = _summarize_opportunities(rows)
         persisted = 0 if dry_run else self.repository.upsert_many(rows)
         return BarPatternBackfillResult(
             report_version="bar_pattern_feature_backfill_v1",
@@ -338,6 +445,7 @@ class BarPatternFeatureService:
                 1 for row in rows if row.get("forward_return_pct") is not None
             ),
             label_summary=label_summary,
+            opportunity_summary=opportunity_summary,
         )
 
     def summary(self, target_date: str, symbol: str | None = None) -> dict[str, Any]:

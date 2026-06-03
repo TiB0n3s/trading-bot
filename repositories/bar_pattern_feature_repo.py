@@ -36,6 +36,10 @@ class BarPatternFeatureRepository:
                     breakout_20 INTEGER,
                     pattern_label TEXT,
                     pattern_score REAL,
+                    opportunity_action TEXT,
+                    opportunity_quality TEXT,
+                    long_opportunity_score REAL,
+                    sell_opportunity_score REAL,
                     forward_return_pct REAL,
                     forward_mfe_pct REAL,
                     forward_mae_pct REAL,
@@ -48,6 +52,10 @@ class BarPatternFeatureRepository:
                 )
                 """
             )
+            self._ensure_column(con, "opportunity_action", "TEXT")
+            self._ensure_column(con, "opportunity_quality", "TEXT")
+            self._ensure_column(con, "long_opportunity_score", "REAL")
+            self._ensure_column(con, "sell_opportunity_score", "REAL")
             con.execute(
                 """
                 CREATE INDEX IF NOT EXISTS idx_bar_pattern_features_symbol_ts
@@ -60,6 +68,20 @@ class BarPatternFeatureRepository:
                 ON bar_pattern_features(pattern_label, bar_timestamp)
                 """
             )
+            con.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_bar_pattern_features_opportunity
+                ON bar_pattern_features(opportunity_action, opportunity_quality, bar_timestamp)
+                """
+            )
+
+    def _ensure_column(self, con, column: str, column_type: str) -> None:
+        columns = {
+            str(row["name"])
+            for row in con.execute("PRAGMA table_info(bar_pattern_features)").fetchall()
+        }
+        if column not in columns:
+            con.execute(f"ALTER TABLE bar_pattern_features ADD COLUMN {column} {column_type}")
 
     def upsert_many(self, rows: list[dict[str, Any]]) -> int:
         if not rows:
@@ -74,6 +96,8 @@ class BarPatternFeatureRepository:
                     pvt, pvt_slope_5, pvt_new_high_30,
                     price_return_5, price_vs_sma_20_pct, breakout_20,
                     pattern_label, pattern_score,
+                    opportunity_action, opportunity_quality,
+                    long_opportunity_score, sell_opportunity_score,
                     forward_return_pct, forward_mfe_pct, forward_mae_pct,
                     horizon_bars, feature_version, runtime_effect, feature_json
                 ) VALUES (
@@ -82,6 +106,8 @@ class BarPatternFeatureRepository:
                     :pvt, :pvt_slope_5, :pvt_new_high_30,
                     :price_return_5, :price_vs_sma_20_pct, :breakout_20,
                     :pattern_label, :pattern_score,
+                    :opportunity_action, :opportunity_quality,
+                    :long_opportunity_score, :sell_opportunity_score,
                     :forward_return_pct, :forward_mfe_pct, :forward_mae_pct,
                     :horizon_bars, :feature_version, :runtime_effect, :feature_json
                 )
@@ -101,6 +127,10 @@ class BarPatternFeatureRepository:
                     breakout_20 = excluded.breakout_20,
                     pattern_label = excluded.pattern_label,
                     pattern_score = excluded.pattern_score,
+                    opportunity_action = excluded.opportunity_action,
+                    opportunity_quality = excluded.opportunity_quality,
+                    long_opportunity_score = excluded.long_opportunity_score,
+                    sell_opportunity_score = excluded.sell_opportunity_score,
                     forward_return_pct = excluded.forward_return_pct,
                     forward_mfe_pct = excluded.forward_mfe_pct,
                     forward_mae_pct = excluded.forward_mae_pct,
@@ -159,9 +189,29 @@ class BarPatternFeatureRepository:
                 """,
                 params,
             ).fetchall()
+            opportunities = con.execute(
+                f"""
+                SELECT
+                    opportunity_action,
+                    opportunity_quality,
+                    COUNT(*) AS rows,
+                    AVG(long_opportunity_score) AS avg_long_opportunity_score,
+                    AVG(sell_opportunity_score) AS avg_sell_opportunity_score,
+                    AVG(forward_return_pct) AS avg_forward_return_pct,
+                    AVG(forward_mfe_pct) AS avg_forward_mfe_pct,
+                    AVG(forward_mae_pct) AS avg_forward_mae_pct
+                FROM bar_pattern_features
+                WHERE substr(bar_timestamp, 1, 10) = ?
+                {extra}
+                GROUP BY opportunity_action, opportunity_quality
+                ORDER BY rows DESC, opportunity_action, opportunity_quality
+                """,
+                params,
+            ).fetchall()
         return {
             "rows": int(row["rows"] or 0),
             "symbols": int(row["symbols"] or 0),
             "rows_with_forward_outcome": int(row["rows_with_forward_outcome"] or 0),
             "labels": [dict(label) for label in labels],
+            "opportunities": [dict(opportunity) for opportunity in opportunities],
         }

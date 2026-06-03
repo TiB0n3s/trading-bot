@@ -44,7 +44,7 @@ def run_bar_pattern_backfill(
         print(f"[WARN] trades.db not found: {db_path}")
         return False
 
-    polygon = polygon_market_data or PolygonMarketDataService()
+    polygon = polygon_market_data or PolygonMarketDataService(timeout_seconds=15.0)
     if not polygon.configured:
         print("[WARN] POLYGON_API_KEY is not configured")
         return False
@@ -87,6 +87,7 @@ def run_bar_pattern_backfill(
             "symbols": 1 if result.feature_rows else 0,
             "rows_with_forward_outcome": result.rows_with_forward_outcome,
             "labels": result.label_summary,
+            "opportunities": result.opportunity_summary,
         }
     else:
         summary = service.summary(target_date, symbol=symbol)
@@ -106,6 +107,21 @@ def run_bar_pattern_backfill(
                 f"{_fmt(row.get('avg_forward_return_pct')):>9} "
                 f"{_fmt(row.get('avg_forward_mfe_pct')):>9} "
                 f"{_fmt(row.get('avg_forward_mae_pct')):>9}"
+            )
+
+    if summary.get("opportunities"):
+        print()
+        print("Hindsight opportunity summary")
+        print(f"  {'action':<24} {'quality':<32} {'rows':>6} {'long':>8} {'sell':>8} {'ret':>8}")
+        print(f"  {'-' * 24} {'-' * 32} {'-' * 6} {'-' * 8} {'-' * 8} {'-' * 8}")
+        for row in summary["opportunities"][:12]:
+            print(
+                f"  {str(row.get('opportunity_action') or 'unknown'):<24} "
+                f"{str(row.get('opportunity_quality') or 'unknown'):<32} "
+                f"{int(row.get('rows') or 0):>6} "
+                f"{_fmt(row.get('avg_long_opportunity_score'), 2):>8} "
+                f"{_fmt(row.get('avg_sell_opportunity_score'), 2):>8} "
+                f"{_fmt(row.get('avg_forward_return_pct')):>8}"
             )
 
     if not result.feature_rows:

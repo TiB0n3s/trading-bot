@@ -63,6 +63,10 @@ def test_bar_pattern_service_builds_efi_pvt_forward_features():
     assert first["pvt"] is not None
     assert first["pvt_slope_5"] is not None
     assert first["runtime_effect"] == BAR_PATTERN_RUNTIME_EFFECT
+    assert any(row["opportunity_action"] == "buy_candidate" for row in rows)
+    assert any(row["opportunity_quality"] == "best_buy_window" for row in rows)
+    assert any(row["long_opportunity_score"] is not None for row in rows)
+    assert any(row["sell_opportunity_score"] is not None for row in rows)
     assert any(row["forward_mfe_pct"] is not None for row in rows)
     assert any(row["forward_mae_pct"] is not None for row in rows)
 
@@ -84,6 +88,11 @@ def test_bar_pattern_repository_persists_and_summarizes(tmp_path: Path):
     assert summary["symbols"] == 1
     assert summary["rows_with_forward_outcome"] > 0
     assert summary["labels"]
+    assert summary["opportunities"]
+    assert any(
+        row["opportunity_action"] == "buy_candidate"
+        for row in summary["opportunities"]
+    )
 
 
 class _FakePolygon:
@@ -115,6 +124,8 @@ def test_bar_pattern_ops_backfill_uses_polygon_and_reports(tmp_path: Path):
     assert "EFI/PVT Bar Pattern Backfill" in out
     assert "observe_only_pattern_learning_no_live_authority" in out
     assert "feature_rows" in out
+    assert "Hindsight opportunity summary" in out
+    assert "buy_candidate" in out
     assert fake.kwargs["multiplier"] == 5
 
 

@@ -27,6 +27,7 @@ AUTO_BUY_RUNTIME_DEFAULTS = {
     "TRADINGVIEW_ALERTS_DEPRECATED": False,
     "AUTO_BUY_ALLOW_TRADINGVIEW_LIVE": False,
     "AUTO_BUY_LIVE_BUYS": False,
+    "AUTO_BUY_LEARNED_TIEBREAKER_ENABLED": False,
 }
 
 
@@ -826,6 +827,136 @@ def test_bucking_fading_tape_does_not_hard_block():
     assert "30m_falling_soft" in candidate["reason"]
 
 
+def test_learned_tiebreaker_can_promote_watch_candidate_in_paper_mode():
+    old_tiebreaker = auto_buy_manager.learned_auto_buy_tiebreaker_decision
+    old_cash_mode = auto_buy_manager.is_cash_mode
+    old_enabled = auto_buy_manager.AUTO_BUY_LEARNED_TIEBREAKER_ENABLED
+    old_gap = auto_buy_manager.AUTO_BUY_LEARNED_TIEBREAKER_MAX_THRESHOLD_GAP
+    auto_buy_manager.learned_auto_buy_tiebreaker_decision = lambda candidate: {
+        "qualified": True,
+        "reason": "symbol_pattern_bucket_passed",
+        "evidence": {
+            "qualified_bucket": "symbol_pattern",
+            "symbol_pattern_stats": {
+                "sample_size": 42,
+                "win_rate": 0.64,
+                "avg_return_pct": 0.55,
+                "avg_mfe_pct": 1.8,
+            },
+        },
+    }
+    auto_buy_manager.is_cash_mode = lambda: False
+    auto_buy_manager.AUTO_BUY_LEARNED_TIEBREAKER_ENABLED = True
+    auto_buy_manager.AUTO_BUY_LEARNED_TIEBREAKER_MAX_THRESHOLD_GAP = 10.0
+    try:
+        feature = favorable_feature()
+        feature["setup_recommendation"] = "watch"
+        feature["setup_score"] = 58
+        candidate = evaluate_auto_buy_candidate(
+            symbol="AMZN",
+            session=strong_session(),
+            feature=feature,
+            context=buy_context(),
+            held=set(),
+            signal_source="internal_bar_only",
+        )
+    finally:
+        auto_buy_manager.learned_auto_buy_tiebreaker_decision = old_tiebreaker
+        auto_buy_manager.is_cash_mode = old_cash_mode
+        auto_buy_manager.AUTO_BUY_LEARNED_TIEBREAKER_ENABLED = old_enabled
+        auto_buy_manager.AUTO_BUY_LEARNED_TIEBREAKER_MAX_THRESHOLD_GAP = old_gap
+
+    assert_equal(candidate["decision"], "strong_buy_candidate", "decision")
+    assert_equal(candidate["learned_tiebreaker_applied"], True, "tiebreaker applied")
+    assert_equal(
+        candidate["learned_tiebreaker_runtime_effect"],
+        "paper_only_tiebreaker_authority",
+        "runtime effect",
+    )
+    if "learned_tiebreaker_promoted" not in candidate["reason"]:
+        raise AssertionError(f"missing learned tiebreaker reason: {candidate['reason']}")
+
+
+def test_learned_tiebreaker_does_not_override_hard_blocks():
+    old_tiebreaker = auto_buy_manager.learned_auto_buy_tiebreaker_decision
+    old_cash_mode = auto_buy_manager.is_cash_mode
+    old_enabled = auto_buy_manager.AUTO_BUY_LEARNED_TIEBREAKER_ENABLED
+    auto_buy_manager.learned_auto_buy_tiebreaker_decision = lambda candidate: {
+        "qualified": True,
+        "reason": "symbol_pattern_bucket_passed",
+        "evidence": {},
+    }
+    auto_buy_manager.is_cash_mode = lambda: False
+    auto_buy_manager.AUTO_BUY_LEARNED_TIEBREAKER_ENABLED = True
+    try:
+        session = strong_session()
+        session["session_return_pct"] = 3.2
+        session["distance_from_vwap_pct"] = 1.5
+        feature = favorable_feature()
+        feature["setup_label"] = "above_vwap_strength_continuation"
+        candidate = evaluate_auto_buy_candidate(
+            symbol="AMZN",
+            session=session,
+            feature=feature,
+            context=buy_context(),
+            held=set(),
+            signal_source="internal_bar_only",
+        )
+    finally:
+        auto_buy_manager.learned_auto_buy_tiebreaker_decision = old_tiebreaker
+        auto_buy_manager.is_cash_mode = old_cash_mode
+        auto_buy_manager.AUTO_BUY_LEARNED_TIEBREAKER_ENABLED = old_enabled
+
+    assert_equal(candidate["decision"], "skip", "decision")
+    assert_equal(candidate["severity"], "blocked", "severity")
+    assert_equal(candidate["learned_tiebreaker_allowed"], False, "tiebreaker allowed")
+    assert_equal(candidate["learned_tiebreaker_applied"], False, "tiebreaker applied")
+
+
+def test_learned_tiebreaker_can_override_soft_intelligence_blocks_in_paper_mode():
+    old_tiebreaker = auto_buy_manager.learned_auto_buy_tiebreaker_decision
+    old_cash_mode = auto_buy_manager.is_cash_mode
+    old_enabled = auto_buy_manager.AUTO_BUY_LEARNED_TIEBREAKER_ENABLED
+    old_gap = auto_buy_manager.AUTO_BUY_LEARNED_TIEBREAKER_MAX_THRESHOLD_GAP
+    auto_buy_manager.learned_auto_buy_tiebreaker_decision = lambda candidate: {
+        "qualified": True,
+        "reason": "pattern_bucket_passed",
+        "evidence": {"qualified_bucket": "pattern"},
+    }
+    auto_buy_manager.is_cash_mode = lambda: False
+    auto_buy_manager.AUTO_BUY_LEARNED_TIEBREAKER_ENABLED = True
+    auto_buy_manager.AUTO_BUY_LEARNED_TIEBREAKER_MAX_THRESHOLD_GAP = 20.0
+    try:
+        session = strong_session()
+        session["trend_label"] = "downtrend"
+        session["trend_score"] = -3
+        session["momentum_15m_pct"] = 0.25
+        session["momentum_30m_pct"] = 0.45
+        feature = favorable_feature()
+        feature["setup_score"] = 72
+        candidate = evaluate_auto_buy_candidate(
+            symbol="AMZN",
+            session=session,
+            feature=feature,
+            context=buy_context(),
+            held=set(),
+            signal_source="internal_bar_only",
+        )
+    finally:
+        auto_buy_manager.learned_auto_buy_tiebreaker_decision = old_tiebreaker
+        auto_buy_manager.is_cash_mode = old_cash_mode
+        auto_buy_manager.AUTO_BUY_LEARNED_TIEBREAKER_ENABLED = old_enabled
+        auto_buy_manager.AUTO_BUY_LEARNED_TIEBREAKER_MAX_THRESHOLD_GAP = old_gap
+
+    assert_equal(candidate["decision"], "strong_buy_candidate", "decision")
+    assert_equal(candidate["learned_tiebreaker_applied"], True, "tiebreaker applied")
+    assert_equal(candidate["learned_tiebreaker_soft_blocks_only"], True, "soft blocks only")
+    assert_equal(candidate["learned_tiebreaker_overrode_soft_blocks"], True, "soft block override")
+    assert_equal(candidate["hard_block_reason"], None, "hard block reason")
+    if "negative_session" not in candidate["learned_tiebreaker_original_hard_block_reason"]:
+        raise AssertionError("missing original soft block reason")
+
+
 def main():
     tests = [
         test_strong_internal_candidate_scores_as_buy_candidate,
@@ -850,6 +981,9 @@ def main():
         test_auto_buy_capacity_allows_replacement_when_flat_under_gross_cap,
         test_auto_buy_capacity_blocks_at_gross_daily_circuit_cap,
         test_bucking_fading_tape_does_not_hard_block,
+        test_learned_tiebreaker_can_promote_watch_candidate_in_paper_mode,
+        test_learned_tiebreaker_does_not_override_hard_blocks,
+        test_learned_tiebreaker_can_override_soft_intelligence_blocks_in_paper_mode,
         test_log_auto_buy_order_writes_canonical_trade_row,
         test_log_candidate_mirrors_to_candidate_universe,
     ]

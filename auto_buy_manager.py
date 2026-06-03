@@ -66,6 +66,10 @@ from risk.exposure import any_cluster_limit_hit, cluster_exposure
 from services.candidate_universe_service import CandidateUniverseService
 from services.ai_momentum_pattern_service import deterministic_momentum_pattern
 from services.candidate_reference_service import candidate_reference_service
+from services.learned_auto_buy_tiebreaker_service import (
+    LearnedAutoBuyThresholds,
+    LearnedAutoBuyTiebreakerService,
+)
 from services.policies.entry_policy import ml_prediction_bucket
 from runtime_config import is_cash_mode
 from strategy_memory import memory_for_signal
@@ -145,8 +149,42 @@ AUTO_BUY_EXTREME_CHASE_BLOCK_SESSION_RETURN_PCT = float(
 AUTO_BUY_EXTREME_CHASE_BLOCK_VWAP_DIST_PCT = float(
     os.getenv("AUTO_BUY_EXTREME_CHASE_BLOCK_VWAP_DIST_PCT", "1.25")
 )
+AUTO_BUY_LEARNED_TIEBREAKER_ENABLED = os.getenv(
+    "AUTO_BUY_LEARNED_TIEBREAKER_ENABLED", "true"
+).strip().lower() in ("1", "true", "yes", "on")
+AUTO_BUY_LEARNED_TIEBREAKER_MIN_SAMPLE_SIZE = int(
+    os.getenv("AUTO_BUY_LEARNED_TIEBREAKER_MIN_SAMPLE_SIZE", "25")
+)
+AUTO_BUY_LEARNED_TIEBREAKER_MIN_WIN_RATE = float(
+    os.getenv("AUTO_BUY_LEARNED_TIEBREAKER_MIN_WIN_RATE", "0.55")
+)
+AUTO_BUY_LEARNED_TIEBREAKER_MIN_AVG_RETURN_PCT = float(
+    os.getenv("AUTO_BUY_LEARNED_TIEBREAKER_MIN_AVG_RETURN_PCT", "0.20")
+)
+AUTO_BUY_LEARNED_TIEBREAKER_MIN_AVG_MFE_PCT = float(
+    os.getenv("AUTO_BUY_LEARNED_TIEBREAKER_MIN_AVG_MFE_PCT", "1.00")
+)
+AUTO_BUY_LEARNED_TIEBREAKER_MAX_AVG_MAE_PCT = float(
+    os.getenv("AUTO_BUY_LEARNED_TIEBREAKER_MAX_AVG_MAE_PCT", "-1.50")
+)
+AUTO_BUY_LEARNED_TIEBREAKER_LOOKBACK_DAYS = int(
+    os.getenv("AUTO_BUY_LEARNED_TIEBREAKER_LOOKBACK_DAYS", "10")
+)
+AUTO_BUY_LEARNED_TIEBREAKER_MAX_THRESHOLD_GAP = float(
+    os.getenv("AUTO_BUY_LEARNED_TIEBREAKER_MAX_THRESHOLD_GAP", "4.0")
+)
+LEARNED_TIEBREAKER_SOFT_BLOCK_PREFIXES = (
+    "bias_avoid",
+    "setup_avoid",
+    "negative_session",
+    "15m_falling",
+    "30m_falling",
+    "ml_prediction_weak",
+    "ml_prediction_weak_bucket",
+)
 
 _prediction_context_cache: dict[str, dict[str, Any]] = {}
+_learned_tiebreaker_cache: dict[tuple[str, str, str], dict[str, Any]] = {}
 
 
 def _to_float(value: Any, default: float | None = None) -> float | None:
@@ -173,6 +211,15 @@ def internal_signal_execution_enabled() -> bool:
 
 def tradingview_webhook_required_for_execution() -> bool:
     return not (AUTO_BUY_ALLOW_TRADINGVIEW_LIVE or internal_signal_execution_enabled())
+
+
+def learned_tiebreaker_soft_block_only(block_reasons: list[str]) -> bool:
+    if not block_reasons:
+        return False
+    for reason in block_reasons:
+        if not str(reason).startswith(LEARNED_TIEBREAKER_SOFT_BLOCK_PREFIXES):
+            return False
+    return True
 
 
 def _parse_et_timestamp(raw_ts: Any) -> datetime | None:
@@ -228,6 +275,36 @@ def auto_buy_prediction_context(symbol: str) -> dict[str, Any]:
         )
 
     _prediction_context_cache[symbol] = dict(result)
+    return result
+
+
+def learned_auto_buy_tiebreaker_decision(candidate: dict[str, Any]) -> dict[str, Any]:
+    target_date = _today()
+    cache_key = (
+        target_date,
+        str(candidate.get("symbol") or "").upper(),
+        str(candidate.get("symbol_pattern") or candidate.get("setup_label") or "unknown"),
+    )
+    if cache_key in _learned_tiebreaker_cache:
+        return dict(_learned_tiebreaker_cache[cache_key])
+    thresholds = LearnedAutoBuyThresholds(
+        min_sample_size=AUTO_BUY_LEARNED_TIEBREAKER_MIN_SAMPLE_SIZE,
+        min_win_rate=AUTO_BUY_LEARNED_TIEBREAKER_MIN_WIN_RATE,
+        min_avg_return_pct=AUTO_BUY_LEARNED_TIEBREAKER_MIN_AVG_RETURN_PCT,
+        min_avg_mfe_pct=AUTO_BUY_LEARNED_TIEBREAKER_MIN_AVG_MFE_PCT,
+        max_avg_mae_pct=AUTO_BUY_LEARNED_TIEBREAKER_MAX_AVG_MAE_PCT,
+        lookback_days=AUTO_BUY_LEARNED_TIEBREAKER_LOOKBACK_DAYS,
+    )
+    decision = LearnedAutoBuyTiebreakerService(
+        CandidateUniverseRepository(DB_PATH),
+        thresholds,
+    ).decide(candidate, target_date=target_date)
+    result = {
+        "qualified": decision.qualified,
+        "reason": decision.reason,
+        "evidence": decision.evidence,
+    }
+    _learned_tiebreaker_cache[cache_key] = dict(result)
     return result
 
 
@@ -911,6 +988,13 @@ def evaluate_auto_buy_candidate(
     elif signal_source == "tradingview_alert":
         reasons.append(f"internal_signal_execution:{execution_signal_mode}")
 
+    pattern = auto_buy_symbol_pattern(
+        symbol=symbol,
+        session=session,
+        feature=feature,
+        context=context,
+    )
+
     if hard_block_reasons:
         decision = "skip"
         severity = "blocked"
@@ -931,12 +1015,50 @@ def evaluate_auto_buy_candidate(
         decision = "skip"
         severity = "low"
 
-    pattern = auto_buy_symbol_pattern(
-        symbol=symbol,
-        session=session,
-        feature=feature,
-        context=context,
+    learned_tiebreaker_applied = False
+    learned_tiebreaker_reason = None
+    learned_tiebreaker_evidence: dict[str, Any] = {}
+    learned_tiebreaker_overrode_soft_blocks = False
+    learned_tiebreaker_original_hard_block_reason = hard_block_reason
+    learned_tiebreaker_soft_blocks_only = learned_tiebreaker_soft_block_only(hard_block_reasons)
+    threshold_gap = round(float(strong_threshold) - float(score), 4)
+    learned_tiebreaker_allowed = (
+        AUTO_BUY_LEARNED_TIEBREAKER_ENABLED
+        and not is_cash_mode()
+        and not requires_webhook
+        and (not hard_block_reasons or learned_tiebreaker_soft_blocks_only)
+        and decision in {"watch", "skip"}
+        and score >= AUTO_BUY_WATCH_SCORE
+        and threshold_gap <= AUTO_BUY_LEARNED_TIEBREAKER_MAX_THRESHOLD_GAP
     )
+    if learned_tiebreaker_allowed:
+        tiebreaker = learned_auto_buy_tiebreaker_decision(
+            {
+                "symbol": symbol,
+                "score": score,
+                "threshold": strong_threshold,
+                "setup_label": setup_label,
+                "session_trend_label": label,
+                **pattern,
+            }
+        )
+        learned_tiebreaker_reason = tiebreaker.get("reason")
+        evidence = tiebreaker.get("evidence")
+        learned_tiebreaker_evidence = evidence if isinstance(evidence, dict) else {}
+        if tiebreaker.get("qualified"):
+            decision = "strong_buy_candidate"
+            severity = "high"
+            learned_tiebreaker_applied = True
+            if hard_block_reasons:
+                learned_tiebreaker_overrode_soft_blocks = True
+                hard_block_reason = None
+            reasons.append(
+                "learned_tiebreaker_promoted:"
+                f"{learned_tiebreaker_reason}:"
+                f"gap={threshold_gap:.2f}"
+            )
+        else:
+            reasons.append(f"learned_tiebreaker_observed:{learned_tiebreaker_reason}")
     return {
         "symbol": symbol,
         "signal_source": signal_source,
@@ -965,6 +1087,19 @@ def evaluate_auto_buy_candidate(
         "strategy_memory_min_setup_score": learned_min_setup_score,
         "strategy_memory_reason": strategy_memory.get("reason"),
         "strategy_memory_available": bool(strategy_memory.get("available")),
+        "learned_tiebreaker_enabled": bool(AUTO_BUY_LEARNED_TIEBREAKER_ENABLED),
+        "learned_tiebreaker_allowed": bool(learned_tiebreaker_allowed),
+        "learned_tiebreaker_applied": bool(learned_tiebreaker_applied),
+        "learned_tiebreaker_reason": learned_tiebreaker_reason,
+        "learned_tiebreaker_evidence": learned_tiebreaker_evidence,
+        "learned_tiebreaker_soft_blocks_only": bool(learned_tiebreaker_soft_blocks_only),
+        "learned_tiebreaker_overrode_soft_blocks": bool(learned_tiebreaker_overrode_soft_blocks),
+        "learned_tiebreaker_original_hard_block_reason": learned_tiebreaker_original_hard_block_reason,
+        "learned_tiebreaker_runtime_effect": (
+            "paper_only_tiebreaker_authority"
+            if learned_tiebreaker_applied
+            else "observe_only_no_live_authority"
+        ),
         "early_constructive_build": bool(early_constructive_build),
         "mature_chase": bool(mature_chase),
         "extreme_chase": bool(extreme_chase),

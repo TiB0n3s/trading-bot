@@ -1083,6 +1083,11 @@ def render(candidates: list[dict[str, Any]], scope: str, market_open: bool) -> N
     print(f"  scope          : {scope}")
     print(f"  market_open    : {market_open}")
     print(f"  live_buy_flag  : {AUTO_BUY_LIVE_BUYS}")
+    print(
+        "  signal_mode    : "
+        f"{'internal_all' if internal_signal_execution_enabled() else 'legacy_source_gate'}"
+    )
+    print(f"  webhook_required: {tradingview_webhook_required_for_execution()}")
     print(f"  min_score      : {AUTO_BUY_MIN_SCORE}")
     print(f"  active_cap     : {AUTO_BUY_MAX_ACTIVE_POSITIONS}")
     print(f"  daily_gross_cap: {AUTO_BUY_MAX_DAILY_ORDERS}")

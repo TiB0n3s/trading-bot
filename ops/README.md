@@ -145,6 +145,23 @@ bar-derived candidate path while preserving `signal_source=tradingview_alert`
 as historical/source metadata. Use
 `python3 ops_check.py signal-source-readiness YYYY-MM-DD` to verify that strong
 legacy-cohort candidates are not being blocked solely by webhook-source gating.
+For paper-mode breadth across the approved universe, use:
+
+```bash
+AUTO_BUY_SIGNAL_MODE=internal_all
+AUTO_BUY_LIVE_BUYS=true
+AUTO_BUY_MAX_ORDERS_PER_RUN=2
+AUTO_BUY_MAX_ACTIVE_POSITIONS=10
+AUTO_BUY_MAX_ACTIVE_POSITIONS_OVERRIDE=10
+AUTO_BUY_MAX_DAILY_ORDERS=24
+AUTO_BUY_MAX_DAILY_ORDERS_OVERRIDE=24
+AUTO_BUY_COOLDOWN_MINUTES=20
+AUTO_BUY_MAX_SIGNALS_PER_SYMBOL=2
+```
+
+The override variables matter for the installed cron entry, which intentionally
+defaults to a smaller 3/12 exposure profile unless `/etc/trading-bot.env`
+provides explicit paper-mode overrides.
 `auto_buy_outcome_report.py` compares captured candidates against forward
 feature-snapshot returns, score buckets, and the TradingView signal baseline.
 `strong_day_participation_report.py --write-db` persists full-universe

@@ -22,6 +22,19 @@ from auto_buy_manager import should_collect_candidates
 import auto_buy_manager
 
 
+AUTO_BUY_RUNTIME_DEFAULTS = {
+    "AUTO_BUY_SIGNAL_MODE": "legacy_source_gate",
+    "TRADINGVIEW_ALERTS_DEPRECATED": False,
+    "AUTO_BUY_ALLOW_TRADINGVIEW_LIVE": False,
+    "AUTO_BUY_LIVE_BUYS": False,
+}
+
+
+def reset_auto_buy_runtime_defaults():
+    for key, value in AUTO_BUY_RUNTIME_DEFAULTS.items():
+        setattr(auto_buy_manager, key, value)
+
+
 def assert_equal(actual, expected, label):
     if actual != expected:
         raise AssertionError(f"{label}: expected {expected!r}, got {actual!r}")
@@ -693,6 +706,10 @@ def main():
 
     for test in tests:
         old_prediction_context = auto_buy_manager.auto_buy_prediction_context
+        old_runtime = {
+            key: getattr(auto_buy_manager, key)
+            for key in AUTO_BUY_RUNTIME_DEFAULTS
+        }
         auto_buy_manager.auto_buy_prediction_context = lambda symbol: {
             "available": False,
             "ml_prediction_bucket": "unknown",
@@ -700,10 +717,13 @@ def main():
             "ml_prediction_sample_size": None,
         }
         try:
+            reset_auto_buy_runtime_defaults()
             test()
             print(f"[OK] {test.__name__}")
         finally:
             auto_buy_manager.auto_buy_prediction_context = old_prediction_context
+            for key, value in old_runtime.items():
+                setattr(auto_buy_manager, key, value)
 
     print()
     print(f"All {len(tests)} auto-buy manager tests passed.")

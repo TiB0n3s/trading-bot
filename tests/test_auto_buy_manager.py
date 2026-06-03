@@ -343,6 +343,10 @@ def test_strategy_memory_avoid_blocks_auto_buy_candidate():
 
 
 def test_tradingview_symbols_need_higher_auto_buy_threshold():
+    # This test requires legacy_source_gate so the webhook threshold penalty applies.
+    # The live env may have internal_all which disables the penalty.
+    reset_auto_buy_runtime_defaults()
+
     session = strong_session()
     session["trend_label"] = "developing_uptrend"
     session["trend_score"] = 3

@@ -41,6 +41,11 @@ os.environ.setdefault("ANTHROPIC_API_KEY", "test-key")
 
 import decision_engine as _de
 
+# _client is lazily initialised on first real API call, so it is None at import
+# time. seed it with a MagicMock so that patch.object(_de._client.messages, …)
+# has a real object to target in every test.
+_de._client = MagicMock()
+
 # ---------------------------------------------------------------------------
 # Assertion helpers
 # ---------------------------------------------------------------------------
@@ -101,7 +106,7 @@ def _capture_create(response_text: str):
 # ---------------------------------------------------------------------------
 
 def test_evaluate_signal_happy_path():
-    with patch.object(_de.client.messages, "create",
+    with patch.object(_de._client.messages, "create",
                       return_value=_mock_message(json.dumps(_VALID_RESPONSE))):
         with patch.object(_de, "_get_symbol_history", return_value={"sample_size": 0}):
             result = _de.evaluate_signal(
@@ -116,7 +121,7 @@ def test_evaluate_signal_happy_path():
 
 
 def test_evaluate_signal_json_parse_error_rejects_safely():
-    with patch.object(_de.client.messages, "create",
+    with patch.object(_de._client.messages, "create",
                       return_value=_mock_message("not valid json {")):
         result = _de.evaluate_signal(
             {"action": "buy", "symbol": "AAPL", "price": 200.0},
@@ -130,7 +135,7 @@ def test_evaluate_signal_json_parse_error_rejects_safely():
 
 
 def test_evaluate_signal_api_exception_rejects_safely():
-    with patch.object(_de.client.messages, "create",
+    with patch.object(_de._client.messages, "create",
                       side_effect=Exception("connection refused")):
         result = _de.evaluate_signal(
             {"action": "buy", "symbol": "AAPL", "price": 200.0},
@@ -145,7 +150,7 @@ def test_evaluate_signal_api_exception_rejects_safely():
 
 def test_evaluate_signal_strips_json_code_fence():
     wrapped = "```json\n" + json.dumps(_VALID_RESPONSE) + "\n```"
-    with patch.object(_de.client.messages, "create",
+    with patch.object(_de._client.messages, "create",
                       return_value=_mock_message(wrapped)):
         with patch.object(_de, "_get_symbol_history", return_value={"sample_size": 0}):
             result = _de.evaluate_signal(
@@ -157,7 +162,7 @@ def test_evaluate_signal_strips_json_code_fence():
 
 def test_evaluate_signal_strips_bare_code_fence():
     wrapped = "```\n" + json.dumps(_VALID_RESPONSE) + "\n```"
-    with patch.object(_de.client.messages, "create",
+    with patch.object(_de._client.messages, "create",
                       return_value=_mock_message(wrapped)):
         with patch.object(_de, "_get_symbol_history", return_value={"sample_size": 0}):
             result = _de.evaluate_signal(
@@ -173,7 +178,7 @@ def test_evaluate_signal_strips_bare_code_fence():
 
 def test_evaluate_signal_removes_diagnostic_keys():
     fake_create, captured = _capture_create(json.dumps(_VALID_RESPONSE))
-    with patch.object(_de.client.messages, "create", side_effect=fake_create):
+    with patch.object(_de._client.messages, "create", side_effect=fake_create):
         with patch.object(_de, "_get_symbol_history", return_value={"sample_size": 0}):
             _de.evaluate_signal(
                 {"action": "buy", "symbol": "AAPL", "price": 200.0},
@@ -197,7 +202,7 @@ def test_evaluate_signal_removes_diagnostic_keys():
 
 def test_evaluate_signal_preserves_non_diagnostic_keys():
     fake_create, captured = _capture_create(json.dumps(_VALID_RESPONSE))
-    with patch.object(_de.client.messages, "create", side_effect=fake_create):
+    with patch.object(_de._client.messages, "create", side_effect=fake_create):
         with patch.object(_de, "_get_symbol_history", return_value={"sample_size": 0}):
             _de.evaluate_signal(
                 {"action": "buy", "symbol": "AAPL", "price": 200.0},
@@ -214,7 +219,7 @@ def test_evaluate_signal_preserves_non_diagnostic_keys():
 
 def test_evaluate_signal_injects_symbol_history_for_buy():
     fake_create, captured = _capture_create(json.dumps(_VALID_RESPONSE))
-    with patch.object(_de.client.messages, "create", side_effect=fake_create):
+    with patch.object(_de._client.messages, "create", side_effect=fake_create):
         with patch.object(_de, "_get_symbol_history",
                           return_value={"sample_size": 3, "win_rate": 0.667}) as mock_hist:
             _de.evaluate_signal(
@@ -232,7 +237,7 @@ def test_evaluate_signal_injects_symbol_history_for_buy():
 
 def test_evaluate_signal_no_symbol_history_for_sell():
     fake_create, captured = _capture_create(json.dumps(_VALID_RESPONSE))
-    with patch.object(_de.client.messages, "create", side_effect=fake_create):
+    with patch.object(_de._client.messages, "create", side_effect=fake_create):
         with patch.object(_de, "_get_symbol_history") as mock_hist:
             _de.evaluate_signal(
                 {"action": "sell", "symbol": "AAPL", "price": 200.0},
@@ -247,7 +252,7 @@ def test_evaluate_signal_no_symbol_history_for_sell():
 
 
 def test_evaluate_signal_none_account_state_safe():
-    with patch.object(_de.client.messages, "create",
+    with patch.object(_de._client.messages, "create",
                       return_value=_mock_message(json.dumps(_VALID_RESPONSE))):
         with patch.object(_de, "_get_symbol_history", return_value={"sample_size": 0}):
             result = _de.evaluate_signal(
@@ -263,7 +268,7 @@ def test_evaluate_signal_none_account_state_safe():
 
 def test_evaluate_signal_uses_haiku_model():
     fake_create, captured = _capture_create(json.dumps(_VALID_RESPONSE))
-    with patch.object(_de.client.messages, "create", side_effect=fake_create):
+    with patch.object(_de._client.messages, "create", side_effect=fake_create):
         with patch.object(_de, "_get_symbol_history", return_value={"sample_size": 0}):
             _de.evaluate_signal({"action": "buy", "symbol": "AAPL", "price": 200.0}, {})
 
@@ -272,7 +277,7 @@ def test_evaluate_signal_uses_haiku_model():
 
 def test_evaluate_signal_timeout_configured():
     fake_create, captured = _capture_create(json.dumps(_VALID_RESPONSE))
-    with patch.object(_de.client.messages, "create", side_effect=fake_create):
+    with patch.object(_de._client.messages, "create", side_effect=fake_create):
         with patch.object(_de, "_get_symbol_history", return_value={"sample_size": 0}):
             _de.evaluate_signal({"action": "buy", "symbol": "AAPL", "price": 200.0}, {})
 
@@ -283,7 +288,7 @@ def test_evaluate_signal_timeout_configured():
 
 def test_evaluate_signal_system_prompt_set():
     fake_create, captured = _capture_create(json.dumps(_VALID_RESPONSE))
-    with patch.object(_de.client.messages, "create", side_effect=fake_create):
+    with patch.object(_de._client.messages, "create", side_effect=fake_create):
         with patch.object(_de, "_get_symbol_history", return_value={"sample_size": 0}):
             _de.evaluate_signal({"action": "buy", "symbol": "AAPL", "price": 200.0}, {})
 
@@ -305,12 +310,8 @@ def _make_row(won, pnl_pct, holding_min, direction="bullish", strength="confirme
 
 
 def _patch_db(rows):
-    """Stub db.get_connection to return rows from matched_trades query."""
-    con = MagicMock()
-    con.execute.return_value.fetchall.return_value = rows
-    con.__enter__ = MagicMock(return_value=con)
-    con.__exit__ = MagicMock(return_value=False)
-    return patch("db.get_connection", return_value=con)
+    """Stub trades_repo.recent_symbol_outcomes to return fixture rows."""
+    return patch("repositories.trades_repo.recent_symbol_outcomes", return_value=rows)
 
 
 def test_symbol_history_no_rows():
@@ -382,7 +383,7 @@ def test_symbol_history_per_setup_absent_without_trend_context():
 
 
 def test_symbol_history_db_exception_fail_open():
-    with patch("db.get_connection", side_effect=Exception("db locked")):
+    with patch("repositories.trades_repo.recent_symbol_outcomes", side_effect=Exception("db locked")):
         result = _de._get_symbol_history("AAPL")
     assert_equal(result, {"sample_size": 0}, "fail-open on DB exception")
 

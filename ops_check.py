@@ -52,6 +52,7 @@ Usage:
   python3 ops_check.py research-export YYYY-MM-DD
   python3 ops_check.py lifecycle-analysis
   python3 ops_check.py decision-lifecycle-dashboard
+  python3 ops_check.py decision-quality-review
   python3 ops_check.py exit-snapshot-backfill YYYY-MM-DD [--dry-run]
   python3 ops_check.py candidate-universe
   python3 ops_check.py candidate-outcome-backfill YYYY-MM-DD [--dry-run]
@@ -63,6 +64,7 @@ Usage:
   python3 ops_check.py bar-pattern-backfill YYYY-MM-DD --symbol AAPL [--dry-run]
   python3 ops_check.py learning-readiness START_DATE [END_DATE]
   python3 ops_check.py learning-effectiveness START_DATE [END_DATE]
+  python3 ops_check.py active-learning START_DATE [END_DATE]
   python3 ops_check.py rollout-contract
   python3 ops_check.py advisory-authority-report
   python3 ops_check.py ai-intelligence-review
@@ -104,6 +106,7 @@ from services.ops_checks.feature_checks import run_feature_health, run_feature_w
 from services.ops_checks.intelligence_checks import run_intelligence_summary
 from services.ops_checks.lifecycle_checks import run_lifecycle_analysis
 from services.ops_checks.lifecycle_dashboard_checks import run_lifecycle_dashboard
+from services.ops_checks.decision_quality_checks import run_decision_quality_review
 from services.ops_checks.exit_snapshot_backfill_checks import run_exit_snapshot_backfill
 from services.ops_checks.candidate_universe_checks import run_candidate_universe_report
 from services.ops_checks.candidate_outcome_backfill_checks import run_candidate_outcome_backfill
@@ -117,6 +120,7 @@ from services.ops_checks.learning_readiness_checks import (
     run_learning_effectiveness,
     run_learning_readiness,
 )
+from services.ops_checks.active_learning_checks import run_active_learning_integration
 from services.ops_checks.rollout_contract_checks import run_rollout_contract_report
 from services.ops_checks.advisory_authority_checks import run_advisory_authority_report
 from services.ops_checks.ai_intelligence_review_checks import run_ai_intelligence_review
@@ -640,6 +644,20 @@ def decision_lifecycle_dashboard(target_date):
     )
 
 
+def decision_quality_review(target_date):
+    symbol = None
+    if "--symbol" in sys.argv:
+        idx = sys.argv.index("--symbol")
+        if idx + 1 < len(sys.argv):
+            symbol = sys.argv[idx + 1]
+    return run_decision_quality_review(
+        target_date,
+        base_dir=BASE_DIR,
+        symbol=symbol,
+        samples=_int_option("--samples", 20),
+    )
+
+
 def exit_snapshot_backfill(target_date):
     end_date = None
     if len(sys.argv) > 3 and not sys.argv[3].startswith("--"):
@@ -809,6 +827,23 @@ def learning_effectiveness(start_date):
         min_pattern_sample_size=_int_option("--pattern-min-sample-size", 30),
         min_calibration_sample_size=_int_option("--calibration-min-sample-size", 5),
         full_readiness_target=_int_option("--full-readiness-target", 750),
+    )
+
+
+def active_learning(start_date):
+    end_date = None
+    if len(sys.argv) > 3 and not sys.argv[3].startswith("--"):
+        end_date = sys.argv[3]
+    symbol = None
+    if "--symbol" in sys.argv:
+        idx = sys.argv.index("--symbol")
+        if idx + 1 < len(sys.argv):
+            symbol = sys.argv[idx + 1]
+    return run_active_learning_integration(
+        start_date,
+        end_date=end_date,
+        base_dir=BASE_DIR,
+        symbol=symbol,
     )
 
 
@@ -1067,6 +1102,9 @@ def main():
     if command == "decision-lifecycle-dashboard":
         return 0 if decision_lifecycle_dashboard(target_date) else 1
 
+    if command == "decision-quality-review":
+        return 0 if decision_quality_review(target_date) else 1
+
     if command == "exit-snapshot-backfill":
         return 0 if exit_snapshot_backfill(target_date) else 1
 
@@ -1099,6 +1137,9 @@ def main():
 
     if command == "learning-effectiveness":
         return 0 if learning_effectiveness(target_date) else 1
+
+    if command == "active-learning":
+        return 0 if active_learning(target_date) else 1
 
     if command == "rollout-contract":
         return 0 if rollout_contract(target_date) else 1

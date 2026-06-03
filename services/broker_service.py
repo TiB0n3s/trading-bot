@@ -39,6 +39,12 @@ class BrokerService:
             qty_override=qty_override,
         )
 
+    def last_order_failure_reason(self) -> str | None:
+        getter = getattr(self.broker, "get_last_order_failure_reason", None)
+        if getter is None:
+            return None
+        return getter()
+
     def list_positions(self) -> list[Any]:
         return list(self.broker.api.list_positions() or [])
 

@@ -493,6 +493,39 @@ def test_internal_all_mode_reaches_normal_auto_buy_gates_for_tradingview_symbols
     assert_equal(candidate["live_block_reason"], "capacity stopped", "block reason")
 
 
+def test_cash_safe_daily_symbol_cap_only_applies_in_cash_modes():
+    old_is_cash_mode = auto_buy_manager.is_cash_mode
+    old_buys_today = auto_buy_manager.app_approved_buys_today
+    old_buy_cooldown = auto_buy_manager.app_buy_cooldown_active
+    old_recent_sell = auto_buy_manager.recent_sell_active
+    old_positions = auto_buy_manager.broker_positions_and_balance
+
+    auto_buy_manager.app_approved_buys_today = lambda symbol: (
+        auto_buy_manager.CASH_SAFE_MAX_NEW_BUYS_PER_SYMBOL_PER_DAY
+    )
+    auto_buy_manager.app_buy_cooldown_active = lambda symbol: (False, "no app cooldown")
+    auto_buy_manager.recent_sell_active = lambda symbol: (False, "no recent app sell")
+    auto_buy_manager.broker_positions_and_balance = lambda: ([], 10_000.0)
+
+    try:
+        auto_buy_manager.is_cash_mode = lambda: False
+        ok, reason, details = auto_buy_manager.risk_cross_check("AMZN")
+        assert_equal(ok, True, "paper risk check")
+        assert_equal(reason, "risk cross-check passed", "paper risk reason")
+
+        auto_buy_manager.is_cash_mode = lambda: True
+        ok, reason, details = auto_buy_manager.risk_cross_check("AMZN")
+        assert_equal(ok, False, "cash risk check")
+        if "app daily symbol buy limit reached" not in reason:
+            raise AssertionError(f"expected daily symbol cap, got {reason!r}")
+    finally:
+        auto_buy_manager.is_cash_mode = old_is_cash_mode
+        auto_buy_manager.app_approved_buys_today = old_buys_today
+        auto_buy_manager.app_buy_cooldown_active = old_buy_cooldown
+        auto_buy_manager.recent_sell_active = old_recent_sell
+        auto_buy_manager.broker_positions_and_balance = old_positions
+
+
 def test_auto_buy_capacity_blocks_when_active_position_cap_is_full():
     old_active_cap = auto_buy_manager.AUTO_BUY_MAX_ACTIVE_POSITIONS
     old_daily_cap = auto_buy_manager.AUTO_BUY_MAX_DAILY_ORDERS
@@ -812,6 +845,7 @@ def main():
         test_live_buy_requires_market_open_and_env_flag,
         test_live_auto_buy_does_not_execute_tradingview_alert_symbols_by_default,
         test_internal_all_mode_reaches_normal_auto_buy_gates_for_tradingview_symbols,
+        test_cash_safe_daily_symbol_cap_only_applies_in_cash_modes,
         test_auto_buy_capacity_blocks_when_active_position_cap_is_full,
         test_auto_buy_capacity_allows_replacement_when_flat_under_gross_cap,
         test_auto_buy_capacity_blocks_at_gross_daily_circuit_cap,

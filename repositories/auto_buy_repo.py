@@ -220,6 +220,30 @@ def live_block_reason_rows(target_date: str, db_path=DB_PATH):
         ).fetchall()
 
 
+def decision_snapshot_rows_between(
+    start_date: str,
+    end_date: str,
+    *,
+    symbol: str | None = None,
+    db_path=DB_PATH,
+):
+    clauses = ["substr(candidate_timestamp, 1, 10) BETWEEN ? AND ?"]
+    params: list[Any] = [start_date, end_date]
+    if symbol:
+        clauses.append("UPPER(symbol) = ?")
+        params.append(symbol.upper())
+    with get_connection(db_path) as con:
+        return con.execute(
+            f"""
+            SELECT *
+            FROM auto_buy_decision_snapshots
+            WHERE {' AND '.join(clauses)}
+            ORDER BY candidate_timestamp ASC, id ASC
+            """,
+            params,
+        ).fetchall()
+
+
 def tradingview_webhook_trade_count(target_date: str, symbols: list[str], db_path=DB_PATH) -> int:
     if not symbols:
         return 0

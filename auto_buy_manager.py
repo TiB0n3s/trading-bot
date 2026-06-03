@@ -67,6 +67,7 @@ from services.candidate_universe_service import CandidateUniverseService
 from services.ai_momentum_pattern_service import deterministic_momentum_pattern
 from services.candidate_reference_service import candidate_reference_service
 from services.policies.entry_policy import ml_prediction_bucket
+from runtime_config import is_cash_mode
 from strategy_memory import memory_for_signal
 from symbols_config import (
     APPROVED_SYMBOLS_LIST,
@@ -398,7 +399,10 @@ def broker_positions_and_balance() -> tuple[list[dict[str, Any]], float]:
 
 
 def risk_cross_check(symbol: str) -> tuple[bool, str, dict[str, Any]]:
-    if app_approved_buys_today(symbol) >= CASH_SAFE_MAX_NEW_BUYS_PER_SYMBOL_PER_DAY:
+    if (
+        is_cash_mode()
+        and app_approved_buys_today(symbol) >= CASH_SAFE_MAX_NEW_BUYS_PER_SYMBOL_PER_DAY
+    ):
         return False, (
             f"app daily symbol buy limit reached: buys_today>="
             f"{CASH_SAFE_MAX_NEW_BUYS_PER_SYMBOL_PER_DAY}"
@@ -1133,7 +1137,12 @@ def maybe_execute_auto_buy(candidate: dict[str, Any], market_open: bool, live_re
         client_order_id=client_order_id(candidate["symbol"]),
     )
     if not order:
-        candidate["live_block_reason"] = "broker returned no order"
+        failure_reason = broker_service.last_order_failure_reason()
+        candidate["broker_failure_reason"] = failure_reason
+        candidate["live_block_reason"] = (
+            "broker returned no order"
+            + (f": {failure_reason}" if failure_reason else ": unknown")
+        )
     else:
         try:
             log_auto_buy_order(candidate, order)

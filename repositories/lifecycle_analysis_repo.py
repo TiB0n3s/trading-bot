@@ -386,3 +386,383 @@ class LifecycleAnalysisRepository:
                 """,
                 params,
             ).fetchall()
+
+    def approved_trade_rows_without_snapshots(
+        self,
+        *,
+        start_date: str,
+        end_date: str,
+        symbol: str | None = None,
+    ) -> list[Any]:
+        """Approved trade rows that predate or bypass decision snapshot capture."""
+        with get_connection(self.db_path) as con:
+            if not self._table_exists(con, "trades"):
+                return []
+
+            trade_cols = self._table_columns(con, "trades")
+            matched_cols = self._table_columns(con, "matched_trades")
+            exit_cols = self._table_columns(con, "exit_snapshots")
+            decision_cols = self._table_columns(con, "decision_snapshots")
+            sel = self._select
+
+            if "timestamp" not in trade_cols or "action" not in trade_cols:
+                return []
+
+            decision_join = ""
+            decision_absent_clause = "1=1"
+            if (
+                self._table_exists(con, "decision_snapshots")
+                and "trade_id" in decision_cols
+                and "id" in trade_cols
+            ):
+                decision_join = "LEFT JOIN decision_snapshots ds ON ds.trade_id = t.id"
+                decision_absent_clause = "ds.id IS NULL"
+            candidate_join = ""
+            candidate_json_select = "NULL AS candidate_json"
+            if self._table_exists(con, "candidate_universe"):
+                candidate_cols = self._table_columns(con, "candidate_universe")
+                if {
+                    "symbol",
+                    "candidate_ts",
+                    "candidate_status",
+                    "candidate_json",
+                } <= candidate_cols:
+                    candidate_join = """
+                    LEFT JOIN candidate_universe cu
+                      ON UPPER(cu.symbol) = UPPER(t.symbol)
+                     AND cu.candidate_status = 'taken'
+                     AND replace(substr(cu.candidate_ts, 1, 19), 'T', ' ') = t.timestamp
+                    """
+                    candidate_json_select = "cu.candidate_json AS candidate_json"
+
+            can_join_matched = (
+                self._table_exists(con, "matched_trades")
+                and "entry_order_id" in matched_cols
+                and "order_id" in trade_cols
+            )
+            matched_join = ""
+            if can_join_matched:
+                matched_join = """
+                LEFT JOIN (
+                    SELECT
+                        entry_order_id,
+                        MAX(id) AS matched_trade_id,
+                        COUNT(*) AS matched_exit_count,
+                        MAX(exit_timestamp) AS matched_exit_timestamp,
+                        SUM(COALESCE(realized_pnl, 0)) AS matched_realized_pnl,
+                        MAX(exit_order_id) AS matched_exit_order_id,
+                        MAX(realized_pnl_pct) AS matched_realized_return_pct,
+                        MAX(mfe_pct) AS matched_mfe_pct,
+                        MAX(capture_ratio) AS matched_capture_ratio,
+                        MAX(exit_reason) AS matched_exit_reason
+                    FROM matched_trades
+                    WHERE entry_order_id IS NOT NULL
+                    GROUP BY entry_order_id
+                ) mt ON mt.entry_order_id = t.order_id
+                """
+            can_join_direct_exit = {
+                "id",
+                "timestamp",
+                "symbol",
+                "action",
+                "fill_price",
+                "qty",
+            } <= trade_cols
+            direct_exit_join = ""
+            if can_join_direct_exit:
+                direct_exit_join = """
+                LEFT JOIN (
+                    SELECT
+                        b.id AS entry_trade_id,
+                        COUNT(s.id) AS direct_exit_count,
+                        MAX(s.timestamp) AS direct_exit_timestamp,
+                        SUM((s.fill_price - b.fill_price) * s.qty) AS direct_realized_pnl,
+                        ROUND(
+                            SUM(((s.fill_price - b.fill_price) / b.fill_price * 100.0) * s.qty)
+                            / NULLIF(SUM(s.qty), 0),
+                            4
+                        ) AS direct_realized_return_pct,
+                        MAX(s.rejection_reason) AS direct_exit_reason
+                    FROM trades b
+                    JOIN trades s
+                      ON UPPER(s.symbol) = UPPER(b.symbol)
+                     AND LOWER(COALESCE(s.action, '')) = 'sell'
+                     AND COALESCE(s.approved, 0) = 1
+                     AND s.timestamp > b.timestamp
+                     AND s.timestamp < COALESCE(
+                        (
+                            SELECT MIN(nb.timestamp)
+                            FROM trades nb
+                            WHERE UPPER(nb.symbol) = UPPER(b.symbol)
+                              AND LOWER(COALESCE(nb.action, '')) = 'buy'
+                              AND COALESCE(nb.approved, 0) = 1
+                              AND nb.timestamp > b.timestamp
+                        ),
+                        '9999-12-31'
+                     )
+                    WHERE LOWER(COALESCE(b.action, '')) = 'buy'
+                      AND COALESCE(b.approved, 0) = 1
+                      AND b.fill_price IS NOT NULL
+                      AND b.fill_price > 0
+                    GROUP BY b.id
+                ) dx ON dx.entry_trade_id = t.id
+                """
+
+            can_join_exit_by_trade = (
+                self._table_exists(con, "exit_snapshots")
+                and "entry_trade_id" in exit_cols
+                and "id" in trade_cols
+            )
+            exit_join_terms = []
+            if can_join_exit_by_trade:
+                exit_join_terms.append("es.entry_trade_id = t.id")
+            if (
+                self._table_exists(con, "exit_snapshots")
+                and can_join_matched
+                and "matched_trade_id" in exit_cols
+            ):
+                exit_join_terms.append("es.matched_trade_id = mt.matched_trade_id")
+            exit_join = ""
+            if exit_join_terms:
+                exit_join = f"LEFT JOIN exit_snapshots es ON {' OR '.join(exit_join_terms)}"
+
+            clauses = [
+                "substr(t.timestamp, 1, 10) BETWEEN ? AND ?",
+                "LOWER(COALESCE(t.action, '')) = 'buy'",
+                "COALESCE(t.approved, 0) = 1",
+                decision_absent_clause,
+            ]
+            params: list[Any] = [start_date, end_date]
+            if symbol:
+                clauses.append("UPPER(t.symbol) = ?")
+                params.append(symbol.upper())
+
+            realized_return_pct = (
+                "COALESCE(es.realized_return_pct, mt.matched_realized_return_pct, dx.direct_realized_return_pct) AS realized_return_pct"
+                if exit_join_terms and can_join_matched and can_join_direct_exit
+                else "COALESCE(es.realized_return_pct, mt.matched_realized_return_pct) AS realized_return_pct"
+                if exit_join_terms and can_join_matched
+                else "COALESCE(es.realized_return_pct, dx.direct_realized_return_pct) AS realized_return_pct"
+                if exit_join_terms and can_join_direct_exit
+                else "COALESCE(mt.matched_realized_return_pct, dx.direct_realized_return_pct) AS realized_return_pct"
+                if can_join_matched and can_join_direct_exit
+                else (
+                    "es.realized_return_pct AS realized_return_pct"
+                    if exit_join_terms
+                    else (
+                        "mt.matched_realized_return_pct AS realized_return_pct"
+                        if can_join_matched
+                        else (
+                            "dx.direct_realized_return_pct AS realized_return_pct"
+                            if can_join_direct_exit
+                            else "NULL AS realized_return_pct"
+                        )
+                    )
+                )
+            )
+            mfe_pct = (
+                "COALESCE(es.mfe_pct, mt.matched_mfe_pct) AS mfe_pct"
+                if exit_join_terms and can_join_matched
+                else (
+                    "es.mfe_pct AS mfe_pct"
+                    if exit_join_terms
+                    else (
+                        "mt.matched_mfe_pct AS mfe_pct"
+                        if can_join_matched
+                        else "NULL AS mfe_pct"
+                    )
+                )
+            )
+            capture_ratio = (
+                "COALESCE(es.capture_ratio, mt.matched_capture_ratio) AS capture_ratio"
+                if exit_join_terms and can_join_matched
+                else (
+                    "es.capture_ratio AS capture_ratio"
+                    if exit_join_terms
+                    else (
+                        "mt.matched_capture_ratio AS capture_ratio"
+                        if can_join_matched
+                        else "NULL AS capture_ratio"
+                    )
+                )
+            )
+            exit_trigger = (
+                "COALESCE(es.exit_trigger, mt.matched_exit_reason, dx.direct_exit_reason) AS exit_trigger"
+                if exit_join_terms and can_join_matched and can_join_direct_exit
+                else "COALESCE(es.exit_trigger, mt.matched_exit_reason) AS exit_trigger"
+                if exit_join_terms and can_join_matched
+                else "COALESCE(es.exit_trigger, dx.direct_exit_reason) AS exit_trigger"
+                if exit_join_terms and can_join_direct_exit
+                else "COALESCE(mt.matched_exit_reason, dx.direct_exit_reason) AS exit_trigger"
+                if can_join_matched and can_join_direct_exit
+                else (
+                    "es.exit_trigger AS exit_trigger"
+                    if exit_join_terms
+                    else (
+                        "mt.matched_exit_reason AS exit_trigger"
+                        if can_join_matched
+                        else (
+                            "dx.direct_exit_reason AS exit_trigger"
+                            if can_join_direct_exit
+                            else "NULL AS exit_trigger"
+                        )
+                    )
+                )
+            )
+            matched_trade_id_select = (
+                "COALESCE(mt.matched_trade_id, dx.entry_trade_id) AS matched_trade_id"
+                if can_join_matched and can_join_direct_exit
+                else "mt.matched_trade_id AS matched_trade_id"
+                if can_join_matched
+                else "dx.entry_trade_id AS matched_trade_id"
+                if can_join_direct_exit
+                else "NULL AS matched_trade_id"
+            )
+            matched_exit_count_select = (
+                "COALESCE(mt.matched_exit_count, dx.direct_exit_count) AS matched_exit_count"
+                if can_join_matched and can_join_direct_exit
+                else "mt.matched_exit_count AS matched_exit_count"
+                if can_join_matched
+                else "dx.direct_exit_count AS matched_exit_count"
+                if can_join_direct_exit
+                else "NULL AS matched_exit_count"
+            )
+            matched_exit_timestamp_select = (
+                "COALESCE(mt.matched_exit_timestamp, dx.direct_exit_timestamp) AS matched_exit_timestamp"
+                if can_join_matched and can_join_direct_exit
+                else "mt.matched_exit_timestamp AS matched_exit_timestamp"
+                if can_join_matched
+                else "dx.direct_exit_timestamp AS matched_exit_timestamp"
+                if can_join_direct_exit
+                else "NULL AS matched_exit_timestamp"
+            )
+            matched_realized_pnl_select = (
+                "COALESCE(mt.matched_realized_pnl, dx.direct_realized_pnl) AS matched_realized_pnl"
+                if can_join_matched and can_join_direct_exit
+                else "mt.matched_realized_pnl AS matched_realized_pnl"
+                if can_join_matched
+                else "dx.direct_realized_pnl AS matched_realized_pnl"
+                if can_join_direct_exit
+                else "NULL AS matched_realized_pnl"
+            )
+            matched_exit_order_id_select = (
+                "mt.matched_exit_order_id AS matched_exit_order_id"
+                if can_join_matched
+                else "NULL AS matched_exit_order_id"
+            )
+            exit_timestamp_select = (
+                "COALESCE(es.exit_timestamp, mt.matched_exit_timestamp, dx.direct_exit_timestamp) AS exit_timestamp"
+                if exit_join_terms and can_join_matched and can_join_direct_exit
+                else "COALESCE(es.exit_timestamp, mt.matched_exit_timestamp) AS exit_timestamp"
+                if exit_join_terms and can_join_matched
+                else "COALESCE(es.exit_timestamp, dx.direct_exit_timestamp) AS exit_timestamp"
+                if exit_join_terms and can_join_direct_exit
+                else "COALESCE(mt.matched_exit_timestamp, dx.direct_exit_timestamp) AS exit_timestamp"
+                if can_join_matched and can_join_direct_exit
+                else "es.exit_timestamp AS exit_timestamp"
+                if exit_join_terms
+                else "mt.matched_exit_timestamp AS exit_timestamp"
+                if can_join_matched
+                else "dx.direct_exit_timestamp AS exit_timestamp"
+                if can_join_direct_exit
+                else "NULL AS exit_timestamp"
+            )
+            realized_pnl_select = (
+                "COALESCE(es.realized_pnl, mt.matched_realized_pnl, dx.direct_realized_pnl) AS realized_pnl"
+                if exit_join_terms and can_join_matched and can_join_direct_exit
+                else "COALESCE(es.realized_pnl, mt.matched_realized_pnl) AS realized_pnl"
+                if exit_join_terms and can_join_matched
+                else "COALESCE(es.realized_pnl, dx.direct_realized_pnl) AS realized_pnl"
+                if exit_join_terms and can_join_direct_exit
+                else "COALESCE(mt.matched_realized_pnl, dx.direct_realized_pnl) AS realized_pnl"
+                if can_join_matched and can_join_direct_exit
+                else "es.realized_pnl AS realized_pnl"
+                if exit_join_terms
+                else "mt.matched_realized_pnl AS realized_pnl"
+                if can_join_matched
+                else "dx.direct_realized_pnl AS realized_pnl"
+                if can_join_direct_exit
+                else "NULL AS realized_pnl"
+            )
+
+            return con.execute(
+                f"""
+                SELECT
+                    NULL AS decision_snapshot_id,
+                    t.id AS trade_id,
+                    t.timestamp AS decision_time,
+                    t.symbol,
+                    t.action,
+                    t.approved,
+                    'approved' AS final_decision,
+                    t.rejection_reason,
+                    {sel(trade_cols, "t", "order_status", "trade_order_status")},
+                    {sel(trade_cols, "t", "order_id", "trade_order_id")},
+                    {sel(trade_cols, "t", "fill_price", "trade_fill_price")},
+                    {sel(trade_cols, "t", "qty", "trade_qty")},
+                    {matched_trade_id_select},
+                    {matched_exit_count_select},
+                    {matched_exit_timestamp_select},
+                    {matched_realized_pnl_select},
+                    {matched_exit_order_id_select},
+                    NULL AS canonical_intelligence_json,
+                    {candidate_json_select},
+                    NULL AS entry_canonical_intelligence_version,
+                    NULL AS entry_canonical_intelligence_hash,
+                    {sel(trade_cols, "t", "momentum_direction")},
+                    {sel(trade_cols, "t", "momentum_pct")},
+                    NULL AS momentum_acceleration_pct,
+                    NULL AS momentum_state,
+                    {sel(trade_cols, "t", "session_trend_label")},
+                    {sel(trade_cols, "t", "session_trend_score")},
+                    {sel(trade_cols, "t", "session_return_pct")},
+                    {sel(trade_cols, "t", "session_momentum_5m_pct")},
+                    {sel(trade_cols, "t", "session_momentum_15m_pct")},
+                    {sel(trade_cols, "t", "session_momentum_30m_pct")},
+                    NULL AS session_momentum_60m_pct,
+                    NULL AS session_momentum_120m_pct,
+                    {sel(trade_cols, "t", "session_distance_from_vwap_pct")},
+                    NULL AS session_trend_regime,
+                    {sel(trade_cols, "t", "prediction_score")},
+                    {sel(trade_cols, "t", "prediction_decision")},
+                    {sel(trade_cols, "t", "prediction_reason")},
+                    NULL AS prediction_confidence,
+                    NULL AS prediction_sample_size,
+                    {sel(trade_cols, "t", "setup_label")},
+                    {sel(trade_cols, "t", "setup_policy_action")},
+                    {sel(trade_cols, "t", "setup_policy_reason")},
+                    NULL AS setup_confidence,
+                    {('es.id AS exit_snapshot_id' if exit_join_terms else 'NULL AS exit_snapshot_id')},
+                    {exit_timestamp_select},
+                    {exit_trigger},
+                    {('es.exit_source AS exit_source' if exit_join_terms else 'NULL AS exit_source')},
+                    {realized_pnl_select},
+                    {realized_return_pct},
+                    {mfe_pct},
+                    {capture_ratio},
+                    {('es.max_adverse_excursion_pct AS max_adverse_excursion_pct' if exit_join_terms else 'NULL AS max_adverse_excursion_pct')},
+                    {('es.avoided_drawdown_pct AS avoided_drawdown_pct' if exit_join_terms else 'NULL AS avoided_drawdown_pct')},
+                    {('es.missed_upside_pct AS missed_upside_pct' if exit_join_terms else 'NULL AS missed_upside_pct')},
+                    {('es.reentry_window_summary AS reentry_window_summary' if exit_join_terms else 'NULL AS reentry_window_summary')},
+                    {('es.canonical_exit_version AS canonical_exit_version' if exit_join_terms else 'NULL AS canonical_exit_version')},
+                    {('es.canonical_exit_hash AS canonical_exit_hash' if exit_join_terms else 'NULL AS canonical_exit_hash')},
+                    {('es.entry_canonical_intelligence_hash AS entry_canonical_intelligence_hash' if exit_join_terms else 'NULL AS entry_canonical_intelligence_hash')},
+                    NULL AS rejected_outcome_id,
+                    NULL AS rejected_label_status,
+                    NULL AS rejected_return_30m,
+                    NULL AS rejected_return_60m,
+                    NULL AS rejected_return_eod,
+                    NULL AS rejected_max_favorable_60m,
+                    NULL AS rejected_max_adverse_60m,
+                    NULL AS rejected_canonical_intelligence_hash
+                FROM trades t
+                {decision_join}
+                {candidate_join}
+                {matched_join}
+                {direct_exit_join}
+                {exit_join}
+                WHERE {' AND '.join(clauses)}
+                ORDER BY t.timestamp ASC, t.id ASC
+                """,
+                params,
+            ).fetchall()

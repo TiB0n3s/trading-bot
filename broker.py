@@ -18,6 +18,7 @@ from runtime_config import (
 )
 
 logger = logging.getLogger(__name__)
+LAST_ORDER_FAILURE_REASON: str | None = None
 
 EXECUTION_POLICY_MODE = os.getenv("EXECUTION_POLICY_MODE", "compare").strip().lower()
 if EXECUTION_POLICY_MODE not in ("off", "compare"):
@@ -28,6 +29,15 @@ if EXECUTION_POLICY_MODE not in ("off", "compare"):
 
 SELL_CANCEL_POLL_ATTEMPTS = int(os.getenv("SELL_CANCEL_POLL_ATTEMPTS", "5"))
 SELL_CANCEL_POLL_SLEEP_SECONDS = float(os.getenv("SELL_CANCEL_POLL_SLEEP_SECONDS", "0.5"))
+
+
+def _record_order_failure(reason: str) -> None:
+    global LAST_ORDER_FAILURE_REASON
+    LAST_ORDER_FAILURE_REASON = reason
+
+
+def get_last_order_failure_reason() -> str | None:
+    return LAST_ORDER_FAILURE_REASON
 
 
 class _LazyAlpacaAPI:
@@ -197,6 +207,8 @@ def place_order(
     client_order_id: str | None = None,
     qty_override: int | None = None,
 ) -> dict[str, Any] | None:
+    global LAST_ORDER_FAILURE_REASON
+    LAST_ORDER_FAILURE_REASON = None
     try:
         request = validate_order_request(
             symbol=symbol,
@@ -218,10 +230,14 @@ def place_order(
                 f"LIVE GUARD: refusing {action.upper()} {symbol} because "
                 f"EXECUTION_MODE={EXECUTION_MODE} but LIVE_TRADING_ENABLED is false"
             )
+            _record_order_failure(
+                f"live_guard:{EXECUTION_MODE}_requires_live_trading_enabled"
+            )
             return None
         account = get_account()
         if not account:
             logger.error("Cannot place order - account unavailable")
+            _record_order_failure("account_unavailable")
             return None
         balance = account["balance"]
         quote = api.get_latest_trade(symbol)
@@ -239,10 +255,12 @@ def place_order(
 
             except Exception as e:
                 logger.error(f"Failed to fetch position for {symbol}: {_classify_broker_exception(e)}", exc_info=True)
+                _record_order_failure(f"position_unavailable_for_sell:{e}")
                 return None
 
             if qty <= 0:
                 logger.error(f"Refusing sell for {symbol}: position qty={qty} is {'short' if qty < 0 else 'zero'}, not a long to close")
+                _record_order_failure(f"sell_qty_not_long:{qty}")
                 return None
 
             if qty < position_qty:
@@ -267,6 +285,7 @@ def place_order(
                         f"Open orders still present after cancel polling for {symbol}: "
                         f"{[getattr(o, 'id', '?') for o in remaining_orders]}"
                     )
+                    _record_order_failure("open_orders_remain_after_cancel")
                     return None
 
                 refreshed = api.get_position(symbol)
@@ -277,6 +296,9 @@ def place_order(
                         f"Qty mismatch after cancel for {symbol}: requested_sell={qty} "
                         f"available={available_qty} - aborting sell"
                     )
+                    _record_order_failure(
+                        f"sell_qty_mismatch_after_cancel:{available_qty}<{qty}"
+                    )
                     return None
 
                 logger.info(
@@ -285,6 +307,7 @@ def place_order(
                 )
             except Exception as e:
                 logger.error(f"Failed to cancel open orders for {symbol}: {_classify_broker_exception(e)}", exc_info=True)
+                _record_order_failure(f"open_order_cancel_failed:{e}")
                 return None
         else:
             risk_amount = balance * (position_size_pct / 100)
@@ -318,6 +341,9 @@ def place_order(
             logger.info(f"Buy sizing: {symbol} qty={qty} at {current_price} | risk_amount={risk_amount:.2f} balance={balance}")
             if qty < 1:
                 logger.error(f"Position size too small for {symbol} - qty rounds to 0 at price {current_price} with balance {balance}")
+                _record_order_failure(
+                    f"buy_qty_rounds_to_zero:price={current_price}:balance={balance}:position_size_pct={position_size_pct}"
+                )
                 return None
             if is_cash_mode():
                 order_notional = qty * current_price
@@ -346,6 +372,9 @@ def place_order(
                         f"LIVE GUARD: refusing BUY {symbol}; notional ${order_notional:.2f} "
                         f"exceeds max_order_dollars ${cap:.2f} "
                         f"(EXECUTION_MODE={EXECUTION_MODE})"
+                    )
+                    _record_order_failure(
+                        f"live_notional_cap:{order_notional:.2f}>{cap:.2f}"
                     )
                     return None
         if side == "buy":
@@ -426,7 +455,9 @@ def place_order(
         }
     except ValidationError as e:
         logger.error(f"Invalid order request: {e}")
+        _record_order_failure(f"invalid_order_request:{e}")
         return None
     except Exception as e:
         logger.error(f"Order placement failed: {e}")
+        _record_order_failure(f"broker_submit_failed:{e}")
         return None

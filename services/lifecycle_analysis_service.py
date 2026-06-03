@@ -55,6 +55,22 @@ class LifecycleAnalysisService:
             return {}
 
     @staticmethod
+    def _candidate_payload(row: dict[str, Any]) -> dict[str, Any]:
+        raw = row.get("candidate_json")
+        if isinstance(raw, dict):
+            loaded = raw
+        elif not raw:
+            return {}
+        else:
+            try:
+                parsed = json.loads(str(raw))
+                loaded = parsed if isinstance(parsed, dict) else {}
+            except Exception:
+                return {}
+        candidate = loaded.get("candidate")
+        return candidate if isinstance(candidate, dict) else loaded
+
+    @staticmethod
     def _path(data: dict[str, Any], *path: str) -> Any:
         cur: Any = data
         for key in path:
@@ -123,6 +139,7 @@ class LifecycleAnalysisService:
 
     def _add_analysis_fields(self, row: dict[str, Any]) -> None:
         canonical = self._canonical(row)
+        candidate = self._candidate_payload(row)
         mappings = {
             "setup_label": ("setup_state", "label"),
             "market_regime": ("regime_state", "market_regime"),
@@ -174,6 +191,24 @@ class LifecycleAnalysisService:
         for output, path in mappings.items():
             if row.get(output) in (None, ""):
                 row[output] = self._path(canonical, *path)
+        candidate_mappings = {
+            "setup_label": "setup_label",
+            "session_trend_label": "session_trend_label",
+            "session_trend_score": "session_trend_score",
+            "session_return_pct": "session_return_pct",
+            "session_momentum_5m_pct": "momentum_5m_pct",
+            "session_momentum_15m_pct": "momentum_15m_pct",
+            "session_momentum_30m_pct": "momentum_30m_pct",
+            "session_distance_from_vwap_pct": "distance_from_vwap_pct",
+            "symbol_pattern": "symbol_pattern",
+            "pattern_runtime_effect": "pattern_runtime_effect",
+            "pattern_directional_bias": "pattern_directional_bias",
+        }
+        for output, key in candidate_mappings.items():
+            if row.get(output) in (None, "", "unknown", "mixed_or_unclassified_pattern"):
+                value = candidate.get(key)
+                if value not in (None, ""):
+                    row[output] = value
         pattern = canonical_symbol_pattern_state(canonical)
         if pattern.get("pattern_label") in {
             None,
@@ -226,6 +261,21 @@ class LifecycleAnalysisService:
             symbol=symbol,
             limit=limit,
         )
+        if limit is None:
+            raw_rows = list(raw_rows) + list(
+                self.repository.approved_trade_rows_without_snapshots(
+                    start_date=start_date,
+                    end_date=end,
+                    symbol=symbol,
+                )
+            )
+            raw_rows.sort(
+                key=lambda row: (
+                    str(dict(row).get("decision_time") or ""),
+                    int(dict(row).get("decision_snapshot_id") or 0),
+                    int(dict(row).get("trade_id") or 0),
+                )
+            )
         rows = []
         summary: dict[str, Any] = {
             "rows": 0,

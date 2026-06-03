@@ -509,6 +509,158 @@ def test_lifecycle_analysis_classifies_matched_exit_missing_snapshot():
         assert row["matched_realized_pnl"] == 4.2
 
 
+def test_lifecycle_analysis_includes_approved_trade_without_decision_snapshot():
+    with tempfile.TemporaryDirectory() as tmp:
+        db_path = Path(tmp) / "test.db"
+        with sqlite3.connect(db_path) as con:
+            con.execute(
+                """
+                CREATE TABLE decision_snapshots (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    trade_id INTEGER,
+                    decision_time TEXT,
+                    symbol TEXT,
+                    action TEXT,
+                    approved INTEGER,
+                    final_decision TEXT,
+                    rejection_reason TEXT
+                )
+                """
+            )
+            con.execute(
+                """
+                CREATE TABLE trades (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    timestamp TEXT,
+                    symbol TEXT,
+                    action TEXT,
+                    approved INTEGER,
+                    order_id TEXT,
+                    order_status TEXT,
+                    fill_price REAL,
+                    qty REAL,
+                    rejection_reason TEXT,
+                    setup_label TEXT,
+                    session_trend_label TEXT,
+                    prediction_decision TEXT
+                )
+                """
+            )
+            con.execute(
+                """
+                CREATE TABLE matched_trades (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    symbol TEXT,
+                    entry_timestamp TEXT,
+                    exit_timestamp TEXT,
+                    entry_order_id TEXT,
+                    exit_order_id TEXT,
+                    realized_pnl REAL,
+                    realized_pnl_pct REAL,
+                    mfe_pct REAL,
+                    capture_ratio REAL,
+                    exit_reason TEXT
+                )
+                """
+            )
+            con.execute(
+                """
+                CREATE TABLE candidate_universe (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    candidate_ts TEXT,
+                    symbol TEXT,
+                    candidate_status TEXT,
+                    candidate_json TEXT
+                )
+                """
+            )
+            con.execute(
+                """
+                INSERT INTO trades (
+                    id, timestamp, symbol, action, approved, order_id,
+                    order_status, fill_price, qty, rejection_reason,
+                    setup_label, session_trend_label, prediction_decision
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    10,
+                    "2026-06-03 10:04:05",
+                    "CRSP",
+                    "buy",
+                    1,
+                    "entry-10",
+                    "filled",
+                    100.0,
+                    1,
+                    "auto_buy_manager: internal bar-derived buy submitted",
+                    "near_vwap_recovery",
+                    "strong_uptrend",
+                    "watch",
+                ),
+            )
+            con.execute(
+                """
+                INSERT INTO candidate_universe (
+                    candidate_ts, symbol, candidate_status, candidate_json
+                ) VALUES (?, ?, ?, ?)
+                """,
+                (
+                    "2026-06-03T10:04:05.900000-04:00",
+                    "CRSP",
+                    "taken",
+                    json.dumps(
+                        {
+                            "candidate": {
+                                "symbol_pattern": "trend_continuation_with_participation",
+                                "pattern_runtime_effect": "observe_only_no_live_authority",
+                                "setup_label": "near_vwap_recovery",
+                                "session_trend_label": "strong_uptrend",
+                                "ml_prediction_score": 56,
+                            }
+                        }
+                    ),
+                ),
+            )
+            con.execute(
+                """
+                INSERT INTO matched_trades (
+                    symbol, entry_timestamp, exit_timestamp, entry_order_id,
+                    exit_order_id, realized_pnl, realized_pnl_pct, mfe_pct,
+                    capture_ratio, exit_reason
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    "CRSP",
+                    "2026-06-03 10:04:05",
+                    "2026-06-03 10:30:05",
+                    "entry-10",
+                    "exit-10",
+                    2.0,
+                    0.42,
+                    0.84,
+                    0.50,
+                    "peak_lock_floor",
+                ),
+            )
+
+        service = LifecycleAnalysisService(LifecycleAnalysisRepository(db_path))
+        payload = service.payload(start_date="2026-06-03")
+
+        assert payload.summary["rows"] == 1
+        assert payload.summary["approved_matched_exit_missing_snapshot"] == 1
+        assert payload.summary["analysis_ready"] is True
+        row = payload.rows[0]
+        assert row["trade_id"] == 10
+        assert row["symbol"] == "CRSP"
+        assert row["lifecycle_status"] == "approved_matched_exit_missing_snapshot"
+        assert row["realized_return_pct"] == 0.42
+        assert row["mfe_pct"] == 0.84
+        assert row["capture_ratio"] == 0.5
+        assert row["exit_trigger"] == "peak_lock_floor"
+        assert row["symbol_pattern"] == "trend_continuation_with_participation"
+        assert row["pattern_runtime_effect"] == "observe_only_no_live_authority"
+
+
 def main():
     tests = [
         test_lifecycle_analysis_joins_entry_exit_and_rejected_counterfactuals,
@@ -518,6 +670,7 @@ def main():
         test_lifecycle_analysis_classifies_snapshot_only_rejections,
         test_lifecycle_analysis_tolerates_pre_canonical_schema,
         test_lifecycle_analysis_classifies_matched_exit_missing_snapshot,
+        test_lifecycle_analysis_includes_approved_trade_without_decision_snapshot,
     ]
     for test in tests:
         test()

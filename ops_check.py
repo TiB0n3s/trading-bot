@@ -29,6 +29,7 @@ Usage:
   python3 ops_check.py rejection-summary
   python3 ops_check.py rejected-outcomes
   python3 ops_check.py auto-buy
+  python3 ops_check.py signal-source-readiness
   python3 ops_check.py auto-buy-outcomes
   python3 ops_check.py decision-snapshots
   python3 ops_check.py policy-artifacts
@@ -85,6 +86,7 @@ from services.ops_checks.conviction_checks import (
     run_conviction_stack_report,
 )
 from services.ops_checks.auto_buy_checks import run_auto_buy_health
+from services.ops_checks.signal_source_checks import run_signal_source_readiness
 from services.ops_checks.dataset_checks import run_dataset_health
 from services.ops_checks.excursion_checks import (
     run_peak_bucket_report,
@@ -438,6 +440,10 @@ def rejected_outcomes_health(target_date):
 
 def auto_buy_health(target_date):
     return run_auto_buy_health(target_date, base_dir=BASE_DIR)
+
+
+def signal_source_readiness(target_date):
+    return run_signal_source_readiness(target_date, base_dir=BASE_DIR)
 
 
 def decision_snapshot_health(target_date):
@@ -886,6 +892,9 @@ def main():
 
     if command == "auto-buy":
         return 0 if auto_buy_health(target_date) else 1
+
+    if command == "signal-source-readiness":
+        return 0 if signal_source_readiness(target_date) else 1
 
     if command == "decision-snapshots":
         return 0 if decision_snapshot_health(target_date) else 1

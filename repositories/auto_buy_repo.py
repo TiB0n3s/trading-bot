@@ -158,6 +158,88 @@ def top_candidate_rows(target_date: str, db_path=DB_PATH):
         ).fetchall()
 
 
+def signal_source_decision_rows(target_date: str, db_path=DB_PATH):
+    with get_connection(db_path) as con:
+        return con.execute(
+            """
+            SELECT
+                COALESCE(signal_source, 'unknown') AS signal_source,
+                COALESCE(decision, 'unknown') AS decision,
+                COUNT(*) AS n,
+                SUM(CASE WHEN order_submitted = 1 THEN 1 ELSE 0 END) AS submitted,
+                MAX(score) AS max_score
+            FROM auto_buy_candidates
+            WHERE substr(timestamp, 1, 10) = ?
+            GROUP BY signal_source, decision
+            ORDER BY signal_source, n DESC, decision
+            """,
+            (target_date,),
+        ).fetchall()
+
+
+def signal_source_readiness_summary(target_date: str, db_path=DB_PATH):
+    with get_connection(db_path) as con:
+        return con.execute(
+            """
+            SELECT
+                COUNT(*) AS rows,
+                SUM(CASE WHEN signal_source = 'tradingview_alert' THEN 1 ELSE 0 END) AS legacy_tv_rows,
+                SUM(CASE WHEN signal_source = 'internal_bar_only' THEN 1 ELSE 0 END) AS internal_rows,
+                SUM(CASE WHEN signal_source = 'tradingview_alert'
+                          AND decision = 'strong_buy_candidate' THEN 1 ELSE 0 END) AS legacy_tv_strong,
+                SUM(CASE WHEN signal_source = 'tradingview_alert'
+                          AND order_submitted = 1 THEN 1 ELSE 0 END) AS legacy_tv_submitted,
+                SUM(CASE WHEN signal_source = 'internal_bar_only'
+                          AND decision = 'strong_buy_candidate' THEN 1 ELSE 0 END) AS internal_strong,
+                SUM(CASE WHEN signal_source = 'internal_bar_only'
+                          AND order_submitted = 1 THEN 1 ELSE 0 END) AS internal_submitted
+            FROM auto_buy_candidates
+            WHERE substr(timestamp, 1, 10) = ?
+            """,
+            (target_date,),
+        ).fetchone()
+
+
+def live_block_reason_rows(target_date: str, db_path=DB_PATH):
+    with get_connection(db_path) as con:
+        return con.execute(
+            """
+            SELECT
+                COALESCE(signal_source, 'unknown') AS signal_source,
+                COALESCE(live_block_reason, 'none') AS live_block_reason,
+                COUNT(*) AS n
+            FROM auto_buy_decision_snapshots
+            WHERE substr(candidate_timestamp, 1, 10) = ?
+              AND live_block_reason IS NOT NULL
+              AND live_block_reason != ''
+            GROUP BY signal_source, live_block_reason
+            ORDER BY n DESC, signal_source, live_block_reason
+            LIMIT 20
+            """,
+            (target_date,),
+        ).fetchall()
+
+
+def tradingview_webhook_trade_count(target_date: str, symbols: list[str], db_path=DB_PATH) -> int:
+    if not symbols:
+        return 0
+    if not table_exists("trades", db_path=db_path):
+        return 0
+    placeholders = ",".join("?" for _ in symbols)
+    with get_connection(db_path) as con:
+        row = con.execute(
+            f"""
+            SELECT COUNT(*) AS n
+            FROM trades
+            WHERE substr(timestamp, 1, 10) = ?
+              AND symbol IN ({placeholders})
+              AND action IN ('buy', 'sell')
+            """,
+            [target_date, *symbols],
+        ).fetchone()
+    return int(row["n"] or 0) if row else 0
+
+
 def decision_snapshot_summary(target_date: str, db_path=DB_PATH):
     with get_connection(db_path) as con:
         return con.execute(

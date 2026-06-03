@@ -138,6 +138,13 @@ replaced while still limiting churn. The cron remains Central-time localized, bu
 candidate rows. Before any live paper buy it also cross-checks shared app
 cooldowns, recent-sell churn state, the app per-symbol daily buy count, and
 correlation-cluster exposure.
+When TradingView alerts are unavailable or intentionally retired, set
+`AUTO_BUY_SIGNAL_MODE=internal_all` or `TRADINGVIEW_ALERTS_DEPRECATED=true`.
+That allows legacy TradingView-cohort symbols to execute through the internal
+bar-derived candidate path while preserving `signal_source=tradingview_alert`
+as historical/source metadata. Use
+`python3 ops_check.py signal-source-readiness YYYY-MM-DD` to verify that strong
+legacy-cohort candidates are not being blocked solely by webhook-source gating.
 `auto_buy_outcome_report.py` compares captured candidates against forward
 feature-snapshot returns, score buckets, and the TradingView signal baseline.
 `strong_day_participation_report.py --write-db` persists full-universe

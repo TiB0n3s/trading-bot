@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import io
 import json
+import os
 import sqlite3
 import subprocess
 import sys
@@ -16,6 +17,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 import ops_check
+from repositories import auto_buy_repo
 
 
 def _run_cli(tmp_path: Path, *args: str) -> tuple[int, str]:
@@ -295,6 +297,7 @@ def test_ops_reliability_cli_missing_db_exits_cleanly(tmp_path):
         ("candidate-outcome-backfill", "Candidate Outcome Backfill", None),
         ("calibration-buckets", "Calibration Buckets", None),
         ("pattern-learning-inputs", "Pattern Learning Inputs", None),
+        ("signal-source-readiness", "Signal Source Readiness", None),
         ("learning-readiness", "Learning Readiness", None),
         ("ai-intelligence-review", "AI Intelligence Integration Review", "ai_intelligence_review_v1"),
     ):
@@ -304,6 +307,120 @@ def test_ops_reliability_cli_missing_db_exits_cleanly(tmp_path):
         if version:
             assert f"report_version          : {version}" in out
         assert "[WARN] trades.db not found" in out
+
+
+def test_signal_source_readiness_cli_flags_legacy_source_gate(tmp_path):
+    db_path = tmp_path / "trades.db"
+    auto_buy_repo.init_tables(db_path)
+    with sqlite3.connect(db_path) as con:
+        con.execute(
+            """
+            INSERT INTO auto_buy_candidates (
+                timestamp, symbol, signal_source, decision, score, reason,
+                live_buy_enabled, order_submitted
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "2026-05-30T10:00:00-04:00",
+                "AAPL",
+                "tradingview_alert",
+                "strong_buy_candidate",
+                17.0,
+                "test",
+                1,
+                0,
+            ),
+        )
+        con.execute(
+            """
+            INSERT INTO auto_buy_decision_snapshots (
+                created_at, candidate_timestamp, symbol, signal_source, decision,
+                score, live_buy_enabled, live_block_reason, order_submitted,
+                runtime_effect
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "2026-05-30T10:00:01-04:00",
+                "2026-05-30T10:00:00-04:00",
+                "AAPL",
+                "tradingview_alert",
+                "strong_buy_candidate",
+                17.0,
+                1,
+                "tradingview alert symbol requires webhook approval path",
+                0,
+                "auto_buy_paper_execution_path",
+            ),
+        )
+
+    old_mode = os.environ.get("AUTO_BUY_SIGNAL_MODE")
+    old_deprecated = os.environ.get("TRADINGVIEW_ALERTS_DEPRECATED")
+    old_allow = os.environ.get("AUTO_BUY_ALLOW_TRADINGVIEW_LIVE")
+    try:
+        os.environ["AUTO_BUY_SIGNAL_MODE"] = "legacy_source_gate"
+        os.environ["TRADINGVIEW_ALERTS_DEPRECATED"] = "false"
+        os.environ["AUTO_BUY_ALLOW_TRADINGVIEW_LIVE"] = "false"
+        code, out = _run_cli(tmp_path, "signal-source-readiness", "2026-05-30")
+    finally:
+        for key, old_value in (
+            ("AUTO_BUY_SIGNAL_MODE", old_mode),
+            ("TRADINGVIEW_ALERTS_DEPRECATED", old_deprecated),
+            ("AUTO_BUY_ALLOW_TRADINGVIEW_LIVE", old_allow),
+        ):
+            if old_value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = old_value
+
+    assert code == 1
+    assert "Signal Source Readiness" in out
+    assert "legacy-tv strong candidates" in out
+    assert "tradingview alert symbol requires webhook approval path" in out
+    assert "Set AUTO_BUY_SIGNAL_MODE=internal_all" in out
+
+
+def test_signal_source_readiness_cli_passes_when_internal_all_active(tmp_path):
+    db_path = tmp_path / "trades.db"
+    auto_buy_repo.init_tables(db_path)
+    with sqlite3.connect(db_path) as con:
+        con.execute(
+            """
+            INSERT INTO auto_buy_candidates (
+                timestamp, symbol, signal_source, decision, score, reason,
+                live_buy_enabled, order_submitted
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "2026-05-30T10:00:00-04:00",
+                "AAPL",
+                "tradingview_alert",
+                "strong_buy_candidate",
+                17.0,
+                "test",
+                1,
+                0,
+            ),
+        )
+
+    old_mode = os.environ.get("AUTO_BUY_SIGNAL_MODE")
+    old_deprecated = os.environ.get("TRADINGVIEW_ALERTS_DEPRECATED")
+    try:
+        os.environ["AUTO_BUY_SIGNAL_MODE"] = "internal_all"
+        os.environ["TRADINGVIEW_ALERTS_DEPRECATED"] = "false"
+        code, out = _run_cli(tmp_path, "signal-source-readiness", "2026-05-30")
+    finally:
+        for key, old_value in (
+            ("AUTO_BUY_SIGNAL_MODE", old_mode),
+            ("TRADINGVIEW_ALERTS_DEPRECATED", old_deprecated),
+        ):
+            if old_value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = old_value
+
+    assert code == 0
+    assert "internal all-symbol execution     true" in out
+    assert "[OK] signal-source readiness check completed" in out
 
 
 def test_resource_readiness_cli_does_not_require_db(tmp_path):
@@ -804,6 +921,8 @@ def main():
         test_rollout_contract_cli_missing_db_exits_cleanly,
         test_symbol_patterns_cli_missing_db_exits_cleanly,
         test_ops_reliability_cli_missing_db_exits_cleanly,
+        test_signal_source_readiness_cli_flags_legacy_source_gate,
+        test_signal_source_readiness_cli_passes_when_internal_all_active,
         test_feature_attribution_cli_empty_lifecycle_rows_warns,
         test_post_trade_learning_cli_empty_lifecycle_rows_warns,
         test_rollout_contract_cli_empty_lifecycle_rows_warns,

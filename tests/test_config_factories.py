@@ -87,6 +87,13 @@ from config.auto_buy import AutoBuyConfig, load_auto_buy_config
 from config.position_manager import PositionManagerConfig, load_position_manager_config
 from config.ml import MLConfig, load_ml_config
 
+RISK_ENV_VARS = [
+    "MACRO_POSITION_COUNT_FLOOR", "PORTFOLIO_ROTATION_ENABLED",
+    "PORTFOLIO_REPLACEMENT_MODE", "RISK_POLICY_MODE",
+    "REGIME_CIRCUIT_BREAKER_MODE",
+    "ENFORCE_SESSION_MOMENTUM_GATE", "ENFORCE_ADAPTIVE_CHURN_REENTRY",
+]
+
 
 # ===========================================================================
 # SignalConfig
@@ -150,37 +157,43 @@ def test_signal_override_wins_over_env():
 # ===========================================================================
 
 def test_risk_override_bypasses_env():
-    with _PatchEnv(PORTFOLIO_ROTATION_ENABLED="false"):
-        cfg = load_risk_config(portfolio_rotation_enabled=True)
+    with _CleanEnv(*RISK_ENV_VARS):
+        with _PatchEnv(PORTFOLIO_ROTATION_ENABLED="false"):
+            cfg = load_risk_config(portfolio_rotation_enabled=True)
     assert cfg.portfolio_rotation_enabled is True
 
 
 def test_risk_override_goes_through_validation():
-    exc = _raises(ValueError, load_risk_config, risk_policy_mode="live")
+    with _CleanEnv(*RISK_ENV_VARS):
+        exc = _raises(ValueError, load_risk_config, risk_policy_mode="live")
     assert "risk_policy_mode" in str(exc)
     assert "RISK_POLICY_MODE" in str(exc)
 
 
 def test_risk_circuit_breaker_mode_validation():
-    cfg = load_risk_config(regime_circuit_breaker_mode="block")
+    with _CleanEnv(*RISK_ENV_VARS):
+        cfg = load_risk_config(regime_circuit_breaker_mode="block")
     assert cfg.regime_circuit_breaker_mode == "block"
 
-    exc = _raises(ValueError, load_risk_config, regime_circuit_breaker_mode="panic")
+    with _CleanEnv(*RISK_ENV_VARS):
+        exc = _raises(ValueError, load_risk_config, regime_circuit_breaker_mode="panic")
     assert "regime_circuit_breaker_mode" in str(exc)
     assert "REGIME_CIRCUIT_BREAKER_MODE" in str(exc)
 
 
 def test_risk_override_loss_pct_sign():
-    exc = _raises(
-        ValueError, load_risk_config,
-        portfolio_replacement_weak_holding_plpc=0.5,
-    )
+    with _CleanEnv(*RISK_ENV_VARS):
+        exc = _raises(
+            ValueError, load_risk_config,
+            portfolio_replacement_weak_holding_plpc=0.5,
+        )
     assert "portfolio_replacement_weak_holding_plpc" in str(exc)
     assert "<= 0" in str(exc)
 
 
 def test_risk_partial_override_preserves_defaults():
-    cfg = load_risk_config(portfolio_rotation_max_per_day=5)
+    with _CleanEnv(*RISK_ENV_VARS):
+        cfg = load_risk_config(portfolio_rotation_max_per_day=5)
     assert cfg.portfolio_rotation_max_per_day == 5
     assert cfg.macro_position_count_floor == RiskConfig.macro_position_count_floor
     assert cfg.portfolio_rotation_min_hold_minutes == (
@@ -189,13 +202,7 @@ def test_risk_partial_override_preserves_defaults():
 
 
 def test_risk_no_env_dependency():
-    env_vars = [
-        "MACRO_POSITION_COUNT_FLOOR", "PORTFOLIO_ROTATION_ENABLED",
-        "PORTFOLIO_REPLACEMENT_MODE", "RISK_POLICY_MODE",
-        "REGIME_CIRCUIT_BREAKER_MODE",
-        "ENFORCE_SESSION_MOMENTUM_GATE", "ENFORCE_ADAPTIVE_CHURN_REENTRY",
-    ]
-    with _CleanEnv(*env_vars):
+    with _CleanEnv(*RISK_ENV_VARS):
         cfg = load_risk_config()
     assert cfg.macro_position_count_floor == 500.0
     assert cfg.portfolio_rotation_enabled is False
@@ -204,8 +211,9 @@ def test_risk_no_env_dependency():
 
 
 def test_risk_circuit_breaker_env_var_is_read_when_no_override():
-    with _PatchEnv(REGIME_CIRCUIT_BREAKER_MODE="warn"):
-        cfg = load_risk_config()
+    with _CleanEnv(*RISK_ENV_VARS):
+        with _PatchEnv(REGIME_CIRCUIT_BREAKER_MODE="warn"):
+            cfg = load_risk_config()
     assert cfg.regime_circuit_breaker_mode == "warn"
 
 
@@ -236,6 +244,7 @@ def test_auto_buy_partial_override_preserves_defaults():
     cfg = load_auto_buy_config(max_daily_orders=5)
     assert cfg.max_daily_orders == 5
     assert cfg.max_active_positions == AutoBuyConfig.max_active_positions
+    assert cfg.signal_mode == AutoBuyConfig.signal_mode
     assert cfg.min_score == AutoBuyConfig.min_score
     assert cfg.cooldown_minutes == AutoBuyConfig.cooldown_minutes
     assert cfg.bucking_tape_min_volume_ratio == AutoBuyConfig.bucking_tape_min_volume_ratio
@@ -245,7 +254,8 @@ def test_auto_buy_no_env_dependency():
     env_vars = [
         "AUTO_BUY_LIVE_BUYS", "AUTO_BUY_MIN_SCORE", "AUTO_BUY_MAX_ACTIVE_POSITIONS",
         "AUTO_BUY_MAX_DAILY_ORDERS", "AUTO_BUY_COOLDOWN_MINUTES",
-        "AUTO_BUY_BUCKING_TAPE_MIN_VOLUME_RATIO",
+        "AUTO_BUY_BUCKING_TAPE_MIN_VOLUME_RATIO", "AUTO_BUY_SIGNAL_MODE",
+        "TRADINGVIEW_ALERTS_DEPRECATED",
     ]
     with _CleanEnv(*env_vars):
         cfg = load_auto_buy_config()
@@ -254,6 +264,21 @@ def test_auto_buy_no_env_dependency():
     assert cfg.max_active_positions == 3
     assert cfg.max_daily_orders == 12
     assert cfg.bucking_tape_min_volume_ratio == 1.8
+    assert cfg.signal_mode == "legacy_source_gate"
+    assert cfg.tradingview_alerts_deprecated is False
+
+
+def test_auto_buy_signal_mode_env_var_is_read():
+    with _PatchEnv(AUTO_BUY_SIGNAL_MODE="internal_all", TRADINGVIEW_ALERTS_DEPRECATED="true"):
+        cfg = load_auto_buy_config()
+    assert cfg.signal_mode == "internal_all"
+    assert cfg.tradingview_alerts_deprecated is True
+
+
+def test_auto_buy_invalid_signal_mode_is_rejected():
+    exc = _raises(ValueError, load_auto_buy_config, signal_mode="surprise")
+    assert "AUTO_BUY_SIGNAL_MODE" in str(exc)
+    assert "legacy_source_gate" in str(exc)
 
 
 # ===========================================================================
@@ -425,6 +450,8 @@ def main():
         test_auto_buy_negative_position_size_rejected,
         test_auto_buy_partial_override_preserves_defaults,
         test_auto_buy_no_env_dependency,
+        test_auto_buy_signal_mode_env_var_is_read,
+        test_auto_buy_invalid_signal_mode_is_rejected,
         # PositionManagerConfig
         test_pm_override_bypasses_env,
         test_pm_positive_loss_pct_rejected,

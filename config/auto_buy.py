@@ -4,13 +4,15 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from config._env import _check, env_bool, env_float, env_int
+from config._env import _check, env_bool, env_float, env_int, env_str
 
 
 @dataclass(frozen=True)
 class AutoBuyConfig:
     # Order execution
     live_buys: bool = False
+    signal_mode: str = "legacy_source_gate"
+    tradingview_alerts_deprecated: bool = False
     position_size_pct: float = 0.50
     stop_loss_pct: float = 1.00
     take_profit_pct: float = 2.00
@@ -118,6 +120,11 @@ class AutoBuyConfig:
             "bucking_tape_min_volume_ratio", "AUTO_BUY_BUCKING_TAPE_MIN_VOLUME_RATIO",
             self.bucking_tape_min_volume_ratio, "must be >= 0",
         )
+        _check(
+            self.signal_mode in {"legacy_source_gate", "internal_all", "bar_all", "all_internal"},
+            "signal_mode", "AUTO_BUY_SIGNAL_MODE",
+            self.signal_mode, "must be one of legacy_source_gate, internal_all, bar_all, all_internal",
+        )
 
 
 def load_auto_buy_config(**overrides) -> AutoBuyConfig:
@@ -133,6 +140,8 @@ def load_auto_buy_config(**overrides) -> AutoBuyConfig:
     """
     kwargs: dict = dict(
         live_buys=env_bool("AUTO_BUY_LIVE_BUYS", False),
+        signal_mode=env_str("AUTO_BUY_SIGNAL_MODE", "legacy_source_gate").lower(),
+        tradingview_alerts_deprecated=env_bool("TRADINGVIEW_ALERTS_DEPRECATED", False),
         position_size_pct=env_float("AUTO_BUY_POSITION_SIZE_PCT", 0.50),
         stop_loss_pct=env_float("AUTO_BUY_STOP_LOSS_PCT", 1.00),
         take_profit_pct=env_float("AUTO_BUY_TAKE_PROFIT_PCT", 2.00),

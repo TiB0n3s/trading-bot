@@ -53,6 +53,7 @@ TESTS = [
     "tests/test_rejection_category_registry.py",
     "tests/test_symbols_config.py",
     "tests/test_cron_contract.py",
+    "tests/test_config_factories.py",
     "tests/test_auto_buy_manager.py",
     "tests/test_market_context_schema.py",
     "tests/test_setup_policy.py",

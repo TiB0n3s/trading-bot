@@ -80,6 +80,12 @@ AUTO_BUY_LIVE_BUYS = os.getenv("AUTO_BUY_LIVE_BUYS", "false").lower() in ("1", "
 AUTO_BUY_ALLOW_TRADINGVIEW_LIVE = os.getenv(
     "AUTO_BUY_ALLOW_TRADINGVIEW_LIVE", "false"
 ).lower() in ("1", "true", "yes", "on")
+AUTO_BUY_SIGNAL_MODE = os.getenv(
+    "AUTO_BUY_SIGNAL_MODE", "legacy_source_gate"
+).strip().lower()
+TRADINGVIEW_ALERTS_DEPRECATED = os.getenv(
+    "TRADINGVIEW_ALERTS_DEPRECATED", "false"
+).strip().lower() in ("1", "true", "yes", "on")
 AUTO_BUY_MIN_SCORE = float(os.getenv("AUTO_BUY_MIN_SCORE", "13"))
 AUTO_BUY_WATCH_SCORE = float(os.getenv("AUTO_BUY_WATCH_SCORE", "7"))
 AUTO_BUY_POSITION_SIZE_PCT = float(os.getenv("AUTO_BUY_POSITION_SIZE_PCT", "0.50"))
@@ -125,6 +131,19 @@ def _to_float(value: Any, default: float | None = None) -> float | None:
 
 def _today() -> str:
     return now_et().strftime("%Y-%m-%d")
+
+
+def internal_signal_execution_enabled() -> bool:
+    """Whether internal bar candidates may execute for the full approved universe."""
+    return TRADINGVIEW_ALERTS_DEPRECATED or AUTO_BUY_SIGNAL_MODE in {
+        "internal_all",
+        "bar_all",
+        "all_internal",
+    }
+
+
+def tradingview_webhook_required_for_execution() -> bool:
+    return not (AUTO_BUY_ALLOW_TRADINGVIEW_LIVE or internal_signal_execution_enabled())
 
 
 def _parse_et_timestamp(raw_ts: Any) -> datetime | None:
@@ -747,9 +766,15 @@ def evaluate_auto_buy_candidate(
     hard_block_reason = "; ".join(hard_block_reasons) if hard_block_reasons else None
 
     strong_threshold = AUTO_BUY_MIN_SCORE
-    if signal_source == "tradingview_alert" and not AUTO_BUY_ALLOW_TRADINGVIEW_LIVE:
+    execution_signal_mode = (
+        "internal_all" if internal_signal_execution_enabled() else "legacy_source_gate"
+    )
+    requires_webhook = signal_source == "tradingview_alert" and tradingview_webhook_required_for_execution()
+    if requires_webhook:
         strong_threshold = AUTO_BUY_MIN_SCORE + 4.0
         reasons.append(f"webhook_symbol_candidate_threshold:{strong_threshold:.1f}")
+    elif signal_source == "tradingview_alert":
+        reasons.append(f"internal_signal_execution:{execution_signal_mode}")
 
     if hard_block_reasons:
         decision = "skip"
@@ -776,6 +801,8 @@ def evaluate_auto_buy_candidate(
     return {
         "symbol": symbol,
         "signal_source": signal_source,
+        "execution_signal_mode": execution_signal_mode,
+        "requires_tradingview_webhook": requires_webhook,
         "decision": decision,
         "severity": severity,
         "score": round(score, 2),
@@ -927,7 +954,7 @@ def maybe_execute_auto_buy(candidate: dict[str, Any], market_open: bool, live_re
         return None
     if (
         candidate.get("signal_source") == "tradingview_alert"
-        and not AUTO_BUY_ALLOW_TRADINGVIEW_LIVE
+        and tradingview_webhook_required_for_execution()
     ):
         candidate["live_block_reason"] = (
             "tradingview alert symbol requires webhook approval path"

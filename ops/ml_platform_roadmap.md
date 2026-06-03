@@ -345,7 +345,8 @@ live feature snapshots, setup classification, and prediction validation.
 
 Near-term posture:
 
-- Keep TradingView alerts connected until enough side-by-side evidence exists.
+- Keep TradingView alerts connected when available, but treat them as optional
+  external input rather than required infrastructure.
 - Treat TradingView alerts as one external signal source, not as ground truth.
 - Build an observe-only internal signal candidate from Alpaca bars using the
   same feature, setup, momentum, and context layers already in the bot.
@@ -355,12 +356,20 @@ Near-term posture:
   rejects, missed opportunities, and avoidable noise.
 - If TradingView alerts are mostly rejected or lower-quality than internal
   candidates, demote or disable them and keep only high-conviction alert types.
+- If the TradingView indicator becomes unavailable, run the approved universe
+  through `auto_buy_manager.py --scope all --live` with
+  `AUTO_BUY_SIGNAL_MODE=internal_all` or `TRADINGVIEW_ALERTS_DEPRECATED=true`.
+  This preserves source labels for historical analysis while letting internal
+  candidate scoring become the live paper-entry generator.
+- Monitor `ops_check.py signal-source-readiness YYYY-MM-DD` for legacy-cohort
+  candidates blocked only by webhook-source gating.
 
 Promotion rule:
 
 - Do not remove TradingView from the live signal path until the internal signal
   generator has observe-only evidence, operator-visible reports, and a rollback
-  path.
+  path. If TradingView disappears externally, promote internal-all mode only in
+  paper/live-compatible modes with conservative order caps and daily review.
 
 ### Dataset Layer
 

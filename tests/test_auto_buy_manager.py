@@ -249,6 +249,41 @@ def test_tradingview_symbols_need_higher_auto_buy_threshold():
     assert_equal(internal["decision"], "strong_buy_candidate", "internal decision")
     assert_equal(webhook_symbol["decision"], "watch", "webhook-symbol decision")
     assert_equal(webhook_symbol["strong_buy_threshold"], auto_buy_manager.AUTO_BUY_MIN_SCORE + 4.0, "threshold")
+    assert_equal(webhook_symbol["requires_tradingview_webhook"], True, "requires webhook")
+
+
+def test_internal_all_mode_removes_tradingview_threshold_penalty():
+    old_mode = auto_buy_manager.AUTO_BUY_SIGNAL_MODE
+    old_deprecated = auto_buy_manager.TRADINGVIEW_ALERTS_DEPRECATED
+    old_allow = auto_buy_manager.AUTO_BUY_ALLOW_TRADINGVIEW_LIVE
+    auto_buy_manager.AUTO_BUY_SIGNAL_MODE = "internal_all"
+    auto_buy_manager.TRADINGVIEW_ALERTS_DEPRECATED = False
+    auto_buy_manager.AUTO_BUY_ALLOW_TRADINGVIEW_LIVE = False
+    try:
+        session = strong_session()
+        session["trend_label"] = "developing_uptrend"
+        session["trend_score"] = 3
+        session["momentum_5m_pct"] = 0.0
+        session["momentum_15m_pct"] = 0.0
+        session["momentum_30m_pct"] = 0.0
+
+        result = evaluate_auto_buy_candidate(
+            symbol="AMZN",
+            session=session,
+            feature=favorable_feature(),
+            context=buy_context(),
+            held=set(),
+            signal_source="tradingview_alert",
+        )
+    finally:
+        auto_buy_manager.AUTO_BUY_SIGNAL_MODE = old_mode
+        auto_buy_manager.TRADINGVIEW_ALERTS_DEPRECATED = old_deprecated
+        auto_buy_manager.AUTO_BUY_ALLOW_TRADINGVIEW_LIVE = old_allow
+
+    assert_equal(result["decision"], "strong_buy_candidate", "decision")
+    assert_equal(result["strong_buy_threshold"], auto_buy_manager.AUTO_BUY_MIN_SCORE, "threshold")
+    assert_equal(result["requires_tradingview_webhook"], False, "requires webhook")
+    assert_equal(result["execution_signal_mode"], "internal_all", "signal mode")
 
 
 def test_early_session_buffer_skips_collection():
@@ -300,6 +335,37 @@ def test_live_auto_buy_does_not_execute_tradingview_alert_symbols_by_default():
         "tradingview alert symbol requires webhook approval path",
         "block reason",
     )
+
+
+def test_internal_all_mode_reaches_normal_auto_buy_gates_for_tradingview_symbols():
+    old_live = auto_buy_manager.AUTO_BUY_LIVE_BUYS
+    old_allow = auto_buy_manager.AUTO_BUY_ALLOW_TRADINGVIEW_LIVE
+    old_mode = auto_buy_manager.AUTO_BUY_SIGNAL_MODE
+    old_deprecated = auto_buy_manager.TRADINGVIEW_ALERTS_DEPRECATED
+    old_capacity = auto_buy_manager.auto_buy_capacity_check
+    auto_buy_manager.AUTO_BUY_LIVE_BUYS = True
+    auto_buy_manager.AUTO_BUY_ALLOW_TRADINGVIEW_LIVE = False
+    auto_buy_manager.AUTO_BUY_SIGNAL_MODE = "internal_all"
+    auto_buy_manager.TRADINGVIEW_ALERTS_DEPRECATED = False
+    auto_buy_manager.auto_buy_capacity_check = lambda: (False, "capacity stopped")
+    try:
+        candidate = {
+            "symbol": "AMZN",
+            "decision": "strong_buy_candidate",
+            "signal_source": "tradingview_alert",
+            "risk_level": "medium",
+        }
+
+        order = maybe_execute_auto_buy(candidate, market_open=True, live_requested=True)
+    finally:
+        auto_buy_manager.AUTO_BUY_LIVE_BUYS = old_live
+        auto_buy_manager.AUTO_BUY_ALLOW_TRADINGVIEW_LIVE = old_allow
+        auto_buy_manager.AUTO_BUY_SIGNAL_MODE = old_mode
+        auto_buy_manager.TRADINGVIEW_ALERTS_DEPRECATED = old_deprecated
+        auto_buy_manager.auto_buy_capacity_check = old_capacity
+
+    assert_equal(order, None, "order")
+    assert_equal(candidate["live_block_reason"], "capacity stopped", "block reason")
 
 
 def test_auto_buy_capacity_blocks_when_active_position_cap_is_full():
@@ -612,9 +678,11 @@ def main():
         test_watch_setup_cannot_become_strong_buy_by_default,
         test_unclassified_extended_vwap_blocks_candidate,
         test_tradingview_symbols_need_higher_auto_buy_threshold,
+        test_internal_all_mode_removes_tradingview_threshold_penalty,
         test_early_session_buffer_skips_collection,
         test_live_buy_requires_market_open_and_env_flag,
         test_live_auto_buy_does_not_execute_tradingview_alert_symbols_by_default,
+        test_internal_all_mode_reaches_normal_auto_buy_gates_for_tradingview_symbols,
         test_auto_buy_capacity_blocks_when_active_position_cap_is_full,
         test_auto_buy_capacity_allows_replacement_when_flat_under_gross_cap,
         test_auto_buy_capacity_blocks_at_gross_daily_circuit_cap,

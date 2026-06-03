@@ -78,6 +78,12 @@ LEARNING_ENRICHMENT_FIELDS = (
     "strategy_memory_pnl",
     "strategy_memory_expectancy",
     "strategy_memory_avg_pnl_pct",
+
+    "performance_score",
+    "performance_label",
+    "performance_confidence",
+    "performance_reason",
+    "performance_evidence",
 )
 
 
@@ -176,6 +182,18 @@ def normalize_symbol_entry(symbol: str, entry: dict[str, Any] | None) -> dict[st
         "materials_risk_score": entry.get("materials_risk_score"),
         "competitive_risk_score": entry.get("competitive_risk_score"),
         "execution_risk_score": entry.get("execution_risk_score"),
+
+        # Holistic performance context; observe-only metadata distinct from
+        # conservative action confidence.
+        "performance_score": entry.get("performance_score"),
+        "performance_label": normalize_string(entry.get("performance_label")),
+        "performance_confidence": normalize_string(entry.get("performance_confidence")),
+        "performance_reason": normalize_string(entry.get("performance_reason")),
+        "performance_evidence": (
+            entry.get("performance_evidence")
+            if isinstance(entry.get("performance_evidence"), list)
+            else []
+        ),
     }
 
     normalized.update(learning_enrichment_fields(entry))
@@ -241,6 +259,9 @@ def schema_quality_summary(ctx: dict[str, Any]) -> dict[str, Any]:
         "strategy_memory_expectancy",
         "session_momentum_label",
         "prior_session_session_return_pct",
+        "performance_score",
+        "performance_label",
+        "performance_confidence",
     ]
 
     coverage = {}

@@ -7,7 +7,7 @@ from types import SimpleNamespace
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from pre_market_research_data import apply_event_enrichment
+from pre_market_research_data import apply_event_enrichment, update_performance_context
 from repositories.pre_market_research_repo import PreMarketResearchRepository
 from services.pre_market_research_service import (
     PreMarketResearchConfig,
@@ -135,6 +135,73 @@ def test_repository_reads_are_delegated():
     assert service.get_strategy_memory_context("AAPL")["trades"] == 3
 
 
+def test_holistic_performance_score_uses_trend_prediction_memory_and_events():
+    entry = {
+        "bias": "buy",
+        "confidence": "low",
+        "entry_quality": "good_on_pullbacks",
+        "risk_level": "medium",
+        "data_snapshot": {
+            "daily_pct": 2.4,
+            "intraday_pct": 0.5,
+            "momentum_30m_pct": 0.2,
+        },
+        "session_momentum_label": "strong_uptrend",
+        "session_return_pct": 1.1,
+        "prediction_score": 62,
+        "strategy_memory_win_rate": 0.67,
+        "strategy_memory_pnl": 25.0,
+        "event_context": {
+            "available": True,
+            "trusted_source_count": 2,
+            "intent_directions": ["constructive"],
+            "confidence_cap": "two_independent_reputable_sources",
+        },
+    }
+
+    result = update_performance_context(entry)
+
+    assert result["confidence"] == "low"
+    assert result["performance_score"] >= 90
+    assert result["performance_label"] == "strong_positive"
+    assert result["performance_confidence"] == "high"
+    assert "market_brief_bias:buy" in result["performance_evidence"]
+    assert "confirmed_constructive_event_context" in result["performance_evidence"]
+
+
+def test_holistic_performance_score_flags_weak_symbols_without_changing_action_confidence():
+    entry = {
+        "bias": "avoid",
+        "confidence": "medium",
+        "entry_quality": "avoid_chasing",
+        "risk_level": "high",
+        "data_snapshot": {
+            "daily_pct": -3.0,
+            "intraday_pct": -1.2,
+            "momentum_30m_pct": -0.3,
+        },
+        "session_momentum_label": "downtrend",
+        "session_return_pct": -1.4,
+        "prediction_score": 39,
+        "strategy_memory_win_rate": 0.3,
+        "strategy_memory_pnl": -12.0,
+        "event_context": {
+            "available": True,
+            "trusted_source_count": 0,
+            "intent_directions": ["risk_negative"],
+            "confidence_cap": "multi_source_untrusted_review",
+        },
+    }
+
+    result = update_performance_context(entry)
+
+    assert result["confidence"] == "medium"
+    assert result["performance_score"] <= 10
+    assert result["performance_label"] == "risk_negative"
+    assert result["performance_confidence"] == "high"
+    assert "risk_negative_event_context" in result["performance_evidence"]
+
+
 def test_repository_event_enrichment_includes_source_metadata(tmp_path):
     db_path = tmp_path / "trades.db"
     repo = PreMarketResearchRepository(db_path)
@@ -234,6 +301,8 @@ if __name__ == "__main__":
         test_get_recent_bars_combines_daily_and_minute_context,
         test_daily_failure_skips_minute_when_configured,
         test_repository_reads_are_delegated,
+        test_holistic_performance_score_uses_trend_prediction_memory_and_events,
+        test_holistic_performance_score_flags_weak_symbols_without_changing_action_confidence,
         _repo_metadata_test,
         test_apply_event_enrichment_uses_multisource_confidence_text,
     ]

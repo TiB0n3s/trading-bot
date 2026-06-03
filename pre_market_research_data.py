@@ -389,6 +389,196 @@ def classify_symbol(symbol, data, macro_sentiment):
     }
 
 
+def _perf_float(value):
+    try:
+        return float(value)
+    except Exception:
+        return None
+
+
+def _performance_label(score: float) -> str:
+    if score >= 75:
+        return "strong_positive"
+    if score >= 60:
+        return "positive"
+    if score >= 45:
+        return "mixed"
+    if score >= 30:
+        return "weak"
+    return "risk_negative"
+
+
+def _performance_confidence(score: float, evidence_count: int) -> str:
+    if evidence_count >= 5 and (score >= 70 or score <= 35):
+        return "high"
+    if evidence_count >= 3:
+        return "medium"
+    return "low"
+
+
+def update_performance_context(symbol_entry: dict) -> dict:
+    """Attach observe-only holistic performance context to one symbol entry."""
+    score = 50.0
+    evidence = []
+
+    data_snapshot = symbol_entry.get("data_snapshot") or {}
+    daily = _perf_float(data_snapshot.get("daily_pct"))
+    intraday = _perf_float(data_snapshot.get("intraday_pct"))
+    mom30 = _perf_float(data_snapshot.get("momentum_30m_pct"))
+
+    if daily is not None:
+        if daily >= 2.0:
+            score += 12
+            evidence.append(f"strong_daily_trend:{daily:+.2f}%")
+        elif daily >= 0.75:
+            score += 6
+            evidence.append(f"positive_daily_trend:{daily:+.2f}%")
+        elif daily <= -2.0:
+            score -= 15
+            evidence.append(f"weak_daily_trend:{daily:+.2f}%")
+        elif daily <= -0.75:
+            score -= 8
+            evidence.append(f"soft_negative_daily_trend:{daily:+.2f}%")
+
+    if intraday is not None:
+        if intraday >= 0.45:
+            score += 8
+            evidence.append(f"positive_intraday_tape:{intraday:+.2f}%")
+        elif intraday <= -1.0:
+            score -= 12
+            evidence.append(f"negative_intraday_tape:{intraday:+.2f}%")
+
+    if mom30 is not None:
+        if mom30 >= 0.10:
+            score += 6
+            evidence.append(f"positive_30m_momentum:{mom30:+.2f}%")
+        elif mom30 <= -0.10:
+            score -= 6
+            evidence.append(f"negative_30m_momentum:{mom30:+.2f}%")
+
+    bias = str(symbol_entry.get("bias") or "").lower()
+    entry_quality = str(symbol_entry.get("entry_quality") or "").lower()
+    risk_level = str(symbol_entry.get("risk_level") or "").lower()
+    if bias == "buy":
+        score += 8
+        evidence.append("market_brief_bias:buy")
+    elif bias == "avoid":
+        score -= 10
+        evidence.append("market_brief_bias:avoid")
+
+    if entry_quality in {"excellent", "high", "good_on_pullbacks", "good_if_holds_gap"}:
+        score += 6
+        evidence.append(f"constructive_entry_quality:{entry_quality}")
+    elif entry_quality in {"do_not_chase", "avoid_chasing", "poor"}:
+        score -= 10
+        evidence.append(f"poor_entry_quality:{entry_quality}")
+
+    if risk_level == "low":
+        score += 4
+        evidence.append("low_symbol_risk")
+    elif risk_level in {"high", "very_high"}:
+        score -= 8
+        evidence.append(f"elevated_symbol_risk:{risk_level}")
+
+    session_label = str(symbol_entry.get("session_momentum_label") or "").lower()
+    session_return = _perf_float(symbol_entry.get("session_return_pct"))
+    if session_label == "strong_uptrend":
+        score += 14
+        evidence.append(f"session_momentum:{session_label}")
+    elif session_label in {"developing_uptrend", "uptrend"}:
+        score += 8
+        evidence.append(f"session_momentum:{session_label}")
+    elif session_label == "fading":
+        score -= 10
+        evidence.append("session_momentum:fading")
+    elif session_label == "downtrend":
+        score -= 14
+        evidence.append("session_momentum:downtrend")
+
+    if session_return is not None:
+        if session_return >= 0.75:
+            score += 6
+            evidence.append(f"positive_session_return:{session_return:+.2f}%")
+        elif session_return <= -0.75:
+            score -= 8
+            evidence.append(f"negative_session_return:{session_return:+.2f}%")
+
+    prior_return = _perf_float(symbol_entry.get("prior_session_session_return_pct"))
+    if prior_return is not None:
+        if prior_return >= 1.0:
+            score += 5
+            evidence.append(f"prior_session_strength:{prior_return:+.2f}%")
+        elif prior_return <= -1.0:
+            score -= 5
+            evidence.append(f"prior_session_weakness:{prior_return:+.2f}%")
+
+    pred_score = _perf_float(symbol_entry.get("prediction_score"))
+    if pred_score is not None:
+        if pred_score >= 60:
+            score += 10
+            evidence.append(f"prediction_support:{pred_score:.1f}")
+        elif pred_score >= 55:
+            score += 6
+            evidence.append(f"prediction_mild_support:{pred_score:.1f}")
+        elif pred_score < 45:
+            score -= 10
+            evidence.append(f"prediction_weak:{pred_score:.1f}")
+
+    win_rate = _perf_float(symbol_entry.get("strategy_memory_win_rate"))
+    if win_rate is not None:
+        if win_rate >= 0.60:
+            score += 8
+            evidence.append(f"strategy_memory_win_rate:{win_rate:.2f}")
+        elif win_rate <= 0.40:
+            score -= 8
+            evidence.append(f"strategy_memory_weak_win_rate:{win_rate:.2f}")
+
+    pnl = _perf_float(symbol_entry.get("strategy_memory_pnl"))
+    if pnl is not None:
+        if pnl > 0:
+            score += 4
+            evidence.append(f"strategy_memory_positive_pnl:{pnl:.2f}")
+        elif pnl < 0:
+            score -= 4
+            evidence.append(f"strategy_memory_negative_pnl:{pnl:.2f}")
+
+    event_context = symbol_entry.get("event_context") or {}
+    if isinstance(event_context, dict) and event_context.get("available"):
+        directions = {
+            str(item).lower()
+            for item in (event_context.get("intent_directions") or [])
+        }
+        trusted_sources = int(event_context.get("trusted_source_count") or 0)
+        confidence_cap = str(event_context.get("confidence_cap") or "")
+
+        if trusted_sources >= 2 and directions & {"constructive", "positive"}:
+            score += 6
+            evidence.append("confirmed_constructive_event_context")
+        elif directions & {"risk_negative", "negative"}:
+            score -= 6
+            evidence.append("risk_negative_event_context")
+        elif trusted_sources >= 1:
+            evidence.append("reputable_event_context_neutral")
+
+        if "untrusted" in confidence_cap or "low" in confidence_cap:
+            score -= 2
+            evidence.append(f"event_confidence_cap:{confidence_cap}")
+
+    score = round(max(0.0, min(100.0, score)), 2)
+    label = _performance_label(score)
+    performance_confidence = _performance_confidence(score, len(evidence))
+    symbol_entry["performance_score"] = score
+    symbol_entry["performance_label"] = label
+    symbol_entry["performance_confidence"] = performance_confidence
+    symbol_entry["performance_evidence"] = evidence[:12]
+    symbol_entry["performance_reason"] = (
+        f"{label} performance score {score:.1f}/100 from "
+        f"{len(evidence)} evidence item(s); action_confidence="
+        f"{symbol_entry.get('confidence') or 'unknown'}."
+    )
+    return symbol_entry
+
+
 def build_symbol_evidence(data, classification, macro_sentiment, macro_regime):
     daily = data.get("daily_pct")
     intra = data.get("intraday_pct")
@@ -771,7 +961,7 @@ def enrich_with_session_context(symbol: str, classification: dict, market_date: 
         enriched["strategy_memory_expectancy"] = mem.get("expectancy")
         enriched["strategy_memory_avg_pnl_pct"] = mem.get("avg_pnl_pct")
 
-    return enriched
+    return update_performance_context(enriched)
 
 def main():
     parser = argparse.ArgumentParser()
@@ -840,6 +1030,7 @@ def main():
                 "bar_count_1m": market_data[sym].get("bar_count_1m", 0),
             }
             apply_event_enrichment(symbols_out[sym], event_enrichment.get(sym) or {})
+            update_performance_context(symbols_out[sym])
         else:
             symbols_out[sym].update({
                 "bias": "neutral",
@@ -850,6 +1041,7 @@ def main():
                 "entry_quality": "conditional",
                 "avoid_type": None,
             })
+            update_performance_context(symbols_out[sym])
 
     template["symbols"] = symbols_out
 

@@ -55,6 +55,11 @@ REQUIRED_SYMBOL = {
     "liquidity_quality",
     "notes",
     "price_location",
+    "performance_confidence",
+    "performance_evidence",
+    "performance_label",
+    "performance_reason",
+    "performance_score",
     "reason",
     "relative_strength_score",
     "resistance_levels",
@@ -84,6 +89,11 @@ def _sample_symbol_entry():
         "liquidity_quality": "normal",
         "notes": "Sanitized schema-test fixture.",
         "price_location": "near_vwap",
+        "performance_confidence": "low",
+        "performance_evidence": [],
+        "performance_label": "mixed",
+        "performance_reason": "Sanitized schema-test fixture.",
+        "performance_score": 50,
         "reason": "Sanitized schema-test fixture.",
         "relative_strength_score": 0,
         "resistance_levels": [999999.0],
@@ -259,7 +269,7 @@ def test_rich_market_context_score_fields_are_numeric():
 
     for sym, entry in (ctx.get("symbols") or {}).items():
         entry = entry or {}
-        for field in ("catalyst_score", "relative_strength_score"):
+        for field in ("catalyst_score", "relative_strength_score", "performance_score"):
             value = entry.get(field)
             if not isinstance(value, (int, float)):
                 bad[f"{sym}.{field}"] = value

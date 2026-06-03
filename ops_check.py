@@ -59,6 +59,7 @@ Usage:
   python3 ops_check.py symbol-patterns
   python3 ops_check.py pattern-learning-inputs
   python3 ops_check.py learning-readiness START_DATE [END_DATE]
+  python3 ops_check.py learning-effectiveness START_DATE [END_DATE]
   python3 ops_check.py rollout-contract
   python3 ops_check.py advisory-authority-report
   python3 ops_check.py ai-intelligence-review
@@ -104,7 +105,10 @@ from services.ops_checks.feature_attribution_checks import run_feature_attributi
 from services.ops_checks.post_trade_learning_checks import run_post_trade_learning_report
 from services.ops_checks.symbol_pattern_checks import run_symbol_pattern_outcomes
 from services.ops_checks.pattern_learning_inputs_checks import run_pattern_learning_inputs_report
-from services.ops_checks.learning_readiness_checks import run_learning_readiness
+from services.ops_checks.learning_readiness_checks import (
+    run_learning_effectiveness,
+    run_learning_readiness,
+)
 from services.ops_checks.rollout_contract_checks import run_rollout_contract_report
 from services.ops_checks.advisory_authority_checks import run_advisory_authority_report
 from services.ops_checks.ai_intelligence_review_checks import run_ai_intelligence_review
@@ -765,6 +769,27 @@ def learning_readiness(start_date):
     )
 
 
+def learning_effectiveness(start_date):
+    end_date = None
+    if len(sys.argv) > 3 and not sys.argv[3].startswith("--"):
+        end_date = sys.argv[3]
+    symbol = None
+    if "--symbol" in sys.argv:
+        idx = sys.argv.index("--symbol")
+        if idx + 1 < len(sys.argv):
+            symbol = sys.argv[idx + 1]
+    return run_learning_effectiveness(
+        start_date,
+        end_date=end_date,
+        base_dir=BASE_DIR,
+        symbol=symbol,
+        min_feature_sample_size=_int_option("--feature-min-sample-size", 30),
+        min_pattern_sample_size=_int_option("--pattern-min-sample-size", 30),
+        min_calibration_sample_size=_int_option("--calibration-min-sample-size", 5),
+        full_readiness_target=_int_option("--full-readiness-target", 750),
+    )
+
+
 def rollout_contract(target_date):
     symbol = None
     if "--symbol" in sys.argv:
@@ -978,6 +1003,9 @@ def main():
 
     if command == "learning-readiness":
         return 0 if learning_readiness(target_date) else 1
+
+    if command == "learning-effectiveness":
+        return 0 if learning_effectiveness(target_date) else 1
 
     if command == "rollout-contract":
         return 0 if rollout_contract(target_date) else 1

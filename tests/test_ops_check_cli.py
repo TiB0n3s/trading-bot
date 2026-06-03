@@ -923,6 +923,128 @@ def test_learning_readiness_cli_golden_fixture_summarizes_holistic_evidence(tmp_
     assert "[OK] learning readiness has no blockers; review manually before promotion" in out
 
 
+def test_learning_effectiveness_cli_uses_readiness_payload_with_daily_framing(tmp_path):
+    _create_lifecycle_fixture_db(tmp_path)
+    (tmp_path / "strategy_memory.json").write_text(
+        json.dumps(
+            {
+                "generated_at": "2026-05-30 16:30:00",
+                "trade_count": 12,
+                "setup_label_context": {"late_chase": {"recommendation": "caution"}},
+            },
+            sort_keys=True,
+        )
+    )
+    with sqlite3.connect(tmp_path / "trades.db") as con:
+        con.execute(
+            """
+            CREATE TABLE job_runs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                job_name TEXT NOT NULL,
+                started_at TEXT NOT NULL,
+                finished_at TEXT NOT NULL,
+                duration_sec REAL NOT NULL,
+                exit_code INTEGER,
+                lock_acquired INTEGER NOT NULL,
+                skipped_reason TEXT,
+                rows_written INTEGER,
+                warnings_count INTEGER,
+                artifact_path TEXT,
+                artifact_hash TEXT,
+                command TEXT
+            )
+            """
+        )
+        con.execute(
+            """
+            INSERT INTO job_runs (
+                job_name, started_at, finished_at, duration_sec, exit_code,
+                lock_acquired, rows_written, warnings_count, command
+            ) VALUES (?, ?, ?, ?, 0, 1, ?, 0, ?)
+            """,
+            (
+                "candidate_universe",
+                "2026-05-30T16:05:00+00:00",
+                "2026-05-30T16:05:02+00:00",
+                2.0,
+                4,
+                "job_runner candidate_universe",
+            ),
+        )
+        con.execute(
+            """
+            CREATE TABLE candidate_universe (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                created_at TEXT NOT NULL,
+                candidate_ts TEXT NOT NULL,
+                symbol TEXT NOT NULL,
+                action TEXT NOT NULL,
+                candidate_kind TEXT NOT NULL,
+                candidate_status TEXT NOT NULL,
+                score REAL,
+                threshold REAL,
+                threshold_distance REAL,
+                decision TEXT,
+                reason TEXT,
+                source TEXT,
+                setup_label TEXT,
+                regime TEXT,
+                session_phase TEXT,
+                canonical_intelligence_hash TEXT,
+                canonical_intelligence_version TEXT,
+                candidate_json TEXT NOT NULL,
+                runtime_effect TEXT NOT NULL DEFAULT 'candidate_capture_only_no_live_authority'
+            )
+            """
+        )
+        con.execute(
+            """
+            INSERT INTO candidate_universe (
+                created_at, candidate_ts, symbol, action, candidate_kind,
+                candidate_status, score, threshold, threshold_distance,
+                decision, reason, source, setup_label, regime, session_phase,
+                candidate_json
+            ) VALUES (?, ?, ?, 'buy', 'entry', ?, ?, 50, ?, ?, ?, ?, ?, ?, ?, '{}')
+            """,
+            (
+                "2026-05-30T10:00:00+00:00",
+                "2026-05-30T10:00:00+00:00",
+                "AAPL",
+                "taken",
+                65,
+                15,
+                "approved",
+                "approved",
+                "auto_buy",
+                "breakout",
+                "trend_expansion",
+                "first_30m",
+            ),
+        )
+
+    code, out = _run_cli(
+        tmp_path,
+        "learning-effectiveness",
+        "2026-05-30",
+        "--feature-min-sample-size",
+        "1",
+        "--pattern-min-sample-size",
+        "1",
+        "--calibration-min-sample-size",
+        "1",
+        "--full-readiness-target",
+        "4",
+    )
+
+    assert code == 0
+    assert "Learning Effectiveness — 2026-05-30 to 2026-05-30" in out
+    assert "report_version                : learning_readiness_v1" in out
+    assert "Learning effect" in out
+    assert "strategy_memory_available" in out
+    assert "learning_constrained_rows" in out
+    assert "[OK] learning effectiveness has no blockers; review manually before promotion" in out
+
+
 def test_regime_status_json_smoke(tmp_path):
     state_path = tmp_path / "regime_state.json"
     result = subprocess.run(
@@ -967,6 +1089,7 @@ def main():
         test_lifecycle_dashboard_and_calibration_cli_use_lifecycle_rows,
         test_research_export_cli_writes_daily_manifest,
         test_learning_readiness_cli_golden_fixture_summarizes_holistic_evidence,
+        test_learning_effectiveness_cli_uses_readiness_payload_with_daily_framing,
         test_regime_status_json_smoke,
     ]
     for test in tests:

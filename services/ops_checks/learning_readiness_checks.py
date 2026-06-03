@@ -43,11 +43,12 @@ def run_learning_readiness(
     min_pattern_sample_size: int = 30,
     min_calibration_sample_size: int = 5,
     full_readiness_target: int = 750,
+    report_title: str = "Learning Readiness",
 ) -> bool:
     end = end_date or start_date
     print()
     print("=" * 72)
-    print(f"  Learning Readiness — {start_date} to {end}")
+    print(f"  {report_title} — {start_date} to {end}")
     print("=" * 72)
 
     db_path = base_dir / "trades.db"
@@ -223,7 +224,31 @@ def run_learning_readiness(
 
     print()
     if payload.blockers:
-        print("[WARN] learning readiness has unresolved blockers")
+        print(f"[WARN] {report_title.lower()} has unresolved blockers")
         return False
-    print("[OK] learning readiness has no blockers; review manually before promotion")
+    print(f"[OK] {report_title.lower()} has no blockers; review manually before promotion")
     return True
+
+
+def run_learning_effectiveness(
+    start_date: str,
+    *,
+    end_date: str | None,
+    base_dir: Path,
+    symbol: str | None = None,
+    min_feature_sample_size: int = 30,
+    min_pattern_sample_size: int = 30,
+    min_calibration_sample_size: int = 5,
+    full_readiness_target: int = 750,
+) -> bool:
+    return run_learning_readiness(
+        start_date,
+        end_date=end_date,
+        base_dir=base_dir,
+        symbol=symbol,
+        min_feature_sample_size=min_feature_sample_size,
+        min_pattern_sample_size=min_pattern_sample_size,
+        min_calibration_sample_size=min_calibration_sample_size,
+        full_readiness_target=full_readiness_target,
+        report_title="Learning Effectiveness",
+    )

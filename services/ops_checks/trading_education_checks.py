@@ -18,6 +18,7 @@ def run_trading_education_health() -> bool:
     print(f"authority_ready     : {payload['authority_ready']}")
     print(f"authority_note      : {payload['authority_note']}")
     print(f"source_count        : {payload['source_count']}")
+    print(f"concept_count       : {payload['concept_count']}")
     print(f"approved_seed_count : {payload['approved_seed_count']}")
     print(f"metadata/manual     : {payload['metadata_or_manual_count']}")
 
@@ -41,6 +42,17 @@ def run_trading_education_health() -> bool:
             f"{source['tier']:<22} "
             f"{source['ingestion_status']:<22} "
             f"{source['link_follow_policy']:<18}"
+        )
+
+    print()
+    print("Curated education concepts")
+    print(f"  {'key':<28} {'type':<20} {'authority':<24}")
+    print(f"  {'-' * 28} {'-' * 20} {'-' * 24}")
+    for concept in payload["concepts"]:
+        print(
+            f"  {concept['key']:<28} "
+            f"{concept['concept_type']:<20} "
+            f"{concept['live_authority']:<24}"
         )
 
     print()

@@ -1161,9 +1161,14 @@ def test_trading_education_health_cli_lists_curated_sources(tmp_path):
     assert "corpus_version      : trading_education_corpus_v1" in out
     assert "runtime_effect      : education_context_only_no_trade_authority" in out
     assert "authority_ready     : False" in out
+    assert "concept_count       :" in out
     assert "sec_investor_education" in out
     assert "nerdwallet_investing" in out
     assert "investopedia" in out
+    assert "Curated education concepts" in out
+    assert "breakout_trading" in out
+    assert "momentum_trading" in out
+    assert "strategy_vs_style" in out
     assert "[OK] trading education sources are curated; no live authority changed" in out
 
 

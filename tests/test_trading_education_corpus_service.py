@@ -24,6 +24,7 @@ def test_trading_education_payload_is_non_authoritative_and_versioned():
     assert payload["runtime_effect"] == TRADING_EDUCATION_RUNTIME_EFFECT
     assert payload["authority_ready"] is False
     assert payload["approved_seed_count"] >= 6
+    assert payload["concept_count"] >= 10
     assert "investor.gov" in payload["approved_domains"]
     assert "investopedia.com" in payload["approved_domains"]
 
@@ -49,11 +50,36 @@ def test_books_and_heuristics_are_not_crawl_domains():
     assert all("graham" not in domain for domain in domains)
 
 
+def test_strategy_concepts_are_normalized_and_non_authoritative():
+    payload = build_trading_education_health_payload()
+    concepts = {concept["key"]: concept for concept in payload["concepts"]}
+
+    expected = {
+        "strategy_vs_style",
+        "trend_trading",
+        "range_trading",
+        "breakout_trading",
+        "reversal_trading",
+        "gap_trading",
+        "pairs_trading",
+        "arbitrage",
+        "momentum_trading",
+        "risk_practice_before_live",
+    }
+
+    assert expected.issubset(concepts)
+    assert concepts["breakout_trading"]["concept_type"] == "strategy_taxonomy"
+    assert "volume_expansion" in concepts["breakout_trading"]["related_features"]
+    assert "efi" in concepts["momentum_trading"]["related_features"]
+    assert all(concept["live_authority"] == "education_context_only" for concept in concepts.values())
+
+
 def main():
     tests = [
         test_trading_education_payload_is_non_authoritative_and_versioned,
         test_classify_education_url_allows_only_curated_domains,
         test_books_and_heuristics_are_not_crawl_domains,
+        test_strategy_concepts_are_normalized_and_non_authoritative,
     ]
     for test in tests:
         test()

@@ -58,11 +58,15 @@ or destabilize the webhook path if treated as routine cleanup.
      broker, market-data, or Flask coupling outside approved boundaries.
    - Keep architecture-boundary tests green before and after ML/report changes.
 4. Retraining cadence:
-   - No automatic retraining by default.
-   - First policy: manually reviewed batch retraining after 20 trading sessions
-     or after a drift/performance alert.
-   - After-close learning should produce retraining-readiness evidence, not
-     silently deploy new model artifacts.
+   - `pipeline/validate_predictions.py` performs a warning-only pre-market
+     drift check for flat/negative recent prediction-score correlation.
+   - `pipeline/retrain.py` can train a candidate artifact after validation
+     decay and run the retraining-readiness/promotion gate.
+   - Candidate registry writes are metadata-only. Automated promotion is capped
+     at `warn_only`; anything stronger requires explicit operator approval and
+     still does not alter runtime without separate wiring.
+   - After-close learning should produce retraining-readiness evidence and
+     candidate artifacts, not automatically alter runtime policy.
 5. Existing after-close policy artifacts:
    - `strategy_memory.json`, `portfolio_replacement_memory.json`,
      `excursion_memory.json`, `missed_opportunity_memory.json`, and

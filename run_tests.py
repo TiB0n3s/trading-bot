@@ -162,6 +162,8 @@ TESTS = [
     "tests/test_entry_quality_service.py",
     "tests/test_filter_report_service.py",
     "tests/test_prediction_validation_service.py",
+    "tests/test_prediction_drift_service.py",
+    "tests/test_ml_promotion.py",
     "tests/test_blocked_signal_outcome_service.py",
     "tests/test_missed_opportunity_service.py",
     "tests/test_ops_check_services.py",

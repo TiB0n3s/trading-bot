@@ -6,8 +6,9 @@ pipeline that enforces the correct dependency order:
 
   1. pre_market_research_data  → market_context.json + daily_symbol_context
   2. collect_and_score_events  → daily_symbol_events + daily_symbol_predictions
-  3. archive_context_state     → point-in-time snapshot
-  4. prediction_cache preload  → warm in-memory prediction cache
+  3. validate_predictions      → warn on flat/negative prediction correlation
+  4. archive_context_state     → point-in-time snapshot
+  5. prediction_cache preload  → warm in-memory prediction cache
 
 Run via job_runner.py so each execution is recorded in job_runs:
 
@@ -69,6 +70,18 @@ def _build_steps(target_date: str, *, dry_run: bool = False) -> list[Step]:
             ],
             critical=True,
             description="collect news events, score, apply context, generate daily_symbol_predictions",
+        ),
+        Step(
+            name="validate_predictions",
+            module="pipeline.validate_predictions",
+            argv=[
+                "--date", target_date,
+                "--sessions", "5",
+                "--threshold", "0.0",
+                "--bad-session-limit", "3",
+            ],
+            critical=False,
+            description="warn if recent prediction_score correlation is flat or negative",
         ),
         Step(
             name="archive_context",

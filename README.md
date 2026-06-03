@@ -546,6 +546,20 @@ The staged readiness report composes dataset profile, dataset manifest, brain
 feature manifest, replay decision-delta audit, prediction-provider contract,
 retraining readiness, and promotion gates. It reports `runtime_effect: none`.
 
+Prediction drift automation is warning/candidate-artifact only:
+
+```bash
+python3 pipeline/validate_predictions.py --date 2026-06-03 --sessions 5
+python3 pipeline/retrain.py --date 2026-06-03 --sessions 5
+```
+
+`pipeline/validate_predictions.py` is part of the pre-market pipeline and
+warns when recent `prediction_score` correlation is flat or negative for 3+
+sessions. `pipeline/retrain.py` can train a candidate supervised artifact and
+write registry metadata only when validation and `retraining-readiness` pass.
+It cannot load a model into runtime or promote beyond `warn_only` without
+explicit operator approval.
+
 The newer AI analytics services add structured observe-only context around the
 same trading decisions: dependency status, technical features, portfolio/risk
 analytics, sentiment scoring, async-pipeline architecture notes, regime-risk

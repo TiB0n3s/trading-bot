@@ -27,6 +27,11 @@ Recent completed roadmap items:
 - `export_ml_dataset.py` can write an audit manifest with `--manifest-output`.
 - `ml_platform` has a staged observe-only integration lane through `staged-readiness`.
 - `retraining-readiness` reports current blockers and never promotes automatically.
+- `pipeline/validate_predictions.py` runs in the pre-market pipeline as a
+  warning-only drift check for recent `prediction_score` correlation.
+- `pipeline/retrain.py` can train candidate ML artifacts after prediction
+  validation decay, but registry writes are metadata-only and promotion beyond
+  `warn_only` requires explicit operator approval.
 - `ml/models/similarity_v0/` is research-only metadata with no trained artifact.
 - `run_staged_tests.py` runs ahead-of-live staged integration tests separately from current behavior tests.
 - `replay-decisions` is a read-only decision-delta audit. It can join changed

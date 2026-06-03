@@ -16,6 +16,7 @@ MODEL_REGISTRY_PATH = MODEL_ROOT / "registry.json"
 FEATURE_VERSION = "feature_snapshots_v3"
 
 MODEL_STATUSES = {
+    "candidate",
     "research",
     "observe_only",
     "warn_only",

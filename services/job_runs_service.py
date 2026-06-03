@@ -307,5 +307,42 @@ class JobRunsService:
         }
 
 
+    def job_status_table(self) -> list[dict[str, Any]]:
+        """Return one summary row per job: name, last run time, status, duration."""
+        self.repository.init_table()
+        rows = self.repository.last_run_per_job()
+        now = datetime.now(timezone.utc)
+        result = []
+        for row in rows:
+            row = dict(row)
+            started = row.get("started_at") or ""
+            age_min: float | None = None
+            if started:
+                try:
+                    dt = datetime.fromisoformat(started).replace(tzinfo=timezone.utc)
+                    age_min = (now - dt).total_seconds() / 60
+                except Exception:
+                    pass
+            if row.get("lock_acquired") == 0 or row.get("skipped_reason"):
+                status = "skipped"
+            elif row.get("exit_code") == 0:
+                status = "ok"
+            elif row.get("exit_code") is None:
+                status = "running?" if age_min is not None and age_min < 10 else "unknown"
+            else:
+                status = "FAIL"
+            result.append({
+                "job_name": row.get("job_name"),
+                "started_at": started,
+                "age_min": round(age_min, 1) if age_min is not None else None,
+                "duration_sec": row.get("duration_sec"),
+                "exit_code": row.get("exit_code"),
+                "rows_written": row.get("rows_written"),
+                "warnings_count": row.get("warnings_count"),
+                "status": status,
+            })
+        return result
+
+
 def build_default_job_runs_service() -> JobRunsService:
     return JobRunsService(JobRunsRepository())

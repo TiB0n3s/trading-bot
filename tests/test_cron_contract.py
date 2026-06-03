@@ -83,6 +83,29 @@ def test_auto_buy_captures_full_candidate_universe():
     assert "AUTO_BUY_MAX_DAILY_ORDERS_OVERRIDE:-12" in lines[0]
 
 
+def test_premarket_dependency_chain_uses_single_pipeline():
+    lines = _cron_command_lines()
+    pipeline = [line for line in lines if "pipeline/pre_market.py" in line]
+    assert len(pipeline) == 1, pipeline
+    assert "--job-name pre_market_pipeline" in pipeline[0]
+    assert "/tmp/tradingbot_pre_market_pipeline.lock" in pipeline[0]
+    assert "pre_market_pipeline.log" in pipeline[0]
+
+    replaced_jobs = (
+        "pre_market_research_data.py --raw-output",
+        "archive_context_state.py --reason premarket_context_refresh",
+        "collect_and_score_events.py --date $(date +\\%F)",
+        "prediction_cache.py preload --date",
+    )
+    offenders = [
+        line
+        for line in lines
+        for replaced in replaced_jobs
+        if replaced in line
+    ]
+    assert not offenders, offenders
+
+
 def main():
     tests = [
         test_no_raw_flock_jobs_remain,
@@ -91,6 +114,7 @@ def main():
         test_after_close_and_post_session_share_lock,
         test_job_runner_lines_have_job_name,
         test_auto_buy_captures_full_candidate_universe,
+        test_premarket_dependency_chain_uses_single_pipeline,
     ]
     for test in tests:
         test()

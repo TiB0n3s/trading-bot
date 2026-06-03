@@ -170,3 +170,31 @@ class JobRunsRepository:
                 """,
                 (start_date, end_date),
             ).fetchall()
+
+    def last_run_per_job(self):
+        """Return the most-recent row for every distinct job_name, ordered by job_name."""
+        with get_connection(self.db_path) as con:
+            return con.execute(
+                """
+                SELECT
+                    jr.id,
+                    jr.job_name,
+                    jr.started_at,
+                    jr.finished_at,
+                    jr.duration_sec,
+                    jr.exit_code,
+                    jr.lock_acquired,
+                    jr.skipped_reason,
+                    jr.rows_written,
+                    jr.warnings_count,
+                    jr.artifact_path,
+                    jr.command
+                FROM job_runs jr
+                INNER JOIN (
+                    SELECT job_name, MAX(id) AS last_id
+                    FROM job_runs
+                    GROUP BY job_name
+                ) latest ON jr.id = latest.last_id
+                ORDER BY jr.job_name ASC
+                """
+            ).fetchall()

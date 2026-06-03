@@ -318,6 +318,60 @@ def test_service_builds_runtime_health_trend_payload():
         assert job["rows_written"] == 4
 
 
+def test_service_builds_latest_job_status_table():
+    with tempfile.TemporaryDirectory() as tmp:
+        db_path = Path(tmp) / "jobs.db"
+        repo = JobRunsRepository(db_path)
+        repo.init_table()
+        repo.insert_run(
+            {
+                "job_name": "old_status",
+                "started_at": "2026-05-31T14:00:00+00:00",
+                "finished_at": "2026-05-31T14:00:02+00:00",
+                "duration_sec": 2.0,
+                "exit_code": 1,
+                "lock_acquired": True,
+                "rows_written": 0,
+                "warnings_count": 0,
+                "command": "old",
+            }
+        )
+        repo.insert_run(
+            {
+                "job_name": "old_status",
+                "started_at": "2026-05-31T14:05:00+00:00",
+                "finished_at": "2026-05-31T14:05:02+00:00",
+                "duration_sec": 2.0,
+                "exit_code": 0,
+                "lock_acquired": True,
+                "rows_written": 4,
+                "warnings_count": 1,
+                "command": "new",
+            }
+        )
+        repo.insert_run(
+            {
+                "job_name": "skipped_job",
+                "started_at": "2026-05-31T14:06:00+00:00",
+                "finished_at": "2026-05-31T14:06:00+00:00",
+                "duration_sec": 0.0,
+                "exit_code": None,
+                "lock_acquired": False,
+                "skipped_reason": "lock_busy",
+                "command": "skip",
+            }
+        )
+
+        rows = JobRunsService(repo).job_status_table()
+
+        by_name = {row["job_name"]: row for row in rows}
+        assert set(by_name) == {"old_status", "skipped_job"}
+        assert by_name["old_status"]["status"] == "ok"
+        assert by_name["old_status"]["rows_written"] == 4
+        assert by_name["old_status"]["warnings_count"] == 1
+        assert by_name["skipped_job"]["status"] == "skipped"
+
+
 def main():
     tests = [
         test_job_runner_records_completed_run,
@@ -328,6 +382,7 @@ def main():
         test_service_builds_runtime_health_payload,
         test_service_marks_runtime_health_unclean_on_failed_job,
         test_service_builds_runtime_health_trend_payload,
+        test_service_builds_latest_job_status_table,
     ]
     for test in tests:
         test()

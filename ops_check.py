@@ -74,6 +74,8 @@ Usage:
   python3 ops_check.py regime-matrix
   python3 ops_check.py all
   python3 ops_check.py filters 2026-05-08
+  python3 ops_check.py jobs
+  python3 ops_check.py job fill_poller
 """
 
 import os
@@ -81,6 +83,8 @@ import subprocess
 import sys
 from datetime import date
 from pathlib import Path
+
+from reports.registry import get_report_commands, run_report
 
 from services.ops_checks.conviction_checks import (
     run_buy_opportunity_report,
@@ -171,48 +175,33 @@ def load_env_file(path=ENV_FILE):
     return True
 
 
-# Commands that take no date arg (run with no extra args)
-# Commands that take a positional date: drawdown, post, adaptive_impact, strategy_intelligence
-# Commands that take --date DATE: filters, blocked, event-attribution, intelligence, context,
-#   learning, predictions, signal-lessons, trends, prediction-validation, auto-buy-outcomes,
-#   strong-days
-# Full arg construction is done in main() below.
+# Non-report operational scripts still dispatched via subprocess.
+# *_report.py scripts are handled in-process via the reports/ package instead.
 COMMANDS = {
     "morning": ["morning_check.py"],
     "positions": ["position_review.py"],
-    "alignment": ["market_alignment_report.py"],
-    "adaptive": ["adaptive_confirmation_report.py"],
-    "adaptive_impact": ["adaptive_impact_report.py"],
-    "strategy_intelligence": ["strategy_intelligence_report.py"],
-    "blocked": ["blocked_signal_outcome_report.py"],
     "session": ["session_momentum.py", "--all"],
     "position-momentum": ["position_momentum_monitor.py"],
-    "filters": ["filter_report.py"],
-    "drawdown": ["drawdown_report.py"],
     "post": ["post_session_check.py"],
     "events": ["bot_events.py", "--limit", "25"],
     "bot-events": ["bot_events.py", "--limit", "25"],
-    "event-attribution": ["event_attribution_report.py"],
-    "intelligence": ["intelligence_context_report.py"],
-    "context": ["context_trade_join_report.py"],
-    "learning": ["intelligence_learning_report.py"],
-    "predictions": ["intelligence_prediction_report.py"],
-    "signal-lessons": ["signal_timing_lesson_report.py"],
-    "trends": ["trend_context_report.py"],
-    "prediction-validation": ["prediction_validation_report.py"],
-    "auto-buy-outcomes": ["auto_buy_outcome_report.py"],
-    "strong-days": ["strong_day_participation_report.py"],
     "regime": ["regime_status.py"],
     "regime-json": ["regime_status.py", "--json"],
     "regime-matrix": ["regime_status.py", "--routing-matrix"],
 }
 
+REPORT_COMMANDS = get_report_commands()
 
-def run(label, args):
+
+def _print_section(label: str) -> None:
     print()
     print("=" * 72)
     print(f"  {label}")
     print("=" * 72)
+
+
+def run(label, args):
+    _print_section(label)
 
     try:
         r = subprocess.run(
@@ -912,6 +901,57 @@ def research_export(target_date: str) -> bool:
         limit=_int_option("--limit", 0) or None,
     )
 
+
+def jobs_status(job_name_filter: str | None = None) -> bool:
+    """Print latest-run-per-job status table from the job_runs ledger."""
+    from repositories.job_runs_repo import JobRunsRepository
+    from services.job_runs_service import JobRunsService
+
+    print()
+    print("=" * 72)
+    print("  Job Run Status — latest run per cron job")
+    print("=" * 72)
+
+    db_path = BASE_DIR / "trades.db"
+    if not db_path.exists():
+        print(f"[WARN] trades.db not found: {db_path}")
+        return False
+
+    svc = JobRunsService(JobRunsRepository(db_path))
+    rows = svc.job_status_table()
+
+    if job_name_filter:
+        rows = [r for r in rows if job_name_filter.lower() in (r.get("job_name") or "").lower()]
+
+    if not rows:
+        print("[WARN] no job_runs rows found — jobs may not have run yet")
+        return False
+
+    failures = [r for r in rows if r["status"] == "FAIL"]
+
+    print(
+        f"\n  {'job':<40} {'status':<8} {'age':>7} {'dur':>7} {'rows':>6} {'warn':>5}"
+    )
+    print("  " + "-" * 70)
+    for r in rows:
+        age = f"{r['age_min']:.0f}m" if r["age_min"] is not None else "-"
+        dur = f"{r['duration_sec']:.1f}s" if r["duration_sec"] is not None else "-"
+        rows_w = str(r["rows_written"]) if r["rows_written"] is not None else "-"
+        warn = str(r["warnings_count"]) if r["warnings_count"] else "-"
+        marker = "!" if r["status"] == "FAIL" else " "
+        print(
+            f"{marker} {r['job_name']:<40} {r['status']:<8} {age:>7} {dur:>7} {rows_w:>6} {warn:>5}"
+        )
+
+    print()
+    if failures:
+        print(f"[WARN] {len(failures)} job(s) last run failed: {', '.join(r['job_name'] for r in failures)}")
+        return False
+
+    print(f"[OK] {len(rows)} jobs shown — no recent failures")
+    return True
+
+
 def main():
     env_loaded = load_env_file()
     print(f"env_file_loaded={env_loaded}")
@@ -924,6 +964,13 @@ def main():
     target_date = sys.argv[2] if len(sys.argv) > 2 else date.today().isoformat()
     if target_date.startswith("--"):
         target_date = date.today().isoformat()
+
+    if command == "jobs":
+        return 0 if jobs_status() else 1
+
+    if command == "job":
+        filter_name = sys.argv[2] if len(sys.argv) > 2 else None
+        return 0 if jobs_status(filter_name) else 1
 
     if command == "market-context-check":
         return 0 if check_market_context_file() else 1
@@ -1086,7 +1133,8 @@ def main():
         checks.append(run("DB Migration Status", ["ops_check.py", "migration-status"]))
         checks.append(run("Morning Check", ["morning_check.py"]))
         checks.append(run("Position Review", ["position_review.py"]))
-        checks.append(run("Market Alignment Report", ["market_alignment_report.py"]))
+        _print_section("Market Alignment Report")
+        checks.append(run_report("alignment", target_date))
         checks.append(run("Session Momentum Refresh", ["session_momentum.py", "--all"]))
         checks.append(run("Position Momentum Monitor", ["position_momentum_monitor.py"]))
         checks.append(run("Bot Events", ["bot_events.py", "--limit", "25"]))
@@ -1105,22 +1153,30 @@ def main():
         checks.append(run("DB Migration Status", ["ops_check.py", "migration-status"]))
         checks.append(run("Morning Check", ["morning_check.py"]))
         checks.append(run("Position Review", ["position_review.py"]))
-        checks.append(run("Market Alignment Report", ["market_alignment_report.py"]))
+        _print_section("Market Alignment Report")
+        checks.append(run_report("alignment", target_date))
         checks.append(run("Session Momentum Refresh", ["session_momentum.py", "--all"]))
         checks.append(run("Position Momentum Monitor", ["position_momentum_monitor.py"]))
-        checks.append(run("Adaptive Confirmation Report", ["adaptive_confirmation_report.py"]))
-        checks.append(run("Adaptive Impact Report", ["adaptive_impact_report.py", target_date]))
-        checks.append(run("Filter Report", ["filter_report.py", "--date", target_date]))
-        checks.append(run("Blocked Signal Outcome Report", ["blocked_signal_outcome_report.py", "--date", target_date]))
-        checks.append(run("Strong-Day Participation", ["strong_day_participation_report.py", "--date", target_date, "--write-db"]))
+        _print_section("Adaptive Confirmation Report")
+        checks.append(run_report("adaptive", target_date))
+        _print_section("Adaptive Impact Report")
+        checks.append(run_report("adaptive_impact", target_date))
+        _print_section("Filter Report")
+        checks.append(run_report("filters", target_date))
+        _print_section("Blocked Signal Outcome Report")
+        checks.append(run_report("blocked", target_date))
+        _print_section("Strong-Day Participation")
+        checks.append(run_report("strong-days", target_date, write_db=True))
         checks.append(run("Rejected Outcomes", ["ops_check.py", "rejected-outcomes", target_date]))
         checks.append(run("Auto-Buy Candidates", ["ops_check.py", "auto-buy", target_date]))
-        checks.append(run("Auto-Buy Outcomes", ["auto_buy_outcome_report.py", "--date", target_date]))
+        _print_section("Auto-Buy Outcomes")
+        checks.append(run_report("auto-buy-outcomes", target_date))
         checks.append(run("Decision Snapshots", ["ops_check.py", "decision-snapshots", target_date]))
         checks.append(run("AI Intelligence Review", ["ops_check.py", "ai-intelligence-review", target_date]))
         checks.append(run("Policy Artifacts", ["ops_check.py", "policy-artifacts"]))
         checks.append(run("Retention Policy", ["ops_check.py", "retention"]))
-        checks.append(run("Drawdown Report", ["drawdown_report.py", target_date]))
+        _print_section("Drawdown Report")
+        checks.append(run_report("drawdown", target_date))
         checks.append(run("Post-Session Check", ["post_session_check.py", target_date]))
 
         print()
@@ -1132,6 +1188,12 @@ def main():
         print("[WARN] one or more checks reported issues")
         return 1
 
+    # In-process report dispatch — no subprocess overhead.
+    if command in REPORT_COMMANDS:
+        _print_section(command.title())
+        ok = run_report(command, target_date)
+        return 0 if ok else 1
+
     if command not in COMMANDS:
         print(f"Unknown command: {command}")
         print()
@@ -1141,11 +1203,7 @@ def main():
     script = COMMANDS[command][0]
     extra = COMMANDS[command][1:]
 
-    if command in ("filters", "blocked", "event-attribution", "intelligence", "context",
-                   "learning", "predictions", "signal-lessons", "trends",
-                   "prediction-validation", "auto-buy-outcomes", "strong-days"):
-        args = [script] + extra + ["--date", target_date]
-    elif command in ("drawdown", "post", "adaptive_impact", "strategy_intelligence"):
+    if command == "post":
         args = [script] + extra + [target_date]
     else:
         args = [script] + extra

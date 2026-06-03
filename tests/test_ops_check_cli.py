@@ -1172,6 +1172,83 @@ def test_trading_education_health_cli_lists_curated_sources(tmp_path):
     assert "[OK] trading education sources are curated; no live authority changed" in out
 
 
+def test_jobs_cli_missing_db_exits_cleanly(tmp_path):
+    code, out = _run_cli(tmp_path, "jobs")
+
+    assert code == 1
+    assert "Job Run Status" in out
+    assert "[WARN] trades.db not found" in out
+
+
+def test_jobs_cli_reads_selected_base_dir_and_filters(tmp_path):
+    from repositories.job_runs_repo import JobRunsRepository
+
+    db_path = tmp_path / "trades.db"
+    repo = JobRunsRepository(db_path)
+    repo.init_table()
+    repo.insert_run(
+        {
+            "job_name": "pre_market_pipeline",
+            "started_at": "2026-06-03T12:50:00+00:00",
+            "finished_at": "2026-06-03T12:50:03+00:00",
+            "duration_sec": 3.0,
+            "exit_code": 0,
+            "lock_acquired": True,
+            "rows_written": 59,
+            "warnings_count": 0,
+            "command": "pipeline",
+        }
+    )
+    repo.insert_run(
+        {
+            "job_name": "run_post_session_review",
+            "started_at": "2026-06-03T22:00:00+00:00",
+            "finished_at": "2026-06-03T22:00:03+00:00",
+            "duration_sec": 3.0,
+            "exit_code": 1,
+            "lock_acquired": True,
+            "rows_written": 0,
+            "warnings_count": 1,
+            "command": "review",
+        }
+    )
+
+    code, out = _run_cli(tmp_path, "job", "pre_market")
+
+    assert code == 0
+    assert "pre_market_pipeline" in out
+    assert "run_post_session_review" not in out
+    assert "[OK] 1 jobs shown" in out
+
+
+def test_report_command_dispatches_in_process_with_target_date(tmp_path):
+    calls = []
+
+    def fake_report(command_name: str, target_date: str, **options) -> bool:
+        calls.append((command_name, target_date, options))
+        print(f"fake report command={command_name} date={target_date}")
+        return True
+
+    old_run_report = ops_check.run_report
+    try:
+        ops_check.run_report = fake_report
+        code, out = _run_cli(tmp_path, "filters", "2026-06-03")
+    finally:
+        ops_check.run_report = old_run_report
+
+    assert code == 0
+    assert calls == [("filters", "2026-06-03", {})]
+    assert "fake report command=filters date=2026-06-03" in out
+
+
+def test_report_registry_marks_direct_function_reports(tmp_path):
+    commands = ops_check.REPORT_COMMANDS
+
+    assert commands["auto-buy-outcomes"].legacy_argv_adapter is False
+    assert commands["prediction-validation"].legacy_argv_adapter is False
+    assert commands["filters"].legacy_argv_adapter is True
+
+
 def main():
     tests = [
         test_feature_attribution_cli_missing_db_exits_cleanly,
@@ -1195,6 +1272,10 @@ def main():
         test_learning_effectiveness_cli_uses_readiness_payload_with_daily_framing,
         test_regime_status_json_smoke,
         test_trading_education_health_cli_lists_curated_sources,
+        test_jobs_cli_missing_db_exits_cleanly,
+        test_jobs_cli_reads_selected_base_dir_and_filters,
+        test_report_command_dispatches_in_process_with_target_date,
+        test_report_registry_marks_direct_function_reports,
     ]
     for test in tests:
         with tempfile.TemporaryDirectory() as tmp:

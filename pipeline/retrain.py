@@ -11,7 +11,11 @@ import argparse
 from contextlib import contextmanager
 import fcntl
 import json
+import os
+import platform
+import resource
 import signal
+import subprocess
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -34,6 +38,8 @@ from services.supervised_prediction_training_service import (
 
 DEFAULT_LOCK_FILE = "/tmp/tradingbot_ml_retrain.lock"
 DEFAULT_MAX_RUNTIME_SECONDS = 1800
+DEFAULT_MEMORY_LIMIT_MB = 4096
+DEFAULT_NICE_INCREMENT = 19
 
 
 class RetrainingTimeout(Exception):
@@ -48,6 +54,69 @@ def _write_json(path: Path, payload: dict[str, Any]) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n")
     return path
+
+
+def _git_sha() -> str | None:
+    try:
+        return subprocess.check_output(
+            ["git", "rev-parse", "HEAD"],
+            cwd=BASE_DIR,
+            text=True,
+            stderr=subprocess.DEVNULL,
+            timeout=2,
+        ).strip()
+    except Exception:
+        return None
+
+
+def _apply_resource_limits(*, memory_limit_mb: int, nice_increment: int) -> dict[str, Any]:
+    result = {
+        "runtime_effect": "process_resource_guard",
+        "requested_memory_limit_mb": memory_limit_mb,
+        "requested_nice_increment": nice_increment,
+        "memory_limit_applied": False,
+        "nice_applied": False,
+        "errors": [],
+    }
+    if nice_increment > 0:
+        try:
+            os.nice(int(nice_increment))
+            result["nice_applied"] = True
+        except Exception as exc:
+            result["errors"].append(f"nice_failed:{exc}")
+    if memory_limit_mb > 0:
+        try:
+            bytes_limit = int(memory_limit_mb) * 1024 * 1024
+            current_soft, current_hard = resource.getrlimit(resource.RLIMIT_AS)
+            hard = bytes_limit
+            if current_hard not in (-1, resource.RLIM_INFINITY):
+                hard = min(bytes_limit, int(current_hard))
+            soft = min(bytes_limit, hard)
+            resource.setrlimit(resource.RLIMIT_AS, (soft, hard))
+            result["memory_limit_applied"] = True
+            result["memory_limit_bytes"] = soft
+        except Exception as exc:
+            result["errors"].append(f"memory_limit_failed:{exc}")
+    return result
+
+
+def _run_marker_path(artifact_dir: Path, target_date: str | None) -> Path | None:
+    if not target_date:
+        return None
+    safe = str(target_date).replace("/", "-")
+    return artifact_dir / "retrain_runs" / f"{safe}.json"
+
+
+def _completed_marker(path: Path | None) -> dict[str, Any] | None:
+    if path is None or not path.exists():
+        return None
+    try:
+        payload = json.loads(path.read_text())
+    except Exception:
+        return None
+    if payload.get("status") in {"completed", "trained_without_registry_promotion"}:
+        return payload
+    return None
 
 
 @contextmanager
@@ -85,6 +154,26 @@ def _print_payload(payload: dict[str, Any], *, as_json: bool) -> None:
 
 
 def _execute_retraining(args: argparse.Namespace) -> int:
+    artifact_dir = Path(args.artifact_dir)
+    target_date = args.target_date or args.end_date
+    marker_path = _run_marker_path(artifact_dir, target_date)
+    marker = _completed_marker(marker_path)
+    if marker and not args.rerun_completed:
+        payload = {
+            "report_version": "automated_retraining_v1",
+            "runtime_effect": "none",
+            "status": "skipped_already_completed",
+            "reason": f"retraining already completed for {target_date}",
+            "target_date": target_date,
+            "previous_run": marker,
+        }
+        _print_payload(payload, as_json=args.json)
+        return 0
+
+    resource_guard = _apply_resource_limits(
+        memory_limit_mb=args.memory_limit_mb,
+        nice_increment=args.nice_increment,
+    )
     drift_service = build_default_prediction_drift_service(db_path=args.db_path)
     validation = drift_service.correlation_report(
         target_date=args.target_date or args.end_date,
@@ -108,7 +197,6 @@ def _execute_retraining(args: argparse.Namespace) -> int:
     rows = fetch_training_rows(db_path=args.db_path, limit=args.limit)
     stamp = _utc_stamp()
     model_id = f"supervised_prediction_{args.horizon}_{stamp}"
-    artifact_dir = Path(args.artifact_dir)
     artifact_path = artifact_dir / f"{model_id}.joblib"
     training = train_supervised_prediction_model(
         rows=rows,
@@ -140,14 +228,39 @@ def _execute_retraining(args: argparse.Namespace) -> int:
         explicit_operator_approval=args.operator_approved,
     )
     metrics_path = artifact_dir / f"{model_id}.metrics.json"
+    diagnostic_path = artifact_path.with_suffix(artifact_path.suffix + ".diagnostic.json")
     metrics = {
         "report_version": "automated_retraining_metrics_v1",
+        "resource_guard": resource_guard,
         "validation": validation,
         "training": training,
         "readiness": readiness,
         "promotion_assessment": assessment.to_dict(),
     }
     _write_json(metrics_path, metrics)
+    diagnostic = {
+        "report_version": "automated_retraining_diagnostic_v1",
+        "runtime_effect": "diagnostic_only_no_live_authority",
+        "model_id": model_id,
+        "target_date": target_date,
+        "artifact_path": str(training.get("artifact_path") or artifact_path),
+        "metrics_path": str(metrics_path),
+        "validation_average_correlation": validation.get("average_correlation"),
+        "validation_bad_session_count": validation.get("bad_session_count"),
+        "validation_valid_session_count": validation.get("valid_session_count"),
+        "training_row_count_loaded": len(rows),
+        "training_sample_size": training.get("sample_size"),
+        "training_provider": training.get("provider"),
+        "training_accuracy": training.get("accuracy"),
+        "python_version": sys.version,
+        "platform": platform.platform(),
+        "git_sha": _git_sha(),
+        "resource_guard": resource_guard,
+        "promotion_allowed": assessment.allowed,
+        "promotion_blockers": list(assessment.blockers),
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+    }
+    _write_json(diagnostic_path, diagnostic)
 
     registry_entry = None
     if training.get("trained") and training.get("artifact_path") and assessment.allowed:
@@ -168,12 +281,27 @@ def _execute_retraining(args: argparse.Namespace) -> int:
         "status": "completed" if registry_entry else "trained_without_registry_promotion",
         "model_id": model_id,
         "metrics_path": str(metrics_path),
+        "diagnostic_path": str(diagnostic_path),
+        "resource_guard": resource_guard,
         "validation": validation,
         "training": training,
         "readiness": readiness,
         "promotion_assessment": assessment.to_dict(),
         "registry_entry": registry_entry,
     }
+    if training.get("trained") and marker_path:
+        marker_payload = {
+            "report_version": "automated_retraining_run_marker_v1",
+            "target_date": target_date,
+            "status": payload["status"],
+            "model_id": model_id,
+            "metrics_path": str(metrics_path),
+            "diagnostic_path": str(diagnostic_path),
+            "artifact_path": training.get("artifact_path"),
+            "registry_entry_written": bool(registry_entry),
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+        }
+        _write_json(marker_path, marker_payload)
     if args.json:
         print(json.dumps(payload, indent=2, sort_keys=True))
     else:
@@ -186,6 +314,7 @@ def _execute_retraining(args: argparse.Namespace) -> int:
             for blocker in assessment.blockers:
                 print(f"  - {blocker}")
         print(f"Metrics: {metrics_path}")
+        print(f"Diagnostic: {diagnostic_path}")
     return 0 if training.get("trained") else 1
 
 
@@ -210,6 +339,11 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--requested-status", default="candidate")
     parser.add_argument("--operator-approved", action="store_true")
     parser.add_argument("--force", action="store_true")
+    parser.add_argument(
+        "--rerun-completed",
+        action="store_true",
+        help="Allow retraining again even when the target date already has a completed run marker.",
+    )
     parser.add_argument("--json", action="store_true")
     parser.add_argument(
         "--lock-file",
@@ -221,6 +355,18 @@ def _parse_args() -> argparse.Namespace:
         type=int,
         default=DEFAULT_MAX_RUNTIME_SECONDS,
         help="Abort retraining if it exceeds this many seconds. Use 0 to disable.",
+    )
+    parser.add_argument(
+        "--memory-limit-mb",
+        type=int,
+        default=DEFAULT_MEMORY_LIMIT_MB,
+        help="Apply RLIMIT_AS memory cap before training. Use 0 to disable.",
+    )
+    parser.add_argument(
+        "--nice-increment",
+        type=int,
+        default=DEFAULT_NICE_INCREMENT,
+        help="Lower process priority with os.nice before training. Use 0 to disable.",
     )
     return parser.parse_args()
 

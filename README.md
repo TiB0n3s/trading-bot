@@ -564,7 +564,23 @@ bad sessions. Empty or partial data is reported through `coverage_status`
 instead of triggering retraining. Retraining uses a nonblocking lock
 (`/tmp/tradingbot_ml_retrain.lock` by default) and a max runtime guard
 (`--max-runtime-seconds`, default 1800) so long training runs do not overlap
-silently with later automation.
+silently with later automation. It also runs at low priority
+(`nice -n 19` in the post-session wrapper and `--nice-increment 19` inside the
+Python process) and applies a default 4 GB address-space cap via
+`--memory-limit-mb 4096`.
+
+Retraining is idempotent by target date. A completed run marker is written under
+`ml/models/supervised_entry_v1/candidates/retrain_runs/`; later runs for the
+same date exit cleanly unless `--rerun-completed` is supplied. Each trained
+candidate writes a human-readable `.diagnostic.json` next to the model artifact
+with validation correlation, training row counts, Python version, platform, Git
+SHA, resource guard settings, and promotion blockers.
+
+If `ML_MODEL_ID` and `ML_MODEL_MAX_AGE_SECONDS` are configured, runtime ML
+authority checks the model registry and artifact mtime before enforcing ML
+size-down/block behavior. Missing or stale model metadata forces
+`deterministic_policy_no_ml_authority`; deterministic hard gates and existing
+non-ML policy still run.
 
 The newer AI analytics services add structured observe-only context around the
 same trading decisions: dependency status, technical features, portfolio/risk

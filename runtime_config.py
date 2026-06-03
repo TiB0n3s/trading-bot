@@ -93,6 +93,8 @@ ML_AUTHORITY_MAX_AGE_SECONDS = _env_int(
     _ml_authority_default_max_age_seconds,
 )
 ML_AUTHORITY_SIZE_CAP_PCT = _env_float("ML_AUTHORITY_SIZE_CAP_PCT", 0.80)
+ML_MODEL_ID = os.getenv("ML_MODEL_ID", "").strip()
+ML_MODEL_MAX_AGE_SECONDS = _env_int("ML_MODEL_MAX_AGE_SECONDS", 0)
 
 
 def is_cash_mode() -> bool:
@@ -144,6 +146,20 @@ def public_decision_policy_config() -> dict:
 
 
 def public_ml_authority_config() -> dict:
+    try:
+        from ml_platform.registry import model_staleness_guard
+
+        model_guard = model_staleness_guard(
+            model_id=ML_MODEL_ID,
+            max_age_seconds=ML_MODEL_MAX_AGE_SECONDS,
+        )
+    except Exception as exc:
+        model_guard = {
+            "status": "guard_error",
+            "fallback_required": True,
+            "fallback_strategy": "deterministic_policy_no_ml_authority",
+            "reason": str(exc),
+        }
     return {
         "authority_mode": ML_AUTHORITY_MODE,
         "execution_mode": EXECUTION_MODE,
@@ -152,6 +168,9 @@ def public_ml_authority_config() -> dict:
         "min_confidence": ML_AUTHORITY_MIN_CONFIDENCE,
         "max_age_seconds": ML_AUTHORITY_MAX_AGE_SECONDS,
         "size_cap_pct": ML_AUTHORITY_SIZE_CAP_PCT,
+        "model_id": ML_MODEL_ID or None,
+        "model_max_age_seconds": ML_MODEL_MAX_AGE_SECONDS,
+        "model_staleness_guard": model_guard,
         "negative_decisions": ["avoid", "block", "caution"],
         "live_block_requirements": {
             "execution_mode": "cash_safe_or_cash_full",

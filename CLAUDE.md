@@ -36,7 +36,13 @@ Recent completed roadmap items:
   calendar days; long weekends/holidays are not treated as failed sessions.
   Empty/partial coverage is explicit via `coverage_status`.
 - Automated retraining uses `/tmp/tradingbot_ml_retrain.lock` and a default
-  1800-second max-runtime guard.
+  1800-second max-runtime guard. It also lowers process priority and applies a
+  default 4 GB memory cap.
+- Retraining writes a per-date completion marker and a `.diagnostic.json`
+  companion file beside candidate model artifacts.
+- Configured ML models are checked for registry/artifact staleness before ML
+  authority can enforce. Stale/missing model metadata falls back to
+  deterministic policy with no ML authority.
 - `ml/models/similarity_v0/` is research-only metadata with no trained artifact.
 - `run_staged_tests.py` runs ahead-of-live staged integration tests separately from current behavior tests.
 - `replay-decisions` is a read-only decision-delta audit. It can join changed

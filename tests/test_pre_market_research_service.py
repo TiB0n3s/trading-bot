@@ -7,7 +7,11 @@ from types import SimpleNamespace
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from pre_market_research_data import apply_event_enrichment, update_performance_context
+from pre_market_research_data import (
+    apply_event_enrichment,
+    build_symbol_evidence,
+    update_performance_context,
+)
 from repositories.pre_market_research_repo import PreMarketResearchRepository
 from services.pre_market_research_service import (
     PreMarketResearchConfig,
@@ -123,6 +127,27 @@ def test_daily_failure_skips_minute_when_configured():
     assert "daily bars failed: boom" in row["error"]
     assert row["minute_fetch_skipped"] == "daily_failed"
     assert row["bar_count_1m"] == 0
+
+
+def test_build_symbol_evidence_marks_missing_technical_levels_as_degraded():
+    evidence = build_symbol_evidence(
+        {
+            "daily_pct": None,
+            "intraday_pct": None,
+            "momentum_30m_pct": None,
+            "bar_count_1m": 0,
+            "support_levels": [],
+            "resistance_levels": [],
+        },
+        {"bias": "neutral"},
+        "mixed",
+        "caution",
+    )
+
+    assert evidence["support_levels"] == [0.01]
+    assert evidence["resistance_levels"] == [999999.0]
+    assert evidence["technical_levels_degraded"] is True
+    assert evidence["technical_levels_source"] == "unavailable_placeholder"
 
 
 def test_repository_reads_are_delegated():
@@ -300,6 +325,7 @@ if __name__ == "__main__":
     tests = [
         test_get_recent_bars_combines_daily_and_minute_context,
         test_daily_failure_skips_minute_when_configured,
+        test_build_symbol_evidence_marks_missing_technical_levels_as_degraded,
         test_repository_reads_are_delegated,
         test_holistic_performance_score_uses_trend_prediction_memory_and_events,
         test_holistic_performance_score_flags_weak_symbols_without_changing_action_confidence,

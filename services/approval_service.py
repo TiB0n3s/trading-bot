@@ -535,13 +535,27 @@ def evaluate_ml_authority_outcome(
         max_age_seconds=max_age_seconds,
         prediction_age_seconds=age_seconds,
     )
+    model_guard = config.get("model_staleness_guard") or {}
+    model_fallback_required = False
+    if isinstance(model_guard, dict) and model_guard.get("fallback_required"):
+        model_fallback_required = True
+        safety_blockers.append(
+            "model staleness guard requires deterministic fallback: "
+            f"{model_guard.get('reason') or model_guard.get('status')}"
+        )
     safety_check_passed = not safety_blockers
     recency_ok = max_age_seconds <= 0 or (
         age_seconds is not None and age_seconds <= max_age_seconds
     )
 
     sample_ok = sample_size >= min_sample_size
-    qualified = bool(negative_compare and sample_ok and confidence_ok and recency_ok)
+    qualified = bool(
+        negative_compare
+        and sample_ok
+        and confidence_ok
+        and recency_ok
+        and not model_fallback_required
+    )
     would_block_under_promoted_mode = qualified
 
     reason_parts = []
@@ -558,7 +572,7 @@ def evaluate_ml_authority_outcome(
             f"prediction_age_seconds={age_seconds} > max_age_seconds={max_age_seconds}"
         )
     if safety_blockers:
-        reason_parts.append("live_block refused: " + "; ".join(safety_blockers))
+        reason_parts.append("ML authority refused: " + "; ".join(safety_blockers))
     if not reason_parts:
         reason_parts.append("qualified negative ML compare")
 

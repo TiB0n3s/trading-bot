@@ -140,6 +140,46 @@ def unique_price_levels(levels, digits=2, limit=3):
     return out
 
 
+def normalize_technical_levels(data):
+    """Return non-empty technical levels while preserving degraded-source metadata."""
+    supports = unique_price_levels(data.get("support_levels") or [])
+    resistances = unique_price_levels(data.get("resistance_levels") or [])
+    metadata = {
+        "technical_levels_degraded": False,
+        "technical_levels_source": "market_data",
+    }
+
+    if supports and resistances:
+        return supports, resistances, metadata
+
+    last_price = data.get("last_price")
+    if last_price:
+        try:
+            price = float(last_price)
+        except Exception:
+            price = 0.0
+        if price > 0:
+            if not supports:
+                supports = unique_price_levels([price * 0.99])
+            if not resistances:
+                resistances = unique_price_levels([price * 1.01])
+            metadata.update(
+                {
+                    "technical_levels_degraded": True,
+                    "technical_levels_source": "last_price_fallback",
+                }
+            )
+            return supports, resistances, metadata
+
+    metadata.update(
+        {
+            "technical_levels_degraded": True,
+            "technical_levels_source": "unavailable_placeholder",
+        }
+    )
+    return supports or [0.01], resistances or [999999.0], metadata
+
+
 _pre_market_research_service = None
 
 
@@ -615,11 +655,14 @@ def build_symbol_evidence(data, classification, macro_sentiment, macro_regime):
     if not risks:
         risks.append("No major data-only risk flagged before open.")
 
+    support_levels, resistance_levels, technical_metadata = normalize_technical_levels(data)
+
     return {
         "key_catalysts": catalysts[:4],
         "key_risks": risks[:4],
-        "support_levels": data.get("support_levels") or [],
-        "resistance_levels": data.get("resistance_levels") or [],
+        "support_levels": support_levels,
+        "resistance_levels": resistance_levels,
+        **technical_metadata,
     }
 
 

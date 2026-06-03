@@ -313,11 +313,27 @@ def policy_artifact_status(base_dir: Path | str) -> dict[str, Any]:
     base_dir = Path(base_dir)
     artifacts = _current_artifact_files(base_dir)
     registry = policy_artifact_registry_status(base_dir)
+    try:
+        from ml_platform.registry import model_staleness_guard
+
+        model_guard = model_staleness_guard(
+            model_id=os.getenv("ML_MODEL_ID", "").strip(),
+            max_age_seconds=int(os.getenv("ML_MODEL_MAX_AGE_SECONDS", "0") or 0),
+            registry_path=base_dir / "ml" / "models" / "registry.json",
+        )
+    except Exception as exc:
+        model_guard = {
+            "status": "guard_error",
+            "fallback_required": True,
+            "fallback_strategy": "deterministic_policy_no_ml_authority",
+            "reason": str(exc),
+        }
 
     return {
         "artifact_type": "policy_artifact",
         "runtime_effect": "live_policy_context" if policy_artifacts_enabled() else "disabled",
         "enabled": policy_artifacts_enabled(),
+        "model_staleness_guard": model_guard,
         "state_hash": _state_hash(artifacts),
         "registry": registry,
         "files": artifacts,

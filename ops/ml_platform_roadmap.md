@@ -70,6 +70,14 @@ or destabilize the webhook path if treated as routine cleanup.
      creating false retraining alerts.
    - Retraining is guarded by a nonblocking lock and max-runtime timeout so
      long jobs do not silently overlap later scheduled automation.
+   - Retraining runs at low process priority and applies a memory cap because
+     the bot shares one VM with market-hour services.
+   - Completed target dates write run markers; retries skip unless explicitly
+     requested with `--rerun-completed`.
+   - Candidate artifacts write diagnostic JSON companions with validation,
+     training, Python, platform, Git SHA, and promotion blocker metadata.
+   - Configured model staleness forces deterministic-policy fallback with no ML
+     authority until the registry/artifact freshness issue is resolved.
    - After-close learning should produce retraining-readiness evidence and
      candidate artifacts, not automatically alter runtime policy.
 5. Existing after-close policy artifacts:

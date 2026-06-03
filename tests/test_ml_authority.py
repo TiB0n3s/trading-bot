@@ -176,6 +176,26 @@ def test_recency_handles_naive_and_timezone_aware_canonical_timestamps():
     assert naive.prediction_age_seconds is not None
 
 
+def test_stale_model_guard_disables_all_ml_authority_effects():
+    outcome = evaluate_ml_authority_outcome(
+        prediction_gate=_gate(),
+        ml_prediction={"prediction_generated_at": "2999-01-01T00:00:00+00:00"},
+        ml_authority_config=_config(
+            authority_mode="size_down_only",
+            model_staleness_guard={
+                "fallback_required": True,
+                "reason": "configured model is stale",
+            },
+        ),
+        execution_mode="cash_full",
+    )
+
+    assert outcome.qualified_for_authority is False
+    assert outcome.enforced is False
+    assert outcome.effect_on_size == "none"
+    assert "deterministic fallback" in outcome.reason
+
+
 def main():
     tests = [
         test_observe_mode_records_negative_compare_without_enforcement,
@@ -185,6 +205,7 @@ def main():
         test_live_block_requires_safe_runtime_and_freshness_config,
         test_recency_uses_only_canonical_prediction_generated_at,
         test_recency_handles_naive_and_timezone_aware_canonical_timestamps,
+        test_stale_model_guard_disables_all_ml_authority_effects,
     ]
     for test in tests:
         test()

@@ -6,12 +6,14 @@ from __future__ import annotations
 import json
 import sys
 import tempfile
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from ml_platform.promotion import assess_candidate_promotion, register_candidate_model
+from ml_platform.registry import model_staleness_guard
 
 
 def _readiness(blockers=None):
@@ -95,12 +97,45 @@ def test_register_candidate_model_writes_registry_metadata_only():
     assert registry["models"][0]["model_id"] == "candidate_v1"
 
 
+def test_model_staleness_guard_requires_fallback_for_old_artifact():
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        artifact = root / "candidate.joblib"
+        artifact.write_bytes(b"model")
+        registry_path = root / "registry.json"
+        old = (datetime.now(timezone.utc) - timedelta(days=10)).isoformat()
+        registry_path.write_text(json.dumps({
+            "models": [{
+                "model_id": "candidate_v1",
+                "artifact_path": str(artifact),
+                "created_at": old,
+                "updated_at": old,
+            }]
+        }))
+        old_ts = (datetime.now(timezone.utc) - timedelta(days=10)).timestamp()
+        artifact.touch()
+        import os
+
+        os.utime(artifact, (old_ts, old_ts))
+
+        guard = model_staleness_guard(
+            model_id="candidate_v1",
+            max_age_seconds=60,
+            registry_path=registry_path,
+        )
+
+    assert guard["fallback_required"] is True
+    assert guard["status"] == "stale"
+    assert guard["fallback_strategy"] == "deterministic_policy_no_ml_authority"
+
+
 def main():
     tests = [
         test_readiness_blockers_prevent_candidate_registration,
         test_directional_validation_allows_candidate_metadata,
         test_promotion_beyond_warn_only_requires_explicit_operator_approval,
         test_register_candidate_model_writes_registry_metadata_only,
+        test_model_staleness_guard_requires_fallback_for_old_artifact,
     ]
     for test in tests:
         test()

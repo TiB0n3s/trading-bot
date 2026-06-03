@@ -289,6 +289,63 @@ def test_evaluate_position_uses_exit_pattern_pressure_for_partial_profit_capture
     )
 
 
+def test_submit_partial_exit_waits_after_canceling_open_orders():
+    class _Order:
+        id = "open-order-1"
+
+    class _Broker:
+        def __init__(self):
+            self.canceled = []
+            self.submitted = False
+
+        def list_open_orders(self, symbol):
+            return [_Order()]
+
+        def cancel_order(self, order_id):
+            self.canceled.append(order_id)
+
+        def submit_market_sell(self, symbol, qty):
+            self.submitted = True
+            raise AssertionError("submit_market_sell should not run after canceling open orders")
+
+    broker = _Broker()
+    old_broker = position_manager.broker_service
+    try:
+        position_manager.broker_service = broker
+        result = position_manager.submit_exit(
+            {"symbol": "AAPL", "action": "sell_partial", "qty": 4, "sell_fraction": 0.5}
+        )
+    finally:
+        position_manager.broker_service = old_broker
+
+    assert_equal(result["submitted"], False, "submitted")
+    assert_true("waiting for available quantity" in result["reason"], "reason")
+    assert_equal(broker.canceled, ["open-order-1"], "canceled orders")
+    assert_equal(broker.submitted, False, "submitted flag")
+
+
+def test_submit_partial_exit_returns_failure_instead_of_crashing_on_broker_error():
+    class _Broker:
+        def list_open_orders(self, symbol):
+            return []
+
+        def submit_market_sell(self, symbol, qty):
+            raise RuntimeError("insufficient qty available for order")
+
+    old_broker = position_manager.broker_service
+    try:
+        position_manager.broker_service = _Broker()
+        result = position_manager.submit_exit(
+            {"symbol": "AAPL", "action": "sell_partial", "qty": 4, "sell_fraction": 0.5}
+        )
+    finally:
+        position_manager.broker_service = old_broker
+
+    assert_equal(result["submitted"], False, "submitted")
+    assert_true("partial sell submit failed" in result["reason"], "reason")
+    assert_true("insufficient qty" in result["reason"], "broker reason")
+
+
 def main():
     tests = [
         test_continuation_delays_soft_full_exit_when_tape_supports,
@@ -306,6 +363,8 @@ def main():
         test_exit_pattern_pressure_gives_retained_strength_extra_confirmation,
         test_exit_pattern_pressure_is_not_armed_before_profit_threshold,
         test_evaluate_position_uses_exit_pattern_pressure_for_partial_profit_capture,
+        test_submit_partial_exit_waits_after_canceling_open_orders,
+        test_submit_partial_exit_returns_failure_instead_of_crashing_on_broker_error,
     ]
 
     for test in tests:

@@ -117,6 +117,33 @@ AUTO_BUY_ML_WEAK_BUCKET_BLOCK_ENABLED = os.getenv(
 AUTO_BUY_WATCH_SETUP_STRONG_BUY_ENABLED = os.getenv(
     "AUTO_BUY_WATCH_SETUP_STRONG_BUY_ENABLED", "false"
 ).strip().lower() in ("1", "true", "yes", "on")
+AUTO_BUY_EARLY_BUILD_ENABLED = os.getenv(
+    "AUTO_BUY_EARLY_BUILD_ENABLED", "true"
+).strip().lower() in ("1", "true", "yes", "on")
+AUTO_BUY_EARLY_BUILD_MAX_SESSION_RETURN_PCT = float(
+    os.getenv("AUTO_BUY_EARLY_BUILD_MAX_SESSION_RETURN_PCT", "0.90")
+)
+AUTO_BUY_EARLY_BUILD_MAX_VWAP_DIST_PCT = float(
+    os.getenv("AUTO_BUY_EARLY_BUILD_MAX_VWAP_DIST_PCT", "0.70")
+)
+AUTO_BUY_EARLY_BUILD_MIN_SETUP_SCORE = float(
+    os.getenv("AUTO_BUY_EARLY_BUILD_MIN_SETUP_SCORE", "50")
+)
+AUTO_BUY_MATURE_CHASE_ENABLED = os.getenv(
+    "AUTO_BUY_MATURE_CHASE_ENABLED", "true"
+).strip().lower() in ("1", "true", "yes", "on")
+AUTO_BUY_MATURE_CHASE_SESSION_RETURN_PCT = float(
+    os.getenv("AUTO_BUY_MATURE_CHASE_SESSION_RETURN_PCT", "1.50")
+)
+AUTO_BUY_MATURE_CHASE_VWAP_DIST_PCT = float(
+    os.getenv("AUTO_BUY_MATURE_CHASE_VWAP_DIST_PCT", "1.00")
+)
+AUTO_BUY_EXTREME_CHASE_BLOCK_SESSION_RETURN_PCT = float(
+    os.getenv("AUTO_BUY_EXTREME_CHASE_BLOCK_SESSION_RETURN_PCT", "2.50")
+)
+AUTO_BUY_EXTREME_CHASE_BLOCK_VWAP_DIST_PCT = float(
+    os.getenv("AUTO_BUY_EXTREME_CHASE_BLOCK_VWAP_DIST_PCT", "1.25")
+)
 
 _prediction_context_cache: dict[str, dict[str, Any]] = {}
 
@@ -642,6 +669,45 @@ def evaluate_auto_buy_candidate(
         score -= 2
         reasons.append("setup_score<=20:-2")
 
+    early_constructive_build = (
+        AUTO_BUY_EARLY_BUILD_ENABLED
+        and setup_score >= AUTO_BUY_EARLY_BUILD_MIN_SETUP_SCORE
+        and setup_rec in {"favorable", "watch"}
+        and label in {"developing_uptrend", "strong_uptrend"}
+        and 0.0 <= session_return <= AUTO_BUY_EARLY_BUILD_MAX_SESSION_RETURN_PCT
+        and -0.10 <= vwap <= AUTO_BUY_EARLY_BUILD_MAX_VWAP_DIST_PCT
+        and m5 >= 0.05
+        and m15 >= 0.10
+        and m30 >= 0.0
+    )
+    if early_constructive_build:
+        score += 3
+        reasons.append(
+            "early_constructive_build:+3"
+            f"(session={session_return:.2f}%,vwap={vwap:.2f}%,setup={setup_score:.1f})"
+        )
+
+    mature_chase = (
+        AUTO_BUY_MATURE_CHASE_ENABLED
+        and session_return >= AUTO_BUY_MATURE_CHASE_SESSION_RETURN_PCT
+        and vwap >= AUTO_BUY_MATURE_CHASE_VWAP_DIST_PCT
+        and setup_label not in {
+            "confirmed_near_vwap_recovery",
+            "near_vwap_weak_strength_followthrough",
+        }
+    )
+    extreme_chase = (
+        mature_chase
+        and session_return >= AUTO_BUY_EXTREME_CHASE_BLOCK_SESSION_RETURN_PCT
+        and vwap >= AUTO_BUY_EXTREME_CHASE_BLOCK_VWAP_DIST_PCT
+    )
+    if mature_chase:
+        score -= 4
+        reasons.append(
+            "mature_chase_extension:-4"
+            f"(session={session_return:.2f}%,vwap={vwap:.2f}%)"
+        )
+
     strategy_memory = memory_for_signal(
         symbol,
         {
@@ -780,6 +846,12 @@ def evaluate_auto_buy_candidate(
         hard_block_reasons.append(
             f"unclassified_extended_vwap:{vwap:.3f}>{AUTO_BUY_UNCLASSIFIED_EXTENDED_BLOCK_PCT:.2f}"
         )
+    if extreme_chase:
+        hard_block_reasons.append(
+            "extreme_mature_chase:"
+            f"session_return={session_return:.3f}>={AUTO_BUY_EXTREME_CHASE_BLOCK_SESSION_RETURN_PCT:.2f};"
+            f"vwap={vwap:.3f}>={AUTO_BUY_EXTREME_CHASE_BLOCK_VWAP_DIST_PCT:.2f}"
+        )
     if (
         strategy_memory.get("available")
         and memory_rec == "avoid"
@@ -889,6 +961,9 @@ def evaluate_auto_buy_candidate(
         "strategy_memory_min_setup_score": learned_min_setup_score,
         "strategy_memory_reason": strategy_memory.get("reason"),
         "strategy_memory_available": bool(strategy_memory.get("available")),
+        "early_constructive_build": bool(early_constructive_build),
+        "mature_chase": bool(mature_chase),
+        "extreme_chase": bool(extreme_chase),
         "feature_snapshot_id": feature.get("id"),
         **prediction_context,
         **pattern,

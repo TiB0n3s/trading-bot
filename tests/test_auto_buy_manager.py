@@ -212,6 +212,60 @@ def test_watch_setup_cannot_become_strong_buy_by_default():
     assert_equal(result["severity"], "medium", "severity")
 
 
+def test_early_constructive_build_gets_buy_candidate_boost():
+    session = strong_session()
+    session["trend_label"] = "developing_uptrend"
+    session["trend_score"] = 4
+    session["session_return_pct"] = 0.42
+    session["momentum_5m_pct"] = 0.08
+    session["momentum_15m_pct"] = 0.18
+    session["momentum_30m_pct"] = 0.12
+    session["distance_from_vwap_pct"] = 0.32
+    feature = favorable_feature()
+    feature["setup_recommendation"] = "watch"
+    feature["setup_score"] = 56
+
+    result = evaluate_auto_buy_candidate(
+        symbol="AMZN",
+        session=session,
+        feature=feature,
+        context=buy_context(),
+        held=set(),
+    )
+
+    assert_equal(result["early_constructive_build"], True, "early build flag")
+    if "early_constructive_build:+3" not in result["reason"]:
+        raise AssertionError(f"missing early build reason: {result['reason']}")
+    assert_equal(result["decision"], "watch", "watch setup still capped")
+
+
+def test_mature_chase_extension_is_penalized_and_extreme_chase_blocks():
+    session = strong_session()
+    session["session_return_pct"] = 3.1
+    session["distance_from_vwap_pct"] = 1.42
+    feature = favorable_feature()
+    feature["setup_label"] = "above_vwap_strength_continuation"
+    feature["setup_recommendation"] = "favorable"
+    feature["setup_score"] = 82
+
+    result = evaluate_auto_buy_candidate(
+        symbol="AMZN",
+        session=session,
+        feature=feature,
+        context=buy_context(),
+        held=set(),
+    )
+
+    assert_equal(result["mature_chase"], True, "mature chase flag")
+    assert_equal(result["extreme_chase"], True, "extreme chase flag")
+    assert_equal(result["decision"], "skip", "decision")
+    assert_equal(result["severity"], "blocked", "severity")
+    if "mature_chase_extension:-4" not in result["reason"]:
+        raise AssertionError(f"missing mature chase reason: {result['reason']}")
+    if "extreme_mature_chase" not in result["hard_block_reason"]:
+        raise AssertionError(f"missing extreme chase block: {result['hard_block_reason']}")
+
+
 def test_unclassified_extended_vwap_blocks_candidate():
     session = strong_session()
     session["distance_from_vwap_pct"] = 1.65
@@ -743,6 +797,8 @@ def main():
         test_weak_ml_prediction_blocks_auto_buy_candidate,
         test_weak_ml_bucket_blocks_even_with_thin_sample,
         test_watch_setup_cannot_become_strong_buy_by_default,
+        test_early_constructive_build_gets_buy_candidate_boost,
+        test_mature_chase_extension_is_penalized_and_extreme_chase_blocks,
         test_unclassified_extended_vwap_blocks_candidate,
         test_strategy_memory_caution_reduces_auto_buy_score,
         test_strategy_memory_avoid_blocks_auto_buy_candidate,

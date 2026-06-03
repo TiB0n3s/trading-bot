@@ -1333,8 +1333,22 @@ def submit_exit(decision):
         open_orders = broker_service.list_open_orders(symbol)
         for o in open_orders:
             broker_service.cancel_order(o.id)
+        if open_orders:
+            return {
+                "submitted": False,
+                "reason": (
+                    f"canceled {len(open_orders)} open order(s); "
+                    "waiting for available quantity to refresh before partial exit"
+                ),
+            }
 
-        order = broker_service.submit_market_sell(symbol, sell_qty)
+        try:
+            order = broker_service.submit_market_sell(symbol, sell_qty)
+        except Exception as exc:
+            return {
+                "submitted": False,
+                "reason": f"partial sell submit failed: {exc}",
+            }
 
         return {
             "submitted": True,

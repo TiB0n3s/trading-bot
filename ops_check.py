@@ -56,6 +56,7 @@ Usage:
   python3 ops_check.py exit-snapshot-backfill YYYY-MM-DD [--dry-run]
   python3 ops_check.py candidate-universe
   python3 ops_check.py candidate-outcome-backfill YYYY-MM-DD [--dry-run]
+  python3 ops_check.py missed-buy-review YYYY-MM-DD
   python3 ops_check.py calibration-buckets
   python3 ops_check.py feature-attribution
   python3 ops_check.py post-trade-learning
@@ -110,6 +111,7 @@ from services.ops_checks.decision_quality_checks import run_decision_quality_rev
 from services.ops_checks.exit_snapshot_backfill_checks import run_exit_snapshot_backfill
 from services.ops_checks.candidate_universe_checks import run_candidate_universe_report
 from services.ops_checks.candidate_outcome_backfill_checks import run_candidate_outcome_backfill
+from services.ops_checks.missed_buy_review_checks import run_missed_buy_review
 from services.ops_checks.calibration_bucket_checks import run_calibration_buckets
 from services.ops_checks.feature_attribution_checks import run_feature_attribution_report
 from services.ops_checks.post_trade_learning_checks import run_post_trade_learning_report
@@ -699,6 +701,21 @@ def candidate_outcome_backfill(target_date):
     )
 
 
+def missed_buy_review(target_date):
+    symbol = None
+    if "--symbol" in sys.argv:
+        idx = sys.argv.index("--symbol")
+        if idx + 1 < len(sys.argv):
+            symbol = sys.argv[idx + 1]
+    return run_missed_buy_review(
+        target_date,
+        base_dir=BASE_DIR,
+        symbol=symbol,
+        samples=_int_option("--samples", 20),
+        min_mfe_pct=_float_option("--min-mfe-pct", 0.8),
+    )
+
+
 def calibration_buckets(target_date):
     symbol = None
     if "--symbol" in sys.argv:
@@ -898,6 +915,18 @@ def _int_option(name: str, default: int = 0) -> int:
         return default
     try:
         return int(sys.argv[idx + 1])
+    except Exception:
+        return default
+
+
+def _float_option(name: str, default: float = 0.0) -> float:
+    if name not in sys.argv:
+        return default
+    idx = sys.argv.index(name)
+    if idx + 1 >= len(sys.argv):
+        return default
+    try:
+        return float(sys.argv[idx + 1])
     except Exception:
         return default
 
@@ -1113,6 +1142,9 @@ def main():
 
     if command == "candidate-outcome-backfill":
         return 0 if candidate_outcome_backfill(target_date) else 1
+
+    if command == "missed-buy-review":
+        return 0 if missed_buy_review(target_date) else 1
 
     if command == "calibration-buckets":
         return 0 if calibration_buckets(target_date) else 1

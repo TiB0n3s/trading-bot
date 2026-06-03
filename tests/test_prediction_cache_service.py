@@ -55,6 +55,37 @@ def test_load_predictions_normalizes_symbols_and_metadata():
     assert repo.market_dates == ["2026-05-27"]
 
 
+def test_load_predictions_hard_clips_extreme_model_outputs():
+    repo = FakeRepository(
+        rows=[
+            {
+                "market_date": "2026-05-27",
+                "symbol": "AAPL",
+                "prediction_score": 999,
+                "timing_score": -10,
+                "probability_of_profit": 1.5,
+                "expected_win_rate": -0.2,
+            },
+        ]
+    )
+    service = _service(repo)
+
+    loaded = service.load_predictions_from_db(market_date="2026-05-27")
+    pred = loaded["AAPL"]
+
+    assert pred["prediction_score"] == 100.0
+    assert pred["timing_score"] == 0.0
+    assert pred["probability_of_profit"] == 1.0
+    assert pred["expected_win_rate"] == 0.0
+    assert pred["prediction_output_clipped"] is True
+    assert set(pred["prediction_output_clipped_fields"]) == {
+        "prediction_score",
+        "timing_score",
+        "probability_of_profit",
+        "expected_win_rate",
+    }
+
+
 def test_refresh_populates_memory_and_lookup_is_read_only_copy():
     repo = FakeRepository(
         rows=[
@@ -91,6 +122,7 @@ def test_refresh_failure_records_status_error_without_raising():
 if __name__ == "__main__":
     tests = [
         test_load_predictions_normalizes_symbols_and_metadata,
+        test_load_predictions_hard_clips_extreme_model_outputs,
         test_refresh_populates_memory_and_lookup_is_read_only_copy,
         test_refresh_failure_records_status_error_without_raising,
     ]

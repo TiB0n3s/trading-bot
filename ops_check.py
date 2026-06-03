@@ -18,6 +18,7 @@ Usage:
   python3 ops_check.py signal-lessons
   python3 ops_check.py trends
   python3 ops_check.py prediction-validation
+  python3 ops_check.py shadow-predictions
   python3 ops_check.py bot-events
   python3 ops_check.py event-attribution
   python3 ops_check.py premarket
@@ -135,6 +136,7 @@ from services.ops_checks.trading_education_checks import run_trading_education_h
 from services.ops_checks.market_data_parity_checks import run_market_data_parity
 from services.ops_checks.research_export_checks import run_research_export
 from services.ops_checks.snapshot_checks import run_decision_snapshot_health
+from services.ops_checks.shadow_prediction_checks import run_shadow_prediction_report
 
 BASE_DIR = Path(__file__).resolve().parent
 VENV_PYTHON = BASE_DIR / "venv" / "bin" / "python"
@@ -902,6 +904,10 @@ def research_export(target_date: str) -> bool:
     )
 
 
+def shadow_predictions(target_date: str) -> bool:
+    return run_shadow_prediction_report(target_date, base_dir=BASE_DIR)
+
+
 def jobs_status(job_name_filter: str | None = None) -> bool:
     """Print latest-run-per-job status table from the job_runs ledger."""
     from repositories.job_runs_repo import JobRunsRepository
@@ -1051,6 +1057,9 @@ def main():
 
     if command == "research-export":
         return 0 if research_export(target_date) else 1
+
+    if command == "shadow-predictions":
+        return 0 if shadow_predictions(target_date) else 1
 
     if command == "lifecycle-analysis":
         return 0 if lifecycle_analysis(target_date) else 1

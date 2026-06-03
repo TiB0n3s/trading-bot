@@ -10,6 +10,10 @@ from typing import Any
 
 from ml_platform.config import MODEL_REGISTRY_PATH, MODEL_STATUSES, ensure_ml_dirs
 
+MODEL_ARTIFACT_SUFFIXES = {".joblib", ".pkl", ".pickle", ".bin"}
+LIVE_MODEL_STATUSES = {"paper_gate", "paper_soft", "live_candidate", "warn_only"}
+CANDIDATE_MODEL_STATUSES = {"candidate", "shadow", "observe_only"}
+
 
 def load_registry(path: Path | str = MODEL_REGISTRY_PATH) -> dict[str, Any]:
     path = Path(path)
@@ -142,6 +146,98 @@ def model_staleness_guard(
             if fallback_required
             else "configured model freshness is within limit"
         ),
+    }
+
+
+def _artifact_path(model: dict[str, Any]) -> Path | None:
+    artifact = str(model.get("artifact_path") or "").strip()
+    if not artifact:
+        return None
+    return Path(artifact)
+
+
+def prune_model_artifacts(
+    *,
+    registry_path: Path | str = MODEL_REGISTRY_PATH,
+    older_than_days: int = 30,
+    fallback_count: int = 3,
+    now: datetime | None = None,
+) -> dict[str, Any]:
+    """Delete stale binary model artifacts while preserving diagnostics.
+
+    The registry remains an audit catalog. This function only unlinks model
+    binary files older than the retention window when they are not protected by
+    live/candidate/fallback retention rules.
+    """
+    registry = load_registry(registry_path)
+    models = list(registry.get("models") or [])
+    now = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
+    cutoff_seconds = max(0, int(older_than_days)) * 86400
+
+    def created_key(model: dict[str, Any]) -> datetime:
+        return _parse_iso(model.get("updated_at") or model.get("created_at")) or datetime.min.replace(tzinfo=timezone.utc)
+
+    protected: set[Path] = set()
+    for model in models:
+        status = str(model.get("status") or "").lower()
+        artifact = _artifact_path(model)
+        if artifact and status in LIVE_MODEL_STATUSES | CANDIDATE_MODEL_STATUSES:
+            protected.add(artifact)
+
+    fallback_candidates = [
+        model
+        for model in models
+        if _artifact_path(model) is not None
+        and str(model.get("status") or "").lower() not in LIVE_MODEL_STATUSES | CANDIDATE_MODEL_STATUSES
+    ]
+    fallback_candidates.sort(key=created_key, reverse=True)
+    for model in fallback_candidates[: max(0, int(fallback_count))]:
+        artifact = _artifact_path(model)
+        if artifact:
+            protected.add(artifact)
+
+    deleted = []
+    kept = []
+    missing = []
+    for model in models:
+        artifact = _artifact_path(model)
+        if not artifact:
+            continue
+        if artifact in protected:
+            kept.append({"artifact_path": str(artifact), "reason": "protected"})
+            continue
+        if artifact.suffix not in MODEL_ARTIFACT_SUFFIXES:
+            kept.append({"artifact_path": str(artifact), "reason": "non_binary_suffix"})
+            continue
+        if not artifact.exists():
+            missing.append(str(artifact))
+            continue
+        mtime = datetime.fromtimestamp(artifact.stat().st_mtime, timezone.utc)
+        age_seconds = max(0, int((now - mtime).total_seconds()))
+        if age_seconds <= cutoff_seconds:
+            kept.append({"artifact_path": str(artifact), "reason": "within_retention_window"})
+            continue
+        artifact.unlink()
+        deleted.append(
+            {
+                "artifact_path": str(artifact),
+                "age_seconds": age_seconds,
+                "diagnostic_preserved": artifact.with_suffix(
+                    artifact.suffix + ".diagnostic.json"
+                ).exists(),
+            }
+        )
+
+    return {
+        "report_version": "model_artifact_pruning_v1",
+        "runtime_effect": "artifact_hygiene_only_no_live_authority",
+        "older_than_days": older_than_days,
+        "fallback_count": fallback_count,
+        "protected_count": len(protected),
+        "deleted_count": len(deleted),
+        "deleted": deleted,
+        "kept": kept,
+        "missing_artifacts": missing,
     }
 
 

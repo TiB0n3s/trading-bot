@@ -311,6 +311,14 @@ def test_bar_pattern_backfill_cli_missing_db_exits_cleanly(tmp_path):
     assert "[WARN] trades.db not found" in out
 
 
+def test_shadow_predictions_cli_missing_db_exits_cleanly(tmp_path):
+    code, out = _run_cli(tmp_path, "shadow-predictions", "2026-05-30")
+
+    assert code == 1
+    assert "Shadow Prediction Report" in out
+    assert "[WARN] trades.db not found" in out
+
+
 def test_ops_reliability_cli_missing_db_exits_cleanly(tmp_path):
     for command, title, version in (
         ("event-source-coverage", "Event Source Coverage", "event_source_coverage_v1"),
@@ -844,6 +852,77 @@ def test_research_export_cli_writes_daily_manifest(tmp_path):
     assert (tmp_path / "research_exports" / "2026-06-02" / "manifest.json").exists()
 
 
+def test_shadow_predictions_cli_scores_labeled_outcomes(tmp_path):
+    with sqlite3.connect(tmp_path / "trades.db") as con:
+        con.execute(
+            """
+            CREATE TABLE shadow_predictions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                market_date TEXT NOT NULL,
+                symbol TEXT NOT NULL,
+                prediction_time TEXT,
+                model_id TEXT NOT NULL,
+                artifact_path TEXT NOT NULL,
+                prediction_score REAL,
+                raw_prediction_score REAL,
+                feature_snapshot_id INTEGER,
+                feature_available_at TEXT,
+                generated_at TEXT NOT NULL,
+                runtime_effect TEXT NOT NULL
+            )
+            """
+        )
+        con.execute(
+            """
+            CREATE TABLE labeled_setups (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                snapshot_id INTEGER UNIQUE,
+                symbol TEXT NOT NULL,
+                timestamp TEXT NOT NULL,
+                ret_fwd_15m REAL,
+                ret_fwd_30m REAL,
+                outcome_label TEXT
+            )
+            """
+        )
+        con.execute(
+            """
+            INSERT INTO shadow_predictions (
+                market_date, symbol, prediction_time, model_id, artifact_path,
+                prediction_score, raw_prediction_score, feature_snapshot_id,
+                feature_available_at, generated_at, runtime_effect
+            ) VALUES
+                ('2026-05-30', 'AAPL', '2026-05-30T14:00:00+00:00',
+                 'candidate-1', '/tmp/candidate.joblib', 72.0, 72.0, 10,
+                 '2026-05-30T14:00:00+00:00', '2026-05-30T14:01:00+00:00',
+                 'shadow_only_no_live_authority'),
+                ('2026-05-30', 'MSFT', '2026-05-30T14:05:00+00:00',
+                 'candidate-1', '/tmp/candidate.joblib', 42.0, 42.0, 11,
+                 '2026-05-30T14:05:00+00:00', '2026-05-30T14:06:00+00:00',
+                 'shadow_only_no_live_authority')
+            """
+        )
+        con.execute(
+            """
+            INSERT INTO labeled_setups (
+                snapshot_id, symbol, timestamp, ret_fwd_15m, ret_fwd_30m, outcome_label
+            ) VALUES
+                (10, 'AAPL', '2026-05-30T14:00:00+00:00', 0.8, 1.2, 'winner'),
+                (11, 'MSFT', '2026-05-30T14:05:00+00:00', -0.3, -0.5, 'loser')
+            """
+        )
+
+    code, out = _run_cli(tmp_path, "shadow-predictions", "2026-05-30")
+
+    assert code == 0
+    assert "Shadow Prediction Report" in out
+    assert "runtime_effect         : observe_only_no_live_authority" in out
+    assert "rows_with_outcomes     : 2" in out
+    assert "high_70_plus" in out
+    assert "weak_below_45" in out
+    assert "[OK] shadow predictions are scoreable against labeled outcomes" in out
+
+
 def test_learning_readiness_cli_golden_fixture_summarizes_holistic_evidence(tmp_path):
     _create_lifecycle_fixture_db(tmp_path)
     (tmp_path / "strategy_memory.json").write_text(
@@ -1256,6 +1335,7 @@ def main():
         test_rollout_contract_cli_missing_db_exits_cleanly,
         test_symbol_patterns_cli_missing_db_exits_cleanly,
         test_bar_pattern_backfill_cli_missing_db_exits_cleanly,
+        test_shadow_predictions_cli_missing_db_exits_cleanly,
         test_ops_reliability_cli_missing_db_exits_cleanly,
         test_signal_source_readiness_cli_flags_legacy_source_gate,
         test_signal_source_readiness_cli_passes_when_internal_all_active,
@@ -1272,6 +1352,7 @@ def main():
         test_learning_effectiveness_cli_uses_readiness_payload_with_daily_framing,
         test_regime_status_json_smoke,
         test_trading_education_health_cli_lists_curated_sources,
+        test_shadow_predictions_cli_scores_labeled_outcomes,
         test_jobs_cli_missing_db_exits_cleanly,
         test_jobs_cli_reads_selected_base_dir_and_filters,
         test_report_command_dispatches_in_process_with_target_date,

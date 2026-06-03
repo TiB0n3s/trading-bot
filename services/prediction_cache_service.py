@@ -12,9 +12,67 @@ from typing import Any, Callable
 from market_time import expected_market_context_date
 from repositories.prediction_repo import PredictionRepository
 
+SCORE_CLIP_MIN = 0.0
+SCORE_CLIP_MAX = 100.0
+PREDICTION_SCORE_FIELDS = (
+    "prediction_score",
+    "timing_score",
+    "trend_score",
+    "ml_prediction_score",
+)
+PROBABILITY_FIELDS = (
+    "probability_of_profit",
+    "expected_win_rate",
+)
+
 
 def now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def _clip_float(value: Any, *, low: float, high: float) -> tuple[Any, bool]:
+    if value is None:
+        return None, False
+    try:
+        numeric = float(value)
+    except Exception:
+        return value, False
+    clipped = max(low, min(high, numeric))
+    return clipped, clipped != numeric
+
+
+def sanitize_prediction_outputs(item: dict[str, Any]) -> dict[str, Any]:
+    """Hard-clip prediction outputs before they can enter runtime context."""
+    sanitized = dict(item)
+    clipped_fields = []
+    for field in PREDICTION_SCORE_FIELDS:
+        if field in sanitized:
+            sanitized[field], clipped = _clip_float(
+                sanitized.get(field),
+                low=SCORE_CLIP_MIN,
+                high=SCORE_CLIP_MAX,
+            )
+            if clipped:
+                clipped_fields.append(field)
+    for field in PROBABILITY_FIELDS:
+        if field in sanitized:
+            sanitized[field], clipped = _clip_float(
+                sanitized.get(field),
+                low=0.0,
+                high=1.0,
+            )
+            if clipped:
+                clipped_fields.append(field)
+    if clipped_fields:
+        sanitized["prediction_output_clipped"] = True
+        sanitized["prediction_output_clipped_fields"] = clipped_fields
+        sanitized["prediction_output_clip_bounds"] = {
+            "score": [SCORE_CLIP_MIN, SCORE_CLIP_MAX],
+            "probability": [0.0, 1.0],
+        }
+    else:
+        sanitized.setdefault("prediction_output_clipped", False)
+    return sanitized
 
 
 class PredictionCacheService:
@@ -59,7 +117,7 @@ class PredictionCacheService:
         loaded = {}
         loaded_at = now_iso()
         for row in rows:
-            item = dict(row)
+            item = sanitize_prediction_outputs(dict(row))
             symbol = str(item.pop("symbol") or "").upper()
             if not symbol:
                 continue

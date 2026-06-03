@@ -42,6 +42,8 @@ or destabilize the webhook path if treated as routine cleanup.
    - Current contract: target 25 ms, hard timeout 50 ms, in-memory TTL cache
      loaded outside the webhook path, TTL 60 seconds, fail-open to no
      prediction.
+   - Prediction cache loading hard-clips numeric model outputs before they can
+     enter runtime context.
    - A provider timeout/error must never block signal processing or hard risk
      checks.
 2. Manual override confounders:
@@ -76,6 +78,13 @@ or destabilize the webhook path if treated as routine cleanup.
      requested with `--rerun-completed`.
    - Candidate artifacts write diagnostic JSON companions with validation,
      training, Python, platform, Git SHA, and promotion blocker metadata.
+   - Training rows are point-in-time filtered by `feature_available_at <=
+     prediction_time_cutoff` to reduce leakage risk.
+   - Old unprotected binary model artifacts are pruned while diagnostic JSON is
+     preserved for historical performance review.
+   - Candidate models can run in shadow mode through `shadow_predictions`, but
+     shadow outputs are explicitly observe-only and not execution inputs.
+     Operators score them with `ops_check.py shadow-predictions YYYY-MM-DD`.
    - Configured model staleness forces deterministic-policy fallback with no ML
      authority until the registry/artifact freshness issue is resolved.
    - After-close learning should produce retraining-readiness evidence and

@@ -82,8 +82,13 @@ def fetch_training_rows(
     db_path: Path | str | None = None,
     symbol: str | None = None,
     limit: int = 5000,
+    prediction_time_cutoff: str | None = None,
 ) -> list[dict[str, Any]]:
-    kwargs: dict[str, Any] = {"symbol": symbol, "limit": limit}
+    kwargs: dict[str, Any] = {
+        "symbol": symbol,
+        "limit": limit,
+        "prediction_time_cutoff": prediction_time_cutoff,
+    }
     if db_path is not None:
         kwargs["db_path"] = db_path
     return repo_fetch_training_rows(**kwargs)

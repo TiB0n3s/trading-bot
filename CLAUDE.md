@@ -40,6 +40,12 @@ Recent completed roadmap items:
   default 4 GB memory cap.
 - Retraining writes a per-date completion marker and a `.diagnostic.json`
   companion file beside candidate model artifacts.
+- Retraining reads training rows through a point-in-time guard
+  (`feature_available_at <= prediction_time_cutoff`) and prunes unprotected old
+  binary artifacts while keeping diagnostic JSON.
+- The pre-market pipeline may write `shadow_predictions` for candidate models;
+  this is observe-only and must not be read by live execution. Operators compare
+  it with `python3 ops_check.py shadow-predictions YYYY-MM-DD`.
 - Configured ML models are checked for registry/artifact staleness before ML
   authority can enforce. Stale/missing model metadata falls back to
   deterministic policy with no ML authority.
@@ -99,7 +105,8 @@ Recent completed roadmap items:
 - `prediction_cache.py` is the only runtime-safe path for
   `daily_symbol_predictions` in the live signal path: preload/background
   refresh outside webhook handling, 60-second TTL, memory-only signal-path
-  reads, fail-open to no ML prediction.
+  reads, fail-open to no ML prediction, and hard clipping of numeric prediction
+  outputs before runtime context.
 - `decision_snapshots` use feature semantic version
   `decision_snapshot_features_v4`. Canonical intelligence includes compact
   observe-only `analytics_state` from the predictive/descriptive/diagnostic/

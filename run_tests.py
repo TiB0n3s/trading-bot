@@ -96,6 +96,8 @@ TESTS = [
     "tests/test_ai_momentum_pattern_service.py",
     "tests/test_ai_review_suite_service.py",
     "tests/test_supervised_prediction_training_service.py",
+    "tests/test_supervised_prediction_training_repo.py",
+    "tests/test_shadow_prediction_service.py",
     "tests/test_timescale_tick_writer_service.py",
     "tests/test_dashboard_alert_service.py",
     "tests/test_decision_context.py",

@@ -574,7 +574,18 @@ Retraining is idempotent by target date. A completed run marker is written under
 same date exit cleanly unless `--rerun-completed` is supplied. Each trained
 candidate writes a human-readable `.diagnostic.json` next to the model artifact
 with validation correlation, training row counts, Python version, platform, Git
-SHA, resource guard settings, and promotion blockers.
+SHA, resource guard settings, and promotion blockers. Training rows are fetched
+with a point-in-time guard using `feature_available_at <=
+--prediction-time-cutoff` so historical metrics cannot use features that were
+unavailable at the decision cutoff. Retraining also prunes unprotected old
+binary artifacts after the run while preserving diagnostic JSON files.
+
+The pre-market pipeline includes an observe-only shadow scoring step. If a
+candidate model exists in the registry, `pipeline.shadow_predictions` scores the
+latest feature snapshots and writes `shadow_predictions` rows. Those rows are
+for post-session comparison only and are not read by the live execution path.
+Use `python3 ops_check.py shadow-predictions YYYY-MM-DD` after labels are
+available to compare candidate score buckets against forward outcomes.
 
 If `ML_MODEL_ID` and `ML_MODEL_MAX_AGE_SECONDS` are configured, runtime ML
 authority checks the model registry and artifact mtime before enforcing ML
@@ -604,7 +615,9 @@ path. The serving contract remains target 25 ms / hard timeout 50 ms,
 fail-open to no prediction. The existing deterministic `prediction_gate` is
 documented as the deterministic signal-quality gate; cached ML predictions are
 recorded beside it as `ml_prediction_*` fields. Weak buckets can reduce size
-through explicit cap logic only.
+through explicit cap logic only. Numeric prediction outputs are hard-clipped at
+the cache boundary (`0..100` for score fields, `0..1` for probabilities) before
+they can enter runtime context.
 
 `python3 -m ml_platform.cli replay-decisions` is read-only. It re-runs
 `decision_policy` against stored `decision_snapshots`, joins changed decisions

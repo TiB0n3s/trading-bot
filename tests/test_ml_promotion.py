@@ -4,8 +4,10 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
 import tempfile
+import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -13,7 +15,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from ml_platform.promotion import assess_candidate_promotion, register_candidate_model
-from ml_platform.registry import model_staleness_guard
+from ml_platform.registry import model_staleness_guard, prune_model_artifacts
 
 
 def _readiness(blockers=None):
@@ -114,8 +116,6 @@ def test_model_staleness_guard_requires_fallback_for_old_artifact():
         }))
         old_ts = (datetime.now(timezone.utc) - timedelta(days=10)).timestamp()
         artifact.touch()
-        import os
-
         os.utime(artifact, (old_ts, old_ts))
 
         guard = model_staleness_guard(
@@ -129,6 +129,57 @@ def test_model_staleness_guard_requires_fallback_for_old_artifact():
     assert guard["fallback_strategy"] == "deterministic_policy_no_ml_authority"
 
 
+def test_prune_model_artifacts_preserves_candidate_and_diagnostics():
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        old_delete = root / "old_delete.joblib"
+        old_candidate = root / "old_candidate.joblib"
+        recent_fallback = root / "recent_fallback.joblib"
+        for artifact in (old_delete, old_candidate, recent_fallback):
+            artifact.write_text("model")
+            artifact.with_suffix(artifact.suffix + ".diagnostic.json").write_text("{}")
+        old_ts = time.time() - 40 * 86400
+        os.utime(old_delete, (old_ts, old_ts))
+        os.utime(old_candidate, (old_ts, old_ts))
+        registry_path = root / "registry.json"
+        registry_path.write_text(json.dumps({
+            "version": 1,
+            "models": [
+                {
+                    "model_id": "delete-me",
+                    "status": "retired",
+                    "artifact_path": str(old_delete),
+                    "created_at": "2026-01-01T00:00:00+00:00",
+                },
+                {
+                    "model_id": "candidate",
+                    "status": "candidate",
+                    "artifact_path": str(old_candidate),
+                    "created_at": "2026-01-02T00:00:00+00:00",
+                },
+                {
+                    "model_id": "fallback",
+                    "status": "retired",
+                    "artifact_path": str(recent_fallback),
+                    "created_at": "2026-06-01T00:00:00+00:00",
+                },
+            ],
+        }))
+
+        report = prune_model_artifacts(
+            registry_path=registry_path,
+            older_than_days=30,
+            fallback_count=1,
+            now=datetime.now(timezone.utc),
+        )
+
+        assert report["deleted_count"] == 1
+        assert not old_delete.exists()
+        assert old_delete.with_suffix(old_delete.suffix + ".diagnostic.json").exists()
+        assert old_candidate.exists()
+        assert recent_fallback.exists()
+
+
 def main():
     tests = [
         test_readiness_blockers_prevent_candidate_registration,
@@ -136,6 +187,7 @@ def main():
         test_promotion_beyond_warn_only_requires_explicit_operator_approval,
         test_register_candidate_model_writes_registry_metadata_only,
         test_model_staleness_guard_requires_fallback_for_old_artifact,
+        test_prune_model_artifacts_preserves_candidate_and_diagnostics,
     ]
     for test in tests:
         test()

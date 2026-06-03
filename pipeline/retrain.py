@@ -30,6 +30,7 @@ from ml_platform.datasets import dataset_profile
 from ml_platform.governance import build_dataset_manifest
 from ml_platform.promotion import assess_candidate_promotion, register_candidate_model
 from ml_platform.readiness import retraining_readiness_report
+from ml_platform.registry import prune_model_artifacts
 from services.prediction_drift_service import build_default_prediction_drift_service
 from services.supervised_prediction_training_service import (
     fetch_training_rows,
@@ -119,6 +120,12 @@ def _completed_marker(path: Path | None) -> dict[str, Any] | None:
     return None
 
 
+def _default_prediction_time_cutoff(target_date: str | None) -> str:
+    if target_date:
+        return f"{target_date}T23:59:59+00:00"
+    return datetime.now(timezone.utc).isoformat()
+
+
 @contextmanager
 def _nonblocking_lock(lock_file: str | None):
     if not lock_file:
@@ -156,6 +163,10 @@ def _print_payload(payload: dict[str, Any], *, as_json: bool) -> None:
 def _execute_retraining(args: argparse.Namespace) -> int:
     artifact_dir = Path(args.artifact_dir)
     target_date = args.target_date or args.end_date
+    prediction_time_cutoff = (
+        getattr(args, "prediction_time_cutoff", None)
+        or _default_prediction_time_cutoff(target_date)
+    )
     marker_path = _run_marker_path(artifact_dir, target_date)
     marker = _completed_marker(marker_path)
     if marker and not args.rerun_completed:
@@ -194,7 +205,11 @@ def _execute_retraining(args: argparse.Namespace) -> int:
         _print_payload(payload, as_json=args.json)
         return 0
 
-    rows = fetch_training_rows(db_path=args.db_path, limit=args.limit)
+    rows = fetch_training_rows(
+        db_path=args.db_path,
+        limit=args.limit,
+        prediction_time_cutoff=prediction_time_cutoff,
+    )
     stamp = _utc_stamp()
     model_id = f"supervised_prediction_{args.horizon}_{stamp}"
     artifact_path = artifact_dir / f"{model_id}.joblib"
@@ -229,12 +244,21 @@ def _execute_retraining(args: argparse.Namespace) -> int:
     )
     metrics_path = artifact_dir / f"{model_id}.metrics.json"
     diagnostic_path = artifact_path.with_suffix(artifact_path.suffix + ".diagnostic.json")
+    pruning = prune_model_artifacts(
+        older_than_days=getattr(args, "prune_older_than_days", 30),
+        fallback_count=getattr(args, "prune_fallback_count", 3),
+    )
     metrics = {
         "report_version": "automated_retraining_metrics_v1",
         "resource_guard": resource_guard,
         "validation": validation,
         "training": training,
         "readiness": readiness,
+        "point_in_time": {
+            "feature_available_at_cutoff": prediction_time_cutoff,
+            "training_query_guard": "feature_available_at <= cutoff",
+        },
+        "artifact_pruning": pruning,
         "promotion_assessment": assessment.to_dict(),
     }
     _write_json(metrics_path, metrics)
@@ -249,6 +273,7 @@ def _execute_retraining(args: argparse.Namespace) -> int:
         "validation_bad_session_count": validation.get("bad_session_count"),
         "validation_valid_session_count": validation.get("valid_session_count"),
         "training_row_count_loaded": len(rows),
+        "feature_available_at_cutoff": prediction_time_cutoff,
         "training_sample_size": training.get("sample_size"),
         "training_provider": training.get("provider"),
         "training_accuracy": training.get("accuracy"),
@@ -256,6 +281,11 @@ def _execute_retraining(args: argparse.Namespace) -> int:
         "platform": platform.platform(),
         "git_sha": _git_sha(),
         "resource_guard": resource_guard,
+        "artifact_pruning": {
+            "deleted_count": pruning.get("deleted_count"),
+            "protected_count": pruning.get("protected_count"),
+            "older_than_days": pruning.get("older_than_days"),
+        },
         "promotion_allowed": assessment.allowed,
         "promotion_blockers": list(assessment.blockers),
         "generated_at": datetime.now(timezone.utc).isoformat(),
@@ -331,6 +361,13 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--horizon", default="15m")
     parser.add_argument("--min-samples", type=int, default=40)
     parser.add_argument("--limit", type=int, default=5000)
+    parser.add_argument(
+        "--prediction-time-cutoff",
+        help=(
+            "Point-in-time feature availability cutoff. Defaults to target date "
+            "23:59:59 UTC, or now when no target date is supplied."
+        ),
+    )
     parser.add_argument("--db-path", default=str(DEFAULT_DB_PATH))
     parser.add_argument(
         "--artifact-dir",
@@ -367,6 +404,18 @@ def _parse_args() -> argparse.Namespace:
         type=int,
         default=DEFAULT_NICE_INCREMENT,
         help="Lower process priority with os.nice before training. Use 0 to disable.",
+    )
+    parser.add_argument(
+        "--prune-older-than-days",
+        type=int,
+        default=30,
+        help="Delete unprotected binary model artifacts older than this many days.",
+    )
+    parser.add_argument(
+        "--prune-fallback-count",
+        type=int,
+        default=3,
+        help="Keep this many recent historical fallback model binaries.",
     )
     return parser.parse_args()
 

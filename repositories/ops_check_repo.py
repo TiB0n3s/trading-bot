@@ -216,6 +216,75 @@ class OpsCheckRepository:
             (target_date,),
         )
 
+    def pattern_learning_matched_rows(self, target_date: str) -> list[sqlite3.Row]:
+        if not self.table_exists("matched_trades"):
+            return []
+
+        columns = self.table_columns("matched_trades")
+
+        def expr(name: str, alias: str | None = None) -> str:
+            alias = alias or name
+            return name if name in columns else f"NULL AS {alias}"
+
+        return self._fetchall(
+            f"""
+            SELECT
+                id,
+                symbol,
+                entry_timestamp,
+                exit_timestamp,
+                realized_pnl_pct,
+                realized_pnl,
+                won,
+                holding_minutes,
+                {expr("mfe_pct")},
+                {expr("capture_ratio")},
+                {expr("max_adverse_excursion_pct")},
+                {expr("setup_label")},
+                {expr("setup_policy_action")},
+                {expr("ml_prediction_bucket")},
+                {expr("ml_prediction_score")},
+                {expr("session_trend_label")},
+                {expr("buy_opportunity_recommendation")},
+                {expr("exit_reason")},
+                {expr("entry_source")},
+                {expr("signal_source")}
+            FROM matched_trades
+            WHERE DATE(COALESCE(exit_timestamp, entry_timestamp)) = ?
+            ORDER BY COALESCE(exit_timestamp, entry_timestamp) ASC, id ASC
+            """,
+            (target_date,),
+        )
+
+    def pattern_learning_candidate_rows(self, target_date: str) -> list[sqlite3.Row]:
+        if not self.table_exists("candidate_universe"):
+            return []
+        return self._fetchall(
+            """
+            SELECT
+                id,
+                candidate_ts,
+                symbol,
+                action,
+                candidate_kind,
+                candidate_status,
+                score,
+                threshold,
+                threshold_distance,
+                decision,
+                reason,
+                source,
+                setup_label,
+                regime,
+                session_phase,
+                candidate_json
+            FROM candidate_universe
+            WHERE substr(candidate_ts, 1, 10) = ?
+            ORDER BY candidate_ts ASC, id ASC
+            """,
+            (target_date,),
+        )
+
     def decision_authority_rows(self, target_date: str) -> list[sqlite3.Row]:
         if not self.table_exists("decision_snapshots"):
             return []
@@ -455,10 +524,10 @@ class OpsCheckRepository:
                 enriched.setup_policy_action, enriched.exit_reason,
                 weak_entry_context, peak_lock_floor_pct, peak_lock_tier,
                 CASE WHEN peak_lock_floor_pct IS NOT NULL
-                       AND realized_pnl_pct <= peak_lock_floor_pct
+                       AND enriched.realized_pnl_pct <= peak_lock_floor_pct
                      THEN 1 ELSE 0 END AS floor_triggered,
-                CASE WHEN mfe_pct >= ?
-                       AND realized_pnl_pct <= 0
+                CASE WHEN enriched.mfe_pct >= ?
+                       AND enriched.realized_pnl_pct <= 0
                        AND peak_lock_floor_pct IS NOT NULL
                      THEN 1 ELSE 0 END AS would_have_been_winner_became_loser
             FROM enriched

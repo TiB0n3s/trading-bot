@@ -1,0 +1,285 @@
+"""Diagnostic learning inputs for trend/pattern intelligence.
+
+This service intentionally produces telemetry only.  It helps determine which
+buy/sell pattern observations can feed offline learning without creating a
+live authority path.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+import json
+from typing import Any, Iterable
+
+
+PATTERN_LEARNING_INPUTS_VERSION = "pattern_learning_inputs_v1"
+PATTERN_LEARNING_RUNTIME_EFFECT = "diagnostic_only_no_live_authority"
+
+
+@dataclass(frozen=True)
+class PatternLearningInputsPayload:
+    summary: dict[str, Any]
+    executed_trade_quality: list[dict[str, Any]]
+    expectancy_by_dimension: dict[str, list[dict[str, Any]]]
+    candidate_label_coverage: dict[str, Any]
+    learning_actions: list[str]
+
+
+def _float(value: Any) -> float | None:
+    try:
+        if value is None or value == "":
+            return None
+        return float(value)
+    except Exception:
+        return None
+
+
+def _bucket(row: dict[str, Any], key: str, default: str = "unknown") -> str:
+    value = row.get(key)
+    if value in (None, ""):
+        return default
+    return str(value)
+
+
+def _mean(values: list[float]) -> float | None:
+    if not values:
+        return None
+    return round(sum(values) / len(values), 4)
+
+
+def _rate(count: int, total: int) -> float | None:
+    if total <= 0:
+        return None
+    return round(count / total, 4)
+
+
+def _load_json(raw: Any) -> dict[str, Any]:
+    if not raw:
+        return {}
+    try:
+        loaded = json.loads(str(raw))
+        return loaded if isinstance(loaded, dict) else {}
+    except Exception:
+        return {}
+
+
+def _candidate_return(payload: dict[str, Any]) -> float | None:
+    return _float(
+        payload.get("forward_return_pct")
+        or payload.get("return_60m")
+        or payload.get("return_30m")
+        or payload.get("return_eod")
+    )
+
+
+def _candidate_mfe(payload: dict[str, Any]) -> float | None:
+    return _float(
+        payload.get("forward_mfe_pct")
+        or payload.get("max_favorable_60m")
+        or payload.get("max_favorable_30m")
+        or payload.get("max_favorable_eod")
+    )
+
+
+def _trade_quality(row: dict[str, Any]) -> str:
+    pnl = _float(row.get("realized_pnl_pct"))
+    mfe = _float(row.get("mfe_pct"))
+    capture = _float(row.get("capture_ratio"))
+    if pnl is None:
+        return "missing_outcome"
+    if pnl > 0 and capture is not None and capture >= 0.50:
+        return "good_buy_good_sell"
+    if pnl > 0:
+        return "good_buy_partial_or_weak_sell"
+    if mfe is not None and mfe >= 0.40:
+        return "good_buy_poor_sell_or_late_exit"
+    if mfe is not None and mfe < 0.20:
+        return "bad_buy_or_no_edge"
+    return "inconclusive_pattern_outcome"
+
+
+def _expectancy(rows: list[dict[str, Any]], key: str) -> list[dict[str, Any]]:
+    grouped: dict[str, list[float]] = {}
+    mfe_grouped: dict[str, list[float]] = {}
+    capture_grouped: dict[str, list[float]] = {}
+    for row in rows:
+        outcome = _float(row.get("realized_pnl_pct"))
+        if outcome is None:
+            continue
+        bucket = _bucket(row, key)
+        grouped.setdefault(bucket, []).append(outcome)
+        mfe = _float(row.get("mfe_pct"))
+        if mfe is not None:
+            mfe_grouped.setdefault(bucket, []).append(mfe)
+        capture = _float(row.get("capture_ratio"))
+        if capture is not None:
+            capture_grouped.setdefault(bucket, []).append(capture)
+
+    result = []
+    for bucket, values in grouped.items():
+        result.append(
+            {
+                "bucket": bucket,
+                "rows": len(values),
+                "win_rate": _rate(sum(1 for value in values if value > 0), len(values)),
+                "avg_return_pct": _mean(values),
+                "avg_mfe_pct": _mean(mfe_grouped.get(bucket, [])),
+                "avg_capture_ratio": _mean(capture_grouped.get(bucket, [])),
+            }
+        )
+    result.sort(key=lambda item: (-(item["rows"] or 0), str(item["bucket"])))
+    return result
+
+
+def _candidate_coverage(candidate_rows: list[dict[str, Any]]) -> dict[str, Any]:
+    status_counts: dict[str, int] = {}
+    pattern_counts: dict[str, int] = {}
+    proven_good = 0
+    proven_bad = 0
+    rows_with_forward_outcome = 0
+    rows_with_forward_mfe = 0
+    top_missed: list[dict[str, Any]] = []
+
+    for row in candidate_rows:
+        status = _bucket(row, "candidate_status")
+        status_counts[status] = status_counts.get(status, 0) + 1
+        payload = _load_json(row.get("candidate_json"))
+        candidate_payload = payload.get("candidate") if isinstance(payload.get("candidate"), dict) else {}
+        pattern = (
+            candidate_payload.get("symbol_pattern")
+            or payload.get("symbol_pattern")
+            or _bucket(row, "setup_label")
+        )
+        pattern_counts[str(pattern)] = pattern_counts.get(str(pattern), 0) + 1
+
+        forward_return = _candidate_return(payload)
+        forward_mfe = _candidate_mfe(payload)
+        if forward_return is not None:
+            rows_with_forward_outcome += 1
+            if forward_return > 0:
+                proven_good += 1
+            else:
+                proven_bad += 1
+        if forward_mfe is not None:
+            rows_with_forward_mfe += 1
+            if row.get("candidate_status") != "taken" and forward_mfe > 0:
+                top_missed.append(
+                    {
+                        "symbol": row.get("symbol"),
+                        "candidate_ts": row.get("candidate_ts"),
+                        "candidate_status": row.get("candidate_status"),
+                        "score": row.get("score"),
+                        "threshold_distance": row.get("threshold_distance"),
+                        "pattern": pattern,
+                        "forward_mfe_pct": round(forward_mfe, 4),
+                        "forward_return_pct": forward_return,
+                        "reason": row.get("reason"),
+                    }
+                )
+
+    top_missed.sort(
+        key=lambda item: (
+            -float(item.get("forward_mfe_pct") or 0.0),
+            str(item.get("candidate_ts") or ""),
+        )
+    )
+    return {
+        "rows": len(candidate_rows),
+        "status_counts": dict(sorted(status_counts.items())),
+        "pattern_counts": dict(sorted(pattern_counts.items(), key=lambda item: (-item[1], item[0]))),
+        "rows_with_forward_outcome": rows_with_forward_outcome,
+        "rows_with_forward_mfe": rows_with_forward_mfe,
+        "proven_good": proven_good,
+        "proven_bad": proven_bad,
+        "forward_outcome_coverage_rate": _rate(rows_with_forward_outcome, len(candidate_rows)),
+        "forward_mfe_coverage_rate": _rate(rows_with_forward_mfe, len(candidate_rows)),
+        "top_missed_by_mfe": top_missed[:15],
+    }
+
+
+def build_pattern_learning_inputs_payload(
+    matched_rows: Iterable[dict[str, Any]],
+    candidate_rows: Iterable[dict[str, Any]],
+) -> PatternLearningInputsPayload:
+    matched = [dict(row) for row in matched_rows]
+    candidates = [dict(row) for row in candidate_rows]
+
+    for row in matched:
+        row["trade_quality"] = _trade_quality(row)
+
+    outcome_rows = [row for row in matched if _float(row.get("realized_pnl_pct")) is not None]
+    mfe_rows = [row for row in matched if _float(row.get("mfe_pct")) is not None]
+    capture_rows = [row for row in matched if _float(row.get("capture_ratio")) is not None]
+    pattern_context_rows = [
+        row
+        for row in matched
+        if any(
+            row.get(key) not in (None, "", "unknown")
+            for key in (
+                "setup_policy_action",
+                "setup_label",
+                "ml_prediction_bucket",
+                "session_trend_label",
+                "buy_opportunity_recommendation",
+            )
+        )
+    ]
+    fully_integrated_rows = [
+        row
+        for row in matched
+        if _float(row.get("realized_pnl_pct")) is not None
+        and _float(row.get("mfe_pct")) is not None
+        and row.get("setup_policy_action") not in (None, "", "unknown")
+        and row.get("ml_prediction_bucket") not in (None, "", "unknown")
+        and row.get("session_trend_label") not in (None, "", "unknown")
+    ]
+    quality_counts: dict[str, int] = {}
+    for row in matched:
+        quality = str(row["trade_quality"])
+        quality_counts[quality] = quality_counts.get(quality, 0) + 1
+
+    candidate_coverage = _candidate_coverage(candidates)
+    learning_actions = []
+    if matched and len(fully_integrated_rows) < len(matched):
+        learning_actions.append(
+            "fill missing MFE/prediction/session context on matched trades before model training"
+        )
+    if candidates and not candidate_coverage["rows_with_forward_outcome"]:
+        learning_actions.append(
+            "backfill forward outcomes for candidate_universe rows to learn missed buys"
+        )
+    if not matched:
+        learning_actions.append("no matched trades available for executed buy/sell pattern learning")
+    if not candidates:
+        learning_actions.append("no candidate_universe rows available for missed-opportunity learning")
+
+    summary = {
+        "report_version": PATTERN_LEARNING_INPUTS_VERSION,
+        "runtime_effect": PATTERN_LEARNING_RUNTIME_EFFECT,
+        "matched_trades": len(matched),
+        "matched_with_realized_outcome": len(outcome_rows),
+        "matched_with_mfe": len(mfe_rows),
+        "matched_with_capture_ratio": len(capture_rows),
+        "matched_with_pattern_context": len(pattern_context_rows),
+        "fully_integrated_pattern_outcome_rows": len(fully_integrated_rows),
+        "candidate_rows": len(candidates),
+        "candidate_rows_with_forward_outcome": candidate_coverage["rows_with_forward_outcome"],
+        "candidate_rows_with_forward_mfe": candidate_coverage["rows_with_forward_mfe"],
+        "quality_counts": dict(sorted(quality_counts.items())),
+        "authority_ready": False,
+        "authority_note": "diagnostic only; cannot approve, block, size, or execute trades",
+    }
+
+    return PatternLearningInputsPayload(
+        summary=summary,
+        executed_trade_quality=matched,
+        expectancy_by_dimension={
+            "trade_quality": _expectancy(matched, "trade_quality"),
+            "setup_policy_action": _expectancy(matched, "setup_policy_action"),
+            "ml_prediction_bucket": _expectancy(matched, "ml_prediction_bucket"),
+            "session_trend_label": _expectancy(matched, "session_trend_label"),
+            "buy_opportunity_recommendation": _expectancy(matched, "buy_opportunity_recommendation"),
+        },
+        candidate_label_coverage=candidate_coverage,
+        learning_actions=learning_actions,
+    )

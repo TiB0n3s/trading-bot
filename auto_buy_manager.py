@@ -65,6 +65,7 @@ from repositories.prediction_repo import PredictionRepository
 from risk.exposure import any_cluster_limit_hit, cluster_exposure
 from services.candidate_universe_service import CandidateUniverseService
 from services.ai_momentum_pattern_service import deterministic_momentum_pattern
+from services.candidate_reference_service import candidate_reference_service
 from services.policies.entry_policy import ml_prediction_bucket
 from symbols_config import (
     APPROVED_SYMBOLS_LIST,
@@ -103,6 +104,12 @@ AUTO_BUY_ML_WEAK_BLOCK_SCORE = float(os.getenv("AUTO_BUY_ML_WEAK_BLOCK_SCORE", "
 AUTO_BUY_ML_WEAK_BLOCK_MIN_SAMPLE_SIZE = int(
     os.getenv("AUTO_BUY_ML_WEAK_BLOCK_MIN_SAMPLE_SIZE", "20")
 )
+AUTO_BUY_ML_WEAK_BUCKET_BLOCK_ENABLED = os.getenv(
+    "AUTO_BUY_ML_WEAK_BUCKET_BLOCK_ENABLED", "true"
+).strip().lower() in ("1", "true", "yes", "on")
+AUTO_BUY_WATCH_SETUP_STRONG_BUY_ENABLED = os.getenv(
+    "AUTO_BUY_WATCH_SETUP_STRONG_BUY_ENABLED", "false"
+).strip().lower() in ("1", "true", "yes", "on")
 
 _prediction_context_cache: dict[str, dict[str, Any]] = {}
 
@@ -653,6 +660,7 @@ def evaluate_auto_buy_candidate(
     prediction_context = auto_buy_prediction_context(symbol)
     ml_score = _to_float(prediction_context.get("ml_prediction_score"))
     ml_sample = int(_to_float(prediction_context.get("ml_prediction_sample_size"), 0) or 0)
+    ml_bucket = str(prediction_context.get("ml_prediction_bucket") or "").strip().lower()
     if prediction_context.get("lookup_error"):
         reasons.append(f"ml_prediction_lookup_error:{prediction_context['lookup_error']}")
     elif prediction_context.get("available"):
@@ -730,6 +738,12 @@ def evaluate_auto_buy_candidate(
             f"{AUTO_BUY_ML_WEAK_BLOCK_SCORE:.2f};"
             f"sample={ml_sample}"
         )
+    elif AUTO_BUY_ML_WEAK_BUCKET_BLOCK_ENABLED and ml_bucket == "weak_below_45":
+        hard_block_reasons.append(
+            "ml_prediction_weak_bucket:"
+            f"{prediction_context.get('ml_prediction_bucket')};"
+            f"score={ml_score};sample={ml_sample}"
+        )
     hard_block_reason = "; ".join(hard_block_reasons) if hard_block_reasons else None
 
     strong_threshold = AUTO_BUY_MIN_SCORE
@@ -740,7 +754,10 @@ def evaluate_auto_buy_candidate(
     if hard_block_reasons:
         decision = "skip"
         severity = "blocked"
-    elif score >= strong_threshold:
+    elif (
+        score >= strong_threshold
+        and (setup_rec != "watch" or AUTO_BUY_WATCH_SETUP_STRONG_BUY_ENABLED)
+    ):
         decision = "strong_buy_candidate"
         severity = "high"
     elif score >= AUTO_BUY_WATCH_SCORE:
@@ -784,9 +801,20 @@ def evaluate_auto_buy_candidate(
     }
 
 
+def enrich_candidate_with_reference_snapshot(candidate: dict[str, Any]) -> dict[str, Any]:
+    enriched = dict(candidate)
+    if enriched.get("reference_price") is not None:
+        return enriched
+    enriched.update(
+        candidate_reference_service.candidate_reference_snapshot(str(enriched.get("symbol") or ""))
+    )
+    return enriched
+
+
 def log_candidate(candidate: dict[str, Any], live_buy_enabled: bool, order: dict[str, Any] | None = None) -> None:
     order = order or {}
     timestamp = now_et().isoformat()
+    candidate = enrich_candidate_with_reference_snapshot(candidate)
     auto_buy_repo.init_tables(DB_PATH)
     auto_buy_repo.insert_candidate_and_snapshot(
         timestamp=timestamp,

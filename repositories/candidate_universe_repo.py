@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import json
 from typing import Any
 
 from db import DB_PATH, get_connection
@@ -134,3 +135,39 @@ class CandidateUniverseRepository:
                 """,
                 params,
             ).fetchall()
+
+    def update_candidate_json(self, candidate_id: int, payload: dict[str, Any]) -> None:
+        self.init_table()
+        with get_connection(self.db_path) as con:
+            con.execute(
+                """
+                UPDATE candidate_universe
+                SET candidate_json = ?
+                WHERE id = ?
+                """,
+                (
+                    json.dumps(payload, sort_keys=True, separators=(",", ":")),
+                    int(candidate_id),
+                ),
+            )
+
+    def update_candidate_json_many(self, updates: list[tuple[int, dict[str, Any]]]) -> None:
+        if not updates:
+            return
+        self.init_table()
+        rows = [
+            (
+                json.dumps(payload, sort_keys=True, separators=(",", ":")),
+                int(candidate_id),
+            )
+            for candidate_id, payload in updates
+        ]
+        with get_connection(self.db_path) as con:
+            con.executemany(
+                """
+                UPDATE candidate_universe
+                SET candidate_json = ?
+                WHERE id = ?
+                """,
+                rows,
+            )

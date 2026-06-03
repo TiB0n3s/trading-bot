@@ -30,6 +30,15 @@ def _load_json(raw) -> dict:
         return {}
 
 
+def _nested(payload: dict, key: str):
+    if payload.get(key) not in (None, ""):
+        return payload.get(key)
+    candidate = payload.get("candidate")
+    if isinstance(candidate, dict):
+        return candidate.get(key)
+    return None
+
+
 def run_candidate_universe_report(
     target_date: str,
     *,
@@ -63,6 +72,10 @@ def run_candidate_universe_report(
     exit_not_taken = 0
     skipped = 0
     scored = 0
+    reference_price_rows = 0
+    bid_ask_rows = 0
+    spread_rows = 0
+    fallback_reference_rows = 0
     for row in rows:
         key = (row.get("candidate_kind") or "unknown", row.get("candidate_status") or "unknown")
         by_kind_status[key] = by_kind_status.get(key, 0) + 1
@@ -74,6 +87,15 @@ def run_candidate_universe_report(
             skipped += 1
         if row.get("score") is not None:
             scored += 1
+        payload = _load_json(row.get("candidate_json"))
+        if _nested(payload, "reference_price") is not None:
+            reference_price_rows += 1
+        if _nested(payload, "bid") is not None and _nested(payload, "ask") is not None:
+            bid_ask_rows += 1
+        if _nested(payload, "spread_pct") is not None:
+            spread_rows += 1
+        if payload.get("forward_reference_price_source") == "first_bar_close_at_or_after_candidate_ts":
+            fallback_reference_rows += 1
 
     lifecycle = LifecycleAnalysisService(LifecycleAnalysisRepository(db_path))
     lifecycle_rows = lifecycle.payload(start_date=target_date, symbol=symbol).rows
@@ -133,6 +155,10 @@ def run_candidate_universe_report(
     print(f"exit_considered_not_taken: {exit_not_taken}")
     print(f"candidates_proven_good : {proven_good}")
     print(f"candidates_proven_bad  : {proven_bad}")
+    print(f"reference_price_rows   : {reference_price_rows}")
+    print(f"bid_ask_rows           : {bid_ask_rows}")
+    print(f"spread_rows            : {spread_rows}")
+    print(f"fallback_reference_rows: {fallback_reference_rows}")
     print()
     print("By kind/status")
     for (kind, status), count in sorted(by_kind_status.items()):

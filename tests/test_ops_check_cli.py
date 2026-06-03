@@ -292,7 +292,9 @@ def test_ops_reliability_cli_missing_db_exits_cleanly(tmp_path):
         ("data-freshness-gate", "Data Freshness Gate", "data_freshness_gate_v1"),
         ("portfolio-risk", "Portfolio Risk Report", "portfolio_risk_v1"),
         ("decision-lifecycle-dashboard", "Decision Lifecycle Dashboard", None),
+        ("candidate-outcome-backfill", "Candidate Outcome Backfill", None),
         ("calibration-buckets", "Calibration Buckets", None),
+        ("pattern-learning-inputs", "Pattern Learning Inputs", None),
         ("learning-readiness", "Learning Readiness", None),
         ("ai-intelligence-review", "AI Intelligence Integration Review", "ai_intelligence_review_v1"),
     ):
@@ -451,6 +453,98 @@ def test_symbol_patterns_cli_golden_fixture_locks_report_contract(tmp_path):
     assert "momentum_deterioration" in out
     assert "Rollout governance" in out
     assert "[OK] symbol pattern diagnostics completed; no live authority changed" in out
+
+
+def test_pattern_learning_inputs_cli_uses_trade_and_candidate_rows(tmp_path):
+    with sqlite3.connect(tmp_path / "trades.db") as con:
+        con.execute(
+            """
+            CREATE TABLE matched_trades (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                symbol TEXT,
+                entry_timestamp TEXT,
+                exit_timestamp TEXT,
+                realized_pnl_pct REAL,
+                realized_pnl REAL,
+                won INTEGER,
+                holding_minutes REAL,
+                mfe_pct REAL,
+                capture_ratio REAL,
+                setup_label TEXT,
+                setup_policy_action TEXT,
+                ml_prediction_bucket TEXT,
+                ml_prediction_score REAL,
+                session_trend_label TEXT,
+                buy_opportunity_recommendation TEXT,
+                exit_reason TEXT,
+                entry_source TEXT,
+                signal_source TEXT
+            )
+            """
+        )
+        con.execute(
+            """
+            INSERT INTO matched_trades (
+                symbol, entry_timestamp, exit_timestamp, realized_pnl_pct,
+                realized_pnl, won, holding_minutes, mfe_pct, capture_ratio,
+                setup_label, setup_policy_action, ml_prediction_bucket,
+                ml_prediction_score, session_trend_label,
+                buy_opportunity_recommendation, exit_reason
+            ) VALUES (
+                'AAPL', '2026-05-30T10:00:00', '2026-05-30T10:30:00',
+                0.8, 4.2, 1, 30, 1.2, 0.67, 'breakout', 'neutral',
+                'high_55_plus', 61, 'strong_uptrend',
+                'strong_buy_candidate', 'position_manager_full_exit'
+            )
+            """
+        )
+        con.execute(
+            """
+            CREATE TABLE candidate_universe (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                candidate_ts TEXT,
+                symbol TEXT,
+                action TEXT,
+                candidate_kind TEXT,
+                candidate_status TEXT,
+                score REAL,
+                threshold REAL,
+                threshold_distance REAL,
+                decision TEXT,
+                reason TEXT,
+                source TEXT,
+                setup_label TEXT,
+                regime TEXT,
+                session_phase TEXT,
+                candidate_json TEXT
+            )
+            """
+        )
+        con.execute(
+            """
+            INSERT INTO candidate_universe (
+                candidate_ts, symbol, action, candidate_kind, candidate_status,
+                score, threshold, threshold_distance, decision, reason, source,
+                setup_label, regime, session_phase, candidate_json
+            ) VALUES (
+                '2026-05-30T10:05:00', 'NVDA', 'buy', 'entry',
+                'near_threshold', 72, 75, -3, 'skip', 'below threshold',
+                'auto_buy', 'breakout', 'trend_expansion', 'first_30m',
+                '{"forward_mfe_pct": 1.4, "forward_return_pct": 0.7, "symbol_pattern": "trend_continuation_with_participation"}'
+            )
+            """
+        )
+
+    code, out = _run_cli(tmp_path, "pattern-learning-inputs", "2026-05-30")
+
+    assert code == 0
+    assert "Pattern Learning Inputs - 2026-05-30" in out
+    assert "report_version                      : pattern_learning_inputs_v1" in out
+    assert "runtime_effect                      : diagnostic_only_no_live_authority" in out
+    assert "fully_integrated_pattern_outcomes : 1 (100.0%)" in out
+    assert "good_buy_good_sell" in out
+    assert "rows_with_forward_outcome         : 1 (100.0%)" in out
+    assert "[OK] pattern learning inputs summarized; no live authority changed" in out
 
 
 def test_ai_intelligence_review_cli_golden_fixture_covers_ten_recommendations(tmp_path):
@@ -715,6 +809,7 @@ def main():
         test_rollout_contract_cli_empty_lifecycle_rows_warns,
         test_rollout_contract_cli_golden_fixture_locks_report_contract,
         test_symbol_patterns_cli_golden_fixture_locks_report_contract,
+        test_pattern_learning_inputs_cli_uses_trade_and_candidate_rows,
         test_ai_intelligence_review_cli_golden_fixture_covers_ten_recommendations,
         test_lifecycle_dashboard_and_calibration_cli_use_lifecycle_rows,
         test_research_export_cli_writes_daily_manifest,

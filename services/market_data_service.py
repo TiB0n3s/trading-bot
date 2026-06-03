@@ -7,6 +7,7 @@ fallback behavior and feed telemetry stay in one place.
 from __future__ import annotations
 
 import logging
+import os
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -14,6 +15,7 @@ from broker import api
 from services.observability import record_market_data_fetch
 
 logger = logging.getLogger(__name__)
+DEFAULT_BAR_FEED = os.getenv("MARKET_DATA_BAR_FEED", "iex").strip().lower() or "iex"
 
 
 def bar_to_dict(bar: Any) -> dict[str, Any]:
@@ -41,7 +43,7 @@ class MarketDataService:
     def get_barset_with_fallback(self, symbol: str, timeframe: str, **kwargs) -> Any:
         """Fetch bars using SIP first, with IEX fallback for subscription failures."""
         symbol = str(symbol or "").strip().upper()
-        feed = kwargs.pop("feed", "sip")
+        feed = str(kwargs.pop("feed", None) or DEFAULT_BAR_FEED).strip().lower()
         try:
             bars = self.client.get_bars(symbol, timeframe, feed=feed, **kwargs)
             self.last_feed_used[symbol] = feed

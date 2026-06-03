@@ -147,9 +147,8 @@ class LiveFeaturesService:
                 start=start.isoformat(),
                 end=end.isoformat(),
                 adjustment="raw",
-                feed="sip",
             )
-            feed_used = self.market_data.get_feed_used(symbol) or "sip"
+            feed_used = self.market_data.get_feed_used(symbol) or "unknown"
             bars = barset.df
 
             if bars is None or bars.empty:

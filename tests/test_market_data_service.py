@@ -40,8 +40,21 @@ def test_sip_subscription_error_falls_back_to_iex_and_tracks_feed():
     assert_equal(service.get_feed_used("AAPL"), "iex", "tracked feed")
 
 
+def test_default_bar_feed_uses_iex_without_sip_probe():
+    client = FakeClient()
+    service = MarketDataService(client=client)
+
+    bars = service.get_bars_with_fallback("aapl", "1Min", limit=2)
+
+    assert_equal(bars, ["iex-bar"], "default bars")
+    assert_equal(len(client.calls), 1, "call count")
+    assert_equal(client.calls[0][2], "iex", "default feed")
+    assert_equal(service.get_feed_used("AAPL"), "iex", "tracked feed")
+
+
 def main():
     test_sip_subscription_error_falls_back_to_iex_and_tracks_feed()
+    test_default_bar_feed_uses_iex_without_sip_probe()
     print("[OK] market data service tests passed")
 
 

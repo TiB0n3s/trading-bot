@@ -114,6 +114,7 @@ APPROVED_MARKET_DATA_BOUNDARIES = {
     "services/market_data_service.py",
     "services/market_data_parity_service.py",
     "services/execution_adapters.py",
+    "services/candidate_reference_service.py",
     "services/momentum_service.py",
     "services/pre_market_research_service.py",
     "services/live_features_service.py",

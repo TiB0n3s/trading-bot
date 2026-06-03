@@ -51,10 +51,12 @@ Usage:
   python3 ops_check.py decision-lifecycle-dashboard
   python3 ops_check.py exit-snapshot-backfill YYYY-MM-DD [--dry-run]
   python3 ops_check.py candidate-universe
+  python3 ops_check.py candidate-outcome-backfill YYYY-MM-DD [--dry-run]
   python3 ops_check.py calibration-buckets
   python3 ops_check.py feature-attribution
   python3 ops_check.py post-trade-learning
   python3 ops_check.py symbol-patterns
+  python3 ops_check.py pattern-learning-inputs
   python3 ops_check.py learning-readiness START_DATE [END_DATE]
   python3 ops_check.py rollout-contract
   python3 ops_check.py advisory-authority-report
@@ -94,10 +96,12 @@ from services.ops_checks.lifecycle_checks import run_lifecycle_analysis
 from services.ops_checks.lifecycle_dashboard_checks import run_lifecycle_dashboard
 from services.ops_checks.exit_snapshot_backfill_checks import run_exit_snapshot_backfill
 from services.ops_checks.candidate_universe_checks import run_candidate_universe_report
+from services.ops_checks.candidate_outcome_backfill_checks import run_candidate_outcome_backfill
 from services.ops_checks.calibration_bucket_checks import run_calibration_buckets
 from services.ops_checks.feature_attribution_checks import run_feature_attribution_report
 from services.ops_checks.post_trade_learning_checks import run_post_trade_learning_report
 from services.ops_checks.symbol_pattern_checks import run_symbol_pattern_outcomes
+from services.ops_checks.pattern_learning_inputs_checks import run_pattern_learning_inputs_report
 from services.ops_checks.learning_readiness_checks import run_learning_readiness
 from services.ops_checks.rollout_contract_checks import run_rollout_contract_report
 from services.ops_checks.advisory_authority_checks import run_advisory_authority_report
@@ -652,6 +656,22 @@ def candidate_universe(target_date):
     )
 
 
+def candidate_outcome_backfill(target_date):
+    symbol = None
+    if "--symbol" in sys.argv:
+        idx = sys.argv.index("--symbol")
+        if idx + 1 < len(sys.argv):
+            symbol = sys.argv[idx + 1]
+    return run_candidate_outcome_backfill(
+        target_date,
+        base_dir=BASE_DIR,
+        symbol=symbol,
+        limit=_int_option("--limit", 0) or None,
+        dry_run="--dry-run" in sys.argv,
+        overwrite="--overwrite" in sys.argv,
+    )
+
+
 def calibration_buckets(target_date):
     symbol = None
     if "--symbol" in sys.argv:
@@ -706,6 +726,14 @@ def symbol_patterns(target_date):
         base_dir=BASE_DIR,
         symbol=symbol,
         min_sample_size=_int_option("--min-sample-size", 30),
+        limit=_int_option("--limit", 20),
+    )
+
+
+def pattern_learning_inputs(target_date):
+    return run_pattern_learning_inputs_report(
+        target_date,
+        base_dir=BASE_DIR,
         limit=_int_option("--limit", 20),
     )
 
@@ -921,6 +949,9 @@ def main():
     if command == "candidate-universe":
         return 0 if candidate_universe(target_date) else 1
 
+    if command == "candidate-outcome-backfill":
+        return 0 if candidate_outcome_backfill(target_date) else 1
+
     if command == "calibration-buckets":
         return 0 if calibration_buckets(target_date) else 1
 
@@ -932,6 +963,9 @@ def main():
 
     if command == "symbol-patterns":
         return 0 if symbol_patterns(target_date) else 1
+
+    if command == "pattern-learning-inputs":
+        return 0 if pattern_learning_inputs(target_date) else 1
 
     if command == "learning-readiness":
         return 0 if learning_readiness(target_date) else 1

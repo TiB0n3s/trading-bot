@@ -8,6 +8,7 @@ Run:
 import sys
 import sqlite3
 import tempfile
+import json
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -141,6 +142,61 @@ def test_weak_ml_prediction_blocks_auto_buy_candidate():
     assert_equal(result["ml_prediction_bucket"], "weak_below_45", "bucket")
     if "ml_prediction_weak" not in result["hard_block_reason"]:
         raise AssertionError(f"missing ML weak block: {result['hard_block_reason']}")
+
+
+def test_weak_ml_bucket_blocks_even_with_thin_sample():
+    old_prediction_context = auto_buy_manager.auto_buy_prediction_context
+    auto_buy_manager.auto_buy_prediction_context = lambda symbol: {
+        "available": True,
+        "prediction_score": 43.0,
+        "prediction_decision": "observe_only",
+        "prediction_reason": "test weak bucket",
+        "ml_prediction_score": 43.0,
+        "ml_prediction_bucket": "weak_below_45",
+        "ml_prediction_confidence": "very_low",
+        "ml_prediction_sample_size": 0,
+    }
+    try:
+        result = evaluate_auto_buy_candidate(
+            symbol="AMZN",
+            session=strong_session(),
+            feature=favorable_feature(),
+            context=buy_context(),
+            held=set(),
+        )
+    finally:
+        auto_buy_manager.auto_buy_prediction_context = old_prediction_context
+
+    assert_equal(result["decision"], "skip", "decision")
+    assert_equal(result["severity"], "blocked", "severity")
+    if "ml_prediction_weak_bucket" not in result["hard_block_reason"]:
+        raise AssertionError(f"missing ML weak bucket block: {result['hard_block_reason']}")
+
+
+def test_watch_setup_cannot_become_strong_buy_by_default():
+    feature = favorable_feature()
+    feature["setup_recommendation"] = "watch"
+    feature["setup_score"] = 95
+    old_prediction_context = auto_buy_manager.auto_buy_prediction_context
+    auto_buy_manager.auto_buy_prediction_context = lambda symbol: {
+        "available": True,
+        "ml_prediction_score": 58.0,
+        "ml_prediction_bucket": "high_55_plus",
+        "ml_prediction_sample_size": 100,
+    }
+    try:
+        result = evaluate_auto_buy_candidate(
+            symbol="AMZN",
+            session=strong_session(),
+            feature=feature,
+            context=buy_context(),
+            held=set(),
+        )
+    finally:
+        auto_buy_manager.auto_buy_prediction_context = old_prediction_context
+
+    assert_equal(result["decision"], "watch", "decision")
+    assert_equal(result["severity"], "medium", "severity")
 
 
 def test_unclassified_extended_vwap_blocks_candidate():
@@ -424,10 +480,40 @@ def test_log_auto_buy_order_writes_canonical_trade_row():
 
 
 def test_log_candidate_mirrors_to_candidate_universe():
+    class Quote:
+        bid_price = 10.0
+        ask_price = 10.1
+        bid_size = 100
+        ask_size = 200
+        timestamp = "2026-06-02T10:00:00-04:00"
+
+    class CandidateReferenceService:
+        def candidate_reference_snapshot(self, symbol):
+            quote = Quote()
+            mid = (quote.bid_price + quote.ask_price) / 2.0
+            spread_pct = (quote.ask_price - quote.bid_price) / mid * 100.0
+            return {
+                "reference_capture_status": "captured",
+                "reference_price": round(mid, 6),
+                "reference_price_source": "quote_mid",
+                "bid": quote.bid_price,
+                "ask": quote.ask_price,
+                "mid": round(mid, 6),
+                "spread_pct": round(spread_pct, 6),
+                "bid_size": quote.bid_size,
+                "ask_size": quote.ask_size,
+                "quote_ts": quote.timestamp,
+            }
+
+        def get_latest_quote(self, symbol):
+            return Quote()
+
     with tempfile.TemporaryDirectory() as tmp:
         db_path = Path(tmp) / "test.db"
         old_path = auto_buy_manager.DB_PATH
+        old_reference_service = auto_buy_manager.candidate_reference_service
         auto_buy_manager.DB_PATH = db_path
+        auto_buy_manager.candidate_reference_service = CandidateReferenceService()
         try:
             auto_buy_manager.log_candidate(
                 {
@@ -445,6 +531,7 @@ def test_log_candidate_mirrors_to_candidate_universe():
             )
         finally:
             auto_buy_manager.DB_PATH = old_path
+            auto_buy_manager.candidate_reference_service = old_reference_service
 
         with sqlite3.connect(db_path) as con:
             row = con.execute(
@@ -464,35 +551,50 @@ def test_log_candidate_mirrors_to_candidate_universe():
         assert_equal(row[6], "candidate_capture_only_no_live_authority", "effect")
         if "trend_continuation_with_participation" not in row[7]:
             raise AssertionError("candidate universe payload did not include symbol pattern")
+        payload = json.loads(row[7])
+        candidate_payload = payload["candidate"]
+        assert_equal(candidate_payload["reference_price"], 10.05, "reference price")
+        assert_equal(candidate_payload["reference_price_source"], "quote_mid", "reference source")
+        assert_equal(candidate_payload["spread_pct"], 0.995025, "spread pct")
 
 
 
 def test_bucking_fading_tape_does_not_hard_block():
-    candidate = evaluate_auto_buy_candidate(
-        symbol="MDB",
-        session={
-            "trend_label": "fading",
-            "trend_score": -3,
-            "session_return_pct": 7.17,
-            "momentum_5m_pct": 0.10,
-            "momentum_15m_pct": -0.30,
-            "momentum_30m_pct": -0.50,
-            "distance_from_vwap_pct": 0.50,
-        },
-        feature={
-            "setup_recommendation": "watch",
-            "setup_label": "bucking_tape_test",
-            "setup_score": 55,
-            "relative_strength_5m": 0.45,
-            "ret_5m": 0.20,
-            "ret_15m": -0.10,
-            "distance_from_vwap": 0.50,
-            "momentum_acceleration_pct": 0.04,
-        },
-        context={"bias": "buy", "entry_quality": "good_on_pullbacks", "risk_level": "low"},
-        held=set(),
-        signal_source="internal_bar_only",
-    )
+    old_prediction_context = auto_buy_manager.auto_buy_prediction_context
+    auto_buy_manager.auto_buy_prediction_context = lambda symbol: {
+        "available": False,
+        "ml_prediction_bucket": "unknown",
+        "ml_prediction_score": None,
+        "ml_prediction_sample_size": None,
+    }
+    try:
+        candidate = evaluate_auto_buy_candidate(
+            symbol="MDB",
+            session={
+                "trend_label": "fading",
+                "trend_score": -3,
+                "session_return_pct": 7.17,
+                "momentum_5m_pct": 0.10,
+                "momentum_15m_pct": -0.30,
+                "momentum_30m_pct": -0.50,
+                "distance_from_vwap_pct": 0.50,
+            },
+            feature={
+                "setup_recommendation": "watch",
+                "setup_label": "bucking_tape_test",
+                "setup_score": 55,
+                "relative_strength_5m": 0.45,
+                "ret_5m": 0.20,
+                "ret_15m": -0.10,
+                "distance_from_vwap": 0.50,
+                "momentum_acceleration_pct": 0.04,
+            },
+            context={"bias": "buy", "entry_quality": "good_on_pullbacks", "risk_level": "low"},
+            held=set(),
+            signal_source="internal_bar_only",
+        )
+    finally:
+        auto_buy_manager.auto_buy_prediction_context = old_prediction_context
 
     assert candidate["hard_block_reason"] is None
     assert "bucking_fading_tape" in candidate["reason"]
@@ -506,6 +608,8 @@ def main():
         test_held_symbol_is_skipped,
         test_negative_session_blocks_candidate,
         test_weak_ml_prediction_blocks_auto_buy_candidate,
+        test_weak_ml_bucket_blocks_even_with_thin_sample,
+        test_watch_setup_cannot_become_strong_buy_by_default,
         test_unclassified_extended_vwap_blocks_candidate,
         test_tradingview_symbols_need_higher_auto_buy_threshold,
         test_early_session_buffer_skips_collection,

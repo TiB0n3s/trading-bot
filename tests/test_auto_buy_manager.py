@@ -234,6 +234,60 @@ def test_unclassified_extended_vwap_blocks_candidate():
         raise AssertionError(f"missing unclassified vwap block: {result['hard_block_reason']}")
 
 
+def test_strategy_memory_caution_reduces_auto_buy_score():
+    old_memory = auto_buy_manager.memory_for_signal
+    auto_buy_manager.memory_for_signal = lambda symbol, context: {
+        "available": True,
+        "recommendation": "caution",
+        "min_setup_score": 95,
+        "reason": "historical weak setup outcome",
+        "symbol_memory": {"trades": 6},
+    }
+    try:
+        result = evaluate_auto_buy_candidate(
+            symbol="AMZN",
+            session=strong_session(),
+            feature=favorable_feature(),
+            context=buy_context(),
+            held=set(),
+        )
+    finally:
+        auto_buy_manager.memory_for_signal = old_memory
+
+    assert_equal(result["strategy_memory_recommendation"], "caution", "memory rec")
+    assert_equal(result["decision"], "watch", "decision")
+    if "strategy_memory_caution_setup_below_min" not in result["reason"]:
+        raise AssertionError(f"missing strategy memory caution reason: {result['reason']}")
+    if "strategy_memory_caution_caps_at_watch" not in result["reason"]:
+        raise AssertionError(f"missing strategy memory watch cap: {result['reason']}")
+
+
+def test_strategy_memory_avoid_blocks_auto_buy_candidate():
+    old_memory = auto_buy_manager.memory_for_signal
+    auto_buy_manager.memory_for_signal = lambda symbol, context: {
+        "available": True,
+        "recommendation": "avoid",
+        "min_setup_score": 95,
+        "reason": "recent avoid lesson",
+        "symbol_memory": {"trades": 8},
+    }
+    try:
+        result = evaluate_auto_buy_candidate(
+            symbol="AMZN",
+            session=strong_session(),
+            feature=favorable_feature(),
+            context=buy_context(),
+            held=set(),
+        )
+    finally:
+        auto_buy_manager.memory_for_signal = old_memory
+
+    assert_equal(result["decision"], "skip", "decision")
+    assert_equal(result["severity"], "blocked", "severity")
+    if "strategy_memory_avoid" not in result["hard_block_reason"]:
+        raise AssertionError(f"missing strategy memory block: {result['hard_block_reason']}")
+
+
 def test_tradingview_symbols_need_higher_auto_buy_threshold():
     session = strong_session()
     session["trend_label"] = "developing_uptrend"
@@ -690,6 +744,8 @@ def main():
         test_weak_ml_bucket_blocks_even_with_thin_sample,
         test_watch_setup_cannot_become_strong_buy_by_default,
         test_unclassified_extended_vwap_blocks_candidate,
+        test_strategy_memory_caution_reduces_auto_buy_score,
+        test_strategy_memory_avoid_blocks_auto_buy_candidate,
         test_tradingview_symbols_need_higher_auto_buy_threshold,
         test_internal_all_mode_removes_tradingview_threshold_penalty,
         test_early_session_buffer_skips_collection,
@@ -706,6 +762,7 @@ def main():
 
     for test in tests:
         old_prediction_context = auto_buy_manager.auto_buy_prediction_context
+        old_memory = auto_buy_manager.memory_for_signal
         old_runtime = {
             key: getattr(auto_buy_manager, key)
             for key in AUTO_BUY_RUNTIME_DEFAULTS
@@ -716,12 +773,19 @@ def main():
             "ml_prediction_score": None,
             "ml_prediction_sample_size": None,
         }
+        auto_buy_manager.memory_for_signal = lambda symbol, context: {
+            "available": False,
+            "recommendation": "none",
+            "min_setup_score": None,
+            "reason": "test default strategy memory unavailable",
+        }
         try:
             reset_auto_buy_runtime_defaults()
             test()
             print(f"[OK] {test.__name__}")
         finally:
             auto_buy_manager.auto_buy_prediction_context = old_prediction_context
+            auto_buy_manager.memory_for_signal = old_memory
             for key, value in old_runtime.items():
                 setattr(auto_buy_manager, key, value)
 

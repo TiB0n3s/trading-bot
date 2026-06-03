@@ -23,6 +23,7 @@ class LearningReadinessPayload:
     lifecycle: dict[str, Any]
     runtime_health: dict[str, Any]
     candidate_universe: dict[str, Any]
+    learning_effect: dict[str, Any]
     symbol_patterns: dict[str, Any]
     feature_attribution: dict[str, Any]
     calibration: dict[str, Any]
@@ -201,6 +202,83 @@ def _integrated_outcome_progress(
     }
 
 
+def _learning_effect_summary(
+    rows: Iterable[dict[str, Any]],
+    *,
+    strategy_memory: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    rows_list = [dict(row) for row in rows]
+    dp_rows = 0
+    block_advisory = 0
+    size_down_advisory = 0
+    enforced = 0
+    block_enforced = 0
+    size_down_enforced = 0
+    observed_not_enforced = 0
+
+    for row in rows_list:
+        canonical = _canonical(row)
+        outcome = _path(
+            canonical,
+            "advisory_authority_state",
+            "decision_policy_outcome",
+        )
+        if not isinstance(outcome, dict):
+            outcome = {}
+        advisory = str(outcome.get("advisory_decision") or "").strip().lower()
+        if not advisory:
+            continue
+        dp_rows += 1
+        is_block = advisory == "block"
+        is_size_down = advisory == "size_down"
+        is_enforced = bool(outcome.get("enforced"))
+        effect_on_execution = str(outcome.get("effect_on_execution") or "")
+        effect_on_size = str(outcome.get("effect_on_size") or "")
+
+        if is_block:
+            block_advisory += 1
+        if is_size_down:
+            size_down_advisory += 1
+        if is_enforced:
+            enforced += 1
+        if is_enforced and is_block and effect_on_execution == "block":
+            block_enforced += 1
+        if is_enforced and is_size_down and effect_on_size in {"size_down", "cap"}:
+            size_down_enforced += 1
+        if (is_block or is_size_down) and not is_enforced:
+            observed_not_enforced += 1
+
+    memory = strategy_memory if isinstance(strategy_memory, dict) else {}
+    context_sections = (
+        "setup_label_context",
+        "prediction_decision_context",
+        "buy_opportunity_context",
+        "session_trend_context",
+        "symbol_setup_label_context",
+        "symbol_prediction_context",
+        "symbol_buy_opportunity_context",
+        "symbol_session_trend_context",
+    )
+    nonempty_context_sections = sum(
+        1 for section in context_sections if memory.get(section)
+    )
+    return {
+        "strategy_memory_available": bool(memory),
+        "strategy_memory_generated_at": memory.get("generated_at"),
+        "strategy_memory_trade_count": int(memory.get("trade_count") or 0),
+        "strategy_memory_context_sections": nonempty_context_sections,
+        "decision_policy_rows": dp_rows,
+        "decision_policy_row_rate": _rate(dp_rows, len(rows_list)),
+        "decision_policy_block_advisory": block_advisory,
+        "decision_policy_size_down_advisory": size_down_advisory,
+        "decision_policy_enforced": enforced,
+        "decision_policy_block_enforced": block_enforced,
+        "decision_policy_size_down_enforced": size_down_enforced,
+        "learning_constrained_rows": block_enforced + size_down_enforced,
+        "learning_observed_not_enforced": observed_not_enforced,
+    }
+
+
 def _stage(*, sessions: int, rows_with_outcome: int, blockers: list[str]) -> str:
     hard_blockers = {
         "missing_runtime_job_runs",
@@ -232,6 +310,7 @@ def build_learning_readiness_payload(
     feature_summary: dict[str, Any] | None = None,
     feature_guardrails: list[dict[str, Any]] | None = None,
     calibration_summary: dict[str, Any] | None = None,
+    strategy_memory: dict[str, Any] | None = None,
     full_readiness_target: int = DEFAULT_FULL_READINESS_INTEGRATED_OUTCOME_TARGET,
 ) -> LearningReadinessPayload:
     rows = [dict(row) for row in lifecycle_rows]
@@ -267,6 +346,10 @@ def build_learning_readiness_payload(
         rows,
         full_readiness_target=full_readiness_target,
     )
+    learning_effect = _learning_effect_summary(
+        rows,
+        strategy_memory=strategy_memory,
+    )
 
     rejected_coverage = lifecycle_summary.get("rejected_counterfactual_coverage_rate")
     approved_exit_rate = lifecycle_summary.get("approved_exit_link_rate")
@@ -291,6 +374,12 @@ def build_learning_readiness_payload(
         blockers.append("no_ready_calibration_buckets")
     if rows_with_outcome and not progress["fully_integrated_outcome_rows"]:
         blockers.append("missing_fully_integrated_pattern_momentum_prediction_outcomes")
+    if not learning_effect["strategy_memory_available"]:
+        blockers.append("strategy_memory_artifact_missing")
+    elif not learning_effect["strategy_memory_trade_count"]:
+        blockers.append("strategy_memory_has_no_trade_rows")
+    if rows and not learning_effect["decision_policy_rows"]:
+        blockers.append("decision_policy_learning_effect_not_recorded")
 
     not_ready_features = [
         item
@@ -339,6 +428,12 @@ def build_learning_readiness_payload(
         next_actions.append("collect more outcomes before using bucket calibration for promotion")
     if "missing_fully_integrated_pattern_momentum_prediction_outcomes" in blockers:
         next_actions.append("verify canonical rows include outcome + pattern + momentum + prediction fields")
+    if "strategy_memory_artifact_missing" in blockers:
+        next_actions.append("run strategy_learner.py after close so live policy has learned memory")
+    if "strategy_memory_has_no_trade_rows" in blockers:
+        next_actions.append("rebuild matched trades and regenerate strategy_memory.json")
+    if "decision_policy_learning_effect_not_recorded" in blockers:
+        next_actions.append("verify decision snapshots include canonical decision_policy_outcome")
     if not next_actions:
         next_actions.append("review feature candidates manually before any authority wiring")
 
@@ -370,6 +465,7 @@ def build_learning_readiness_payload(
                 else None
             ),
         },
+        learning_effect=learning_effect,
         symbol_patterns={
             "pattern_rows": int(pattern_summary.get("pattern_rows") or 0),
             "distinct_patterns": int(pattern_summary.get("distinct_patterns") or 0),

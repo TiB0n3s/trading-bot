@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 from repositories.candidate_universe_repo import CandidateUniverseRepository
@@ -87,6 +88,15 @@ def run_learning_readiness(
         rows,
         min_sample_size=min_calibration_sample_size,
     )
+    strategy_memory_path = base_dir / "strategy_memory.json"
+    strategy_memory = {}
+    if strategy_memory_path.exists():
+        try:
+            loaded = json.loads(strategy_memory_path.read_text())
+            strategy_memory = loaded if isinstance(loaded, dict) else {}
+        except Exception:
+            strategy_memory = {}
+
     payload = build_learning_readiness_payload(
         start_date=start_date,
         end_date=end,
@@ -98,6 +108,7 @@ def run_learning_readiness(
         feature_summary=feature_payload.summary,
         feature_guardrails=feature_payload.rollout_guardrails,
         calibration_summary=calibration_payload.summary,
+        strategy_memory=strategy_memory,
         full_readiness_target=full_readiness_target,
     )
 
@@ -158,6 +169,25 @@ def run_learning_readiness(
         "candidate_rows_per_lifecycle_row",
     ):
         print(f"  {key:<36} {_fmt(payload.candidate_universe.get(key))}")
+
+    print()
+    print("Learning effect")
+    for key in (
+        "strategy_memory_available",
+        "strategy_memory_generated_at",
+        "strategy_memory_trade_count",
+        "strategy_memory_context_sections",
+        "decision_policy_rows",
+        "decision_policy_row_rate",
+        "decision_policy_block_advisory",
+        "decision_policy_size_down_advisory",
+        "decision_policy_enforced",
+        "decision_policy_block_enforced",
+        "decision_policy_size_down_enforced",
+        "learning_constrained_rows",
+        "learning_observed_not_enforced",
+    ):
+        print(f"  {key:<36} {_fmt(payload.learning_effect.get(key))}")
 
     print()
     print("Intelligence diagnostics")

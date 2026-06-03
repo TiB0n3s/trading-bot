@@ -67,6 +67,7 @@ from services.candidate_universe_service import CandidateUniverseService
 from services.ai_momentum_pattern_service import deterministic_momentum_pattern
 from services.candidate_reference_service import candidate_reference_service
 from services.policies.entry_policy import ml_prediction_bucket
+from strategy_memory import memory_for_signal
 from symbols_config import (
     APPROVED_SYMBOLS_LIST,
     CLUSTER_EXPOSURE_LIMITS,
@@ -641,6 +642,53 @@ def evaluate_auto_buy_candidate(
         score -= 2
         reasons.append("setup_score<=20:-2")
 
+    strategy_memory = memory_for_signal(
+        symbol,
+        {
+            "setup_quality": {
+                "label": setup_label,
+                "recommendation": setup_rec,
+            },
+            "setup_observation": {
+                "setup_label": setup_label,
+                "setup_score": setup_score,
+            },
+            "prediction_observation": {
+                "decision": "unknown",
+            },
+            "buy_opportunity": {
+                "recommendation": "unknown",
+            },
+            "session_observation": {
+                "label": label,
+            },
+        },
+    )
+    learned_min_setup_score = strategy_memory.get("min_setup_score")
+    memory_rec = str(strategy_memory.get("recommendation") or "none").strip().lower()
+    strategy_memory_caution_gate = False
+    if strategy_memory.get("available"):
+        reasons.append(
+            "strategy_memory:"
+            f"{memory_rec}:min_setup={learned_min_setup_score}:"
+            f"trades={((strategy_memory.get('symbol_memory') or {}).get('trades'))}"
+        )
+        if isinstance(learned_min_setup_score, int) and setup_score < learned_min_setup_score:
+            if memory_rec == "avoid":
+                reasons.append(
+                    f"strategy_memory_avoid_setup_below_min:{setup_score:.1f}<"
+                    f"{learned_min_setup_score}"
+                )
+            elif memory_rec == "caution":
+                strategy_memory_caution_gate = True
+                score -= 4
+                reasons.append(
+                    f"strategy_memory_caution_setup_below_min:{setup_score:.1f}<"
+                    f"{learned_min_setup_score}:-4"
+                )
+    else:
+        reasons.append(f"strategy_memory:unavailable:{strategy_memory.get('reason')}")
+
     relative_strength = _to_float(feature.get("relative_strength_5m"), 0) or 0
     ret5 = _to_float(feature.get("ret_5m"), 0) or 0
     ret15 = _to_float(feature.get("ret_15m"), 0) or 0
@@ -732,6 +780,17 @@ def evaluate_auto_buy_candidate(
         hard_block_reasons.append(
             f"unclassified_extended_vwap:{vwap:.3f}>{AUTO_BUY_UNCLASSIFIED_EXTENDED_BLOCK_PCT:.2f}"
         )
+    if (
+        strategy_memory.get("available")
+        and memory_rec == "avoid"
+        and isinstance(learned_min_setup_score, int)
+        and setup_score < learned_min_setup_score
+    ):
+        hard_block_reasons.append(
+            "strategy_memory_avoid:"
+            f"setup_score={setup_score:.1f}<learned_min={learned_min_setup_score};"
+            f"{strategy_memory.get('reason')}"
+        )
     if label in ("downtrend", "fading"):
         if not bucking_negative_tape:
             hard_block_reasons.append(f"negative_session:{label}")
@@ -779,6 +838,10 @@ def evaluate_auto_buy_candidate(
     if hard_block_reasons:
         decision = "skip"
         severity = "blocked"
+    elif strategy_memory_caution_gate and score >= AUTO_BUY_WATCH_SCORE:
+        decision = "watch"
+        severity = "medium"
+        reasons.append("strategy_memory_caution_caps_at_watch")
     elif (
         score >= strong_threshold
         and (setup_rec != "watch" or AUTO_BUY_WATCH_SETUP_STRONG_BUY_ENABLED)
@@ -822,6 +885,10 @@ def evaluate_auto_buy_candidate(
         "setup_label": setup_label,
         "setup_recommendation": setup_rec,
         "setup_score": setup_score,
+        "strategy_memory_recommendation": memory_rec,
+        "strategy_memory_min_setup_score": learned_min_setup_score,
+        "strategy_memory_reason": strategy_memory.get("reason"),
+        "strategy_memory_available": bool(strategy_memory.get("available")),
         "feature_snapshot_id": feature.get("id"),
         **prediction_context,
         **pattern,

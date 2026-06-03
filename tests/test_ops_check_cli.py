@@ -51,6 +51,10 @@ def _canonical_lifecycle_json(
     utility="trade_candidate",
     setup="breakout",
     phase="first_30m",
+    policy_decision="allow",
+    policy_enforced=False,
+    policy_size_effect="none",
+    policy_execution_effect="none",
 ) -> str:
     return json.dumps(
         {
@@ -80,7 +84,15 @@ def _canonical_lifecycle_json(
                 "runtime_effect": "observe_only_compare",
             },
             "advisory_authority_state": {
-                "utility_estimate": {"utility_decision": utility}
+                "utility_estimate": {"utility_decision": utility},
+                "decision_policy_outcome": {
+                    "advisory_decision": policy_decision,
+                    "authority_mode": "paper_only",
+                    "enforced": policy_enforced,
+                    "effect_on_size": policy_size_effect,
+                    "effect_on_execution": policy_execution_effect,
+                    "reason": f"fixture policy {policy_decision}",
+                },
             },
             "pattern_state": {
                 "pattern_label": (
@@ -195,6 +207,9 @@ def _create_lifecycle_fixture_db(tmp_path: Path) -> None:
                     utility="do_not_trade",
                     setup="late_chase",
                     phase="midday",
+                    policy_decision="size_down",
+                    policy_enforced=True,
+                    policy_size_effect="size_down",
                 ),
             ),
             (
@@ -216,6 +231,8 @@ def _create_lifecycle_fixture_db(tmp_path: Path) -> None:
                     utility="do_not_trade",
                     setup="failed_breakout",
                     phase="afternoon",
+                    policy_decision="block",
+                    policy_enforced=False,
                 ),
             ),
         ]
@@ -746,6 +763,19 @@ def test_research_export_cli_writes_daily_manifest(tmp_path):
 
 def test_learning_readiness_cli_golden_fixture_summarizes_holistic_evidence(tmp_path):
     _create_lifecycle_fixture_db(tmp_path)
+    (tmp_path / "strategy_memory.json").write_text(
+        json.dumps(
+            {
+                "generated_at": "2026-05-30 16:30:00",
+                "trade_count": 12,
+                "setup_label_context": {"late_chase": {"recommendation": "caution"}},
+                "prediction_decision_context": {"block": {"recommendation": "avoid"}},
+                "buy_opportunity_context": {"watch": {"recommendation": "caution"}},
+                "session_trend_context": {"fading": {"recommendation": "avoid"}},
+            },
+            sort_keys=True,
+        )
+    )
     with sqlite3.connect(tmp_path / "trades.db") as con:
         con.execute(
             """
@@ -885,6 +915,10 @@ def test_learning_readiness_cli_golden_fixture_summarizes_holistic_evidence(tmp_
     assert "100.00%" in out
     assert "Candidate universe" in out
     assert "near_threshold" in out
+    assert "Learning effect" in out
+    assert "strategy_memory_available" in out
+    assert "decision_policy_size_down_enforced" in out
+    assert "learning_observed_not_enforced" in out
     assert "Intelligence diagnostics" in out
     assert "[OK] learning readiness has no blockers; review manually before promotion" in out
 

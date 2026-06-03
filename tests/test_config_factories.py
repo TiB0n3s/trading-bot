@@ -93,6 +93,13 @@ RISK_ENV_VARS = [
     "REGIME_CIRCUIT_BREAKER_MODE",
     "ENFORCE_SESSION_MOMENTUM_GATE", "ENFORCE_ADAPTIVE_CHURN_REENTRY",
 ]
+AUTO_BUY_ENV_VARS = [
+    "AUTO_BUY_LIVE_BUYS", "AUTO_BUY_MIN_SCORE", "AUTO_BUY_MAX_ACTIVE_POSITIONS",
+    "AUTO_BUY_MAX_DAILY_ORDERS", "AUTO_BUY_COOLDOWN_MINUTES",
+    "AUTO_BUY_BUCKING_TAPE_MIN_VOLUME_RATIO", "AUTO_BUY_SIGNAL_MODE",
+    "TRADINGVIEW_ALERTS_DEPRECATED", "AUTO_BUY_MAX_ORDERS_PER_RUN",
+    "AUTO_BUY_MAX_SIGNALS_PER_SYMBOL",
+]
 
 
 # ===========================================================================
@@ -228,20 +235,23 @@ def test_auto_buy_override_bypasses_env():
 
 
 def test_auto_buy_override_goes_through_validation():
-    exc = _raises(ValueError, load_auto_buy_config, max_orders_per_run=0)
+    with _CleanEnv(*AUTO_BUY_ENV_VARS):
+        exc = _raises(ValueError, load_auto_buy_config, max_orders_per_run=0)
     assert "max_orders_per_run" in str(exc)
     assert "AUTO_BUY_MAX_ORDERS_PER_RUN" in str(exc)
     assert ">= 1" in str(exc)
 
 
 def test_auto_buy_negative_position_size_rejected():
-    exc = _raises(ValueError, load_auto_buy_config, position_size_pct=-0.1)
+    with _CleanEnv(*AUTO_BUY_ENV_VARS):
+        exc = _raises(ValueError, load_auto_buy_config, position_size_pct=-0.1)
     assert "position_size_pct" in str(exc)
     assert "> 0" in str(exc)
 
 
 def test_auto_buy_partial_override_preserves_defaults():
-    cfg = load_auto_buy_config(max_daily_orders=5)
+    with _CleanEnv(*AUTO_BUY_ENV_VARS):
+        cfg = load_auto_buy_config(max_daily_orders=5)
     assert cfg.max_daily_orders == 5
     assert cfg.max_active_positions == AutoBuyConfig.max_active_positions
     assert cfg.signal_mode == AutoBuyConfig.signal_mode
@@ -251,13 +261,7 @@ def test_auto_buy_partial_override_preserves_defaults():
 
 
 def test_auto_buy_no_env_dependency():
-    env_vars = [
-        "AUTO_BUY_LIVE_BUYS", "AUTO_BUY_MIN_SCORE", "AUTO_BUY_MAX_ACTIVE_POSITIONS",
-        "AUTO_BUY_MAX_DAILY_ORDERS", "AUTO_BUY_COOLDOWN_MINUTES",
-        "AUTO_BUY_BUCKING_TAPE_MIN_VOLUME_RATIO", "AUTO_BUY_SIGNAL_MODE",
-        "TRADINGVIEW_ALERTS_DEPRECATED",
-    ]
-    with _CleanEnv(*env_vars):
+    with _CleanEnv(*AUTO_BUY_ENV_VARS):
         cfg = load_auto_buy_config()
     assert cfg.live_buys is False
     assert cfg.min_score == 13.0

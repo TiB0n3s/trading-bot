@@ -4,15 +4,18 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 import logging
+import os
 from typing import Any
 from zoneinfo import ZoneInfo
 
 from repositories.session_momentum_repo import SessionMomentumRepository
+from services.bar_pattern_feature_service import BarPatternFeatureService
 from services.market_data_service import market_data_service
 
 
 MIN_BARS = 5
 LOOKBACK_MINUTES = 240
+BAR_PATTERN_HORIZON_BARS = 60
 ET = ZoneInfo("America/New_York")
 
 
@@ -33,16 +36,28 @@ def _safe_float(value: Any) -> float | None:
         return None
 
 
+def _bar_field(bar: Any, *names: str) -> Any:
+    if isinstance(bar, dict):
+        for name in names:
+            if name in bar:
+                return bar.get(name)
+        return None
+    for name in names:
+        if hasattr(bar, name):
+            return getattr(bar, name)
+    return None
+
+
 def _bar_close(bar: Any) -> float | None:
-    return _safe_float(getattr(bar, "c", None))
+    return _safe_float(_bar_field(bar, "c", "close"))
 
 
 def _bar_high(bar: Any) -> float | None:
-    return _safe_float(getattr(bar, "h", None))
+    return _safe_float(_bar_field(bar, "h", "high"))
 
 
 def _bar_low(bar: Any) -> float | None:
-    return _safe_float(getattr(bar, "l", None))
+    return _safe_float(_bar_field(bar, "l", "low"))
 
 
 def _bar_typical_price(bar: Any) -> float | None:
@@ -56,7 +71,30 @@ def _bar_typical_price(bar: Any) -> float | None:
 
 
 def _bar_volume(bar: Any) -> float:
-    return _safe_float(getattr(bar, "v", None)) or 0.0
+    return _safe_float(_bar_field(bar, "v", "volume")) or 0.0
+
+
+def _bar_timestamp(bar: Any) -> Any:
+    return _bar_field(bar, "timestamp", "t")
+
+
+def _target_date_from_bars(bars: list[Any]) -> str:
+    for bar in bars:
+        raw = _bar_timestamp(bar)
+        if raw is None:
+            continue
+        try:
+            if isinstance(raw, (int, float)):
+                ts = float(raw)
+                if ts > 10_000_000_000:
+                    ts /= 1000.0
+                return datetime.fromtimestamp(ts, tz=timezone.utc).date().isoformat()
+            if isinstance(raw, datetime):
+                return raw.astimezone(timezone.utc).date().isoformat()
+            return str(raw)[:10]
+        except Exception:
+            continue
+    return datetime.now(timezone.utc).date().isoformat()
 
 
 def _compute_vwap(bars: list[Any]) -> float | None:
@@ -340,16 +378,22 @@ class SessionMomentumService:
         market_data,
         logger: logging.Logger | None = None,
         lookback_minutes: int = LOOKBACK_MINUTES,
+        bar_pattern_service: BarPatternFeatureService | None = None,
+        capture_bar_patterns: bool = False,
+        bar_pattern_horizon_bars: int = BAR_PATTERN_HORIZON_BARS,
     ):
         self.repository = repository
         self.market_data = market_data
         self.logger = logger or logging.getLogger(__name__)
         self.lookback_minutes = lookback_minutes
+        self.bar_pattern_service = bar_pattern_service
+        self.capture_bar_patterns = bool(capture_bar_patterns)
+        self.bar_pattern_horizon_bars = bar_pattern_horizon_bars
 
     def init_table(self) -> None:
         self.repository.init_table()
 
-    def build(self, symbol: str) -> dict[str, Any]:
+    def _fetch_session_bars(self, symbol: str) -> list[Any]:
         symbol = symbol.upper()
         start = _session_start_or_lookback(
             datetime.now(timezone.utc),
@@ -362,8 +406,10 @@ class SessionMomentumService:
             start=start,
             feed="iex",
         )
-        bars = [b for b in bars if _bar_close(b) is not None]
+        return [b for b in bars if _bar_close(b) is not None]
 
+    def build_from_bars(self, symbol: str, bars: list[Any]) -> dict[str, Any]:
+        symbol = symbol.upper()
         if not bars:
             now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             return {
@@ -477,10 +523,43 @@ class SessionMomentumService:
             "reason": classification["reason"],
         }
 
+    def build(self, symbol: str) -> dict[str, Any]:
+        bars = self._fetch_session_bars(symbol)
+        return self.build_from_bars(symbol, bars)
+
     def refresh_symbol(self, symbol: str) -> dict[str, Any]:
-        row = self.build(symbol)
+        bars = self._fetch_session_bars(symbol)
+        row = self.build_from_bars(symbol, bars)
         row = self.upsert(row)
+        self._capture_bar_pattern_features(symbol, bars)
         return self.repository.get_latest(symbol) or row
+
+    def _capture_bar_pattern_features(self, symbol: str, bars: list[Any]) -> None:
+        if not self.capture_bar_patterns or self.bar_pattern_service is None or not bars:
+            return
+        try:
+            result = self.bar_pattern_service.persist_features(
+                bars,
+                symbol=symbol.upper(),
+                target_date=_target_date_from_bars(bars),
+                timeframe="1m",
+                horizon_bars=self.bar_pattern_horizon_bars,
+            )
+            self.logger.info(
+                "bar_pattern_features captured from session momentum bars for %s: "
+                "bars=%s feature_rows=%s persisted_rows=%s",
+                symbol.upper(),
+                result.bars,
+                result.feature_rows,
+                result.persisted_rows,
+            )
+        except Exception as exc:
+            self.logger.warning(
+                "bar_pattern_features capture failed for %s: %s: %s",
+                symbol.upper(),
+                type(exc).__name__,
+                exc,
+            )
 
     def upsert(self, row: dict[str, Any]) -> dict[str, Any]:
         self.repository.init_table()
@@ -523,9 +602,15 @@ _default_service: SessionMomentumService | None = None
 def get_default_session_momentum_service() -> SessionMomentumService:
     global _default_service
     if _default_service is None:
+        capture_bar_patterns = os.getenv(
+            "SESSION_MOMENTUM_CAPTURE_BAR_PATTERNS",
+            "true",
+        ).strip().lower() not in {"0", "false", "no", "off"}
         _default_service = SessionMomentumService(
             repository=SessionMomentumRepository(),
             market_data=market_data_service,
             logger=logging.getLogger("session_momentum"),
+            bar_pattern_service=BarPatternFeatureService(),
+            capture_bar_patterns=capture_bar_patterns,
         )
     return _default_service

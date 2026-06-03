@@ -259,7 +259,7 @@ def _bar_pattern_evidence(bar_pattern_rows: list[dict[str, Any]]) -> dict[str, A
             "forward_mfe_pct": round(forward_mfe, 4) if forward_mfe is not None else None,
             "forward_mae_pct": round(forward_mae, 4) if forward_mae is not None else None,
         }
-        if action == "long_candidate" and long_score is not None:
+        if action in {"buy_candidate", "long_candidate"} and long_score is not None:
             top_buy_windows.append(item)
         if action == "sell_or_avoid_candidate" and sell_score is not None:
             top_sell_or_avoid_windows.append(item)

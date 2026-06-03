@@ -1,7 +1,7 @@
 import sys
 from pathlib import Path
 from types import SimpleNamespace
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
@@ -17,6 +17,17 @@ from services.session_momentum_service import (
 
 def _bar(close, volume=10):
     return SimpleNamespace(c=close, h=close + 1, l=close - 1, v=volume)
+
+
+def _timed_bar(close, minutes, volume=10):
+    start = datetime(2026, 6, 2, 13, 30, tzinfo=timezone.utc)
+    return SimpleNamespace(
+        t=start + timedelta(minutes=minutes),
+        c=close,
+        h=close + 0.1,
+        l=close - 0.1,
+        v=volume,
+    )
 
 
 class FakeMarketData:
@@ -43,6 +54,19 @@ class FakeRepository:
 
     def upsert(self, row):
         self.saved = dict(row)
+
+
+class FakeBarPatternService:
+    def __init__(self):
+        self.calls = []
+
+    def persist_features(self, bars, **kwargs):
+        self.calls.append((list(bars), kwargs))
+        return SimpleNamespace(
+            bars=len(bars),
+            feature_rows=max(0, len(bars) - 20),
+            persisted_rows=max(0, len(bars) - 20),
+        )
 
 
 def test_build_calculates_vwap_and_strong_uptrend():
@@ -167,6 +191,31 @@ def test_refresh_symbol_upserts_merged_row():
     assert row["session_strength_seen"] == 1
 
 
+def test_refresh_symbol_reuses_session_bars_for_bar_pattern_capture():
+    bars = [_timed_bar(100 + i * 0.05, i, volume=100 + i) for i in range(30)]
+    market_data = FakeMarketData(bars)
+    pattern_service = FakeBarPatternService()
+    service = SessionMomentumService(
+        repository=FakeRepository(),
+        market_data=market_data,
+        bar_pattern_service=pattern_service,
+        capture_bar_patterns=True,
+        bar_pattern_horizon_bars=15,
+    )
+
+    row = service.refresh_symbol("aapl")
+
+    assert row["symbol"] == "AAPL"
+    assert len(market_data.calls) == 1
+    assert len(pattern_service.calls) == 1
+    captured_bars, kwargs = pattern_service.calls[0]
+    assert captured_bars == bars
+    assert kwargs["symbol"] == "AAPL"
+    assert kwargs["target_date"] == "2026-06-02"
+    assert kwargs["timeframe"] == "1m"
+    assert kwargs["horizon_bars"] == 15
+
+
 def test_missing_bars_returns_insufficient_data_safely():
     service = SessionMomentumService(
         repository=FakeRepository(),
@@ -218,6 +267,7 @@ if __name__ == "__main__":
         test_classification_labels_for_uptrend_fading_and_downtrend,
         test_session_start_anchors_to_market_open_after_open,
         test_refresh_symbol_upserts_merged_row,
+        test_refresh_symbol_reuses_session_bars_for_bar_pattern_capture,
         test_missing_bars_returns_insufficient_data_safely,
         test_retained_strength_preserves_prior_highs_and_tracks_pullback,
     ]

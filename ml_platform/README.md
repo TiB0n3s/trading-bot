@@ -159,6 +159,11 @@ research. Both artifacts remain observe-only unless an explicit future
 promotion process adds validation, model-card review, default-off env flags,
 runtime tests, and rollback.
 
+The root `requirements.txt` includes the optional research dependencies needed
+for these checked-in workflows: `duckdb`, `pyarrow`, `scikit-learn`, `joblib`,
+and `hmmlearn`. They are installed for reproducible exports/training/tests, not
+for live authority.
+
 `score_financial_sentiment.py` separates the lightweight lexicon fallback from
 the optional FinBERT transformer path. Use it to generate sentiment evidence,
 not to directly approve, reject, size, or exit trades.

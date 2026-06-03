@@ -980,6 +980,23 @@ A model can only move from observe-only to paper-trading influence after it has:
     training features; `entry_quality_report.py` runs post-session in
     observe-only mode. Do not promote entry-quality hard gates until the report
     has enough matched outcomes per bucket.
+25. Done: add full-universe internal auto-buy execution support for paper mode
+    via `AUTO_BUY_SIGNAL_MODE=internal_all`, with candidate decisions, live
+    block reasons, risk cross-checks, and submitted order metadata captured in
+    `auto_buy_decision_snapshots` and `candidate_universe`.
+26. Done: add auto-buy timing labels for learning and review:
+    `early_constructive_build`, `mature_chase`, and `extreme_chase`. These help
+    separate early accumulation/reclaim entries from late momentum chase entries
+    before promoting any learned policy.
+27. Done: harden position-manager partial exits around broker/open-order state.
+    Partial exits now wait after canceling open orders and fail safely on
+    available-quantity errors instead of crashing the job.
+28. Done: add a curated, non-authoritative trading education source/concept
+    contract through `ops_check.py trading-education-health`; use it for
+    taxonomy/explanation context only.
+29. Done: include DuckDB/PyArrow/sklearn/joblib/hmmlearn in
+    `requirements.txt` so research exports, supervised artifacts, and HMM regime
+    experiments are reproducible from a fresh install.
 
 Critical blockers before real training:
 

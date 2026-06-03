@@ -118,6 +118,7 @@ python3 ops_check.py decision-snapshots 2026-05-26
 python3 ops_check.py policy-artifacts
 python3 ops_check.py retention
 python3 ops_check.py order-health 2026-05-26
+python3 ops_check.py trading-education-health
 python3 prediction_cache.py preload --date 2026-05-26
 ```
 
@@ -138,6 +139,12 @@ replaced while still limiting churn. The cron remains Central-time localized, bu
 candidate rows. Before any live paper buy it also cross-checks shared app
 cooldowns, recent-sell churn state, the app per-symbol daily buy count, and
 correlation-cluster exposure.
+Current scoring favors earlier constructive build over mature momentum chase:
+`early_constructive_build` is recorded when a symbol is near VWAP with improving
+5m/15m/30m momentum and acceptable setup quality, while `mature_chase` and
+`extreme_chase` are recorded when price is already extended from VWAP after a
+large session move. Extreme chase states are blocked unless the setup is a
+specific recovery/retest pattern rather than simple momentum chasing.
 When TradingView alerts are unavailable or intentionally retired, set
 `AUTO_BUY_SIGNAL_MODE=internal_all` or `TRADINGVIEW_ALERTS_DEPRECATED=true`.
 That allows legacy TradingView-cohort symbols to execute through the internal
@@ -172,12 +179,19 @@ that were strong even if they had no TradingView alert.
 decisions, live block reasons, risk cross-checks, and submitted order metadata
 so the internal buy path has its own audit trail beside the main webhook
 decision snapshots.
+`position_manager.py` treats partial exits as fail-safe around open-order state:
+when a partial exit must cancel open orders first, it waits for the next cycle
+before submitting; if Alpaca still reports insufficient available quantity, the
+job records a non-submitted action instead of crashing.
 `decision-snapshots` verifies immutable point-in-time audit coverage for new
 approved/rejected decisions. `policy-artifacts` checks the runtime learning
 artifact files, and `retention` prints the non-destructive hot/warm/cold table
 classification.
 `order-health` checks approved rows for order IDs/statuses, fill-event
 distribution, and imported Alpaca order status summaries.
+`trading-education-health` reports the versioned, non-authoritative education
+source and concept corpus. It is for AI/ML explanation, taxonomy, and operator
+review only; it cannot approve, block, size, or execute trades.
 `prediction_cache.py preload` verifies that `daily_symbol_predictions` can be
 loaded into the TTL cache before the session. The Flask app also starts its own
 background cache refresher so webhook handling reads predictions from memory,

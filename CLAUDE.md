@@ -48,6 +48,15 @@ Recent completed roadmap items:
 - Auto-buy live paper execution cross-checks shared app cooldowns, recent-sell
   churn state, per-symbol daily app buys, and correlation-cluster exposure
   before calling the broker.
+- Auto-buy can operate from internal bar-derived candidates across the approved
+  universe when `AUTO_BUY_SIGNAL_MODE=internal_all` and
+  `AUTO_BUY_LIVE_BUYS=true`. It now records `early_constructive_build`,
+  `mature_chase`, and `extreme_chase` so post-session review can distinguish
+  early accumulation/reclaim opportunities from late momentum chasing.
+- `position_manager.py` partial exits are fail-safe around open-order state:
+  cancel-first cycles wait for the next pass before submitting, and Alpaca
+  available-quantity errors return non-submitted results instead of crashing the
+  job.
 - `archive_context_state.py` snapshots market context, override hashes, policy
   artifact hashes, and symbol-universe version for future replay.
 - `policy_artifacts.py` registers after-close learning artifact sets, tracks a
@@ -83,6 +92,14 @@ Recent completed roadmap items:
   `services/live_features_service.py` mirrors compact ticks through
   `services/timescale_tick_writer_service.py`; this path is storage-only and
   has no order, sizing, or risk-gate authority.
+- DuckDB/PyArrow research exports, sklearn/joblib supervised artifacts, and
+  hmmlearn HMM regime artifacts are included in `requirements.txt` for
+  reproducible local research/test runs. These dependencies remain observe-only
+  unless separately promoted through tests, reports, and explicit operator
+  review.
+- `ops_check.py trading-education-health` reports the curated
+  `trading_education_corpus_v1` source/concept contract. Education content can
+  support explanation and taxonomy work, but it has no live authority.
 - New AI analytics command surfaces exist for operator/research review:
   `ai_dependency_status.py`, `score_financial_sentiment.py`,
   `timescale_smoke_test.py`, `train_supervised_predictions.py`,

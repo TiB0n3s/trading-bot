@@ -67,6 +67,16 @@ python3 run_staged_tests.py
 Generated experiment/model artifacts are local research outputs and are ignored
 by default. Promote only reviewed metadata/artifacts intentionally.
 
+Fresh research installs should use the root `requirements.txt`; it includes the
+optional research packages used by checked-in commands:
+
+- DuckDB and PyArrow for Parquet/research exports.
+- scikit-learn and joblib for supervised entry-prediction artifacts.
+- hmmlearn for HMM regime artifacts.
+
+These packages are research infrastructure only. Installing them does not grant
+model output any live authority.
+
 `models/similarity_v0/` is the first versioned research placeholder. It contains
 metadata only: no trained model artifact, no runtime import, and no permission
 to influence orders, position sizing, or risk controls.

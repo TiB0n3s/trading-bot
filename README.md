@@ -25,7 +25,12 @@ As of the latest roadmap work:
 - `decision_snapshots` now use feature semantic version `decision_snapshot_features_v4`; canonical intelligence includes observe-only `analytics_state` from the predictive/descriptive/diagnostic/prescriptive toolkit.
 - `ml_platform` remains a staged, ahead-of-live research lane with read-only readiness, replay, governance, manifest, and retraining reports.
 - `ml/models/similarity_v0/` remains a research-only metadata placeholder, while optional supervised and HMM artifacts can be trained under `ml/models/` for offline review only.
+- Research export support now includes DuckDB and Parquet/PyArrow so daily review datasets can be exported without changing live trading behavior.
 - Optional TimescaleDB storage can mirror compact live feature ticks into `stock_ticks` when `TIMESCALE_DB_URI` is configured. This storage path has no trade authority.
+- Auto-buy paper execution can run from internal Alpaca-bar candidates across the approved universe when `AUTO_BUY_SIGNAL_MODE=internal_all` and `AUTO_BUY_LIVE_BUYS=true`. Candidate capture stores scored/taken/not-taken rows for learning and counterfactual review.
+- Auto-buy scoring now distinguishes early constructive build opportunities from mature chase/extension states. Early build is a ranking/learning boost; mature/extreme chase is penalized or blocked so the bot is not simply buying peak momentum.
+- Position-manager partial exits now fail safe when open-order cancellation or Alpaca available-quantity state has not settled; the job records a failed/queued action instead of crashing on stale quantity.
+- The trading education corpus is versioned and non-authoritative. `ops_check.py trading-education-health` reports curated source and concept coverage for SEC/FINRA/CFTC/CME/NerdWallet/Investopedia plus normalized strategy concepts.
 - Webhook/status secrets should be supplied by `X-Webhook-Secret` or `Authorization: Bearer ...`; query-string secrets are rejected unless `ALLOW_QUERY_STRING_SECRET=true` is explicitly set for temporary compatibility.
 - Prediction gate mode defaults to warn-only for hard blocking. Weak ML predictions can only reduce risk through explicit size caps; they do not place orders, loosen gates, or override broker/order safeguards.
 
@@ -34,7 +39,7 @@ As of the latest roadmap work:
 ## High-Level Architecture
 
 ```text
-TradingView Alerts
+TradingView Alerts / Internal Bar Candidates
         |
         v
 Cloudflare Tunnel
@@ -63,6 +68,12 @@ SQLite trades.db
         v
 Reports, intelligence, validation
 ```
+
+TradingView alerts are now one possible signal source, not the only source.
+When configured for paper-mode breadth, `auto_buy_manager.py --scope all --live`
+can evaluate the full approved universe from internal bar/session/setup data and
+submit only candidates that pass the same capacity, cooldown, risk, and broker
+safety checks.
 
 ## Runtime Environment
 
@@ -115,6 +126,11 @@ pip install -r requirements.txt
 pip install -e '.[dev]'
 python run_tests.py
 ```
+
+`requirements.txt` includes the core runtime stack plus optional research
+dependencies used by checked-in commands: DuckDB/PyArrow research exports,
+scikit-learn/joblib supervised prediction artifacts, and hmmlearn HMM regime
+experiments. These packages do not grant live trading authority by themselves.
 
 Additional validation commands:
 

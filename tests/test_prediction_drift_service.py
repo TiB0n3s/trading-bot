@@ -72,6 +72,7 @@ def test_positive_correlation_does_not_recommend_retraining():
     assert report["warning"] is False
     assert report["retraining_recommended"] is False
     assert report["bad_session_count"] == 0
+    assert report["coverage_status"] == "evaluated"
     assert report["average_correlation"] and report["average_correlation"] > 0
 
 
@@ -104,7 +105,46 @@ def test_insufficient_pairs_are_reported_without_crashing():
 
     assert report["warning"] is False
     assert report["valid_session_count"] == 0
+    assert report["coverage_status"] == "insufficient_pairs"
     assert report["date_scores"][0]["status"] == "insufficient_pairs"
+
+
+def test_gapped_market_dates_use_available_sessions_not_calendar_days():
+    path = _db(
+        {
+            "2026-05-29": [("A", 90, 2), ("B", 60, 1), ("C", 20, -1)],
+            "2026-06-02": [("A", 80, 3), ("B", 50, 0), ("C", 10, -2)],
+            "2026-06-03": [("A", 70, 2), ("B", 40, 1), ("C", 10, -1)],
+        }
+    )
+    report = _service(path).correlation_report(
+        target_date="2026-06-03",
+        sessions=3,
+        bad_session_limit=3,
+    ).to_dict()
+
+    assert [row["market_date"] for row in report["date_scores"]] == [
+        "2026-06-03",
+        "2026-06-02",
+        "2026-05-29",
+    ]
+    assert report["missing_requested_session_count"] == 0
+    assert report["latest_available_date"] == "2026-06-03"
+    assert report["coverage_status"] == "evaluated"
+
+
+def test_no_prediction_data_is_explicit_empty_state_not_retraining_trigger():
+    path = _db({})
+    report = _service(path).correlation_report(
+        target_date="2026-06-03",
+        sessions=3,
+        bad_session_limit=3,
+    ).to_dict()
+
+    assert report["coverage_status"] == "no_prediction_outcome_data"
+    assert report["missing_requested_session_count"] == 3
+    assert report["warning"] is False
+    assert report["retraining_recommended"] is False
 
 
 def main():
@@ -112,6 +152,8 @@ def main():
         test_positive_correlation_does_not_recommend_retraining,
         test_flat_or_negative_correlation_recommends_retraining_after_limit,
         test_insufficient_pairs_are_reported_without_crashing,
+        test_gapped_market_dates_use_available_sessions_not_calendar_days,
+        test_no_prediction_data_is_explicit_empty_state_not_retraining_trigger,
     ]
     for test in tests:
         test()

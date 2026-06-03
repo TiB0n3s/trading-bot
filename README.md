@@ -558,7 +558,13 @@ warns when recent `prediction_score` correlation is flat or negative for 3+
 sessions. `pipeline/retrain.py` can train a candidate supervised artifact and
 write registry metadata only when validation and `retraining-readiness` pass.
 It cannot load a model into runtime or promote beyond `warn_only` without
-explicit operator approval.
+explicit operator approval. Drift validation uses the last available joined
+prediction/outcome sessions, so weekends and market holidays do not count as
+bad sessions. Empty or partial data is reported through `coverage_status`
+instead of triggering retraining. Retraining uses a nonblocking lock
+(`/tmp/tradingbot_ml_retrain.lock` by default) and a max runtime guard
+(`--max-runtime-seconds`, default 1800) so long training runs do not overlap
+silently with later automation.
 
 The newer AI analytics services add structured observe-only context around the
 same trading decisions: dependency status, technical features, portfolio/risk

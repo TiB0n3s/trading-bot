@@ -8,7 +8,10 @@ loads models into runtime or changes live trading authority.
 from __future__ import annotations
 
 import argparse
+from contextlib import contextmanager
+import fcntl
 import json
+import signal
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -29,6 +32,13 @@ from services.supervised_prediction_training_service import (
     train_supervised_prediction_model,
 )
 
+DEFAULT_LOCK_FILE = "/tmp/tradingbot_ml_retrain.lock"
+DEFAULT_MAX_RUNTIME_SECONDS = 1800
+
+
+class RetrainingTimeout(Exception):
+    pass
+
 
 def _utc_stamp() -> str:
     return datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
@@ -40,30 +50,41 @@ def _write_json(path: Path, payload: dict[str, Any]) -> Path:
     return path
 
 
-def main() -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--date", dest="target_date")
-    parser.add_argument("--start-date")
-    parser.add_argument("--end-date")
-    parser.add_argument("--sessions", type=int, default=5)
-    parser.add_argument("--threshold", type=float, default=0.0)
-    parser.add_argument("--bad-session-limit", type=int, default=3)
-    parser.add_argument("--min-pairs", type=int, default=3)
-    parser.add_argument("--trading-sessions-observed", type=int, default=0)
-    parser.add_argument("--horizon", default="15m")
-    parser.add_argument("--min-samples", type=int, default=40)
-    parser.add_argument("--limit", type=int, default=5000)
-    parser.add_argument("--db-path", default=str(DEFAULT_DB_PATH))
-    parser.add_argument(
-        "--artifact-dir",
-        default=str(MODEL_ROOT / "supervised_entry_v1" / "candidates"),
-    )
-    parser.add_argument("--requested-status", default="candidate")
-    parser.add_argument("--operator-approved", action="store_true")
-    parser.add_argument("--force", action="store_true")
-    parser.add_argument("--json", action="store_true")
-    args = parser.parse_args()
+@contextmanager
+def _nonblocking_lock(lock_file: str | None):
+    if not lock_file:
+        yield True
+        return
+    path = Path(lock_file)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    handle = path.open("w")
+    acquired = False
+    try:
+        try:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+            acquired = True
+        except BlockingIOError:
+            yield False
+            return
+        yield True
+    finally:
+        if acquired:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+        handle.close()
 
+
+def _timeout_handler(signum, frame):  # noqa: ARG001
+    raise RetrainingTimeout("automated retraining exceeded max runtime")
+
+
+def _print_payload(payload: dict[str, Any], *, as_json: bool) -> None:
+    if as_json:
+        print(json.dumps(payload, indent=2, sort_keys=True))
+        return
+    print(payload.get("reason") or payload.get("status") or "automated retraining result")
+
+
+def _execute_retraining(args: argparse.Namespace) -> int:
     drift_service = build_default_prediction_drift_service(db_path=args.db_path)
     validation = drift_service.correlation_report(
         target_date=args.target_date or args.end_date,
@@ -81,7 +102,7 @@ def main() -> int:
             "reason": "prediction validation does not recommend retraining",
             "validation": validation,
         }
-        print(json.dumps(payload, indent=2, sort_keys=True) if args.json else payload["reason"])
+        _print_payload(payload, as_json=args.json)
         return 0
 
     rows = fetch_training_rows(db_path=args.db_path, limit=args.limit)
@@ -166,6 +187,78 @@ def main() -> int:
                 print(f"  - {blocker}")
         print(f"Metrics: {metrics_path}")
     return 0 if training.get("trained") else 1
+
+
+def _parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--date", dest="target_date")
+    parser.add_argument("--start-date")
+    parser.add_argument("--end-date")
+    parser.add_argument("--sessions", type=int, default=5)
+    parser.add_argument("--threshold", type=float, default=0.0)
+    parser.add_argument("--bad-session-limit", type=int, default=3)
+    parser.add_argument("--min-pairs", type=int, default=3)
+    parser.add_argument("--trading-sessions-observed", type=int, default=0)
+    parser.add_argument("--horizon", default="15m")
+    parser.add_argument("--min-samples", type=int, default=40)
+    parser.add_argument("--limit", type=int, default=5000)
+    parser.add_argument("--db-path", default=str(DEFAULT_DB_PATH))
+    parser.add_argument(
+        "--artifact-dir",
+        default=str(MODEL_ROOT / "supervised_entry_v1" / "candidates"),
+    )
+    parser.add_argument("--requested-status", default="candidate")
+    parser.add_argument("--operator-approved", action="store_true")
+    parser.add_argument("--force", action="store_true")
+    parser.add_argument("--json", action="store_true")
+    parser.add_argument(
+        "--lock-file",
+        default=DEFAULT_LOCK_FILE,
+        help="Nonblocking lock file. Use empty string to disable.",
+    )
+    parser.add_argument(
+        "--max-runtime-seconds",
+        type=int,
+        default=DEFAULT_MAX_RUNTIME_SECONDS,
+        help="Abort retraining if it exceeds this many seconds. Use 0 to disable.",
+    )
+    return parser.parse_args()
+
+
+def main() -> int:
+    args = _parse_args()
+    lock_file = args.lock_file or None
+    with _nonblocking_lock(lock_file) as acquired:
+        if not acquired:
+            payload = {
+                "report_version": "automated_retraining_v1",
+                "runtime_effect": "none",
+                "status": "skipped_lock_busy",
+                "reason": f"another retraining process holds {lock_file}",
+            }
+            _print_payload(payload, as_json=args.json)
+            return 0
+        previous_handler = None
+        if args.max_runtime_seconds and args.max_runtime_seconds > 0:
+            previous_handler = signal.signal(signal.SIGALRM, _timeout_handler)
+            signal.alarm(args.max_runtime_seconds)
+        try:
+            return _execute_retraining(args)
+        except RetrainingTimeout as exc:
+            payload = {
+                "report_version": "automated_retraining_v1",
+                "runtime_effect": "none",
+                "status": "timeout",
+                "reason": str(exc),
+                "max_runtime_seconds": args.max_runtime_seconds,
+            }
+            _print_payload(payload, as_json=args.json)
+            return 124
+        finally:
+            if args.max_runtime_seconds and args.max_runtime_seconds > 0:
+                signal.alarm(0)
+                if previous_handler is not None:
+                    signal.signal(signal.SIGALRM, previous_handler)
 
 
 if __name__ == "__main__":

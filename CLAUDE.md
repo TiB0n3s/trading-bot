@@ -32,6 +32,11 @@ Recent completed roadmap items:
 - `pipeline/retrain.py` can train candidate ML artifacts after prediction
   validation decay, but registry writes are metadata-only and promotion beyond
   `warn_only` requires explicit operator approval.
+- Prediction drift checks use available joined prediction/outcome sessions, not
+  calendar days; long weekends/holidays are not treated as failed sessions.
+  Empty/partial coverage is explicit via `coverage_status`.
+- Automated retraining uses `/tmp/tradingbot_ml_retrain.lock` and a default
+  1800-second max-runtime guard.
 - `ml/models/similarity_v0/` is research-only metadata with no trained artifact.
 - `run_staged_tests.py` runs ahead-of-live staged integration tests separately from current behavior tests.
 - `replay-decisions` is a read-only decision-delta audit. It can join changed

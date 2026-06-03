@@ -65,6 +65,11 @@ or destabilize the webhook path if treated as routine cleanup.
    - Candidate registry writes are metadata-only. Automated promotion is capped
      at `warn_only`; anything stronger requires explicit operator approval and
      still does not alter runtime without separate wiring.
+   - Prediction drift checks evaluate available joined prediction/outcome
+     sessions, not calendar days, and expose empty/partial coverage instead of
+     creating false retraining alerts.
+   - Retraining is guarded by a nonblocking lock and max-runtime timeout so
+     long jobs do not silently overlap later scheduled automation.
    - After-close learning should produce retraining-readiness evidence and
      candidate artifacts, not automatically alter runtime policy.
 5. Existing after-close policy artifacts:

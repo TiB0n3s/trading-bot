@@ -39,6 +39,9 @@ class PredictionDriftReport:
     flat_or_negative_threshold: float
     min_pairs_per_session: int
     date_scores: list[PredictionDateCorrelation] = field(default_factory=list)
+    coverage_status: str = "unknown"
+    latest_available_date: str | None = None
+    missing_requested_session_count: int = 0
     bad_session_count: int = 0
     valid_session_count: int = 0
     average_correlation: float | None = None
@@ -140,6 +143,7 @@ class PredictionDriftService:
 
         valid = [score for score in scores if score.correlation is not None]
         bad = [score for score in valid if (score.correlation or 0.0) <= threshold]
+        missing_requested_session_count = max(0, sessions - len(scores))
         avg = (
             round(sum(float(score.correlation) for score in valid) / len(valid), 4)
             if valid
@@ -147,12 +151,21 @@ class PredictionDriftService:
         )
         warning = len(bad) >= bad_session_limit
         if not scores:
+            coverage_status = "no_prediction_outcome_data"
             reason = "no joined prediction/outcome rows found"
+        elif not valid:
+            coverage_status = "insufficient_pairs"
+            reason = "prediction/outcome rows exist but no session has enough pairs"
+        elif len(valid) < min(sessions, bad_session_limit):
+            coverage_status = "partial"
+            reason = "partial prediction/outcome coverage; not enough valid sessions for a strong drift conclusion"
         elif warning:
+            coverage_status = "evaluated"
             reason = (
                 f"{len(bad)} sessions have prediction_score correlation <= {threshold}"
             )
         else:
+            coverage_status = "evaluated"
             reason = "prediction_score directional correlation is not in retraining-alert state"
         return PredictionDriftReport(
             report_version=PREDICTION_DRIFT_REPORT_VERSION,
@@ -163,6 +176,9 @@ class PredictionDriftService:
             flat_or_negative_threshold=threshold,
             min_pairs_per_session=min_pairs_per_session,
             date_scores=scores,
+            coverage_status=coverage_status,
+            latest_available_date=scores[0].market_date if scores else None,
+            missing_requested_session_count=missing_requested_session_count,
             bad_session_count=len(bad),
             valid_session_count=len(valid),
             average_correlation=avg,

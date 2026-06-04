@@ -165,6 +165,50 @@ def test_schwab_child_seeds_are_approved_and_blocked_pages_fail(tmp_path=None):
     tmp.cleanup()
 
 
+def test_manual_snapshot_ingest_accepts_uploaded_schwab_card_content():
+    tmp = tempfile.TemporaryDirectory()
+    db_path = Path(tmp.name) / "trades.db"
+    repo = TradingEducationRepository(db_path)
+    service = TradingEducationIngestionService(repo=repo)
+
+    result = service.ingest_manual_snapshot(
+        url="https://www.schwab.com/learn/story/what-are-derivatives",
+        title="What Are Derivatives? A Guide to Financial Contracts",
+        content=(
+            "Derivatives are financial contracts whose value comes from an underlying asset. "
+            "Options, futures, swaps, and forwards may be used in trading strategies to manage risk, "
+            "generate income, or speculate on price changes. Derivatives involve significant risks, including "
+            "leverage, liquidity, expiration, assignment, and amplified losses."
+        ),
+    )
+    recent = repo.recent_pages(limit=1)
+
+    assert result["status"] in {"stored", "needs_review"}
+    assert result["source_key"] == "schwab_learn_trading"
+    assert "risk_practice_before_live" in result["concept_keys"]
+    assert "strategy_vs_style" in result["concept_keys"]
+    assert recent[0]["ingestion_method"] == "manual_snapshot"
+    assert recent[0]["extraction_confidence"] is not None
+    tmp.cleanup()
+
+
+def test_manual_snapshot_blocks_unapproved_urls():
+    tmp = tempfile.TemporaryDirectory()
+    db_path = Path(tmp.name) / "trades.db"
+    repo = TradingEducationRepository(db_path)
+    service = TradingEducationIngestionService(repo=repo)
+
+    result = service.ingest_manual_snapshot(
+        url="https://example.com/not-approved",
+        title="Not Approved",
+        content="options risk strategy",
+    )
+
+    assert result["status"] == "blocked"
+    assert repo.summary()["rows"] == 0
+    tmp.cleanup()
+
+
 def test_education_ingestion_dry_run_does_not_persist():
     tmp = tempfile.TemporaryDirectory()
     db_path = Path(tmp.name) / "trades.db"
@@ -177,7 +221,7 @@ def test_education_ingestion_dry_run_does_not_persist():
     result = service.ingest(max_pages=1, dry_run=True)
 
     assert result["dry_run"] is True
-    assert result["stored"] == 1
+    assert result["stored"] + result["needs_review"] == 1
     assert repo.summary()["rows"] == 0
     tmp.cleanup()
 
@@ -190,6 +234,8 @@ def main():
         test_strategy_concepts_are_normalized_and_non_authoritative,
         test_education_ingestion_stores_compact_concept_metadata,
         test_schwab_child_seeds_are_approved_and_blocked_pages_fail,
+        test_manual_snapshot_ingest_accepts_uploaded_schwab_card_content,
+        test_manual_snapshot_blocks_unapproved_urls,
         test_education_ingestion_dry_run_does_not_persist,
     ]
     for test in tests:

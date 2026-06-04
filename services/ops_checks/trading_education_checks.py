@@ -27,7 +27,9 @@ def run_trading_education_health(*, base_dir: Path | None = None) -> bool:
     print(f"approved_seed_count : {payload['approved_seed_count']}")
     print(f"metadata/manual     : {payload['metadata_or_manual_count']}")
     print(f"stored_pages        : {stored['stored']}")
+    print(f"needs_review        : {stored['needs_review']}")
     print(f"failed_pages        : {stored['failed']}")
+    print(f"avg_confidence      : {stored['avg_confidence']:.2f}")
     print(f"latest_retrieved_at : {stored['latest_retrieved_at'] or '-'}")
 
     print()
@@ -90,3 +92,44 @@ def run_trading_education_health(*, base_dir: Path | None = None) -> bool:
     print()
     print("[OK] trading education sources are curated; no live authority changed")
     return True
+
+
+def run_trading_education_review(*, base_dir: Path | None = None) -> bool:
+    repo = TradingEducationRepository(base_dir / "trades.db") if base_dir else TradingEducationRepository()
+    summary = repo.summary()
+    rows = repo.review_rows(limit=30)
+
+    print()
+    print("=" * 72)
+    print("  Trading Education Extraction Review")
+    print("=" * 72)
+    print("report_version      : trading_education_review_v1")
+    print("runtime_effect      : education_context_only_no_trade_authority")
+    print(f"stored_pages        : {summary['stored']}")
+    print(f"needs_review        : {summary['needs_review']}")
+    print(f"failed_pages        : {summary['failed']}")
+    print(f"avg_confidence      : {summary['avg_confidence']:.2f}")
+
+    if not rows:
+        print()
+        print("[OK] no trading education extraction rows require review")
+        return True
+
+    print()
+    print("Rows requiring review")
+    print(f"  {'source':<28} {'status':<14} {'conf':>5} {'method':<16} {'warning/error'}")
+    print(f"  {'-' * 28} {'-' * 14} {'-' * 5} {'-' * 16} {'-' * 40}")
+    for row in rows:
+        warnings = row.get("extraction_warnings") or row.get("error") or "-"
+        print(
+            f"  {str(row.get('source_key') or '-'):<28} "
+            f"{str(row.get('status') or '-'):<14} "
+            f"{float(row.get('extraction_confidence') or 0.0):>5.2f} "
+            f"{str(row.get('ingestion_method') or '-'):<16} "
+            f"{str(warnings)[:90]}"
+        )
+        print(f"    {row.get('url')}")
+
+    print()
+    print("[WARN] trading education extraction has rows requiring review")
+    return False

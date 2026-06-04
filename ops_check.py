@@ -48,6 +48,7 @@ Usage:
   python3 ops_check.py resource-readiness
   python3 ops_check.py trading-education-health
   python3 ops_check.py trading-education-ingest [--max-pages N] [--dry-run]
+  python3 ops_check.py trading-education-review
   python3 ops_check.py market-data-parity AAPL
   python3 ops_check.py market-data-parity AAPL --bars --date YYYY-MM-DD
   python3 ops_check.py research-export YYYY-MM-DD
@@ -141,7 +142,10 @@ from services.ops_checks.log_ledger_checks import run_log_ledger_consistency
 from services.ops_checks.portfolio_risk_checks import run_portfolio_risk_report
 from services.ops_checks.point_in_time_archive_checks import run_point_in_time_archive
 from services.ops_checks.resource_readiness_checks import run_resource_readiness
-from services.ops_checks.trading_education_checks import run_trading_education_health
+from services.ops_checks.trading_education_checks import (
+    run_trading_education_health,
+    run_trading_education_review,
+)
 from services.ops_checks.market_data_parity_checks import run_market_data_parity
 from services.ops_checks.research_export_checks import run_research_export
 from services.ops_checks.snapshot_checks import run_decision_snapshot_health
@@ -614,6 +618,10 @@ def trading_education_health():
 
 def trading_education_ingest():
     return run_trading_education_ingest_cli(sys.argv[2:]) == 0
+
+
+def trading_education_review():
+    return run_trading_education_review(base_dir=BASE_DIR)
 
 
 def market_data_parity(symbol):
@@ -1132,6 +1140,9 @@ def main():
 
     if command == "trading-education-ingest":
         return 0 if trading_education_ingest() else 1
+
+    if command == "trading-education-review":
+        return 0 if trading_education_review() else 1
 
     if command == "market-data-parity":
         symbol = sys.argv[2] if len(sys.argv) > 2 else ""

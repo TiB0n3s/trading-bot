@@ -12,6 +12,7 @@ from html.parser import HTMLParser
 import hashlib
 import json
 import re
+from pathlib import Path
 from typing import Any
 from urllib.parse import urljoin, urlparse
 from urllib.request import Request, urlopen
@@ -22,6 +23,7 @@ from repositories.trading_education_repo import TradingEducationRepository
 TRADING_EDUCATION_CORPUS_VERSION = "trading_education_corpus_v1"
 TRADING_EDUCATION_RUNTIME_EFFECT = "education_context_only_no_trade_authority"
 TRADING_EDUCATION_INGEST_VERSION = "trading_education_ingest_v1"
+TRADING_EDUCATION_EXTRACTION_SCHEMA_VERSION = "trading_education_extraction_schema_v1"
 
 
 @dataclass(frozen=True)
@@ -527,6 +529,14 @@ def _compact_summary(text: str, *, max_chars: int = 700) -> str:
     return summary[:max_chars]
 
 
+def _guess_title_from_text(text: str, fallback: str) -> str:
+    for line in (text or "").splitlines():
+        clean = " ".join(line.split()).strip()
+        if len(clean) >= 8:
+            return clean[:300]
+    return fallback
+
+
 def _concept_matches(text: str) -> tuple[list[str], list[str]]:
     lower = f" {text.lower()} "
     concept_keys: list[str] = []
@@ -611,6 +621,44 @@ def _blocked_or_error_page(title: str, text: str) -> str | None:
     return None
 
 
+def _confidence_and_warnings(
+    *,
+    title: str,
+    text: str,
+    concept_keys: list[str],
+    source: TradingEducationSource,
+    ingestion_method: str,
+) -> tuple[float, list[str], str]:
+    warnings: list[str] = []
+    text_len = len(text or "")
+    if text_len < 250:
+        warnings.append("short_text")
+    if not concept_keys:
+        warnings.append("no_concept_match")
+    if source.tier.startswith("official"):
+        base = 0.8
+    elif source.tier in {"medium_education", "official_high"}:
+        base = 0.68
+    else:
+        base = 0.55
+    if ingestion_method == "manual_snapshot":
+        base -= 0.08
+    if text_len >= 1000:
+        base += 0.08
+    elif text_len >= 500:
+        base += 0.04
+    if concept_keys:
+        base += 0.08
+    if not title or title == source.name:
+        warnings.append("generic_or_missing_title")
+        base -= 0.05
+    confidence = max(0.0, min(0.99, round(base, 4)))
+    status = "stored" if confidence >= 0.55 and not warnings else "needs_review"
+    if warnings == ["generic_or_missing_title"] and confidence >= 0.6:
+        status = "stored"
+    return confidence, warnings, status
+
+
 class TradingEducationIngestionService:
     """Bounded crawler/extractor for approved education sources.
 
@@ -681,19 +729,36 @@ class TradingEducationIngestionService:
                 "runtime_effect": TRADING_EDUCATION_RUNTIME_EFFECT,
                 "status": "fetch_failed",
                 "error": error[:500],
+                "extraction_confidence": 0.0,
+                "extraction_warnings": json.dumps(["fetch_failed"], sort_keys=True),
+                "ingestion_method": "fetch",
             }
         )
 
-    def _extract_page(self, source: TradingEducationSource, url: str, html: str) -> dict[str, Any]:
+    def _extract_page(
+        self,
+        source: TradingEducationSource,
+        url: str,
+        html: str,
+        *,
+        ingestion_method: str = "fetch",
+    ) -> dict[str, Any]:
         parser = _EducationHtmlExtractor()
         parser.feed(html)
         text = _normalize_text(parser.text)
-        title = parser.title or source.name
+        title = parser.title or _guess_title_from_text(text, source.name)
         blocked_reason = _blocked_or_error_page(title, text)
         if blocked_reason:
             raise RuntimeError(blocked_reason)
         content_hash = hashlib.sha256(text.encode("utf-8")).hexdigest()
         concept_keys, related_features = _concept_matches(f"{title} {text}")
+        confidence, warnings, status = _confidence_and_warnings(
+            title=title,
+            text=text,
+            concept_keys=concept_keys,
+            source=source,
+            ingestion_method=ingestion_method,
+        )
         now = datetime.now(timezone.utc).isoformat()
         return {
             "source_key": source.key,
@@ -709,8 +774,11 @@ class TradingEducationIngestionService:
             "source_policy_version": TRADING_EDUCATION_CORPUS_VERSION,
             "corpus_version": TRADING_EDUCATION_CORPUS_VERSION,
             "runtime_effect": TRADING_EDUCATION_RUNTIME_EFFECT,
-            "status": "stored",
+            "status": status,
             "error": None,
+            "extraction_confidence": confidence,
+            "extraction_warnings": json.dumps(warnings, sort_keys=True) if warnings else None,
+            "ingestion_method": ingestion_method,
             "_links": [
                 urljoin(url, link)
                 for link in parser.links
@@ -729,6 +797,7 @@ class TradingEducationIngestionService:
         queue: list[tuple[TradingEducationSource, str]] = self.approved_seed_pairs()
         seen: set[str] = set()
         stored = 0
+        needs_review = 0
         failed = 0
         visited: list[dict[str, Any]] = []
 
@@ -743,8 +812,11 @@ class TradingEducationIngestionService:
                 links = row.pop("_links", [])
                 if not dry_run:
                     self.repo.upsert_page(row)
-                stored += 1
-                visited.append({"url": url, "source_key": source.key, "status": "stored"})
+                if row["status"] == "stored":
+                    stored += 1
+                elif row["status"] == "needs_review":
+                    needs_review += 1
+                visited.append({"url": url, "source_key": source.key, "status": row["status"]})
                 if follow_links:
                     for link in links[:5]:
                         if link not in seen and len(queue) + len(seen) < max_pages * 2:
@@ -763,9 +835,86 @@ class TradingEducationIngestionService:
             "dry_run": dry_run,
             "visited": len(visited),
             "stored": stored,
+            "needs_review": needs_review,
             "failed": failed,
             "max_pages": max_pages,
             "follow_links": follow_links,
             "pages": visited,
             "repository_summary": self.repo.summary() if not dry_run else {},
         }
+
+    @staticmethod
+    def source_for_url(url: str) -> TradingEducationSource | None:
+        if not classify_education_url(url).get("matched"):
+            return None
+        host = urlparse(url or "").netloc.lower()
+        host = host[4:] if host.startswith("www.") else host
+        for source in CURATED_TRADING_EDUCATION_SOURCES:
+            if not source.url:
+                continue
+            source_host = urlparse(source.url).netloc.lower()
+            source_host = source_host[4:] if source_host.startswith("www.") else source_host
+            if host == source_host or host.endswith(f".{source_host}"):
+                return source
+        return None
+
+    def ingest_manual_snapshot(
+        self,
+        *,
+        url: str,
+        content: str,
+        title: str | None = None,
+        dry_run: bool = False,
+    ) -> dict[str, Any]:
+        source = self.source_for_url(url)
+        if source is None:
+            return {
+                "report_version": "trading_education_manual_ingest_v1",
+                "runtime_effect": TRADING_EDUCATION_RUNTIME_EFFECT,
+                "status": "blocked",
+                "url": url,
+                "error": "url_not_in_approved_education_sources",
+            }
+        body = content or ""
+        html = (
+            f"<html><head><title>{title or ''}</title></head><body><pre>{body}</pre></body></html>"
+            if "<html" not in body.lower()
+            else body
+        )
+        row = self._extract_page(source, url, html, ingestion_method="manual_snapshot")
+        if title:
+            row["title"] = title[:300]
+        row.pop("_links", None)
+        if not dry_run:
+            self.repo.upsert_page(row)
+        return {
+            "report_version": "trading_education_manual_ingest_v1",
+            "schema_version": TRADING_EDUCATION_EXTRACTION_SCHEMA_VERSION,
+            "runtime_effect": TRADING_EDUCATION_RUNTIME_EFFECT,
+            "status": row["status"],
+            "url": url,
+            "source_key": source.key,
+            "title": row["title"],
+            "concept_keys": json.loads(row["concept_keys"] or "[]"),
+            "related_features": json.loads(row["related_features"] or "[]"),
+            "extraction_confidence": row["extraction_confidence"],
+            "extraction_warnings": json.loads(row["extraction_warnings"] or "[]"),
+            "dry_run": dry_run,
+        }
+
+    def ingest_manual_file(
+        self,
+        *,
+        url: str,
+        path: Path | str,
+        title: str | None = None,
+        dry_run: bool = False,
+    ) -> dict[str, Any]:
+        file_path = Path(path)
+        content = file_path.read_text(errors="replace")
+        return self.ingest_manual_snapshot(
+            url=url,
+            content=content,
+            title=title,
+            dry_run=dry_run,
+        )

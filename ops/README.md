@@ -197,6 +197,19 @@ review only; it cannot approve, block, size, or execute trades.
 compact concept metadata in `trading_education_pages`; use small `--max-pages`
 values and `--no-follow` for seed refreshes. Fetch failures are recorded rather
 than treated as trading failures.
+For sites that block VM fetches, operator-provided HTML/text snapshots can be
+loaded through the same schema:
+
+```bash
+python3 ops_check.py trading-education-ingest \
+  --manual-file /path/to/article.html \
+  --url https://www.schwab.com/learn/story/what-are-derivatives \
+  --title "What Are Derivatives? A Guide to Financial Contracts"
+python3 ops_check.py trading-education-review
+```
+
+Manual snapshots are marked `manual_snapshot`; low-confidence or short
+extractions are stored as `needs_review`.
 `prediction_cache.py preload` verifies that `daily_symbol_predictions` can be
 loaded into the TTL cache before the session. The Flask app also starts its own
 background cache refresher so webhook handling reads predictions from memory,

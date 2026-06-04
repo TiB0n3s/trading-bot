@@ -31,6 +31,20 @@ Schwab trading article cards currently tracked as approved child seeds:
 
 If Schwab returns an authorization/error page to the VM, the ingestion job
 records `fetch_failed` instead of storing the error page as education content.
+If an operator manually exports the article HTML/text from a browser, load it
+through the same schema with:
+
+```bash
+python3 ops_check.py trading-education-ingest \
+  --manual-file /path/to/schwab_article.html \
+  --url https://www.schwab.com/learn/story/what-are-derivatives \
+  --title "What Are Derivatives? A Guide to Financial Contracts"
+python3 ops_check.py trading-education-review
+```
+
+Manual snapshots are marked with `ingestion_method=manual_snapshot` and may be
+stored as `needs_review` if the content is short, has no concept match, or has
+low extraction confidence.
 
 ## Reference-Only Sources
 

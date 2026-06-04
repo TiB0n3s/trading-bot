@@ -72,6 +72,7 @@ Usage:
   python3 ops_check.py active-learning START_DATE [END_DATE]
   python3 ops_check.py rollout-contract
   python3 ops_check.py advisory-authority-report
+  python3 ops_check.py paper-learning-authority
   python3 ops_check.py ai-intelligence-review
   python3 ops_check.py migration-status
   python3 ops_check.py strong-days
@@ -130,6 +131,9 @@ from services.ops_checks.active_learning_checks import run_active_learning_integ
 from services.ops_checks.learning_artifact_checks import run_learning_artifact_consumption
 from services.ops_checks.rollout_contract_checks import run_rollout_contract_report
 from services.ops_checks.advisory_authority_checks import run_advisory_authority_report
+from services.ops_checks.paper_learning_authority_checks import (
+    run_paper_learning_authority_report,
+)
 from services.ops_checks.ai_intelligence_review_checks import run_ai_intelligence_review
 from services.ops_checks.order_checks import run_order_health
 from services.ops_checks.rejection_checks import run_rejection_summary
@@ -599,6 +603,7 @@ def production_evidence(target_date):
         conviction_persistence_health(target_date),
         feature_attribution(target_date),
         post_trade_learning(target_date),
+        paper_learning_authority(target_date),
         ai_intelligence_review(target_date),
     ]
     print()
@@ -980,6 +985,10 @@ def advisory_authority_report(target_date: str) -> bool:
     return run_advisory_authority_report(target_date, base_dir=BASE_DIR)
 
 
+def paper_learning_authority(target_date: str) -> bool:
+    return run_paper_learning_authority_report(target_date, base_dir=BASE_DIR)
+
+
 def point_in_time_archive(target_date: str) -> bool:
     reason = "operator_snapshot"
     if "--reason" in sys.argv:
@@ -1250,6 +1259,9 @@ def main():
 
     if command == "advisory-authority-report":
         return 0 if advisory_authority_report(target_date) else 1
+
+    if command == "paper-learning-authority":
+        return 0 if paper_learning_authority(target_date) else 1
 
     if command == "premarket":
         checks = []

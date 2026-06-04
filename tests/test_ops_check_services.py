@@ -24,6 +24,9 @@ from services.ops_checks.excursion_checks import (
     run_peak_bucket_report,
     run_winner_became_loser,
 )
+from services.ops_checks.paper_learning_authority_checks import (
+    run_paper_learning_authority_report,
+)
 from services.ops_checks.setup_breakdown import run_setup_breakdown
 from services.ops_checks.context_freshness_checks import run_context_freshness
 from services.ops_checks.event_source_checks import run_event_source_coverage
@@ -453,6 +456,82 @@ def test_advisory_authority_report_prefers_canonical_outcomes(tmp_path):
     assert "legacy_mode" not in out
 
 
+def test_paper_learning_authority_report_counts_canonical_override(tmp_path):
+    db_path = tmp_path / "trades.db"
+    override = {
+        "allowed": True,
+        "reason": "paper learning authority approved strong canonical intelligence",
+        "setup_score": 82,
+        "buy_opportunity_score": 9.5,
+        "position_size_pct": 0.5,
+    }
+    canonical = {
+        "advisory_authority_state": {
+            "paper_learning_authority_outcome": override,
+        }
+    }
+    account_state = {
+        "paper_learning_authority_override": {
+            **override,
+            "setup_score": 70,
+            "buy_opportunity_score": 8.0,
+        }
+    }
+
+    with sqlite3.connect(db_path) as con:
+        con.execute(
+            """
+            CREATE TABLE decision_snapshots (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                decision_time TEXT,
+                trade_id INTEGER,
+                symbol TEXT,
+                action TEXT,
+                approved INTEGER,
+                final_decision TEXT,
+                rejection_reason TEXT,
+                account_state_json TEXT,
+                canonical_intelligence_json TEXT
+            )
+            """
+        )
+        con.execute(
+            """
+            INSERT INTO decision_snapshots (
+                id, decision_time, trade_id, symbol, action, approved, final_decision,
+                rejection_reason, account_state_json, canonical_intelligence_json
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                10,
+                "2026-06-03T15:00:00+00:00",
+                99,
+                "MSFT",
+                "buy",
+                1,
+                "approved",
+                None,
+                json.dumps(account_state),
+                json.dumps(canonical),
+            ),
+        )
+
+    buf = io.StringIO()
+    with redirect_stdout(buf):
+        assert run_paper_learning_authority_report("2026-06-03", base_dir=tmp_path) is True
+
+    out = buf.getvalue()
+    assert "Paper Learning Authority Report" in out
+    assert "report_version          : paper_learning_authority_v1" in out
+    assert "runtime_effect          : paper_only_diagnostic" in out
+    assert f"  {'paper_authority_rows':<38}     1" in out
+    assert f"  {'allowed_overrides':<38}     1" in out
+    assert f"  {'approved_after_override':<38}     1" in out
+    assert "avg_setup_score" in out
+    assert "82.000" in out
+    assert "MSFT" in out
+
+
 def test_setup_breakdown_prints_prominent_fallback_health(tmp_path):
     db_path = tmp_path / "trades.db"
 
@@ -565,6 +644,7 @@ def main():
         test_log_ledger_consistency_flags_unwrapped_cron,
         test_feature_attribution_and_post_trade_learning_reports_use_lifecycle_rows,
         test_advisory_authority_report_prefers_canonical_outcomes,
+        test_paper_learning_authority_report_counts_canonical_override,
         test_setup_breakdown_prints_prominent_fallback_health,
     ]
     for test in tests:

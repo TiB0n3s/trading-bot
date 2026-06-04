@@ -436,6 +436,9 @@ def build_canonical_intelligence_snapshot(
         "session_gate_outcome": account_state.get("session_gate_outcome") or {},
         "setup_quality_outcome": account_state.get("setup_quality_outcome") or {},
         "ml_outcome": account_state.get("ml_outcome") or {},
+        "paper_learning_authority_outcome": (
+            account_state.get("paper_learning_authority_override") or {}
+        ),
         "utility_estimate": (
             account_state.get("utility_estimate")
             or (account_state.get("decision_policy") or {}).get("utility_estimate")

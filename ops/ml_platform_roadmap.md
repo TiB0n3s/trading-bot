@@ -27,6 +27,10 @@ becomes an ML-driven trading system.
   learning; it is not cash-live authority and cannot override stale,
   broker/account, macro/regime, explicit override, or Claude infrastructure
   failures.
+- `ops_check.py paper-learning-authority YYYY-MM-DD` is the dedicated
+  diagnostic surface for those overrides. It reports override coverage,
+  lifecycle linkage, realized outcomes, MFE, and counterfactual availability
+  without granting any new authority.
 
 ## Near-term foundation
 
@@ -103,8 +107,9 @@ or destabilize the webhook path if treated as routine cleanup.
    - `pipeline/after_close_learning.py` is the recurring after-close learning
      automation layer. It runs outcome completion, research export,
      pattern-learning inputs, feature attribution, post-trade learning,
-     learning readiness, guarded retraining/model comparison, and point-in-time
-     archive under the existing `run_after_close_learning.sh` cron path.
+     learning readiness, paper-learning authority outcome audit, guarded
+     retraining/model comparison, and point-in-time archive under the existing
+     `run_after_close_learning.sh` cron path.
 5. Existing after-close policy artifacts:
    - `strategy_memory.json`, `portfolio_replacement_memory.json`,
      `excursion_memory.json`, `missed_opportunity_memory.json`, and

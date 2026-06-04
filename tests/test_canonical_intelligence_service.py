@@ -244,6 +244,13 @@ def _snapshot(**overrides):
                     }
                 ],
             },
+            "paper_learning_authority_override": {
+                "allowed": True,
+                "setup_score": 82,
+                "buy_opportunity_score": 9.5,
+                "position_size_pct": 0.5,
+                "reason": "paper learning authority approved strong canonical intelligence",
+            },
             "intelligence_context": {
                 "summary": {
                     "support_count": 3,
@@ -350,6 +357,18 @@ def test_build_canonical_snapshot_collects_core_state_and_hashes():
     assert rollout["report_version"] == "rollout_contract_v1"
     assert rollout["assessments"][0]["feature_family"] == "execution_quality"
     assert rollout["assessments"][0]["status"] == "size_down_candidate"
+    assert (
+        data["advisory_authority_state"]["paper_learning_authority_outcome"][
+            "allowed"
+        ]
+        is True
+    )
+    assert (
+        data["advisory_authority_state"]["paper_learning_authority_outcome"][
+            "setup_score"
+        ]
+        == 82
+    )
     assert data["confidence"]["raw_confidence_labels"]["prediction_confidence"] == "medium"
     assert data["confidence"]["primary_source"] == "setup_quality"
     assert data["confidence"]["primary_realized_win_rate"] == 0.64

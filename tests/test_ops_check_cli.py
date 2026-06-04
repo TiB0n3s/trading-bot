@@ -287,6 +287,14 @@ def test_post_trade_learning_cli_missing_db_exits_cleanly(tmp_path):
     assert "[WARN] trades.db not found" in out
 
 
+def test_paper_learning_authority_cli_missing_db_exits_cleanly(tmp_path):
+    code, out = _run_cli(tmp_path, "paper-learning-authority", "2026-05-30")
+
+    assert code == 1
+    assert "Paper Learning Authority Report" in out
+    assert "[WARN] trades.db not found" in out
+
+
 def test_rollout_contract_cli_missing_db_exits_cleanly(tmp_path):
     code, out = _run_cli(tmp_path, "rollout-contract", "2026-05-30")
 
@@ -1350,6 +1358,7 @@ def main():
     tests = [
         test_feature_attribution_cli_missing_db_exits_cleanly,
         test_post_trade_learning_cli_missing_db_exits_cleanly,
+        test_paper_learning_authority_cli_missing_db_exits_cleanly,
         test_rollout_contract_cli_missing_db_exits_cleanly,
         test_symbol_patterns_cli_missing_db_exits_cleanly,
         test_bar_pattern_backfill_cli_missing_db_exits_cleanly,

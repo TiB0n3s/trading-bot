@@ -56,9 +56,14 @@ Recent completed roadmap items:
 - `pipeline/after_close_learning.py` is the recurring after-close quant
   learning loop. It completes rejected/candidate/exit outcomes, writes
   DuckDB/PyArrow research exports, runs pattern/feature/post-trade/readiness
-  reports, runs guarded retraining/model comparison, and archives point-in-time
-  state. `run_after_close_learning.sh` invokes it under the existing cron
+  reports, audits paper-learning authority outcomes, runs guarded
+  retraining/model comparison, and archives point-in-time state.
+  `run_after_close_learning.sh` invokes it under the existing cron
   `job_runner.py` lock/ledger path.
+- `ops_check.py paper-learning-authority YYYY-MM-DD` reports paper-only
+  learning overrides, lifecycle linkage, realized outcomes, MFE, and
+  counterfactual outcome availability. It is diagnostic evidence only and must
+  not be treated as live/cash promotion.
 - The pre-market pipeline may write `shadow_predictions` for candidate models;
   this is observe-only and must not be read by live execution. Operators compare
   it with `python3 ops_check.py shadow-predictions YYYY-MM-DD`.

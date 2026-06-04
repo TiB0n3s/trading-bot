@@ -34,6 +34,7 @@ def test_after_close_learning_dry_run_lists_recurring_quant_steps():
     assert "After-close quant learning pipeline" in out
     assert "candidate_outcome_backfill" in out
     assert "research_export" in out
+    assert "paper_learning_authority" in out
     assert "automated_retraining" in out
     assert "point_in_time_archive" in out
     assert "pipeline.retrain" in out

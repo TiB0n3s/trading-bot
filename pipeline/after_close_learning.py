@@ -86,6 +86,13 @@ def _build_steps(target_date: str) -> list[Step]:
             description="report outcome coverage, calibration, active learning, and blockers",
         ),
         Step(
+            name="paper_learning_authority",
+            module="ops_check",
+            argv=["paper-learning-authority", target_date],
+            critical=False,
+            description="audit paper-only learning overrides against linked lifecycle outcomes",
+        ),
+        Step(
             name="automated_retraining",
             module="pipeline.retrain",
             argv=["--date", target_date, "--sessions", "5", "--bad-session-limit", "3"],

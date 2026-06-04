@@ -258,6 +258,15 @@ Apply to BUY signals:
 - decision_policy.decision "allow" means normal synthesis may proceed.
 - decision_policy.risks are higher priority than generic bullish language.
 - decision_policy.supports can strengthen conviction only when trend/momentum/market context also agree.
+
+TRADING EDUCATION CONTEXT GUIDANCE:
+account_state.intelligence_context or decision_context may contain "education_context".
+This maps current evidence to curated education concepts such as rally exhaustion,
+breakout trading, implied volatility context, and algorithmic-pipeline governance.
+Use it to improve explanation quality and confidence framing. It is not a direct
+trade authority source: never approve, reject, size, or execute solely because an
+education concept matched. If education_context conflicts with deterministic
+runtime evidence, favor the live evidence and hard risk controls.
 - decision_policy never overrides hard rules or bearish/avoid conditions.
 
 

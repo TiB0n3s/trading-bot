@@ -6,6 +6,7 @@ from pathlib import Path
 
 from repositories.trading_education_repo import TradingEducationRepository
 from services.trading_education_corpus_service import build_trading_education_health_payload
+from services.trading_education_coverage_service import build_trading_education_coverage_payload
 
 
 def run_trading_education_health(*, base_dir: Path | None = None) -> bool:
@@ -133,3 +134,54 @@ def run_trading_education_review(*, base_dir: Path | None = None) -> bool:
     print()
     print("[WARN] trading education extraction has rows requiring review")
     return False
+
+
+def run_trading_education_coverage(*, base_dir: Path) -> bool:
+    payload = build_trading_education_coverage_payload(base_dir=base_dir)
+
+    print()
+    print("=" * 72)
+    print("  Trading Education Coverage")
+    print("=" * 72)
+    print(f"report_version       : {payload['report_version']}")
+    print(f"runtime_effect       : {payload['runtime_effect']}")
+    print(f"decision_policy      : {payload['decision_influence_policy']}")
+    print(f"concept_count        : {payload['concept_count']}")
+    print(f"connected_count      : {payload['connected_count']}")
+    print(f"stored_only_count    : {payload['stored_only_count']}")
+    print(f"taxonomy_only_count  : {payload['taxonomy_only_count']}")
+
+    print()
+    print("Concept coverage")
+    print(
+        f"  {'concept':<32} {'status':<14} {'stored':>6} {'refs':>5} "
+        f"{'feature_refs':>12} {'missing_capabilities'}"
+    )
+    print(
+        f"  {'-' * 32} {'-' * 14} {'-' * 6} {'-' * 5} "
+        f"{'-' * 12} {'-' * 28}"
+    )
+    for row in payload["concepts"]:
+        missing = ",".join(row["missing_capabilities"]) if row["missing_capabilities"] else "-"
+        print(
+            f"  {row['key']:<32} {row['coverage_status']:<14} "
+            f"{row['stored_pages']:>6} {row['concept_reference_count']:>5} "
+            f"{row['related_feature_reference_count']:>12} {missing}"
+        )
+
+    print()
+    print("Backtesting readiness")
+    for row in payload["backtest_readiness"]:
+        status = "present" if row["present"] else "missing"
+        matched = ", ".join(row["matched_patterns"]) if row["matched_patterns"] else "-"
+        print(f"  {row['key']:<28} {status:<8} {matched}")
+
+    print()
+    print("Quant-stack dependencies")
+    for row in payload["quant_stack_dependencies"]:
+        status = "available" if row["available"] else "missing"
+        print(f"  {row['package']:<14} {status:<10} {row['capability']}")
+
+    print()
+    print("[OK] trading education coverage completed; no live authority changed")
+    return True

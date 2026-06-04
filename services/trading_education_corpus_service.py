@@ -13,11 +13,12 @@ import hashlib
 import json
 import re
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from urllib.parse import urljoin, urlparse
 from urllib.request import Request, urlopen
 
-from repositories.trading_education_repo import TradingEducationRepository
+if TYPE_CHECKING:
+    from repositories.trading_education_repo import TradingEducationRepository
 
 
 TRADING_EDUCATION_CORPUS_VERSION = "trading_education_corpus_v1"
@@ -1031,12 +1032,16 @@ class TradingEducationIngestionService:
     def __init__(
         self,
         *,
-        repo: TradingEducationRepository | None = None,
+        repo: "TradingEducationRepository | None" = None,
         timeout_seconds: float = 8.0,
         user_agent: str = "trading-bot education-corpus/1.0",
         transport: Any | None = None,
     ):
-        self.repo = repo or TradingEducationRepository()
+        if repo is None:
+            from repositories.trading_education_repo import TradingEducationRepository
+
+            repo = TradingEducationRepository()
+        self.repo = repo
         self.timeout_seconds = timeout_seconds
         self.user_agent = user_agent
         self.transport = transport or self._default_transport

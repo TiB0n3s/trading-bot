@@ -17,6 +17,13 @@ from services.trading_education_corpus_service import (  # noqa: E402
     build_trading_education_health_payload,
     classify_education_url,
 )
+from services.trading_education_coverage_service import (  # noqa: E402
+    build_trading_education_coverage_payload,
+)
+from services.trading_education_decision_context_service import (  # noqa: E402
+    EDUCATION_DECISION_RUNTIME_EFFECT,
+    education_context_for_account_state,
+)
 from repositories.trading_education_repo import TradingEducationRepository  # noqa: E402
 
 
@@ -422,6 +429,80 @@ def test_education_ingestion_dry_run_does_not_persist():
     tmp.cleanup()
 
 
+def test_trading_education_coverage_reports_storage_gaps_and_readiness():
+    tmp = tempfile.TemporaryDirectory()
+    base_dir = Path(tmp.name)
+    db_path = base_dir / "trades.db"
+    repo = TradingEducationRepository(db_path)
+    service = TradingEducationIngestionService(repo=repo)
+    service.ingest_manual_snapshot(
+        url="https://www.schwab.com/learn/story/ways-traders-spot-rallys-potential-end",
+        title="4 Ways Traders Spot a Rally's Potential End",
+        content=(
+            "A rally may be coming to an end when good news is bad news, dip buyers stop "
+            "getting rewarded, price turns parabolic, and a stock closes near the day's lows. "
+            "Bearish engulfing candles, dark cloud cover, shooting stars, three black crows, "
+            "advance block, and negative divergence can corroborate momentum deterioration. "
+            "These reversal patterns should be treated as yellow flags for exit review and "
+            "winner-became-loser diagnostics, not standalone sell authority."
+        ),
+    )
+    (base_dir / "local_feature.py").write_text(
+        "exit_decision_quality winner-became-loser point_in_time_archive "
+        "candidate_outcome slippage shadow_prediction rollout_contract "
+        "bearish_engulfing close_near_low down_volume_pressure"
+    )
+
+    payload = build_trading_education_coverage_payload(base_dir=base_dir, repo=repo)
+    rows = {row["key"]: row for row in payload["concepts"]}
+
+    assert payload["report_version"] == "trading_education_coverage_v1"
+    assert payload["runtime_effect"] == TRADING_EDUCATION_RUNTIME_EFFECT
+    assert rows["rally_exhaustion_exit_patterns"]["stored_pages"] == 1
+    assert rows["rally_exhaustion_exit_patterns"]["coverage_status"] == "connected"
+    assert all(row["present"] for row in payload["backtest_readiness"])
+    assert "live approval/sizing/execution requires explicit promotion" in payload[
+        "decision_influence_policy"
+    ]
+    tmp.cleanup()
+
+
+def test_education_context_can_inform_decision_context_without_authority():
+    payload = education_context_for_account_state(
+        {
+            "action": "buy",
+            "event_context": {
+                "event_signal": "headline_watch",
+                "summary": "earnings guidance headline may already be priced in",
+            },
+            "prediction_gate": {"prediction_score": 62, "prediction_decision": "allow"},
+            "market_microstructure": {"breakout_quality": "confirmed_breakout"},
+            "momentum": {"direction": "rising", "state": "accelerating"},
+        }
+    )
+    keys = {row["key"] for row in payload["concepts"]}
+
+    assert payload["runtime_effect"] == EDUCATION_DECISION_RUNTIME_EFFECT
+    assert "news_expectations_positioning" in keys
+    assert "breakout_trading" in keys
+    assert "algorithmic_trading_pipeline" in keys
+    assert "cannot directly" in payload["authority_note"]
+    assert all("execute" not in row["influence_policy"].lower() for row in payload["concepts"])
+
+
+def test_runtime_education_context_does_not_import_education_repository_or_table():
+    runtime_files = [
+        ROOT / "decision_context.py",
+        ROOT / "services" / "context_builder.py",
+        ROOT / "services" / "trading_education_decision_context_service.py",
+    ]
+    combined = "\n".join(path.read_text() for path in runtime_files)
+
+    assert "TradingEducationRepository" not in combined
+    assert "trading_education_pages" not in combined
+    assert ".upsert_page(" not in combined
+
+
 def main():
     tests = [
         test_trading_education_payload_is_non_authoritative_and_versioned,
@@ -440,6 +521,9 @@ def main():
         test_manual_snapshot_maps_algorithmic_trading_pipeline_guidance,
         test_manual_snapshot_blocks_unapproved_urls,
         test_education_ingestion_dry_run_does_not_persist,
+        test_trading_education_coverage_reports_storage_gaps_and_readiness,
+        test_education_context_can_inform_decision_context_without_authority,
+        test_runtime_education_context_does_not_import_education_repository_or_table,
     ]
     for test in tests:
         test()

@@ -1251,6 +1251,20 @@ def test_trading_education_health_cli_lists_curated_sources(tmp_path):
     assert "[OK] trading education sources are curated; no live authority changed" in out
 
 
+def test_trading_education_coverage_cli_reports_influence_boundary(tmp_path):
+    code, out = _run_cli(tmp_path, "trading-education-coverage")
+
+    assert code == 0
+    assert "Trading Education Coverage" in out
+    assert "report_version       : trading_education_coverage_v1" in out
+    assert "education_context_only_no_trade_authority" in out
+    assert "Concept coverage" in out
+    assert "Backtesting readiness" in out
+    assert "Quant-stack dependencies" in out
+    assert "algorithmic_trading_pipeline" in out
+    assert "[OK] trading education coverage completed; no live authority changed" in out
+
+
 def test_jobs_cli_missing_db_exits_cleanly(tmp_path):
     code, out = _run_cli(tmp_path, "jobs")
 
@@ -1352,6 +1366,7 @@ def main():
         test_learning_effectiveness_cli_uses_readiness_payload_with_daily_framing,
         test_regime_status_json_smoke,
         test_trading_education_health_cli_lists_curated_sources,
+        test_trading_education_coverage_cli_reports_influence_boundary,
         test_shadow_predictions_cli_scores_labeled_outcomes,
         test_jobs_cli_missing_db_exits_cleanly,
         test_jobs_cli_reads_selected_base_dir_and_filters,

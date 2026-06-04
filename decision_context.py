@@ -11,6 +11,7 @@ Purpose:
 from __future__ import annotations
 
 from portfolio_replacement_memory import load_portfolio_replacement_memory
+from services.trading_education_decision_context_service import education_context_for_account_state
 
 
 def _safe_dict(value):
@@ -265,6 +266,10 @@ def build_intelligence_context(symbol, action, account_state):
         "portfolio_replacement": _compact_dict(load_portfolio_replacement_memory()),
         "correlation_exposure": _safe_list(account_state.get("correlation_exposure")),
     }
+    ctx["education_context"] = education_context_for_account_state(
+        account_state,
+        action=action,
+    )
 
     ctx["summary"] = _summarize_context(ctx)
     return ctx

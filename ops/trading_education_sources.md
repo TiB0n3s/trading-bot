@@ -116,6 +116,19 @@ python3 ops_check.py trading-education-ingest --max-pages 6 --no-follow
 python3 ops_check.py trading-education-health
 ```
 
+Run coverage and gap analysis with:
+
+```bash
+python3 ops_check.py trading-education-coverage
+```
+
+The coverage report shows stored concept coverage, project references,
+backtesting-readiness checks, optional quant-stack package status, and the
+current influence boundary. Education concepts are allowed to inform AI
+explanations, diagnostics, and candidate recommendations, but live approval,
+sizing, blocking, or execution still requires explicit promotion governance and
+calibrated outcome evidence.
+
 The ingestion job stores compact metadata in `trading_education_pages`:
 
 - source key/name/tier

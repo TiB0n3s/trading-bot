@@ -20,6 +20,7 @@ from services.setup_context_service import (
     get_recent_favorable_setup,
     remember_favorable_setup,
 )
+from services.trading_education_decision_context_service import education_context_for_account_state
 from services.volatility_normalization_service import classify_volatility_normalization
 
 
@@ -1335,6 +1336,10 @@ def build_final_signal_context(
         "portfolio_decision": portfolio_decision,
         "execution_quality": execution_quality,
         "intelligence_context": intelligence_context,
+        "education_context": education_context_for_account_state(
+            account_state,
+            action=account_state.get("action"),
+        ),
     }
 
     summary = {
@@ -1376,6 +1381,7 @@ def build_final_signal_context(
         "portfolio_duplicate_risk_score": portfolio_decision.get("duplicate_risk_score"),
         "execution_quality": execution_quality.get("fill_quality"),
         "net_execution_cost_pct": execution_quality.get("net_execution_cost_pct"),
+        "education_concept_count": decision_context["education_context"].get("concept_count"),
     }
 
     return BuiltSignalContext(

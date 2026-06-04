@@ -33,13 +33,42 @@ def test_after_close_learning_dry_run_lists_recurring_quant_steps():
     assert code == 0
     assert "After-close quant learning pipeline" in out
     assert "candidate_outcome_backfill" in out
+    assert "excursion_memory" in out
+    assert "missed_opportunity_memory" in out
+    assert "symbol_momentum_timing_memory" in out
+    assert "policy_backtest_summary" in out
+    assert "portfolio_replacement_memory" in out
+    assert "strategy_memory_refresh" in out
     assert "research_export" in out
     assert "paper_learning_authority" in out
     assert "automated_retraining" in out
+    assert "policy_artifact_register" in out
     assert "point_in_time_archive" in out
     assert "pipeline.retrain" in out
 
 
+def test_after_close_wrapper_delegates_learning_to_pipeline_only():
+    wrapper = (ROOT / "run_after_close_learning.sh").read_text()
+
+    assert "pipeline/after_close_learning.py" in wrapper
+
+    legacy_direct_calls = (
+        "python3 trade_matcher.py",
+        "python3 strategy_learner.py",
+        "python3 excursion_report.py",
+        "python3 missed_opportunity_report.py",
+        "python3 symbol_momentum_timing_report.py",
+        "python3 policy_backtest.py",
+        "python3 portfolio_replacement_report.py",
+        "python3 strategy_brain_report.py",
+        "python3 policy_artifacts.py register",
+        "python3 archive_context_state.py",
+    )
+    offenders = [call for call in legacy_direct_calls if call in wrapper]
+    assert not offenders, offenders
+
+
 if __name__ == "__main__":
     test_after_close_learning_dry_run_lists_recurring_quant_steps()
+    test_after_close_wrapper_delegates_learning_to_pipeline_only()
     print("after-close learning pipeline tests passed")

@@ -105,11 +105,12 @@ or destabilize the webhook path if treated as routine cleanup.
    - After-close learning should produce retraining-readiness evidence and
      candidate artifacts, not automatically alter runtime policy.
    - `pipeline/after_close_learning.py` is the recurring after-close learning
-     automation layer. It runs outcome completion, research export,
-     pattern-learning inputs, feature attribution, post-trade learning,
-     learning readiness, paper-learning authority outcome audit, guarded
-     retraining/model comparison, and point-in-time archive under the existing
-     `run_after_close_learning.sh` cron path.
+     automation layer. It runs outcome completion, report-memory refresh,
+     research export, pattern-learning inputs, feature attribution,
+     post-trade learning, learning readiness, paper-learning authority outcome
+     audit, guarded retraining/model comparison, policy artifact registration,
+     and point-in-time archive under the existing `run_after_close_learning.sh`
+     cron path.
 5. Existing after-close policy artifacts:
    - `strategy_memory.json`, `portfolio_replacement_memory.json`,
      `excursion_memory.json`, `missed_opportunity_memory.json`, and
@@ -595,7 +596,7 @@ Goal: bring the pre-existing after-close learning artifacts under governance.
 
 Problem:
 
-- `run_after_close_learning.sh` writes memory artifacts nightly.
+- `pipeline/after_close_learning.py` writes memory artifacts nightly.
 - `strategy_memory.py`, `portfolio_replacement_memory.py`,
   `decision_policy.py`, and `decision_context.py` load these artifacts in the
   live runtime path.
@@ -604,7 +605,7 @@ Problem:
 - `policy_artifacts.py` registers artifact sets, stores snapshot contents under
   `data_archive/policy_artifacts/`, tracks a known-good pointer, and can roll
   back runtime artifacts with temp-file replacement.
-- `run_after_close_learning.sh` registers the completed artifact set as
+- `pipeline/after_close_learning.py` registers the completed artifact set as
   known-good after all learning steps finish.
 
 Governed artifacts:
@@ -1011,7 +1012,7 @@ A model can only move from observe-only to paper-trading influence after it has:
     signal baseline, and `strong_day_participation_report.py --write-db`
     captures full-universe strong-session coverage including no-alert symbols.
 21. Done: add post-learning point-in-time archive to
-    `run_after_close_learning.sh` after policy artifact registration, so
+    `pipeline/after_close_learning.py` after policy artifact registration, so
     after-close strategy/policy memory refreshes are archived as well as
     pre-market context.
 22. Done: add `auto_buy_decision_snapshots` so the internal auto-buy execution
@@ -1094,10 +1095,10 @@ Critical blockers before real training:
    staged, but replay selection logic is not yet implemented.
 6. Continue symbol-universe versioning and review remaining candidates:
    F, HBAN, KEY, KHC, CRM, PDD, HPQ, BBY, DLTR, GPS, AEO, BKE.
-7. Sequencing note: `run_after_close_learning.sh` currently runs before
-   `run_post_session_review.sh` builds rejected-signal outcomes. That is
-   acceptable while after-close learning does not consume rejected outcomes,
-   but the order must change before rejected outcomes become a learning input.
+7. Sequencing note: `pipeline/after_close_learning.py` now completes
+   rejected/candidate forward outcomes before downstream learning reports, so
+   after-close learning is not waiting on `run_post_session_review.sh` for its
+   outcome inputs.
 
 The biggest missing concept is auditability of what the bot knew at decision
 time. Without that, training, evaluation, and promotion can look sophisticated

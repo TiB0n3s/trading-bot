@@ -238,12 +238,12 @@ python3 policy_artifacts.py rollback --dry-run
 python3 policy_artifacts.py rollback
 ```
 
-`run_after_close_learning.sh` registers the completed artifact set and marks it
-known-good after all learning steps finish. If the after-close job fails before
-completion, it logs a critical `AFTER_CLOSE_LEARNING` bot event. Rollback
-restores the known-good snapshot with temp-file replacement. Dataset manifests
-include current artifact hashes, the registry hash, and the known-good artifact
-set id.
+`pipeline/after_close_learning.py` registers the completed artifact set and
+marks it known-good after all learning steps finish. `run_after_close_learning.sh`
+only loads environment, logs start/failure/finish bot events, and delegates to
+the pipeline under the cron/job-runner lock. Rollback restores the known-good
+snapshot with temp-file replacement. Dataset manifests include current artifact
+hashes, the registry hash, and the known-good artifact set id.
 
 
 ## Point-In-Time Context Archive

@@ -54,12 +54,13 @@ Recent completed roadmap items:
   (`feature_available_at <= prediction_time_cutoff`) and prunes unprotected old
   binary artifacts while keeping diagnostic JSON.
 - `pipeline/after_close_learning.py` is the recurring after-close quant
-  learning loop. It completes rejected/candidate/exit outcomes, writes
-  DuckDB/PyArrow research exports, runs pattern/feature/post-trade/readiness
-  reports, audits paper-learning authority outcomes, runs guarded
-  retraining/model comparison, and archives point-in-time state.
-  `run_after_close_learning.sh` invokes it under the existing cron
-  `job_runner.py` lock/ledger path.
+  learning loop. It completes rejected/candidate/exit outcomes, refreshes
+  report-memory artifacts, writes DuckDB/PyArrow research exports, runs
+  pattern/feature/post-trade/readiness reports, audits paper-learning authority
+  outcomes, runs guarded retraining/model comparison, registers policy
+  artifacts, and archives point-in-time state. `run_after_close_learning.sh`
+  invokes it under the existing cron `job_runner.py` lock/ledger path and
+  should remain a scheduler wrapper only.
 - `ops_check.py paper-learning-authority YYYY-MM-DD` reports paper-only
   learning overrides, lifecycle linkage, realized outcomes, MFE, and
   counterfactual outcome availability. It is diagnostic evidence only and must

@@ -21,6 +21,17 @@ These may be ingested from their seed URL and same-domain links only:
 Official/regulator/exchange sources should be preferred when a concept appears
 in both an official source and a consumer education source.
 
+Schwab trading article cards currently tracked as approved child seeds:
+
+- `https://www.schwab.com/learn/story/what-are-derivatives`
+- `https://www.schwab.com/learn/story/options-strategy-covered-call`
+- `https://www.schwab.com/learn/story/options-expiration-definitions-checklist-more`
+- `https://www.schwab.com/learn/story/how-to-use-weekly-stock-options`
+- `https://www.schwab.com/learn/story/what-happens-to-options-when-stock-splits`
+
+If Schwab returns an authorization/error page to the VM, the ingestion job
+records `fetch_failed` instead of storing the error page as education content.
+
 ## Reference-Only Sources
 
 These may be referenced by metadata or operator notes only. Do not ingest full

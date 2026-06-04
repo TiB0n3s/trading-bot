@@ -126,6 +126,45 @@ def test_education_ingestion_stores_compact_concept_metadata():
     tmp.cleanup()
 
 
+def test_schwab_child_seeds_are_approved_and_blocked_pages_fail(tmp_path=None):
+    tmp = tempfile.TemporaryDirectory()
+    db_path = Path(tmp.name) / "trades.db"
+    repo = TradingEducationRepository(db_path)
+    service = TradingEducationIngestionService(
+        repo=repo,
+        transport=lambda url: (
+            "<html><head><title>Charles Schwab</title></head><body>"
+            "We’re sorry, but we were unable to authorize your request."
+            "</body></html>"
+            if "schwab.com" in url
+            else "<html><title>Options Strategy</title><body>covered call strategy risks options liquidity</body></html>"
+        ),
+    )
+
+    schwab_pairs = [
+        url
+        for source, url in service.approved_seed_pairs()
+        if source.key == "schwab_learn_trading"
+    ]
+    assert "https://www.schwab.com/learn/story/what-are-derivatives" in schwab_pairs
+    assert "https://www.schwab.com/learn/story/options-strategy-covered-call" in schwab_pairs
+
+    result = service.ingest(max_pages=len(service.approved_seed_pairs()), follow_links=False)
+    summary = repo.summary()
+
+    assert result["failed"] >= len(schwab_pairs)
+    assert summary["by_source"]
+    assert any(
+        row["source_key"] == "schwab_learn_trading" and row["status"] == "fetch_failed"
+        for row in summary["by_source"]
+    )
+    assert not any(
+        row["source_key"] == "schwab_learn_trading"
+        for row in repo.recent_pages(limit=20, stored_only=True)
+    )
+    tmp.cleanup()
+
+
 def test_education_ingestion_dry_run_does_not_persist():
     tmp = tempfile.TemporaryDirectory()
     db_path = Path(tmp.name) / "trades.db"
@@ -150,6 +189,7 @@ def main():
         test_books_and_heuristics_are_not_crawl_domains,
         test_strategy_concepts_are_normalized_and_non_authoritative,
         test_education_ingestion_stores_compact_concept_metadata,
+        test_schwab_child_seeds_are_approved_and_blocked_pages_fail,
         test_education_ingestion_dry_run_does_not_persist,
     ]
     for test in tests:

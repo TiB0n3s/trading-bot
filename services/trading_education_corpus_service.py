@@ -36,6 +36,7 @@ class TradingEducationSource:
     link_follow_policy: str
     authority: str
     notes: str
+    seed_urls: tuple[str, ...] = ()
 
     def to_dict(self) -> dict[str, Any]:
         data = asdict(self)
@@ -145,6 +146,13 @@ CURATED_TRADING_EDUCATION_SOURCES: tuple[TradingEducationSource, ...] = (
         link_follow_policy="same_domain_only",
         authority="education_context_only",
         notes="Broker education for trading concepts and mechanics. Not market-moving news or live authority.",
+        seed_urls=(
+            "https://www.schwab.com/learn/story/what-are-derivatives",
+            "https://www.schwab.com/learn/story/options-strategy-covered-call",
+            "https://www.schwab.com/learn/story/options-expiration-definitions-checklist-more",
+            "https://www.schwab.com/learn/story/how-to-use-weekly-stock-options",
+            "https://www.schwab.com/learn/story/what-happens-to-options-when-stock-splits",
+        ),
     ),
     TradingEducationSource(
         key="intelligent_investor",
@@ -532,8 +540,33 @@ def _concept_matches(text: str) -> tuple[list[str], list[str]]:
         "pairs_trading": ("pairs", "relative strength", "correlation", "spread"),
         "arbitrage": ("arbitrage", "dislocation", "price difference"),
         "momentum_trading": ("momentum", "volume", "force index", "price volume trend", "vwap"),
-        "risk_practice_before_live": ("risk", "paper", "simulator", "practice", "diversification"),
-        "strategy_vs_style": ("strategy", "trading style", "investment style"),
+        "risk_practice_before_live": (
+            "risk",
+            "risks",
+            "paper",
+            "simulator",
+            "practice",
+            "diversification",
+            "derivatives",
+            "options",
+            "covered call",
+            "expiration",
+            "weekly options",
+            "stock splits",
+            "leverage",
+            "assignment",
+            "liquidity",
+            "contract",
+            "manage risk",
+        ),
+        "strategy_vs_style": (
+            "strategy",
+            "strategies",
+            "trading style",
+            "investment style",
+            "covered call strategy",
+            "options strategy",
+        ),
         "backtesting_overfitting_control": (
             "backtest",
             "backtesting",
@@ -565,6 +598,17 @@ def _same_domain(base_url: str, candidate_url: str) -> bool:
         else candidate.netloc.lower()
     )
     return bool(candidate.scheme in {"http", "https"} and candidate_host == base_host)
+
+
+def _blocked_or_error_page(title: str, text: str) -> str | None:
+    combined = f"{title} {text}".lower()
+    if "unable to authorize your request" in combined:
+        return "authorization_error_page"
+    if "access denied" in combined or "forbidden" in combined:
+        return "access_denied_page"
+    if title.strip().lower() == "charles schwab" and "we apologize for any inconvenience" in combined:
+        return "schwab_authorization_error_page"
+    return None
 
 
 class TradingEducationIngestionService:
@@ -607,6 +651,17 @@ class TradingEducationIngestionService:
             if source.url and source.ingestion_status in {"approved_seed", "approved_context_seed"}
         ]
 
+    @classmethod
+    def approved_seed_pairs(cls) -> list[tuple[TradingEducationSource, str]]:
+        pairs: list[tuple[TradingEducationSource, str]] = []
+        for source in cls.approved_sources():
+            if source.url:
+                pairs.append((source, source.url))
+            for url in source.seed_urls:
+                if source.url and _same_domain(source.url, url):
+                    pairs.append((source, url))
+        return pairs
+
     def _store_failure(self, source: TradingEducationSource, url: str, error: str) -> None:
         now = datetime.now(timezone.utc).isoformat()
         self.repo.upsert_page(
@@ -634,6 +689,9 @@ class TradingEducationIngestionService:
         parser.feed(html)
         text = _normalize_text(parser.text)
         title = parser.title or source.name
+        blocked_reason = _blocked_or_error_page(title, text)
+        if blocked_reason:
+            raise RuntimeError(blocked_reason)
         content_hash = hashlib.sha256(text.encode("utf-8")).hexdigest()
         concept_keys, related_features = _concept_matches(f"{title} {text}")
         now = datetime.now(timezone.utc).isoformat()
@@ -668,9 +726,7 @@ class TradingEducationIngestionService:
         dry_run: bool = False,
     ) -> dict[str, Any]:
         self.repo.init_table()
-        queue: list[tuple[TradingEducationSource, str]] = [
-            (source, source.url or "") for source in self.approved_sources()
-        ]
+        queue: list[tuple[TradingEducationSource, str]] = self.approved_seed_pairs()
         seen: set[str] = set()
         stored = 0
         failed = 0

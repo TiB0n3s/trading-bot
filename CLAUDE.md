@@ -64,6 +64,13 @@ Recent completed roadmap items:
   learning overrides, lifecycle linkage, realized outcomes, MFE, and
   counterfactual outcome availability. It is diagnostic evidence only and must
   not be treated as live/cash promotion.
+- `ops_check.py advanced-alpha-readiness YYYY-MM-DD` reports readiness for
+  bar-level order-flow proxies, true trade-level VPIN, ETF lead-lag, options
+  skew, fractional-memory/trend-scan features, asymmetric-loss comparison, and
+  model monitoring. It is readiness-only and must not be treated as authority.
+- `ops_check.py advanced-alpha-comparison YYYY-MM-DD` compares standard score
+  thresholding against an asymmetric false-positive guard using linked forward
+  outcomes. It is diagnostic-only and must not be treated as authority.
 - The pre-market pipeline may write `shadow_predictions` for candidate models;
   this is observe-only and must not be read by live execution. Operators compare
   it with `python3 ops_check.py shadow-predictions YYYY-MM-DD`.
@@ -528,6 +535,14 @@ observe-only training/research inputs. ETF lead-lag vectors and options-skew
 signals require additional feeds before they can be populated. Live promotion
 still requires model-readiness, calibration, stability, and rollout-governance
 checks.
+
+Use `python3 ops_check.py advanced-alpha-readiness YYYY-MM-DD` to see which
+advanced families are integrated, partially integrated, or blocked by missing
+feeds/schema/outcomes.
+
+Use `python3 ops_check.py advanced-alpha-comparison YYYY-MM-DD` to compare the
+standard score-threshold profile against the asymmetric false-positive guard.
+This is an offline diagnostic; it cannot block, approve, or size trades.
 
 fill_poller.py
 

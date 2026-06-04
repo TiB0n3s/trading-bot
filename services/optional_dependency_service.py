@@ -24,6 +24,8 @@ OPTIONAL_AI_DEPENDENCIES = {
     "redis": "queue_broker_and_lock_state",
     "vectorbt": "vectorized_backtesting",
     "backtrader": "event_driven_backtesting",
+    "plotly": "read_only_model_monitor_charts",
+    "streamlit": "read_only_model_monitor_dashboard",
 }
 
 

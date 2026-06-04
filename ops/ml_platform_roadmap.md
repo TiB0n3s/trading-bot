@@ -1057,6 +1057,17 @@ A model can only move from observe-only to paper-trading influence after it has:
     trend-scanning labels/t-stats. Dataset exports, brain features, and
     supervised training can consume those fields. ETF lead-lag and options-skew
     signals remain future work until reference/options feeds are available.
+32. Done: add an advanced-alpha readiness report. `ops_check.py
+    advanced-alpha-readiness YYYY-MM-DD` scores bar-level order-flow proxy,
+    true trade-level VPIN, ETF/component lead-lag, options skew,
+    fractional-memory/trend-scan features, asymmetric-loss model comparison,
+    and model monitoring against feed/schema/coverage/outcome/ops gates. This
+    report is readiness-only and does not grant authority.
+33. Done: add an advanced-alpha model comparison report. `ops_check.py
+    advanced-alpha-comparison YYYY-MM-DD` compares the existing score-threshold
+    profile with an asymmetric false-positive guard using forward outcomes,
+    net return units, drawdown, and false-positive counts. This is
+    diagnostic-only and cannot affect live decisions.
 
 Critical blockers before real training:
 

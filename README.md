@@ -32,6 +32,7 @@ As of the latest roadmap work:
 - Auto-buy scoring now distinguishes early constructive build opportunities from mature chase/extension states. Early build is a ranking/learning boost; mature/extreme chase is penalized or blocked so the bot is not simply buying peak momentum.
 - Paper learning authority is enabled by default for paper/dry-run only. It can override Claude low-confidence soft rejections when canonical setup quality and buy-opportunity evidence are strong, and it caps the resulting paper size. It cannot override stale signals, broker/account constraints, cash-safe/cash-full mode, explicit symbol overrides, macro/regime hard blocks, or Claude infrastructure failures.
 - `ops_check.py paper-learning-authority YYYY-MM-DD` audits those paper-only overrides against linked lifecycle evidence. This report is diagnostic and does not grant live/cash authority.
+- `ops_check.py advanced-alpha-readiness YYYY-MM-DD` scores advanced alpha families such as bar-level order-flow proxies, true trade-level VPIN, ETF lead-lag, options skew, fractional-memory/trend-scan features, asymmetric-loss comparison, and model dashboards. `ops_check.py advanced-alpha-comparison YYYY-MM-DD` compares standard score thresholding against an asymmetric false-positive guard using linked forward outcomes. Both reports are diagnostic-only and cannot affect live trading.
 - Position-manager partial exits now fail safe when open-order cancellation or Alpaca available-quantity state has not settled; the job records a failed/queued action instead of crashing on stale quantity.
 - The trading education corpus is versioned and non-authoritative. `ops_check.py trading-education-health` reports curated source and concept coverage for SEC/FINRA/CFTC/CME/NerdWallet/Investopedia/Schwab plus normalized strategy, risk, backtesting, and overfitting-control concepts; `ops_check.py trading-education-ingest --max-pages 6 --no-follow` stores compact approved-source concept metadata with URL, timestamp, content hash, and corpus version.
 - Webhook/status secrets should be supplied by `X-Webhook-Secret` or `Authorization: Bearer ...`; query-string secrets are rejected unless `ALLOW_QUERY_STRING_SECRET=true` is explicitly set for temporary compatibility.
@@ -365,6 +366,15 @@ triple_barrier_label
 trend_scan_label
 
 These features and targets are available for observe-only training/research. ETF lead-lag vectors and options-skew signals still require additional reference/options feeds before they can be populated. Promotion into live authority still requires model-readiness, calibration, stability, and rollout-governance checks.
+
+Readiness command:
+
+```bash
+python3 ops_check.py advanced-alpha-readiness 2026-06-04
+python3 ops_check.py advanced-alpha-comparison 2026-06-04
+```
+
+These reports distinguish the currently integrated bar-level proxies from true trade-level order flow, ETF/component lead-lag, and options-skew features that still require external feeds or mappings. The comparison report also shows whether an asymmetric false-positive guard would have reduced bad pattern candidates without granting authority.
 
 fill_poller.py
 

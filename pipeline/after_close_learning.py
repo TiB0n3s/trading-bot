@@ -65,6 +65,20 @@ def _build_steps(target_date: str) -> list[Step]:
             description="summarize executed, missed, and EFI/PVT pattern learning inputs",
         ),
         Step(
+            name="advanced_alpha_comparison",
+            module="ops_check",
+            argv=["advanced-alpha-comparison", target_date],
+            critical=False,
+            description="compare standard thresholding with asymmetric false-positive guards",
+        ),
+        Step(
+            name="advanced_alpha_readiness",
+            module="ops_check",
+            argv=["advanced-alpha-readiness", target_date],
+            critical=False,
+            description="score advanced alpha feed/schema/coverage/outcome/readiness gates",
+        ),
+        Step(
             name="feature_attribution",
             module="ops_check",
             argv=["feature-attribution", target_date],

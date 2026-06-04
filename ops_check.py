@@ -46,6 +46,8 @@ Usage:
   python3 ops_check.py portfolio-risk
   python3 ops_check.py production-evidence
   python3 ops_check.py resource-readiness
+  python3 ops_check.py advanced-alpha-readiness
+  python3 ops_check.py advanced-alpha-comparison
   python3 ops_check.py trading-education-health
   python3 ops_check.py trading-education-ingest [--max-pages N] [--dry-run]
   python3 ops_check.py trading-education-review
@@ -149,6 +151,12 @@ from services.ops_checks.log_ledger_checks import run_log_ledger_consistency
 from services.ops_checks.portfolio_risk_checks import run_portfolio_risk_report
 from services.ops_checks.point_in_time_archive_checks import run_point_in_time_archive
 from services.ops_checks.resource_readiness_checks import run_resource_readiness
+from services.ops_checks.advanced_alpha_readiness_checks import (
+    run_advanced_alpha_readiness,
+)
+from services.ops_checks.advanced_alpha_model_comparison_checks import (
+    run_advanced_alpha_model_comparison,
+)
 from services.ops_checks.trading_education_checks import (
     run_trading_education_coverage,
     run_trading_education_health,
@@ -619,6 +627,14 @@ def production_evidence(target_date):
 
 def resource_readiness():
     return run_resource_readiness(base_dir=BASE_DIR)
+
+
+def advanced_alpha_readiness(target_date):
+    return run_advanced_alpha_readiness(target_date, base_dir=BASE_DIR)
+
+
+def advanced_alpha_comparison(target_date):
+    return run_advanced_alpha_model_comparison(target_date, base_dir=BASE_DIR)
 
 
 def trading_education_health():
@@ -1169,6 +1185,10 @@ def main():
 
     if command == "resource-readiness":
         return 0 if resource_readiness() else 1
+    if command == "advanced-alpha-readiness":
+        return 0 if advanced_alpha_readiness(target_date) else 1
+    if command == "advanced-alpha-comparison":
+        return 0 if advanced_alpha_comparison(target_date) else 1
 
     if command == "trading-education-health":
         return 0 if trading_education_health() else 1

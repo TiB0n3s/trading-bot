@@ -340,6 +340,8 @@ def test_ops_reliability_cli_missing_db_exits_cleanly(tmp_path):
         ("pattern-learning-inputs", "Pattern Learning Inputs", None),
         ("signal-source-readiness", "Signal Source Readiness", None),
         ("learning-readiness", "Learning Readiness", None),
+        ("advanced-alpha-readiness", "Advanced Alpha Readiness", None),
+        ("advanced-alpha-comparison", "Advanced Alpha Model Comparison", None),
         ("ai-intelligence-review", "AI Intelligence Integration Review", "ai_intelligence_review_v1"),
     ):
         code, out = _run_cli(tmp_path, command, "2026-05-30")

@@ -24,6 +24,11 @@ class AutoBuyConfig:
     # Score thresholds
     min_score: float = 13.0
     watch_score: float = 7.0
+    paper_strong_evidence_promotion_enabled: bool = True
+    paper_strong_evidence_score_buffer: float = 3.0
+    paper_strong_evidence_min_setup_score: float = 50.0
+    paper_strong_evidence_min_ml_score: float = 50.0
+    paper_strong_evidence_min_session_score: float = 5.0
 
     # Timing guards
     cooldown_minutes: int = 60
@@ -90,6 +95,34 @@ class AutoBuyConfig:
             self.watch_score, "must be >= 0",
         )
         _check(
+            self.paper_strong_evidence_score_buffer >= 0,
+            "paper_strong_evidence_score_buffer",
+            "AUTO_BUY_PAPER_STRONG_EVIDENCE_SCORE_BUFFER",
+            self.paper_strong_evidence_score_buffer,
+            "must be >= 0",
+        )
+        _check(
+            self.paper_strong_evidence_min_setup_score >= 0,
+            "paper_strong_evidence_min_setup_score",
+            "AUTO_BUY_PAPER_STRONG_EVIDENCE_MIN_SETUP_SCORE",
+            self.paper_strong_evidence_min_setup_score,
+            "must be >= 0",
+        )
+        _check(
+            self.paper_strong_evidence_min_ml_score >= 0,
+            "paper_strong_evidence_min_ml_score",
+            "AUTO_BUY_PAPER_STRONG_EVIDENCE_MIN_ML_SCORE",
+            self.paper_strong_evidence_min_ml_score,
+            "must be >= 0",
+        )
+        _check(
+            self.paper_strong_evidence_min_session_score >= 0,
+            "paper_strong_evidence_min_session_score",
+            "AUTO_BUY_PAPER_STRONG_EVIDENCE_MIN_SESSION_SCORE",
+            self.paper_strong_evidence_min_session_score,
+            "must be >= 0",
+        )
+        _check(
             self.cooldown_minutes >= 1,
             "cooldown_minutes", "AUTO_BUY_COOLDOWN_MINUTES",
             self.cooldown_minutes, "must be >= 1",
@@ -151,6 +184,21 @@ def load_auto_buy_config(**overrides) -> AutoBuyConfig:
         max_signals_per_symbol=env_int("AUTO_BUY_MAX_SIGNALS_PER_SYMBOL", 2),
         min_score=env_float("AUTO_BUY_MIN_SCORE", 13.0),
         watch_score=env_float("AUTO_BUY_WATCH_SCORE", 7.0),
+        paper_strong_evidence_promotion_enabled=env_bool(
+            "AUTO_BUY_PAPER_STRONG_EVIDENCE_PROMOTION_ENABLED", True
+        ),
+        paper_strong_evidence_score_buffer=env_float(
+            "AUTO_BUY_PAPER_STRONG_EVIDENCE_SCORE_BUFFER", 3.0
+        ),
+        paper_strong_evidence_min_setup_score=env_float(
+            "AUTO_BUY_PAPER_STRONG_EVIDENCE_MIN_SETUP_SCORE", 50.0
+        ),
+        paper_strong_evidence_min_ml_score=env_float(
+            "AUTO_BUY_PAPER_STRONG_EVIDENCE_MIN_ML_SCORE", 50.0
+        ),
+        paper_strong_evidence_min_session_score=env_float(
+            "AUTO_BUY_PAPER_STRONG_EVIDENCE_MIN_SESSION_SCORE", 5.0
+        ),
         cooldown_minutes=env_int("AUTO_BUY_COOLDOWN_MINUTES", 60),
         session_buffer_minutes=env_int("AUTO_BUY_SESSION_BUFFER_MINUTES", 10),
         app_buy_cooldown_minutes=env_int("ORDER_COOLDOWN_MINUTES", 15),

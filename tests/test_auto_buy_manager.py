@@ -30,6 +30,7 @@ AUTO_BUY_RUNTIME_DEFAULTS = {
     "AUTO_BUY_LEARNED_TIEBREAKER_ENABLED": False,
     "AUTO_BUY_WATCH_SETUP_STRONG_BUY_ENABLED": False,
     "AUTO_BUY_INTRADAY_FEEDBACK_ENABLED": False,
+    "AUTO_BUY_PAPER_STRONG_EVIDENCE_PROMOTION_ENABLED": False,
 }
 
 
@@ -274,6 +275,86 @@ def test_intraday_feedback_blocks_repeated_losing_pattern():
     assert_equal(result["intraday_feedback_status"], "block", "feedback status")
     if "intraday_pattern_feedback" not in result["hard_block_reason"]:
         raise AssertionError(f"missing intraday feedback hard block: {result['hard_block_reason']}")
+
+
+def test_paper_strong_evidence_promotes_setup_soft_block_only():
+    old_cash_mode = auto_buy_manager.is_cash_mode
+    old_promotion = auto_buy_manager.AUTO_BUY_PAPER_STRONG_EVIDENCE_PROMOTION_ENABLED
+    old_watch = auto_buy_manager.AUTO_BUY_WATCH_SETUP_STRONG_BUY_ENABLED
+    old_prediction_context = auto_buy_manager.auto_buy_prediction_context
+    auto_buy_manager.is_cash_mode = lambda: False
+    auto_buy_manager.AUTO_BUY_PAPER_STRONG_EVIDENCE_PROMOTION_ENABLED = True
+    auto_buy_manager.AUTO_BUY_WATCH_SETUP_STRONG_BUY_ENABLED = True
+    auto_buy_manager.auto_buy_prediction_context = lambda symbol: {
+        "available": True,
+        "ml_prediction_score": 54.0,
+        "ml_prediction_bucket": "mid_50_55",
+        "ml_prediction_sample_size": 30,
+    }
+    session = strong_session()
+    session["trend_score"] = 8
+    session["session_return_pct"] = 1.1
+    session["momentum_15m_pct"] = 0.35
+    session["momentum_30m_pct"] = 0.55
+    feature = favorable_feature()
+    feature["setup_recommendation"] = "avoid"
+    feature["setup_label"] = "near_vwap_neutral_fade_risk"
+    feature["setup_score"] = 62
+    try:
+        result = evaluate_auto_buy_candidate(
+            symbol="SOFI",
+            session=session,
+            feature=feature,
+            context=buy_context(),
+            rolling_context={
+                "five_day_return_pct": 4.2,
+                "continuation_score": 5,
+                "trend_context": "strong_continuation",
+            },
+            held=set(),
+        )
+    finally:
+        auto_buy_manager.is_cash_mode = old_cash_mode
+        auto_buy_manager.AUTO_BUY_PAPER_STRONG_EVIDENCE_PROMOTION_ENABLED = old_promotion
+        auto_buy_manager.AUTO_BUY_WATCH_SETUP_STRONG_BUY_ENABLED = old_watch
+        auto_buy_manager.auto_buy_prediction_context = old_prediction_context
+
+    assert_equal(result["decision"], "strong_buy_candidate", "decision")
+    assert_equal(result["paper_strong_evidence_promotion_applied"], True, "promotion applied")
+    assert_equal(result["hard_block_reason"], None, "soft block cleared")
+    if "paper_strong_evidence_promoted" not in result["reason"]:
+        raise AssertionError(f"missing paper promotion reason: {result['reason']}")
+
+
+def test_paper_strong_evidence_does_not_promote_weak_ml_block():
+    old_cash_mode = auto_buy_manager.is_cash_mode
+    old_promotion = auto_buy_manager.AUTO_BUY_PAPER_STRONG_EVIDENCE_PROMOTION_ENABLED
+    old_prediction_context = auto_buy_manager.auto_buy_prediction_context
+    auto_buy_manager.is_cash_mode = lambda: False
+    auto_buy_manager.AUTO_BUY_PAPER_STRONG_EVIDENCE_PROMOTION_ENABLED = True
+    auto_buy_manager.auto_buy_prediction_context = lambda symbol: {
+        "available": True,
+        "ml_prediction_score": 41.0,
+        "ml_prediction_bucket": "weak_below_45",
+        "ml_prediction_sample_size": 30,
+    }
+    try:
+        result = evaluate_auto_buy_candidate(
+            symbol="SOFI",
+            session=strong_session(),
+            feature=favorable_feature(),
+            context=buy_context(),
+            held=set(),
+        )
+    finally:
+        auto_buy_manager.is_cash_mode = old_cash_mode
+        auto_buy_manager.AUTO_BUY_PAPER_STRONG_EVIDENCE_PROMOTION_ENABLED = old_promotion
+        auto_buy_manager.auto_buy_prediction_context = old_prediction_context
+
+    assert_equal(result["decision"], "skip", "decision")
+    assert_equal(result["paper_strong_evidence_promotion_applied"], False, "promotion applied")
+    if "ml_prediction_weak" not in result["hard_block_reason"]:
+        raise AssertionError(f"missing weak ML block: {result['hard_block_reason']}")
 
 
 def test_watch_setup_cannot_become_strong_buy_by_default():
@@ -1072,6 +1153,8 @@ def main():
         test_weak_ml_prediction_blocks_auto_buy_candidate,
         test_weak_ml_bucket_blocks_even_with_thin_sample,
         test_intraday_feedback_blocks_repeated_losing_pattern,
+        test_paper_strong_evidence_promotes_setup_soft_block_only,
+        test_paper_strong_evidence_does_not_promote_weak_ml_block,
         test_watch_setup_cannot_become_strong_buy_by_default,
         test_early_constructive_build_gets_buy_candidate_boost,
         test_mature_chase_extension_is_penalized_and_extreme_chase_blocks,

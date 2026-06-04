@@ -216,6 +216,10 @@ def _bar_pattern_evidence(bar_pattern_rows: list[dict[str, Any]]) -> dict[str, A
     cvd_divergence_counts: dict[str, int] = {}
     rows_with_order_flow = 0
     rows_with_fractional_memory = 0
+    buy_window_forward_returns: list[float] = []
+    sell_avoid_forward_returns: list[float] = []
+    buy_windows_with_positive_mfe = 0
+    sell_avoid_windows_with_negative_return = 0
     top_buy_windows: list[dict[str, Any]] = []
     top_sell_or_avoid_windows: list[dict[str, Any]] = []
 
@@ -308,8 +312,16 @@ def _bar_pattern_evidence(bar_pattern_rows: list[dict[str, Any]]) -> dict[str, A
         }
         if action in {"buy_candidate", "long_candidate"} and long_score is not None:
             top_buy_windows.append(item)
+            if forward_return is not None:
+                buy_window_forward_returns.append(forward_return)
+            if forward_mfe is not None and forward_mfe > 0.50:
+                buy_windows_with_positive_mfe += 1
         if action == "sell_or_avoid_candidate" and sell_score is not None:
             top_sell_or_avoid_windows.append(item)
+            if forward_return is not None:
+                sell_avoid_forward_returns.append(forward_return)
+                if forward_return < 0:
+                    sell_avoid_windows_with_negative_return += 1
 
     top_buy_windows.sort(
         key=lambda item: (
@@ -376,6 +388,19 @@ def _bar_pattern_evidence(bar_pattern_rows: list[dict[str, Any]]) -> dict[str, A
         "fractional_memory_coverage_rate": _rate(rows_with_fractional_memory, len(bar_pattern_rows)),
         "avg_long_opportunity_score": _mean(long_scores),
         "avg_sell_opportunity_score": _mean(sell_scores),
+        "buy_window_rows_with_forward_return": len(buy_window_forward_returns),
+        "buy_window_win_rate": _rate(
+            sum(1 for value in buy_window_forward_returns if value > 0),
+            len(buy_window_forward_returns),
+        ),
+        "buy_window_avg_forward_return_pct": _mean(buy_window_forward_returns),
+        "buy_windows_with_positive_mfe": buy_windows_with_positive_mfe,
+        "sell_avoid_rows_with_forward_return": len(sell_avoid_forward_returns),
+        "sell_avoid_correct_direction_rate": _rate(
+            sell_avoid_windows_with_negative_return,
+            len(sell_avoid_forward_returns),
+        ),
+        "sell_avoid_avg_forward_return_pct": _mean(sell_avoid_forward_returns),
         "pattern_counts": dict(sorted(pattern_counts.items(), key=lambda item: (-item[1], item[0]))),
         "opportunity_counts": dict(sorted(opportunity_counts.items(), key=lambda item: (-item[1], item[0]))),
         "triple_barrier_counts": dict(
@@ -457,6 +482,20 @@ def build_pattern_learning_inputs_payload(
     if bar_patterns and not bar_pattern_evidence["rows_with_opportunity_label"]:
         learning_actions.append(
             "rerun bar-pattern backfill to populate hindsight buy/sell opportunity labels"
+        )
+    if (
+        bar_pattern_evidence["buy_window_rows_with_forward_return"]
+        and (bar_pattern_evidence["buy_window_win_rate"] or 0.0) < 0.50
+    ):
+        learning_actions.append(
+            "review buy-window pattern thresholds; current buy-window win rate is below 50%"
+        )
+    if (
+        bar_pattern_evidence["sell_avoid_rows_with_forward_return"]
+        and (bar_pattern_evidence["sell_avoid_correct_direction_rate"] or 0.0) < 0.50
+    ):
+        learning_actions.append(
+            "review sell/avoid pattern thresholds; current avoid windows are not consistently followed by weakness"
         )
     if not bar_patterns:
         learning_actions.append("no bar_pattern_features rows available for EFI/PVT pattern learning")

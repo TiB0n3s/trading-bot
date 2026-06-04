@@ -226,6 +226,11 @@ def build_missed_buy_review_payload(
     missed_good = 0
     high_quality_missed = 0
     correctly_avoided = 0
+    quality_counts: dict[str, int] = {}
+    missed_mfe_values: list[float] = []
+    missed_return_values: list[float] = []
+    soft_block_missed_good = 0
+    promotion_review_candidates = 0
     top_missed: list[dict[str, Any]] = []
     reason_tokens: list[str] = []
     symbol_values: list[str] = []
@@ -246,18 +251,38 @@ def build_missed_buy_review_payload(
 
         non_taken_with_forward += 1
         quality = _missed_quality(forward_return, forward_mfe)
+        quality_counts[quality] = quality_counts.get(quality, 0) + 1
         if quality in {"missed_good", "high_quality_missed"}:
             missed_good += 1
+            if forward_mfe is not None:
+                missed_mfe_values.append(forward_mfe)
+            if forward_return is not None:
+                missed_return_values.append(forward_return)
         if quality == "high_quality_missed":
             high_quality_missed += 1
         if quality == "correctly_avoided_or_bad_candidate":
             correctly_avoided += 1
 
         pattern = _pattern(row, candidate, payload)
+        row_reason_tokens = _reason_tokens(row, candidate)
         if quality in {"missed_good", "high_quality_missed"}:
-            reason_tokens.extend(_reason_tokens(row, candidate))
+            reason_tokens.extend(row_reason_tokens)
             symbol_values.append(str(row.get("symbol") or "unknown").upper())
             pattern_values.append(pattern)
+            if any(
+                token.startswith(("setup_avoid", "strategy_memory_caution"))
+                for token in row_reason_tokens
+            ):
+                soft_block_missed_good += 1
+            score = _float(row.get("score"))
+            threshold = _float(row.get("threshold"))
+            if (
+                score is not None
+                and threshold is not None
+                and score >= threshold
+                and any(token.startswith("setup_avoid") for token in row_reason_tokens)
+            ):
+                promotion_review_candidates += 1
 
         if forward_mfe is not None and forward_mfe >= min_mfe_pct:
             top_missed.append(
@@ -275,7 +300,18 @@ def build_missed_buy_review_payload(
                     "forward_return_pct": round(forward_return, 4) if forward_return is not None else None,
                     "forward_mae_pct": round(forward_mae, 4) if forward_mae is not None else None,
                     "quality": quality,
-                    "reason_tokens": _reason_tokens(row, candidate),
+                    "reason_tokens": row_reason_tokens,
+                    "soft_block_candidate": any(
+                        token.startswith(("setup_avoid", "strategy_memory_caution"))
+                        for token in row_reason_tokens
+                    ),
+                    "paper_promotion_review_candidate": bool(
+                        quality in {"missed_good", "high_quality_missed"}
+                        and _float(row.get("score")) is not None
+                        and _float(row.get("threshold")) is not None
+                        and (_float(row.get("score")) or 0.0) >= (_float(row.get("threshold")) or 0.0)
+                        and any(token.startswith("setup_avoid") for token in row_reason_tokens)
+                    ),
                     "reason": row.get("reason") or candidate.get("reason"),
                 }
             )
@@ -301,6 +337,19 @@ def build_missed_buy_review_payload(
         "high_quality_missed_candidates": high_quality_missed,
         "correctly_avoided_or_bad_candidates": correctly_avoided,
         "missed_good_rate_of_non_taken_with_forward": _rate(missed_good, non_taken_with_forward),
+        "quality_counts": dict(sorted(quality_counts.items())),
+        "soft_block_missed_good_candidates": soft_block_missed_good,
+        "paper_promotion_review_candidates": promotion_review_candidates,
+        "avg_missed_good_mfe_pct": (
+            round(sum(missed_mfe_values) / len(missed_mfe_values), 4)
+            if missed_mfe_values
+            else None
+        ),
+        "avg_missed_good_return_pct": (
+            round(sum(missed_return_values) / len(missed_return_values), 4)
+            if missed_return_values
+            else None
+        ),
         "min_mfe_pct": min_mfe_pct,
     }
     return MissedBuyReviewPayload(

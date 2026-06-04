@@ -132,6 +132,13 @@ def test_pattern_learning_inputs_classifies_trade_and_candidate_coverage():
     ] == 1
     assert payload.bar_pattern_evidence["order_flow_coverage_rate"] == 1.0
     assert payload.bar_pattern_evidence["fractional_memory_coverage_rate"] == 1.0
+    assert payload.bar_pattern_evidence["buy_window_rows_with_forward_return"] == 1
+    assert payload.bar_pattern_evidence["buy_window_win_rate"] == 1.0
+    assert payload.bar_pattern_evidence["buy_window_avg_forward_return_pct"] == 0.9
+    assert payload.bar_pattern_evidence["buy_windows_with_positive_mfe"] == 1
+    assert payload.bar_pattern_evidence["sell_avoid_rows_with_forward_return"] == 1
+    assert payload.bar_pattern_evidence["sell_avoid_correct_direction_rate"] == 1.0
+    assert payload.bar_pattern_evidence["sell_avoid_avg_forward_return_pct"] == -0.4
     assert payload.bar_pattern_evidence["top_buy_windows"][0]["symbol"] == "AAPL"
     assert payload.bar_pattern_evidence["top_sell_or_avoid_windows"][0]["symbol"] == "AAPL"
 

@@ -99,6 +99,11 @@ AUTO_BUY_ENV_VARS = [
     "AUTO_BUY_BUCKING_TAPE_MIN_VOLUME_RATIO", "AUTO_BUY_SIGNAL_MODE",
     "TRADINGVIEW_ALERTS_DEPRECATED", "AUTO_BUY_MAX_ORDERS_PER_RUN",
     "AUTO_BUY_MAX_SIGNALS_PER_SYMBOL",
+    "AUTO_BUY_PAPER_STRONG_EVIDENCE_PROMOTION_ENABLED",
+    "AUTO_BUY_PAPER_STRONG_EVIDENCE_SCORE_BUFFER",
+    "AUTO_BUY_PAPER_STRONG_EVIDENCE_MIN_SETUP_SCORE",
+    "AUTO_BUY_PAPER_STRONG_EVIDENCE_MIN_ML_SCORE",
+    "AUTO_BUY_PAPER_STRONG_EVIDENCE_MIN_SESSION_SCORE",
 ]
 
 
@@ -258,6 +263,10 @@ def test_auto_buy_partial_override_preserves_defaults():
     assert cfg.min_score == AutoBuyConfig.min_score
     assert cfg.cooldown_minutes == AutoBuyConfig.cooldown_minutes
     assert cfg.bucking_tape_min_volume_ratio == AutoBuyConfig.bucking_tape_min_volume_ratio
+    assert (
+        cfg.paper_strong_evidence_score_buffer
+        == AutoBuyConfig.paper_strong_evidence_score_buffer
+    )
 
 
 def test_auto_buy_no_env_dependency():
@@ -270,6 +279,27 @@ def test_auto_buy_no_env_dependency():
     assert cfg.bucking_tape_min_volume_ratio == 1.8
     assert cfg.signal_mode == "legacy_source_gate"
     assert cfg.tradingview_alerts_deprecated is False
+    assert cfg.paper_strong_evidence_promotion_enabled is True
+    assert cfg.paper_strong_evidence_score_buffer == 3.0
+    assert cfg.paper_strong_evidence_min_setup_score == 50.0
+    assert cfg.paper_strong_evidence_min_ml_score == 50.0
+    assert cfg.paper_strong_evidence_min_session_score == 5.0
+
+
+def test_auto_buy_paper_strong_evidence_env_vars_are_read():
+    with _PatchEnv(
+        AUTO_BUY_PAPER_STRONG_EVIDENCE_PROMOTION_ENABLED="false",
+        AUTO_BUY_PAPER_STRONG_EVIDENCE_SCORE_BUFFER="4.5",
+        AUTO_BUY_PAPER_STRONG_EVIDENCE_MIN_SETUP_SCORE="60",
+        AUTO_BUY_PAPER_STRONG_EVIDENCE_MIN_ML_SCORE="52",
+        AUTO_BUY_PAPER_STRONG_EVIDENCE_MIN_SESSION_SCORE="6",
+    ):
+        cfg = load_auto_buy_config()
+    assert cfg.paper_strong_evidence_promotion_enabled is False
+    assert cfg.paper_strong_evidence_score_buffer == 4.5
+    assert cfg.paper_strong_evidence_min_setup_score == 60.0
+    assert cfg.paper_strong_evidence_min_ml_score == 52.0
+    assert cfg.paper_strong_evidence_min_session_score == 6.0
 
 
 def test_auto_buy_signal_mode_env_var_is_read():
@@ -454,6 +484,7 @@ def main():
         test_auto_buy_negative_position_size_rejected,
         test_auto_buy_partial_override_preserves_defaults,
         test_auto_buy_no_env_dependency,
+        test_auto_buy_paper_strong_evidence_env_vars_are_read,
         test_auto_buy_signal_mode_env_var_is_read,
         test_auto_buy_invalid_signal_mode_is_rejected,
         # PositionManagerConfig

@@ -106,6 +106,12 @@ Recent completed roadmap items:
   `AUTO_BUY_LIVE_BUYS=true`. It now records `early_constructive_build`,
   `mature_chase`, and `extreme_chase` so post-session review can distinguish
   early accumulation/reclaim opportunities from late momentum chasing.
+- Auto-buy has a paper/dry-run-only strong-evidence promotion path. It may
+  promote a candidate blocked only by setup conservatism when score, setup,
+  session, 15m/30m momentum, and non-weak ML evidence all clear explicit
+  thresholds. It records `paper_strong_evidence_*` fields and must not override
+  weak ML, intraday losing-pattern feedback, extreme chase, broker/account,
+  stale-data, macro/regime, or cash-mode blockers.
 - Auto-buy paper defaults are broader than cash defaults: paper/dry-run allows
   more per-run/daily candidate executions, watch-setup promotion when score is
   strong, and lower learned-tiebreaker sample requirements. Cash modes keep the

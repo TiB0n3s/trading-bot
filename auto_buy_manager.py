@@ -198,6 +198,22 @@ AUTO_BUY_LEARNED_TIEBREAKER_MAX_THRESHOLD_GAP = float(
 AUTO_BUY_INTRADAY_FEEDBACK_ENABLED = os.getenv(
     "AUTO_BUY_INTRADAY_FEEDBACK_ENABLED", "true"
 ).strip().lower() in ("1", "true", "yes", "on")
+AUTO_BUY_PAPER_STRONG_EVIDENCE_PROMOTION_ENABLED = os.getenv(
+    "AUTO_BUY_PAPER_STRONG_EVIDENCE_PROMOTION_ENABLED",
+    _paper_runtime_default("true", "false"),
+).strip().lower() in ("1", "true", "yes", "on")
+AUTO_BUY_PAPER_STRONG_EVIDENCE_SCORE_BUFFER = float(
+    os.getenv("AUTO_BUY_PAPER_STRONG_EVIDENCE_SCORE_BUFFER", "3.0")
+)
+AUTO_BUY_PAPER_STRONG_EVIDENCE_MIN_SETUP_SCORE = float(
+    os.getenv("AUTO_BUY_PAPER_STRONG_EVIDENCE_MIN_SETUP_SCORE", "50.0")
+)
+AUTO_BUY_PAPER_STRONG_EVIDENCE_MIN_ML_SCORE = float(
+    os.getenv("AUTO_BUY_PAPER_STRONG_EVIDENCE_MIN_ML_SCORE", "50.0")
+)
+AUTO_BUY_PAPER_STRONG_EVIDENCE_MIN_SESSION_SCORE = float(
+    os.getenv("AUTO_BUY_PAPER_STRONG_EVIDENCE_MIN_SESSION_SCORE", "5.0")
+)
 LEARNED_TIEBREAKER_SOFT_BLOCK_PREFIXES = (
     "bias_avoid",
     "setup_avoid",
@@ -207,6 +223,7 @@ LEARNED_TIEBREAKER_SOFT_BLOCK_PREFIXES = (
     "ml_prediction_weak",
     "ml_prediction_weak_bucket",
 )
+PAPER_STRONG_EVIDENCE_SOFT_BLOCK_PREFIXES = ("setup_avoid",)
 
 _prediction_context_cache: dict[str, dict[str, Any]] = {}
 _learned_tiebreaker_cache: dict[tuple[str, str, str], dict[str, Any]] = {}
@@ -252,6 +269,15 @@ def learned_tiebreaker_soft_block_only(block_reasons: list[str]) -> bool:
         return False
     for reason in block_reasons:
         if not str(reason).startswith(LEARNED_TIEBREAKER_SOFT_BLOCK_PREFIXES):
+            return False
+    return True
+
+
+def paper_strong_evidence_soft_block_only(block_reasons: list[str]) -> bool:
+    if not block_reasons:
+        return True
+    for reason in block_reasons:
+        if not str(reason).startswith(PAPER_STRONG_EVIDENCE_SOFT_BLOCK_PREFIXES):
             return False
     return True
 
@@ -1161,6 +1187,39 @@ def evaluate_auto_buy_candidate(
         decision = "skip"
         severity = "low"
 
+    paper_promotion_applied = False
+    paper_promotion_reason = None
+    paper_promotion_soft_blocks_only = paper_strong_evidence_soft_block_only(hard_block_reasons)
+    ml_score_for_promotion = ml_score if ml_score is not None else 50.0
+    paper_promotion_allowed = (
+        AUTO_BUY_PAPER_STRONG_EVIDENCE_PROMOTION_ENABLED
+        and not is_cash_mode()
+        and not requires_webhook
+        and decision in {"watch", "skip"}
+        and score >= strong_threshold + AUTO_BUY_PAPER_STRONG_EVIDENCE_SCORE_BUFFER
+        and paper_promotion_soft_blocks_only
+        and setup_score >= AUTO_BUY_PAPER_STRONG_EVIDENCE_MIN_SETUP_SCORE
+        and session_score >= AUTO_BUY_PAPER_STRONG_EVIDENCE_MIN_SESSION_SCORE
+        and m15 > 0
+        and m30 > 0
+        and not extreme_chase
+        and ml_score_for_promotion >= AUTO_BUY_PAPER_STRONG_EVIDENCE_MIN_ML_SCORE
+        and str(intraday_feedback.get("status") or "neutral") not in {"block", "would_block"}
+    )
+    if paper_promotion_allowed:
+        decision = "strong_buy_candidate"
+        severity = "high"
+        paper_promotion_applied = True
+        if hard_block_reasons:
+            hard_block_reason = None
+        paper_promotion_reason = (
+            "paper_strong_evidence:"
+            f"score={score:.2f}>={strong_threshold + AUTO_BUY_PAPER_STRONG_EVIDENCE_SCORE_BUFFER:.2f};"
+            f"setup={setup_score:.1f};session={session_score:.1f};"
+            f"ml={ml_score_for_promotion:.2f}"
+        )
+        reasons.append(f"paper_strong_evidence_promoted:{paper_promotion_reason}")
+
     learned_tiebreaker_applied = False
     learned_tiebreaker_reason = None
     learned_tiebreaker_evidence: dict[str, Any] = {}
@@ -1249,6 +1308,18 @@ def evaluate_auto_buy_candidate(
         "strategy_memory_min_setup_score": learned_min_setup_score,
         "strategy_memory_reason": strategy_memory.get("reason"),
         "strategy_memory_available": bool(strategy_memory.get("available")),
+        "paper_strong_evidence_promotion_enabled": bool(
+            AUTO_BUY_PAPER_STRONG_EVIDENCE_PROMOTION_ENABLED
+        ),
+        "paper_strong_evidence_promotion_allowed": bool(paper_promotion_allowed),
+        "paper_strong_evidence_promotion_applied": bool(paper_promotion_applied),
+        "paper_strong_evidence_promotion_reason": paper_promotion_reason,
+        "paper_strong_evidence_soft_blocks_only": bool(paper_promotion_soft_blocks_only),
+        "paper_strong_evidence_runtime_effect": (
+            "paper_only_auto_buy_promotion"
+            if paper_promotion_applied
+            else "observe_only_or_not_qualified"
+        ),
         "learned_tiebreaker_enabled": bool(AUTO_BUY_LEARNED_TIEBREAKER_ENABLED),
         "learned_tiebreaker_allowed": bool(learned_tiebreaker_allowed),
         "learned_tiebreaker_applied": bool(learned_tiebreaker_applied),

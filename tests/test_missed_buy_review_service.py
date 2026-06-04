@@ -66,8 +66,15 @@ def test_missed_buy_review_counts_only_non_taken_forward_winners():
     assert payload.summary["missed_good_candidates"] == 1
     assert payload.summary["high_quality_missed_candidates"] == 1
     assert payload.summary["correctly_avoided_or_bad_candidates"] == 1
+    assert payload.summary["quality_counts"]["high_quality_missed"] == 1
+    assert payload.summary["soft_block_missed_good_candidates"] == 1
+    assert payload.summary["paper_promotion_review_candidates"] == 0
+    assert payload.summary["avg_missed_good_mfe_pct"] == 2.4
+    assert payload.summary["avg_missed_good_return_pct"] == 1.2
     assert payload.top_missed[0]["symbol"] == "AAPL"
     assert payload.top_missed[0]["quality"] == "high_quality_missed"
+    assert payload.top_missed[0]["soft_block_candidate"] is True
+    assert payload.top_missed[0]["paper_promotion_review_candidate"] is False
     reasons = {row["key"]: row["count"] for row in payload.reason_token_counts}
     assert reasons["negative_session_downtrend"] == 1
     assert reasons["below_vwap"] == 1

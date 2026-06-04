@@ -63,6 +63,16 @@ def run_missed_buy_review(
     print(f"  high_quality_missed_candidates    : {summary['high_quality_missed_candidates']}")
     print(f"  correctly_avoided_or_bad_candidates: {summary['correctly_avoided_or_bad_candidates']}")
     print(f"  missed_good_rate                  : {_pct(summary['missed_good_rate_of_non_taken_with_forward'])}")
+    print(f"  soft_block_missed_good_candidates : {summary['soft_block_missed_good_candidates']}")
+    print(f"  paper_promotion_review_candidates : {summary['paper_promotion_review_candidates']}")
+    print(f"  avg_missed_good_mfe_pct           : {_fmt(summary['avg_missed_good_mfe_pct'])}")
+    print(f"  avg_missed_good_return_pct        : {_fmt(summary['avg_missed_good_return_pct'])}")
+
+    if summary.get("quality_counts"):
+        print()
+        print("Missed-buy quality counts")
+        for label, count in summary["quality_counts"].items():
+            print(f"  {label:<38} {count:>6}")
 
     if payload.reason_token_counts:
         print()
@@ -91,6 +101,7 @@ def run_missed_buy_review(
         )
         for item in payload.top_missed[:samples]:
             reasons = ",".join(item.get("reason_tokens") or []) or str(item.get("reason") or "-")
+            promotion_marker = " paper_promotion_review" if item.get("paper_promotion_review_candidate") else ""
             print(
                 f"  {str(item.get('candidate_ts') or '-')[:19]:<19} "
                 f"{str(item.get('symbol') or '-'):<6} "
@@ -100,7 +111,7 @@ def run_missed_buy_review(
                 f"{_fmt(item.get('forward_mfe_pct')):>8} "
                 f"{_fmt(item.get('forward_return_pct')):>8} "
                 f"{_fmt(item.get('forward_mae_pct')):>8} "
-                f"{reasons[:120]}"
+                f"{reasons[:120]}{promotion_marker}"
             )
 
     if payload.learning_actions:

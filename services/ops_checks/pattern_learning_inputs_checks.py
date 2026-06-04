@@ -176,6 +176,22 @@ def run_pattern_learning_inputs_report(
         "  avg_sell_opportunity_score        : "
         f"{_fmt(bar_patterns['avg_sell_opportunity_score'])}"
     )
+    print(
+        "  buy_window_win_rate               : "
+        f"{_fmt(bar_patterns.get('buy_window_win_rate'))}"
+    )
+    print(
+        "  buy_window_avg_forward_return_pct : "
+        f"{_fmt(bar_patterns.get('buy_window_avg_forward_return_pct'))}"
+    )
+    print(
+        "  sell_avoid_correct_direction_rate : "
+        f"{_fmt(bar_patterns.get('sell_avoid_correct_direction_rate'))}"
+    )
+    print(
+        "  sell_avoid_avg_forward_return_pct : "
+        f"{_fmt(bar_patterns.get('sell_avoid_avg_forward_return_pct'))}"
+    )
 
     if bar_patterns["opportunity_counts"]:
         print()

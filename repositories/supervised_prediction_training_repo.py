@@ -36,6 +36,34 @@ def fetch_training_rows(
             row["name"]
             for row in con.execute("PRAGMA table_info(feature_snapshots)").fetchall()
         }
+        has_bar_patterns = con.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='bar_pattern_features'"
+        ).fetchone()
+        bp_cols = set()
+        if has_bar_patterns:
+            bp_cols = {
+                row["name"]
+                for row in con.execute("PRAGMA table_info(bar_pattern_features)").fetchall()
+            }
+
+        def bp_expr(name: str) -> str:
+            return f"bp.{name}" if name in bp_cols else f"NULL AS {name}"
+
+        bar_pattern_join = ""
+        if has_bar_patterns:
+            bar_pattern_join = """
+                LEFT JOIN bar_pattern_features bp
+                  ON bp.symbol = fs.symbol
+                 AND bp.bar_timestamp = fs.timestamp
+                 AND bp.timeframe = '1m'
+                 AND bp.rowid = (
+                    SELECT MAX(bp2.rowid)
+                    FROM bar_pattern_features bp2
+                    WHERE bp2.symbol = fs.symbol
+                      AND bp2.bar_timestamp = fs.timestamp
+                      AND bp2.timeframe = '1m'
+                 )
+            """
         point_in_time_sql = ""
         if prediction_time_cutoff:
             if "feature_available_at" in fs_cols:
@@ -63,11 +91,34 @@ def fetch_training_rows(
                 fs.relative_strength_5m,
                 fs.spread_pct,
                 fs.setup_score,
+                {bp_expr("candle_body_pct")},
+                {bp_expr("upper_wick_pct")},
+                {bp_expr("lower_wick_pct")},
+                {bp_expr("upper_lower_wick_ratio")},
+                {bp_expr("close_location")},
+                {bp_expr("range_atr_ratio")},
+                {bp_expr("atr_20_pct")},
+                {bp_expr("volume_ratio_20")},
+                {bp_expr("pressure_return_3")},
+                {bp_expr("pressure_return_8")},
+                {bp_expr("volume_weighted_pressure_3")},
+                {bp_expr("pattern_label")},
+                {bp_expr("pattern_score")},
+                {bp_expr("opportunity_action")},
+                {bp_expr("opportunity_quality")},
+                {bp_expr("long_opportunity_score")},
+                {bp_expr("sell_opportunity_score")},
+                {bp_expr("triple_barrier_label")},
+                {bp_expr("triple_barrier_reason")},
+                {bp_expr("triple_barrier_bars_to_event")},
+                {bp_expr("triple_barrier_profit_pct")},
+                {bp_expr("triple_barrier_stop_pct")},
                 ls.ret_fwd_5m,
                 ls.ret_fwd_15m,
                 ls.ret_fwd_30m
             FROM feature_snapshots fs
             JOIN labeled_setups ls ON ls.snapshot_id = fs.id
+            {bar_pattern_join}
             WHERE ls.ret_fwd_15m IS NOT NULL
               {point_in_time_sql}
               {symbol_sql}

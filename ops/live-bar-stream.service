@@ -1,0 +1,16 @@
+[Unit]
+Description=Trading Bot live 1-minute bar stream
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/tradingbot/trading-bot
+EnvironmentFile=/etc/trading-bot.env
+ExecStart=/bin/bash -lc '/home/tradingbot/trading-bot/venv/bin/python /home/tradingbot/trading-bot/live_bar_stream.py --all --feed "${ALPACA_BAR_STREAM_FEED:-iex}"'
+Restart=always
+RestartSec=30
+Nice=5
+
+[Install]
+WantedBy=multi-user.target

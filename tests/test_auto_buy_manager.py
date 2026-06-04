@@ -29,12 +29,14 @@ AUTO_BUY_RUNTIME_DEFAULTS = {
     "AUTO_BUY_LIVE_BUYS": False,
     "AUTO_BUY_LEARNED_TIEBREAKER_ENABLED": False,
     "AUTO_BUY_WATCH_SETUP_STRONG_BUY_ENABLED": False,
+    "AUTO_BUY_INTRADAY_FEEDBACK_ENABLED": False,
 }
 
 
 def reset_auto_buy_runtime_defaults():
     for key, value in AUTO_BUY_RUNTIME_DEFAULTS.items():
         setattr(auto_buy_manager, key, value)
+    auto_buy_manager._rolling_momentum_context_cache = None
 
 
 def assert_equal(actual, expected, label):
@@ -94,6 +96,42 @@ def test_strong_internal_candidate_scores_as_buy_candidate():
     )
     if not result.get("symbol_pattern"):
         raise AssertionError("missing symbol pattern")
+
+
+def test_five_day_rolling_context_is_scored_and_returned():
+    result = evaluate_auto_buy_candidate(
+        symbol="AMZN",
+        session=strong_session(),
+        feature=favorable_feature(),
+        context=buy_context(),
+        rolling_context={
+            "five_day_return_pct": 3.2,
+            "prior_day_return_pct": 0.8,
+            "current_price_vs_prior_close_pct": 1.1,
+            "extension_from_recent_base_pct": 2.4,
+            "continuation_score": 4,
+            "trend_context": "strong_continuation",
+            "generated_at": "2026-06-04T09:45:00",
+            "latest_bar_time_et": "2026-06-04T09:44:00-04:00",
+            "data_feed": "iex",
+            "market_days_found": 8,
+            "last_5_market_days": [
+                "2026-05-28",
+                "2026-05-29",
+                "2026-06-01",
+                "2026-06-02",
+                "2026-06-03",
+            ],
+        },
+        held=set(),
+    )
+
+    assert_equal(result["five_day_return_pct"], 3.2, "five day return")
+    assert_equal(result["rolling_continuation_score"], 4.0, "rolling score")
+    assert_equal(result["rolling_trend_context"], "strong_continuation", "rolling trend")
+    assert_equal(result["rolling_momentum_source"], "rolling_momentum_json", "rolling source")
+    if "5d_trend_aligned" not in result["reason"]:
+        raise AssertionError("5-day alignment was not included in scoring reason")
 
 
 def test_held_symbol_is_skipped():
@@ -186,6 +224,56 @@ def test_weak_ml_bucket_blocks_even_with_thin_sample():
     assert_equal(result["severity"], "blocked", "severity")
     if "ml_prediction_weak_bucket" not in result["hard_block_reason"]:
         raise AssertionError(f"missing ML weak bucket block: {result['hard_block_reason']}")
+
+
+def test_intraday_feedback_blocks_repeated_losing_pattern():
+    old_prediction_context = auto_buy_manager.auto_buy_prediction_context
+    old_cash_mode = auto_buy_manager.is_cash_mode
+    old_enabled = auto_buy_manager.AUTO_BUY_INTRADAY_FEEDBACK_ENABLED
+    auto_buy_manager.auto_buy_prediction_context = lambda symbol: {
+        "available": True,
+        "prediction_score": 44.0,
+        "prediction_decision": "observe_only",
+        "prediction_reason": "test weak bucket",
+        "ml_prediction_score": 44.0,
+        "ml_prediction_bucket": "weak_below_45",
+        "ml_prediction_confidence": "medium",
+        "ml_prediction_sample_size": 30,
+    }
+    auto_buy_manager.is_cash_mode = lambda: False
+    auto_buy_manager.AUTO_BUY_INTRADAY_FEEDBACK_ENABLED = True
+    feature = favorable_feature()
+    feature["setup_recommendation"] = "avoid"
+    feature["setup_label"] = "near_vwap_neutral_fade_risk"
+    feature["setup_score"] = 45
+    try:
+        result = evaluate_auto_buy_candidate(
+            symbol="AAPL",
+            session=strong_session(),
+            feature=feature,
+            context=buy_context(),
+            intraday_feedback_evidence={
+                "ml=weak_below_45|setup_action=avoid": {
+                    "key": "ml=weak_below_45|setup_action=avoid",
+                    "trades": 3,
+                    "wins": 0,
+                    "losses": 3,
+                    "loss_rate": 1.0,
+                    "avg_pnl_pct": -0.35,
+                    "symbols": ["AAPL"],
+                }
+            },
+            held=set(),
+        )
+    finally:
+        auto_buy_manager.auto_buy_prediction_context = old_prediction_context
+        auto_buy_manager.is_cash_mode = old_cash_mode
+        auto_buy_manager.AUTO_BUY_INTRADAY_FEEDBACK_ENABLED = old_enabled
+
+    assert_equal(result["decision"], "skip", "feedback decision")
+    assert_equal(result["intraday_feedback_status"], "block", "feedback status")
+    if "intraday_pattern_feedback" not in result["hard_block_reason"]:
+        raise AssertionError(f"missing intraday feedback hard block: {result['hard_block_reason']}")
 
 
 def test_watch_setup_cannot_become_strong_buy_by_default():
@@ -752,6 +840,16 @@ def test_log_candidate_mirrors_to_candidate_universe():
                     "setup_label": "breakout",
                     "symbol_pattern": "trend_continuation_with_participation",
                     "pattern_runtime_effect": "observe_only_no_live_authority",
+                    "five_day_return_pct": 3.2,
+                    "rolling_continuation_score": 4,
+                    "rolling_momentum_last_5_market_days": [
+                        "2026-05-28",
+                        "2026-05-29",
+                        "2026-06-01",
+                        "2026-06-02",
+                        "2026-06-03",
+                    ],
+                    "rolling_momentum_source": "rolling_momentum_json",
                 },
                 live_buy_enabled=False,
             )
@@ -782,6 +880,13 @@ def test_log_candidate_mirrors_to_candidate_universe():
         assert_equal(candidate_payload["reference_price"], 10.05, "reference price")
         assert_equal(candidate_payload["reference_price_source"], "quote_mid", "reference source")
         assert_equal(candidate_payload["spread_pct"], 0.995025, "spread pct")
+        assert_equal(candidate_payload["five_day_return_pct"], 3.2, "five-day return")
+        assert_equal(candidate_payload["rolling_continuation_score"], 4, "rolling score")
+        assert_equal(
+            candidate_payload["rolling_momentum_source"],
+            "rolling_momentum_json",
+            "rolling source",
+        )
 
 
 
@@ -961,10 +1066,12 @@ def test_learned_tiebreaker_can_override_soft_intelligence_blocks_in_paper_mode(
 def main():
     tests = [
         test_strong_internal_candidate_scores_as_buy_candidate,
+        test_five_day_rolling_context_is_scored_and_returned,
         test_held_symbol_is_skipped,
         test_negative_session_blocks_candidate,
         test_weak_ml_prediction_blocks_auto_buy_candidate,
         test_weak_ml_bucket_blocks_even_with_thin_sample,
+        test_intraday_feedback_blocks_repeated_losing_pattern,
         test_watch_setup_cannot_become_strong_buy_by_default,
         test_early_constructive_build_gets_buy_candidate_boost,
         test_mature_chase_extension_is_penalized_and_extreme_chase_blocks,

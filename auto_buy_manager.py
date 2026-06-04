@@ -75,6 +75,10 @@ from services.learned_auto_buy_tiebreaker_service import (
     LearnedAutoBuyThresholds,
     LearnedAutoBuyTiebreakerService,
 )
+from services.intraday_trade_feedback_service import (
+    IntradayTradeFeedbackService,
+    build_default_intraday_trade_feedback_service,
+)
 from services.policies.entry_policy import ml_prediction_bucket
 from runtime_config import is_cash_mode
 from strategy_memory import memory_for_signal
@@ -191,6 +195,9 @@ AUTO_BUY_LEARNED_TIEBREAKER_MAX_THRESHOLD_GAP = float(
         _paper_runtime_default("6.0", "4.0"),
     )
 )
+AUTO_BUY_INTRADAY_FEEDBACK_ENABLED = os.getenv(
+    "AUTO_BUY_INTRADAY_FEEDBACK_ENABLED", "true"
+).strip().lower() in ("1", "true", "yes", "on")
 LEARNED_TIEBREAKER_SOFT_BLOCK_PREFIXES = (
     "bias_avoid",
     "setup_avoid",
@@ -203,6 +210,15 @@ LEARNED_TIEBREAKER_SOFT_BLOCK_PREFIXES = (
 
 _prediction_context_cache: dict[str, dict[str, Any]] = {}
 _learned_tiebreaker_cache: dict[tuple[str, str, str], dict[str, Any]] = {}
+_rolling_momentum_context_cache: dict[str, dict[str, Any]] | None = None
+_intraday_feedback_service: IntradayTradeFeedbackService | None = None
+
+
+def intraday_feedback_service() -> IntradayTradeFeedbackService:
+    global _intraday_feedback_service
+    if _intraday_feedback_service is None:
+        _intraday_feedback_service = build_default_intraday_trade_feedback_service(DB_PATH)
+    return _intraday_feedback_service
 
 
 def _to_float(value: Any, default: float | None = None) -> float | None:
@@ -294,6 +310,42 @@ def auto_buy_prediction_context(symbol: str) -> dict[str, Any]:
 
     _prediction_context_cache[symbol] = dict(result)
     return result
+
+
+def load_rolling_momentum_context(
+    path: Path | None = None,
+) -> dict[str, dict[str, Any]]:
+    """Load rolling multi-day momentum context captured by rolling_momentum.py.
+
+    This is read-only, cached per process, and deliberately does not fetch
+    market data. If the provider file is missing or malformed, candidate
+    scoring remains available with explicit missing context.
+    """
+    global _rolling_momentum_context_cache
+    if path is None and _rolling_momentum_context_cache is not None:
+        return {symbol: dict(value) for symbol, value in _rolling_momentum_context_cache.items()}
+
+    source_path = path or (BASE_DIR / "rolling_momentum.json")
+    try:
+        loaded = json.loads(source_path.read_text())
+    except Exception:
+        result: dict[str, dict[str, Any]] = {}
+    else:
+        symbols = loaded.get("symbols") if isinstance(loaded, dict) else {}
+        result = {
+            str(symbol).upper(): dict(payload)
+            for symbol, payload in symbols.items()
+            if isinstance(payload, dict)
+        } if isinstance(symbols, dict) else {}
+
+    if path is None:
+        _rolling_momentum_context_cache = {symbol: dict(value) for symbol, value in result.items()}
+    return result
+
+
+def rolling_momentum_for_symbol(symbol: str) -> dict[str, Any]:
+    symbol = str(symbol or "").upper()
+    return dict(load_rolling_momentum_context().get(symbol) or {})
 
 
 def learned_auto_buy_tiebreaker_decision(candidate: dict[str, Any]) -> dict[str, Any]:
@@ -641,6 +693,8 @@ def evaluate_auto_buy_candidate(
     session: dict[str, Any],
     feature: dict[str, Any],
     context: dict[str, Any],
+    rolling_context: dict[str, Any] | None = None,
+    intraday_feedback_evidence: dict[str, dict[str, Any]] | None = None,
     held: set[str] | None = None,
     signal_source: str = "internal_bar_only",
 ) -> dict[str, Any]:
@@ -668,6 +722,7 @@ def evaluate_auto_buy_candidate(
     entry_quality = context.get("entry_quality")
     risk_level = context.get("risk_level")
     avoid_type = context.get("avoid_type")
+    rolling_context = rolling_context or {}
 
     if bias == "avoid":
         score -= 5
@@ -697,6 +752,40 @@ def evaluate_auto_buy_candidate(
     m30 = _to_float(session.get("momentum_30m_pct"), 0) or 0
     vwap = _to_float(session.get("distance_from_vwap_pct"), 0) or 0
     session_return = _to_float(session.get("session_return_pct"), 0) or 0
+    five_day_return = _to_float(rolling_context.get("five_day_return_pct"))
+    prior_day_return = _to_float(rolling_context.get("prior_day_return_pct"))
+    current_vs_prior_close = _to_float(
+        rolling_context.get("current_price_vs_prior_close_pct")
+    )
+    extension_from_recent_base = _to_float(
+        rolling_context.get("extension_from_recent_base_pct")
+    )
+    rolling_continuation_score = _to_float(
+        rolling_context.get("continuation_score")
+    )
+    rolling_trend_context = rolling_context.get("trend_context")
+
+    if five_day_return is not None:
+        if five_day_return >= 2.0 and label in {"strong_uptrend", "developing_uptrend"}:
+            score += 2
+            reasons.append(f"5d_trend_aligned:+2({five_day_return:.2f}%)")
+        elif five_day_return >= 1.0 and session_return >= 0.25:
+            score += 1
+            reasons.append(f"5d_constructive:+1({five_day_return:.2f}%)")
+        elif five_day_return <= -2.0 and label in {"downtrend", "fading"}:
+            score -= 2
+            reasons.append(f"5d_negative_aligned:-2({five_day_return:.2f}%)")
+        elif five_day_return <= -1.0 and session_return <= -0.25:
+            score -= 1
+            reasons.append(f"5d_weak_context:-1({five_day_return:.2f}%)")
+
+    if rolling_continuation_score is not None:
+        if rolling_continuation_score >= 4:
+            score += 1
+            reasons.append(f"rolling_continuation_score:+1({rolling_continuation_score:.0f})")
+        elif rolling_continuation_score <= -4:
+            score -= 1
+            reasons.append(f"rolling_continuation_score:-1({rolling_continuation_score:.0f})")
 
     if label == "strong_uptrend" or session_score >= 6:
         score += 4
@@ -993,6 +1082,52 @@ def evaluate_auto_buy_candidate(
             f"{prediction_context.get('ml_prediction_bucket')};"
             f"score={ml_score};sample={ml_sample}"
         )
+
+    pattern = auto_buy_symbol_pattern(
+        symbol=symbol,
+        session=session,
+        feature=feature,
+        context=context,
+    )
+    intraday_feedback = {
+        "status": "disabled",
+        "runtime_effect": "disabled_no_intraday_feedback",
+        "score_penalty": 0.0,
+        "hard_block_reason": None,
+        "evidence": {},
+    }
+    if AUTO_BUY_INTRADAY_FEEDBACK_ENABLED:
+        intraday_feedback = intraday_feedback_service().assess_candidate(
+            target_date=_today(),
+            candidate={
+                "symbol": symbol,
+                "setup_recommendation": setup_rec,
+                "setup_policy_action": setup_rec,
+                "setup_label": setup_label,
+                "ml_prediction_bucket": prediction_context.get("ml_prediction_bucket"),
+                "session_trend_label": label,
+                **pattern,
+            },
+            evidence=intraday_feedback_evidence,
+            allow_authority=not is_cash_mode(),
+        )
+        feedback_status = str(intraday_feedback.get("status") or "neutral")
+        feedback_penalty = _to_float(intraday_feedback.get("score_penalty"), 0) or 0
+        if feedback_penalty:
+            score += feedback_penalty
+            reasons.append(
+                "intraday_feedback_penalty:"
+                f"{feedback_status}:{feedback_penalty:+.1f}:"
+                f"{intraday_feedback.get('feedback_key')}"
+            )
+        if feedback_status == "block" and intraday_feedback.get("hard_block_reason"):
+            hard_block_reasons.append(str(intraday_feedback["hard_block_reason"]))
+        elif feedback_status.startswith("would_"):
+            reasons.append(
+                "intraday_feedback_observed_no_authority:"
+                f"{feedback_status}:{intraday_feedback.get('feedback_key')}"
+            )
+
     hard_block_reason = "; ".join(hard_block_reasons) if hard_block_reasons else None
 
     strong_threshold = AUTO_BUY_MIN_SCORE
@@ -1005,13 +1140,6 @@ def evaluate_auto_buy_candidate(
         reasons.append(f"webhook_symbol_candidate_threshold:{strong_threshold:.1f}")
     elif signal_source == "tradingview_alert":
         reasons.append(f"internal_signal_execution:{execution_signal_mode}")
-
-    pattern = auto_buy_symbol_pattern(
-        symbol=symbol,
-        session=session,
-        feature=feature,
-        context=context,
-    )
 
     if hard_block_reasons:
         decision = "skip"
@@ -1094,6 +1222,22 @@ def evaluate_auto_buy_candidate(
         "session_trend_label": label,
         "session_trend_score": session_score,
         "session_return_pct": session_return,
+        "five_day_return_pct": five_day_return,
+        "prior_day_return_pct": prior_day_return,
+        "current_price_vs_prior_close_pct": current_vs_prior_close,
+        "extension_from_recent_base_pct": extension_from_recent_base,
+        "rolling_continuation_score": rolling_continuation_score,
+        "rolling_trend_context": rolling_trend_context,
+        "rolling_momentum_generated_at": rolling_context.get("generated_at"),
+        "rolling_momentum_latest_bar_time_et": rolling_context.get("latest_bar_time_et"),
+        "rolling_momentum_data_feed": rolling_context.get("data_feed"),
+        "rolling_momentum_market_days_found": rolling_context.get("market_days_found"),
+        "rolling_momentum_last_5_market_days": rolling_context.get("last_5_market_days") or [],
+        "rolling_momentum_source": (
+            "rolling_momentum_json"
+            if rolling_context
+            else "missing"
+        ),
         "momentum_5m_pct": m5,
         "momentum_15m_pct": m15,
         "momentum_30m_pct": m30,
@@ -1118,6 +1262,13 @@ def evaluate_auto_buy_candidate(
             if learned_tiebreaker_applied
             else "observe_only_no_live_authority"
         ),
+        "intraday_feedback_enabled": bool(AUTO_BUY_INTRADAY_FEEDBACK_ENABLED),
+        "intraday_feedback_status": intraday_feedback.get("status"),
+        "intraday_feedback_key": intraday_feedback.get("feedback_key"),
+        "intraday_feedback_score_penalty": intraday_feedback.get("score_penalty"),
+        "intraday_feedback_hard_block_reason": intraday_feedback.get("hard_block_reason"),
+        "intraday_feedback_evidence": intraday_feedback.get("evidence") or {},
+        "intraday_feedback_runtime_effect": intraday_feedback.get("runtime_effect"),
         "early_constructive_build": bool(early_constructive_build),
         "mature_chase": bool(mature_chase),
         "extreme_chase": bool(extreme_chase),
@@ -1152,6 +1303,34 @@ def log_candidate(candidate: dict[str, Any], live_buy_enabled: bool, order: dict
         order_json=json.dumps(order, sort_keys=True, default=str),
         db_path=DB_PATH,
     )
+    feedback_status = str(candidate.get("intraday_feedback_status") or "neutral")
+    if feedback_status not in {"neutral", "disabled"}:
+        try:
+            auto_buy_repo.insert_intraday_feedback_event(
+                created_at=now_et().isoformat(),
+                target_date=_today(),
+                symbol=candidate.get("symbol"),
+                feedback_key=str(candidate.get("intraday_feedback_key") or "unknown"),
+                status=feedback_status,
+                score_penalty=_to_float(candidate.get("intraday_feedback_score_penalty")),
+                hard_block_reason=candidate.get("intraday_feedback_hard_block_reason"),
+                evidence_json=json.dumps(
+                    candidate.get("intraday_feedback_evidence") or {},
+                    sort_keys=True,
+                    default=str,
+                ),
+                candidate_json=json.dumps(candidate, sort_keys=True, default=str),
+                runtime_effect=str(
+                    candidate.get("intraday_feedback_runtime_effect")
+                    or "observe_only_no_intraday_feedback"
+                ),
+                db_path=DB_PATH,
+            )
+        except Exception as exc:
+            print(
+                f"[WARN] intraday feedback capture failed for {candidate.get('symbol')}: {exc}",
+                file=sys.stderr,
+            )
     try:
         CandidateUniverseService(CandidateUniverseRepository(DB_PATH)).persist_scored_candidate(
             candidate_ts=timestamp,
@@ -1335,6 +1514,12 @@ AUTO_BUY_BUCKING_TAPE_MIN_EARLY_SESSION_RETURN_PCT = float(
 def build_candidates(scope: str) -> list[dict[str, Any]]:
     ctx = load_market_context()
     symbols_ctx = ctx.get("symbols") or {}
+    rolling_context = load_rolling_momentum_context()
+    intraday_feedback_evidence = (
+        intraday_feedback_service().build_evidence(_today())
+        if AUTO_BUY_INTRADAY_FEEDBACK_ENABLED
+        else {}
+    )
     held = held_symbols()
     candidates = []
 
@@ -1349,6 +1534,8 @@ def build_candidates(scope: str) -> list[dict[str, Any]]:
             session=latest_session(symbol),
             feature=latest_feature(symbol),
             context=symbols_ctx.get(symbol) or {},
+            rolling_context=rolling_context.get(symbol.upper()) or {},
+            intraday_feedback_evidence=intraday_feedback_evidence,
             held=held,
             signal_source=SYMBOL_SIGNAL_SOURCE.get(symbol, "unknown"),
         )
@@ -1399,14 +1586,17 @@ def render(candidates: list[dict[str, Any]], scope: str, market_open: bool) -> N
     print()
     print(
         f"{'Sym':<6} {'Source':<18} {'Decision':<22} {'Score':>6} "
-        f"{'Session':<20} {'Pattern':<30} {'Setup':<30} Reason"
+        f"{'Session':<20} {'5d':>7} {'Pattern':<30} {'Setup':<30} Reason"
     )
-    print("-" * 148)
+    print("-" * 156)
     for c in candidates:
+        five_day = _to_float(c.get("five_day_return_pct"))
+        five_day_text = "-" if five_day is None else f"{five_day:+.1f}%"
         print(
             f"{c['symbol']:<6} {c.get('signal_source', '-'):<18} "
             f"{c['decision']:<22} {c['score']:>6.1f} "
             f"{str(c.get('session_trend_label')) + '/' + str(c.get('session_trend_score')):<20} "
+            f"{five_day_text:>7} "
             f"{str(c.get('symbol_pattern') or '-')[:30]:<30} "
             f"{str(c.get('setup_label') or '-')[:30]:<30} "
             f"{c.get('hard_block_reason') or c.get('reason')}"

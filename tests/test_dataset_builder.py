@@ -136,9 +136,34 @@ CREATE TABLE daily_symbol_predictions (
 )
 """
 
+_BAR_PATTERN_DDL = """
+CREATE TABLE bar_pattern_features (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    symbol TEXT NOT NULL,
+    bar_timestamp TEXT NOT NULL,
+    timeframe TEXT NOT NULL,
+    feature_version TEXT,
+    candle_body_pct REAL,
+    close_location REAL,
+    range_atr_ratio REAL,
+    volume_weighted_pressure_3 REAL,
+    pattern_label TEXT,
+    pattern_score REAL,
+    opportunity_action TEXT,
+    opportunity_quality TEXT,
+    long_opportunity_score REAL,
+    sell_opportunity_score REAL,
+    triple_barrier_label INTEGER,
+    triple_barrier_reason TEXT,
+    triple_barrier_bars_to_event INTEGER,
+    triple_barrier_profit_pct REAL,
+    triple_barrier_stop_pct REAL
+)
+"""
+
 
 def _create_tables(con: sqlite3.Connection) -> None:
-    for ddl in (_FS_DDL, _LS_DDL, _CONTEXT_DDL, _PREDICTIONS_DDL):
+    for ddl in (_FS_DDL, _LS_DDL, _CONTEXT_DDL, _PREDICTIONS_DDL, _BAR_PATTERN_DDL):
         con.execute(ddl)
 
 
@@ -176,6 +201,32 @@ def _insert_ls(con, *, snapshot_id, complete=True, outcome_label="win"):
             1.8,  -0.3,
             outcome_label,
         ),
+    )
+
+
+def _insert_bar_pattern(con, *, ts, symbol, label=1):
+    con.execute(
+        """
+        INSERT INTO bar_pattern_features (
+            symbol, bar_timestamp, timeframe, feature_version,
+            candle_body_pct, close_location, range_atr_ratio,
+            volume_weighted_pressure_3, pattern_label, pattern_score,
+            opportunity_action, opportunity_quality,
+            long_opportunity_score, sell_opportunity_score,
+            triple_barrier_label, triple_barrier_reason,
+            triple_barrier_bars_to_event, triple_barrier_profit_pct,
+            triple_barrier_stop_pct
+        ) VALUES (
+            ?, ?, '1m', 'efi_pvt_candle_physics_bar_pattern_v2',
+            0.6, 0.82, 1.25,
+            0.33, 'constructive_candle_pressure', 72,
+            'long_candidate', 'good_buy_window',
+            80, 20,
+            ?, 'profit_target_first',
+            4, 0.5, 0.3
+        )
+        """,
+        (symbol, ts, label),
     )
 
 
@@ -262,8 +313,10 @@ def _filter_fixture(tmp_dir: Path) -> Path:
     with sqlite3.connect(db_path) as con:
         _create_tables(con)
         # Row 1 — complete
-        sid1 = _insert_fs(con, ts="2026-05-26T10:00:00", symbol="AAPL")
+        ts1 = "2026-05-26T10:00:00"
+        sid1 = _insert_fs(con, ts=ts1, symbol="AAPL")
         _insert_ls(con, snapshot_id=sid1, complete=True, outcome_label="win")
+        _insert_bar_pattern(con, ts=ts1, symbol="AAPL")
         # Row 2 — partial_near_close (ret_fwd_30m NULL)
         sid2 = _insert_fs(con, ts="2026-05-26T10:30:00", symbol="NVDA")
         _insert_ls(con, snapshot_id=sid2, complete=False, outcome_label=None)
@@ -281,6 +334,14 @@ def test_complete_only_excludes_non_complete_rows():
         result = build_training_dataset(cfg)
     symbols_out = {r["symbol"] for r in result.rows}
     assert_equal(symbols_out, {"AAPL"}, "only complete row exported")
+    row = result.rows[0]
+    assert_equal(row["candle_body_pct"], 0.6, "candle body exported")
+    assert_equal(row["triple_barrier_label"], 1, "triple barrier target exported")
+    assert_equal(
+        row["bar_pattern_feature_version"],
+        "efi_pvt_candle_physics_bar_pattern_v2",
+        "bar pattern version exported",
+    )
 
 
 def test_complete_only_exclusion_reason_counts():
@@ -358,6 +419,8 @@ def test_manifest_required_fields_present():
         _, result = _manifest_fixture(Path(tmp))
     for field in _REQUIRED_MANIFEST_FIELDS:
         assert_in(field, result.manifest, f"manifest[{field!r}] present")
+    assert_in("triple_barrier_label", result.manifest["safe_training_targets"], "triple target")
+    assert_true(result.manifest["triple_barrier_target_included"], "triple target flag")
 
 
 def test_manifest_export_row_count_matches_rows():

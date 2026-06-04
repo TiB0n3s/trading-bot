@@ -73,8 +73,36 @@ def run_auto_buy_health(target_date: str, *, base_dir: Path) -> bool:
         print(f"  snapshots             {_int_row_value(row, 'n'):>8}")
         print(f"  submitted             {_int_row_value(row, 'submitted'):>8}")
         print(f"  live_blocked          {_int_row_value(row, 'blocked'):>8}")
+        rolling = auto_buy_repo.rolling_context_summary(target_date, db_path=db_path)
+        print()
+        print("Rolling 5-day context")
+        print(f"  rows_with_5d          {_int_row_value(rolling, 'rows_with_5d'):>8}")
+        print(f"  rolling_source_rows   {_int_row_value(rolling, 'rolling_source_rows'):>8}")
+        if rolling and rolling["avg_5d_return_pct"] is not None:
+            print(f"  avg_5d_return_pct     {rolling['avg_5d_return_pct']:>8.3f}")
+            print(f"  min_5d_return_pct     {rolling['min_5d_return_pct']:>8.3f}")
+            print(f"  max_5d_return_pct     {rolling['max_5d_return_pct']:>8.3f}")
+        else:
+            print("  avg_5d_return_pct            -")
     else:
         print("  [WARN] auto_buy_decision_snapshots table missing")
+
+    feedback_rows = auto_buy_repo.intraday_feedback_summary(target_date, db_path=db_path)
+    if feedback_rows:
+        print()
+        print("Intraday feedback actions")
+        print("  status          key                                      rows same hist penalty block_reason")
+        print("  --------------- ---------------------------------------- ---- ---- ---- ------- ------------")
+        for row in feedback_rows:
+            print(
+                f"  {str(row['status'] or '-')[:15]:<15} "
+                f"{str(row['feedback_key'] or '-')[:40]:<40} "
+                f"{_int_row_value(row, 'n'):>4} "
+                f"{_int_row_value(row, 'same_day_trades'):>4} "
+                f"{_int_row_value(row, 'historical_trades'):>4} "
+                f"{str(row['max_penalty'] if row['max_penalty'] is not None else '-')[:7]:>7} "
+                f"{str(row['hard_block_reason'] or '-')[:60]}"
+            )
 
     print()
     print("[OK] auto-buy candidate check completed")

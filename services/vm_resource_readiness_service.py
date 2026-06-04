@@ -33,9 +33,12 @@ RESOURCE_SPECS: tuple[ResourceSpec, ...] = (
         label="Alpaca full market data",
         category="market_data",
         env_vars=("ALPACA_API_KEY", "ALPACA_SECRET_KEY"),
-        packages=("alpaca_trade_api",),
+        packages=("alpaca_trade_api", "alpaca"),
         runtime_effect="existing_adapter_boundary",
-        next_action="Confirm subscription/feed entitlement and monitor SIP/IEX fallback rate.",
+        next_action=(
+            "Confirm subscription/feed entitlement, monitor SIP/IEX fallback rate, "
+            "and use live_bar_stream.py for observe-only closed-bar learning."
+        ),
     ),
     ResourceSpec(
         key="polygon_market_data",

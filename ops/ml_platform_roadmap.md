@@ -1044,6 +1044,13 @@ A model can only move from observe-only to paper-trading influence after it has:
 29. Done: include DuckDB/PyArrow/sklearn/joblib/hmmlearn in
     `requirements.txt` so research exports, supervised artifacts, and HMM regime
     experiments are reproducible from a fresh install.
+30. Done: wire candle-physics and triple-barrier pattern learning into the
+    ML/export surface. `live_bar_stream.py` can feed closed 1-minute bars into
+    `session_momentum` and `bar_pattern_features`; `pipeline/historical_bar_archive.py`
+    can backfill Polygon RTH bars; dataset exports and supervised training now
+    expose candle body/wick ratios, ATR-normalized range, pressure vectors,
+    pattern scores, and `triple_barrier_label`. These remain observe-only until
+    readiness, calibration, and rollout-governance checks pass.
 
 Critical blockers before real training:
 
@@ -1053,8 +1060,9 @@ Critical blockers before real training:
    all 5m/15m/30m/60m/EOD horizons where structurally available, preserve
    action-aware MFE/MAE signs, and mark near-close rows as partial.
 2. Continue validating fixed-horizon label v1. Default training exports now use
-   complete fixed-horizon rows only, but 60m and action-aware MFE/MAE targets
-   still need to be added to the feature-snapshot label schema.
+   complete fixed-horizon rows only, and triple-barrier labels are available
+   from `bar_pattern_features`; 60m and action-aware MFE/MAE targets still need
+   to be added to the feature-snapshot label schema.
 3. Version realized-exit labels by exit logic before any realized-PnL training
    claims. Do not mix trades across changing exit policies without explicit
    `exit_policy_version` and `position_manager_version` controls.

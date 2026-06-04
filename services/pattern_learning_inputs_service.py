@@ -209,6 +209,8 @@ def _bar_pattern_evidence(bar_pattern_rows: list[dict[str, Any]]) -> dict[str, A
     long_scores: list[float] = []
     sell_scores: list[float] = []
     forward_returns_by_opportunity: dict[str, list[float]] = {}
+    triple_barrier_counts: dict[str, int] = {}
+    triple_barrier_returns: dict[str, list[float]] = {}
     top_buy_windows: list[dict[str, Any]] = []
     top_sell_or_avoid_windows: list[dict[str, Any]] = []
 
@@ -235,6 +237,13 @@ def _bar_pattern_evidence(bar_pattern_rows: list[dict[str, Any]]) -> dict[str, A
         forward_mae = _float(row.get("forward_mae_pct"))
         long_score = _float(row.get("long_opportunity_score"))
         sell_score = _float(row.get("sell_opportunity_score"))
+        triple_barrier_label = row.get("triple_barrier_label")
+        triple_barrier_reason = _bucket(row, "triple_barrier_reason")
+        if triple_barrier_label is not None:
+            triple_key = f"{int(float(triple_barrier_label))}|{triple_barrier_reason}"
+            triple_barrier_counts[triple_key] = triple_barrier_counts.get(triple_key, 0) + 1
+            if forward_return is not None:
+                triple_barrier_returns.setdefault(triple_key, []).append(forward_return)
 
         if forward_return is not None:
             rows_with_forward_outcome += 1
@@ -258,6 +267,13 @@ def _bar_pattern_evidence(bar_pattern_rows: list[dict[str, Any]]) -> dict[str, A
             "forward_return_pct": round(forward_return, 4) if forward_return is not None else None,
             "forward_mfe_pct": round(forward_mfe, 4) if forward_mfe is not None else None,
             "forward_mae_pct": round(forward_mae, 4) if forward_mae is not None else None,
+            "triple_barrier_label": (
+                int(float(triple_barrier_label))
+                if triple_barrier_label is not None
+                else None
+            ),
+            "triple_barrier_reason": triple_barrier_reason,
+            "triple_barrier_bars_to_event": row.get("triple_barrier_bars_to_event"),
         }
         if action in {"buy_candidate", "long_candidate"} and long_score is not None:
             top_buy_windows.append(item)
@@ -289,6 +305,20 @@ def _bar_pattern_evidence(bar_pattern_rows: list[dict[str, Any]]) -> dict[str, A
         )
     opportunity_expectancy.sort(key=lambda item: (-(item["rows"] or 0), item["opportunity"]))
 
+    triple_barrier_expectancy = []
+    for label, values in triple_barrier_returns.items():
+        triple_barrier_expectancy.append(
+            {
+                "triple_barrier": label,
+                "rows": len(values),
+                "win_rate": _rate(sum(1 for value in values if value > 0), len(values)),
+                "avg_forward_return_pct": _mean(values),
+            }
+        )
+    triple_barrier_expectancy.sort(
+        key=lambda item: (-(item["rows"] or 0), item["triple_barrier"])
+    )
+
     return {
         "rows": len(bar_pattern_rows),
         "symbols": len(symbols),
@@ -301,8 +331,12 @@ def _bar_pattern_evidence(bar_pattern_rows: list[dict[str, Any]]) -> dict[str, A
         "avg_sell_opportunity_score": _mean(sell_scores),
         "pattern_counts": dict(sorted(pattern_counts.items(), key=lambda item: (-item[1], item[0]))),
         "opportunity_counts": dict(sorted(opportunity_counts.items(), key=lambda item: (-item[1], item[0]))),
+        "triple_barrier_counts": dict(
+            sorted(triple_barrier_counts.items(), key=lambda item: (-item[1], item[0]))
+        ),
         "runtime_effects": dict(sorted(runtime_effects.items())),
         "opportunity_expectancy": opportunity_expectancy,
+        "triple_barrier_expectancy": triple_barrier_expectancy,
         "top_buy_windows": top_buy_windows[:15],
         "top_sell_or_avoid_windows": top_sell_or_avoid_windows[:15],
     }

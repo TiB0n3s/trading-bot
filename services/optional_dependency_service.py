@@ -9,6 +9,7 @@ from typing import Any
 OPTIONAL_AI_DEPENDENCIES = {
     "numpy": "array_math",
     "pandas": "dataframe_feature_pipeline",
+    "alpaca": "alpaca_py_live_bar_streaming",
     "yfinance": "free_historical_daily_market_data",
     "sklearn": "random_forest_and_classical_ml",
     "xgboost": "gradient_boosted_tree_model",

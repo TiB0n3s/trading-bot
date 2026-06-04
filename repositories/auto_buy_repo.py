@@ -88,6 +88,29 @@ def init_tables(db_path=DB_PATH) -> None:
             ON auto_buy_decision_snapshots(symbol, candidate_timestamp)
             """
         )
+        con.execute(
+            """
+            CREATE TABLE IF NOT EXISTS auto_buy_intraday_feedback (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                created_at TEXT NOT NULL,
+                target_date TEXT NOT NULL,
+                symbol TEXT,
+                feedback_key TEXT NOT NULL,
+                status TEXT NOT NULL,
+                score_penalty REAL,
+                hard_block_reason TEXT,
+                evidence_json TEXT,
+                candidate_json TEXT,
+                runtime_effect TEXT NOT NULL
+            )
+            """
+        )
+        con.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_auto_buy_intraday_feedback_date_key
+            ON auto_buy_intraday_feedback(target_date, feedback_key, created_at)
+            """
+        )
         existing_cols = {
             row["name"]
             for row in con.execute("PRAGMA table_info(auto_buy_candidates)").fetchall()
@@ -215,6 +238,223 @@ def live_block_reason_rows(target_date: str, db_path=DB_PATH):
             GROUP BY signal_source, live_block_reason
             ORDER BY n DESC, signal_source, live_block_reason
             LIMIT 20
+            """,
+            (target_date,),
+        ).fetchall()
+
+
+def rolling_context_summary(target_date: str, db_path=DB_PATH):
+    with get_connection(db_path) as con:
+        return con.execute(
+            """
+            SELECT
+                COUNT(*) AS rows,
+                SUM(
+                    CASE
+                        WHEN json_extract(candidate_json, '$.five_day_return_pct') IS NOT NULL
+                          THEN 1 ELSE 0
+                    END
+                ) AS rows_with_5d,
+                ROUND(AVG(json_extract(candidate_json, '$.five_day_return_pct')), 3)
+                    AS avg_5d_return_pct,
+                ROUND(MAX(json_extract(candidate_json, '$.five_day_return_pct')), 3)
+                    AS max_5d_return_pct,
+                ROUND(MIN(json_extract(candidate_json, '$.five_day_return_pct')), 3)
+                    AS min_5d_return_pct,
+                SUM(
+                    CASE
+                        WHEN json_extract(candidate_json, '$.rolling_momentum_source')
+                             = 'rolling_momentum_json'
+                          THEN 1 ELSE 0
+                    END
+                ) AS rolling_source_rows
+            FROM auto_buy_decision_snapshots
+            WHERE substr(candidate_timestamp, 1, 10) = ?
+            """,
+            (target_date,),
+        ).fetchone()
+
+
+def filled_trade_rows_for_intraday_feedback(target_date: str, db_path=DB_PATH):
+    if not table_exists("trades", db_path=db_path):
+        return []
+    with get_connection(db_path) as con:
+        return con.execute(
+            """
+            SELECT
+                id,
+                timestamp,
+                symbol,
+                action,
+                qty,
+                fill_price,
+                order_id,
+                setup_label,
+                setup_policy_action,
+                ml_prediction_bucket,
+                session_trend_label,
+                session_return_pct,
+                buy_opportunity_recommendation,
+                confidence,
+                rejection_reason
+            FROM trades
+            WHERE substr(timestamp, 1, 10) = ?
+              AND approved = 1
+              AND order_status = 'filled'
+              AND action IN ('buy', 'sell')
+              AND qty IS NOT NULL
+              AND qty > 0
+              AND fill_price IS NOT NULL
+              AND fill_price > 0
+            ORDER BY timestamp ASC, id ASC
+            """,
+            (target_date,),
+        ).fetchall()
+
+
+def historical_matched_trade_rows_for_feedback(
+    target_date: str,
+    *,
+    lookback_days: int = 20,
+    db_path=DB_PATH,
+):
+    if not table_exists("matched_trades", db_path=db_path):
+        return []
+
+    columns = table_columns("matched_trades", db_path=db_path)
+    required = {
+        "symbol",
+        "entry_timestamp",
+        "exit_timestamp",
+        "holding_minutes",
+        "qty",
+        "entry_price",
+        "exit_price",
+        "realized_pnl_pct",
+        "won",
+    }
+    if not required.issubset(columns):
+        return []
+
+    optional = {
+        "setup_policy_action": "setup_policy_action",
+        "setup_label": "setup_label",
+        "ml_prediction_bucket": "ml_prediction_bucket",
+        "session_trend_label": "session_trend_label",
+        "buy_opportunity_recommendation": "buy_opportunity_recommendation",
+        "entry_source": "entry_source",
+        "signal_source": "signal_source",
+    }
+    select_cols = [
+        "id",
+        "symbol",
+        "entry_timestamp",
+        "exit_timestamp",
+        "holding_minutes",
+        "qty",
+        "entry_price",
+        "exit_price",
+        "realized_pnl_pct",
+        "won",
+    ]
+    for name in optional:
+        if name in columns:
+            select_cols.append(name)
+        else:
+            select_cols.append(f"NULL AS {optional[name]}")
+
+    source_filter = ""
+    if "entry_source" in columns or "signal_source" in columns:
+        source_terms = []
+        if "entry_source" in columns:
+            source_terms.append("entry_source = 'auto_buy_manager'")
+        if "signal_source" in columns:
+            source_terms.append("signal_source IN ('auto_buy_manager', 'internal_bar_only', 'tradingview_alert')")
+        source_filter = f" AND ({' OR '.join(source_terms)})"
+
+    with get_connection(db_path) as con:
+        return con.execute(
+            f"""
+            SELECT {", ".join(select_cols)}
+            FROM matched_trades
+            WHERE substr(entry_timestamp, 1, 10) < ?
+              AND date(substr(entry_timestamp, 1, 10)) >= date(?, ?)
+              AND realized_pnl_pct IS NOT NULL
+              {source_filter}
+            ORDER BY entry_timestamp ASC, id ASC
+            """,
+            (target_date, target_date, f"-{int(lookback_days)} days"),
+        ).fetchall()
+
+
+def insert_intraday_feedback_event(
+    *,
+    created_at: str,
+    target_date: str,
+    symbol: str | None,
+    feedback_key: str,
+    status: str,
+    score_penalty: float | None,
+    hard_block_reason: str | None,
+    evidence_json: str,
+    candidate_json: str,
+    runtime_effect: str,
+    db_path=DB_PATH,
+) -> None:
+    with get_connection(db_path) as con:
+        con.execute(
+            """
+            INSERT INTO auto_buy_intraday_feedback (
+                created_at,
+                target_date,
+                symbol,
+                feedback_key,
+                status,
+                score_penalty,
+                hard_block_reason,
+                evidence_json,
+                candidate_json,
+                runtime_effect
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                created_at,
+                target_date,
+                symbol,
+                feedback_key,
+                status,
+                score_penalty,
+                hard_block_reason,
+                evidence_json,
+                candidate_json,
+                runtime_effect,
+            ),
+        )
+
+
+def intraday_feedback_summary(target_date: str, db_path=DB_PATH):
+    if not table_exists("auto_buy_intraday_feedback", db_path=db_path):
+        return []
+    with get_connection(db_path) as con:
+        return con.execute(
+            """
+            SELECT
+                status,
+                feedback_key,
+                COUNT(*) AS n,
+                MAX(score_penalty) AS max_penalty,
+                MAX(hard_block_reason) AS hard_block_reason,
+                MAX(COALESCE(json_extract(evidence_json, '$.same_day_trades'), 0))
+                    AS same_day_trades,
+                MAX(COALESCE(json_extract(evidence_json, '$.historical_trades'), 0))
+                    AS historical_trades,
+                MAX(COALESCE(json_extract(evidence_json, '$.sources'), '[]'))
+                    AS evidence_sources
+            FROM auto_buy_intraday_feedback
+            WHERE target_date = ?
+            GROUP BY status, feedback_key
+            ORDER BY n DESC, status, feedback_key
+            LIMIT 12
             """,
             (target_date,),
         ).fetchall()

@@ -16,6 +16,7 @@ from services.ops_checks.conviction_checks import (
     run_claude_context_audit,
     run_conviction_stack_report,
 )
+from services.ops_checks.auto_buy_checks import run_auto_buy_health
 from services.ops_checks.advisory_authority_checks import run_advisory_authority_report
 from services.ops_checks.feature_attribution_checks import run_feature_attribution_report
 from services.ops_checks.post_trade_learning_checks import run_post_trade_learning_report
@@ -532,6 +533,177 @@ def test_paper_learning_authority_report_counts_canonical_override(tmp_path):
     assert "MSFT" in out
 
 
+def test_auto_buy_health_reports_rolling_five_day_context(tmp_path):
+    db_path = tmp_path / "trades.db"
+    with sqlite3.connect(db_path) as con:
+        con.execute(
+            """
+            CREATE TABLE auto_buy_candidates (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                timestamp TEXT,
+                symbol TEXT,
+                signal_source TEXT,
+                decision TEXT,
+                score REAL,
+                reason TEXT,
+                market_bias TEXT,
+                entry_quality TEXT,
+                risk_level TEXT,
+                session_trend_label TEXT,
+                session_trend_score REAL,
+                session_return_pct REAL,
+                momentum_5m_pct REAL,
+                momentum_15m_pct REAL,
+                momentum_30m_pct REAL,
+                distance_from_vwap_pct REAL,
+                setup_label TEXT,
+                setup_recommendation TEXT,
+                setup_score REAL,
+                hard_block_reason TEXT,
+                feature_snapshot_id INTEGER,
+                live_buy_enabled INTEGER,
+                order_submitted INTEGER,
+                order_id TEXT
+            )
+            """
+        )
+        con.execute(
+            """
+            CREATE TABLE auto_buy_decision_snapshots (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                created_at TEXT,
+                candidate_timestamp TEXT,
+                symbol TEXT,
+                signal_source TEXT,
+                decision TEXT,
+                score REAL,
+                reason TEXT,
+                hard_block_reason TEXT,
+                live_buy_enabled INTEGER,
+                live_block_reason TEXT,
+                risk_cross_check_reason TEXT,
+                order_submitted INTEGER,
+                order_id TEXT,
+                order_status TEXT,
+                candidate_json TEXT,
+                order_json TEXT,
+                runtime_effect TEXT
+            )
+            """
+        )
+        con.execute(
+            """
+            CREATE TABLE auto_buy_intraday_feedback (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                created_at TEXT NOT NULL,
+                target_date TEXT NOT NULL,
+                symbol TEXT,
+                feedback_key TEXT NOT NULL,
+                status TEXT NOT NULL,
+                score_penalty REAL,
+                hard_block_reason TEXT,
+                evidence_json TEXT,
+                candidate_json TEXT,
+                runtime_effect TEXT NOT NULL
+            )
+            """
+        )
+        con.execute(
+            """
+            INSERT INTO auto_buy_candidates (
+                timestamp, symbol, signal_source, decision, score, reason,
+                session_trend_label, session_trend_score, setup_label,
+                live_buy_enabled, order_submitted
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0)
+            """,
+            (
+                "2026-06-04T09:45:00-04:00",
+                "AAPL",
+                "internal_bar_only",
+                "watch",
+                12.0,
+                "5d_constructive:+1",
+                "developing_uptrend",
+                4,
+                "confirmed_near_vwap_recovery",
+            ),
+        )
+        con.execute(
+            """
+            INSERT INTO auto_buy_decision_snapshots (
+                created_at, candidate_timestamp, symbol, signal_source, decision,
+                score, reason, hard_block_reason, live_buy_enabled,
+                live_block_reason, order_submitted, candidate_json, order_json,
+                runtime_effect
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "2026-06-04T09:45:01-04:00",
+                "2026-06-04T09:45:00-04:00",
+                "AAPL",
+                "internal_bar_only",
+                "watch",
+                12.0,
+                "5d_constructive:+1",
+                "decision=watch",
+                0,
+                "decision=watch",
+                0,
+                json.dumps(
+                    {
+                        "five_day_return_pct": 3.2,
+                        "rolling_momentum_source": "rolling_momentum_json",
+                    }
+                ),
+                "{}",
+                "auto_buy_paper_execution_path",
+            ),
+        )
+        con.execute(
+            """
+            INSERT INTO auto_buy_intraday_feedback (
+                created_at, target_date, symbol, feedback_key, status,
+                score_penalty, hard_block_reason, evidence_json,
+                candidate_json, runtime_effect
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "2026-06-04T09:45:02-04:00",
+                "2026-06-04",
+                "AAPL",
+                "ml=weak_below_45|setup_action=avoid",
+                "block",
+                -4.0,
+                "intraday_pattern_feedback:test",
+                json.dumps(
+                    {
+                        "same_day_trades": 1,
+                        "historical_trades": 3,
+                        "sources": [
+                            "same_day_filled_trades",
+                            "historical_matched_trades",
+                        ],
+                    }
+                ),
+                "{}",
+                "paper_intraday_pattern_block",
+            ),
+        )
+
+    buf = io.StringIO()
+    with redirect_stdout(buf):
+        assert run_auto_buy_health("2026-06-04", base_dir=tmp_path) is True
+
+    out = buf.getvalue()
+    assert "Rolling 5-day context" in out
+    assert "rows_with_5d                 1" in out
+    assert "rolling_source_rows          1" in out
+    assert "avg_5d_return_pct        3.200" in out
+    assert "Intraday feedback actions" in out
+    assert "rows same hist penalty" in out
+    assert "ml=weak_below_45|setup_action=avoid" in out
+
+
 def test_setup_breakdown_prints_prominent_fallback_health(tmp_path):
     db_path = tmp_path / "trades.db"
 
@@ -645,6 +817,7 @@ def main():
         test_feature_attribution_and_post_trade_learning_reports_use_lifecycle_rows,
         test_advisory_authority_report_prefers_canonical_outcomes,
         test_paper_learning_authority_report_counts_canonical_override,
+        test_auto_buy_health_reports_rolling_five_day_context,
         test_setup_breakdown_prints_prominent_fallback_health,
     ]
     for test in tests:

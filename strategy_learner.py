@@ -131,6 +131,14 @@ def new_pattern_bucket():
         "best_buy_windows": 0,
         "good_buy_windows": 0,
         "sell_or_avoid_windows": 0,
+        "triple_profit_first": 0,
+        "triple_stop_first": 0,
+        "triple_timeout": 0,
+        "candle_body_total": 0.0,
+        "close_location_total": 0.0,
+        "range_atr_total": 0.0,
+        "volume_pressure_total": 0.0,
+        "candle_rows": 0,
     }
 
 
@@ -159,6 +167,29 @@ def add_pattern_row(bucket, row):
         bucket["long_score_total"] += float(row["long_opportunity_score"] or 0)
     if row["sell_opportunity_score"] is not None:
         bucket["sell_score_total"] += float(row["sell_opportunity_score"] or 0)
+    triple = row["triple_barrier_label"]
+    if triple is not None:
+        try:
+            triple_value = int(float(triple))
+            if triple_value > 0:
+                bucket["triple_profit_first"] += 1
+            elif triple_value < 0:
+                bucket["triple_stop_first"] += 1
+            else:
+                bucket["triple_timeout"] += 1
+        except Exception:
+            pass
+    candle_values = [
+        ("candle_body_total", row["candle_body_pct"]),
+        ("close_location_total", row["close_location"]),
+        ("range_atr_total", row["range_atr_ratio"]),
+        ("volume_pressure_total", row["volume_weighted_pressure_3"]),
+    ]
+    if any(value is not None for _, value in candle_values):
+        bucket["candle_rows"] += 1
+        for key, value in candle_values:
+            if value is not None:
+                bucket[key] += float(value or 0)
 
 
 def finalize_pattern_bucket(bucket):
@@ -180,6 +211,12 @@ def finalize_pattern_bucket(bucket):
     avg_sell = bucket["sell_score_total"] / rows
     best_buy_rate = pct(bucket["best_buy_windows"], rows)
     sell_or_avoid_rate = pct(bucket["sell_or_avoid_windows"], rows)
+    triple_total = (
+        bucket["triple_profit_first"]
+        + bucket["triple_stop_first"]
+        + bucket["triple_timeout"]
+    )
+    candle_rows = bucket["candle_rows"]
 
     if rows < 30:
         evidence_label = "thin_sample"
@@ -200,6 +237,21 @@ def finalize_pattern_bucket(bucket):
         "avg_sell_opportunity_score": round(avg_sell, 2),
         "best_buy_window_rate_pct": best_buy_rate,
         "sell_or_avoid_window_rate_pct": sell_or_avoid_rate,
+        "triple_barrier_profit_first_rate_pct": pct(bucket["triple_profit_first"], triple_total),
+        "triple_barrier_stop_first_rate_pct": pct(bucket["triple_stop_first"], triple_total),
+        "triple_barrier_timeout_rate_pct": pct(bucket["triple_timeout"], triple_total),
+        "avg_candle_body_pct": (
+            round(bucket["candle_body_total"] / candle_rows, 4) if candle_rows else None
+        ),
+        "avg_close_location": (
+            round(bucket["close_location_total"] / candle_rows, 4) if candle_rows else None
+        ),
+        "avg_range_atr_ratio": (
+            round(bucket["range_atr_total"] / candle_rows, 4) if candle_rows else None
+        ),
+        "avg_volume_weighted_pressure_3": (
+            round(bucket["volume_pressure_total"] / candle_rows, 4) if candle_rows else None
+        ),
         "evidence_label": evidence_label,
         "recommendation": "observe",
         "authority_ready": False,

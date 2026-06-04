@@ -12,7 +12,7 @@ import json
 from typing import Any, Callable
 
 
-AI_MOMENTUM_PATTERN_VERSION = "ai_momentum_pattern_v2"
+AI_MOMENTUM_PATTERN_VERSION = "ai_momentum_pattern_v3"
 AI_MOMENTUM_PATTERN_AUTHORITY = "observe_only_no_live_authority"
 
 Provider = Callable[[str], dict[str, Any] | str]
@@ -66,6 +66,7 @@ def build_momentum_pattern_prompt(
     momentum_state: dict[str, Any],
     trend_state: dict[str, Any],
     event_state: dict[str, Any] | None = None,
+    candle_state: dict[str, Any] | None = None,
 ) -> str:
     compact = {
         "symbol": symbol,
@@ -74,6 +75,7 @@ def build_momentum_pattern_prompt(
         "momentum_state": momentum_state,
         "trend_state": trend_state,
         "event_state": event_state or {},
+        "candle_state": candle_state or {},
     }
     return (
         "Interpret this trading setup's momentum/trend pattern for review "
@@ -129,6 +131,20 @@ def _pattern_forecast(
             "expected_mae_pct": -0.55,
             "holding_time_decay": "moderate",
         },
+        "constructive_candle_pressure": {
+            "expected_horizon": "5m_to_30m",
+            "favorable_move_probability": 0.54,
+            "expected_mfe_pct": 0.55,
+            "expected_mae_pct": -0.42,
+            "holding_time_decay": "moderate_if_pressure_persists",
+        },
+        "bearish_candle_pressure": {
+            "expected_horizon": "5m_to_30m",
+            "favorable_move_probability": 0.37,
+            "expected_mfe_pct": 0.25,
+            "expected_mae_pct": -0.75,
+            "holding_time_decay": "fast_against_long_entries",
+        },
     }.get(
         pattern_label,
         {
@@ -177,11 +193,13 @@ def deterministic_momentum_pattern(
     momentum_state: dict[str, Any] | None = None,
     trend_state: dict[str, Any] | None = None,
     event_state: dict[str, Any] | None = None,
+    candle_state: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     regime_state = _dict(regime_state)
     momentum_state = _dict(momentum_state)
     trend_state = _dict(trend_state)
     event_state = _dict(event_state)
+    candle_state = _dict(candle_state)
 
     trend_direction = _safe_str(trend_state.get("direction"), default="neutral")
     trend_strength = _safe_str(trend_state.get("strength"), default="unknown")
@@ -194,6 +212,11 @@ def deterministic_momentum_pattern(
     participation = _safe_str(regime_state.get("participation_state"), default="unknown")
     volatility_stretch = _safe_str(regime_state.get("volatility_stretch_state"), default="unknown")
     liquidity = _safe_str(regime_state.get("microstructure_liquidity_state"), default="unknown")
+    candle_body_pct = _safe_float(candle_state.get("candle_body_pct"))
+    close_location = _safe_float(candle_state.get("close_location"))
+    range_atr_ratio = _safe_float(candle_state.get("range_atr_ratio"))
+    volume_weighted_pressure_3 = _safe_float(candle_state.get("volume_weighted_pressure_3"))
+    triple_barrier_label = candle_state.get("triple_barrier_label")
 
     missing = []
     if trend_direction == "neutral" or trend_strength == "unknown":
@@ -204,6 +227,8 @@ def deterministic_momentum_pattern(
         missing.append("participation_confirmation")
     if vwap_state == "unknown":
         missing.append("vwap_state")
+    if not candle_state:
+        missing.append("candle_physics")
 
     pattern = "mixed_or_unclassified_pattern"
     directional_bias = "neutral"
@@ -263,6 +288,35 @@ def deterministic_momentum_pattern(
         directional_bias = "mixed"
         failure_mode = "spread_or_liquidity_absorbs_edge"
 
+    if (
+        close_location is not None
+        and candle_body_pct is not None
+        and range_atr_ratio is not None
+        and close_location >= 0.75
+        and candle_body_pct >= 0.50
+        and 0.80 <= range_atr_ratio <= 2.50
+        and (volume_weighted_pressure_3 or 0.0) > 0
+        and pattern == "mixed_or_unclassified_pattern"
+    ):
+        pattern = "constructive_candle_pressure"
+        directional_bias = "constructive"
+        continuation = "early_pressure_follow_through_possible"
+        failure_mode = "upper_wick_rejection_or_pressure_fade"
+        confidence = "medium"
+
+    if (
+        close_location is not None
+        and range_atr_ratio is not None
+        and close_location <= 0.25
+        and range_atr_ratio >= 1.25
+        and (volume_weighted_pressure_3 or 0.0) < 0
+    ):
+        pattern = "bearish_candle_pressure"
+        directional_bias = "risk_negative"
+        continuation = "downside_follow_through_risk"
+        failure_mode = "forceful_selling_or_failed_reversal"
+        confidence = "medium"
+
     rationale = [
         f"trend={trend_direction}/{trend_strength}",
         f"momentum={momentum_label}",
@@ -271,6 +325,13 @@ def deterministic_momentum_pattern(
         f"vwap={vwap_state}",
         f"participation={participation}",
     ]
+    if candle_state:
+        rationale.append(
+            "candle="
+            f"body={candle_body_pct},close_loc={close_location},"
+            f"range_atr={range_atr_ratio},pressure3={volume_weighted_pressure_3},"
+            f"triple={triple_barrier_label}"
+        )
     event_alignment = event_state.get("ai_market_alignment") or event_state.get("intent_directions")
     if event_alignment:
         rationale.append(f"event_alignment={event_alignment}")
@@ -415,6 +476,7 @@ class AIMomentumPatternService:
         momentum_state: dict[str, Any] | None = None,
         trend_state: dict[str, Any] | None = None,
         event_state: dict[str, Any] | None = None,
+        candle_state: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         fallback = deterministic_momentum_pattern(
             symbol=symbol,
@@ -423,6 +485,7 @@ class AIMomentumPatternService:
             momentum_state=momentum_state,
             trend_state=trend_state,
             event_state=event_state,
+            candle_state=candle_state,
         )
         if not self.config.enabled or self.provider is None:
             if (
@@ -440,6 +503,7 @@ class AIMomentumPatternService:
             momentum_state=_dict(momentum_state),
             trend_state=_dict(trend_state),
             event_state=_dict(event_state),
+            candle_state=_dict(candle_state),
         )
         try:
             payload = self.provider(prompt)

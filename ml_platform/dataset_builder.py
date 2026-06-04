@@ -33,12 +33,14 @@ from symbols_config import SYMBOL_UNIVERSE_VERSION
 
 QUERY_VERSION = "ml_dataset_builder_v1"
 LABEL_VERSION = "label_taxonomy_v1"
+BAR_PATTERN_FEATURE_TARGET_VERSION = "bar_pattern_feature_target_v1"
 
 FIXED_HORIZON_TARGETS = [
     "ret_fwd_15m",
     "ret_fwd_30m",
     "max_up_15m",
     "max_down_15m",
+    "triple_barrier_label",
 ]
 
 FUTURE_FIXED_HORIZON_TARGETS = [
@@ -90,6 +92,25 @@ ROW_COLUMNS = [
     "setup_score",
     "setup_confidence",
     "setup_key",
+    # Observe-only candle physics / pattern learning features
+    "bar_pattern_feature_version",
+    "candle_body_pct",
+    "upper_wick_pct",
+    "lower_wick_pct",
+    "upper_lower_wick_ratio",
+    "close_location",
+    "range_atr_ratio",
+    "atr_20_pct",
+    "volume_ratio_20",
+    "pressure_return_3",
+    "pressure_return_8",
+    "volume_weighted_pressure_3",
+    "bar_pattern_label",
+    "bar_pattern_score",
+    "bar_opportunity_action",
+    "bar_opportunity_quality",
+    "bar_long_opportunity_score",
+    "bar_sell_opportunity_score",
     # Fixed-horizon labels (from labeled_setups)
     "future_price_5m",
     "future_price_15m",
@@ -100,6 +121,12 @@ ROW_COLUMNS = [
     "max_up_15m",
     "max_down_15m",
     "outcome_label",
+    # Triple-barrier label metadata (from bar_pattern_features)
+    "triple_barrier_label",
+    "triple_barrier_reason",
+    "triple_barrier_bars_to_event",
+    "triple_barrier_profit_pct",
+    "triple_barrier_stop_pct",
     # Daily context (from daily_symbol_context)
     "context_bias",
     "context_confidence",
@@ -319,6 +346,8 @@ def build_training_dataset(config: DatasetBuildConfig) -> DatasetBuildResult:
     )
     manifest["safe_training_targets"] = FIXED_HORIZON_TARGETS
     manifest["future_fixed_horizon_targets_pending_schema"] = FUTURE_FIXED_HORIZON_TARGETS
+    manifest["bar_pattern_feature_target_version"] = BAR_PATTERN_FEATURE_TARGET_VERSION
+    manifest["triple_barrier_target_included"] = True
     manifest["pit_contract_ok"] = pit_contract.get("ok", False)
     manifest["stale_feature_snapshot_count"] = pit_contract.get(
         "stale_feature_snapshot_count", 0

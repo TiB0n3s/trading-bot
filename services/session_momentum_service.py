@@ -529,6 +529,15 @@ class SessionMomentumService:
 
     def refresh_symbol(self, symbol: str) -> dict[str, Any]:
         bars = self._fetch_session_bars(symbol)
+        return self.refresh_from_bars(symbol, bars)
+
+    def refresh_from_bars(self, symbol: str, bars: list[Any]) -> dict[str, Any]:
+        """Refresh session state from an already-collected 1-minute bar sequence.
+
+        This is the shared ingestion path for REST polling and live closed-bar
+        streams. Keeping it here prevents the streaming path from inventing a
+        second version of session momentum or bar-pattern capture.
+        """
         row = self.build_from_bars(symbol, bars)
         row = self.upsert(row)
         self._capture_bar_pattern_features(symbol, bars)

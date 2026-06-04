@@ -125,6 +125,7 @@ class PolygonMarketDataService:
                     "low": row.get("l"),
                     "close": row.get("c"),
                     "volume": row.get("v"),
+                    "vwap": row.get("vw") if row.get("vw") is not None else row.get("c"),
                 }
             )
         return bars

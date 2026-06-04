@@ -484,6 +484,48 @@ Inserts synthetic exit rows for unmatched bracket sell fills.
 Managed by:
 
 sudo systemctl status fill-stream --no-pager
+
+live_bar_stream.py
+
+Optional Alpaca `alpaca-py` 1-minute closed-bar listener.
+
+Responsibilities:
+
+Subscribes to live 1-minute bars.
+Gap-fills missing rolling context after startup/reconnect.
+Updates session_momentum through SessionMomentumService.
+Feeds bar_pattern_features for EFI/PVT/candle-physics and triple-barrier learning.
+
+Runtime effect:
+
+observe_only_bar_learning_no_direct_order_authority
+
+This stream is an intelligence/learning input only. It must not submit orders or bypass LiveSignalProcessor authority paths.
+
+pipeline/historical_bar_archive.py
+
+Offline Polygon archive/backfill job for 1-minute regular-session bars.
+
+Responsibilities:
+
+Archives Polygon 1-minute RTH bars.
+Caches CSVs under `data/historical_bars/polygon_1min`.
+Feeds bars into `bar_pattern_features` unless `--no-patterns` is supplied.
+Provides historical candle-physics and triple-barrier labels for ML/replay research.
+
+Usage:
+
+python3 pipeline/historical_bar_archive.py --date 2026-06-03 --symbol AAPL
+python3 pipeline/historical_bar_archive.py --date 2026-06-03 --all
+
+ML candle-pattern contract:
+
+`bar_pattern_features` is part of the ML/export surface. Candle body/wick ratios,
+close location, ATR-normalized range, pressure vectors, EFI/PVT pattern labels,
+opportunity scores, and `triple_barrier_label` are observe-only training/research
+inputs. Live promotion still requires model-readiness, calibration, stability,
+and rollout-governance checks.
+
 fill_poller.py
 
 Fallback order fill reconciler.

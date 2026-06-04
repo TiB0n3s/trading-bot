@@ -87,6 +87,7 @@ class TrainingDataRepository:
             has_labels = self._table_exists(con, "labeled_setups")
             has_context = self._table_exists(con, "daily_symbol_context")
             has_predictions = self._table_exists(con, "daily_symbol_predictions")
+            has_bar_patterns = self._table_exists(con, "bar_pattern_features")
 
             label_join = """
                 LEFT JOIN labeled_setups ls
@@ -102,6 +103,19 @@ class TrainingDataRepository:
                   ON p.market_date = substr(fs.timestamp, 1, 10)
                  AND p.symbol = fs.symbol
             """ if has_predictions else ""
+            bar_pattern_join = """
+                LEFT JOIN bar_pattern_features bp
+                  ON bp.symbol = fs.symbol
+                 AND bp.bar_timestamp = fs.timestamp
+                 AND bp.timeframe = '1m'
+                 AND bp.rowid = (
+                    SELECT MAX(bp2.rowid)
+                    FROM bar_pattern_features bp2
+                    WHERE bp2.symbol = fs.symbol
+                      AND bp2.bar_timestamp = fs.timestamp
+                      AND bp2.timeframe = '1m'
+                 )
+            """ if has_bar_patterns else ""
 
             query = f"""
                 SELECT
@@ -121,11 +135,19 @@ class TrainingDataRepository:
                     {('p.confidence' if has_predictions else 'NULL')} AS prediction_confidence,
                     {('p.sample_size' if has_predictions else 'NULL')} AS prediction_sample_size,
                     {('p.trend_label' if has_predictions else 'NULL')} AS prediction_trend_label,
-                    {('p.timing_score' if has_predictions else 'NULL')} AS prediction_timing_score
+                    {('p.timing_score' if has_predictions else 'NULL')} AS prediction_timing_score,
+                    {('bp.pattern_label' if has_bar_patterns else 'NULL')} AS bar_pattern_label,
+                    {('bp.pattern_score' if has_bar_patterns else 'NULL')} AS bar_pattern_score,
+                    {('bp.candle_body_pct' if has_bar_patterns else 'NULL')} AS candle_body_pct,
+                    {('bp.close_location' if has_bar_patterns else 'NULL')} AS close_location,
+                    {('bp.range_atr_ratio' if has_bar_patterns else 'NULL')} AS range_atr_ratio,
+                    {('bp.volume_weighted_pressure_3' if has_bar_patterns else 'NULL')} AS volume_weighted_pressure_3,
+                    {('bp.triple_barrier_label' if has_bar_patterns else 'NULL')} AS triple_barrier_label
                 FROM feature_snapshots fs
                 {label_join}
                 {context_join}
                 {prediction_join}
+                {bar_pattern_join}
                 WHERE {where_sql}
                 ORDER BY fs.timestamp, fs.symbol, fs.id
             """
@@ -153,7 +175,28 @@ class TrainingDataRepository:
                     raise RuntimeError(f"Required table missing: {table}")
 
             fs_cols = self._table_columns(con, "feature_snapshots")
+            bp_cols = self._table_columns(con, "bar_pattern_features")
             opt = self._opt
+
+            def bp_opt(col: str, alias: str | None = None, fallback: str = "NULL") -> str:
+                alias = alias or col
+                return f"bp.{col} AS {alias}" if col in bp_cols else f"{fallback} AS {alias}"
+
+            bar_pattern_join = ""
+            if bp_cols:
+                bar_pattern_join = """
+                LEFT JOIN bar_pattern_features bp
+                  ON bp.symbol = fs.symbol
+                 AND bp.bar_timestamp = fs.timestamp
+                 AND bp.timeframe = '1m'
+                 AND bp.rowid = (
+                    SELECT MAX(bp2.rowid)
+                    FROM bar_pattern_features bp2
+                    WHERE bp2.symbol = fs.symbol
+                      AND bp2.bar_timestamp = fs.timestamp
+                      AND bp2.timeframe = '1m'
+                 )
+                """
             query = f"""
                 SELECT
                     fs.id                          AS snapshot_id,
@@ -191,6 +234,24 @@ class TrainingDataRepository:
                     fs.setup_score,
                     fs.setup_confidence,
                     fs.setup_key,
+                    {bp_opt('feature_version', 'bar_pattern_feature_version')},
+                    {bp_opt('candle_body_pct')},
+                    {bp_opt('upper_wick_pct')},
+                    {bp_opt('lower_wick_pct')},
+                    {bp_opt('upper_lower_wick_ratio')},
+                    {bp_opt('close_location')},
+                    {bp_opt('range_atr_ratio')},
+                    {bp_opt('atr_20_pct')},
+                    {bp_opt('volume_ratio_20')},
+                    {bp_opt('pressure_return_3')},
+                    {bp_opt('pressure_return_8')},
+                    {bp_opt('volume_weighted_pressure_3')},
+                    {bp_opt('pattern_label', 'bar_pattern_label')},
+                    {bp_opt('pattern_score', 'bar_pattern_score')},
+                    {bp_opt('opportunity_action', 'bar_opportunity_action')},
+                    {bp_opt('opportunity_quality', 'bar_opportunity_quality')},
+                    {bp_opt('long_opportunity_score', 'bar_long_opportunity_score')},
+                    {bp_opt('sell_opportunity_score', 'bar_sell_opportunity_score')},
                     ls.future_price_5m,
                     ls.future_price_15m,
                     ls.future_price_30m,
@@ -200,6 +261,11 @@ class TrainingDataRepository:
                     ls.max_up_15m,
                     ls.max_down_15m,
                     ls.outcome_label,
+                    {bp_opt('triple_barrier_label')},
+                    {bp_opt('triple_barrier_reason')},
+                    {bp_opt('triple_barrier_bars_to_event')},
+                    {bp_opt('triple_barrier_profit_pct')},
+                    {bp_opt('triple_barrier_stop_pct')},
                     c.bias                         AS context_bias,
                     c.confidence                   AS context_confidence,
                     c.risk_level                   AS context_risk_level,
@@ -229,6 +295,7 @@ class TrainingDataRepository:
                 FROM feature_snapshots fs
                 LEFT JOIN labeled_setups ls
                   ON ls.snapshot_id = fs.id
+                {bar_pattern_join}
                 LEFT JOIN daily_symbol_context c
                   ON c.market_date = substr(fs.timestamp, 1, 10)
                  AND c.symbol      = fs.symbol

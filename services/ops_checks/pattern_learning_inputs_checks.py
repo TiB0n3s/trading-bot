@@ -185,6 +185,22 @@ def run_pattern_learning_inputs_report(
                 f"ret={_fmt(row.get('avg_forward_return_pct'))}"
             )
 
+    if bar_patterns.get("triple_barrier_counts"):
+        print()
+        print("Bar-pattern triple-barrier counts")
+        for barrier, count in bar_patterns["triple_barrier_counts"].items():
+            print(f"  {barrier:<42} {count:>6}")
+
+    if bar_patterns.get("triple_barrier_expectancy"):
+        print()
+        print("Bar-pattern triple-barrier expectancy")
+        for row in bar_patterns["triple_barrier_expectancy"][:limit]:
+            print(
+                f"  {row['triple_barrier'][:42]:<42} "
+                f"n={row['rows']:<4} win={_fmt(row.get('win_rate')):<8} "
+                f"ret={_fmt(row.get('avg_forward_return_pct'))}"
+            )
+
     if bar_patterns["top_buy_windows"]:
         print()
         print("Top EFI/PVT buy windows")

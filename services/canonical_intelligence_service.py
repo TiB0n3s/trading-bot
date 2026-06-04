@@ -8,8 +8,9 @@ import hashlib
 import json
 from typing import Any
 
-from services.confidence_calibration_service import build_calibrated_confidence
 from services.analytics_method_service import build_analytics_method_state
+from services.ai_momentum_pattern_service import AI_MOMENTUM_PATTERN_VERSION
+from services.confidence_calibration_service import build_calibrated_confidence
 
 
 CANONICAL_INTELLIGENCE_VERSION = "canonical_intelligence_v1"
@@ -507,7 +508,7 @@ def build_canonical_intelligence_snapshot(
     ai_pattern = analytics_state.get("ai_momentum_pattern") or {}
     prediction_layer = ai_pattern.get("prediction_layer") or {}
     pattern_state = {
-        "version": ai_pattern.get("version") or "ai_momentum_pattern_v2",
+        "version": ai_pattern.get("version") or AI_MOMENTUM_PATTERN_VERSION,
         "runtime_effect": (
             ai_pattern.get("runtime_effect")
             or "observe_only_no_live_authority"

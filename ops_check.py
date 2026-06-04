@@ -66,6 +66,7 @@ Usage:
   python3 ops_check.py symbol-patterns
   python3 ops_check.py pattern-learning-inputs
   python3 ops_check.py bar-pattern-backfill YYYY-MM-DD --symbol AAPL [--dry-run]
+  python3 ops_check.py historical-bar-archive START_DATE --end-date YYYY-MM-DD --symbol AAPL
   python3 ops_check.py learning-readiness START_DATE [END_DATE]
   python3 ops_check.py learning-effectiveness START_DATE [END_DATE]
   python3 ops_check.py learning-artifacts YYYY-MM-DD
@@ -123,6 +124,7 @@ from services.ops_checks.post_trade_learning_checks import run_post_trade_learni
 from services.ops_checks.symbol_pattern_checks import run_symbol_pattern_outcomes
 from services.ops_checks.pattern_learning_inputs_checks import run_pattern_learning_inputs_report
 from services.ops_checks.bar_pattern_checks import run_bar_pattern_backfill
+from services.ops_checks.historical_bar_archive_checks import run_historical_bar_archive
 from services.ops_checks.learning_readiness_checks import (
     run_learning_effectiveness,
     run_learning_readiness,
@@ -832,6 +834,24 @@ def bar_pattern_backfill(target_date: str) -> bool:
     )
 
 
+def historical_bar_archive(start_date: str) -> bool:
+    symbol = _str_option("--symbol", "")
+    if not symbol and len(sys.argv) > 3 and not sys.argv[3].startswith("--"):
+        symbol = sys.argv[3]
+    end_date = _str_option("--end-date", start_date)
+    cache_dir_text = _str_option("--cache-dir", "")
+    return run_historical_bar_archive(
+        start_date,
+        base_dir=BASE_DIR,
+        symbol=symbol,
+        end_date=end_date,
+        cache_dir=Path(cache_dir_text) if cache_dir_text else None,
+        build_patterns="--no-patterns" not in sys.argv,
+        horizon_bars=_int_option("--horizon-bars", 20),
+        dry_run="--dry-run" in sys.argv,
+    )
+
+
 def learning_readiness(start_date):
     end_date = None
     if len(sys.argv) > 3 and not sys.argv[3].startswith("--"):
@@ -1210,6 +1230,9 @@ def main():
 
     if command == "bar-pattern-backfill":
         return 0 if bar_pattern_backfill(target_date) else 1
+
+    if command == "historical-bar-archive":
+        return 0 if historical_bar_archive(target_date) else 1
 
     if command == "learning-readiness":
         return 0 if learning_readiness(target_date) else 1

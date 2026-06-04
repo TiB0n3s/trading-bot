@@ -23,6 +23,16 @@ def _optional_column(columns: set[str], table_alias: str, column: str, fallback:
     return f"{table_alias}.{column}" if column in columns else f"{fallback} AS {column}"
 
 
+def _optional_alias(
+    columns: set[str],
+    table_alias: str,
+    column: str,
+    alias: str,
+    fallback: str = "NULL",
+) -> str:
+    return f"{table_alias}.{column} AS {alias}" if column in columns else f"{fallback} AS {alias}"
+
+
 class MlExportRepository:
     def __init__(self, db_path: Path | str):
         self.db_path = Path(db_path)
@@ -35,6 +45,22 @@ class MlExportRepository:
             if missing:
                 raise SystemExit(f"Missing required table(s): {', '.join(missing)}")
             fs_columns = _table_columns(con, "feature_snapshots")
+            bp_columns = _table_columns(con, "bar_pattern_features")
+            bar_pattern_join = ""
+            if bp_columns:
+                bar_pattern_join = """
+                LEFT JOIN bar_pattern_features bp
+                  ON bp.symbol = fs.symbol
+                 AND bp.bar_timestamp = fs.timestamp
+                 AND bp.timeframe = '1m'
+                 AND bp.rowid = (
+                    SELECT MAX(bp2.rowid)
+                    FROM bar_pattern_features bp2
+                    WHERE bp2.symbol = fs.symbol
+                      AND bp2.bar_timestamp = fs.timestamp
+                      AND bp2.timeframe = '1m'
+                 )
+                """
 
             query = f"""
                 SELECT
@@ -73,6 +99,24 @@ class MlExportRepository:
                     fs.setup_score,
                     fs.setup_confidence,
                     fs.setup_key,
+                    {_optional_alias(bp_columns, 'bp', 'feature_version', 'bar_pattern_feature_version')},
+                    {_optional_column(bp_columns, 'bp', 'candle_body_pct')},
+                    {_optional_column(bp_columns, 'bp', 'upper_wick_pct')},
+                    {_optional_column(bp_columns, 'bp', 'lower_wick_pct')},
+                    {_optional_column(bp_columns, 'bp', 'upper_lower_wick_ratio')},
+                    {_optional_column(bp_columns, 'bp', 'close_location')},
+                    {_optional_column(bp_columns, 'bp', 'range_atr_ratio')},
+                    {_optional_column(bp_columns, 'bp', 'atr_20_pct')},
+                    {_optional_column(bp_columns, 'bp', 'volume_ratio_20')},
+                    {_optional_column(bp_columns, 'bp', 'pressure_return_3')},
+                    {_optional_column(bp_columns, 'bp', 'pressure_return_8')},
+                    {_optional_column(bp_columns, 'bp', 'volume_weighted_pressure_3')},
+                    {_optional_alias(bp_columns, 'bp', 'pattern_label', 'bar_pattern_label')},
+                    {_optional_alias(bp_columns, 'bp', 'pattern_score', 'bar_pattern_score')},
+                    {_optional_alias(bp_columns, 'bp', 'opportunity_action', 'bar_opportunity_action')},
+                    {_optional_alias(bp_columns, 'bp', 'opportunity_quality', 'bar_opportunity_quality')},
+                    {_optional_alias(bp_columns, 'bp', 'long_opportunity_score', 'bar_long_opportunity_score')},
+                    {_optional_alias(bp_columns, 'bp', 'sell_opportunity_score', 'bar_sell_opportunity_score')},
                     ls.future_price_5m,
                     ls.future_price_15m,
                     ls.future_price_30m,
@@ -82,6 +126,11 @@ class MlExportRepository:
                     ls.max_up_15m,
                     ls.max_down_15m,
                     ls.outcome_label,
+                    {_optional_column(bp_columns, 'bp', 'triple_barrier_label')},
+                    {_optional_column(bp_columns, 'bp', 'triple_barrier_reason')},
+                    {_optional_column(bp_columns, 'bp', 'triple_barrier_bars_to_event')},
+                    {_optional_column(bp_columns, 'bp', 'triple_barrier_profit_pct')},
+                    {_optional_column(bp_columns, 'bp', 'triple_barrier_stop_pct')},
                     c.bias AS context_bias,
                     c.confidence AS context_confidence,
                     c.risk_level AS context_risk_level,
@@ -114,6 +163,7 @@ class MlExportRepository:
                 FROM feature_snapshots fs
                 LEFT JOIN labeled_setups ls
                   ON ls.snapshot_id = fs.id
+                {bar_pattern_join}
                 LEFT JOIN daily_symbol_context c
                   ON c.market_date = substr(fs.timestamp, 1, 10)
                  AND c.symbol = fs.symbol

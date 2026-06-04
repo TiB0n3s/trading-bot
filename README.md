@@ -298,6 +298,69 @@ Managed by systemd:
 
 sudo systemctl status fill-stream
 sudo systemctl restart fill-stream
+
+live_bar_stream.py
+
+Optional Alpaca `alpaca-py` closed-bar listener.
+
+Responsibilities:
+
+Subscribes to live 1-minute bars.
+Gap-fills missing rolling context through the shared market-data service after startup/reconnect.
+Updates session_momentum through SessionMomentumService.
+Feeds the same bars into bar_pattern_features for EFI/PVT/candle-physics and triple-barrier learning.
+
+Runtime effect:
+
+observe_only_bar_learning_no_direct_order_authority
+
+It does not submit orders and does not bypass auto-buy, approval, sizing, or execution gates.
+
+Usage:
+
+python3 live_bar_stream.py --symbol AAPL
+python3 live_bar_stream.py --symbol AAPL,MSFT,NVDA --feed iex
+python3 live_bar_stream.py --all --feed iex
+
+Use `--feed sip` only when the Alpaca account has paid consolidated data. IEX can be useful for paper learning, but its volume/VWAP can differ materially from Polygon/SIP history.
+
+pipeline/historical_bar_archive.py
+
+Offline Polygon archive/backfill job for 1-minute regular-session bars.
+
+Responsibilities:
+
+Archives Polygon 1-minute RTH bars for one or more symbols.
+Caches CSVs under `data/historical_bars/polygon_1min` by default.
+Feeds the same bars into `bar_pattern_features` unless `--no-patterns` is supplied.
+Provides historical candle-physics and triple-barrier labels for ML/replay research.
+
+Usage:
+
+python3 pipeline/historical_bar_archive.py --date 2026-06-03 --symbol AAPL
+python3 pipeline/historical_bar_archive.py --start-date 2026-06-01 --end-date 2026-06-03 --symbol AAPL,MSFT
+python3 pipeline/historical_bar_archive.py --date 2026-06-03 --all
+
+This is an offline learning job only. It does not place orders or grant live authority.
+
+ML candle-pattern integration
+
+`bar_pattern_features` is now part of the ML/export surface:
+
+Included feature families:
+
+candle body/wick ratios
+close location within candle range
+ATR-normalized range
+volume-normalized pressure vectors
+EFI/PVT pattern labels and opportunity scores
+
+Included target:
+
+triple_barrier_label
+
+The target is available for observe-only training/research. Promotion into live authority still requires model-readiness, calibration, stability, and rollout-governance checks.
+
 fill_poller.py
 
 Fallback fill reconciler.

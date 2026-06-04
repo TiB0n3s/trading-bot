@@ -18,8 +18,8 @@ from services.optional_dependency_service import optional_dependency_status
 from policy_artifacts import atomic_write_json
 
 
-SUPERVISED_MODEL_VERSION = "supervised_prediction_model_v1"
-QUANT_MODEL_SUITE_VERSION = "quant_model_suite_v1"
+SUPERVISED_MODEL_VERSION = "supervised_prediction_model_v2"
+QUANT_MODEL_SUITE_VERSION = "quant_model_suite_v2"
 DEFAULT_FEATURE_COLUMNS = (
     "ret_1m",
     "ret_5m",
@@ -31,6 +31,24 @@ DEFAULT_FEATURE_COLUMNS = (
     "spread_pct",
     "setup_score",
 )
+CANDLE_PHYSICS_FEATURE_COLUMNS = (
+    "candle_body_pct",
+    "upper_wick_pct",
+    "lower_wick_pct",
+    "upper_lower_wick_ratio",
+    "close_location",
+    "range_atr_ratio",
+    "atr_20_pct",
+    "volume_ratio_20",
+    "pressure_return_3",
+    "pressure_return_8",
+    "volume_weighted_pressure_3",
+    "pattern_score",
+    "long_opportunity_score",
+    "sell_opportunity_score",
+)
+DEFAULT_FEATURE_COLUMNS = DEFAULT_FEATURE_COLUMNS + CANDLE_PHYSICS_FEATURE_COLUMNS
+TRIPLE_BARRIER_TARGETS = ("triple_barrier", "triple_barrier_label")
 
 
 @dataclass(frozen=True)
@@ -84,6 +102,14 @@ def _row_features(row: dict[str, Any], feature_columns: list[str]) -> list[float
 
 
 def _label(row: dict[str, Any], horizon: str) -> int | None:
+    if horizon in TRIPLE_BARRIER_TARGETS:
+        try:
+            value = row.get("triple_barrier_label")
+            if value is None:
+                return None
+            return int(float(value))
+        except Exception:
+            return None
     col = f"ret_fwd_{horizon}"
     try:
         value = row.get(col)

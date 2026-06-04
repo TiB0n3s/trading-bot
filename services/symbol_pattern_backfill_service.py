@@ -11,7 +11,10 @@ from __future__ import annotations
 
 from typing import Any
 
-from services.ai_momentum_pattern_service import deterministic_momentum_pattern
+from services.ai_momentum_pattern_service import (
+    AI_MOMENTUM_PATTERN_VERSION,
+    deterministic_momentum_pattern,
+)
 
 
 def _dict(value: Any) -> dict[str, Any]:
@@ -37,7 +40,7 @@ def canonical_symbol_pattern_state(canonical: dict[str, Any]) -> dict[str, Any]:
     if analytics_pattern.get("pattern_label"):
         prediction_layer = _dict(analytics_pattern.get("prediction_layer"))
         return {
-            "version": analytics_pattern.get("version") or "ai_momentum_pattern_v2",
+            "version": analytics_pattern.get("version") or AI_MOMENTUM_PATTERN_VERSION,
             "runtime_effect": analytics_pattern.get("runtime_effect")
             or "observe_only_no_live_authority",
             "pattern_label": analytics_pattern.get("pattern_label"),
@@ -72,7 +75,7 @@ def canonical_symbol_pattern_state(canonical: dict[str, Any]) -> dict[str, Any]:
     )
     prediction_layer = _dict(derived.get("prediction_layer"))
     return {
-        "version": derived.get("version") or "ai_momentum_pattern_v2",
+        "version": derived.get("version") or AI_MOMENTUM_PATTERN_VERSION,
         "runtime_effect": derived.get("runtime_effect")
         or "observe_only_no_live_authority",
         "pattern_label": derived.get("pattern_label"),

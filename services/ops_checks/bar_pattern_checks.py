@@ -88,6 +88,7 @@ def run_bar_pattern_backfill(
             "rows_with_forward_outcome": result.rows_with_forward_outcome,
             "labels": result.label_summary,
             "opportunities": result.opportunity_summary,
+            "triple_barriers": [],
         }
     else:
         summary = service.summary(target_date, symbol=symbol)
@@ -122,6 +123,22 @@ def run_bar_pattern_backfill(
                 f"{_fmt(row.get('avg_long_opportunity_score'), 2):>8} "
                 f"{_fmt(row.get('avg_sell_opportunity_score'), 2):>8} "
                 f"{_fmt(row.get('avg_forward_return_pct')):>8}"
+            )
+
+    if summary.get("triple_barriers"):
+        print()
+        print("Triple-barrier label summary")
+        print(f"  {'label':>5} {'reason':<40} {'rows':>6} {'ret':>8} {'mfe':>8} {'mae':>8} {'bars':>8}")
+        print(f"  {'-' * 5} {'-' * 40} {'-' * 6} {'-' * 8} {'-' * 8} {'-' * 8} {'-' * 8}")
+        for row in summary["triple_barriers"][:12]:
+            print(
+                f"  {str(row.get('triple_barrier_label')):>5} "
+                f"{str(row.get('triple_barrier_reason') or 'unknown')[:40]:<40} "
+                f"{int(row.get('rows') or 0):>6} "
+                f"{_fmt(row.get('avg_forward_return_pct')):>8} "
+                f"{_fmt(row.get('avg_forward_mfe_pct')):>8} "
+                f"{_fmt(row.get('avg_forward_mae_pct')):>8} "
+                f"{_fmt(row.get('avg_bars_to_event'), 2):>8}"
             )
 
     if not result.feature_rows:

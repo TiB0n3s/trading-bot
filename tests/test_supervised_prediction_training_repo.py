@@ -45,6 +45,30 @@ def _build_db(path: Path) -> None:
             )
             """
         )
+        con.execute(
+            """
+            CREATE TABLE bar_pattern_features (
+                symbol TEXT,
+                bar_timestamp TEXT,
+                timeframe TEXT,
+                candle_body_pct REAL,
+                close_location REAL,
+                range_atr_ratio REAL,
+                volume_weighted_pressure_3 REAL,
+                pattern_label TEXT,
+                pattern_score REAL,
+                opportunity_action TEXT,
+                opportunity_quality TEXT,
+                long_opportunity_score REAL,
+                sell_opportunity_score REAL,
+                triple_barrier_label INTEGER,
+                triple_barrier_reason TEXT,
+                triple_barrier_bars_to_event INTEGER,
+                triple_barrier_profit_pct REAL,
+                triple_barrier_stop_pct REAL
+            )
+            """
+        )
         for idx, available_at in (
             (1, "2026-06-03T10:00:00+00:00"),
             (2, "2026-06-03T22:00:00+00:00"),
@@ -68,6 +92,29 @@ def _build_db(path: Path) -> None:
                 """,
                 (idx,),
             )
+            con.execute(
+                """
+                INSERT INTO bar_pattern_features (
+                    symbol, bar_timestamp, timeframe,
+                    candle_body_pct, close_location, range_atr_ratio,
+                    volume_weighted_pressure_3, pattern_label, pattern_score,
+                    opportunity_action, opportunity_quality,
+                    long_opportunity_score, sell_opportunity_score,
+                    triple_barrier_label, triple_barrier_reason,
+                    triple_barrier_bars_to_event, triple_barrier_profit_pct,
+                    triple_barrier_stop_pct
+                ) VALUES (
+                    'AAPL', ?, '1m',
+                    0.6, 0.8, 1.2,
+                    0.3, 'constructive_force_pvt', 72,
+                    'long_candidate', 'good_buy_window',
+                    80, 20,
+                    1, 'profit_target_first',
+                    4, 0.5, 0.3
+                )
+                """,
+                (f"2026-06-03T0{idx}:00:00+00:00",),
+            )
 
 
 def test_fetch_training_rows_respects_feature_available_at_cutoff():
@@ -82,6 +129,8 @@ def test_fetch_training_rows_respects_feature_available_at_cutoff():
 
     assert len(rows) == 1
     assert rows[0]["timestamp"] == "2026-06-03T01:00:00+00:00"
+    assert rows[0]["candle_body_pct"] == 0.6
+    assert rows[0]["triple_barrier_label"] == 1
 
 
 if __name__ == "__main__":

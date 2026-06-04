@@ -30,6 +30,21 @@ def _rows(n=60):
                 "relative_strength_5m": 0.2,
                 "spread_pct": 0.01,
                 "setup_score": 60,
+                "candle_body_pct": 0.6,
+                "upper_wick_pct": 0.1,
+                "lower_wick_pct": 0.3,
+                "upper_lower_wick_ratio": 0.333,
+                "close_location": 0.8,
+                "range_atr_ratio": 1.2,
+                "atr_20_pct": 0.4,
+                "volume_ratio_20": 1.5,
+                "pressure_return_3": 0.2,
+                "pressure_return_8": 0.4,
+                "volume_weighted_pressure_3": 0.3,
+                "pattern_score": 72,
+                "long_opportunity_score": 80,
+                "sell_opportunity_score": 20,
+                "triple_barrier_label": 1 if i % 3 == 0 else (-1 if i % 3 == 1 else 0),
                 "ret_fwd_15m": 0.2 if i % 2 == 0 else -0.1,
             }
         )
@@ -44,6 +59,7 @@ def test_train_supervised_prediction_model_uses_baseline_without_required_deps()
     assert result["baseline_positive_rate"] == 0.5
     assert result["runtime_effect"] == "observe_only_no_live_authority"
     assert "artifact_path" in result
+    assert "candle_body_pct" in result["feature_columns"]
 
 
 def test_train_supervised_prediction_model_blocks_small_samples():
@@ -63,7 +79,7 @@ def test_train_quant_model_suite_compares_available_observe_only_models():
         ).to_dict()
 
     providers = {row["provider"] for row in result["models"]}
-    assert result["version"] == "quant_model_suite_v1"
+    assert result["version"] == "quant_model_suite_v2"
     assert result["runtime_effect"] == "observe_only_no_live_authority"
     assert result["sample_size"] == 80
     assert "chronological_positive_rate_baseline" in providers
@@ -72,11 +88,25 @@ def test_train_quant_model_suite_compares_available_observe_only_models():
     assert all(row["runtime_effect"] == "observe_only_no_live_authority" for row in result["models"])
 
 
+def test_train_supervised_prediction_model_can_use_triple_barrier_target():
+    result = train_supervised_prediction_model(
+        rows=_rows(90),
+        horizon="triple_barrier",
+        min_samples=40,
+    ).to_dict()
+
+    assert result["trained"] is True
+    assert result["sample_size"] == 90
+    assert "triple_barrier" in result["reason"] or result["provider"]
+    assert result["runtime_effect"] == "observe_only_no_live_authority"
+
+
 def main():
     tests = [
         test_train_supervised_prediction_model_uses_baseline_without_required_deps,
         test_train_supervised_prediction_model_blocks_small_samples,
         test_train_quant_model_suite_compares_available_observe_only_models,
+        test_train_supervised_prediction_model_can_use_triple_barrier_target,
     ]
     for test in tests:
         test()

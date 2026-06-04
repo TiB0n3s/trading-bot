@@ -54,7 +54,7 @@ def test_polygon_aggregate_bar_dicts_normalizes_results():
         return {
             "status": "OK",
             "results": [
-                {"t": 1780407000000, "o": 100.0, "h": 101.0, "l": 99.5, "c": 100.5, "v": 12345},
+                {"t": 1780407000000, "o": 100.0, "h": 101.0, "l": 99.5, "c": 100.5, "v": 12345, "vw": 100.3},
                 {"t": 1780407300000, "o": 100.5, "h": 102.0, "l": 100.2, "c": 101.8, "v": 23456},
             ],
         }
@@ -65,7 +65,9 @@ def test_polygon_aggregate_bar_dicts_normalizes_results():
     assert len(bars) == 2
     assert bars[0]["timestamp"].startswith("2026-06-02T")
     assert bars[0]["open"] == 100.0
+    assert bars[0]["vwap"] == 100.3
     assert bars[1]["close"] == 101.8
+    assert bars[1]["vwap"] == 101.8
     assert "/v2/aggs/ticker/AAPL/range/5/minute/2026-06-02/2026-06-02" in calls[0].url
 
 

@@ -69,6 +69,14 @@ def test_bar_pattern_service_builds_efi_pvt_forward_features():
     assert any(row["sell_opportunity_score"] is not None for row in rows)
     assert any(row["forward_mfe_pct"] is not None for row in rows)
     assert any(row["forward_mae_pct"] is not None for row in rows)
+    assert any(row["candle_body_pct"] is not None for row in rows)
+    assert any(row["upper_wick_pct"] is not None for row in rows)
+    assert any(row["lower_wick_pct"] is not None for row in rows)
+    assert any(row["range_atr_ratio"] is not None for row in rows)
+    assert any(row["pressure_return_3"] is not None for row in rows)
+    assert any(row["volume_weighted_pressure_3"] is not None for row in rows)
+    assert any(row["triple_barrier_label"] in {-1, 0, 1} for row in rows)
+    assert any(row["triple_barrier_reason"] for row in rows)
 
 
 def test_bar_pattern_repository_persists_and_summarizes(tmp_path: Path):
@@ -89,6 +97,7 @@ def test_bar_pattern_repository_persists_and_summarizes(tmp_path: Path):
     assert summary["rows_with_forward_outcome"] > 0
     assert summary["labels"]
     assert summary["opportunities"]
+    assert summary["triple_barriers"]
     assert any(
         row["opportunity_action"] == "buy_candidate"
         for row in summary["opportunities"]
@@ -125,6 +134,7 @@ def test_bar_pattern_ops_backfill_uses_polygon_and_reports(tmp_path: Path):
     assert "observe_only_pattern_learning_no_live_authority" in out
     assert "feature_rows" in out
     assert "Hindsight opportunity summary" in out
+    assert "Triple-barrier label summary" in out
     assert "buy_candidate" in out
     assert fake.kwargs["multiplier"] == 5
 

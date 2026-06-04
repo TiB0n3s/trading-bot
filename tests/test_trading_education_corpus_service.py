@@ -76,6 +76,10 @@ def test_strategy_concepts_are_normalized_and_non_authoritative():
         "backtesting_overfitting_control",
         "news_expectations_positioning",
         "short_selling_risk",
+        "rally_exhaustion_exit_patterns",
+        "implied_volatility_context",
+        "heikin_ashi_trend_reversal",
+        "ipo_liquidity_restrictions",
     }
 
     assert expected.issubset(concepts)
@@ -85,6 +89,10 @@ def test_strategy_concepts_are_normalized_and_non_authoritative():
     assert "walk_forward_window" in concepts["backtesting_overfitting_control"]["related_features"]
     assert "priced_in_risk" in concepts["news_expectations_positioning"]["related_features"]
     assert "short_squeeze_risk" in concepts["short_selling_risk"]["related_features"]
+    assert "bearish_engulfing" in concepts["rally_exhaustion_exit_patterns"]["related_features"]
+    assert "expected_move" in concepts["implied_volatility_context"]["related_features"]
+    assert "heikin_ashi_color_run" in concepts["heikin_ashi_trend_reversal"]["related_features"]
+    assert "lockup_expiration" in concepts["ipo_liquidity_restrictions"]["related_features"]
     assert "out-of-sample" in concepts["backtesting_overfitting_control"]["summary"]
     assert all(concept["live_authority"] == "education_context_only" for concept in concepts.values())
 
@@ -154,6 +162,10 @@ def test_schwab_child_seeds_are_approved_and_blocked_pages_fail(tmp_path=None):
     assert "https://www.schwab.com/learn/story/options-strategy-covered-call" in schwab_pairs
     assert "https://www.schwab.com/learn/story/why-stocks-sometimes-ignore-good-or-bad-news" in schwab_pairs
     assert "https://www.schwab.com/learn/story/ins-and-outs-short-selling" in schwab_pairs
+    assert "https://www.schwab.com/learn/story/ways-traders-spot-rallys-potential-end" in schwab_pairs
+    assert "https://www.schwab.com/learn/story/aligning-your-options-with-implied-volatility" in schwab_pairs
+    assert "https://www.schwab.com/learn/story/heikin-ashi-candles-reversals-and-strategies" in schwab_pairs
+    assert "https://www.schwab.com/learn/story/pre-ipo-company-equity-6-actions-to-take-now" in schwab_pairs
 
     result = service.ingest(max_pages=len(service.approved_seed_pairs()), follow_links=False)
     summary = repo.summary()
@@ -247,6 +259,95 @@ def test_manual_snapshot_maps_short_selling_risk_article():
     tmp.cleanup()
 
 
+def test_manual_snapshot_maps_rally_exhaustion_exit_article():
+    tmp = tempfile.TemporaryDirectory()
+    db_path = Path(tmp.name) / "trades.db"
+    repo = TradingEducationRepository(db_path)
+    service = TradingEducationIngestionService(repo=repo)
+
+    result = service.ingest_manual_snapshot(
+        url="https://www.schwab.com/learn/story/ways-traders-spot-rallys-potential-end",
+        title="4 Ways Traders Spot a Rally's Potential End",
+        content=(
+            "A rally may be coming to an end when good news is bad news, dip buyers stop "
+            "getting rewarded, a sharp top becomes parabolic, or a stock closes near the "
+            "day's lows. Bearish engulfing, dark cloud cover, shooting star, three black "
+            "crows, advance block, and negative divergence can corroborate exit review."
+        ),
+    )
+
+    assert result["status"] in {"stored", "needs_review"}
+    assert "rally_exhaustion_exit_patterns" in result["concept_keys"]
+    assert "bearish_engulfing" in result["related_features"]
+    tmp.cleanup()
+
+
+def test_manual_snapshot_maps_implied_volatility_article():
+    tmp = tempfile.TemporaryDirectory()
+    db_path = Path(tmp.name) / "trades.db"
+    repo = TradingEducationRepository(db_path)
+    service = TradingEducationIngestionService(repo=repo)
+
+    result = service.ingest_manual_snapshot(
+        url="https://www.schwab.com/learn/story/aligning-your-options-with-implied-volatility",
+        title="Aligning Options Strategies and Implied Volatility",
+        content=(
+            "Implied volatility estimates expected volatility and expected move magnitude, "
+            "not direction. Traders compare historical volatility, IV rank, IV percentile, "
+            "probability cones, VIX, short vega, long vega, term structure, and tail risk."
+        ),
+    )
+
+    assert result["status"] in {"stored", "needs_review"}
+    assert "implied_volatility_context" in result["concept_keys"]
+    assert "expected_move" in result["related_features"]
+    tmp.cleanup()
+
+
+def test_manual_snapshot_maps_heikin_ashi_article():
+    tmp = tempfile.TemporaryDirectory()
+    db_path = Path(tmp.name) / "trades.db"
+    repo = TradingEducationRepository(db_path)
+    service = TradingEducationIngestionService(repo=repo)
+
+    result = service.ingest_manual_snapshot(
+        url="https://www.schwab.com/learn/story/heikin-ashi-candles-reversals-and-strategies",
+        title="How to Use Heikin Ashi Charts",
+        content=(
+            "Heikin ashi average bar charts smooth price action. A heikin ashi bar run, "
+            "short-range bars, bars without bottom wicks, and an eight-period EMA crossing "
+            "a 21-period EMA may help identify trend reversals."
+        ),
+    )
+
+    assert result["status"] in {"stored", "needs_review"}
+    assert "heikin_ashi_trend_reversal" in result["concept_keys"]
+    assert "heikin_ashi_color_run" in result["related_features"]
+    tmp.cleanup()
+
+
+def test_manual_snapshot_maps_ipo_liquidity_restrictions_article():
+    tmp = tempfile.TemporaryDirectory()
+    db_path = Path(tmp.name) / "trades.db"
+    repo = TradingEducationRepository(db_path)
+    service = TradingEducationIngestionService(repo=repo)
+
+    result = service.ingest_manual_snapshot(
+        url="https://www.schwab.com/learn/story/pre-ipo-company-equity-6-actions-to-take-now",
+        title="Pre-IPO Company Equity: 6 Actions to Take Now",
+        content=(
+            "Pre-IPO employees should review the S-1, equity incentive plan, award agreement, "
+            "tender offer terms, lock-up period, blackout period, trading window, 10b5-1 plan, "
+            "dilution, and concentration risk before liquidity events."
+        ),
+    )
+
+    assert result["status"] in {"stored", "needs_review"}
+    assert "ipo_liquidity_restrictions" in result["concept_keys"]
+    assert "lockup_expiration" in result["related_features"]
+    tmp.cleanup()
+
+
 def test_manual_snapshot_blocks_unapproved_urls():
     tmp = tempfile.TemporaryDirectory()
     db_path = Path(tmp.name) / "trades.db"
@@ -292,6 +393,10 @@ def main():
         test_manual_snapshot_ingest_accepts_uploaded_schwab_card_content,
         test_manual_snapshot_maps_expectations_and_positioning_article,
         test_manual_snapshot_maps_short_selling_risk_article,
+        test_manual_snapshot_maps_rally_exhaustion_exit_article,
+        test_manual_snapshot_maps_implied_volatility_article,
+        test_manual_snapshot_maps_heikin_ashi_article,
+        test_manual_snapshot_maps_ipo_liquidity_restrictions_article,
         test_manual_snapshot_blocks_unapproved_urls,
         test_education_ingestion_dry_run_does_not_persist,
     ]

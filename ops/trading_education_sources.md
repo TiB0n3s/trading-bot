@@ -30,6 +30,10 @@ Schwab trading article cards currently tracked as approved child seeds:
 - `https://www.schwab.com/learn/story/what-happens-to-options-when-stock-splits`
 - `https://www.schwab.com/learn/story/why-stocks-sometimes-ignore-good-or-bad-news`
 - `https://www.schwab.com/learn/story/ins-and-outs-short-selling`
+- `https://www.schwab.com/learn/story/ways-traders-spot-rallys-potential-end`
+- `https://www.schwab.com/learn/story/aligning-your-options-with-implied-volatility`
+- `https://www.schwab.com/learn/story/heikin-ashi-candles-reversals-and-strategies`
+- `https://www.schwab.com/learn/story/pre-ipo-company-equity-6-actions-to-take-now`
 
 If Schwab returns an authorization/error page to the VM, the ingestion job
 records `fetch_failed` instead of storing the error page as education content.
@@ -87,6 +91,10 @@ These are used to label and explain bot behavior; they do not grant authority.
 - Backtesting and overfitting control
 - News, expectations, and positioning
 - Short selling risk
+- Rally exhaustion and exit patterns
+- Implied volatility context
+- Heikin Ashi trend reversal context
+- IPO liquidity and insider restriction context
 
 The concept pack should be used for reporting, education context, feature
 taxonomy, and future AI explanation prompts. It must not become a live approval,

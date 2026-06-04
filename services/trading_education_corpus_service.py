@@ -156,6 +156,10 @@ CURATED_TRADING_EDUCATION_SOURCES: tuple[TradingEducationSource, ...] = (
             "https://www.schwab.com/learn/story/what-happens-to-options-when-stock-splits",
             "https://www.schwab.com/learn/story/why-stocks-sometimes-ignore-good-or-bad-news",
             "https://www.schwab.com/learn/story/ins-and-outs-short-selling",
+            "https://www.schwab.com/learn/story/ways-traders-spot-rallys-potential-end",
+            "https://www.schwab.com/learn/story/aligning-your-options-with-implied-volatility",
+            "https://www.schwab.com/learn/story/heikin-ashi-candles-reversals-and-strategies",
+            "https://www.schwab.com/learn/story/pre-ipo-company-equity-6-actions-to-take-now",
         ),
     ),
     TradingEducationSource(
@@ -449,6 +453,122 @@ CURATED_TRADING_EDUCATION_CONCEPTS: tuple[TradingEducationConcept, ...] = (
             "Treat short-sale education as risk context for long-only systems unless explicitly promoted.",
         ),
     ),
+    TradingEducationConcept(
+        key="rally_exhaustion_exit_patterns",
+        name="Rally exhaustion and exit patterns",
+        concept_type="exit_learning",
+        summary=(
+            "A rally may be losing durability when good news is sold, dip buyers stop being "
+            "rewarded, price turns parabolic, closes occur near session lows, or bearish candle "
+            "patterns confirm momentum deterioration."
+        ),
+        bot_usage=(
+            "Use for exit-review labels, winner-became-loser diagnostics, peak-lock analysis, "
+            "and post-trade explanations of missed scale-out opportunities."
+        ),
+        live_authority="education_context_only",
+        related_features=(
+            "bearish_engulfing",
+            "dark_cloud_cover",
+            "shooting_star",
+            "three_black_crows",
+            "advance_block",
+            "rsi_negative_divergence",
+            "parabolic_rise",
+            "close_near_low",
+            "down_volume_pressure",
+        ),
+        guardrails=(
+            "Treat reversal patterns as corroborating evidence, not standalone exit authority.",
+            "Require outcome attribution before promoting scale-out or exit-rule changes.",
+        ),
+    ),
+    TradingEducationConcept(
+        key="implied_volatility_context",
+        name="Implied volatility context",
+        concept_type="market_mechanics",
+        summary=(
+            "Implied volatility reflects option-market expectations for future move magnitude, "
+            "not direction, and can be compared with historical volatility, event risk, VIX, and "
+            "volatility rank or percentile."
+        ),
+        bot_usage=(
+            "Use for event-risk context, expected-range telemetry, execution/risk explanations, "
+            "and future options-aware volatility features."
+        ),
+        live_authority="education_context_only",
+        related_features=(
+            "implied_volatility",
+            "historical_volatility",
+            "iv_rank",
+            "iv_percentile",
+            "expected_move",
+            "vix_context",
+            "event_volatility_premium",
+            "tail_risk",
+        ),
+        guardrails=(
+            "Do not infer direction from implied volatility alone.",
+            "Do not introduce options strategy authority without a separate options risk model.",
+        ),
+    ),
+    TradingEducationConcept(
+        key="heikin_ashi_trend_reversal",
+        name="Heikin Ashi trend reversal context",
+        concept_type="technical_analysis",
+        summary=(
+            "Heikin Ashi bars smooth candle noise by averaging current and prior bar data, "
+            "helping identify trend persistence, choppy transitions, and possible reversals when "
+            "used with confirmation such as EMA changes."
+        ),
+        bot_usage=(
+            "Use for bar-pattern learning, trend deterioration labels, exit diagnostics, and "
+            "candidate pattern explanations."
+        ),
+        live_authority="education_context_only",
+        related_features=(
+            "heikin_ashi_color_run",
+            "heikin_ashi_wick_state",
+            "heikin_ashi_body_size",
+            "ema_8_21_cross",
+            "trend_smoothing",
+            "choppy_transition",
+        ),
+        guardrails=(
+            "Heikin Ashi prices are derived averages and may not match executable prices.",
+            "Expect signals to lag raw candles; use as context, not immediate execution authority.",
+        ),
+    ),
+    TradingEducationConcept(
+        key="ipo_liquidity_restrictions",
+        name="IPO liquidity and insider restriction context",
+        concept_type="event_risk",
+        summary=(
+            "IPO and pre-IPO equity events can involve S-1 disclosures, lock-up periods, blackout "
+            "periods, trading windows, 10b5-1 plans, dilution risk, concentration risk, taxes, and "
+            "post-listing volatility."
+        ),
+        bot_usage=(
+            "Use for IPO/event context, insider-supply risk, lock-up expiration review, and "
+            "peripheral company intelligence explanations."
+        ),
+        live_authority="education_context_only",
+        related_features=(
+            "ipo_event",
+            "s1_filing",
+            "lockup_expiration",
+            "blackout_period",
+            "trading_window",
+            "10b5_1_plan",
+            "dilution_risk",
+            "insider_supply_risk",
+            "concentration_risk",
+        ),
+        guardrails=(
+            "Use official filings as source of truth for company-specific IPO or insider details.",
+            "Do not treat employee-equity education as directional market evidence.",
+        ),
+    ),
 )
 
 
@@ -648,8 +768,7 @@ def _concept_matches(text: str) -> tuple[list[str], list[str]]:
             "drawdown",
         ),
         "news_expectations_positioning": (
-            "priced in",
-            "expectations",
+            "already priced in",
             "forward guidance",
             "earnings call",
             "sell the news",
@@ -657,8 +776,8 @@ def _concept_matches(text: str) -> tuple[list[str], list[str]]:
             "positioning",
             "institutional flows",
             "tax-loss harvesting",
-            "market sentiment",
-            "headline",
+            "investor sentiment may be turning",
+            "headline sentiment",
             "ignore good",
             "ignore bad",
         ),
@@ -675,6 +794,61 @@ def _concept_matches(text: str) -> tuple[list[str], list[str]]:
             "trailing buy-stop",
             "dividend payments",
             "potentially limitless losses",
+        ),
+        "rally_exhaustion_exit_patterns": (
+            "rally's potential end",
+            "rally may be coming to an end",
+            "good news is bad news",
+            "dip buyers stop",
+            "sharp top",
+            "parabolic",
+            "closes near the day's lows",
+            "bearish engulfing",
+            "dark cloud cover",
+            "shooting star",
+            "three black crows",
+            "advance block",
+            "negative divergence",
+        ),
+        "implied_volatility_context": (
+            "implied volatility",
+            "historical volatility",
+            "iv rank",
+            "iv percentile",
+            "probability cone",
+            "expected volatility",
+            "expected move",
+            "vix",
+            "short vega",
+            "long vega",
+            "term structure",
+            "tail risk",
+        ),
+        "heikin_ashi_trend_reversal": (
+            "heikin ashi",
+            "heiken ashi",
+            "average bar",
+            "heikin ashi bar",
+            "short-range bars",
+            "without bottom wicks",
+            "ema crossed",
+            "eight-period ema",
+            "21-period ema",
+        ),
+        "ipo_liquidity_restrictions": (
+            "pre-ipo",
+            "initial public offering",
+            "s-1",
+            "lock-up period",
+            "lockup period",
+            "blackout period",
+            "trading window",
+            "10b5-1",
+            "tender offer",
+            "equity incentive plan",
+            "award agreement",
+            "dilution",
+            "concentration risk",
         ),
     }
     concept_lookup = {concept.key: concept for concept in CURATED_TRADING_EDUCATION_CONCEPTS}

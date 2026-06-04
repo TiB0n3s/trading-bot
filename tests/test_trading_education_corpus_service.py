@@ -96,6 +96,9 @@ def test_strategy_concepts_are_normalized_and_non_authoritative():
     assert "lockup_expiration" in concepts["ipo_liquidity_restrictions"]["related_features"]
     assert "data_leakage_guard" in concepts["algorithmic_trading_pipeline"]["related_features"]
     assert "paper_trading_duration" in concepts["algorithmic_trading_pipeline"]["related_features"]
+    assert "pandas_numpy_stack" in concepts["algorithmic_trading_pipeline"]["related_features"]
+    assert "stationary_return_transform" in concepts["algorithmic_trading_pipeline"]["related_features"]
+    assert "time_series_split" in concepts["algorithmic_trading_pipeline"]["related_features"]
     assert "out-of-sample" in concepts["backtesting_overfitting_control"]["summary"]
     assert all(concept["live_authority"] == "education_context_only" for concept in concepts.values())
 
@@ -368,7 +371,11 @@ def test_manual_snapshot_maps_algorithmic_trading_pipeline_guidance():
             "GARCH, XGBoost, LSTM, Transformers, or FinBERT, build a backtesting engine that "
             "avoids data leakage and includes transactional variables, Sharpe Ratio, Maximum "
             "Drawdown, Win/Loss Ratio, position sizing, Kelly Criterion, portfolio "
-            "diversification, paper trading, and system latency checks."
+            "diversification, paper trading, and system latency checks. Practical Python tools "
+            "include pandas, numpy, yfinance, Alpaca, Interactive Brokers, TA-Lib, "
+            "scikit-learn, RandomForest, logistic regression, Backtrader, and vectorbt. "
+            "Use train_test_split with shuffle=False, avoid look-ahead bias, and convert "
+            "raw prices into stationary data such as log returns or percentage changes."
         ),
     )
 
@@ -376,6 +383,8 @@ def test_manual_snapshot_maps_algorithmic_trading_pipeline_guidance():
     assert result["runtime_effect"] == TRADING_EDUCATION_RUNTIME_EFFECT
     assert "algorithmic_trading_pipeline" in result["concept_keys"]
     assert "data_leakage_guard" in result["related_features"]
+    assert "stationary_return_transform" in result["related_features"]
+    assert "time_series_split" in result["related_features"]
     tmp.cleanup()
 
 

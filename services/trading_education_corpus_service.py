@@ -576,8 +576,9 @@ CURATED_TRADING_EDUCATION_CONCEPTS: tuple[TradingEducationConcept, ...] = (
         summary=(
             "A market-prediction system should define objective, asset universe, timeframe, and "
             "strategy hypothesis; ingest clean OHLCV and contextual data; engineer features; select "
-            "models appropriate to the task; run leakage-safe backtests with realistic frictions; "
-            "enforce risk controls; and validate forward behavior in paper trading before live use."
+            "models and quantitative packages appropriate to the task; run leakage-safe backtests "
+            "with realistic frictions; enforce risk controls; and validate forward behavior in paper "
+            "trading before live use."
         ),
         bot_usage=(
             "Use for ML roadmap checks, training pipeline reviews, model-readiness explanations, "
@@ -591,7 +592,17 @@ CURATED_TRADING_EDUCATION_CONCEPTS: tuple[TradingEducationConcept, ...] = (
             "ohlcv_quality",
             "alternative_data_context",
             "technical_indicator_set",
+            "pandas_numpy_stack",
+            "free_historical_data_source",
+            "live_market_data_api",
+            "technical_analysis_library",
+            "classic_ml_model",
+            "gradient_boosted_model",
+            "deep_sequence_model",
+            "nlp_sentiment_model",
             "data_leakage_guard",
+            "stationary_return_transform",
+            "time_series_split",
             "transaction_cost_model",
             "slippage_model",
             "max_drawdown",
@@ -606,6 +617,8 @@ CURATED_TRADING_EDUCATION_CONCEPTS: tuple[TradingEducationConcept, ...] = (
             "Do not treat model architecture choice as evidence of profitability.",
             "Require leakage-safe backtesting, friction modeling, and forward paper results before promotion.",
             "Keep hard risk controls independent of predictive model confidence.",
+            "Convert raw prices into returns or other stationary features before training.",
+            "Use time-series-safe splits; do not shuffle historical samples for live-style evaluation.",
         ),
     ),
 )
@@ -919,6 +932,24 @@ def _concept_matches(text: str) -> tuple[list[str], list[str]]:
             "portfolio diversification",
             "paper trading",
             "system latency",
+            "pandas",
+            "numpy",
+            "yfinance",
+            "alpaca",
+            "interactive brokers",
+            "ta-lib",
+            "scikit-learn",
+            "randomforest",
+            "random forest",
+            "logistic regression",
+            "backtrader",
+            "vectorbt",
+            "train_test_split",
+            "shuffle=false",
+            "stationarity",
+            "stationary data",
+            "log returns",
+            "percentage changes",
         ),
     }
     concept_lookup = {concept.key: concept for concept in CURATED_TRADING_EDUCATION_CONCEPTS}

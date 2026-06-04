@@ -97,6 +97,12 @@ These are used to label and explain bot behavior; they do not grant authority.
 - IPO liquidity and insider restriction context
 - Algorithmic trading pipeline design
 
+The algorithmic trading pipeline concept includes practical tooling context
+such as pandas/numpy, market-data APIs, technical-analysis libraries,
+classic/deep ML libraries, backtesting frameworks, time-series-safe splits,
+stationary return transforms, and leakage/overfitting guardrails. These are
+implementation references, not endorsement of any model as profitable.
+
 The concept pack should be used for reporting, education context, feature
 taxonomy, and future AI explanation prompts. It must not become a live approval,
 blocking, sizing, or execution path without separate promotion governance.

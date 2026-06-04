@@ -184,6 +184,8 @@ def test_manual_snapshot_ingest_accepts_uploaded_schwab_card_content():
     recent = repo.recent_pages(limit=1)
 
     assert result["status"] in {"stored", "needs_review"}
+    assert result["corpus_version"] == "trading_education_corpus_v1"
+    assert result["runtime_effect"] == TRADING_EDUCATION_RUNTIME_EFFECT
     assert result["source_key"] == "schwab_learn_trading"
     assert "risk_practice_before_live" in result["concept_keys"]
     assert "strategy_vs_style" in result["concept_keys"]

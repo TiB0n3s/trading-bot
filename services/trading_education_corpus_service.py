@@ -870,6 +870,7 @@ class TradingEducationIngestionService:
         if source is None:
             return {
                 "report_version": "trading_education_manual_ingest_v1",
+                "corpus_version": TRADING_EDUCATION_CORPUS_VERSION,
                 "runtime_effect": TRADING_EDUCATION_RUNTIME_EFFECT,
                 "status": "blocked",
                 "url": url,
@@ -890,6 +891,7 @@ class TradingEducationIngestionService:
         return {
             "report_version": "trading_education_manual_ingest_v1",
             "schema_version": TRADING_EDUCATION_EXTRACTION_SCHEMA_VERSION,
+            "corpus_version": TRADING_EDUCATION_CORPUS_VERSION,
             "runtime_effect": TRADING_EDUCATION_RUNTIME_EFFECT,
             "status": row["status"],
             "url": url,

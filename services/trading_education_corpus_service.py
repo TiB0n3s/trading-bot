@@ -340,6 +340,35 @@ CURATED_TRADING_EDUCATION_CONCEPTS: tuple[TradingEducationConcept, ...] = (
         related_features=("paper_mode", "promotion_readiness", "sample_size", "calibration_error"),
         guardrails=("Education concepts do not bypass rollout thresholds or operator review.",),
     ),
+    TradingEducationConcept(
+        key="backtesting_overfitting_control",
+        name="Backtesting and overfitting control",
+        concept_type="governance",
+        summary=(
+            "Backtesting simulates clearly defined entry, exit, and risk rules on historical "
+            "data, then evaluates profitability, drawdowns, robustness, and out-of-sample "
+            "performance without risking capital."
+        ),
+        bot_usage=(
+            "Use for promotion readiness, walk-forward validation, model drift review, "
+            "policy replay, and report language around overfitting risk."
+        ),
+        live_authority="education_context_only",
+        related_features=(
+            "backtest_profit_factor",
+            "max_drawdown",
+            "walk_forward_window",
+            "out_of_sample_score",
+            "cross_validation_score",
+            "parameter_count",
+            "overfit_risk",
+        ),
+        guardrails=(
+            "Do not promote a strategy from in-sample results alone.",
+            "Prefer simple parameter sets and require walk-forward or out-of-sample validation.",
+            "Treat high backtest performance with high parameter complexity as overfit risk.",
+        ),
+    ),
 )
 
 
@@ -493,6 +522,18 @@ def _concept_matches(text: str) -> tuple[list[str], list[str]]:
         "momentum_trading": ("momentum", "volume", "force index", "price volume trend", "vwap"),
         "risk_practice_before_live": ("risk", "paper", "simulator", "practice", "diversification"),
         "strategy_vs_style": ("strategy", "trading style", "investment style"),
+        "backtesting_overfitting_control": (
+            "backtest",
+            "backtesting",
+            "walk-forward",
+            "walk forward",
+            "cross-validation",
+            "out-of-sample",
+            "out of sample",
+            "overfit",
+            "overfitting",
+            "drawdown",
+        ),
     }
     concept_lookup = {concept.key: concept for concept in CURATED_TRADING_EDUCATION_CONCEPTS}
     for key, terms in keyword_map.items():

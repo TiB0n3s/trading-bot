@@ -68,12 +68,15 @@ def test_strategy_concepts_are_normalized_and_non_authoritative():
         "arbitrage",
         "momentum_trading",
         "risk_practice_before_live",
+        "backtesting_overfitting_control",
     }
 
     assert expected.issubset(concepts)
     assert concepts["breakout_trading"]["concept_type"] == "strategy_taxonomy"
     assert "volume_expansion" in concepts["breakout_trading"]["related_features"]
     assert "efi" in concepts["momentum_trading"]["related_features"]
+    assert "walk_forward_window" in concepts["backtesting_overfitting_control"]["related_features"]
+    assert "out-of-sample" in concepts["backtesting_overfitting_control"]["summary"]
     assert all(concept["live_authority"] == "education_context_only" for concept in concepts.values())
 
 
@@ -85,12 +88,14 @@ def test_education_ingestion_stores_compact_concept_metadata():
     def fake_transport(url: str) -> str:
         return """
         <html>
-          <head><title>Breakout and Momentum Trading Basics</title></head>
+          <head><title>Breakout, Momentum, and Backtesting Basics</title></head>
           <body>
             <main>
               <p>A breakout strategy enters when price moves above resistance
               with volume expansion and continued momentum.</p>
               <p>Risk management and paper practice should be used before live trading.</p>
+              <p>Backtesting should use out-of-sample data and walk-forward validation
+              to reduce overfitting risk and evaluate drawdowns.</p>
               <a href="/more-breakout-education">More</a>
               <a href="https://example.com/not-approved">Offsite</a>
             </main>
@@ -110,7 +115,9 @@ def test_education_ingestion_stores_compact_concept_metadata():
     assert "breakout_trading" in recent[0]["concept_keys"]
     assert "momentum_trading" in recent[0]["concept_keys"]
     assert "risk_practice_before_live" in recent[0]["concept_keys"]
+    assert "backtesting_overfitting_control" in recent[0]["concept_keys"]
     assert "volume_expansion" in recent[0]["related_features"]
+    assert "overfit_risk" in recent[0]["related_features"]
     tmp.cleanup()
 
 

@@ -122,7 +122,8 @@ Recent completed roadmap items:
   review.
 - `ops_check.py trading-education-health` reports the curated
   `trading_education_corpus_v1` source/concept contract. Education content can
-  support explanation and taxonomy work, but it has no live authority.
+  support explanation, taxonomy, backtesting, and overfitting-governance work,
+  but it has no live authority.
 - `ops_check.py trading-education-ingest --max-pages 6 --no-follow` performs a
   bounded approved-source crawl and stores compact concept metadata only:
   source URL, retrieved timestamp, content hash, summary, concept keys, related

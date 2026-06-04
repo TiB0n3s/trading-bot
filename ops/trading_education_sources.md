@@ -56,6 +56,7 @@ These are used to label and explain bot behavior; they do not grant authority.
 - Arbitrage
 - Momentum trading
 - Practice and risk validation before live use
+- Backtesting and overfitting control
 
 The concept pack should be used for reporting, education context, feature
 taxonomy, and future AI explanation prompts. It must not become a live approval,
@@ -93,6 +94,9 @@ automated requests.
 - Do not ingest copyrighted books or podcasts beyond metadata/operator notes.
 - Do not treat education content as market-moving news.
 - Do not treat education content as live authority.
+- Backtesting concepts should support promotion readiness, walk-forward
+  validation, out-of-sample review, and overfitting-risk reporting. They should
+  not justify live authority from in-sample results alone.
 - Keep pasted/reference material normalized as concise concept metadata instead
   of storing long copyrighted or vendor-authored passages.
 - Any future education-corpus ingestion job should report source counts through

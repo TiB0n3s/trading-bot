@@ -95,6 +95,7 @@ These are used to label and explain bot behavior; they do not grant authority.
 - Implied volatility context
 - Heikin Ashi trend reversal context
 - IPO liquidity and insider restriction context
+- Algorithmic trading pipeline design
 
 The concept pack should be used for reporting, education context, feature
 taxonomy, and future AI explanation prompts. It must not become a live approval,

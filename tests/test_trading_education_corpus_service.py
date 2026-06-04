@@ -80,6 +80,7 @@ def test_strategy_concepts_are_normalized_and_non_authoritative():
         "implied_volatility_context",
         "heikin_ashi_trend_reversal",
         "ipo_liquidity_restrictions",
+        "algorithmic_trading_pipeline",
     }
 
     assert expected.issubset(concepts)
@@ -93,6 +94,8 @@ def test_strategy_concepts_are_normalized_and_non_authoritative():
     assert "expected_move" in concepts["implied_volatility_context"]["related_features"]
     assert "heikin_ashi_color_run" in concepts["heikin_ashi_trend_reversal"]["related_features"]
     assert "lockup_expiration" in concepts["ipo_liquidity_restrictions"]["related_features"]
+    assert "data_leakage_guard" in concepts["algorithmic_trading_pipeline"]["related_features"]
+    assert "paper_trading_duration" in concepts["algorithmic_trading_pipeline"]["related_features"]
     assert "out-of-sample" in concepts["backtesting_overfitting_control"]["summary"]
     assert all(concept["live_authority"] == "education_context_only" for concept in concepts.values())
 
@@ -348,6 +351,34 @@ def test_manual_snapshot_maps_ipo_liquidity_restrictions_article():
     tmp.cleanup()
 
 
+def test_manual_snapshot_maps_algorithmic_trading_pipeline_guidance():
+    tmp = tempfile.TemporaryDirectory()
+    db_path = Path(tmp.name) / "trades.db"
+    repo = TradingEducationRepository(db_path)
+    service = TradingEducationIngestionService(repo=repo)
+
+    result = service.ingest_manual_snapshot(
+        url="https://www.schwab.com/learn/trading",
+        title="Operator note: algorithmic trading pipeline",
+        content=(
+            "To build an algorithmic system to read and predict market trends, define asset "
+            "classes, establish timeframes, formulate hypotheses, ingest OHLCV and alternative "
+            "data, calculate technical indicators such as moving averages, relative strength "
+            "index, and Bollinger Bands, choose predictive model architecture such as ARIMA, "
+            "GARCH, XGBoost, LSTM, Transformers, or FinBERT, build a backtesting engine that "
+            "avoids data leakage and includes transactional variables, Sharpe Ratio, Maximum "
+            "Drawdown, Win/Loss Ratio, position sizing, Kelly Criterion, portfolio "
+            "diversification, paper trading, and system latency checks."
+        ),
+    )
+
+    assert result["status"] in {"stored", "needs_review"}
+    assert result["runtime_effect"] == TRADING_EDUCATION_RUNTIME_EFFECT
+    assert "algorithmic_trading_pipeline" in result["concept_keys"]
+    assert "data_leakage_guard" in result["related_features"]
+    tmp.cleanup()
+
+
 def test_manual_snapshot_blocks_unapproved_urls():
     tmp = tempfile.TemporaryDirectory()
     db_path = Path(tmp.name) / "trades.db"
@@ -397,6 +428,7 @@ def main():
         test_manual_snapshot_maps_implied_volatility_article,
         test_manual_snapshot_maps_heikin_ashi_article,
         test_manual_snapshot_maps_ipo_liquidity_restrictions_article,
+        test_manual_snapshot_maps_algorithmic_trading_pipeline_guidance,
         test_manual_snapshot_blocks_unapproved_urls,
         test_education_ingestion_dry_run_does_not_persist,
     ]

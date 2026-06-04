@@ -569,6 +569,45 @@ CURATED_TRADING_EDUCATION_CONCEPTS: tuple[TradingEducationConcept, ...] = (
             "Do not treat employee-equity education as directional market evidence.",
         ),
     ),
+    TradingEducationConcept(
+        key="algorithmic_trading_pipeline",
+        name="Algorithmic trading pipeline design",
+        concept_type="system_design",
+        summary=(
+            "A market-prediction system should define objective, asset universe, timeframe, and "
+            "strategy hypothesis; ingest clean OHLCV and contextual data; engineer features; select "
+            "models appropriate to the task; run leakage-safe backtests with realistic frictions; "
+            "enforce risk controls; and validate forward behavior in paper trading before live use."
+        ),
+        bot_usage=(
+            "Use for ML roadmap checks, training pipeline reviews, model-readiness explanations, "
+            "data-quality diagnostics, and deployment guardrail language."
+        ),
+        live_authority="education_context_only",
+        related_features=(
+            "asset_universe",
+            "trading_timeframe",
+            "strategy_hypothesis",
+            "ohlcv_quality",
+            "alternative_data_context",
+            "technical_indicator_set",
+            "data_leakage_guard",
+            "transaction_cost_model",
+            "slippage_model",
+            "max_drawdown",
+            "sharpe_ratio",
+            "win_loss_ratio",
+            "position_sizing",
+            "portfolio_diversification",
+            "paper_trading_duration",
+            "latency_monitoring",
+        ),
+        guardrails=(
+            "Do not treat model architecture choice as evidence of profitability.",
+            "Require leakage-safe backtesting, friction modeling, and forward paper results before promotion.",
+            "Keep hard risk controls independent of predictive model confidence.",
+        ),
+    ),
 )
 
 
@@ -849,6 +888,37 @@ def _concept_matches(text: str) -> tuple[list[str], list[str]]:
             "award agreement",
             "dilution",
             "concentration risk",
+        ),
+        "algorithmic_trading_pipeline": (
+            "algorithmic system",
+            "market trends",
+            "asset classes",
+            "establish timeframes",
+            "formulate hypotheses",
+            "ohlcv",
+            "alternative data",
+            "technical indicators",
+            "moving averages",
+            "relative strength index",
+            "bollinger bands",
+            "predictive model architecture",
+            "arima",
+            "garch",
+            "xgboost",
+            "lstm",
+            "transformers",
+            "finbert",
+            "backtesting engine",
+            "data leakage",
+            "transactional variables",
+            "sharpe ratio",
+            "maximum drawdown",
+            "win/loss ratio",
+            "position sizing",
+            "kelly criterion",
+            "portfolio diversification",
+            "paper trading",
+            "system latency",
         ),
     }
     concept_lookup = {concept.key: concept for concept in CURATED_TRADING_EDUCATION_CONCEPTS}

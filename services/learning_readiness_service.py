@@ -11,6 +11,8 @@ from dataclasses import dataclass
 import json
 from typing import Any, Iterable
 
+from services.candidate_outcome_coverage_service import summarize_candidate_outcome_coverage
+
 
 LEARNING_READINESS_REPORT_VERSION = "learning_readiness_v1"
 LEARNING_READINESS_RUNTIME_EFFECT = "diagnostic_only_no_live_authority"
@@ -47,6 +49,7 @@ def _decision_date(row: dict[str, Any]) -> str | None:
 
 def _candidate_summary(rows: Iterable[dict[str, Any]]) -> dict[str, Any]:
     rows_list = [dict(row) for row in rows]
+    coverage = summarize_candidate_outcome_coverage(rows_list)
     by_status: dict[str, int] = {}
     by_kind: dict[str, int] = {}
     for row in rows_list:
@@ -63,6 +66,14 @@ def _candidate_summary(rows: Iterable[dict[str, Any]]) -> dict[str, Any]:
         "exit_considered_not_taken": by_status.get("exit_considered_not_taken", 0),
         "by_status": dict(sorted(by_status.items())),
         "by_kind": dict(sorted(by_kind.items())),
+        "rows_with_forward_outcome": coverage["rows_with_forward_outcome"],
+        "missing_forward_outcome": coverage["missing_forward_outcome"],
+        "forward_outcome_coverage_rate": coverage["forward_outcome_coverage_rate"],
+        "non_taken_rows": coverage["non_taken_rows"],
+        "non_taken_with_forward_outcome": coverage["non_taken_with_forward_outcome"],
+        "non_taken_forward_outcome_coverage_rate": coverage[
+            "non_taken_forward_outcome_coverage_rate"
+        ],
     }
 
 
@@ -368,6 +379,11 @@ def build_learning_readiness_payload(
         blockers.append("approved_exit_link_rate_below_80pct")
     if candidate["rows"] == 0:
         blockers.append("missing_candidate_universe_rows")
+    elif (
+        candidate["forward_outcome_coverage_rate"] is None
+        or candidate["forward_outcome_coverage_rate"] < 0.80
+    ):
+        blockers.append("candidate_forward_outcome_coverage_below_80pct")
     if int(pattern_summary.get("pattern_rows") or 0) == 0 and rows:
         blockers.append("missing_symbol_pattern_rows")
     if int(calibration_summary.get("ready_bucket_count") or 0) == 0 and rows_with_outcome:
@@ -424,6 +440,8 @@ def build_learning_readiness_payload(
         next_actions.append("classify open positions versus missing exit snapshot linkage")
     if "missing_candidate_universe_rows" in blockers:
         next_actions.append("verify candidate-universe capture is running with scope=all")
+    if "candidate_forward_outcome_coverage_below_80pct" in blockers:
+        next_actions.append("run candidate-outcome-backfill until candidate forward-outcome coverage is at least 80%")
     if "no_ready_calibration_buckets" in blockers:
         next_actions.append("collect more outcomes before using bucket calibration for promotion")
     if "missing_fully_integrated_pattern_momentum_prediction_outcomes" in blockers:

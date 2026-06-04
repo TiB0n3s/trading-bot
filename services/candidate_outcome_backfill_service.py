@@ -15,6 +15,11 @@ from typing import Any, Iterable
 import pytz
 
 from repositories.candidate_universe_repo import CandidateUniverseRepository
+from services.candidate_outcome_coverage_service import (
+    candidate_has_forward_outcome,
+    load_candidate_json,
+    summarize_candidate_outcome_coverage,
+)
 from services.rejected_signal_outcome_market_data_service import (
     rejected_signal_outcome_market_data_service,
 )
@@ -42,16 +47,12 @@ class CandidateOutcomeBackfillResult:
     no_bars: int
     error: int
     dry_run: bool
+    coverage_before: dict[str, Any]
+    projected_coverage_after: dict[str, Any]
 
 
 def _load_json(raw: Any) -> dict[str, Any]:
-    if not raw:
-        return {}
-    try:
-        loaded = json.loads(str(raw))
-        return loaded if isinstance(loaded, dict) else {}
-    except Exception:
-        return {}
+    return load_candidate_json(raw)
 
 
 def _parse_ts(value: str) -> datetime:
@@ -164,18 +165,6 @@ def _excursion_60m(
     return favorable, adverse
 
 
-def candidate_has_forward_outcome(payload: dict[str, Any]) -> bool:
-    return any(
-        payload.get(key) is not None
-        for key in (
-            "forward_return_pct",
-            "return_60m",
-            "forward_mfe_pct",
-            "max_favorable_60m",
-        )
-    )
-
-
 def compute_candidate_outcome(row: dict[str, Any], bars: list[dict[str, Any]]) -> dict[str, Any]:
     candidate_dt = _parse_ts(str(row["candidate_ts"]))
     action = str(row.get("action") or "buy").lower()
@@ -276,6 +265,9 @@ class CandidateOutcomeBackfillService:
             rows = rows[: max(0, int(limit))]
 
         bars_by_symbol: dict[str, list[dict[str, Any]]] = {}
+        coverage_before = summarize_candidate_outcome_coverage(rows)
+        projected_rows = [dict(row) for row in rows]
+        projected_by_id = {int(row["id"]): row for row in projected_rows if row.get("id") is not None}
         counts = {
             "eligible": 0,
             "updated": 0,
@@ -301,6 +293,13 @@ class CandidateOutcomeBackfillService:
                 merged.update(outcome)
                 if not dry_run:
                     updates.append((int(row["id"]), merged))
+                projected_row = projected_by_id.get(int(row["id"]))
+                if projected_row is not None:
+                    projected_row["candidate_json"] = json.dumps(
+                        merged,
+                        sort_keys=True,
+                        separators=(",", ":"),
+                    )
                 status = outcome.get("label_status")
                 if status == "partial":
                     counts["partial"] += 1
@@ -317,6 +316,7 @@ class CandidateOutcomeBackfillService:
             else:
                 for candidate_id, payload in updates:
                     self.repository.update_candidate_json(candidate_id, payload)
+        projected_coverage_after = summarize_candidate_outcome_coverage(projected_rows)
 
         return CandidateOutcomeBackfillResult(
             report_version=CANDIDATE_OUTCOME_BACKFILL_VERSION,
@@ -330,4 +330,6 @@ class CandidateOutcomeBackfillService:
             no_bars=counts["no_bars"],
             error=counts["error"],
             dry_run=dry_run,
+            coverage_before=coverage_before,
+            projected_coverage_after=projected_coverage_after,
         )

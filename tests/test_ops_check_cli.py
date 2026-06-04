@@ -1017,7 +1017,7 @@ def test_learning_readiness_cli_golden_fixture_summarizes_holistic_evidence(tmp_
                 candidate_status, score, threshold, threshold_distance,
                 decision, reason, source, setup_label, regime, session_phase,
                 candidate_json
-            ) VALUES (?, ?, ?, 'buy', 'entry', ?, ?, 50, ?, ?, ?, ?, ?, ?, ?, '{}')
+            ) VALUES (?, ?, ?, 'buy', 'entry', ?, ?, 50, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             [
                 (
@@ -1033,6 +1033,7 @@ def test_learning_readiness_cli_golden_fixture_summarizes_holistic_evidence(tmp_
                     "breakout",
                     "trend_expansion",
                     "first_30m",
+                    '{"forward_return_pct": 0.7, "forward_mfe_pct": 1.3}',
                 ),
                 (
                     "2026-05-30T10:15:00+00:00",
@@ -1047,6 +1048,7 @@ def test_learning_readiness_cli_golden_fixture_summarizes_holistic_evidence(tmp_
                     "pullback",
                     "orderly_pullback",
                     "late_morning",
+                    '{"forward_return_pct": 0.2, "forward_mfe_pct": 0.9}',
                 ),
             ],
         )
@@ -1077,6 +1079,7 @@ def test_learning_readiness_cli_golden_fixture_summarizes_holistic_evidence(tmp_
     assert "100.00%" in out
     assert "Candidate universe" in out
     assert "near_threshold" in out
+    assert "forward_outcome_coverage_rate" in out
     assert "Learning effect" in out
     assert "strategy_memory_available" in out
     assert "decision_policy_size_down_enforced" in out
@@ -1166,7 +1169,7 @@ def test_learning_effectiveness_cli_uses_readiness_payload_with_daily_framing(tm
                 candidate_status, score, threshold, threshold_distance,
                 decision, reason, source, setup_label, regime, session_phase,
                 candidate_json
-            ) VALUES (?, ?, ?, 'buy', 'entry', ?, ?, 50, ?, ?, ?, ?, ?, ?, ?, '{}')
+            ) VALUES (?, ?, ?, 'buy', 'entry', ?, ?, 50, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 "2026-05-30T10:00:00+00:00",
@@ -1181,6 +1184,7 @@ def test_learning_effectiveness_cli_uses_readiness_payload_with_daily_framing(tm
                 "breakout",
                 "trend_expansion",
                 "first_30m",
+                '{"forward_return_pct": 0.7, "forward_mfe_pct": 1.3}',
             ),
         )
 

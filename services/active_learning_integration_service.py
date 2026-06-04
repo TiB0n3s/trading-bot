@@ -11,6 +11,8 @@ from dataclasses import dataclass
 import json
 from typing import Any, Iterable
 
+from services.candidate_outcome_coverage_service import summarize_candidate_outcome_coverage
+
 
 ACTIVE_LEARNING_INTEGRATION_VERSION = "active_learning_integration_v1"
 RUNTIME_EFFECT = "diagnostic_only_no_live_authority"
@@ -184,23 +186,17 @@ def _lifecycle_summary(rows: Iterable[dict[str, Any]]) -> dict[str, Any]:
 
 def _candidate_summary(rows: Iterable[dict[str, Any]]) -> dict[str, Any]:
     rows_list = [dict(row) for row in rows]
-    outcome_rows = 0
-    for row in rows_list:
-        payload = _load_json(row.get("candidate_json"))
-        if any(
-            payload.get(key) is not None
-            for key in (
-                "forward_return_pct",
-                "forward_mfe_pct",
-                "return_60m",
-                "max_favorable_60m",
-            )
-        ):
-            outcome_rows += 1
+    coverage = summarize_candidate_outcome_coverage(rows_list)
     return {
         "rows": len(rows_list),
-        "rows_with_forward_outcome": outcome_rows,
-        "forward_outcome_rate": _rate(outcome_rows, len(rows_list)),
+        "rows_with_forward_outcome": coverage["rows_with_forward_outcome"],
+        "forward_outcome_rate": coverage["forward_outcome_coverage_rate"],
+        "missing_forward_outcome": coverage["missing_forward_outcome"],
+        "non_taken_rows": coverage["non_taken_rows"],
+        "non_taken_with_forward_outcome": coverage["non_taken_with_forward_outcome"],
+        "non_taken_forward_outcome_rate": coverage[
+            "non_taken_forward_outcome_coverage_rate"
+        ],
         "taken_rows": sum(1 for row in rows_list if row.get("candidate_status") == "taken"),
         "near_threshold_rows": sum(1 for row in rows_list if row.get("candidate_status") == "near_threshold"),
         "scored_not_taken_rows": sum(1 for row in rows_list if row.get("candidate_status") == "scored_not_taken"),

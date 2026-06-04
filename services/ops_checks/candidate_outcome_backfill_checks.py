@@ -8,6 +8,15 @@ from repositories.candidate_universe_repo import CandidateUniverseRepository
 from services.candidate_outcome_backfill_service import CandidateOutcomeBackfillService
 
 
+def _pct(value) -> str:
+    if value is None:
+        return "-"
+    try:
+        return f"{float(value) * 100:.1f}%"
+    except Exception:
+        return str(value)
+
+
 def run_candidate_outcome_backfill(
     target_date: str,
     *,
@@ -49,6 +58,27 @@ def run_candidate_outcome_backfill(
     print(f"partial              : {result.partial}")
     print(f"no_bars              : {result.no_bars}")
     print(f"error                : {result.error}")
+    print()
+    print("Forward outcome coverage")
+    before = result.coverage_before
+    after = result.projected_coverage_after
+    print(
+        "  before             : "
+        f"{before['rows_with_forward_outcome']} / {before['rows']} "
+        f"({_pct(before['forward_outcome_coverage_rate'])})"
+    )
+    print(
+        "  projected_after    : "
+        f"{after['rows_with_forward_outcome']} / {after['rows']} "
+        f"({_pct(after['forward_outcome_coverage_rate'])})"
+    )
+    print(
+        "  non_taken_after    : "
+        f"{after['non_taken_with_forward_outcome']} / {after['non_taken_rows']} "
+        f"({_pct(after['non_taken_forward_outcome_coverage_rate'])})"
+    )
+    print(f"  missing_after      : {after['missing_forward_outcome']}")
+    print(f"  ready_80pct_after  : {bool((after['forward_outcome_coverage_rate'] or 0) >= 0.8)}")
 
     if result.error:
         print("[WARN] candidate outcome backfill had errors")

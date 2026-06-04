@@ -108,6 +108,9 @@ def test_backfill_updates_candidate_json_with_forward_outcome():
 
     assert result.updated == 1
     assert result.error == 0
+    assert result.coverage_before["rows_with_forward_outcome"] == 0
+    assert result.projected_coverage_after["rows_with_forward_outcome"] == 1
+    assert result.projected_coverage_after["forward_outcome_coverage_rate"] == 1.0
     updated = repo.updated[1]
     assert updated["candidate"]["symbol"] == "AAPL"
     assert updated["forward_return_pct"] == 3.0

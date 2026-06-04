@@ -116,6 +116,7 @@ TESTS = [
     "tests/test_export_ml_dataset.py",
     "tests/test_feature_parity_contract.py",
     "tests/test_candidate_universe_service.py",
+    "tests/test_candidate_outcome_coverage_service.py",
     "tests/test_candidate_outcome_backfill_service.py",
     "tests/test_ml_replay.py",
     "tests/test_policy_artifacts.py",

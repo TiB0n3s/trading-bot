@@ -167,9 +167,17 @@ def run_learning_readiness(
         "near_threshold",
         "scored_not_taken",
         "exit_considered_not_taken",
+        "rows_with_forward_outcome",
+        "missing_forward_outcome",
+        "forward_outcome_coverage_rate",
+        "non_taken_with_forward_outcome",
+        "non_taken_forward_outcome_coverage_rate",
         "candidate_rows_per_lifecycle_row",
     ):
-        print(f"  {key:<36} {_fmt(payload.candidate_universe.get(key))}")
+        value = payload.candidate_universe.get(key)
+        if key.endswith("_rate"):
+            value = _pct(value)
+        print(f"  {key:<36} {_fmt(value)}")
 
     print()
     print("Learning effect")

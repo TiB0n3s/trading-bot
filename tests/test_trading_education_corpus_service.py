@@ -30,11 +30,13 @@ def test_trading_education_payload_is_non_authoritative_and_versioned():
     assert payload["concept_count"] >= 10
     assert "investor.gov" in payload["approved_domains"]
     assert "investopedia.com" in payload["approved_domains"]
+    assert "schwab.com" in payload["approved_domains"]
 
 
 def test_classify_education_url_allows_only_curated_domains():
     sec = classify_education_url("https://www.investor.gov/introduction-investing")
     investopedia = classify_education_url("https://www.investopedia.com/terms/v/vwap.asp")
+    schwab = classify_education_url("https://www.schwab.com/learn/trading")
     unknown = classify_education_url("https://example.com/trading-course")
 
     assert sec["matched"] is True
@@ -42,6 +44,9 @@ def test_classify_education_url_allows_only_curated_domains():
     assert sec["link_follow_policy"] == "same_domain_only"
     assert investopedia["matched"] is True
     assert investopedia["ingestion_status"] == "approved_context_seed"
+    assert schwab["matched"] is True
+    assert schwab["source_type"] == "broker_education"
+    assert schwab["authority"] == "education_context_only"
     assert unknown["matched"] is False
     assert unknown["ingestion_status"] == "blocked"
 

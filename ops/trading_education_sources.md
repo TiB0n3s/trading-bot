@@ -16,6 +16,7 @@ These may be ingested from their seed URL and same-domain links only:
 - CME Group Education
 - NerdWallet Investing Education
 - Investopedia
+- Charles Schwab Learn Trading
 
 Official/regulator/exchange sources should be preferred when a concept appears
 in both an official source and a consumer education source.

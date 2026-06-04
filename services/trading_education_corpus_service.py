@@ -135,6 +135,18 @@ CURATED_TRADING_EDUCATION_SOURCES: tuple[TradingEducationSource, ...] = (
         notes="Useful for definitions and broad concepts. Validate critical claims against official sources.",
     ),
     TradingEducationSource(
+        key="schwab_learn_trading",
+        name="Charles Schwab Learn Trading",
+        source_type="broker_education",
+        tier="medium_education",
+        url="https://www.schwab.com/learn/trading",
+        topics=("trading_basics", "technical_analysis", "risk_management", "market_mechanics"),
+        ingestion_status="approved_context_seed",
+        link_follow_policy="same_domain_only",
+        authority="education_context_only",
+        notes="Broker education for trading concepts and mechanics. Not market-moving news or live authority.",
+    ),
+    TradingEducationSource(
         key="intelligent_investor",
         name="The Intelligent Investor by Benjamin Graham",
         source_type="book",

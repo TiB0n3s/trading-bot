@@ -25,6 +25,11 @@ ENV_FILE = Path("/etc/trading-bot.env")
 DB_PATH = BASE_DIR / "trades.db"
 
 
+def _paper_runtime_default(paper_value: str, live_value: str) -> str:
+    mode = os.getenv("EXECUTION_MODE", "paper").strip().lower()
+    return paper_value if mode in {"paper", "dry_run"} else live_value
+
+
 def reexec_under_venv_if_available() -> None:
     if not VENV_PYTHON.exists():
         return
@@ -97,9 +102,15 @@ AUTO_BUY_WATCH_SCORE = float(os.getenv("AUTO_BUY_WATCH_SCORE", "7"))
 AUTO_BUY_POSITION_SIZE_PCT = float(os.getenv("AUTO_BUY_POSITION_SIZE_PCT", "0.50"))
 AUTO_BUY_STOP_LOSS_PCT = float(os.getenv("AUTO_BUY_STOP_LOSS_PCT", "1.00"))
 AUTO_BUY_TAKE_PROFIT_PCT = float(os.getenv("AUTO_BUY_TAKE_PROFIT_PCT", "2.00"))
-AUTO_BUY_MAX_ORDERS_PER_RUN = int(os.getenv("AUTO_BUY_MAX_ORDERS_PER_RUN", "1"))
-AUTO_BUY_MAX_ACTIVE_POSITIONS = int(os.getenv("AUTO_BUY_MAX_ACTIVE_POSITIONS", "3"))
-AUTO_BUY_MAX_DAILY_ORDERS = int(os.getenv("AUTO_BUY_MAX_DAILY_ORDERS", "12"))
+AUTO_BUY_MAX_ORDERS_PER_RUN = int(
+    os.getenv("AUTO_BUY_MAX_ORDERS_PER_RUN", _paper_runtime_default("3", "1"))
+)
+AUTO_BUY_MAX_ACTIVE_POSITIONS = int(
+    os.getenv("AUTO_BUY_MAX_ACTIVE_POSITIONS", _paper_runtime_default("8", "3"))
+)
+AUTO_BUY_MAX_DAILY_ORDERS = int(
+    os.getenv("AUTO_BUY_MAX_DAILY_ORDERS", _paper_runtime_default("30", "12"))
+)
 AUTO_BUY_COOLDOWN_MINUTES = int(os.getenv("AUTO_BUY_COOLDOWN_MINUTES", "60"))
 AUTO_BUY_SESSION_BUFFER_MINUTES = int(os.getenv("AUTO_BUY_SESSION_BUFFER_MINUTES", "10"))
 APP_BUY_COOLDOWN_MINUTES = int(os.getenv("ORDER_COOLDOWN_MINUTES", "15"))
@@ -120,7 +131,8 @@ AUTO_BUY_ML_WEAK_BUCKET_BLOCK_ENABLED = os.getenv(
     "AUTO_BUY_ML_WEAK_BUCKET_BLOCK_ENABLED", "true"
 ).strip().lower() in ("1", "true", "yes", "on")
 AUTO_BUY_WATCH_SETUP_STRONG_BUY_ENABLED = os.getenv(
-    "AUTO_BUY_WATCH_SETUP_STRONG_BUY_ENABLED", "false"
+    "AUTO_BUY_WATCH_SETUP_STRONG_BUY_ENABLED",
+    _paper_runtime_default("true", "false"),
 ).strip().lower() in ("1", "true", "yes", "on")
 AUTO_BUY_EARLY_BUILD_ENABLED = os.getenv(
     "AUTO_BUY_EARLY_BUILD_ENABLED", "true"
@@ -153,7 +165,10 @@ AUTO_BUY_LEARNED_TIEBREAKER_ENABLED = os.getenv(
     "AUTO_BUY_LEARNED_TIEBREAKER_ENABLED", "true"
 ).strip().lower() in ("1", "true", "yes", "on")
 AUTO_BUY_LEARNED_TIEBREAKER_MIN_SAMPLE_SIZE = int(
-    os.getenv("AUTO_BUY_LEARNED_TIEBREAKER_MIN_SAMPLE_SIZE", "25")
+    os.getenv(
+        "AUTO_BUY_LEARNED_TIEBREAKER_MIN_SAMPLE_SIZE",
+        _paper_runtime_default("10", "25"),
+    )
 )
 AUTO_BUY_LEARNED_TIEBREAKER_MIN_WIN_RATE = float(
     os.getenv("AUTO_BUY_LEARNED_TIEBREAKER_MIN_WIN_RATE", "0.55")
@@ -171,7 +186,10 @@ AUTO_BUY_LEARNED_TIEBREAKER_LOOKBACK_DAYS = int(
     os.getenv("AUTO_BUY_LEARNED_TIEBREAKER_LOOKBACK_DAYS", "10")
 )
 AUTO_BUY_LEARNED_TIEBREAKER_MAX_THRESHOLD_GAP = float(
-    os.getenv("AUTO_BUY_LEARNED_TIEBREAKER_MAX_THRESHOLD_GAP", "4.0")
+    os.getenv(
+        "AUTO_BUY_LEARNED_TIEBREAKER_MAX_THRESHOLD_GAP",
+        _paper_runtime_default("6.0", "4.0"),
+    )
 )
 LEARNED_TIEBREAKER_SOFT_BLOCK_PREFIXES = (
     "bias_avoid",

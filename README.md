@@ -2,7 +2,7 @@
 
 Automated AI-assisted paper trading bot using TradingView webhooks, a Flask/Gunicorn webhook server, service-owned signal orchestration, Alpaca paper trading, pre-market intelligence, event scoring, prediction reports, and layered risk controls.
 
-This project is currently operated as a paper-trading system. Several live-safe controls are present in the codebase. ML prediction authority remains conservative: weak prediction evidence can apply explicitly logged downside size caps, while hard prediction blocking remains disabled unless promoted through paper-session validation and operator review.
+This project is currently operated as a paper-trading system. Several live-safe controls are present in the codebase. ML prediction authority remains conservative in cash modes. In paper/dry-run modes, explicitly bounded learning authority can now influence paper entries after hard blockers pass, so the intelligence layer can learn from real execution behavior without granting cash-live authority.
 
 ---
 
@@ -30,6 +30,7 @@ As of the latest roadmap work:
 - Optional TimescaleDB storage can mirror compact live feature ticks into `stock_ticks` when `TIMESCALE_DB_URI` is configured. This storage path has no trade authority.
 - Auto-buy paper execution can run from internal Alpaca-bar candidates across the approved universe when `AUTO_BUY_SIGNAL_MODE=internal_all` and `AUTO_BUY_LIVE_BUYS=true`. Candidate capture stores scored/taken/not-taken rows for learning and counterfactual review.
 - Auto-buy scoring now distinguishes early constructive build opportunities from mature chase/extension states. Early build is a ranking/learning boost; mature/extreme chase is penalized or blocked so the bot is not simply buying peak momentum.
+- Paper learning authority is enabled by default for paper/dry-run only. It can override Claude low-confidence soft rejections when canonical setup quality and buy-opportunity evidence are strong, and it caps the resulting paper size. It cannot override stale signals, broker/account constraints, cash-safe/cash-full mode, explicit symbol overrides, macro/regime hard blocks, or Claude infrastructure failures.
 - Position-manager partial exits now fail safe when open-order cancellation or Alpaca available-quantity state has not settled; the job records a failed/queued action instead of crashing on stale quantity.
 - The trading education corpus is versioned and non-authoritative. `ops_check.py trading-education-health` reports curated source and concept coverage for SEC/FINRA/CFTC/CME/NerdWallet/Investopedia/Schwab plus normalized strategy, risk, backtesting, and overfitting-control concepts; `ops_check.py trading-education-ingest --max-pages 6 --no-follow` stores compact approved-source concept metadata with URL, timestamp, content hash, and corpus version.
 - Webhook/status secrets should be supplied by `X-Webhook-Secret` or `Authorization: Bearer ...`; query-string secrets are rejected unless `ALLOW_QUERY_STRING_SECRET=true` is explicitly set for temporary compatibility.

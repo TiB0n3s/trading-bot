@@ -44,6 +44,12 @@ Recent completed roadmap items:
   comparison for baseline, RandomForest, and XGBoost when the optional packages
   are installed. This is diagnostic evidence only; it cannot promote, size,
   block, approve, or execute trades.
+- Paper learning authority is enabled by default for paper/dry-run only. After
+  hard blockers and deterministic pipeline gates have passed, it may convert a
+  Claude low-confidence soft rejection into a capped paper approval when
+  canonical setup quality and buy-opportunity scores are strong. It must never
+  apply in `cash_safe`/`cash_full`, never override stale/broker/account/macro/
+  explicit-symbol hard blockers, and never override Claude parse/engine errors.
 - Retraining reads training rows through a point-in-time guard
   (`feature_available_at <= prediction_time_cutoff`) and prunes unprotected old
   binary artifacts while keeping diagnostic JSON.
@@ -85,6 +91,10 @@ Recent completed roadmap items:
   `AUTO_BUY_LIVE_BUYS=true`. It now records `early_constructive_build`,
   `mature_chase`, and `extreme_chase` so post-session review can distinguish
   early accumulation/reclaim opportunities from late momentum chasing.
+- Auto-buy paper defaults are broader than cash defaults: paper/dry-run allows
+  more per-run/daily candidate executions, watch-setup promotion when score is
+  strong, and lower learned-tiebreaker sample requirements. Cash modes keep the
+  tighter defaults unless explicitly configured otherwise.
 - `position_manager.py` partial exits are fail-safe around open-order state:
   cancel-first cycles wait for the next pass before submitting, and Alpaca
   available-quantity errors return non-submitted results instead of crashing the

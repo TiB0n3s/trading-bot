@@ -7,8 +7,8 @@ becomes an ML-driven trading system.
 
 - Paper trading remains the runtime mode.
 - Prediction outputs remain conservative and evidence-gated.
-- No model should place orders, loosen risk controls, or override broker/order
-  safeguards.
+- No model should place cash-live orders, loosen risk controls, or override
+  broker/order safeguards.
 - Current prediction influence is limited to logged downside size caps for weak
   prediction evidence. Hard prediction blocking remains disabled unless
   explicitly promoted through paper-session validation.
@@ -20,6 +20,13 @@ becomes an ML-driven trading system.
 - Any future additional prediction influence must be paper-only,
   environment-controlled, logged, reversible, and limited to soft risk reduction
   until validated.
+- Paper learning authority is active by default for paper/dry-run only. After
+  hard blockers pass, strong canonical setup quality plus strong buy-opportunity
+  evidence can override a Claude low-confidence soft rejection into a capped
+  paper approval. This is intended to produce real paper execution evidence for
+  learning; it is not cash-live authority and cannot override stale,
+  broker/account, macro/regime, explicit override, or Claude infrastructure
+  failures.
 
 ## Near-term foundation
 

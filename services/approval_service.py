@@ -669,6 +669,92 @@ def _claude_infrastructure_rejection(reason: str) -> tuple[str, str] | None:
     return None
 
 
+def _paper_learning_override_decision(
+    *,
+    action: str,
+    decision: dict[str, Any],
+    account_state: dict[str, Any],
+    execution_mode: str,
+    ml_authority_config: dict[str, Any] | None,
+) -> dict[str, Any]:
+    """Return a paper-only approval override for strong canonical intelligence.
+
+    This runs after all pre-Claude pipeline gates. It cannot revive stale signals,
+    broker/account failures, cash-mode signals, or Claude infrastructure failures.
+    """
+    config = (ml_authority_config or {}).get("paper_learning_authority") or {}
+    if (
+        action != "buy"
+        or execution_mode not in {"paper", "dry_run"}
+        or not bool(config.get("enabled"))
+    ):
+        return {"allowed": False, "reason": "paper learning authority disabled or not applicable"}
+
+    setup_quality = account_state.get("setup_quality") or {}
+    buy_opportunity = account_state.get("buy_opportunity") or {}
+    prediction_gate = account_state.get("prediction_gate") or {}
+    session_gate = account_state.get("session_momentum_gate") or {}
+
+    setup_score = _float_or_none(setup_quality.get("score"))
+    buy_score = _float_or_none(buy_opportunity.get("buy_opportunity_score"))
+    min_setup = float(config.get("min_setup_score") or 65.0)
+    min_buy_score = float(config.get("min_buy_opportunity_score") or 8.0)
+    max_size_pct = float(config.get("max_position_size_pct") or 0.75)
+
+    setup_rec = str(setup_quality.get("recommendation") or "").lower()
+    setup_action = str(setup_quality.get("policy_action") or "").lower()
+    buy_rec = str(buy_opportunity.get("buy_opportunity_recommendation") or "").lower()
+    deterministic_gate = str(
+        prediction_gate.get("deterministic_signal_quality_decision")
+        or prediction_gate.get("prediction_decision")
+        or ""
+    ).lower()
+    session_severity = str(session_gate.get("severity") or "").lower()
+
+    blockers = []
+    if setup_action in {"block", "avoid"} or setup_rec == "avoid":
+        blockers.append(f"setup_quality={setup_action or setup_rec}")
+    if buy_rec in {"avoid", "skip"}:
+        blockers.append(f"buy_opportunity={buy_rec}")
+    if deterministic_gate == "block":
+        blockers.append("deterministic_signal_quality=block")
+    if session_severity in {"block", "hard_block"}:
+        blockers.append(f"session_gate={session_severity}")
+    if setup_score is None or setup_score < min_setup:
+        blockers.append(f"setup_score={setup_score} < {min_setup}")
+    if buy_score is None or buy_score < min_buy_score:
+        blockers.append(f"buy_opportunity_score={buy_score} < {min_buy_score}")
+
+    if blockers:
+        return {
+            "allowed": False,
+            "reason": "; ".join(blockers),
+            "setup_score": setup_score,
+            "buy_opportunity_score": buy_score,
+        }
+
+    requested_size = _float_or_none(decision.get("position_size_pct"))
+    if requested_size is None or requested_size <= 0:
+        requested_size = max_size_pct
+    approved_size = min(requested_size, max_size_pct)
+
+    return {
+        "allowed": True,
+        "reason": (
+            "paper learning authority approved strong canonical intelligence "
+            f"after Claude soft rejection: setup_score={setup_score}; "
+            f"buy_score={buy_score}; setup={setup_rec or setup_action}; "
+            f"buy_rec={buy_rec}"
+        ),
+        "position_size_pct": approved_size,
+        "max_position_size_pct": max_size_pct,
+        "setup_score": setup_score,
+        "buy_opportunity_score": buy_score,
+        "setup_recommendation": setup_rec,
+        "buy_opportunity_recommendation": buy_rec,
+    }
+
+
 def evaluate_approval_decision(
     *,
     signal: dict[str, Any],
@@ -680,6 +766,8 @@ def evaluate_approval_decision(
     account_state: dict[str, Any],
     medium_confidence_override: Callable[..., tuple[bool, str]],
     tape_exception_enabled: bool,
+    execution_mode: str = "paper",
+    ml_authority_config: dict[str, Any] | None = None,
 ) -> ApprovalDecision:
     raw_decision = evaluate_signal(signal, claude_account_state)
     decision = normalize_claude_decision(action=action, decision=raw_decision)
@@ -715,6 +803,33 @@ def evaluate_approval_decision(
         )
 
     if action == "buy" and confidence == "low":
+        paper_override = _paper_learning_override_decision(
+            action=action,
+            decision=decision,
+            account_state=account_state,
+            execution_mode=execution_mode,
+            ml_authority_config=ml_authority_config,
+        )
+        if paper_override.get("allowed"):
+            adjusted = dict(decision)
+            adjusted["approved"] = True
+            adjusted["confidence"] = "medium"
+            adjusted["position_size_pct"] = paper_override["position_size_pct"]
+            adjusted["reason"] = paper_override["reason"]
+            adjusted["paper_learning_authority_override"] = paper_override
+            account_state["paper_learning_authority_override"] = paper_override
+            return ApprovalDecision(
+                approved=True,
+                source="paper_learning_authority",
+                confidence="medium",
+                reason=paper_override["reason"],
+                category=None,
+                claude_payload=adjusted,
+                metadata={
+                    "raw_decision": raw_decision,
+                    "paper_learning_authority_override": paper_override,
+                },
+            )
         return ApprovalDecision(
             approved=False,
             source="confidence_gate",
@@ -743,6 +858,33 @@ def evaluate_approval_decision(
                 account_state=account_state,
             )
             if not medium_ok:
+                paper_override = _paper_learning_override_decision(
+                    action=action,
+                    decision=decision,
+                    account_state=account_state,
+                    execution_mode=execution_mode,
+                    ml_authority_config=ml_authority_config,
+                )
+                if paper_override.get("allowed"):
+                    adjusted = dict(decision)
+                    adjusted["approved"] = True
+                    adjusted["confidence"] = "medium"
+                    adjusted["position_size_pct"] = paper_override["position_size_pct"]
+                    adjusted["reason"] = paper_override["reason"]
+                    adjusted["paper_learning_authority_override"] = paper_override
+                    account_state["paper_learning_authority_override"] = paper_override
+                    return ApprovalDecision(
+                        approved=True,
+                        source="paper_learning_authority",
+                        confidence="medium",
+                        reason=paper_override["reason"],
+                        category=None,
+                        claude_payload=adjusted,
+                        metadata={
+                            "raw_decision": raw_decision,
+                            "paper_learning_authority_override": paper_override,
+                        },
+                    )
                 return ApprovalDecision(
                     approved=False,
                     source="confidence_gate",
@@ -772,6 +914,33 @@ def evaluate_approval_decision(
             account_state=account_state,
         )
         if not medium_ok:
+            paper_override = _paper_learning_override_decision(
+                action=action,
+                decision=decision,
+                account_state=account_state,
+                execution_mode=execution_mode,
+                ml_authority_config=ml_authority_config,
+            )
+            if paper_override.get("allowed"):
+                adjusted = dict(decision)
+                adjusted["approved"] = True
+                adjusted["confidence"] = "medium"
+                adjusted["position_size_pct"] = paper_override["position_size_pct"]
+                adjusted["reason"] = paper_override["reason"]
+                adjusted["paper_learning_authority_override"] = paper_override
+                account_state["paper_learning_authority_override"] = paper_override
+                return ApprovalDecision(
+                    approved=True,
+                    source="paper_learning_authority",
+                    confidence="medium",
+                    reason=paper_override["reason"],
+                    category=None,
+                    claude_payload=adjusted,
+                    metadata={
+                        "raw_decision": raw_decision,
+                        "paper_learning_authority_override": paper_override,
+                    },
+                )
             return ApprovalDecision(
                 approved=False,
                 source="confidence_gate",
@@ -791,6 +960,35 @@ def evaluate_approval_decision(
             "gate": "conditional_entry_quality",
             "reason": medium_reason,
         }
+
+    if action == "buy" and not bool(decision.get("approved")):
+        paper_override = _paper_learning_override_decision(
+            action=action,
+            decision=decision,
+            account_state=account_state,
+            execution_mode=execution_mode,
+            ml_authority_config=ml_authority_config,
+        )
+        if paper_override.get("allowed"):
+            adjusted = dict(decision)
+            adjusted["approved"] = True
+            adjusted["confidence"] = "medium"
+            adjusted["position_size_pct"] = paper_override["position_size_pct"]
+            adjusted["reason"] = paper_override["reason"]
+            adjusted["paper_learning_authority_override"] = paper_override
+            account_state["paper_learning_authority_override"] = paper_override
+            return ApprovalDecision(
+                approved=True,
+                source="paper_learning_authority",
+                confidence="medium",
+                reason=paper_override["reason"],
+                category=None,
+                claude_payload=adjusted,
+                metadata={
+                    "raw_decision": raw_decision,
+                    "paper_learning_authority_override": paper_override,
+                },
+            )
 
     return ApprovalDecision(
         approved=bool(decision.get("approved")),
@@ -821,6 +1019,8 @@ def run_claude_and_confidence(
     market_bias: dict[str, Any] | None,
     tape_exception_enabled: bool,
     log: Any,
+    execution_mode: str = "paper",
+    ml_authority_config: dict[str, Any] | None = None,
 ) -> ClaudeOutcome:
     weekly_perf = weekly_symbol_performance(symbol)
     account_state["weekly_symbol_performance"] = weekly_perf
@@ -836,6 +1036,8 @@ def run_claude_and_confidence(
         account_state=account_state,
         medium_confidence_override=medium_confidence_override,
         tape_exception_enabled=tape_exception_enabled,
+        execution_mode=execution_mode,
+        ml_authority_config=ml_authority_config,
     )
     decision = dict(approval_decision.claude_payload or {})
 

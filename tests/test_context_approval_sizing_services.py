@@ -233,6 +233,151 @@ def test_approval_service_converts_low_confidence_to_category():
     assert_equal(result.category, "confidence_gate", "category")
 
 
+def test_paper_learning_authority_can_override_claude_low_confidence():
+    account_state = {
+        "setup_quality": {
+            "recommendation": "buy",
+            "policy_action": "allow",
+            "score": 78,
+        },
+        "buy_opportunity": {
+            "buy_opportunity_recommendation": "strong_buy_candidate",
+            "buy_opportunity_score": 11,
+        },
+        "prediction_gate": {
+            "deterministic_signal_quality_decision": "pass",
+        },
+        "session_momentum_gate": {"severity": "pass"},
+    }
+    result = evaluate_approval_decision(
+        signal={"symbol": "AAPL", "action": "buy"},
+        action="buy",
+        claude_account_state={},
+        evaluate_signal=lambda *_: {
+            "approved": False,
+            "confidence": "low",
+            "reason": "Claude is cautious",
+            "position_size_pct": 2.5,
+        },
+        cash_safe_mode=False,
+        market_bias={},
+        account_state=account_state,
+        medium_confidence_override=lambda **_: (False, "no override"),
+        tape_exception_enabled=False,
+        execution_mode="paper",
+        ml_authority_config={
+            "paper_learning_authority": {
+                "enabled": True,
+                "min_setup_score": 65,
+                "min_buy_opportunity_score": 8,
+                "max_position_size_pct": 0.75,
+            }
+        },
+    )
+
+    assert_equal(result.approved, True, "approved")
+    assert_equal(result.source, "paper_learning_authority", "source")
+    assert_equal(result.category, None, "category")
+    assert_equal(result.claude_payload["position_size_pct"], 0.75, "size cap")
+    assert_equal(
+        account_state["paper_learning_authority_override"]["allowed"],
+        True,
+        "override marker",
+    )
+
+
+def test_paper_learning_authority_does_not_override_cash_mode():
+    account_state = {
+        "setup_quality": {
+            "recommendation": "buy",
+            "policy_action": "allow",
+            "score": 90,
+        },
+        "buy_opportunity": {
+            "buy_opportunity_recommendation": "strong_buy_candidate",
+            "buy_opportunity_score": 12,
+        },
+        "prediction_gate": {
+            "deterministic_signal_quality_decision": "pass",
+        },
+    }
+    result = evaluate_approval_decision(
+        signal={"symbol": "AAPL", "action": "buy"},
+        action="buy",
+        claude_account_state={},
+        evaluate_signal=lambda *_: {
+            "approved": False,
+            "confidence": "low",
+            "reason": "Claude is cautious",
+        },
+        cash_safe_mode=False,
+        market_bias={},
+        account_state=account_state,
+        medium_confidence_override=lambda **_: (False, "no override"),
+        tape_exception_enabled=False,
+        execution_mode="cash_full",
+        ml_authority_config={
+            "paper_learning_authority": {
+                "enabled": True,
+                "min_setup_score": 65,
+                "min_buy_opportunity_score": 8,
+                "max_position_size_pct": 0.75,
+            }
+        },
+    )
+
+    assert_equal(result.approved, False, "approved")
+    assert_equal(result.category, "confidence_gate", "category")
+    assert_equal("paper_learning_authority_override" in account_state, False, "override marker")
+
+
+def test_paper_learning_authority_can_override_claude_unapproved_soft_response():
+    account_state = {
+        "setup_quality": {
+            "recommendation": "buy",
+            "policy_action": "allow",
+            "score": 82,
+        },
+        "buy_opportunity": {
+            "buy_opportunity_recommendation": "strong_buy_candidate",
+            "buy_opportunity_score": 10,
+        },
+        "prediction_gate": {
+            "deterministic_signal_quality_decision": "pass",
+        },
+        "session_momentum_gate": {"severity": "pass"},
+    }
+    result = evaluate_approval_decision(
+        signal={"symbol": "AAPL", "action": "buy"},
+        action="buy",
+        claude_account_state={},
+        evaluate_signal=lambda *_: {
+            "approved": False,
+            "confidence": "medium",
+            "reason": "mixed context but not an infrastructure failure",
+            "position_size_pct": 1.0,
+        },
+        cash_safe_mode=False,
+        market_bias={},
+        account_state=account_state,
+        medium_confidence_override=lambda **_: (True, "test override"),
+        tape_exception_enabled=False,
+        execution_mode="paper",
+        ml_authority_config={
+            "paper_learning_authority": {
+                "enabled": True,
+                "min_setup_score": 65,
+                "min_buy_opportunity_score": 8,
+                "max_position_size_pct": 0.75,
+            }
+        },
+    )
+
+    assert_equal(result.approved, True, "approved")
+    assert_equal(result.source, "paper_learning_authority", "source")
+    assert_equal(result.claude_payload["position_size_pct"], 0.75, "size cap")
+
+
 def test_approval_service_separates_claude_parse_error_from_confidence_gate():
     result = evaluate_approval_decision(
         signal={"symbol": "AAPL", "action": "buy"},
@@ -476,6 +621,9 @@ def main():
         test_context_builder_sanitizes_claude_context,
         test_initial_context_builder_hydrates_buy_context,
         test_approval_service_converts_low_confidence_to_category,
+        test_paper_learning_authority_can_override_claude_low_confidence,
+        test_paper_learning_authority_does_not_override_cash_mode,
+        test_paper_learning_authority_can_override_claude_unapproved_soft_response,
         test_approval_service_separates_claude_parse_error_from_confidence_gate,
         test_approval_service_separates_claude_engine_error_from_confidence_gate,
         test_sizing_service_preserves_sell_default_size,

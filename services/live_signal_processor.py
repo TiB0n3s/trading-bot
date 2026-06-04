@@ -1081,6 +1081,8 @@ class LiveSignalProcessor:
             cash_safe_mode=self.deps.is_cash_safe_mode(),
             market_bias=self.deps.market_bias.get(kwargs["symbol"]) or {},
             tape_exception_enabled=self.deps.tape_exception_enabled,
+            execution_mode=self.deps.execution_mode,
+            ml_authority_config=self.deps.ml_authority_config,
             log=self.deps.log,
         )
         if outcome.rejected and outcome.approval:

@@ -96,6 +96,20 @@ ML_AUTHORITY_SIZE_CAP_PCT = _env_float("ML_AUTHORITY_SIZE_CAP_PCT", 0.80)
 ML_MODEL_ID = os.getenv("ML_MODEL_ID", "").strip()
 ML_MODEL_MAX_AGE_SECONDS = _env_int("ML_MODEL_MAX_AGE_SECONDS", 0)
 
+PAPER_LEARNING_AUTHORITY_ENABLED = _env_bool(
+    "PAPER_LEARNING_AUTHORITY_ENABLED",
+    True,
+)
+PAPER_LEARNING_MIN_SETUP_SCORE = _env_float("PAPER_LEARNING_MIN_SETUP_SCORE", 65.0)
+PAPER_LEARNING_MIN_BUY_OPPORTUNITY_SCORE = _env_float(
+    "PAPER_LEARNING_MIN_BUY_OPPORTUNITY_SCORE",
+    8.0,
+)
+PAPER_LEARNING_MAX_POSITION_SIZE_PCT = _env_float(
+    "PAPER_LEARNING_MAX_POSITION_SIZE_PCT",
+    0.75,
+)
+
 
 def is_cash_mode() -> bool:
     return EXECUTION_MODE in {"cash_safe", "cash_full"}
@@ -180,6 +194,26 @@ def public_ml_authority_config() -> dict:
             "prediction_freshness_timestamp_required": True,
         },
         "can_increase_size": False,
+        "paper_learning_authority": {
+            "enabled": PAPER_LEARNING_AUTHORITY_ENABLED,
+            "execution_modes": ["paper", "dry_run"],
+            "min_setup_score": PAPER_LEARNING_MIN_SETUP_SCORE,
+            "min_buy_opportunity_score": PAPER_LEARNING_MIN_BUY_OPPORTUNITY_SCORE,
+            "max_position_size_pct": PAPER_LEARNING_MAX_POSITION_SIZE_PCT,
+            "can_override": [
+                "claude_low_confidence",
+                "claude_unapproved_with_strong_canonical_intelligence",
+            ],
+            "cannot_override": [
+                "stale_signal",
+                "liquidity_or_spread_failure",
+                "broker_or_account_constraints",
+                "cash_safe_or_cash_full_mode",
+                "macro_or_regime_hard_block",
+                "explicit_symbol_override",
+                "claude_parse_or_engine_error",
+            ],
+        },
         "default_authority_mode": "observe_only_compare",
         "promotion_checklist": [
             "Review advisory-authority-report for qualified/not-enforced rows.",

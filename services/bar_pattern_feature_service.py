@@ -1,15 +1,16 @@
-"""EFI/PVT bar-pattern feature extraction for observe-only learning."""
+"""Advanced per-bar feature extraction for observe-only learning."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timezone
+import math
 from typing import Any
 
 from repositories.bar_pattern_feature_repo import BarPatternFeatureRepository
 
 
-BAR_PATTERN_FEATURE_VERSION = "efi_pvt_candle_physics_bar_pattern_v2"
+BAR_PATTERN_FEATURE_VERSION = "efi_pvt_orderflow_math_bar_pattern_v3"
 BAR_PATTERN_RUNTIME_EFFECT = "observe_only_pattern_learning_no_live_authority"
 
 
@@ -86,6 +87,29 @@ def _zscore(values: list[float]) -> float | None:
     return (values[-1] - mean) / std
 
 
+def _std(values: list[float]) -> float | None:
+    if len(values) < 2:
+        return None
+    mean = sum(values) / len(values)
+    variance = sum((value - mean) ** 2 for value in values) / len(values)
+    return variance ** 0.5
+
+
+def _rolling_corr(x_values: list[float], y_values: list[float]) -> float | None:
+    if len(x_values) != len(y_values) or len(x_values) < 3:
+        return None
+    x_mean = sum(x_values) / len(x_values)
+    y_mean = sum(y_values) / len(y_values)
+    x_diffs = [value - x_mean for value in x_values]
+    y_diffs = [value - y_mean for value in y_values]
+    x_var = sum(value * value for value in x_diffs)
+    y_var = sum(value * value for value in y_diffs)
+    denom = (x_var * y_var) ** 0.5
+    if not denom:
+        return 0.0
+    return sum(x * y for x, y in zip(x_diffs, y_diffs)) / denom
+
+
 def _pct_change(old: float | None, new: float | None) -> float | None:
     if old in (None, 0) or new is None:
         return None
@@ -96,6 +120,19 @@ def _safe_div(numerator: float | None, denominator: float | None) -> float | Non
     if numerator is None or denominator in (None, 0):
         return None
     return numerator / denominator
+
+
+def _quantile(values: list[float], q: float) -> float | None:
+    if not values:
+        return None
+    ordered = sorted(values)
+    pos = (len(ordered) - 1) * max(0.0, min(1.0, q))
+    lower = math.floor(pos)
+    upper = math.ceil(pos)
+    if lower == upper:
+        return ordered[int(pos)]
+    weight = pos - lower
+    return ordered[lower] * (1.0 - weight) + ordered[upper] * weight
 
 
 def _clamp(value: float, low: float = 0.0, high: float = 100.0) -> float:
@@ -118,6 +155,106 @@ def _true_ranges(highs: list[float], lows: list[float], closes: list[float]) -> 
             )
         )
     return ranges
+
+
+def _fractional_weights(d: float, size: int, threshold: float = 1e-4) -> list[float]:
+    weights = [1.0]
+    for k in range(1, max(1, size)):
+        weights.append(-weights[-1] / k * (d - k + 1.0))
+    trimmed = [weight for weight in reversed(weights) if abs(weight) > threshold]
+    return trimmed or [1.0]
+
+
+def _fractional_diff_at(
+    values: list[float],
+    idx: int,
+    *,
+    d: float = 0.45,
+    window: int = 60,
+    threshold: float = 1e-4,
+) -> float | None:
+    start = max(0, idx + 1 - window)
+    sample = values[start : idx + 1]
+    if len(sample) < 8:
+        return None
+    weights = _fractional_weights(d, len(sample), threshold=threshold)
+    sample = sample[-len(weights) :]
+    if len(sample) != len(weights):
+        return None
+    return sum(weight * value for weight, value in zip(weights, sample))
+
+
+def _trend_scan_label(
+    *,
+    closes: list[float],
+    idx: int,
+    max_bars: int,
+    min_bars: int = 5,
+) -> dict[str, Any]:
+    future = closes[idx + 1 : idx + 1 + max_bars]
+    if len(future) < min_bars:
+        return {
+            "trend_scan_label": None,
+            "trend_scan_tstat": None,
+            "trend_scan_bars": None,
+            "trend_scan_return_pct": None,
+            "trend_scan_reason": "insufficient_forward_bars",
+        }
+
+    best: dict[str, Any] | None = None
+    for bars in range(min_bars, len(future) + 1):
+        y_values = future[:bars]
+        x_values = list(range(1, bars + 1))
+        x_mean = sum(x_values) / bars
+        y_mean = sum(y_values) / bars
+        x_diffs = [value - x_mean for value in x_values]
+        y_diffs = [value - y_mean for value in y_values]
+        x_var = sum(value * value for value in x_diffs)
+        if not x_var:
+            continue
+        slope = sum(x * y for x, y in zip(x_diffs, y_diffs)) / x_var
+        intercept = y_mean - slope * x_mean
+        residuals = [
+            y - (intercept + slope * x)
+            for x, y in zip(x_values, y_values)
+        ]
+        if bars <= 2:
+            continue
+        residual_var = sum(value * value for value in residuals) / (bars - 2)
+        slope_stderr = (residual_var / x_var) ** 0.5 if x_var else None
+        if not slope_stderr:
+            tstat = 0.0
+        else:
+            tstat = slope / slope_stderr
+        candidate = {
+            "trend_scan_tstat": tstat,
+            "trend_scan_bars": bars,
+            "trend_scan_return_pct": _pct_change(closes[idx], y_values[-1]),
+        }
+        if best is None or abs(tstat) > abs(float(best["trend_scan_tstat"])):
+            best = candidate
+
+    if best is None:
+        return {
+            "trend_scan_label": None,
+            "trend_scan_tstat": None,
+            "trend_scan_bars": None,
+            "trend_scan_return_pct": None,
+            "trend_scan_reason": "trend_scan_unavailable",
+        }
+    tstat = float(best["trend_scan_tstat"])
+    label = 1 if tstat >= 2.0 else (-1 if tstat <= -2.0 else 0)
+    return {
+        **best,
+        "trend_scan_label": label,
+        "trend_scan_reason": (
+            "positive_structural_trend"
+            if label == 1
+            else "negative_structural_trend"
+            if label == -1
+            else "no_stable_directional_trend"
+        ),
+    }
 
 
 def _rolling_avg_at(values: list[float], idx: int, window: int) -> float | None:
@@ -447,11 +584,35 @@ class BarPatternFeatureService:
 
         efi_raw = [0.0]
         pvt = [0.0]
+        trade_directions = [0.0]
+        volume_delta = [0.0]
+        institutional_volume_delta = [0.0]
+        cumulative_volume_delta = [0.0]
+        last_direction = 0.0
+        current_session_date = str(normalized[0]["timestamp"])[:10]
+        session_cvd = 0.0
         for idx in range(1, len(normalized)):
             change = closes[idx] - closes[idx - 1]
+            direction = 1.0 if change > 0 else (-1.0 if change < 0 else last_direction)
+            last_direction = direction if direction else last_direction
             efi_raw.append(change * volumes[idx])
             pct = change / closes[idx - 1] if closes[idx - 1] else 0.0
             pvt.append(pvt[-1] + volumes[idx] * pct)
+            trade_directions.append(direction)
+            volume_delta.append(direction * volumes[idx])
+            session_date = str(normalized[idx]["timestamp"])[:10]
+            if session_date != current_session_date:
+                current_session_date = session_date
+                session_cvd = 0.0
+            volume_cutoff = _quantile(volumes[max(0, idx - 59) : idx + 1], 0.65) or 0.0
+            inst_delta = direction * volumes[idx] if volumes[idx] >= volume_cutoff else 0.0
+            institutional_volume_delta.append(inst_delta)
+            session_cvd += inst_delta
+            cumulative_volume_delta.append(session_cvd)
+        fractional_diff_close = [
+            _fractional_diff_at(closes, idx, d=0.45)
+            for idx in range(len(normalized))
+        ]
         efi_ema = _ema(efi_raw, 13)
 
         rows = []
@@ -505,6 +666,38 @@ class BarPatternFeatureService:
                 future_lows=future_lows,
                 atr_pct=candle["atr_20_pct"],
             )
+            trend_scan = _trend_scan_label(
+                closes=closes,
+                idx=idx,
+                max_bars=horizon_bars,
+            )
+            corr_start = max(0, idx - 19)
+            cvd_price_corr_20 = _rolling_corr(
+                closes[corr_start : idx + 1],
+                cumulative_volume_delta[corr_start : idx + 1],
+            )
+            volume_sum_20 = sum(volumes[corr_start : idx + 1])
+            signed_volume_sum_20 = sum(
+                abs(value) for value in volume_delta[corr_start : idx + 1]
+            )
+            vpin_toxicity_20 = _safe_div(signed_volume_sum_20, volume_sum_20)
+            cvd_change_5 = (
+                cumulative_volume_delta[idx] - cumulative_volume_delta[idx - 5]
+                if idx >= 5
+                else None
+            )
+            cvd_divergence_label = "none"
+            if price_return_5 is not None and cvd_change_5 is not None:
+                if price_return_5 < 0 and cvd_change_5 > 0:
+                    cvd_divergence_label = "bullish_absorption"
+                elif price_return_5 > 0 and cvd_change_5 < 0:
+                    cvd_divergence_label = "bearish_distribution"
+            frac_window = [
+                value
+                for value in fractional_diff_close[max(0, idx - 19) : idx + 1]
+                if value is not None
+            ]
+            fractional_diff_zscore_20 = _zscore(frac_window)
             opportunity_action, opportunity_quality, long_score, sell_score = _label_hindsight_opportunity(
                 forward_return=forward_return,
                 forward_mfe=forward_mfe,
@@ -532,6 +725,16 @@ class BarPatternFeatureService:
                 "pressure_return_3": pressure_return_3,
                 "pressure_return_8": pressure_return_8,
                 "volume_weighted_pressure_3": candle["volume_weighted_pressure_3"],
+                "trade_direction": trade_directions[idx],
+                "volume_delta": volume_delta[idx],
+                "institutional_volume_delta": institutional_volume_delta[idx],
+                "cumulative_volume_delta": cumulative_volume_delta[idx],
+                "cvd_price_corr_20": cvd_price_corr_20,
+                "cvd_divergence_label": cvd_divergence_label,
+                "vpin_toxicity_20": vpin_toxicity_20,
+                "fractional_diff_close_045": fractional_diff_close[idx],
+                "fractional_diff_zscore_20": fractional_diff_zscore_20,
+                **trend_scan,
                 **triple_barrier,
                 "price_return_5": price_return_5,
                 "price_vs_sma_20_pct": price_vs_sma,
@@ -568,6 +771,20 @@ class BarPatternFeatureService:
                     "pressure_return_3": _round(pressure_return_3),
                     "pressure_return_8": _round(pressure_return_8),
                     "volume_weighted_pressure_3": _round(candle["volume_weighted_pressure_3"]),
+                    "trade_direction": _round(trade_directions[idx]),
+                    "volume_delta": _round(volume_delta[idx]),
+                    "institutional_volume_delta": _round(institutional_volume_delta[idx]),
+                    "cumulative_volume_delta": _round(cumulative_volume_delta[idx]),
+                    "cvd_price_corr_20": _round(cvd_price_corr_20),
+                    "cvd_divergence_label": cvd_divergence_label,
+                    "vpin_toxicity_20": _round(vpin_toxicity_20),
+                    "fractional_diff_close_045": _round(fractional_diff_close[idx]),
+                    "fractional_diff_zscore_20": _round(fractional_diff_zscore_20),
+                    "trend_scan_label": trend_scan["trend_scan_label"],
+                    "trend_scan_tstat": _round(trend_scan["trend_scan_tstat"]),
+                    "trend_scan_bars": trend_scan["trend_scan_bars"],
+                    "trend_scan_return_pct": _round(trend_scan["trend_scan_return_pct"]),
+                    "trend_scan_reason": trend_scan["trend_scan_reason"],
                     "triple_barrier_label": triple_barrier["triple_barrier_label"],
                     "triple_barrier_reason": triple_barrier["triple_barrier_reason"],
                     "triple_barrier_bars_to_event": triple_barrier["triple_barrier_bars_to_event"],

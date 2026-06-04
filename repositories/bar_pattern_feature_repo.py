@@ -1,4 +1,4 @@
-"""Persistence for observe-only EFI/PVT bar-pattern learning rows."""
+"""Persistence for observe-only advanced per-bar learning rows."""
 
 from __future__ import annotations
 
@@ -44,6 +44,20 @@ class BarPatternFeatureRepository:
                     pressure_return_3 REAL,
                     pressure_return_8 REAL,
                     volume_weighted_pressure_3 REAL,
+                    trade_direction REAL,
+                    volume_delta REAL,
+                    institutional_volume_delta REAL,
+                    cumulative_volume_delta REAL,
+                    cvd_price_corr_20 REAL,
+                    cvd_divergence_label TEXT,
+                    vpin_toxicity_20 REAL,
+                    fractional_diff_close_045 REAL,
+                    fractional_diff_zscore_20 REAL,
+                    trend_scan_label INTEGER,
+                    trend_scan_tstat REAL,
+                    trend_scan_bars INTEGER,
+                    trend_scan_return_pct REAL,
+                    trend_scan_reason TEXT,
                     triple_barrier_label INTEGER,
                     triple_barrier_reason TEXT,
                     triple_barrier_bars_to_event INTEGER,
@@ -83,6 +97,20 @@ class BarPatternFeatureRepository:
             self._ensure_column(con, "pressure_return_3", "REAL")
             self._ensure_column(con, "pressure_return_8", "REAL")
             self._ensure_column(con, "volume_weighted_pressure_3", "REAL")
+            self._ensure_column(con, "trade_direction", "REAL")
+            self._ensure_column(con, "volume_delta", "REAL")
+            self._ensure_column(con, "institutional_volume_delta", "REAL")
+            self._ensure_column(con, "cumulative_volume_delta", "REAL")
+            self._ensure_column(con, "cvd_price_corr_20", "REAL")
+            self._ensure_column(con, "cvd_divergence_label", "TEXT")
+            self._ensure_column(con, "vpin_toxicity_20", "REAL")
+            self._ensure_column(con, "fractional_diff_close_045", "REAL")
+            self._ensure_column(con, "fractional_diff_zscore_20", "REAL")
+            self._ensure_column(con, "trend_scan_label", "INTEGER")
+            self._ensure_column(con, "trend_scan_tstat", "REAL")
+            self._ensure_column(con, "trend_scan_bars", "INTEGER")
+            self._ensure_column(con, "trend_scan_return_pct", "REAL")
+            self._ensure_column(con, "trend_scan_reason", "TEXT")
             self._ensure_column(con, "triple_barrier_label", "INTEGER")
             self._ensure_column(con, "triple_barrier_reason", "TEXT")
             self._ensure_column(con, "triple_barrier_bars_to_event", "INTEGER")
@@ -131,6 +159,12 @@ class BarPatternFeatureRepository:
                     upper_lower_wick_ratio, close_location, range_atr_ratio,
                     atr_20_pct, volume_ratio_20, pressure_return_3,
                     pressure_return_8, volume_weighted_pressure_3,
+                    trade_direction, volume_delta, institutional_volume_delta,
+                    cumulative_volume_delta, cvd_price_corr_20,
+                    cvd_divergence_label, vpin_toxicity_20,
+                    fractional_diff_close_045, fractional_diff_zscore_20,
+                    trend_scan_label, trend_scan_tstat, trend_scan_bars,
+                    trend_scan_return_pct, trend_scan_reason,
                     triple_barrier_label, triple_barrier_reason,
                     triple_barrier_bars_to_event, triple_barrier_profit_pct,
                     triple_barrier_stop_pct,
@@ -148,6 +182,12 @@ class BarPatternFeatureRepository:
                     :upper_lower_wick_ratio, :close_location, :range_atr_ratio,
                     :atr_20_pct, :volume_ratio_20, :pressure_return_3,
                     :pressure_return_8, :volume_weighted_pressure_3,
+                    :trade_direction, :volume_delta, :institutional_volume_delta,
+                    :cumulative_volume_delta, :cvd_price_corr_20,
+                    :cvd_divergence_label, :vpin_toxicity_20,
+                    :fractional_diff_close_045, :fractional_diff_zscore_20,
+                    :trend_scan_label, :trend_scan_tstat, :trend_scan_bars,
+                    :trend_scan_return_pct, :trend_scan_reason,
                     :triple_barrier_label, :triple_barrier_reason,
                     :triple_barrier_bars_to_event, :triple_barrier_profit_pct,
                     :triple_barrier_stop_pct,
@@ -181,6 +221,20 @@ class BarPatternFeatureRepository:
                     pressure_return_3 = excluded.pressure_return_3,
                     pressure_return_8 = excluded.pressure_return_8,
                     volume_weighted_pressure_3 = excluded.volume_weighted_pressure_3,
+                    trade_direction = excluded.trade_direction,
+                    volume_delta = excluded.volume_delta,
+                    institutional_volume_delta = excluded.institutional_volume_delta,
+                    cumulative_volume_delta = excluded.cumulative_volume_delta,
+                    cvd_price_corr_20 = excluded.cvd_price_corr_20,
+                    cvd_divergence_label = excluded.cvd_divergence_label,
+                    vpin_toxicity_20 = excluded.vpin_toxicity_20,
+                    fractional_diff_close_045 = excluded.fractional_diff_close_045,
+                    fractional_diff_zscore_20 = excluded.fractional_diff_zscore_20,
+                    trend_scan_label = excluded.trend_scan_label,
+                    trend_scan_tstat = excluded.trend_scan_tstat,
+                    trend_scan_bars = excluded.trend_scan_bars,
+                    trend_scan_return_pct = excluded.trend_scan_return_pct,
+                    trend_scan_reason = excluded.trend_scan_reason,
                     triple_barrier_label = excluded.triple_barrier_label,
                     triple_barrier_reason = excluded.triple_barrier_reason,
                     triple_barrier_bars_to_event = excluded.triple_barrier_bars_to_event,
@@ -228,7 +282,11 @@ class BarPatternFeatureRepository:
                     COUNT(*) AS rows,
                     COUNT(DISTINCT symbol) AS symbols,
                     SUM(CASE WHEN forward_return_pct IS NOT NULL THEN 1 ELSE 0 END)
-                        AS rows_with_forward_outcome
+                        AS rows_with_forward_outcome,
+                    SUM(CASE WHEN cvd_price_corr_20 IS NOT NULL OR vpin_toxicity_20 IS NOT NULL THEN 1 ELSE 0 END)
+                        AS rows_with_order_flow,
+                    SUM(CASE WHEN fractional_diff_zscore_20 IS NOT NULL THEN 1 ELSE 0 END)
+                        AS rows_with_fractional_memory
                 FROM bar_pattern_features
                 WHERE substr(bar_timestamp, 1, 10) = ?
                 {extra}
@@ -289,11 +347,52 @@ class BarPatternFeatureRepository:
                 """,
                 params,
             ).fetchall()
+            trend_scans = con.execute(
+                f"""
+                SELECT
+                    trend_scan_label,
+                    COALESCE(trend_scan_reason, 'unknown') AS trend_scan_reason,
+                    COUNT(*) AS rows,
+                    AVG(forward_return_pct) AS avg_forward_return_pct,
+                    AVG(forward_mfe_pct) AS avg_forward_mfe_pct,
+                    AVG(forward_mae_pct) AS avg_forward_mae_pct,
+                    AVG(trend_scan_tstat) AS avg_trend_scan_tstat,
+                    AVG(trend_scan_bars) AS avg_trend_scan_bars
+                FROM bar_pattern_features
+                WHERE substr(bar_timestamp, 1, 10) = ?
+                {extra}
+                  AND trend_scan_label IS NOT NULL
+                GROUP BY trend_scan_label, trend_scan_reason
+                ORDER BY rows DESC, trend_scan_label
+                """,
+                params,
+            ).fetchall()
+            cvd_divergences = con.execute(
+                f"""
+                SELECT
+                    COALESCE(cvd_divergence_label, 'unknown') AS cvd_divergence_label,
+                    COUNT(*) AS rows,
+                    AVG(forward_return_pct) AS avg_forward_return_pct,
+                    AVG(forward_mfe_pct) AS avg_forward_mfe_pct,
+                    AVG(forward_mae_pct) AS avg_forward_mae_pct,
+                    AVG(vpin_toxicity_20) AS avg_vpin_toxicity_20
+                FROM bar_pattern_features
+                WHERE substr(bar_timestamp, 1, 10) = ?
+                {extra}
+                GROUP BY cvd_divergence_label
+                ORDER BY rows DESC, cvd_divergence_label
+                """,
+                params,
+            ).fetchall()
         return {
             "rows": int(row["rows"] or 0),
             "symbols": int(row["symbols"] or 0),
             "rows_with_forward_outcome": int(row["rows_with_forward_outcome"] or 0),
+            "rows_with_order_flow": int(row["rows_with_order_flow"] or 0),
+            "rows_with_fractional_memory": int(row["rows_with_fractional_memory"] or 0),
             "labels": [dict(label) for label in labels],
             "opportunities": [dict(opportunity) for opportunity in opportunities],
             "triple_barriers": [dict(item) for item in triple_barriers],
+            "trend_scans": [dict(item) for item in trend_scans],
+            "cvd_divergences": [dict(item) for item in cvd_divergences],
         }

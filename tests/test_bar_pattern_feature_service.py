@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Tests for observe-only EFI/PVT bar-pattern learning features."""
+"""Tests for observe-only advanced per-bar learning features."""
 
 from __future__ import annotations
 
@@ -77,6 +77,11 @@ def test_bar_pattern_service_builds_efi_pvt_forward_features():
     assert any(row["volume_weighted_pressure_3"] is not None for row in rows)
     assert any(row["triple_barrier_label"] in {-1, 0, 1} for row in rows)
     assert any(row["triple_barrier_reason"] for row in rows)
+    assert any(row["cvd_price_corr_20"] is not None for row in rows)
+    assert any(row["vpin_toxicity_20"] is not None for row in rows)
+    assert any(row["fractional_diff_zscore_20"] is not None for row in rows)
+    assert any(row["trend_scan_label"] in {-1, 0, 1} for row in rows)
+    assert any(row["trend_scan_reason"] for row in rows)
 
 
 def test_bar_pattern_repository_persists_and_summarizes(tmp_path: Path):
@@ -98,6 +103,10 @@ def test_bar_pattern_repository_persists_and_summarizes(tmp_path: Path):
     assert summary["labels"]
     assert summary["opportunities"]
     assert summary["triple_barriers"]
+    assert summary["trend_scans"]
+    assert summary["cvd_divergences"]
+    assert summary["rows_with_order_flow"] > 0
+    assert summary["rows_with_fractional_memory"] > 0
     assert any(
         row["opportunity_action"] == "buy_candidate"
         for row in summary["opportunities"]
@@ -135,6 +144,8 @@ def test_bar_pattern_ops_backfill_uses_polygon_and_reports(tmp_path: Path):
     assert "feature_rows" in out
     assert "Hindsight opportunity summary" in out
     assert "Triple-barrier label summary" in out
+    assert "Trend-scanning label summary" in out
+    assert "CVD divergence summary" in out
     assert "buy_candidate" in out
     assert fake.kwargs["multiplier"] == 5
 

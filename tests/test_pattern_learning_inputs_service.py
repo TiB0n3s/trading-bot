@@ -61,6 +61,14 @@ def test_pattern_learning_inputs_classifies_trade_and_candidate_coverage():
                 "triple_barrier_label": 1,
                 "triple_barrier_reason": "profit_target_first",
                 "triple_barrier_bars_to_event": 3,
+                "trend_scan_label": 1,
+                "trend_scan_reason": "positive_structural_trend",
+                "trend_scan_tstat": 3.1,
+                "trend_scan_bars": 8,
+                "cvd_divergence_label": "bullish_absorption",
+                "cvd_price_corr_20": 0.4,
+                "vpin_toxicity_20": 0.7,
+                "fractional_diff_zscore_20": 1.2,
                 "runtime_effect": "observe_only_pattern_learning_no_live_authority",
             },
             {
@@ -78,6 +86,14 @@ def test_pattern_learning_inputs_classifies_trade_and_candidate_coverage():
                 "triple_barrier_label": -1,
                 "triple_barrier_reason": "stop_loss_first",
                 "triple_barrier_bars_to_event": 2,
+                "trend_scan_label": -1,
+                "trend_scan_reason": "negative_structural_trend",
+                "trend_scan_tstat": -2.4,
+                "trend_scan_bars": 6,
+                "cvd_divergence_label": "bearish_distribution",
+                "cvd_price_corr_20": -0.2,
+                "vpin_toxicity_20": 0.8,
+                "fractional_diff_zscore_20": -1.0,
                 "runtime_effect": "observe_only_pattern_learning_no_live_authority",
             },
         ],
@@ -107,6 +123,15 @@ def test_pattern_learning_inputs_classifies_trade_and_candidate_coverage():
         "-1|stop_loss_first"
     ] == 1
     assert payload.bar_pattern_evidence["triple_barrier_expectancy"]
+    assert payload.bar_pattern_evidence["trend_scan_counts"][
+        "1|positive_structural_trend"
+    ] == 1
+    assert payload.bar_pattern_evidence["trend_scan_expectancy"]
+    assert payload.bar_pattern_evidence["cvd_divergence_counts"][
+        "bullish_absorption"
+    ] == 1
+    assert payload.bar_pattern_evidence["order_flow_coverage_rate"] == 1.0
+    assert payload.bar_pattern_evidence["fractional_memory_coverage_rate"] == 1.0
     assert payload.bar_pattern_evidence["top_buy_windows"][0]["symbol"] == "AAPL"
     assert payload.bar_pattern_evidence["top_sell_or_avoid_windows"][0]["symbol"] == "AAPL"
 

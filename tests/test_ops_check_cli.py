@@ -771,12 +771,12 @@ def test_pattern_learning_inputs_cli_uses_trade_and_candidate_rows(tmp_path):
     assert "fully_integrated_pattern_outcomes : 1 (100.0%)" in out
     assert "good_buy_good_sell" in out
     assert "rows_with_forward_outcome         : 1 (100.0%)" in out
-    assert "EFI/PVT bar-pattern strategy evidence" in out
+    assert "Advanced bar-pattern/order-flow strategy evidence" in out
     assert "bar_pattern_rows                  : 2" in out
     assert "long_candidate|best_buy_window" in out
     assert "sell_or_avoid_candidate|risk_window" in out
-    assert "Top EFI/PVT buy windows" in out
-    assert "Top EFI/PVT sell-or-avoid windows" in out
+    assert "Top advanced buy windows" in out
+    assert "Top advanced sell-or-avoid windows" in out
     assert "[OK] pattern learning inputs summarized; no live authority changed" in out
 
 

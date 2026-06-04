@@ -55,6 +55,17 @@ def _build_db(path: Path) -> None:
                 close_location REAL,
                 range_atr_ratio REAL,
                 volume_weighted_pressure_3 REAL,
+                volume_delta REAL,
+                institutional_volume_delta REAL,
+                cumulative_volume_delta REAL,
+                cvd_price_corr_20 REAL,
+                vpin_toxicity_20 REAL,
+                fractional_diff_close_045 REAL,
+                fractional_diff_zscore_20 REAL,
+                trend_scan_label INTEGER,
+                trend_scan_tstat REAL,
+                trend_scan_bars INTEGER,
+                trend_scan_return_pct REAL,
                 pattern_label TEXT,
                 pattern_score REAL,
                 opportunity_action TEXT,
@@ -97,7 +108,13 @@ def _build_db(path: Path) -> None:
                 INSERT INTO bar_pattern_features (
                     symbol, bar_timestamp, timeframe,
                     candle_body_pct, close_location, range_atr_ratio,
-                    volume_weighted_pressure_3, pattern_label, pattern_score,
+                    volume_weighted_pressure_3,
+                    volume_delta, institutional_volume_delta,
+                    cumulative_volume_delta, cvd_price_corr_20,
+                    vpin_toxicity_20, fractional_diff_close_045,
+                    fractional_diff_zscore_20, trend_scan_label,
+                    trend_scan_tstat, trend_scan_bars, trend_scan_return_pct,
+                    pattern_label, pattern_score,
                     opportunity_action, opportunity_quality,
                     long_opportunity_score, sell_opportunity_score,
                     triple_barrier_label, triple_barrier_reason,
@@ -106,7 +123,11 @@ def _build_db(path: Path) -> None:
                 ) VALUES (
                     'AAPL', ?, '1m',
                     0.6, 0.8, 1.2,
-                    0.3, 'constructive_force_pvt', 72,
+                    0.3,
+                    1200, 1200, 3600, 0.42,
+                    0.74, 12.3, 1.1, 1,
+                    2.8, 8, 0.9,
+                    'constructive_force_pvt', 72,
                     'long_candidate', 'good_buy_window',
                     80, 20,
                     1, 'profit_target_first',
@@ -130,6 +151,8 @@ def test_fetch_training_rows_respects_feature_available_at_cutoff():
     assert len(rows) == 1
     assert rows[0]["timestamp"] == "2026-06-03T01:00:00+00:00"
     assert rows[0]["candle_body_pct"] == 0.6
+    assert rows[0]["cvd_price_corr_20"] == 0.42
+    assert rows[0]["trend_scan_label"] == 1
     assert rows[0]["triple_barrier_label"] == 1
 
 

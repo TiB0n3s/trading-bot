@@ -142,7 +142,16 @@ class TrainingDataRepository:
                     {('bp.close_location' if has_bar_patterns else 'NULL')} AS close_location,
                     {('bp.range_atr_ratio' if has_bar_patterns else 'NULL')} AS range_atr_ratio,
                     {('bp.volume_weighted_pressure_3' if has_bar_patterns else 'NULL')} AS volume_weighted_pressure_3,
-                    {('bp.triple_barrier_label' if has_bar_patterns else 'NULL')} AS triple_barrier_label
+                    {('bp.volume_delta' if has_bar_patterns else 'NULL')} AS volume_delta,
+                    {('bp.institutional_volume_delta' if has_bar_patterns else 'NULL')} AS institutional_volume_delta,
+                    {('bp.cumulative_volume_delta' if has_bar_patterns else 'NULL')} AS cumulative_volume_delta,
+                    {('bp.cvd_price_corr_20' if has_bar_patterns else 'NULL')} AS cvd_price_corr_20,
+                    {('bp.vpin_toxicity_20' if has_bar_patterns else 'NULL')} AS vpin_toxicity_20,
+                    {('bp.fractional_diff_close_045' if has_bar_patterns else 'NULL')} AS fractional_diff_close_045,
+                    {('bp.fractional_diff_zscore_20' if has_bar_patterns else 'NULL')} AS fractional_diff_zscore_20,
+                    {('bp.triple_barrier_label' if has_bar_patterns else 'NULL')} AS triple_barrier_label,
+                    {('bp.trend_scan_label' if has_bar_patterns else 'NULL')} AS trend_scan_label,
+                    {('bp.trend_scan_tstat' if has_bar_patterns else 'NULL')} AS trend_scan_tstat
                 FROM feature_snapshots fs
                 {label_join}
                 {context_join}
@@ -246,6 +255,19 @@ class TrainingDataRepository:
                     {bp_opt('pressure_return_3')},
                     {bp_opt('pressure_return_8')},
                     {bp_opt('volume_weighted_pressure_3')},
+                    {bp_opt('volume_delta')},
+                    {bp_opt('institutional_volume_delta')},
+                    {bp_opt('cumulative_volume_delta')},
+                    {bp_opt('cvd_price_corr_20')},
+                    {bp_opt('cvd_divergence_label')},
+                    {bp_opt('vpin_toxicity_20')},
+                    {bp_opt('fractional_diff_close_045')},
+                    {bp_opt('fractional_diff_zscore_20')},
+                    {bp_opt('trend_scan_label')},
+                    {bp_opt('trend_scan_tstat')},
+                    {bp_opt('trend_scan_bars')},
+                    {bp_opt('trend_scan_return_pct')},
+                    {bp_opt('trend_scan_reason')},
                     {bp_opt('pattern_label', 'bar_pattern_label')},
                     {bp_opt('pattern_score', 'bar_pattern_score')},
                     {bp_opt('opportunity_action', 'bar_opportunity_action')},

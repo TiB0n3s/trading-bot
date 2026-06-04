@@ -147,7 +147,7 @@ def run_pattern_learning_inputs_report(
 
     bar_patterns = payload.bar_pattern_evidence
     print()
-    print("EFI/PVT bar-pattern strategy evidence")
+    print("Advanced bar-pattern/order-flow strategy evidence")
     print(f"  bar_pattern_rows                  : {bar_patterns['rows']}")
     print(f"  symbols                           : {bar_patterns['symbols']}")
     print(
@@ -159,6 +159,14 @@ def run_pattern_learning_inputs_report(
         "  rows_with_opportunity_label       : "
         f"{bar_patterns['rows_with_opportunity_label']} "
         f"({_pct(bar_patterns['rows_with_opportunity_label'], bar_patterns['rows'])})"
+    )
+    print(
+        "  order_flow_coverage_rate          : "
+        f"{_fmt(bar_patterns.get('order_flow_coverage_rate'))}"
+    )
+    print(
+        "  fractional_memory_coverage_rate   : "
+        f"{_fmt(bar_patterns.get('fractional_memory_coverage_rate'))}"
     )
     print(
         "  avg_long_opportunity_score        : "
@@ -201,9 +209,31 @@ def run_pattern_learning_inputs_report(
                 f"ret={_fmt(row.get('avg_forward_return_pct'))}"
             )
 
+    if bar_patterns.get("trend_scan_counts"):
+        print()
+        print("Bar-pattern trend-scan counts")
+        for trend, count in bar_patterns["trend_scan_counts"].items():
+            print(f"  {trend:<42} {count:>6}")
+
+    if bar_patterns.get("trend_scan_expectancy"):
+        print()
+        print("Bar-pattern trend-scan expectancy")
+        for row in bar_patterns["trend_scan_expectancy"][:limit]:
+            print(
+                f"  {row['trend_scan'][:42]:<42} "
+                f"n={row['rows']:<4} win={_fmt(row.get('win_rate')):<8} "
+                f"ret={_fmt(row.get('avg_forward_return_pct'))}"
+            )
+
+    if bar_patterns.get("cvd_divergence_counts"):
+        print()
+        print("CVD divergence counts")
+        for divergence, count in bar_patterns["cvd_divergence_counts"].items():
+            print(f"  {divergence:<42} {count:>6}")
+
     if bar_patterns["top_buy_windows"]:
         print()
-        print("Top EFI/PVT buy windows")
+        print("Top advanced buy windows")
         print(
             f"  {'time':<19} {'sym':<6} {'pattern':<28} "
             f"{'quality':<20} {'long':>8} {'mfe':>8} {'ret':>8}"
@@ -221,7 +251,7 @@ def run_pattern_learning_inputs_report(
 
     if bar_patterns["top_sell_or_avoid_windows"]:
         print()
-        print("Top EFI/PVT sell-or-avoid windows")
+        print("Top advanced sell-or-avoid windows")
         print(
             f"  {'time':<19} {'sym':<6} {'pattern':<28} "
             f"{'quality':<20} {'sell':>8} {'mae':>8} {'ret':>8}"

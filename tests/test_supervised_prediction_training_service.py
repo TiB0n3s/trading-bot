@@ -41,6 +41,16 @@ def _rows(n=60):
                 "pressure_return_3": 0.2,
                 "pressure_return_8": 0.4,
                 "volume_weighted_pressure_3": 0.3,
+                "volume_delta": 1000 if i % 2 == 0 else -800,
+                "institutional_volume_delta": 1000 if i % 3 == 0 else 0,
+                "cumulative_volume_delta": i * 100,
+                "cvd_price_corr_20": 0.25,
+                "vpin_toxicity_20": 0.72,
+                "fractional_diff_close_045": 12.0 + i * 0.01,
+                "fractional_diff_zscore_20": 0.8,
+                "trend_scan_label": 1 if i % 3 == 0 else (-1 if i % 3 == 1 else 0),
+                "trend_scan_tstat": 2.6 if i % 3 == 0 else -2.2,
+                "trend_scan_return_pct": 0.8 if i % 3 == 0 else -0.6,
                 "pattern_score": 72,
                 "long_opportunity_score": 80,
                 "sell_opportunity_score": 20,
@@ -79,7 +89,7 @@ def test_train_quant_model_suite_compares_available_observe_only_models():
         ).to_dict()
 
     providers = {row["provider"] for row in result["models"]}
-    assert result["version"] == "quant_model_suite_v2"
+    assert result["version"] == "quant_model_suite_v3"
     assert result["runtime_effect"] == "observe_only_no_live_authority"
     assert result["sample_size"] == 80
     assert "chronological_positive_rate_baseline" in providers
@@ -101,12 +111,26 @@ def test_train_supervised_prediction_model_can_use_triple_barrier_target():
     assert result["runtime_effect"] == "observe_only_no_live_authority"
 
 
+def test_train_supervised_prediction_model_can_use_trend_scan_target():
+    result = train_supervised_prediction_model(
+        rows=_rows(90),
+        horizon="trend_scan",
+        min_samples=40,
+    ).to_dict()
+
+    assert result["trained"] is True
+    assert result["sample_size"] == 90
+    assert "trend_scan_tstat" in result["feature_columns"]
+    assert result["runtime_effect"] == "observe_only_no_live_authority"
+
+
 def main():
     tests = [
         test_train_supervised_prediction_model_uses_baseline_without_required_deps,
         test_train_supervised_prediction_model_blocks_small_samples,
         test_train_quant_model_suite_compares_available_observe_only_models,
         test_train_supervised_prediction_model_can_use_triple_barrier_target,
+        test_train_supervised_prediction_model_can_use_trend_scan_target,
     ]
     for test in tests:
         test()

@@ -34,6 +34,7 @@ from symbols_config import SYMBOL_UNIVERSE_VERSION
 QUERY_VERSION = "ml_dataset_builder_v1"
 LABEL_VERSION = "label_taxonomy_v1"
 BAR_PATTERN_FEATURE_TARGET_VERSION = "bar_pattern_feature_target_v1"
+ADVANCED_ALPHA_FEATURE_VERSION = "advanced_alpha_feature_target_v1"
 
 FIXED_HORIZON_TARGETS = [
     "ret_fwd_15m",
@@ -41,6 +42,7 @@ FIXED_HORIZON_TARGETS = [
     "max_up_15m",
     "max_down_15m",
     "triple_barrier_label",
+    "trend_scan_label",
 ]
 
 FUTURE_FIXED_HORIZON_TARGETS = [
@@ -105,6 +107,19 @@ ROW_COLUMNS = [
     "pressure_return_3",
     "pressure_return_8",
     "volume_weighted_pressure_3",
+    "volume_delta",
+    "institutional_volume_delta",
+    "cumulative_volume_delta",
+    "cvd_price_corr_20",
+    "cvd_divergence_label",
+    "vpin_toxicity_20",
+    "fractional_diff_close_045",
+    "fractional_diff_zscore_20",
+    "trend_scan_label",
+    "trend_scan_tstat",
+    "trend_scan_bars",
+    "trend_scan_return_pct",
+    "trend_scan_reason",
     "bar_pattern_label",
     "bar_pattern_score",
     "bar_opportunity_action",
@@ -347,7 +362,9 @@ def build_training_dataset(config: DatasetBuildConfig) -> DatasetBuildResult:
     manifest["safe_training_targets"] = FIXED_HORIZON_TARGETS
     manifest["future_fixed_horizon_targets_pending_schema"] = FUTURE_FIXED_HORIZON_TARGETS
     manifest["bar_pattern_feature_target_version"] = BAR_PATTERN_FEATURE_TARGET_VERSION
+    manifest["advanced_alpha_feature_version"] = ADVANCED_ALPHA_FEATURE_VERSION
     manifest["triple_barrier_target_included"] = True
+    manifest["trend_scan_target_included"] = True
     manifest["pit_contract_ok"] = pit_contract.get("ok", False)
     manifest["stale_feature_snapshot_count"] = pit_contract.get(
         "stale_feature_snapshot_count", 0

@@ -494,7 +494,7 @@ Responsibilities:
 Subscribes to live 1-minute bars.
 Gap-fills missing rolling context after startup/reconnect.
 Updates session_momentum through SessionMomentumService.
-Feeds bar_pattern_features for EFI/PVT/candle-physics and triple-barrier learning.
+Feeds bar_pattern_features for EFI/PVT, candle physics, order-flow proxy, fractional-memory, triple-barrier, and trend-scanning learning.
 
 Runtime effect:
 
@@ -511,20 +511,23 @@ Responsibilities:
 Archives Polygon 1-minute RTH bars.
 Caches CSVs under `data/historical_bars/polygon_1min`.
 Feeds bars into `bar_pattern_features` unless `--no-patterns` is supplied.
-Provides historical candle-physics and triple-barrier labels for ML/replay research.
+Provides historical candle-physics, order-flow proxy, fractional-memory, triple-barrier, and trend-scanning labels for ML/replay research.
 
 Usage:
 
 python3 pipeline/historical_bar_archive.py --date 2026-06-03 --symbol AAPL
 python3 pipeline/historical_bar_archive.py --date 2026-06-03 --all
 
-ML candle-pattern contract:
+ML advanced per-bar contract:
 
 `bar_pattern_features` is part of the ML/export surface. Candle body/wick ratios,
 close location, ATR-normalized range, pressure vectors, EFI/PVT pattern labels,
-opportunity scores, and `triple_barrier_label` are observe-only training/research
-inputs. Live promotion still requires model-readiness, calibration, stability,
-and rollout-governance checks.
+CVD/order-flow proxies, VPIN-style toxicity, fractional-differentiated price
+memory, opportunity scores, `triple_barrier_label`, and `trend_scan_label` are
+observe-only training/research inputs. ETF lead-lag vectors and options-skew
+signals require additional feeds before they can be populated. Live promotion
+still requires model-readiness, calibration, stability, and rollout-governance
+checks.
 
 fill_poller.py
 

@@ -19,7 +19,7 @@ from policy_artifacts import atomic_write_json
 
 
 SUPERVISED_MODEL_VERSION = "supervised_prediction_model_v2"
-QUANT_MODEL_SUITE_VERSION = "quant_model_suite_v2"
+QUANT_MODEL_SUITE_VERSION = "quant_model_suite_v3"
 DEFAULT_FEATURE_COLUMNS = (
     "ret_1m",
     "ret_5m",
@@ -47,8 +47,24 @@ CANDLE_PHYSICS_FEATURE_COLUMNS = (
     "long_opportunity_score",
     "sell_opportunity_score",
 )
-DEFAULT_FEATURE_COLUMNS = DEFAULT_FEATURE_COLUMNS + CANDLE_PHYSICS_FEATURE_COLUMNS
+ADVANCED_ALPHA_FEATURE_COLUMNS = (
+    "volume_delta",
+    "institutional_volume_delta",
+    "cumulative_volume_delta",
+    "cvd_price_corr_20",
+    "vpin_toxicity_20",
+    "fractional_diff_close_045",
+    "fractional_diff_zscore_20",
+    "trend_scan_tstat",
+    "trend_scan_return_pct",
+)
+DEFAULT_FEATURE_COLUMNS = (
+    DEFAULT_FEATURE_COLUMNS
+    + CANDLE_PHYSICS_FEATURE_COLUMNS
+    + ADVANCED_ALPHA_FEATURE_COLUMNS
+)
 TRIPLE_BARRIER_TARGETS = ("triple_barrier", "triple_barrier_label")
+TREND_SCAN_TARGETS = ("trend_scan", "trend_scan_label")
 
 
 @dataclass(frozen=True)
@@ -105,6 +121,14 @@ def _label(row: dict[str, Any], horizon: str) -> int | None:
     if horizon in TRIPLE_BARRIER_TARGETS:
         try:
             value = row.get("triple_barrier_label")
+            if value is None:
+                return None
+            return int(float(value))
+        except Exception:
+            return None
+    if horizon in TREND_SCAN_TARGETS:
+        try:
+            value = row.get("trend_scan_label")
             if value is None:
                 return None
             return int(float(value))

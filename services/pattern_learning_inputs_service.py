@@ -211,6 +211,11 @@ def _bar_pattern_evidence(bar_pattern_rows: list[dict[str, Any]]) -> dict[str, A
     forward_returns_by_opportunity: dict[str, list[float]] = {}
     triple_barrier_counts: dict[str, int] = {}
     triple_barrier_returns: dict[str, list[float]] = {}
+    trend_scan_counts: dict[str, int] = {}
+    trend_scan_returns: dict[str, list[float]] = {}
+    cvd_divergence_counts: dict[str, int] = {}
+    rows_with_order_flow = 0
+    rows_with_fractional_memory = 0
     top_buy_windows: list[dict[str, Any]] = []
     top_sell_or_avoid_windows: list[dict[str, Any]] = []
 
@@ -239,11 +244,27 @@ def _bar_pattern_evidence(bar_pattern_rows: list[dict[str, Any]]) -> dict[str, A
         sell_score = _float(row.get("sell_opportunity_score"))
         triple_barrier_label = row.get("triple_barrier_label")
         triple_barrier_reason = _bucket(row, "triple_barrier_reason")
+        trend_scan_label = row.get("trend_scan_label")
+        trend_scan_reason = _bucket(row, "trend_scan_reason")
+        cvd_divergence_label = _bucket(row, "cvd_divergence_label")
+        if cvd_divergence_label != "unknown":
+            cvd_divergence_counts[cvd_divergence_label] = (
+                cvd_divergence_counts.get(cvd_divergence_label, 0) + 1
+            )
+        if row.get("cvd_price_corr_20") is not None or row.get("vpin_toxicity_20") is not None:
+            rows_with_order_flow += 1
+        if row.get("fractional_diff_zscore_20") is not None:
+            rows_with_fractional_memory += 1
         if triple_barrier_label is not None:
             triple_key = f"{int(float(triple_barrier_label))}|{triple_barrier_reason}"
             triple_barrier_counts[triple_key] = triple_barrier_counts.get(triple_key, 0) + 1
             if forward_return is not None:
                 triple_barrier_returns.setdefault(triple_key, []).append(forward_return)
+        if trend_scan_label is not None:
+            trend_key = f"{int(float(trend_scan_label))}|{trend_scan_reason}"
+            trend_scan_counts[trend_key] = trend_scan_counts.get(trend_key, 0) + 1
+            if forward_return is not None:
+                trend_scan_returns.setdefault(trend_key, []).append(forward_return)
 
         if forward_return is not None:
             rows_with_forward_outcome += 1
@@ -274,6 +295,16 @@ def _bar_pattern_evidence(bar_pattern_rows: list[dict[str, Any]]) -> dict[str, A
             ),
             "triple_barrier_reason": triple_barrier_reason,
             "triple_barrier_bars_to_event": row.get("triple_barrier_bars_to_event"),
+            "trend_scan_label": (
+                int(float(trend_scan_label))
+                if trend_scan_label is not None
+                else None
+            ),
+            "trend_scan_tstat": row.get("trend_scan_tstat"),
+            "trend_scan_bars": row.get("trend_scan_bars"),
+            "cvd_divergence_label": cvd_divergence_label,
+            "vpin_toxicity_20": row.get("vpin_toxicity_20"),
+            "fractional_diff_zscore_20": row.get("fractional_diff_zscore_20"),
         }
         if action in {"buy_candidate", "long_candidate"} and long_score is not None:
             top_buy_windows.append(item)
@@ -319,6 +350,20 @@ def _bar_pattern_evidence(bar_pattern_rows: list[dict[str, Any]]) -> dict[str, A
         key=lambda item: (-(item["rows"] or 0), item["triple_barrier"])
     )
 
+    trend_scan_expectancy = []
+    for label, values in trend_scan_returns.items():
+        trend_scan_expectancy.append(
+            {
+                "trend_scan": label,
+                "rows": len(values),
+                "win_rate": _rate(sum(1 for value in values if value > 0), len(values)),
+                "avg_forward_return_pct": _mean(values),
+            }
+        )
+    trend_scan_expectancy.sort(
+        key=lambda item: (-(item["rows"] or 0), item["trend_scan"])
+    )
+
     return {
         "rows": len(bar_pattern_rows),
         "symbols": len(symbols),
@@ -327,6 +372,8 @@ def _bar_pattern_evidence(bar_pattern_rows: list[dict[str, Any]]) -> dict[str, A
         "rows_with_opportunity_label": rows_with_opportunity_label,
         "forward_outcome_coverage_rate": _rate(rows_with_forward_outcome, len(bar_pattern_rows)),
         "opportunity_label_coverage_rate": _rate(rows_with_opportunity_label, len(bar_pattern_rows)),
+        "order_flow_coverage_rate": _rate(rows_with_order_flow, len(bar_pattern_rows)),
+        "fractional_memory_coverage_rate": _rate(rows_with_fractional_memory, len(bar_pattern_rows)),
         "avg_long_opportunity_score": _mean(long_scores),
         "avg_sell_opportunity_score": _mean(sell_scores),
         "pattern_counts": dict(sorted(pattern_counts.items(), key=lambda item: (-item[1], item[0]))),
@@ -334,9 +381,16 @@ def _bar_pattern_evidence(bar_pattern_rows: list[dict[str, Any]]) -> dict[str, A
         "triple_barrier_counts": dict(
             sorted(triple_barrier_counts.items(), key=lambda item: (-item[1], item[0]))
         ),
+        "trend_scan_counts": dict(
+            sorted(trend_scan_counts.items(), key=lambda item: (-item[1], item[0]))
+        ),
+        "cvd_divergence_counts": dict(
+            sorted(cvd_divergence_counts.items(), key=lambda item: (-item[1], item[0]))
+        ),
         "runtime_effects": dict(sorted(runtime_effects.items())),
         "opportunity_expectancy": opportunity_expectancy,
         "triple_barrier_expectancy": triple_barrier_expectancy,
+        "trend_scan_expectancy": trend_scan_expectancy,
         "top_buy_windows": top_buy_windows[:15],
         "top_sell_or_avoid_windows": top_sell_or_avoid_windows[:15],
     }

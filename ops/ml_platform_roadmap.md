@@ -1051,6 +1051,12 @@ A model can only move from observe-only to paper-trading influence after it has:
     expose candle body/wick ratios, ATR-normalized range, pressure vectors,
     pattern scores, and `triple_barrier_label`. These remain observe-only until
     readiness, calibration, and rollout-governance checks pass.
+31. Done: extend the per-bar learning surface beyond candlesticks. The same
+    `bar_pattern_features` substrate now persists CVD/order-flow proxy metrics,
+    VPIN-style toxicity, fractional-differentiated price memory, and
+    trend-scanning labels/t-stats. Dataset exports, brain features, and
+    supervised training can consume those fields. ETF lead-lag and options-skew
+    signals remain future work until reference/options feeds are available.
 
 Critical blockers before real training:
 

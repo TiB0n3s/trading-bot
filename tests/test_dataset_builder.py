@@ -147,6 +147,15 @@ CREATE TABLE bar_pattern_features (
     close_location REAL,
     range_atr_ratio REAL,
     volume_weighted_pressure_3 REAL,
+    cvd_price_corr_20 REAL,
+    cvd_divergence_label TEXT,
+    vpin_toxicity_20 REAL,
+    fractional_diff_zscore_20 REAL,
+    trend_scan_label INTEGER,
+    trend_scan_tstat REAL,
+    trend_scan_bars INTEGER,
+    trend_scan_return_pct REAL,
+    trend_scan_reason TEXT,
     pattern_label TEXT,
     pattern_score REAL,
     opportunity_action TEXT,
@@ -210,16 +219,24 @@ def _insert_bar_pattern(con, *, ts, symbol, label=1):
         INSERT INTO bar_pattern_features (
             symbol, bar_timestamp, timeframe, feature_version,
             candle_body_pct, close_location, range_atr_ratio,
-            volume_weighted_pressure_3, pattern_label, pattern_score,
+            volume_weighted_pressure_3,
+            cvd_price_corr_20, cvd_divergence_label, vpin_toxicity_20,
+            fractional_diff_zscore_20, trend_scan_label, trend_scan_tstat,
+            trend_scan_bars, trend_scan_return_pct, trend_scan_reason,
+            pattern_label, pattern_score,
             opportunity_action, opportunity_quality,
             long_opportunity_score, sell_opportunity_score,
             triple_barrier_label, triple_barrier_reason,
             triple_barrier_bars_to_event, triple_barrier_profit_pct,
             triple_barrier_stop_pct
         ) VALUES (
-            ?, ?, '1m', 'efi_pvt_candle_physics_bar_pattern_v2',
+            ?, ?, '1m', 'efi_pvt_orderflow_math_bar_pattern_v3',
             0.6, 0.82, 1.25,
-            0.33, 'constructive_candle_pressure', 72,
+            0.33,
+            0.44, 'bullish_absorption', 0.72,
+            1.1, 1, 2.8,
+            8, 0.9, 'positive_structural_trend',
+            'constructive_candle_pressure', 72,
             'long_candidate', 'good_buy_window',
             80, 20,
             ?, 'profit_target_first',
@@ -336,10 +353,12 @@ def test_complete_only_excludes_non_complete_rows():
     assert_equal(symbols_out, {"AAPL"}, "only complete row exported")
     row = result.rows[0]
     assert_equal(row["candle_body_pct"], 0.6, "candle body exported")
+    assert_equal(row["cvd_price_corr_20"], 0.44, "CVD correlation exported")
+    assert_equal(row["trend_scan_label"], 1, "trend-scan target exported")
     assert_equal(row["triple_barrier_label"], 1, "triple barrier target exported")
     assert_equal(
         row["bar_pattern_feature_version"],
-        "efi_pvt_candle_physics_bar_pattern_v2",
+        "efi_pvt_orderflow_math_bar_pattern_v3",
         "bar pattern version exported",
     )
 
@@ -420,7 +439,9 @@ def test_manifest_required_fields_present():
     for field in _REQUIRED_MANIFEST_FIELDS:
         assert_in(field, result.manifest, f"manifest[{field!r}] present")
     assert_in("triple_barrier_label", result.manifest["safe_training_targets"], "triple target")
+    assert_in("trend_scan_label", result.manifest["safe_training_targets"], "trend-scan target")
     assert_true(result.manifest["triple_barrier_target_included"], "triple target flag")
+    assert_true(result.manifest["trend_scan_target_included"], "trend-scan target flag")
 
 
 def test_manifest_export_row_count_matches_rows():

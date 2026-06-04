@@ -308,7 +308,7 @@ Responsibilities:
 Subscribes to live 1-minute bars.
 Gap-fills missing rolling context through the shared market-data service after startup/reconnect.
 Updates session_momentum through SessionMomentumService.
-Feeds the same bars into bar_pattern_features for EFI/PVT/candle-physics and triple-barrier learning.
+Feeds the same bars into bar_pattern_features for EFI/PVT, candle physics, order-flow proxy, fractional-memory, triple-barrier, and trend-scanning learning.
 
 Runtime effect:
 
@@ -333,7 +333,7 @@ Responsibilities:
 Archives Polygon 1-minute RTH bars for one or more symbols.
 Caches CSVs under `data/historical_bars/polygon_1min` by default.
 Feeds the same bars into `bar_pattern_features` unless `--no-patterns` is supplied.
-Provides historical candle-physics and triple-barrier labels for ML/replay research.
+Provides historical candle-physics, order-flow proxy, fractional-memory, triple-barrier, and trend-scanning labels for ML/replay research.
 
 Usage:
 
@@ -343,7 +343,7 @@ python3 pipeline/historical_bar_archive.py --date 2026-06-03 --all
 
 This is an offline learning job only. It does not place orders or grant live authority.
 
-ML candle-pattern integration
+ML advanced per-bar integration
 
 `bar_pattern_features` is now part of the ML/export surface:
 
@@ -354,12 +354,17 @@ close location within candle range
 ATR-normalized range
 volume-normalized pressure vectors
 EFI/PVT pattern labels and opportunity scores
+CVD/order-flow proxy metrics
+VPIN-style toxicity proxy
+fractional-differentiated close memory
+trend-scanning t-stat and trend horizon labels
 
 Included target:
 
 triple_barrier_label
+trend_scan_label
 
-The target is available for observe-only training/research. Promotion into live authority still requires model-readiness, calibration, stability, and rollout-governance checks.
+These features and targets are available for observe-only training/research. ETF lead-lag vectors and options-skew signals still require additional reference/options feeds before they can be populated. Promotion into live authority still requires model-readiness, calibration, stability, and rollout-governance checks.
 
 fill_poller.py
 

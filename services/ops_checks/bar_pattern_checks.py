@@ -1,4 +1,4 @@
-"""Operator backfill/report for EFI/PVT bar-pattern features."""
+"""Operator backfill/report for advanced per-bar learning features."""
 
 from __future__ import annotations
 
@@ -86,9 +86,13 @@ def run_bar_pattern_backfill(
             "rows": result.feature_rows,
             "symbols": 1 if result.feature_rows else 0,
             "rows_with_forward_outcome": result.rows_with_forward_outcome,
+            "rows_with_order_flow": 0,
+            "rows_with_fractional_memory": 0,
             "labels": result.label_summary,
             "opportunities": result.opportunity_summary,
             "triple_barriers": [],
+            "trend_scans": [],
+            "cvd_divergences": [],
         }
     else:
         summary = service.summary(target_date, symbol=symbol)
@@ -97,6 +101,8 @@ def run_bar_pattern_backfill(
     print(f"  rows                         : {summary['rows']}")
     print(f"  symbols                      : {summary['symbols']}")
     print(f"  rows_with_forward_outcome    : {summary['rows_with_forward_outcome']}")
+    print(f"  rows_with_order_flow         : {summary.get('rows_with_order_flow', 0)}")
+    print(f"  rows_with_fractional_memory  : {summary.get('rows_with_fractional_memory', 0)}")
     if summary["labels"]:
         print()
         print(f"  {'pattern':<32} {'rows':>6} {'ret':>9} {'mfe':>9} {'mae':>9}")
@@ -141,10 +147,39 @@ def run_bar_pattern_backfill(
                 f"{_fmt(row.get('avg_bars_to_event'), 2):>8}"
             )
 
+    if summary.get("trend_scans"):
+        print()
+        print("Trend-scanning label summary")
+        print(f"  {'label':>5} {'reason':<36} {'rows':>6} {'ret':>8} {'tstat':>8} {'bars':>8}")
+        print(f"  {'-' * 5} {'-' * 36} {'-' * 6} {'-' * 8} {'-' * 8} {'-' * 8}")
+        for row in summary["trend_scans"][:12]:
+            print(
+                f"  {str(row.get('trend_scan_label')):>5} "
+                f"{str(row.get('trend_scan_reason') or 'unknown')[:36]:<36} "
+                f"{int(row.get('rows') or 0):>6} "
+                f"{_fmt(row.get('avg_forward_return_pct')):>8} "
+                f"{_fmt(row.get('avg_trend_scan_tstat'), 2):>8} "
+                f"{_fmt(row.get('avg_trend_scan_bars'), 2):>8}"
+            )
+
+    if summary.get("cvd_divergences"):
+        print()
+        print("CVD divergence summary")
+        print(f"  {'divergence':<28} {'rows':>6} {'ret':>8} {'mfe':>8} {'vpin':>8}")
+        print(f"  {'-' * 28} {'-' * 6} {'-' * 8} {'-' * 8} {'-' * 8}")
+        for row in summary["cvd_divergences"][:12]:
+            print(
+                f"  {str(row.get('cvd_divergence_label') or 'unknown')[:28]:<28} "
+                f"{int(row.get('rows') or 0):>6} "
+                f"{_fmt(row.get('avg_forward_return_pct')):>8} "
+                f"{_fmt(row.get('avg_forward_mfe_pct')):>8} "
+                f"{_fmt(row.get('avg_vpin_toxicity_20'), 2):>8}"
+            )
+
     if not result.feature_rows:
         print("[WARN] no feature rows built; need at least 21 bars")
         return False
 
     print()
-    print("[OK] EFI/PVT pattern rows captured; no live authority changed")
+    print("[OK] advanced pattern/order-flow rows captured; no live authority changed")
     return True

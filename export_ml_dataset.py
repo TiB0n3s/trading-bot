@@ -75,6 +75,19 @@ BASE_COLUMNS = [
     "pressure_return_3",
     "pressure_return_8",
     "volume_weighted_pressure_3",
+    "volume_delta",
+    "institutional_volume_delta",
+    "cumulative_volume_delta",
+    "cvd_price_corr_20",
+    "cvd_divergence_label",
+    "vpin_toxicity_20",
+    "fractional_diff_close_045",
+    "fractional_diff_zscore_20",
+    "trend_scan_label",
+    "trend_scan_tstat",
+    "trend_scan_bars",
+    "trend_scan_return_pct",
+    "trend_scan_reason",
     "bar_pattern_label",
     "bar_pattern_score",
     "bar_opportunity_action",
@@ -122,6 +135,7 @@ FIXED_HORIZON_TARGETS = [
     "max_up_15m",
     "max_down_15m",
     "triple_barrier_label",
+    "trend_scan_label",
 ]
 
 FUTURE_FIXED_HORIZON_TARGETS = [

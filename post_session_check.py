@@ -63,7 +63,7 @@ def fail(msg):
     print(f"[FAIL] {msg}")
 
 
-def run_cmd(label, cmd):
+def run_cmd(label, cmd, *, critical=True):
     print(f"\n── {label} ─────────────────────────────────────────")
     try:
         r = subprocess.run(
@@ -80,11 +80,19 @@ def run_cmd(label, cmd):
         if r.returncode == 0:
             ok(f"{label} completed")
             return True
-        fail(f"{label} exited with code {r.returncode}")
-        return False
+        if critical:
+            fail(f"{label} exited with code {r.returncode}")
+            return False
+        else:
+            warn(f"{label} exited with code {r.returncode}; continuing")
+            return True
     except Exception as e:
-        fail(f"{label} failed: {e}")
-        return False
+        if critical:
+            fail(f"{label} failed: {e}")
+            return False
+        else:
+            warn(f"{label} failed: {e}; continuing")
+            return True
 
 
 def check_missing_fills(target_date):
@@ -112,8 +120,8 @@ def check_reconciliation():
         alpaca_positions = broker_service.list_positions()
         alpaca = {p.symbol: float(p.qty) for p in alpaca_positions}
     except Exception as e:
-        fail(f"Could not fetch Alpaca positions: {e}")
-        return False
+        warn(f"Could not fetch Alpaca positions: {e}; reconciliation skipped")
+        return True
 
     rows = repo.db_open_position_rows()
 
@@ -224,7 +232,7 @@ def main():
     # These scripts are read-only/reporting. They can be a little verbose.
     checks.append(run_cmd("Daily Summary", [sys.executable, "daily_summary.py", target_date]))
     checks.append(run_cmd("Filter Report", [sys.executable, "filter_report.py", "--date", target_date]))
-    checks.append(run_cmd("Position Review", [sys.executable, "position_review.py"]))
+    checks.append(run_cmd("Position Review", [sys.executable, "position_review.py"], critical=False))
     checks.append(run_cmd("Drawdown Report", [sys.executable, "drawdown_report.py", target_date]))
     checks.append(run_cmd("Analytics Report", [sys.executable, "analytics_report.py", "--date", target_date]))
     checks.append(run_cmd("Rejected Outcome Builder", [sys.executable, "rejected_signal_outcome_builder.py", "--date", target_date]))

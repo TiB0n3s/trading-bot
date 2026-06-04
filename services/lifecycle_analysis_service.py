@@ -71,6 +71,63 @@ class LifecycleAnalysisService:
         return candidate if isinstance(candidate, dict) else loaded
 
     @staticmethod
+    def _synthesize_auto_buy_canonical(row: dict[str, Any], candidate: dict[str, Any]) -> dict[str, Any]:
+        """Compatibility canonical state for direct auto-buy trade rows.
+
+        Auto-buy entries can bypass decision_snapshots.  They still carry the
+        decision evidence in candidate_universe/auto_buy payloads, so expose the
+        normalized authority fields for learning/readiness reports.
+        """
+        if not candidate:
+            return {}
+        learned_applied = bool(candidate.get("learned_tiebreaker_applied"))
+        learned_outcome = {
+            "advisory_decision": "allow" if candidate.get("decision") == "strong_buy_candidate" else candidate.get("decision"),
+            "authority_mode": "paper_only",
+            "enforced": learned_applied,
+            "effect_on_size": "none",
+            "effect_on_execution": "allow" if learned_applied else "none",
+            "reason": candidate.get("learned_tiebreaker_reason") or candidate.get("reason"),
+            "source": "auto_buy_manager_candidate_payload",
+            "runtime_effect": candidate.get("learned_tiebreaker_runtime_effect") or "observe_only_no_live_authority",
+        }
+        return {
+            "advisory_authority_state": {
+                "decision_policy_outcome": learned_outcome,
+                "setup_quality_outcome": {
+                    "label": candidate.get("setup_label"),
+                    "recommendation": candidate.get("setup_recommendation"),
+                    "source": "auto_buy_manager_candidate_payload",
+                },
+                "ml_outcome": {
+                    "bucket": candidate.get("ml_prediction_bucket"),
+                    "score": candidate.get("ml_prediction_score"),
+                    "source": "auto_buy_manager_candidate_payload",
+                },
+            },
+            "pattern_state": {
+                "pattern_label": candidate.get("symbol_pattern"),
+                "directional_bias": candidate.get("pattern_directional_bias"),
+                "confidence_quality": candidate.get("pattern_confidence_quality"),
+                "runtime_effect": candidate.get("pattern_runtime_effect"),
+                "source": "auto_buy_manager_candidate_payload",
+            },
+            "momentum_state": {
+                "session_label": candidate.get("session_trend_label"),
+                "session_score": candidate.get("session_trend_score"),
+            },
+            "prediction_state": {
+                "ml_bucket": candidate.get("ml_prediction_bucket"),
+                "ml_score": candidate.get("ml_prediction_score"),
+            },
+            "setup_state": {
+                "label": candidate.get("setup_label"),
+                "recommendation": candidate.get("setup_recommendation"),
+                "score": candidate.get("setup_score"),
+            },
+        }
+
+    @staticmethod
     def _path(data: dict[str, Any], *path: str) -> Any:
         cur: Any = data
         for key in path:
@@ -140,6 +197,14 @@ class LifecycleAnalysisService:
     def _add_analysis_fields(self, row: dict[str, Any]) -> None:
         canonical = self._canonical(row)
         candidate = self._candidate_payload(row)
+        if not canonical:
+            canonical = self._synthesize_auto_buy_canonical(row, candidate)
+            if canonical:
+                row["canonical_intelligence_json"] = json.dumps(
+                    canonical,
+                    sort_keys=True,
+                    default=str,
+                )
         mappings = {
             "setup_label": ("setup_state", "label"),
             "market_regime": ("regime_state", "market_regime"),

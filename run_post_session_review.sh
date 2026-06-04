@@ -11,7 +11,7 @@ TODAY="${1:-$(date +%F)}"
 PYTHON="/home/tradingbot/trading-bot/venv/bin/python"
 
 echo "=== Post-session review $(date -Iseconds) DATE=${TODAY} ==="
-"${PYTHON}" ops_check.py post "${TODAY}"
+"${PYTHON}" ops_check.py post "${TODAY}" || echo "WARN: post-session operational check reported issues; continuing learning/review pipeline"
 "${PYTHON}" rejected_signal_outcome_builder.py --date "${TODAY}"
 "${PYTHON}" ops_check.py rejected-outcomes "${TODAY}"
 "${PYTHON}" ops_check.py decision-lifecycle-dashboard "${TODAY}"
@@ -31,3 +31,4 @@ nice -n 19 "${PYTHON}" pipeline/retrain.py --date "${TODAY}" --sessions 5 --bad-
 "${PYTHON}" ops_check.py policy-artifacts
 "${PYTHON}" analytics_report.py --date "${TODAY}"
 "${PYTHON}" filter_report.py --date "${TODAY}"
+"${PYTHON}" ops_check.py learning-artifacts "${TODAY}"

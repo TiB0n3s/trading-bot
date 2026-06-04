@@ -65,6 +65,7 @@ Usage:
   python3 ops_check.py bar-pattern-backfill YYYY-MM-DD --symbol AAPL [--dry-run]
   python3 ops_check.py learning-readiness START_DATE [END_DATE]
   python3 ops_check.py learning-effectiveness START_DATE [END_DATE]
+  python3 ops_check.py learning-artifacts YYYY-MM-DD
   python3 ops_check.py active-learning START_DATE [END_DATE]
   python3 ops_check.py rollout-contract
   python3 ops_check.py advisory-authority-report
@@ -123,6 +124,7 @@ from services.ops_checks.learning_readiness_checks import (
     run_learning_readiness,
 )
 from services.ops_checks.active_learning_checks import run_active_learning_integration
+from services.ops_checks.learning_artifact_checks import run_learning_artifact_consumption
 from services.ops_checks.rollout_contract_checks import run_rollout_contract_report
 from services.ops_checks.advisory_authority_checks import run_advisory_authority_report
 from services.ops_checks.ai_intelligence_review_checks import run_ai_intelligence_review
@@ -864,6 +866,13 @@ def active_learning(start_date):
     )
 
 
+def learning_artifacts(target_date):
+    return run_learning_artifact_consumption(
+        target_date,
+        base_dir=BASE_DIR,
+    )
+
+
 def rollout_contract(target_date):
     symbol = None
     if "--symbol" in sys.argv:
@@ -1169,6 +1178,9 @@ def main():
 
     if command == "learning-effectiveness":
         return 0 if learning_effectiveness(target_date) else 1
+
+    if command == "learning-artifacts":
+        return 0 if learning_artifacts(target_date) else 1
 
     if command == "active-learning":
         return 0 if active_learning(target_date) else 1

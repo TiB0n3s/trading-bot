@@ -74,6 +74,8 @@ def test_strategy_concepts_are_normalized_and_non_authoritative():
         "momentum_trading",
         "risk_practice_before_live",
         "backtesting_overfitting_control",
+        "news_expectations_positioning",
+        "short_selling_risk",
     }
 
     assert expected.issubset(concepts)
@@ -81,6 +83,8 @@ def test_strategy_concepts_are_normalized_and_non_authoritative():
     assert "volume_expansion" in concepts["breakout_trading"]["related_features"]
     assert "efi" in concepts["momentum_trading"]["related_features"]
     assert "walk_forward_window" in concepts["backtesting_overfitting_control"]["related_features"]
+    assert "priced_in_risk" in concepts["news_expectations_positioning"]["related_features"]
+    assert "short_squeeze_risk" in concepts["short_selling_risk"]["related_features"]
     assert "out-of-sample" in concepts["backtesting_overfitting_control"]["summary"]
     assert all(concept["live_authority"] == "education_context_only" for concept in concepts.values())
 
@@ -148,6 +152,8 @@ def test_schwab_child_seeds_are_approved_and_blocked_pages_fail(tmp_path=None):
     ]
     assert "https://www.schwab.com/learn/story/what-are-derivatives" in schwab_pairs
     assert "https://www.schwab.com/learn/story/options-strategy-covered-call" in schwab_pairs
+    assert "https://www.schwab.com/learn/story/why-stocks-sometimes-ignore-good-or-bad-news" in schwab_pairs
+    assert "https://www.schwab.com/learn/story/ins-and-outs-short-selling" in schwab_pairs
 
     result = service.ingest(max_pages=len(service.approved_seed_pairs()), follow_links=False)
     summary = repo.summary()
@@ -194,6 +200,53 @@ def test_manual_snapshot_ingest_accepts_uploaded_schwab_card_content():
     tmp.cleanup()
 
 
+def test_manual_snapshot_maps_expectations_and_positioning_article():
+    tmp = tempfile.TemporaryDirectory()
+    db_path = Path(tmp.name) / "trades.db"
+    repo = TradingEducationRepository(db_path)
+    service = TradingEducationIngestionService(repo=repo)
+
+    result = service.ingest_manual_snapshot(
+        url="https://www.schwab.com/learn/story/why-stocks-sometimes-ignore-good-or-bad-news",
+        title="Why Stocks Sometimes Ignore Good (or Bad) News",
+        content=(
+            "Stocks may ignore good news when expectations were already priced in. "
+            "Investors can buy the rumor and sell the news after an earnings call, "
+            "especially when forward guidance disappoints. Market sentiment, positioning, "
+            "institutional flows, index changes, tax-loss harvesting, and margin calls can "
+            "also dominate a headline."
+        ),
+    )
+
+    assert result["status"] in {"stored", "needs_review"}
+    assert "news_expectations_positioning" in result["concept_keys"]
+    assert "priced_in_risk" in result["related_features"]
+    tmp.cleanup()
+
+
+def test_manual_snapshot_maps_short_selling_risk_article():
+    tmp = tempfile.TemporaryDirectory()
+    db_path = Path(tmp.name) / "trades.db"
+    repo = TradingEducationRepository(db_path)
+    service = TradingEducationIngestionService(repo=repo)
+
+    result = service.ingest_manual_snapshot(
+        url="https://www.schwab.com/learn/story/ins-and-outs-short-selling",
+        title="Short Selling: The Risks and Rewards",
+        content=(
+            "Short selling involves borrowing shares and selling them, then buying them "
+            "back later. Short sellers face borrow availability, locate requirements, "
+            "short squeeze risk, margin calls, dividend payments, buy-stop orders, "
+            "and potentially limitless losses."
+        ),
+    )
+
+    assert result["status"] in {"stored", "needs_review"}
+    assert "short_selling_risk" in result["concept_keys"]
+    assert "short_squeeze_risk" in result["related_features"]
+    tmp.cleanup()
+
+
 def test_manual_snapshot_blocks_unapproved_urls():
     tmp = tempfile.TemporaryDirectory()
     db_path = Path(tmp.name) / "trades.db"
@@ -237,6 +290,8 @@ def main():
         test_education_ingestion_stores_compact_concept_metadata,
         test_schwab_child_seeds_are_approved_and_blocked_pages_fail,
         test_manual_snapshot_ingest_accepts_uploaded_schwab_card_content,
+        test_manual_snapshot_maps_expectations_and_positioning_article,
+        test_manual_snapshot_maps_short_selling_risk_article,
         test_manual_snapshot_blocks_unapproved_urls,
         test_education_ingestion_dry_run_does_not_persist,
     ]

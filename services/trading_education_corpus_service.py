@@ -154,6 +154,8 @@ CURATED_TRADING_EDUCATION_SOURCES: tuple[TradingEducationSource, ...] = (
             "https://www.schwab.com/learn/story/options-expiration-definitions-checklist-more",
             "https://www.schwab.com/learn/story/how-to-use-weekly-stock-options",
             "https://www.schwab.com/learn/story/what-happens-to-options-when-stock-splits",
+            "https://www.schwab.com/learn/story/why-stocks-sometimes-ignore-good-or-bad-news",
+            "https://www.schwab.com/learn/story/ins-and-outs-short-selling",
         ),
     ),
     TradingEducationSource(
@@ -391,6 +393,62 @@ CURATED_TRADING_EDUCATION_CONCEPTS: tuple[TradingEducationConcept, ...] = (
             "Treat high backtest performance with high parameter complexity as overfit risk.",
         ),
     ),
+    TradingEducationConcept(
+        key="news_expectations_positioning",
+        name="News, expectations, and positioning",
+        concept_type="market_behavior",
+        summary=(
+            "Stocks can move against apparently good or bad news when expectations, guidance, "
+            "macro conditions, positioning, institutional flows, or buy-the-rumor/sell-the-news "
+            "behavior matter more than the headline itself."
+        ),
+        bot_usage=(
+            "Use for event-context validation, earnings reaction review, sell-the-news diagnostics, "
+            "and post-trade explanations where headline sentiment diverges from price action."
+        ),
+        live_authority="education_context_only",
+        related_features=(
+            "expectation_gap",
+            "priced_in_risk",
+            "sell_the_news_risk",
+            "guidance_vs_results",
+            "institutional_flow_pressure",
+            "macro_override",
+            "positioning_imbalance",
+        ),
+        guardrails=(
+            "Do not treat a positive headline as bullish without price/volume confirmation.",
+            "Compare event interpretation against market reaction and prior expectations.",
+        ),
+    ),
+    TradingEducationConcept(
+        key="short_selling_risk",
+        name="Short selling risk",
+        concept_type="risk_management",
+        summary=(
+            "Short selling borrows and sells shares in expectation of a decline, but carries "
+            "borrow availability, margin, short-squeeze, dividend, fee, and theoretically unlimited "
+            "loss risks."
+        ),
+        bot_usage=(
+            "Use for downside-asymmetry review, squeeze-risk labels, short-interest context, and "
+            "guardrails around any future short/hedged strategy research."
+        ),
+        live_authority="education_context_only",
+        related_features=(
+            "short_interest",
+            "borrow_cost",
+            "locate_required",
+            "short_squeeze_risk",
+            "margin_call_risk",
+            "gap_up_risk",
+            "borrow_liquidity",
+        ),
+        guardrails=(
+            "Do not introduce short execution authority without a separate broker/risk model.",
+            "Treat short-sale education as risk context for long-only systems unless explicitly promoted.",
+        ),
+    ),
 )
 
 
@@ -588,6 +646,35 @@ def _concept_matches(text: str) -> tuple[list[str], list[str]]:
             "overfit",
             "overfitting",
             "drawdown",
+        ),
+        "news_expectations_positioning": (
+            "priced in",
+            "expectations",
+            "forward guidance",
+            "earnings call",
+            "sell the news",
+            "buy the rumor",
+            "positioning",
+            "institutional flows",
+            "tax-loss harvesting",
+            "market sentiment",
+            "headline",
+            "ignore good",
+            "ignore bad",
+        ),
+        "short_selling_risk": (
+            "short selling",
+            "short sale",
+            "short-sellers",
+            "short squeeze",
+            "borrow shares",
+            "borrowed shares",
+            "naked shorting",
+            "locate",
+            "buy-stop",
+            "trailing buy-stop",
+            "dividend payments",
+            "potentially limitless losses",
         ),
     }
     concept_lookup = {concept.key: concept for concept in CURATED_TRADING_EDUCATION_CONCEPTS}

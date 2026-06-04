@@ -61,6 +61,31 @@ The concept pack should be used for reporting, education context, feature
 taxonomy, and future AI explanation prompts. It must not become a live approval,
 blocking, sizing, or execution path without separate promotion governance.
 
+## Ingestion Command
+
+Run a bounded seed refresh with:
+
+```bash
+python3 ops_check.py trading-education-ingest --max-pages 6 --no-follow
+python3 ops_check.py trading-education-health
+```
+
+The ingestion job stores compact metadata in `trading_education_pages`:
+
+- source key/name/tier
+- URL and retrieved timestamp
+- content hash
+- compact summary
+- matched concept keys
+- related feature names
+- corpus/source policy version
+- runtime effect
+- fetch status/error
+
+It does not store full copyrighted books or unrestricted long-form content.
+Fetch failures are retained for observability because public websites may block
+automated requests.
+
 ## Guardrails
 
 - Follow links only within approved seed domains.

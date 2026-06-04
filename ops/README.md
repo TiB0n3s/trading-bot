@@ -119,6 +119,7 @@ python3 ops_check.py policy-artifacts
 python3 ops_check.py retention
 python3 ops_check.py order-health 2026-05-26
 python3 ops_check.py trading-education-health
+python3 ops_check.py trading-education-ingest --max-pages 6 --no-follow
 python3 prediction_cache.py preload --date 2026-05-26
 ```
 
@@ -192,6 +193,10 @@ distribution, and imported Alpaca order status summaries.
 `trading-education-health` reports the versioned, non-authoritative education
 source and concept corpus. It is for AI/ML explanation, taxonomy, and operator
 review only; it cannot approve, block, size, or execute trades.
+`trading-education-ingest` performs a bounded approved-domain crawl and stores
+compact concept metadata in `trading_education_pages`; use small `--max-pages`
+values and `--no-follow` for seed refreshes. Fetch failures are recorded rather
+than treated as trading failures.
 `prediction_cache.py preload` verifies that `daily_symbol_predictions` can be
 loaded into the TTL cache before the session. The Flask app also starts its own
 background cache refresher so webhook handling reads predictions from memory,

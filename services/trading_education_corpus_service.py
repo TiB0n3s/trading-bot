@@ -7,12 +7,21 @@ the AI/ML education corpus may ingest or reference before any crawler is added.
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
+from datetime import datetime, timezone
+from html.parser import HTMLParser
+import hashlib
+import json
+import re
 from typing import Any
-from urllib.parse import urlparse
+from urllib.parse import urljoin, urlparse
+from urllib.request import Request, urlopen
+
+from repositories.trading_education_repo import TradingEducationRepository
 
 
 TRADING_EDUCATION_CORPUS_VERSION = "trading_education_corpus_v1"
 TRADING_EDUCATION_RUNTIME_EFFECT = "education_context_only_no_trade_authority"
+TRADING_EDUCATION_INGEST_VERSION = "trading_education_ingest_v1"
 
 
 @dataclass(frozen=True)
@@ -407,3 +416,247 @@ def build_trading_education_health_payload() -> dict[str, Any]:
         "sources": sources,
         "concepts": concepts,
     }
+
+
+class _EducationHtmlExtractor(HTMLParser):
+    def __init__(self):
+        super().__init__()
+        self.title_parts: list[str] = []
+        self.text_parts: list[str] = []
+        self.links: list[str] = []
+        self._capture_title = False
+        self._skip_depth = 0
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        lower = tag.lower()
+        if lower in {"script", "style", "noscript", "svg"}:
+            self._skip_depth += 1
+            return
+        if lower == "title":
+            self._capture_title = True
+        if lower == "a":
+            for key, value in attrs:
+                if key.lower() == "href" and value:
+                    self.links.append(value)
+
+    def handle_endtag(self, tag: str) -> None:
+        lower = tag.lower()
+        if lower in {"script", "style", "noscript", "svg"} and self._skip_depth:
+            self._skip_depth -= 1
+        if lower == "title":
+            self._capture_title = False
+
+    def handle_data(self, data: str) -> None:
+        text = " ".join((data or "").split())
+        if not text or self._skip_depth:
+            return
+        if self._capture_title:
+            self.title_parts.append(text)
+        elif len(text) > 2:
+            self.text_parts.append(text)
+
+    @property
+    def title(self) -> str:
+        return " ".join(self.title_parts).strip()
+
+    @property
+    def text(self) -> str:
+        return " ".join(self.text_parts).strip()
+
+
+def _normalize_text(text: str, *, max_chars: int = 20000) -> str:
+    normalized = re.sub(r"\s+", " ", text or "").strip()
+    return normalized[:max_chars]
+
+
+def _compact_summary(text: str, *, max_chars: int = 700) -> str:
+    text = _normalize_text(text, max_chars=6000)
+    if not text:
+        return ""
+    sentences = re.split(r"(?<=[.!?])\s+", text)
+    summary = " ".join(sentence for sentence in sentences[:4] if sentence).strip()
+    return summary[:max_chars]
+
+
+def _concept_matches(text: str) -> tuple[list[str], list[str]]:
+    lower = f" {text.lower()} "
+    concept_keys: list[str] = []
+    related_features: set[str] = set()
+    keyword_map = {
+        "trend_trading": ("trend", "moving average", "higher high", "continuation"),
+        "range_trading": ("range", "support", "resistance", "mean reversion"),
+        "breakout_trading": ("breakout", "break out", "volume expansion", "new high"),
+        "reversal_trading": ("reversal", "trend break", "pullback", "retracement"),
+        "gap_trading": ("gap", "opening range", "gap up", "gap down"),
+        "pairs_trading": ("pairs", "relative strength", "correlation", "spread"),
+        "arbitrage": ("arbitrage", "dislocation", "price difference"),
+        "momentum_trading": ("momentum", "volume", "force index", "price volume trend", "vwap"),
+        "risk_practice_before_live": ("risk", "paper", "simulator", "practice", "diversification"),
+        "strategy_vs_style": ("strategy", "trading style", "investment style"),
+    }
+    concept_lookup = {concept.key: concept for concept in CURATED_TRADING_EDUCATION_CONCEPTS}
+    for key, terms in keyword_map.items():
+        if any(term in lower for term in terms):
+            concept_keys.append(key)
+            related_features.update(concept_lookup[key].related_features)
+    return sorted(set(concept_keys)), sorted(related_features)
+
+
+def _same_domain(base_url: str, candidate_url: str) -> bool:
+    base = urlparse(base_url)
+    candidate = urlparse(candidate_url)
+    base_host = base.netloc.lower()[4:] if base.netloc.lower().startswith("www.") else base.netloc.lower()
+    candidate_host = (
+        candidate.netloc.lower()[4:]
+        if candidate.netloc.lower().startswith("www.")
+        else candidate.netloc.lower()
+    )
+    return bool(candidate.scheme in {"http", "https"} and candidate_host == base_host)
+
+
+class TradingEducationIngestionService:
+    """Bounded crawler/extractor for approved education sources.
+
+    The output is compact concept metadata. It is intentionally not a market
+    signal and cannot alter live approval, sizing, or execution behavior.
+    """
+
+    def __init__(
+        self,
+        *,
+        repo: TradingEducationRepository | None = None,
+        timeout_seconds: float = 8.0,
+        user_agent: str = "trading-bot education-corpus/1.0",
+        transport: Any | None = None,
+    ):
+        self.repo = repo or TradingEducationRepository()
+        self.timeout_seconds = timeout_seconds
+        self.user_agent = user_agent
+        self.transport = transport or self._default_transport
+
+    def _default_transport(self, url: str) -> str:
+        req = Request(
+            url,
+            headers={
+                "User-Agent": self.user_agent,
+                "Accept": "text/html,application/xhtml+xml,text/plain;q=0.9,*/*;q=0.8",
+            },
+        )
+        with urlopen(req, timeout=self.timeout_seconds) as response:
+            raw = response.read(1_000_000)
+        return raw.decode("utf-8", errors="replace")
+
+    @staticmethod
+    def approved_sources() -> list[TradingEducationSource]:
+        return [
+            source
+            for source in CURATED_TRADING_EDUCATION_SOURCES
+            if source.url and source.ingestion_status in {"approved_seed", "approved_context_seed"}
+        ]
+
+    def _store_failure(self, source: TradingEducationSource, url: str, error: str) -> None:
+        now = datetime.now(timezone.utc).isoformat()
+        self.repo.upsert_page(
+            {
+                "source_key": source.key,
+                "source_name": source.name,
+                "source_tier": source.tier,
+                "url": url,
+                "title": None,
+                "retrieved_at": now,
+                "content_hash": hashlib.sha256(error.encode("utf-8")).hexdigest(),
+                "summary": None,
+                "concept_keys": "[]",
+                "related_features": "[]",
+                "source_policy_version": TRADING_EDUCATION_CORPUS_VERSION,
+                "corpus_version": TRADING_EDUCATION_CORPUS_VERSION,
+                "runtime_effect": TRADING_EDUCATION_RUNTIME_EFFECT,
+                "status": "fetch_failed",
+                "error": error[:500],
+            }
+        )
+
+    def _extract_page(self, source: TradingEducationSource, url: str, html: str) -> dict[str, Any]:
+        parser = _EducationHtmlExtractor()
+        parser.feed(html)
+        text = _normalize_text(parser.text)
+        title = parser.title or source.name
+        content_hash = hashlib.sha256(text.encode("utf-8")).hexdigest()
+        concept_keys, related_features = _concept_matches(f"{title} {text}")
+        now = datetime.now(timezone.utc).isoformat()
+        return {
+            "source_key": source.key,
+            "source_name": source.name,
+            "source_tier": source.tier,
+            "url": url,
+            "title": title[:300],
+            "retrieved_at": now,
+            "content_hash": content_hash,
+            "summary": _compact_summary(text),
+            "concept_keys": json.dumps(concept_keys, sort_keys=True),
+            "related_features": json.dumps(related_features, sort_keys=True),
+            "source_policy_version": TRADING_EDUCATION_CORPUS_VERSION,
+            "corpus_version": TRADING_EDUCATION_CORPUS_VERSION,
+            "runtime_effect": TRADING_EDUCATION_RUNTIME_EFFECT,
+            "status": "stored",
+            "error": None,
+            "_links": [
+                urljoin(url, link)
+                for link in parser.links
+                if _same_domain(url, urljoin(url, link))
+            ],
+        }
+
+    def ingest(
+        self,
+        *,
+        max_pages: int = 12,
+        follow_links: bool = True,
+        dry_run: bool = False,
+    ) -> dict[str, Any]:
+        self.repo.init_table()
+        queue: list[tuple[TradingEducationSource, str]] = [
+            (source, source.url or "") for source in self.approved_sources()
+        ]
+        seen: set[str] = set()
+        stored = 0
+        failed = 0
+        visited: list[dict[str, Any]] = []
+
+        while queue and len(seen) < max_pages:
+            source, url = queue.pop(0)
+            if not url or url in seen:
+                continue
+            seen.add(url)
+            try:
+                html = self.transport(url)
+                row = self._extract_page(source, url, html)
+                links = row.pop("_links", [])
+                if not dry_run:
+                    self.repo.upsert_page(row)
+                stored += 1
+                visited.append({"url": url, "source_key": source.key, "status": "stored"})
+                if follow_links:
+                    for link in links[:5]:
+                        if link not in seen and len(queue) + len(seen) < max_pages * 2:
+                            queue.append((source, link))
+            except Exception as exc:
+                failed += 1
+                if not dry_run:
+                    self._store_failure(source, url, str(exc))
+                visited.append({"url": url, "source_key": source.key, "status": "fetch_failed", "error": str(exc)})
+
+        return {
+            "report_version": "trading_education_ingest_report_v1",
+            "ingest_version": TRADING_EDUCATION_INGEST_VERSION,
+            "corpus_version": TRADING_EDUCATION_CORPUS_VERSION,
+            "runtime_effect": TRADING_EDUCATION_RUNTIME_EFFECT,
+            "dry_run": dry_run,
+            "visited": len(visited),
+            "stored": stored,
+            "failed": failed,
+            "max_pages": max_pages,
+            "follow_links": follow_links,
+            "pages": visited,
+            "repository_summary": self.repo.summary() if not dry_run else {},
+        }

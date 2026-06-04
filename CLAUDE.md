@@ -123,6 +123,10 @@ Recent completed roadmap items:
 - `ops_check.py trading-education-health` reports the curated
   `trading_education_corpus_v1` source/concept contract. Education content can
   support explanation and taxonomy work, but it has no live authority.
+- `ops_check.py trading-education-ingest --max-pages 6 --no-follow` performs a
+  bounded approved-source crawl and stores compact concept metadata only:
+  source URL, retrieved timestamp, content hash, summary, concept keys, related
+  feature names, and corpus version. It must remain education context only.
 - New AI analytics command surfaces exist for operator/research review:
   `ai_dependency_status.py`, `score_financial_sentiment.py`,
   `timescale_smoke_test.py`, `train_supervised_predictions.py`,

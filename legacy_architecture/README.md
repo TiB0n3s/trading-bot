@@ -33,3 +33,27 @@ point-in-time archival.
 
 The individual scripts are still active manual/operator tools where useful, but
 their scheduled after-close impact must flow through the pipeline.
+
+## Manual-Only Root Utilities
+
+Legacy status: manual/operator tools only.
+
+The following root scripts are not part of cron, `job_runner.py`, Flask startup,
+auto-buy, position management, or the live signal path. Keep them out of live
+decision wiring unless they are promoted through a service/pipeline boundary and
+covered by tests.
+
+- `add_symbol_event.py`
+- `backfill_setup_labels.py`
+- `init_prediction_db.py`
+- `parse_market_brief.py`
+- `replay_report.py`
+- `score_symbol_event.py`
+- `signal_event_builder.py`
+
+Notes:
+
+- `wsgi.py` is not listed here even though static repo references are sparse;
+  it is a deployment entrypoint and should remain at the root.
+- Manual tools may be moved under `ops/manual_tools/` in a future cleanup pass,
+  but only after documentation and operator command references are updated.

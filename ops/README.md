@@ -311,13 +311,29 @@ python3 rejected_signal_outcome_builder.py --date YYYY-MM-DD
 python3 ops_check.py rejected-outcomes YYYY-MM-DD
 ```
 
-The post-session cron calls `run_post_session_review.sh`, and that wrapper plus
-`post_session_check.py` run the builder before validation. `ops_check.py
-rejected-outcomes` verifies rejected row coverage, complete/pending/partial/error
-label counts, 5m/15m/30m/60m/EOD horizon population, action-adjusted MFE/MAE
-signs, and near-close partial attribution. Near-close rows should be `partial`
-with `partial_reason = near_close_no_60m_window`, not silently treated as
-complete labels.
+The post-session cron calls `run_post_session_review.sh`, which delegates to
+`pipeline/post_session_review.py`. The pipeline runs the rejected-outcome builder
+before validation and treats review/report warnings as warn-only instead of hard
+cron failures. `ops_check.py rejected-outcomes` verifies rejected row coverage,
+complete/pending/partial/error label counts, 5m/15m/30m/60m/EOD horizon
+population, action-adjusted MFE/MAE signs, and near-close partial attribution.
+Near-close rows should be `partial` with
+`partial_reason = near_close_no_60m_window`, not silently treated as complete
+labels.
+
+## Local Artifact Cleanup
+
+`ops/clean_local_artifacts.sh` defaults to safe local cleanup only: Python
+caches and local source backup/temp files. It intentionally excludes operational
+logs, session logs, QA logs, and `*.db.bak*` database backups unless explicitly
+requested.
+
+```bash
+ops/clean_local_artifacts.sh --dry-run
+ops/clean_local_artifacts.sh --apply
+ops/clean_local_artifacts.sh --dry-run --include-logs --include-db-backups
+ops/clean_local_artifacts.sh --apply --include-logs --include-session-logs
+```
 
 The third tracked migration adds webhook-event lifecycle/status columns used by
 the app to record queue, start, finish, order, and failure metadata.

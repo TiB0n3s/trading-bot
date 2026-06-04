@@ -176,6 +176,8 @@ TESTS = [
     "tests/test_ml_promotion.py",
     "tests/test_pipeline_retrain.py",
     "tests/test_after_close_learning_pipeline.py",
+    "tests/test_post_session_review_pipeline.py",
+    "tests/test_clean_local_artifacts_script.py",
     "tests/test_blocked_signal_outcome_service.py",
     "tests/test_missed_opportunity_service.py",
     "tests/test_ops_check_services.py",

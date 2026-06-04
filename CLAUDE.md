@@ -61,6 +61,10 @@ Recent completed roadmap items:
   artifacts, and archives point-in-time state. `run_after_close_learning.sh`
   invokes it under the existing cron `job_runner.py` lock/ledger path and
   should remain a scheduler wrapper only.
+- `pipeline/post_session_review.py` owns post-session review sequencing. It
+  keeps review/report warnings warn-only so `run_post_session_review.sh` does
+  not look like a failed runtime job when diagnostics are simply reporting
+  issues to inspect.
 - `ops_check.py paper-learning-authority YYYY-MM-DD` reports paper-only
   learning overrides, lifecycle linkage, realized outcomes, MFE, and
   counterfactual outcome availability. It is diagnostic evidence only and must

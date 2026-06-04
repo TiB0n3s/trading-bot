@@ -985,9 +985,10 @@ A model can only move from observe-only to paper-trading influence after it has:
 10. Done: complete `app.py` decomposition for the live signal path.
 11. Done: add `rejected_signal_outcomes` schema target plus
    `rejected_signal_outcome_builder.py` and `ops_check.py rejected-outcomes`
-   coverage/label-quality reporting. The post-session cron now runs the
-   builder daily before validation. Continue collecting multiple paper sessions
-   before treating counterfactual labels as training-ready.
+   coverage/label-quality reporting. The post-session cron now delegates to
+   `pipeline/post_session_review.py`, which runs the builder daily before
+   validation with warn-only report semantics. Continue collecting multiple
+   paper sessions before treating counterfactual labels as training-ready.
 12. Done: define label v1 formally with fixed-horizon returns, excursion
     labels, classification labels, and exit-policy requirements.
 13. Done: add dataset manifest generation to dataset export flow.

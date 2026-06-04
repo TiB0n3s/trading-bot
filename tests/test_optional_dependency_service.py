@@ -18,6 +18,7 @@ def test_optional_dependency_status_reports_packages_without_importing():
     assert status["runtime_effect"] == "readiness_only_no_import_side_effects"
     assert "sklearn" in status["packages"]
     assert "transformers" in status["packages"]
+    assert status["packages"]["yfinance"]["capability"] == "free_historical_daily_market_data"
     assert status["missing_count"] + status["available_count"] == len(status["packages"])
 
 

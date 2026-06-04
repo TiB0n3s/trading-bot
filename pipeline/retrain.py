@@ -34,6 +34,7 @@ from ml_platform.registry import prune_model_artifacts
 from services.prediction_drift_service import build_default_prediction_drift_service
 from services.supervised_prediction_training_service import (
     fetch_training_rows,
+    train_quant_model_suite,
     train_supervised_prediction_model,
 )
 
@@ -219,6 +220,13 @@ def _execute_retraining(args: argparse.Namespace) -> int:
         min_samples=args.min_samples,
         artifact_path=artifact_path,
     ).to_dict()
+    quant_suite = train_quant_model_suite(
+        rows=rows,
+        horizon=args.horizon,
+        min_samples=args.min_samples,
+        artifact_dir=artifact_dir / "model_suite" / model_id,
+        model_id_prefix=model_id,
+    ).to_dict()
 
     profile = dataset_profile(
         db_path=args.db_path,
@@ -253,6 +261,7 @@ def _execute_retraining(args: argparse.Namespace) -> int:
         "resource_guard": resource_guard,
         "validation": validation,
         "training": training,
+        "quant_model_suite": quant_suite,
         "readiness": readiness,
         "point_in_time": {
             "feature_available_at_cutoff": prediction_time_cutoff,
@@ -277,6 +286,13 @@ def _execute_retraining(args: argparse.Namespace) -> int:
         "training_sample_size": training.get("sample_size"),
         "training_provider": training.get("provider"),
         "training_accuracy": training.get("accuracy"),
+        "quant_suite_best_provider": (
+            (quant_suite.get("best_model") or {}).get("provider")
+        ),
+        "quant_suite_best_accuracy": (
+            (quant_suite.get("best_model") or {}).get("accuracy")
+        ),
+        "quant_suite_model_count": len(quant_suite.get("models") or []),
         "python_version": sys.version,
         "platform": platform.platform(),
         "git_sha": _git_sha(),
@@ -315,6 +331,7 @@ def _execute_retraining(args: argparse.Namespace) -> int:
         "resource_guard": resource_guard,
         "validation": validation,
         "training": training,
+        "quant_model_suite": quant_suite,
         "readiness": readiness,
         "promotion_assessment": assessment.to_dict(),
         "registry_entry": registry_entry,

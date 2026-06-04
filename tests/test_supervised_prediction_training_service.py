@@ -4,12 +4,16 @@
 from __future__ import annotations
 
 import sys
+import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from services.supervised_prediction_training_service import train_supervised_prediction_model
+from services.supervised_prediction_training_service import (
+    train_quant_model_suite,
+    train_supervised_prediction_model,
+)
 
 
 def _rows(n=60):
@@ -49,10 +53,30 @@ def test_train_supervised_prediction_model_blocks_small_samples():
     assert "insufficient labeled rows" in result["reason"]
 
 
+def test_train_quant_model_suite_compares_available_observe_only_models():
+    with tempfile.TemporaryDirectory() as tmp:
+        result = train_quant_model_suite(
+            rows=_rows(80),
+            min_samples=40,
+            artifact_dir=Path(tmp),
+            model_id_prefix="test_suite",
+        ).to_dict()
+
+    providers = {row["provider"] for row in result["models"]}
+    assert result["version"] == "quant_model_suite_v1"
+    assert result["runtime_effect"] == "observe_only_no_live_authority"
+    assert result["sample_size"] == 80
+    assert "chronological_positive_rate_baseline" in providers
+    assert "sklearn_random_forest" in providers
+    assert result["best_model"] is None or result["best_model"]["provider"] in providers
+    assert all(row["runtime_effect"] == "observe_only_no_live_authority" for row in result["models"])
+
+
 def main():
     tests = [
         test_train_supervised_prediction_model_uses_baseline_without_required_deps,
         test_train_supervised_prediction_model_blocks_small_samples,
+        test_train_quant_model_suite_compares_available_observe_only_models,
     ]
     for test in tests:
         test()

@@ -40,9 +40,19 @@ Recent completed roadmap items:
   default 4 GB memory cap.
 - Retraining writes a per-date completion marker and a `.diagnostic.json`
   companion file beside candidate model artifacts.
+- Automated retraining now also writes an observe-only quant model suite
+  comparison for baseline, RandomForest, and XGBoost when the optional packages
+  are installed. This is diagnostic evidence only; it cannot promote, size,
+  block, approve, or execute trades.
 - Retraining reads training rows through a point-in-time guard
   (`feature_available_at <= prediction_time_cutoff`) and prunes unprotected old
   binary artifacts while keeping diagnostic JSON.
+- `pipeline/after_close_learning.py` is the recurring after-close quant
+  learning loop. It completes rejected/candidate/exit outcomes, writes
+  DuckDB/PyArrow research exports, runs pattern/feature/post-trade/readiness
+  reports, runs guarded retraining/model comparison, and archives point-in-time
+  state. `run_after_close_learning.sh` invokes it under the existing cron
+  `job_runner.py` lock/ledger path.
 - The pre-market pipeline may write `shadow_predictions` for candidate models;
   this is observe-only and must not be read by live execution. Operators compare
   it with `python3 ops_check.py shadow-predictions YYYY-MM-DD`.

@@ -153,6 +153,7 @@ def test_execute_retraining_writes_diagnostic_and_run_marker():
         diagnostic = json.loads(diagnostics[0].read_text())
         assert diagnostic["training_sample_size"] == 40
         assert diagnostic["validation_average_correlation"] == -0.2
+        assert "quant_suite_model_count" in diagnostic
         assert "python_version" in diagnostic
 
 

@@ -78,6 +78,10 @@ or destabilize the webhook path if treated as routine cleanup.
      requested with `--rerun-completed`.
    - Candidate artifacts write diagnostic JSON companions with validation,
      training, Python, platform, Git SHA, and promotion blocker metadata.
+   - Candidate retraining writes an observe-only quant model suite comparison
+     for the chronological baseline, sklearn RandomForest, and XGBoost when
+     available. The suite is evidence for review only and cannot alter live
+     authority.
    - Training rows are point-in-time filtered by `feature_available_at <=
      prediction_time_cutoff` to reduce leakage risk.
    - Old unprotected binary model artifacts are pruned while diagnostic JSON is
@@ -89,6 +93,11 @@ or destabilize the webhook path if treated as routine cleanup.
      authority until the registry/artifact freshness issue is resolved.
    - After-close learning should produce retraining-readiness evidence and
      candidate artifacts, not automatically alter runtime policy.
+   - `pipeline/after_close_learning.py` is the recurring after-close learning
+     automation layer. It runs outcome completion, research export,
+     pattern-learning inputs, feature attribution, post-trade learning,
+     learning readiness, guarded retraining/model comparison, and point-in-time
+     archive under the existing `run_after_close_learning.sh` cron path.
 5. Existing after-close policy artifacts:
    - `strategy_memory.json`, `portfolio_replacement_memory.json`,
      `excursion_memory.json`, `missed_opportunity_memory.json`, and

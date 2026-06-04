@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 from typing import Any, Callable
 
 from services.signal_models import ApprovalResult, SizingDecision as PipelineSizingDecision
+from services.slippage_kelly_sizing_service import calculate_slippage_adjusted_kelly_cap
 
 
 @dataclass(frozen=True)
@@ -94,6 +95,14 @@ def collect_active_caps(account_state: dict[str, Any]) -> list[SizeCap]:
                 (account_state["setup_quality_size_cap"] or {}).get("reason"),
             )
         )
+    if account_state.get("slippage_kelly_size_cap"):
+        caps.append(
+            SizeCap(
+                "slippage_kelly",
+                float((account_state["slippage_kelly_size_cap"] or {}).get("cap_pct", 99)),
+                (account_state["slippage_kelly_size_cap"] or {}).get("reason"),
+            )
+        )
     buy_opportunity_sizing = account_state.get("buy_opportunity_sizing") or {}
     if buy_opportunity_sizing.get("cap_pct") is not None:
         caps.append(
@@ -170,6 +179,34 @@ def apply_final_sizing(
 ) -> SizingDecision:
     requested = float(decision.get("position_size_pct") or 1.0)
     capped_request = requested
+
+    if action == "buy":
+        slippage_kelly = calculate_slippage_adjusted_kelly_cap(
+            account_state=account_state,
+            action=action,
+            requested_size_pct=requested,
+        )
+        account_state["slippage_kelly_sizing"] = slippage_kelly.to_dict()
+        if slippage_kelly.action in {"cap", "zero"} and slippage_kelly.cap_pct is not None:
+            apply_size_cap(
+                account_state,
+                cap_pct=slippage_kelly.cap_pct,
+                state_key="slippage_kelly_size_cap",
+                payload={
+                    "enabled": slippage_kelly.enabled,
+                    "cap_pct": slippage_kelly.cap_pct,
+                    "reason": slippage_kelly.reason,
+                    "friction_ratio": slippage_kelly.friction_ratio,
+                    "model_prob": slippage_kelly.model_prob,
+                    "predicted_slippage_pct": slippage_kelly.predicted_slippage_pct,
+                    "adjusted_risk_reward_ratio": (
+                        slippage_kelly.adjusted_risk_reward_ratio
+                    ),
+                    "runtime_effect": slippage_kelly.runtime_effect,
+                    "version": slippage_kelly.version,
+                },
+            )
+
     max_size_override = account_state.get("max_position_size_pct_override")
 
     if action == "buy" and max_size_override is not None:

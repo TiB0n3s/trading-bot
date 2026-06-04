@@ -71,6 +71,9 @@ Recent completed roadmap items:
 - `ops_check.py advanced-alpha-comparison YYYY-MM-DD` compares standard score
   thresholding against an asymmetric false-positive guard using linked forward
   outcomes. It is diagnostic-only and must not be treated as authority.
+- Slippage-adjusted fractional Kelly sizing is a final BUY size cap only. It
+  may reduce or zero size when predicted slippage erodes ATR-based reward/risk,
+  but it must never approve trades, increase size, or bypass execution safety.
 - The pre-market pipeline may write `shadow_predictions` for candidate models;
   this is observe-only and must not be read by live execution. Operators compare
   it with `python3 ops_check.py shadow-predictions YYYY-MM-DD`.

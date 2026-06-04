@@ -74,6 +74,7 @@ TESTS = [
     "tests/test_confidence_calibration_service.py",
     "tests/test_portfolio_decision_service.py",
     "tests/test_execution_quality_service.py",
+    "tests/test_slippage_kelly_sizing_service.py",
     "tests/test_decision_policy.py",
     "tests/test_decision_utility_service.py",
     "tests/test_analytics_method_service.py",

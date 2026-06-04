@@ -1068,6 +1068,11 @@ A model can only move from observe-only to paper-trading influence after it has:
     profile with an asymmetric false-positive guard using forward outcomes,
     net return units, drawdown, and false-positive counts. This is
     diagnostic-only and cannot affect live decisions.
+34. Done: add slippage-adjusted fractional Kelly sizing. Final BUY sizing now
+    uses predicted slippage, ATR context, and model probability to compute a
+    downside-only Kelly cap. High friction can reduce or zero size before
+    Alpaca routing, but this path cannot approve trades, increase size, or
+    bypass execution safeguards.
 
 Critical blockers before real training:
 

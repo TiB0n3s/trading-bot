@@ -228,51 +228,66 @@ def execute_approved_order(
                 "conviction_stack": sizing_decision.conviction_stack,
             }
 
-            execution = execute_order_func(
-                symbol=symbol,
-                action=action,
-                signal=signal,
-                signal_price=price,
-                decision=decision,
-                account_state=account_state,
-                position_size_pct=adjusted_position_size_pct,
-                execution_mode=execution_mode,
-                pre_order_safety_check=pre_order_safety_check,
-                one_bar_confirmation_hold=one_bar_confirmation_hold,
-                make_client_order_id=make_client_order_id,
-                place_order=place_order,
-                log=log,
-            )
-            account_state.update(execution.account_state_updates)
-            if execution.decision_updates:
-                decision.update(execution.decision_updates)
-            order_result = execution.order_result
-
-            if execution.rejection_category:
-                rejection_adapter.reject_approval_decision(
-                    execution_rejection_decision(execution)
+            if action == "buy" and adjusted_position_size_pct <= 0:
+                reason = (
+                    "slippage_kelly_size_zero: "
+                    f"{(account_state.get('slippage_kelly_sizing') or {}).get('reason')}"
                 )
-                return True
-
-            if order_result:
-                if execution_mode == "dry_run":
-                    log.info(f"DRY RUN ORDER RECORDED: {order_result}")
-                else:
-                    log.info(f"ORDER PLACED: {order_result}")
-                    cooldown_key = (symbol, action)
-                    last_order[cooldown_key] = current_et
-                    write_cooldown(symbol, action, current_et)
-                    if action == "sell":
-                        last_sell[symbol] = (current_et, price)
-                        write_recent_sell(symbol, current_et, price)
+                log.warning(f"{reason} for {symbol}; order not routed")
+                decision.update(
+                    {
+                        "approved": False,
+                        "reason": reason,
+                        "position_size_pct": 0,
+                    }
+                )
+                account_state["order_path_blocked"] = "slippage_kelly"
             else:
-                log.error(f"Order placement failed for {symbol}")
-                if dedupe_key:
-                    record_webhook_status(
-                        dedupe_key=dedupe_key,
-                        status="submit_failed",
-                        failure_reason=execution.failure_reason or "broker returned no order_result",
+                execution = execute_order_func(
+                    symbol=symbol,
+                    action=action,
+                    signal=signal,
+                    signal_price=price,
+                    decision=decision,
+                    account_state=account_state,
+                    position_size_pct=adjusted_position_size_pct,
+                    execution_mode=execution_mode,
+                    pre_order_safety_check=pre_order_safety_check,
+                    one_bar_confirmation_hold=one_bar_confirmation_hold,
+                    make_client_order_id=make_client_order_id,
+                    place_order=place_order,
+                    log=log,
+                )
+                account_state.update(execution.account_state_updates)
+                if execution.decision_updates:
+                    decision.update(execution.decision_updates)
+                order_result = execution.order_result
+
+                if execution.rejection_category:
+                    rejection_adapter.reject_approval_decision(
+                        execution_rejection_decision(execution)
                     )
+                    return True
+
+                if order_result:
+                    if execution_mode == "dry_run":
+                        log.info(f"DRY RUN ORDER RECORDED: {order_result}")
+                    else:
+                        log.info(f"ORDER PLACED: {order_result}")
+                        cooldown_key = (symbol, action)
+                        last_order[cooldown_key] = current_et
+                        write_cooldown(symbol, action, current_et)
+                        if action == "sell":
+                            last_sell[symbol] = (current_et, price)
+                            write_recent_sell(symbol, current_et, price)
+                else:
+                    log.error(f"Order placement failed for {symbol}")
+                    if dedupe_key:
+                        record_webhook_status(
+                            dedupe_key=dedupe_key,
+                            status="submit_failed",
+                            failure_reason=execution.failure_reason or "broker returned no order_result",
+                        )
 
         except Exception as exc:
             log.exception(

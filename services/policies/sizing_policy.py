@@ -79,6 +79,8 @@ def compute_dominant_limiter(account_state: dict[str, Any]) -> str:
         caps.append(("setup_policy_override", 0.75))
     if account_state.get("setup_quality_size_cap"):
         caps.append(("setup_quality", account_state["setup_quality_size_cap"].get("cap_pct", 99)))
+    if account_state.get("slippage_kelly_size_cap"):
+        caps.append(("slippage_kelly", account_state["slippage_kelly_size_cap"].get("cap_pct", 99)))
     limiter = "uncapped" if not caps else min(caps, key=lambda x: x[1])[0]
     record_dominant_limiter(limiter)
     return limiter

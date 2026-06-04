@@ -616,6 +616,40 @@ def test_setup_quality_sizing_caps_when_enabled_without_fighting_tighter_caps():
     assert_equal(sizing.dominant_limiter, "weak_prediction_degraded", "tighter limiter")
 
 
+def test_slippage_kelly_sizing_can_zero_high_friction_buy():
+    account_state = {
+        "prediction_gate": {"ml_prediction_score": 0.72},
+        "atr_20_pct": 1.0,
+        "execution_quality": {"slippage_estimate_pct": 0.25},
+        "buy_opportunity": {
+            "buy_opportunity_recommendation": "strong_buy_candidate",
+            "buy_opportunity_score": 12,
+        },
+    }
+    with _temporary_env(
+        SLIPPAGE_KELLY_SIZING_ENABLED="true",
+        SLIPPAGE_KELLY_MAX_FRICTION_RATIO="0.20",
+    ):
+        sizing = apply_final_sizing(
+            symbol="AAPL",
+            action="buy",
+            decision={"position_size_pct": 1.0},
+            risk_multiplier=1.0,
+            account_state=account_state,
+            apply_buy_opportunity_sizing=lambda **kwargs: (
+                sizing_policy.apply_buy_opportunity_sizing(**kwargs)
+            ),
+        )
+
+    assert_equal(sizing.final_size_pct, 0.0, "slippage Kelly zero cap")
+    assert_equal(sizing.dominant_limiter, "slippage_kelly", "slippage limiter")
+    assert_equal(
+        account_state["slippage_kelly_sizing"]["runtime_effect"],
+        "size_cap_only_no_approval_authority",
+        "runtime effect",
+    )
+
+
 def main():
     tests = [
         test_context_builder_sanitizes_claude_context,
@@ -633,6 +667,7 @@ def main():
         test_setup_quality_sizing_is_enabled_by_default,
         test_strong_buy_lift_requires_supportive_setup_quality,
         test_setup_quality_sizing_caps_when_enabled_without_fighting_tighter_caps,
+        test_slippage_kelly_sizing_can_zero_high_friction_buy,
     ]
     for test in tests:
         test()

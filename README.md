@@ -388,6 +388,12 @@ python3 ops_check.py historical-bar-progress \
   --min-days 252 \
   --min-symbols 20 \
   --limit 20
+
+python3 ops_check.py historical-bar-readiness \
+  2024-06-01 \
+  --end-date 2026-06-04 \
+  --min-days 252 \
+  --min-symbols 20
 ```
 
 The backfill writes chunked CSVs under `data/historical_bars/polygon_1min` and
@@ -401,7 +407,21 @@ dataset floor, not proof that every approved symbol has equivalent history.
 The progress report adds approved-universe awareness, latest manifest status,
 recent manifest errors, and a prioritized list of symbols still below the
 market-day floor. It is cache/manifest based so it stays fast while backfills
-run. Use `historical-bar-coverage` for DB-derived training readiness.
+run. `historical-bar-readiness` combines cache progress, latest manifest state,
+feature-family readiness, and completion-hook status; by default it skips
+expensive DB scans so it is safe during active backfills. Add
+`--include-db-quality` after the backfill finishes to scan persisted rows for
+OHLCV nulls, invalid price ranges, feature missing rates, and optional
+`--include-duplicate-scan` duplicate checks. Use `historical-bar-coverage` for
+DB-derived aggregate training readiness.
+
+The after-close learning loop also runs
+`pipeline/historical_bar_completion_hook.py`. This hook watches the cache/
+manifest readiness fingerprint and triggers guarded observe-only retraining only
+once a new historical-bar coverage floor is crossed. It stores state under
+`runtime_state/historical_bar_training_hook_state.json`, skips repeated training
+for the same readiness fingerprint, and still cannot promote or alter live
+authority.
 
 Build or inspect the canonical ML training export after coverage is acceptable:
 

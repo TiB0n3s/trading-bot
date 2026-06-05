@@ -156,6 +156,13 @@ def _build_steps(target_date: str) -> list[Step]:
             description="audit paper-only learning overrides against linked lifecycle outcomes",
         ),
         Step(
+            name="historical_bar_completion_training",
+            module="pipeline.historical_bar_completion_hook",
+            argv=["--date", target_date],
+            critical=False,
+            description="trigger guarded observe-only training when historical bar backfill crosses readiness floor",
+        ),
+        Step(
             name="symbol_universe_retraining",
             module="pipeline.symbol_universe_retrain",
             argv=["--date", target_date],

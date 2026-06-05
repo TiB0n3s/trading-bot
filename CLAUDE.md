@@ -60,6 +60,11 @@ Recent completed roadmap items:
   bar-pattern coverage, then calls guarded retraining with `--force
   --rerun-completed` once coverage gates pass. It is observe-only and cannot
   promote or alter live authority.
+- `pipeline/historical_bar_completion_hook.py` also runs in the after-close
+  loop. It watches cache/manifest historical-bar readiness, records a runtime
+  readiness fingerprint, and triggers guarded observe-only retraining once a
+  new coverage floor is reached. It skips repeated training for the same
+  fingerprint and cannot promote or alter live authority.
 - `pipeline/after_close_learning.py` is the recurring after-close quant
   learning loop. It completes rejected/candidate/exit outcomes, refreshes
   report-memory artifacts, writes DuckDB/PyArrow research exports, runs

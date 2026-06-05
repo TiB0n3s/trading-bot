@@ -21,9 +21,21 @@ class BarPatternFeatureRepository:
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     symbol TEXT NOT NULL,
                     bar_timestamp TEXT NOT NULL,
+                    bar_source TEXT,
+                    bar_interval_start_ts TEXT,
+                    bar_interval_semantics TEXT,
                     timeframe TEXT NOT NULL,
+                    open REAL,
+                    high REAL,
+                    low REAL,
                     close REAL,
                     volume REAL,
+                    vwap REAL,
+                    ema_12 REAL,
+                    ema_26 REAL,
+                    macd REAL,
+                    macd_signal REAL,
+                    rsi_14 REAL,
                     efi REAL,
                     efi_ema_13 REAL,
                     efi_slope_3 REAL,
@@ -86,6 +98,18 @@ class BarPatternFeatureRepository:
             self._ensure_column(con, "opportunity_quality", "TEXT")
             self._ensure_column(con, "long_opportunity_score", "REAL")
             self._ensure_column(con, "sell_opportunity_score", "REAL")
+            self._ensure_column(con, "bar_source", "TEXT")
+            self._ensure_column(con, "bar_interval_start_ts", "TEXT")
+            self._ensure_column(con, "bar_interval_semantics", "TEXT")
+            self._ensure_column(con, "open", "REAL")
+            self._ensure_column(con, "high", "REAL")
+            self._ensure_column(con, "low", "REAL")
+            self._ensure_column(con, "vwap", "REAL")
+            self._ensure_column(con, "ema_12", "REAL")
+            self._ensure_column(con, "ema_26", "REAL")
+            self._ensure_column(con, "macd", "REAL")
+            self._ensure_column(con, "macd_signal", "REAL")
+            self._ensure_column(con, "rsi_14", "REAL")
             self._ensure_column(con, "candle_body_pct", "REAL")
             self._ensure_column(con, "upper_wick_pct", "REAL")
             self._ensure_column(con, "lower_wick_pct", "REAL")
@@ -151,7 +175,9 @@ class BarPatternFeatureRepository:
             con.executemany(
                 """
                 INSERT INTO bar_pattern_features (
-                    symbol, bar_timestamp, timeframe, close, volume,
+                    symbol, bar_timestamp, bar_source, bar_interval_start_ts,
+                    bar_interval_semantics, timeframe, open, high, low, close,
+                    volume, vwap, ema_12, ema_26, macd, macd_signal, rsi_14,
                     efi, efi_ema_13, efi_slope_3, efi_zscore_20,
                     pvt, pvt_slope_5, pvt_new_high_30,
                     price_return_5, price_vs_sma_20_pct, breakout_20,
@@ -174,7 +200,10 @@ class BarPatternFeatureRepository:
                     forward_return_pct, forward_mfe_pct, forward_mae_pct,
                     horizon_bars, feature_version, runtime_effect, feature_json
                 ) VALUES (
-                    :symbol, :bar_timestamp, :timeframe, :close, :volume,
+                    :symbol, :bar_timestamp, :bar_source, :bar_interval_start_ts,
+                    :bar_interval_semantics, :timeframe, :open, :high, :low,
+                    :close, :volume, :vwap, :ema_12, :ema_26, :macd,
+                    :macd_signal, :rsi_14,
                     :efi, :efi_ema_13, :efi_slope_3, :efi_zscore_20,
                     :pvt, :pvt_slope_5, :pvt_new_high_30,
                     :price_return_5, :price_vs_sma_20_pct, :breakout_20,
@@ -199,8 +228,20 @@ class BarPatternFeatureRepository:
                 )
                 ON CONFLICT(symbol, bar_timestamp, timeframe, feature_version)
                 DO UPDATE SET
+                    bar_source = excluded.bar_source,
+                    bar_interval_start_ts = excluded.bar_interval_start_ts,
+                    bar_interval_semantics = excluded.bar_interval_semantics,
+                    open = excluded.open,
+                    high = excluded.high,
+                    low = excluded.low,
                     close = excluded.close,
                     volume = excluded.volume,
+                    vwap = excluded.vwap,
+                    ema_12 = excluded.ema_12,
+                    ema_26 = excluded.ema_26,
+                    macd = excluded.macd,
+                    macd_signal = excluded.macd_signal,
+                    rsi_14 = excluded.rsi_14,
                     efi = excluded.efi,
                     efi_ema_13 = excluded.efi_ema_13,
                     efi_slope_3 = excluded.efi_slope_3,
@@ -281,6 +322,17 @@ class BarPatternFeatureRepository:
                 SELECT
                     COUNT(*) AS rows,
                     COUNT(DISTINCT symbol) AS symbols,
+                    SUM(CASE
+                        WHEN open IS NOT NULL
+                         AND high IS NOT NULL
+                         AND low IS NOT NULL
+                         AND close IS NOT NULL
+                         AND volume IS NOT NULL
+                         AND vwap IS NOT NULL
+                         AND bar_interval_start_ts IS NOT NULL
+                        THEN 1 ELSE 0 END) AS rows_with_raw_bar_contract,
+                    SUM(CASE WHEN ema_12 IS NOT NULL AND ema_26 IS NOT NULL AND macd IS NOT NULL AND rsi_14 IS NOT NULL THEN 1 ELSE 0 END)
+                        AS rows_with_technical_indicators,
                     SUM(CASE WHEN forward_return_pct IS NOT NULL THEN 1 ELSE 0 END)
                         AS rows_with_forward_outcome,
                     SUM(CASE WHEN cvd_price_corr_20 IS NOT NULL OR vpin_toxicity_20 IS NOT NULL THEN 1 ELSE 0 END)
@@ -387,6 +439,8 @@ class BarPatternFeatureRepository:
         return {
             "rows": int(row["rows"] or 0),
             "symbols": int(row["symbols"] or 0),
+            "rows_with_raw_bar_contract": int(row["rows_with_raw_bar_contract"] or 0),
+            "rows_with_technical_indicators": int(row["rows_with_technical_indicators"] or 0),
             "rows_with_forward_outcome": int(row["rows_with_forward_outcome"] or 0),
             "rows_with_order_flow": int(row["rows_with_order_flow"] or 0),
             "rows_with_fractional_memory": int(row["rows_with_fractional_memory"] or 0),

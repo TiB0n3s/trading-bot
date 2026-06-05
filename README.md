@@ -384,6 +384,14 @@ The backfill writes chunked CSVs under `data/historical_bars/polygon_1min` and
 persists the derived `bar_pattern_features` rows used by supervised training,
 advanced-alpha readiness, pattern-learning reports, and research exports.
 
+Historical bar contract:
+
+- cached CSVs include OHLCV, VWAP, source, adjusted flag, and inclusive interval-start metadata
+- `bar_pattern_features` persists raw OHLCV/VWAP plus engineered RSI/EMA/MACD, candle physics, EFI/PVT, CVD/VPIN proxies, fractional-memory, triple-barrier, and trend-scan fields
+- supervised training consumes normalized/derived features, not raw absolute price levels, so cross-symbol models are less likely to learn ticker price scale instead of behavior
+- intra-bar open/high/low/close event timestamps require tick-level data; Polygon 1-minute aggregate bars do not provide those timestamps
+- tick, volume, and dollar bars remain a future data-sampling layer once transaction-level data is archived
+
 ML advanced per-bar integration
 
 `bar_pattern_features` is now part of the ML/export surface:

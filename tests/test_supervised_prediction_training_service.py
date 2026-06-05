@@ -30,6 +30,11 @@ def _rows(n=60):
                 "relative_strength_5m": 0.2,
                 "spread_pct": 0.01,
                 "setup_score": 60,
+                "ema_12": 100.5 + i * 0.01,
+                "ema_26": 100.1 + i * 0.01,
+                "macd": 0.4,
+                "macd_signal": 0.35,
+                "rsi_14": 62.0,
                 "candle_body_pct": 0.6,
                 "upper_wick_pct": 0.1,
                 "lower_wick_pct": 0.3,
@@ -70,6 +75,9 @@ def test_train_supervised_prediction_model_uses_baseline_without_required_deps()
     assert result["runtime_effect"] == "observe_only_no_live_authority"
     assert "artifact_path" in result
     assert "candle_body_pct" in result["feature_columns"]
+    assert "ema_12" in result["feature_columns"]
+    assert "macd" in result["feature_columns"]
+    assert "rsi_14" in result["feature_columns"]
 
 
 def test_train_supervised_prediction_model_blocks_small_samples():

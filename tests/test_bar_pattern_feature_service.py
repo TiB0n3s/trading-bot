@@ -44,6 +44,7 @@ def _fixture_bars() -> list[dict[str, float | str]]:
                 "low": close - 0.16,
                 "close": round(close, 4),
                 "volume": float(volume),
+                "vwap": round(close - 0.02, 4),
             }
         )
     return bars
@@ -58,6 +59,18 @@ def test_bar_pattern_service_builds_efi_pvt_forward_features():
     assert "volume_confirmed_breakout" in labels or "constructive_continuation" in labels
     first = rows[0]
     assert first["symbol"] == "AAPL"
+    assert first["bar_source"] == "polygon_aggregate_1m"
+    assert first["bar_interval_start_ts"] == first["bar_timestamp"]
+    assert first["bar_interval_semantics"] == "inclusive_start_regular_hours_1m"
+    assert first["open"] is not None
+    assert first["high"] is not None
+    assert first["low"] is not None
+    assert first["vwap"] is not None
+    assert first["ema_12"] is not None
+    assert first["ema_26"] is not None
+    assert first["macd"] is not None
+    assert first["macd_signal"] is not None
+    assert first["rsi_14"] is not None
     assert first["efi"] is not None
     assert first["efi_ema_13"] is not None
     assert first["pvt"] is not None
@@ -99,6 +112,8 @@ def test_bar_pattern_repository_persists_and_summarizes(tmp_path: Path):
     assert result.persisted_rows == result.feature_rows
     assert summary["rows"] == result.feature_rows
     assert summary["symbols"] == 1
+    assert summary["rows_with_raw_bar_contract"] == result.feature_rows
+    assert summary["rows_with_technical_indicators"] == result.feature_rows
     assert summary["rows_with_forward_outcome"] > 0
     assert summary["labels"]
     assert summary["opportunities"]

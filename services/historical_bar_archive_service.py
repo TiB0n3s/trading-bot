@@ -79,9 +79,14 @@ def _is_regular_hours_bar(bar: dict[str, Any]) -> bool:
 
 def _csv_row(symbol: str, bar: dict[str, Any]) -> dict[str, Any]:
     ts = _timestamp_et(bar.get("timestamp"))
+    interval_start = ts.isoformat() if ts else str(bar.get("timestamp") or "")
     return {
-        "Timestamp": ts.isoformat() if ts else str(bar.get("timestamp") or ""),
+        "Timestamp": interval_start,
+        "IntervalStart": interval_start,
+        "IntervalSemantics": "inclusive_start_regular_hours_1m",
         "Symbol": symbol,
+        "Source": "polygon_aggregate_1m",
+        "Adjusted": True,
         "Open": bar.get("open"),
         "High": bar.get("high"),
         "Low": bar.get("low"),
@@ -161,7 +166,20 @@ class HistoricalBarArchiveService:
             with cache_path.open("w", newline="", encoding="utf-8") as fh:
                 writer = csv.DictWriter(
                     fh,
-                    fieldnames=["Timestamp", "Symbol", "Open", "High", "Low", "Close", "Volume", "VWAP"],
+                    fieldnames=[
+                        "Timestamp",
+                        "IntervalStart",
+                        "IntervalSemantics",
+                        "Symbol",
+                        "Source",
+                        "Adjusted",
+                        "Open",
+                        "High",
+                        "Low",
+                        "Close",
+                        "Volume",
+                        "VWAP",
+                    ],
                 )
                 writer.writeheader()
                 writer.writerows(csv_rows)

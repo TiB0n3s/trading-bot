@@ -70,6 +70,8 @@ def run_historical_bar_coverage(
     print(f"calendar_span_days      : {span_days}")
     print(f"min_timestamp           : {summary['min_ts']}")
     print(f"max_timestamp           : {summary['max_ts']}")
+    print(f"raw_bar_contract        : {_pct(summary['raw_contract_rows'], rows):.2f}%")
+    print(f"technical_indicators    : {_pct(summary['technical_indicator_rows'], rows):.2f}%")
     print(f"triple_barrier_coverage : {_pct(summary['triple_rows'], rows):.2f}%")
     print(f"trend_scan_coverage     : {_pct(summary['trend_scan_rows'], rows):.2f}%")
     print(f"fractional_coverage     : {_pct(summary['fractional_rows'], rows):.2f}%")

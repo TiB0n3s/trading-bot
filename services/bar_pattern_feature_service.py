@@ -10,7 +10,7 @@ from typing import Any
 from repositories.bar_pattern_feature_repo import BarPatternFeatureRepository
 
 
-BAR_PATTERN_FEATURE_VERSION = "efi_pvt_orderflow_math_bar_pattern_v3"
+BAR_PATTERN_FEATURE_VERSION = "efi_pvt_orderflow_math_bar_pattern_v4"
 BAR_PATTERN_RUNTIME_EFFECT = "observe_only_pattern_learning_no_live_authority"
 
 
@@ -63,6 +63,7 @@ def normalize_bar(bar: Any) -> dict[str, Any]:
         "low": _float(_bar_value(bar, "low", "l")),
         "close": _float(_bar_value(bar, "close", "c")),
         "volume": _float(_bar_value(bar, "volume", "v")),
+        "vwap": _float(_bar_value(bar, "vwap", "vw", "VWAP")),
     }
 
 
@@ -74,6 +75,25 @@ def _ema(values: list[float], window: int) -> list[float]:
     for value in values[1:]:
         out.append(value * alpha + out[-1] * (1.0 - alpha))
     return out
+
+
+def _rsi_at(values: list[float], idx: int, window: int = 14) -> float | None:
+    if idx < window:
+        return None
+    gains = []
+    losses = []
+    for pos in range(idx - window + 1, idx + 1):
+        change = values[pos] - values[pos - 1]
+        if change >= 0:
+            gains.append(change)
+        else:
+            losses.append(abs(change))
+    avg_gain = sum(gains) / window if gains else 0.0
+    avg_loss = sum(losses) / window if losses else 0.0
+    if avg_loss == 0:
+        return 100.0 if avg_gain > 0 else 50.0
+    rs = avg_gain / avg_loss
+    return 100.0 - (100.0 / (1.0 + rs))
 
 
 def _zscore(values: list[float]) -> float | None:
@@ -580,6 +600,10 @@ class BarPatternFeatureService:
         highs = [float(bar["high"] if bar["high"] is not None else bar["close"]) for bar in normalized]
         lows = [float(bar["low"] if bar["low"] is not None else bar["close"]) for bar in normalized]
         volumes = [float(bar["volume"] or 0.0) for bar in normalized]
+        vwaps = [
+            float(bar["vwap"] if bar.get("vwap") is not None else bar["close"])
+            for bar in normalized
+        ]
         true_ranges = _true_ranges(highs, lows, closes)
 
         efi_raw = [0.0]
@@ -614,10 +638,20 @@ class BarPatternFeatureService:
             for idx in range(len(normalized))
         ]
         efi_ema = _ema(efi_raw, 13)
+        ema_12 = _ema(closes, 12)
+        ema_26 = _ema(closes, 26)
+        macd_values = [
+            fast - slow
+            for fast, slow in zip(ema_12[-len(ema_26) :], ema_26)
+        ]
+        macd_offset = len(closes) - len(macd_values)
+        macd_signal_values = _ema(macd_values, 9)
+        macd_signal_offset = len(closes) - len(macd_signal_values)
 
         rows = []
         for idx in range(20, len(normalized)):
             close = closes[idx]
+            vwap = vwaps[idx]
             sma20 = sum(closes[idx - 19 : idx + 1]) / 20.0
             prev_high_20 = max(highs[idx - 20 : idx]) if idx >= 20 else None
             price_return_5 = _pct_change(closes[idx - 5], close) if idx >= 5 else None
@@ -703,11 +737,33 @@ class BarPatternFeatureService:
                 forward_mfe=forward_mfe,
                 forward_mae=forward_mae,
             )
+            macd_idx = idx - macd_offset
+            macd = macd_values[macd_idx] if 0 <= macd_idx < len(macd_values) else None
+            macd_signal_idx = idx - macd_signal_offset
+            macd_signal = (
+                macd_signal_values[macd_signal_idx]
+                if 0 <= macd_signal_idx < len(macd_signal_values)
+                else None
+            )
+            interval_start_ts = normalized[idx]["timestamp"]
 
             feature_json = {
+                "bar_source": "polygon_aggregate_1m",
+                "bar_interval_start_ts": interval_start_ts,
+                "bar_interval_semantics": "inclusive_start_regular_hours_1m",
+                "open": opens[idx],
+                "high": highs[idx],
+                "low": lows[idx],
                 "close": close,
+                "volume": volumes[idx],
+                "vwap": vwap,
                 "sma20": sma20,
                 "prev_high_20": prev_high_20,
+                "ema_12": ema_12[idx],
+                "ema_26": ema_26[idx],
+                "macd": macd,
+                "macd_signal": macd_signal,
+                "rsi_14": _rsi_at(closes, idx, 14),
                 "efi": efi_raw[idx],
                 "efi_ema_13": efi_ema[idx],
                 "efi_slope_3": efi_slope_3,
@@ -747,9 +803,21 @@ class BarPatternFeatureService:
                 {
                     "symbol": symbol.upper(),
                     "bar_timestamp": normalized[idx]["timestamp"],
+                    "bar_source": "polygon_aggregate_1m",
+                    "bar_interval_start_ts": interval_start_ts,
+                    "bar_interval_semantics": "inclusive_start_regular_hours_1m",
                     "timeframe": timeframe,
+                    "open": _round(opens[idx]),
+                    "high": _round(highs[idx]),
+                    "low": _round(lows[idx]),
                     "close": _round(close),
                     "volume": _round(volumes[idx]),
+                    "vwap": _round(vwap),
+                    "ema_12": _round(ema_12[idx]),
+                    "ema_26": _round(ema_26[idx]),
+                    "macd": _round(macd),
+                    "macd_signal": _round(macd_signal),
+                    "rsi_14": _round(_rsi_at(closes, idx, 14)),
                     "efi": _round(efi_raw[idx]),
                     "efi_ema_13": _round(efi_ema[idx]),
                     "efi_slope_3": _round(efi_slope_3),

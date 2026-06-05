@@ -33,6 +33,11 @@ DEFAULT_FEATURE_COLUMNS = (
     "setup_score",
 )
 CANDLE_PHYSICS_FEATURE_COLUMNS = (
+    "ema_12",
+    "ema_26",
+    "macd",
+    "macd_signal",
+    "rsi_14",
     "candle_body_pct",
     "upper_wick_pct",
     "lower_wick_pct",

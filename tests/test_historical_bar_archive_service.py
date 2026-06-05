@@ -85,6 +85,10 @@ def test_historical_bar_archive_filters_rth_caches_csv_and_builds_patterns(tmp_p
         rows = list(csv.DictReader(fh))
     assert len(rows) == 35
     assert rows[0]["Timestamp"].endswith("-04:00")
+    assert rows[0]["IntervalStart"] == rows[0]["Timestamp"]
+    assert rows[0]["IntervalSemantics"] == "inclusive_start_regular_hours_1m"
+    assert rows[0]["Source"] == "polygon_aggregate_1m"
+    assert rows[0]["Adjusted"] == "True"
     assert rows[0]["VWAP"]
 
 

@@ -96,6 +96,11 @@ ROW_COLUMNS = [
     "setup_key",
     # Observe-only candle physics / pattern learning features
     "bar_pattern_feature_version",
+    "ema_12",
+    "ema_26",
+    "macd",
+    "macd_signal",
+    "rsi_14",
     "candle_body_pct",
     "upper_wick_pct",
     "lower_wick_pct",

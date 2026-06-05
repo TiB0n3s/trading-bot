@@ -91,6 +91,11 @@ def _symbol_coverage(
                     }
                     for symbol in symbols
                 }
+            columns = {
+                str(row[1])
+                for row in con.execute("PRAGMA table_info(bar_pattern_features)").fetchall()
+            }
+            timeframe_filter = "AND timeframe = '1m'" if "timeframe" in columns else ""
             rows = con.execute(
                 f"""
                 SELECT
@@ -101,6 +106,7 @@ def _symbol_coverage(
                     MAX(substr(bar_timestamp, 1, 10)) AS last_date
                 FROM bar_pattern_features
                 WHERE symbol IN ({placeholders})
+                  {timeframe_filter}
                 GROUP BY symbol
                 """,
                 symbols,

@@ -774,12 +774,23 @@ python3 pipeline/symbol_universe_retrain.py --date 2026-06-05
 
 The trigger records the current `symbols_config.py` approved-symbol fingerprint
 on first run. Later additions/removals are detected by hash. Added symbols must
-first meet bar-pattern coverage gates (`--min-bar-rows`, `--min-bar-days`) so
-the retrainer does not build a candidate artifact before the new symbol has
-usable candle/pattern history. When coverage passes, the trigger calls
-`pipeline/retrain.py --force --rerun-completed`; the result is still
-observe-only candidate training and cannot change live authority. Pending
-coverage and last-trained universe state are stored in
+first meet bar-pattern coverage gates (`--min-bar-rows`, `--min-bar-days`). If
+an added symbol is not coverage-ready, the trigger automatically calls the
+chunked Polygon archive:
+
+```bash
+python3 pipeline/historical_bar_backfill.py \
+  --start-date 2024-06-01 \
+  --end-date 2026-06-05 \
+  --symbol NEW1,NEW2 \
+  --skip-existing-cache
+```
+
+That backfill writes cached CSV chunks and persists derived v4
+`bar_pattern_features`. After backfill, the trigger reassesses coverage; when
+coverage passes, it calls `pipeline/retrain.py --force --rerun-completed`. The
+result is still observe-only candidate training and cannot change live
+authority. Pending coverage and last-trained universe state are stored in
 `runtime_state/symbol_universe_training_state.json`.
 
 The pre-market pipeline includes an observe-only shadow scoring step. If a

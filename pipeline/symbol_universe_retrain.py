@@ -79,6 +79,40 @@ def _run_retraining(args: argparse.Namespace) -> int:
     return int(result.returncode)
 
 
+def _run_added_symbol_backfill(
+    args: argparse.Namespace,
+    *,
+    added_symbols: list[str],
+) -> int:
+    if not added_symbols:
+        return 0
+    cmd = [
+        sys.executable,
+        str(BASE_DIR / "pipeline" / "historical_bar_backfill.py"),
+        "--start-date",
+        args.backfill_start_date,
+        "--end-date",
+        args.backfill_end_date or args.date,
+        "--symbol",
+        ",".join(added_symbols),
+        "--chunk-days",
+        str(args.backfill_chunk_days),
+        "--horizon-bars",
+        str(args.backfill_horizon_bars),
+        "--skip-existing-cache",
+        "--retry-attempts",
+        str(args.backfill_retry_attempts),
+        "--retry-sleep-seconds",
+        str(args.backfill_retry_sleep_seconds),
+        "--request-sleep-seconds",
+        str(args.backfill_request_sleep_seconds),
+    ]
+    print("Running added-symbol historical backfill:")
+    print("  " + " ".join(cmd))
+    result = subprocess.run(cmd, cwd=BASE_DIR)
+    return int(result.returncode)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--date", required=True)
@@ -89,6 +123,18 @@ def main() -> int:
     parser.add_argument("--sessions", type=int, default=5)
     parser.add_argument("--bad-session-limit", type=int, default=3)
     parser.add_argument("--artifact-dir")
+    parser.add_argument(
+        "--no-auto-backfill",
+        action="store_true",
+        help="Do not run historical bar backfill for newly added symbols.",
+    )
+    parser.add_argument("--backfill-start-date", default="2024-06-01")
+    parser.add_argument("--backfill-end-date")
+    parser.add_argument("--backfill-chunk-days", type=int, default=30)
+    parser.add_argument("--backfill-horizon-bars", type=int, default=20)
+    parser.add_argument("--backfill-request-sleep-seconds", type=float, default=0.25)
+    parser.add_argument("--backfill-retry-attempts", type=int, default=2)
+    parser.add_argument("--backfill-retry-sleep-seconds", type=float, default=15.0)
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--json", action="store_true")
     args = parser.parse_args()
@@ -118,6 +164,35 @@ def main() -> int:
         else:
             _print_human(payload)
         return 0
+
+    if (
+        assessment.retraining_required
+        and not assessment.retraining_allowed
+        and assessment.added_symbols
+        and not args.no_auto_backfill
+    ):
+        if args.dry_run:
+            payload["status"] = "would_backfill_added_symbols"
+            payload["reason"] = "approved symbol universe changed; added symbols need historical bar backfill"
+            payload["state_path"] = str(args.state_path)
+            if args.json:
+                print(json.dumps(payload, indent=2, sort_keys=True))
+            else:
+                _print_human(payload)
+            return 0
+
+        backfill_exit_code = _run_added_symbol_backfill(
+            args,
+            added_symbols=assessment.added_symbols,
+        )
+        payload["backfill_exit_code"] = backfill_exit_code
+        reassessed = service.assess(
+            min_bar_rows=args.min_bar_rows,
+            min_bar_days=args.min_bar_days,
+        )
+        payload = reassessed.to_dict()
+        payload["backfill_exit_code"] = backfill_exit_code
+        assessment = reassessed
 
     if assessment.retraining_required and not assessment.retraining_allowed:
         if not args.dry_run:

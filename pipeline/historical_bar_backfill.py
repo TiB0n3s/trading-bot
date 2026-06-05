@@ -14,6 +14,7 @@ from datetime import date, datetime, timedelta, timezone
 import json
 from pathlib import Path
 import sys
+import time
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
@@ -22,6 +23,7 @@ from services.historical_bar_archive_service import (  # noqa: E402
     DEFAULT_HISTORICAL_BAR_DIR,
     HistoricalBarArchiveService,
 )
+from services.polygon_market_data_service import PolygonMarketDataService  # noqa: E402
 from symbols_config import APPROVED_SYMBOLS_LIST  # noqa: E402
 
 
@@ -85,6 +87,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--no-patterns", action="store_true")
     parser.add_argument("--skip-existing-cache", action="store_true")
     parser.add_argument("--max-chunks", type=int, default=0, help="Safety limit for smoke runs; 0 means all chunks")
+    parser.add_argument("--request-sleep-seconds", type=float, default=0.0)
+    parser.add_argument("--retry-attempts", type=int, default=2)
+    parser.add_argument("--retry-sleep-seconds", type=float, default=15.0)
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args(argv)
 
@@ -96,7 +101,13 @@ def main(argv: list[str] | None = None) -> int:
 
     cache_dir = Path(args.cache_dir) if args.cache_dir else ROOT / DEFAULT_HISTORICAL_BAR_DIR
     chunks = _date_chunks(start, end, args.chunk_days)
-    service = HistoricalBarArchiveService()
+    service = HistoricalBarArchiveService(
+        polygon_market_data=PolygonMarketDataService(
+            timeout_seconds=20.0,
+            retry_attempts=args.retry_attempts,
+            retry_sleep_seconds=args.retry_sleep_seconds,
+        )
+    )
     results: list[dict] = []
     errors: list[str] = []
     skipped_chunks = 0
@@ -147,6 +158,8 @@ def main(argv: list[str] | None = None) -> int:
                     f"persisted_pattern_rows={payload.get('persisted_pattern_rows')} "
                     f"errors={len(payload.get('errors') or [])}"
                 )
+                if args.request_sleep_seconds > 0:
+                    time.sleep(args.request_sleep_seconds)
             except Exception as exc:
                 message = (
                     f"{symbol} {chunk_start.isoformat()}..{chunk_end.isoformat()}: "
@@ -154,6 +167,8 @@ def main(argv: list[str] | None = None) -> int:
                 )
                 errors.append(message)
                 print(f"[WARN] archive_chunk_failed {message}")
+                if args.request_sleep_seconds > 0:
+                    time.sleep(args.request_sleep_seconds)
         if args.max_chunks and attempted_chunks >= args.max_chunks:
             break
 

@@ -71,11 +71,43 @@ def test_polygon_aggregate_bar_dicts_normalizes_results():
     assert "/v2/aggs/ticker/AAPL/range/5/minute/2026-06-02/2026-06-02" in calls[0].url
 
 
+def test_polygon_trade_dicts_normalizes_tick_results():
+    calls = []
+
+    def transport(request):
+        calls.append(request)
+        return {
+            "status": "OK",
+            "results": [
+                {
+                    "sip_timestamp": 1780407000000000000,
+                    "price": 100.25,
+                    "size": 50,
+                    "exchange": 11,
+                    "conditions": [12],
+                    "sequence_number": 123,
+                    "tape": 3,
+                }
+            ],
+        }
+
+    service = PolygonMarketDataService(api_key="test-key", transport=transport)
+    trades = service.trade_dicts("aapl", timestamp="2026-06-02", limit=1)
+
+    assert len(trades) == 1
+    assert trades[0]["timestamp"].startswith("2026-06-02T")
+    assert trades[0]["price"] == 100.25
+    assert trades[0]["size"] == 50
+    assert "/v3/trades/AAPL" in calls[0].url
+    assert "timestamp=2026-06-02" in calls[0].url
+
+
 def main():
     tests = [
         test_polygon_latest_quote_summary_uses_injected_transport,
         test_polygon_requires_api_key_before_request,
         test_polygon_aggregate_bar_dicts_normalizes_results,
+        test_polygon_trade_dicts_normalizes_tick_results,
     ]
     for test in tests:
         test()

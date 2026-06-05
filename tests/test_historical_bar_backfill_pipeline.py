@@ -35,7 +35,7 @@ def test_historical_bar_backfill_chunks_date_range_and_symbols():
     original_service = backfill_pipeline.HistoricalBarArchiveService
     try:
         FakeArchiveService.calls = []
-        backfill_pipeline.HistoricalBarArchiveService = lambda: FakeArchiveService()
+        backfill_pipeline.HistoricalBarArchiveService = lambda **kwargs: FakeArchiveService()
         code = backfill_pipeline.main(
             [
                 "--start-date",
@@ -66,7 +66,7 @@ def test_historical_bar_backfill_max_chunks_limits_smoke_runs():
     original_service = backfill_pipeline.HistoricalBarArchiveService
     try:
         FakeArchiveService.calls = []
-        backfill_pipeline.HistoricalBarArchiveService = lambda: FakeArchiveService()
+        backfill_pipeline.HistoricalBarArchiveService = lambda **kwargs: FakeArchiveService()
         code = backfill_pipeline.main(
             [
                 "--start-date",

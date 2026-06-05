@@ -8,9 +8,11 @@ from __future__ import annotations
 
 import json
 import os
+import time
 from dataclasses import dataclass
 from datetime import date, datetime, timezone
 from typing import Any, Callable
+from urllib.error import HTTPError
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
@@ -35,10 +37,14 @@ class PolygonMarketDataService:
         *,
         api_key: str | None = None,
         timeout_seconds: float = 5.0,
+        retry_attempts: int = 0,
+        retry_sleep_seconds: float = 15.0,
         transport: Callable[[PolygonRequest], dict[str, Any]] | None = None,
     ):
         self.api_key = api_key if api_key is not None else os.environ.get("POLYGON_API_KEY", "")
         self.timeout_seconds = timeout_seconds
+        self.retry_attempts = max(0, int(retry_attempts or 0))
+        self.retry_sleep_seconds = max(0.0, float(retry_sleep_seconds or 0.0))
         self.transport = transport or self._default_transport
 
     @property
@@ -53,8 +59,16 @@ class PolygonMarketDataService:
 
     def _default_transport(self, request: PolygonRequest) -> dict[str, Any]:
         req = Request(request.url, headers={"User-Agent": "trading-bot/polygon-validation"})
-        with urlopen(req, timeout=self.timeout_seconds) as response:
-            return json.loads(response.read().decode("utf-8"))
+        attempts = self.retry_attempts + 1
+        for attempt in range(attempts):
+            try:
+                with urlopen(req, timeout=self.timeout_seconds) as response:
+                    return json.loads(response.read().decode("utf-8"))
+            except HTTPError as exc:
+                if exc.code != 429 or attempt >= attempts - 1:
+                    raise
+                time.sleep(self.retry_sleep_seconds)
+        raise RuntimeError("unreachable polygon retry state")
 
     def latest_quote(self, symbol: str) -> dict[str, Any]:
         """Return Polygon's latest quote payload for a stock symbol."""
@@ -129,6 +143,71 @@ class PolygonMarketDataService:
                 }
             )
         return bars
+
+    def trades(
+        self,
+        symbol: str,
+        *,
+        timestamp: str | date,
+        order: str = "asc",
+        sort: str = "timestamp",
+        limit: int = 50000,
+    ) -> dict[str, Any]:
+        """Return Polygon stock trades for a symbol/date when the key is entitled.
+
+        This uses Polygon's v3 trades endpoint and returns raw payload metadata
+        so callers can inspect entitlement/rate-limit behavior.
+        """
+        symbol = str(symbol or "").upper().strip()
+        return self._request(
+            f"/v3/trades/{symbol}",
+            timestamp=timestamp,
+            order=order,
+            sort=sort,
+            limit=limit,
+        )
+
+    def trade_dicts(
+        self,
+        symbol: str,
+        *,
+        timestamp: str | date,
+        order: str = "asc",
+        sort: str = "timestamp",
+        limit: int = 50000,
+    ) -> list[dict[str, Any]]:
+        payload = self.trades(
+            symbol,
+            timestamp=timestamp,
+            order=order,
+            sort=sort,
+            limit=limit,
+        )
+        trades = []
+        for row in payload.get("results") or []:
+            ts = row.get("sip_timestamp") or row.get("participant_timestamp") or row.get("trf_timestamp")
+            timestamp_iso = ""
+            if ts is not None:
+                try:
+                    timestamp_iso = datetime.fromtimestamp(
+                        float(ts) / 1_000_000_000.0,
+                        tz=timezone.utc,
+                    ).isoformat()
+                except Exception:
+                    timestamp_iso = str(ts)
+            trades.append(
+                {
+                    "timestamp": timestamp_iso,
+                    "price": row.get("price"),
+                    "size": row.get("size"),
+                    "exchange": row.get("exchange"),
+                    "conditions": row.get("conditions"),
+                    "sequence_number": row.get("sequence_number"),
+                    "tape": row.get("tape"),
+                    "raw": row,
+                }
+            )
+        return trades
 
     def latest_quote_summary(self, symbol: str) -> dict[str, Any]:
         payload = self.latest_quote(symbol)

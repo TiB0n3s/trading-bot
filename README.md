@@ -370,7 +370,10 @@ python3 pipeline/historical_bar_backfill.py \
   --start-date 2024-06-01 \
   --end-date 2026-06-04 \
   --all \
-  --chunk-days 30
+  --chunk-days 120 \
+  --request-sleep-seconds 13 \
+  --retry-attempts 3 \
+  --retry-sleep-seconds 20
 
 # 3. Verify DB feature coverage before using the data for model claims.
 python3 ops_check.py historical-bar-coverage \
@@ -391,6 +394,21 @@ Historical bar contract:
 - supervised training consumes normalized/derived features, not raw absolute price levels, so cross-symbol models are less likely to learn ticker price scale instead of behavior
 - intra-bar open/high/low/close event timestamps require tick-level data; Polygon 1-minute aggregate bars do not provide those timestamps
 - tick, volume, and dollar bars remain a future data-sampling layer once transaction-level data is archived
+
+Tick-level Polygon probe:
+
+```bash
+python3 pipeline/polygon_tick_archive.py \
+  --date 2026-06-04 \
+  --symbol AAPL \
+  --limit 50000 \
+  --dry-run
+```
+
+If the command returns trades, remove `--dry-run` to cache raw transactions
+under `data/historical_ticks/polygon_trades`. If it returns an entitlement
+or plan error, the current Polygon subscription does not expose tick-level
+historical trades.
 
 ML advanced per-bar integration
 

@@ -98,7 +98,10 @@ python3 pipeline/historical_bar_backfill.py \
   --start-date 2024-06-01 \
   --end-date 2026-06-04 \
   --all \
-  --chunk-days 30
+  --chunk-days 120 \
+  --request-sleep-seconds 13 \
+  --retry-attempts 3 \
+  --retry-sleep-seconds 20
 ```
 
 Verify coverage before making model-readiness claims:
@@ -120,6 +123,20 @@ Data contract:
 - Cached CSV chunks include OHLCV, VWAP, source, adjusted flag, and inclusive interval-start metadata.
 - Persisted `bar_pattern_features` rows include raw OHLCV/VWAP plus RSI/EMA/MACD, candle-physics ratios, EFI/PVT, CVD/VPIN proxies, fractional-memory, triple-barrier, and trend-scan features.
 - Intra-bar timestamps for the exact open/high/low/close event sequence are not available from Polygon aggregate bars. Those require tick-level data and should be treated as a future archive layer.
+
+Tick-level entitlement probe:
+
+```bash
+python3 pipeline/polygon_tick_archive.py \
+  --date 2026-06-04 \
+  --symbol AAPL \
+  --limit 50000 \
+  --dry-run
+```
+
+Successful output means tick-level trades can be cached for future tick,
+volume, and dollar-bar sampling. Entitlement or plan errors mean the current
+Polygon subscription only supports aggregate-bar training.
 
 ## AI Analytics And Storage Checks
 

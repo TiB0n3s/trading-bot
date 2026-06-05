@@ -74,6 +74,9 @@ policy_backtest_summary.json
 strategy_memory_history/
 runtime_state/
 research_exports/
+data/historical_bars/
+data/historical_ticks/
+manual_polygon_backfill_v4_*.log
 
 # Generated portfolio replacement intelligence
 portfolio_replacement_memory.json

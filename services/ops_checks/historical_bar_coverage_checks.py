@@ -28,6 +28,16 @@ def _days_between(start: str | None, end: str | None) -> int:
     return max(0, (end_d - start_d).days + 1)
 
 
+def _median(values: list[int]) -> float:
+    if not values:
+        return 0.0
+    ordered = sorted(values)
+    mid = len(ordered) // 2
+    if len(ordered) % 2:
+        return float(ordered[mid])
+    return (ordered[mid - 1] + ordered[mid]) / 2.0
+
+
 def run_historical_bar_coverage(
     *,
     base_dir: Path,
@@ -54,12 +64,28 @@ def run_historical_bar_coverage(
         return False
     summary = payload["summary"]
     top_symbols = payload["top_symbols"]
+    symbol_rows = payload.get("symbol_rows") or []
 
     rows = int(summary["rows"] or 0)
     symbols = int(summary["symbols"] or 0)
     market_dates = int(summary["market_dates"] or 0)
     span_days = _days_between(summary["min_ts"], summary["max_ts"])
-    training_ready = market_dates >= min_days and symbols >= min_symbols and rows > 0
+    per_symbol_rows = [int(row["rows"] or 0) for row in symbol_rows]
+    per_symbol_market_dates = [int(row["market_dates"] or 0) for row in symbol_rows]
+    min_symbol_rows = min(per_symbol_rows) if per_symbol_rows else 0
+    max_symbol_rows = max(per_symbol_rows) if per_symbol_rows else 0
+    median_symbol_rows = _median(per_symbol_rows)
+    min_symbol_market_dates = min(per_symbol_market_dates) if per_symbol_market_dates else 0
+    median_symbol_market_dates = _median(per_symbol_market_dates)
+    symbols_meeting_min_days = sum(1 for n in per_symbol_market_dates if n >= min_days)
+    imbalance_ratio = round(max_symbol_rows / median_symbol_rows, 2) if median_symbol_rows else 0.0
+    balanced_symbol_ready = symbols_meeting_min_days >= min_symbols
+    training_ready = (
+        market_dates >= min_days
+        and symbols >= min_symbols
+        and rows > 0
+        and balanced_symbol_ready
+    )
 
     print(f"report_version          : {HISTORICAL_BAR_COVERAGE_VERSION}")
     print("runtime_effect          : readiness_only_no_live_authority")
@@ -70,6 +96,13 @@ def run_historical_bar_coverage(
     print(f"calendar_span_days      : {span_days}")
     print(f"min_timestamp           : {summary['min_ts']}")
     print(f"max_timestamp           : {summary['max_ts']}")
+    print(f"min_symbol_rows         : {min_symbol_rows}")
+    print(f"median_symbol_rows      : {median_symbol_rows:.1f}")
+    print(f"max_symbol_rows         : {max_symbol_rows}")
+    print(f"min_symbol_market_dates : {min_symbol_market_dates}")
+    print(f"median_symbol_dates     : {median_symbol_market_dates:.1f}")
+    print(f"symbols_meeting_days    : {symbols_meeting_min_days}")
+    print(f"symbol_imbalance_ratio  : {imbalance_ratio:.2f}")
     print(f"raw_bar_contract        : {_pct(summary['raw_contract_rows'], rows):.2f}%")
     print(f"technical_indicators    : {_pct(summary['technical_indicator_rows'], rows):.2f}%")
     print(f"triple_barrier_coverage : {_pct(summary['triple_rows'], rows):.2f}%")
@@ -79,6 +112,7 @@ def run_historical_bar_coverage(
     print(f"cvd_proxy_coverage      : {_pct(summary['cvd_rows'], rows):.2f}%")
     print(f"min_days_required       : {min_days}")
     print(f"min_symbols_required    : {min_symbols}")
+    print(f"balanced_symbol_ready   : {balanced_symbol_ready}")
     print(f"training_ready          : {training_ready}")
 
     if top_symbols:
@@ -96,5 +130,7 @@ def run_historical_bar_coverage(
         return True
 
     print()
+    if not balanced_symbol_ready:
+        print("[WARN] historical bars are still symbol-imbalanced for the configured floor")
     print("[WARN] historical bar coverage does not yet meet configured ML training floor")
     return False

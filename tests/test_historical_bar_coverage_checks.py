@@ -40,7 +40,7 @@ def _build_db(
         """ if include_raw_contract else ""
         con.execute(
             f"""
-            CREATE TABLE bar_pattern_features (
+            CREATE TABLE IF NOT EXISTS bar_pattern_features (
                 symbol TEXT,
                 bar_timestamp TEXT,
                 timeframe TEXT,
@@ -141,6 +141,26 @@ def test_historical_bar_coverage_reports_raw_contract_and_indicator_coverage():
     assert "technical_indicators    : 100.00%" in out
 
 
+def test_historical_bar_coverage_flags_symbol_imbalance():
+    with tempfile.TemporaryDirectory() as tmp:
+        base_dir = Path(tmp)
+        _build_db(base_dir / "trades.db", days=3, symbols=("AAPL",))
+        _build_db(base_dir / "trades.db", days=1, symbols=("MSFT",), include_raw_contract=False)
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            ok = run_historical_bar_coverage(
+                base_dir=base_dir,
+                min_days=3,
+                min_symbols=2,
+            )
+
+    out = buf.getvalue()
+    assert ok is False
+    assert "balanced_symbol_ready   : False" in out
+    assert "symbols_meeting_days    : 1" in out
+    assert "symbol-imbalanced" in out
+
+
 if __name__ == "__main__":
     test_historical_bar_coverage_reports_not_ready_for_short_history()
     print("[OK] test_historical_bar_coverage_reports_not_ready_for_short_history")
@@ -148,4 +168,6 @@ if __name__ == "__main__":
     print("[OK] test_historical_bar_coverage_passes_when_thresholds_met")
     test_historical_bar_coverage_reports_raw_contract_and_indicator_coverage()
     print("[OK] test_historical_bar_coverage_reports_raw_contract_and_indicator_coverage")
-    print("\nAll 3 historical bar coverage tests passed.")
+    test_historical_bar_coverage_flags_symbol_imbalance()
+    print("[OK] test_historical_bar_coverage_flags_symbol_imbalance")
+    print("\nAll 4 historical bar coverage tests passed.")

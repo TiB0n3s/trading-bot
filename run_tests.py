@@ -135,6 +135,7 @@ TESTS = [
     "tests/test_historical_bar_backfill_pipeline.py",
     "tests/test_polygon_tick_archive_pipeline.py",
     "tests/test_historical_bar_coverage_checks.py",
+    "tests/test_ml_dataset_export_checks.py",
     "tests/test_canonical_exit_service.py",
     "tests/test_exit_snapshot_backfill_service.py",
     "tests/test_lifecycle_analysis_service.py",

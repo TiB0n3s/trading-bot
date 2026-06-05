@@ -70,6 +70,7 @@ Usage:
   python3 ops_check.py bar-pattern-backfill YYYY-MM-DD --symbol AAPL [--dry-run]
   python3 ops_check.py historical-bar-archive START_DATE --end-date YYYY-MM-DD --symbol AAPL
   python3 ops_check.py historical-bar-coverage [START_DATE] [--end-date YYYY-MM-DD]
+  python3 ops_check.py ml-dataset-export START_DATE [END_DATE] [--output PATH] [--format jsonl|csv] [--max-rows N]
   python3 ops_check.py learning-readiness START_DATE [END_DATE]
   python3 ops_check.py learning-effectiveness START_DATE [END_DATE]
   python3 ops_check.py learning-artifacts YYYY-MM-DD
@@ -129,6 +130,7 @@ from services.ops_checks.pattern_learning_inputs_checks import run_pattern_learn
 from services.ops_checks.bar_pattern_checks import run_bar_pattern_backfill
 from services.ops_checks.historical_bar_archive_checks import run_historical_bar_archive
 from services.ops_checks.historical_bar_coverage_checks import run_historical_bar_coverage
+from services.ops_checks.ml_dataset_checks import run_ml_dataset_export_check
 from services.ops_checks.learning_readiness_checks import (
     run_learning_effectiveness,
     run_learning_readiness,
@@ -884,6 +886,24 @@ def historical_bar_coverage(start_date: str | None = None) -> bool:
     )
 
 
+def ml_dataset_export(start_date: str) -> bool:
+    end_date = start_date
+    if len(sys.argv) > 3 and not sys.argv[3].startswith("--"):
+        end_date = sys.argv[3]
+    output_text = _str_option("--output", "")
+    return run_ml_dataset_export_check(
+        start_date,
+        end_date=end_date,
+        base_dir=BASE_DIR,
+        output_path=Path(output_text) if output_text else None,
+        output_format=_str_option("--format", "jsonl"),
+        include_incomplete="--include-incomplete" in sys.argv,
+        min_rows=_int_option("--min-rows", 500),
+        min_symbols=_int_option("--min-symbols", 20),
+        max_rows=(_int_option("--max-rows", 5000) or None),
+    )
+
+
 def learning_readiness(start_date):
     end_date = None
     if len(sys.argv) > 3 and not sys.argv[3].startswith("--"):
@@ -1277,6 +1297,9 @@ def main():
             else None
         )
         return 0 if historical_bar_coverage(start_arg) else 1
+
+    if command == "ml-dataset-export":
+        return 0 if ml_dataset_export(target_date) else 1
 
     if command == "learning-readiness":
         return 0 if learning_readiness(target_date) else 1

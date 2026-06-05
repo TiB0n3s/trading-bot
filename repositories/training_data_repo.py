@@ -180,7 +180,13 @@ class TrainingDataRepository:
     def _opt(columns: set[str], alias: str, col: str, fallback: str = "NULL") -> str:
         return f"{alias}.{col}" if col in columns else f"{fallback} AS {col}"
 
-    def raw_training_rows(self, start_date: str, end_date: str) -> list[sqlite3.Row]:
+    def raw_training_rows(
+        self,
+        start_date: str,
+        end_date: str,
+        *,
+        limit: int | None = None,
+    ) -> list[sqlite3.Row]:
         with self._connect() as con:
             for table in ("feature_snapshots", "labeled_setups"):
                 if not self._table_exists(con, table):
@@ -207,7 +213,18 @@ class TrainingDataRepository:
                       AND datetime(bp2.bar_timestamp) >= datetime(fs.timestamp, '-90 seconds')
                  )
                 """
+            limit_sql = ""
+            if limit and limit > 0:
+                limit_sql = f" LIMIT {int(limit)}"
+
             query = f"""
+                WITH limited_fs AS (
+                    SELECT *
+                    FROM feature_snapshots
+                    WHERE substr(timestamp, 1, 10) BETWEEN ? AND ?
+                    ORDER BY timestamp, symbol, id
+                    {limit_sql}
+                )
                 SELECT
                     fs.id                          AS snapshot_id,
                     substr(fs.timestamp, 1, 10)    AS snapshot_date,
@@ -320,7 +337,7 @@ class TrainingDataRepository:
                     'excluded_not_training_target' AS realized_exit_label_status,
                     NULL                           AS exit_policy_version,
                     NULL                           AS position_manager_version
-                FROM feature_snapshots fs
+                FROM limited_fs fs
                 LEFT JOIN labeled_setups ls
                   ON ls.snapshot_id = fs.id
                 {bar_pattern_join}
@@ -330,7 +347,6 @@ class TrainingDataRepository:
                 LEFT JOIN daily_symbol_predictions p
                   ON p.market_date = substr(fs.timestamp, 1, 10)
                  AND p.symbol      = fs.symbol
-                WHERE substr(fs.timestamp, 1, 10) BETWEEN ? AND ?
                 ORDER BY fs.timestamp, fs.symbol, fs.id
             """
             return con.execute(query, (start_date, end_date)).fetchall()

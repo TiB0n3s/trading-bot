@@ -193,6 +193,8 @@ class DatasetBuildConfig:
     end_date: str                    # YYYY-MM-DD inclusive
     db_path: Path | None = None
     include_incomplete_labels: bool = False
+    max_source_rows: int | None = None
+    build_manifest: bool = True
     query_version: str = QUERY_VERSION
     label_version: str = LABEL_VERSION
 
@@ -227,9 +229,15 @@ def _fetch_raw_rows(
     db_path: Path,
     start_date: str,
     end_date: str,
+    *,
+    max_source_rows: int | None = None,
 ) -> list[Any]:
     """Run the canonical join and return all rows for the date range."""
-    return TrainingDataRepository(db_path).raw_training_rows(start_date, end_date)
+    return TrainingDataRepository(db_path).raw_training_rows(
+        start_date,
+        end_date,
+        limit=max_source_rows,
+    )
 
 
 def _exclusion_counts(rows: list[Any]) -> dict[str, int]:
@@ -319,7 +327,12 @@ def build_training_dataset(config: DatasetBuildConfig) -> DatasetBuildResult:
     archive_root = get_archive_root(db_path.parent)
 
     pit_contract = validate_pit_contract(db_path)
-    raw_rows = _fetch_raw_rows(db_path, config.start_date, config.end_date)
+    raw_rows = _fetch_raw_rows(
+        db_path,
+        config.start_date,
+        config.end_date,
+        max_source_rows=config.max_source_rows,
+    )
     exclusion_counts = _exclusion_counts(raw_rows)
 
     if config.include_incomplete_labels:
@@ -338,19 +351,43 @@ def build_training_dataset(config: DatasetBuildConfig) -> DatasetBuildResult:
 
     rows = _inject_pit_archive(export_sqlite_rows, pit_coverage)
 
-    manifest = build_dataset_manifest(
-        db_path=db_path,
-        start_date=config.start_date,
-        end_date=config.end_date,
-        query_version=config.query_version,
-        label_version=config.label_version,
-        excluded_rows_reason_counts=exclusion_counts,
-        pit_coverage=pit_coverage,
-    )
+    if config.build_manifest:
+        manifest = build_dataset_manifest(
+            db_path=db_path,
+            start_date=config.start_date,
+            end_date=config.end_date,
+            query_version=config.query_version,
+            label_version=config.label_version,
+            excluded_rows_reason_counts=exclusion_counts,
+            pit_coverage=pit_coverage,
+        )
+    else:
+        manifest = {
+            "dataset_id": "manifest_not_built",
+            "created_at": None,
+            "source_db_path": str(db_path),
+            "source_db_hash": None,
+            "query_version": config.query_version,
+            "label_version": config.label_version,
+            "feature_version": FEATURE_VERSION,
+            "row_count": len(raw_rows),
+            "symbol_count": len({r["symbol"] for r in raw_rows if r["symbol"]}),
+            "date_range": {"start": config.start_date, "end": config.end_date},
+            "excluded_rows_reason_counts": exclusion_counts,
+            "git_sha": None,
+            "override_state_hash": None,
+            "override_tracking_status": "not_built",
+            "policy_artifact_state_hash": None,
+            "policy_artifact_tracking_status": "not_built",
+            "pit_coverage": pit_coverage,
+            "manifest_hashing_skipped": True,
+        }
     complete_horizon_rows = sum(
         1 for r in raw_rows if (r["label_horizon_status"] or "unlabeled") == "complete"
     )
     manifest["source_row_count"] = len(raw_rows)
+    manifest["source_row_limit"] = config.max_source_rows
+    manifest["source_rows_may_be_limited"] = bool(config.max_source_rows)
     manifest["export_row_count"] = len(rows)
     manifest["complete_horizon_rows"] = complete_horizon_rows
     manifest["training_default_complete_horizon_only"] = not config.include_incomplete_labels

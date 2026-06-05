@@ -116,6 +116,31 @@ python3 ops_check.py historical-bar-coverage \
 
 If the coverage report is not ready, train only as a smoke test or
 observe-only comparison. Do not promote model authority from short history.
+The report also shows per-symbol balance metrics. A dataset with enough total
+days can still be weak if only a few symbols have deep history.
+
+Inspect or write the canonical ML training export:
+
+```bash
+python3 ops_check.py ml-dataset-export \
+  2024-06-01 \
+  2026-06-04 \
+  --min-rows 500 \
+  --min-symbols 20 \
+  --max-rows 5000
+
+python3 ops_check.py ml-dataset-export \
+  2024-06-01 \
+  2026-06-04 \
+  --output research_exports/ml_training_dataset_20240601_20260604.csv \
+  --format csv \
+  --max-rows 0
+```
+
+This export is point-in-time audited, manifest-backed, and has
+`dataset_export_only_no_live_authority` runtime effect. The default
+`--max-rows 5000` keeps checks responsive; `--max-rows 0` requests a full
+export.
 
 Data contract:
 

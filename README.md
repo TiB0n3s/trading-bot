@@ -387,6 +387,34 @@ The backfill writes chunked CSVs under `data/historical_bars/polygon_1min` and
 persists the derived `bar_pattern_features` rows used by supervised training,
 advanced-alpha readiness, pattern-learning reports, and research exports.
 
+The coverage report prints both aggregate readiness and per-symbol balance:
+minimum/median/maximum symbol rows, symbols meeting the configured market-day
+floor, and a symbol-imbalance ratio. Treat `training_ready=True` as a configured
+dataset floor, not proof that every approved symbol has equivalent history.
+
+Build or inspect the canonical ML training export after coverage is acceptable:
+
+```bash
+python3 ops_check.py ml-dataset-export \
+  2024-06-01 \
+  2026-06-04 \
+  --min-rows 500 \
+  --min-symbols 20 \
+  --max-rows 5000
+
+python3 ops_check.py ml-dataset-export \
+  2024-06-01 \
+  2026-06-04 \
+  --output research_exports/ml_training_dataset_20240601_20260604.jsonl \
+  --format jsonl \
+  --max-rows 0
+```
+
+`ml-dataset-export` uses `ml_platform.dataset_builder`, writes an adjacent
+manifest when `--output` is supplied, and remains export-only with no live
+authority. The default `--max-rows 5000` keeps operator checks responsive while
+the archive is large; use `--max-rows 0` only for an intentional full export.
+
 Historical bar contract:
 
 - cached CSVs include OHLCV, VWAP, source, adjusted flag, and inclusive interval-start metadata

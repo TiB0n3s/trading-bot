@@ -124,8 +124,23 @@ class HistoricalBarCoverageRepository:
                 params,
             ).fetchall()
 
+            symbol_rows = con.execute(
+                f"""
+                SELECT symbol, COUNT(*) AS rows,
+                       COUNT(DISTINCT substr(bar_timestamp, 1, 10)) AS market_dates,
+                       SUM(CASE WHEN triple_barrier_label IS NOT NULL THEN 1 ELSE 0 END) AS triple_rows,
+                       SUM(CASE WHEN trend_scan_label IS NOT NULL THEN 1 ELSE 0 END) AS trend_scan_rows
+                FROM bar_pattern_features
+                {where}
+                GROUP BY symbol
+                ORDER BY rows DESC, symbol
+                """,
+                params,
+            ).fetchall()
+
         return {
             "table_exists": True,
             "summary": dict(summary),
             "top_symbols": [dict(row) for row in top_symbols],
+            "symbol_rows": [dict(row) for row in symbol_rows],
         }

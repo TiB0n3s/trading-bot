@@ -71,7 +71,7 @@ class FakeStream:
 
 
 def test_normalize_live_bar_maps_alpaca_py_shape():
-    normalized = normalize_live_bar(_bar(close=101.5))
+    normalized = normalize_live_bar(_bar(close=101.5), feed="iex")
 
     assert normalized["symbol"] == "AAPL"
     assert normalized["open"] == 101.4
@@ -81,6 +81,9 @@ def test_normalize_live_bar_maps_alpaca_py_shape():
     assert normalized["volume"] == 1000
     assert normalized["vwap"] == 101.47
     assert normalized["timestamp"].endswith("+00:00")
+    assert normalized["source"] == "alpaca_live_bar_stream"
+    assert normalized["feed"] == "iex"
+    assert normalized["interval_semantics"] == "inclusive_start_live_closed_1m"
 
 
 def test_ingest_bar_gap_fills_then_updates_session_momentum():
@@ -121,6 +124,10 @@ def test_ingest_bar_gap_fills_then_updates_session_momentum():
     assert market_data.calls[0][1]["feed"] == "iex"
     assert len(session.calls) == 1
     assert len(session.calls[0][1]) == 5
+    assert session.calls[0][1][0]["source"] == "alpaca_gap_fill_bars"
+    assert session.calls[0][1][0]["feed"] == "iex"
+    assert session.calls[0][1][-1]["source"] == "alpaca_live_bar_stream"
+    assert session.calls[0][1][-1]["interval_semantics"] == "inclusive_start_live_closed_1m"
 
 
 def test_ingest_bar_gap_fills_again_after_stream_gap():

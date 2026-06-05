@@ -64,6 +64,19 @@ def normalize_bar(bar: Any) -> dict[str, Any]:
         "close": _float(_bar_value(bar, "close", "c")),
         "volume": _float(_bar_value(bar, "volume", "v")),
         "vwap": _float(_bar_value(bar, "vwap", "vw", "VWAP")),
+        "source": _bar_value(bar, "source", "Source", "bar_source"),
+        "feed": _bar_value(bar, "feed", "Feed", "bar_feed"),
+        "adjusted": _bar_value(bar, "adjusted", "Adjusted", "bar_adjusted"),
+        "trade_count": _float(_bar_value(bar, "trade_count", "transactions", "n")),
+        "interval_start": _timestamp(
+            _bar_value(bar, "interval_start", "IntervalStart", "bar_interval_start_ts", "timestamp", "t")
+        ),
+        "interval_semantics": _bar_value(
+            bar,
+            "interval_semantics",
+            "IntervalSemantics",
+            "bar_interval_semantics",
+        ),
     }
 
 
@@ -570,6 +583,10 @@ class BarPatternBackfillResult:
     feature_rows: int
     persisted_rows: int
     rows_with_forward_outcome: int
+    rows_with_raw_bar_contract: int
+    rows_with_source: int
+    rows_with_adjustment_flag: int
+    rows_with_trade_count: int
     label_summary: list[dict[str, Any]]
     opportunity_summary: list[dict[str, Any]]
     error: str | None = None
@@ -586,6 +603,10 @@ class BarPatternFeatureService:
         symbol: str,
         timeframe: str = "5m",
         horizon_bars: int = 12,
+        bar_source: str = "unknown_bar_source",
+        bar_feed: str | None = None,
+        adjusted: bool | None = None,
+        interval_semantics: str = "inclusive_start_1m",
     ) -> list[dict[str, Any]]:
         normalized = [
             bar for bar in (normalize_bar(item) for item in bars)
@@ -745,12 +766,29 @@ class BarPatternFeatureService:
                 if 0 <= macd_signal_idx < len(macd_signal_values)
                 else None
             )
-            interval_start_ts = normalized[idx]["timestamp"]
+            interval_start_ts = normalized[idx].get("interval_start") or normalized[idx]["timestamp"]
+            row_source = str(normalized[idx].get("source") or bar_source or "unknown_bar_source")
+            row_feed = normalized[idx].get("feed") or bar_feed
+            row_adjusted_raw = normalized[idx].get("adjusted")
+            if row_adjusted_raw is None:
+                row_adjusted = None if adjusted is None else int(bool(adjusted))
+            elif isinstance(row_adjusted_raw, str):
+                row_adjusted = 1 if row_adjusted_raw.strip().lower() in {"1", "true", "yes"} else 0
+            else:
+                row_adjusted = int(bool(row_adjusted_raw))
+            row_interval_semantics = (
+                normalized[idx].get("interval_semantics")
+                or interval_semantics
+                or "inclusive_start_1m"
+            )
 
             feature_json = {
-                "bar_source": "polygon_aggregate_1m",
+                "bar_source": row_source,
+                "bar_feed": row_feed,
+                "bar_adjusted": row_adjusted,
+                "bar_trade_count": normalized[idx].get("trade_count"),
                 "bar_interval_start_ts": interval_start_ts,
-                "bar_interval_semantics": "inclusive_start_regular_hours_1m",
+                "bar_interval_semantics": row_interval_semantics,
                 "open": opens[idx],
                 "high": highs[idx],
                 "low": lows[idx],
@@ -803,9 +841,12 @@ class BarPatternFeatureService:
                 {
                     "symbol": symbol.upper(),
                     "bar_timestamp": normalized[idx]["timestamp"],
-                    "bar_source": "polygon_aggregate_1m",
+                    "bar_source": row_source,
+                    "bar_feed": row_feed,
+                    "bar_adjusted": row_adjusted,
+                    "bar_trade_count": _round(normalized[idx].get("trade_count")),
                     "bar_interval_start_ts": interval_start_ts,
-                    "bar_interval_semantics": "inclusive_start_regular_hours_1m",
+                    "bar_interval_semantics": row_interval_semantics,
                     "timeframe": timeframe,
                     "open": _round(opens[idx]),
                     "high": _round(highs[idx]),
@@ -883,6 +924,10 @@ class BarPatternFeatureService:
         target_date: str,
         timeframe: str = "5m",
         horizon_bars: int = 12,
+        bar_source: str = "unknown_bar_source",
+        bar_feed: str | None = None,
+        adjusted: bool | None = None,
+        interval_semantics: str = "inclusive_start_1m",
         dry_run: bool = False,
     ) -> BarPatternBackfillResult:
         rows = self.build_features(
@@ -890,6 +935,10 @@ class BarPatternFeatureService:
             symbol=symbol,
             timeframe=timeframe,
             horizon_bars=horizon_bars,
+            bar_source=bar_source,
+            bar_feed=bar_feed,
+            adjusted=adjusted,
+            interval_semantics=interval_semantics,
         )
         label_summary = _summarize_rows(rows)
         opportunity_summary = _summarize_opportunities(rows)
@@ -905,6 +954,24 @@ class BarPatternFeatureService:
             persisted_rows=persisted,
             rows_with_forward_outcome=sum(
                 1 for row in rows if row.get("forward_return_pct") is not None
+            ),
+            rows_with_raw_bar_contract=sum(
+                1
+                for row in rows
+                if row.get("open") is not None
+                and row.get("high") is not None
+                and row.get("low") is not None
+                and row.get("close") is not None
+                and row.get("volume") is not None
+                and row.get("vwap") is not None
+                and row.get("bar_interval_start_ts") is not None
+            ),
+            rows_with_source=sum(1 for row in rows if row.get("bar_source")),
+            rows_with_adjustment_flag=sum(
+                1 for row in rows if row.get("bar_adjusted") is not None
+            ),
+            rows_with_trade_count=sum(
+                1 for row in rows if row.get("bar_trade_count") is not None
             ),
             label_summary=label_summary,
             opportunity_summary=opportunity_summary,

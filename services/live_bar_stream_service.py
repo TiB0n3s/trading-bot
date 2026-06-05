@@ -66,7 +66,7 @@ def _bar_attr(bar: Any, *names: str) -> Any:
     return None
 
 
-def normalize_live_bar(bar: Any) -> dict[str, Any]:
+def normalize_live_bar(bar: Any, *, feed: str | None = None) -> dict[str, Any]:
     return {
         "symbol": str(_bar_attr(bar, "symbol", "S") or "").upper(),
         "timestamp": _timestamp(_bar_attr(bar, "timestamp", "t")),
@@ -76,6 +76,9 @@ def normalize_live_bar(bar: Any) -> dict[str, Any]:
         "close": _float(_bar_attr(bar, "close", "c")),
         "volume": _float(_bar_attr(bar, "volume", "v")),
         "vwap": _float(_bar_attr(bar, "vwap", "vw")),
+        "source": "alpaca_live_bar_stream",
+        "feed": feed,
+        "interval_semantics": "inclusive_start_live_closed_1m",
     }
 
 
@@ -196,7 +199,7 @@ class LiveBarStreamService:
             return []
 
     def ingest_bar(self, bar: Any) -> LiveBarIngestResult:
-        normalized = normalize_live_bar(bar)
+        normalized = normalize_live_bar(bar, feed=self.feed)
         symbol = normalized["symbol"]
         if not symbol:
             raise ValueError("live bar missing symbol")
@@ -213,6 +216,10 @@ class LiveBarStreamService:
         ):
             gap_fill_attempted = True
             fill_rows = self._gap_fill(symbol)
+            for row in fill_rows:
+                row.setdefault("source", "alpaca_gap_fill_bars")
+                row.setdefault("feed", self.feed)
+                row.setdefault("interval_semantics", "inclusive_start_gap_fill_1m")
             gap_fill_rows = len(fill_rows)
             if fill_rows:
                 self._bars_by_symbol[symbol] = fill_rows

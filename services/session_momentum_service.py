@@ -553,6 +553,8 @@ class SessionMomentumService:
                 target_date=_target_date_from_bars(bars),
                 timeframe="1m",
                 horizon_bars=self.bar_pattern_horizon_bars,
+                bar_source="session_momentum_market_data",
+                interval_semantics="inclusive_start_intraday_1m",
             )
             self.logger.info(
                 "bar_pattern_features captured from session momentum bars for %s: "

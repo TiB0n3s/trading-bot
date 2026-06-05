@@ -199,6 +199,9 @@ class HistoricalBarArchiveService:
                 target_date=end.isoformat(),
                 timeframe="1m",
                 horizon_bars=horizon_bars,
+                bar_source="polygon_aggregate_1m",
+                adjusted=True,
+                interval_semantics="inclusive_start_regular_hours_1m",
                 dry_run=dry_run,
             )
             pattern_rows = result.feature_rows

@@ -22,6 +22,9 @@ class BarPatternFeatureRepository:
                     symbol TEXT NOT NULL,
                     bar_timestamp TEXT NOT NULL,
                     bar_source TEXT,
+                    bar_feed TEXT,
+                    bar_adjusted INTEGER,
+                    bar_trade_count REAL,
                     bar_interval_start_ts TEXT,
                     bar_interval_semantics TEXT,
                     timeframe TEXT NOT NULL,
@@ -99,6 +102,9 @@ class BarPatternFeatureRepository:
             self._ensure_column(con, "long_opportunity_score", "REAL")
             self._ensure_column(con, "sell_opportunity_score", "REAL")
             self._ensure_column(con, "bar_source", "TEXT")
+            self._ensure_column(con, "bar_feed", "TEXT")
+            self._ensure_column(con, "bar_adjusted", "INTEGER")
+            self._ensure_column(con, "bar_trade_count", "REAL")
             self._ensure_column(con, "bar_interval_start_ts", "TEXT")
             self._ensure_column(con, "bar_interval_semantics", "TEXT")
             self._ensure_column(con, "open", "REAL")
@@ -175,9 +181,10 @@ class BarPatternFeatureRepository:
             con.executemany(
                 """
                 INSERT INTO bar_pattern_features (
-                    symbol, bar_timestamp, bar_source, bar_interval_start_ts,
-                    bar_interval_semantics, timeframe, open, high, low, close,
-                    volume, vwap, ema_12, ema_26, macd, macd_signal, rsi_14,
+                    symbol, bar_timestamp, bar_source, bar_feed, bar_adjusted,
+                    bar_trade_count, bar_interval_start_ts, bar_interval_semantics,
+                    timeframe, open, high, low, close, volume, vwap, ema_12,
+                    ema_26, macd, macd_signal, rsi_14,
                     efi, efi_ema_13, efi_slope_3, efi_zscore_20,
                     pvt, pvt_slope_5, pvt_new_high_30,
                     price_return_5, price_vs_sma_20_pct, breakout_20,
@@ -200,7 +207,8 @@ class BarPatternFeatureRepository:
                     forward_return_pct, forward_mfe_pct, forward_mae_pct,
                     horizon_bars, feature_version, runtime_effect, feature_json
                 ) VALUES (
-                    :symbol, :bar_timestamp, :bar_source, :bar_interval_start_ts,
+                    :symbol, :bar_timestamp, :bar_source, :bar_feed, :bar_adjusted,
+                    :bar_trade_count, :bar_interval_start_ts,
                     :bar_interval_semantics, :timeframe, :open, :high, :low,
                     :close, :volume, :vwap, :ema_12, :ema_26, :macd,
                     :macd_signal, :rsi_14,
@@ -229,6 +237,9 @@ class BarPatternFeatureRepository:
                 ON CONFLICT(symbol, bar_timestamp, timeframe, feature_version)
                 DO UPDATE SET
                     bar_source = excluded.bar_source,
+                    bar_feed = excluded.bar_feed,
+                    bar_adjusted = excluded.bar_adjusted,
+                    bar_trade_count = excluded.bar_trade_count,
                     bar_interval_start_ts = excluded.bar_interval_start_ts,
                     bar_interval_semantics = excluded.bar_interval_semantics,
                     open = excluded.open,
@@ -331,6 +342,12 @@ class BarPatternFeatureRepository:
                          AND vwap IS NOT NULL
                          AND bar_interval_start_ts IS NOT NULL
                         THEN 1 ELSE 0 END) AS rows_with_raw_bar_contract,
+                    SUM(CASE WHEN bar_source IS NOT NULL THEN 1 ELSE 0 END)
+                        AS rows_with_source,
+                    SUM(CASE WHEN bar_adjusted IS NOT NULL THEN 1 ELSE 0 END)
+                        AS rows_with_adjustment_flag,
+                    SUM(CASE WHEN bar_trade_count IS NOT NULL THEN 1 ELSE 0 END)
+                        AS rows_with_trade_count,
                     SUM(CASE WHEN ema_12 IS NOT NULL AND ema_26 IS NOT NULL AND macd IS NOT NULL AND rsi_14 IS NOT NULL THEN 1 ELSE 0 END)
                         AS rows_with_technical_indicators,
                     SUM(CASE WHEN forward_return_pct IS NOT NULL THEN 1 ELSE 0 END)
@@ -440,6 +457,9 @@ class BarPatternFeatureRepository:
             "rows": int(row["rows"] or 0),
             "symbols": int(row["symbols"] or 0),
             "rows_with_raw_bar_contract": int(row["rows_with_raw_bar_contract"] or 0),
+            "rows_with_source": int(row["rows_with_source"] or 0),
+            "rows_with_adjustment_flag": int(row["rows_with_adjustment_flag"] or 0),
+            "rows_with_trade_count": int(row["rows_with_trade_count"] or 0),
             "rows_with_technical_indicators": int(row["rows_with_technical_indicators"] or 0),
             "rows_with_forward_outcome": int(row["rows_with_forward_outcome"] or 0),
             "rows_with_order_flow": int(row["rows_with_order_flow"] or 0),

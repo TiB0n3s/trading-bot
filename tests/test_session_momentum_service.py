@@ -214,6 +214,8 @@ def test_refresh_symbol_reuses_session_bars_for_bar_pattern_capture():
     assert kwargs["target_date"] == "2026-06-02"
     assert kwargs["timeframe"] == "1m"
     assert kwargs["horizon_bars"] == 15
+    assert kwargs["bar_source"] == "session_momentum_market_data"
+    assert kwargs["interval_semantics"] == "inclusive_start_intraday_1m"
 
 
 def test_missing_bars_returns_insufficient_data_safely():

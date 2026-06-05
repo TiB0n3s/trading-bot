@@ -59,9 +59,11 @@ def test_bar_pattern_service_builds_efi_pvt_forward_features():
     assert "volume_confirmed_breakout" in labels or "constructive_continuation" in labels
     first = rows[0]
     assert first["symbol"] == "AAPL"
-    assert first["bar_source"] == "polygon_aggregate_1m"
+    assert first["bar_source"] == "unknown_bar_source"
+    assert first["bar_adjusted"] is None
+    assert first["bar_trade_count"] is None
     assert first["bar_interval_start_ts"] == first["bar_timestamp"]
-    assert first["bar_interval_semantics"] == "inclusive_start_regular_hours_1m"
+    assert first["bar_interval_semantics"] == "inclusive_start_1m"
     assert first["open"] is not None
     assert first["high"] is not None
     assert first["low"] is not None
@@ -113,6 +115,7 @@ def test_bar_pattern_repository_persists_and_summarizes(tmp_path: Path):
     assert summary["rows"] == result.feature_rows
     assert summary["symbols"] == 1
     assert summary["rows_with_raw_bar_contract"] == result.feature_rows
+    assert summary["rows_with_source"] == result.feature_rows
     assert summary["rows_with_technical_indicators"] == result.feature_rows
     assert summary["rows_with_forward_outcome"] > 0
     assert summary["labels"]
@@ -126,6 +129,39 @@ def test_bar_pattern_repository_persists_and_summarizes(tmp_path: Path):
         row["opportunity_action"] == "buy_candidate"
         for row in summary["opportunities"]
     )
+
+
+def test_bar_pattern_service_preserves_source_feed_adjustment_and_trade_count():
+    bars = []
+    for idx, bar in enumerate(_fixture_bars()):
+        item = dict(bar)
+        item["source"] = "alpaca_live_bar_stream"
+        item["feed"] = "iex"
+        item["adjusted"] = False
+        item["trade_count"] = 10 + idx
+        item["interval_semantics"] = "inclusive_start_live_closed_1m"
+        bars.append(item)
+
+    service = BarPatternFeatureService()
+    rows = service.build_features(
+        bars,
+        symbol="AAPL",
+        timeframe="1m",
+        horizon_bars=6,
+        bar_source="fallback_source",
+        bar_feed="fallback_feed",
+        adjusted=True,
+        interval_semantics="fallback_semantics",
+    )
+
+    assert rows
+    first = rows[0]
+    assert first["bar_source"] == "alpaca_live_bar_stream"
+    assert first["bar_feed"] == "iex"
+    assert first["bar_adjusted"] == 0
+    assert first["bar_trade_count"] is not None
+    assert first["bar_interval_semantics"] == "inclusive_start_live_closed_1m"
+    assert first["feature_json"]["bar_source"] == "alpaca_live_bar_stream"
 
 
 class _FakePolygon:

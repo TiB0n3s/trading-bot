@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import csv
 import io
+import sqlite3
 import sys
 import tempfile
 from contextlib import redirect_stdout
@@ -90,6 +91,20 @@ def test_historical_bar_archive_filters_rth_caches_csv_and_builds_patterns(tmp_p
     assert rows[0]["Source"] == "polygon_aggregate_1m"
     assert rows[0]["Adjusted"] == "True"
     assert rows[0]["VWAP"]
+
+    with sqlite3.connect(tmp_path / "trades.db") as con:
+        con.row_factory = sqlite3.Row
+        db_row = con.execute(
+            """
+            SELECT bar_source, bar_adjusted, bar_interval_semantics
+            FROM bar_pattern_features
+            WHERE symbol = 'AAPL'
+            LIMIT 1
+            """
+        ).fetchone()
+    assert db_row["bar_source"] == "polygon_aggregate_1m"
+    assert db_row["bar_adjusted"] == 1
+    assert db_row["bar_interval_semantics"] == "inclusive_start_regular_hours_1m"
 
 
 def test_historical_bar_archive_ops_report_uses_fake_polygon(tmp_path: Path):

@@ -186,6 +186,12 @@ class BarPatternFeatureRepository:
             )
             con.execute(
                 """
+                CREATE INDEX IF NOT EXISTS idx_bar_pattern_features_timeframe_ts
+                ON bar_pattern_features(timeframe, bar_timestamp)
+                """
+            )
+            con.execute(
+                """
                 CREATE INDEX IF NOT EXISTS idx_bar_pattern_features_label
                 ON bar_pattern_features(pattern_label, bar_timestamp)
                 """

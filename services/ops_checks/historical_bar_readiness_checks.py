@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from datetime import date, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -66,6 +67,10 @@ def _count_expr(columns: set[str], condition: str, alias: str) -> str:
     return f"SUM(CASE WHEN {condition} THEN 1 ELSE 0 END) AS {alias}"
 
 
+def _exclusive_next_day(day: str) -> str:
+    return (date.fromisoformat(day) + timedelta(days=1)).isoformat()
+
+
 def _quality_payload(
     *,
     db_path: Path,
@@ -88,11 +93,11 @@ def _quality_payload(
         if "timeframe" in columns:
             where.append("timeframe = '1m'")
         if start_date:
-            where.append("substr(bar_timestamp, 1, 10) >= ?")
+            where.append("bar_timestamp >= ?")
             params.append(start_date)
         if end_date:
-            where.append("substr(bar_timestamp, 1, 10) <= ?")
-            params.append(end_date)
+            where.append("bar_timestamp < ?")
+            params.append(_exclusive_next_day(end_date))
         where_sql = " AND ".join(where)
 
         required_price_cols = {"open", "high", "low", "close", "volume"}

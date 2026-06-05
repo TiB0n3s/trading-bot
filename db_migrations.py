@@ -561,6 +561,16 @@ MIGRATIONS: tuple[Migration, ...] = (
             "ALTER TABLE decision_snapshots ADD COLUMN reversal_attempt_score INTEGER",
         ),
     ),
+    Migration(
+        migration_id="20260605_022_bar_pattern_timeframe_timestamp_index",
+        description="Add whole-universe timeframe/timestamp index for historical-bar readiness scans.",
+        statements=(
+            """
+            CREATE INDEX IF NOT EXISTS idx_bar_pattern_features_timeframe_ts
+            ON bar_pattern_features(timeframe, bar_timestamp)
+            """,
+        ),
+    ),
 )
 
 

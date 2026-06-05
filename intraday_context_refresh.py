@@ -12,6 +12,7 @@ Two stages:
 Designed for cron use every 45 min during market hours (9–15 ET, Mon–Fri).
 """
 
+import argparse
 import json
 import logging
 import os
@@ -191,19 +192,34 @@ def rebuild_market_context(market_date: str) -> dict:
 
 
 def main():
-    market_date = date.today().isoformat()
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--date",
+        default=date.today().isoformat(),
+        help="Market date to refresh, YYYY-MM-DD. Defaults to today.",
+    )
+    parser.add_argument(
+        "--skip-collect",
+        action="store_true",
+        help="Only rebuild market_context.json from existing daily_symbol_context/event rows.",
+    )
+    args = parser.parse_args()
+
+    market_date = args.date
     started = datetime.now()
 
     print()
     print("=== Intraday context refresh ===")
     print(f"  Date    : {market_date}")
     print(f"  Started : {started.strftime('%H:%M:%S')}")
+    print(f"  Collect : {'skipped' if args.skip_collect else 'enabled'}")
     print()
 
     # Stage 1 — collect fresh events
-    stage1_rc = _collect_events(market_date)
-    if stage1_rc != 0:
-        logger.warning(f"collect_and_score_events exited with code {stage1_rc}; continuing to Stage 2")
+    if not args.skip_collect:
+        stage1_rc = _collect_events(market_date)
+        if stage1_rc != 0:
+            logger.warning(f"collect_and_score_events exited with code {stage1_rc}; continuing to Stage 2")
 
     # Stage 2 — rebuild market_context.json
     try:

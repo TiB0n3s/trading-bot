@@ -147,7 +147,35 @@ def test_historical_bar_readiness_reports_quality_and_hook_status():
     assert "historical bars are not yet ready" in out
 
 
+def test_historical_bar_readiness_marks_skipped_db_metrics_not_scanned():
+    with tempfile.TemporaryDirectory() as tmp:
+        base_dir = Path(tmp)
+        _build_db(base_dir / "trades.db")
+        _write_manifest(base_dir)
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            ok = run_historical_bar_readiness(
+                base_dir=base_dir,
+                start_date="2026-01-01",
+                end_date="2026-01-03",
+                min_days=3,
+                min_symbols=1,
+                include_db_quality=False,
+                limit=5,
+            )
+
+    out = buf.getvalue()
+    assert ok is False
+    assert "db_quality_scan            : skipped" in out
+    assert "db_rows                    : not_scanned" in out
+    assert "null_ohlcv_rows            : not_scanned" in out
+    assert "invalid_price_rows         : not_scanned" in out
+    assert "zero_volume_rows           : not_scanned" in out
+
+
 if __name__ == "__main__":
     test_historical_bar_readiness_reports_quality_and_hook_status()
+    test_historical_bar_readiness_marks_skipped_db_metrics_not_scanned()
     print("[OK] test_historical_bar_readiness_reports_quality_and_hook_status")
-    print("\nAll 1 historical bar readiness tests passed.")
+    print("[OK] test_historical_bar_readiness_marks_skipped_db_metrics_not_scanned")
+    print("\nAll 2 historical bar readiness tests passed.")

@@ -396,6 +396,12 @@ python3 ops_check.py historical-bar-readiness \
   --end-date 2026-06-04 \
   --min-days 252 \
   --min-symbols 20
+
+# 4. After the broad pass, build a focused retry plan for only the tail.
+python3 ops_check.py historical-bar-retry-plan \
+  2024-06-01 \
+  --end-date 2026-06-04 \
+  --max-symbols 10
 ```
 
 The backfill writes chunked CSVs under `data/historical_bars/polygon_1min` and
@@ -414,8 +420,12 @@ feature-family readiness, and completion-hook status; by default it skips
 expensive DB scans so it is safe during active backfills. Add
 `--include-db-quality` after the backfill finishes to scan persisted rows for
 OHLCV nulls, invalid price ranges, feature missing rates, and optional
-`--include-duplicate-scan` duplicate checks. Use `historical-bar-coverage` for
-DB-derived aggregate training readiness.
+`--include-duplicate-scan` duplicate checks. When the scan is skipped, DB-only
+metrics print as `not_scanned` rather than zero. Use
+`historical-bar-coverage` for DB-derived aggregate training readiness. Use
+`historical-bar-retry-plan` after a broad run to prioritize only symbols below
+the day floor and symbols tied to recent manifest errors; add `--execute` only
+when you want it to launch the focused retry backfill.
 
 The after-close learning loop also runs
 `pipeline/historical_bar_completion_hook.py`. This hook watches the cache/

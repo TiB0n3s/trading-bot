@@ -74,6 +74,7 @@ Usage:
   python3 ops_check.py historical-bar-coverage [START_DATE] [--end-date YYYY-MM-DD]
   python3 ops_check.py historical-bar-progress [START_DATE] [--end-date YYYY-MM-DD]
   python3 ops_check.py historical-bar-readiness [START_DATE] [--end-date YYYY-MM-DD] [--include-db-quality]
+  python3 ops_check.py historical-bar-retry-plan START_DATE [--end-date YYYY-MM-DD] [--execute]
   python3 ops_check.py ml-dataset-export START_DATE [END_DATE] [--output PATH] [--format jsonl|csv] [--max-rows N]
   python3 ops_check.py learning-readiness START_DATE [END_DATE]
   python3 ops_check.py learning-effectiveness START_DATE [END_DATE]
@@ -1378,6 +1379,25 @@ def main():
             else None
         )
         return 0 if historical_bar_readiness(start_arg) else 1
+
+    if command == "historical-bar-retry-plan":
+        args = [
+            "pipeline/historical_bar_retry_missing.py",
+            "--start-date",
+            target_date,
+        ]
+        end_date = _str_option("--end-date", "")
+        if end_date:
+            args.extend(["--end-date", end_date])
+        for option in ("--min-days", "--max-symbols", "--manifest-limit"):
+            value = _str_option(option, "")
+            if value:
+                args.extend([option, value])
+        if "--execute" in sys.argv:
+            args.append("--execute")
+        if "--json" in sys.argv:
+            args.append("--json")
+        return 0 if run("Historical Bar Retry Plan", args) else 1
 
     if command == "ml-dataset-export":
         return 0 if ml_dataset_export(target_date) else 1

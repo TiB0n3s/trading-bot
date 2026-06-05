@@ -264,8 +264,10 @@ def run_historical_bar_readiness(
         quality = {"table_exists": False, "reason": "db_quality_scan_skipped"}
         coverage = None
 
-    total_rows = 0
-    null_ohlcv = invalid_price = zero_volume = 0
+    total_rows: int | None = None
+    null_ohlcv: int | None = None
+    invalid_price: int | None = None
+    zero_volume: int | None = None
     duplicate_rows: int | None = None
     feature_nulls: list[dict[str, Any]] = []
     if quality.get("table_exists"):
@@ -286,9 +288,9 @@ def run_historical_bar_readiness(
     ]
     feature_ready_pct = _pct(len(feature_ready), len(feature_nulls))
     quality_ready = (not include_db_quality) or (
-        total_rows > 0
-        and null_ohlcv == 0
-        and invalid_price == 0
+        (total_rows or 0) > 0
+        and (null_ohlcv or 0) == 0
+        and (invalid_price or 0) == 0
         and (duplicate_rows is None or duplicate_rows == 0)
     )
     hook_ready = (
@@ -313,11 +315,11 @@ def run_historical_bar_readiness(
     print(f"symbols_remaining          : {len(remaining_symbols)}")
     print(f"min_days_required          : {min_days}")
     print(f"min_symbols_required       : {min_symbols}")
-    print(f"db_rows                    : {total_rows}")
+    print(f"db_rows                    : {total_rows if total_rows is not None else 'not_scanned'}")
     print(f"db_quality_scan            : {'included' if include_db_quality else 'skipped'}")
-    print(f"null_ohlcv_rows            : {null_ohlcv}")
-    print(f"invalid_price_rows         : {invalid_price}")
-    print(f"zero_volume_rows           : {zero_volume}")
+    print(f"null_ohlcv_rows            : {null_ohlcv if null_ohlcv is not None else 'not_scanned'}")
+    print(f"invalid_price_rows         : {invalid_price if invalid_price is not None else 'not_scanned'}")
+    print(f"zero_volume_rows           : {zero_volume if zero_volume is not None else 'not_scanned'}")
     print(f"duplicate_scan             : {quality.get('duplicate_scan', 'skipped')}")
     print(f"duplicate_rows             : {duplicate_rows if duplicate_rows is not None else 'not_scanned'}")
     print(f"feature_ready_pct          : {feature_ready_pct:.2f}%")

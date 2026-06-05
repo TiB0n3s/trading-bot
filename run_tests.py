@@ -142,6 +142,7 @@ TESTS = [
     "tests/test_historical_bar_coverage_checks.py",
     "tests/test_historical_bar_progress_checks.py",
     "tests/test_historical_bar_readiness_checks.py",
+    "tests/test_historical_bar_retry_missing.py",
     "tests/test_external_symbol_discovery_checks.py",
     "tests/test_ml_dataset_export_checks.py",
     "tests/test_canonical_exit_service.py",

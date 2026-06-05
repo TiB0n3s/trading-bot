@@ -6,12 +6,14 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 import math
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from repositories.bar_pattern_feature_repo import BarPatternFeatureRepository
 
 
 BAR_PATTERN_FEATURE_VERSION = "efi_pvt_orderflow_math_bar_pattern_v4"
 BAR_PATTERN_RUNTIME_EFFECT = "observe_only_pattern_learning_no_live_authority"
+MARKET_TZ = ZoneInfo("America/New_York")
 
 
 def _float(value: Any) -> float | None:
@@ -55,13 +57,53 @@ def _timestamp(value: Any) -> str:
     return str(value)
 
 
+def _parse_timestamp(value: Any) -> datetime | None:
+    text = _timestamp(value).strip()
+    if not text:
+        return None
+    if text.endswith("Z"):
+        text = f"{text[:-1]}+00:00"
+    try:
+        dt = datetime.fromisoformat(text)
+    except Exception:
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(MARKET_TZ)
+
+
+def _session_phase(dt: datetime | None) -> str | None:
+    if dt is None:
+        return None
+    minute = dt.hour * 60 + dt.minute
+    if minute < 9 * 60 + 30 or minute >= 16 * 60:
+        return "off_hours"
+    if minute < 10 * 60:
+        return "opening_drive"
+    if minute < 11 * 60 + 30:
+        return "morning_trend"
+    if minute < 14 * 60:
+        return "midday_liquidity_decay"
+    if minute < 15 * 60:
+        return "afternoon_reprice"
+    return "power_hour"
+
+
 def normalize_bar(bar: Any) -> dict[str, Any]:
+    close = _float(_bar_value(bar, "close", "c"))
+    bid_price = _float(_bar_value(bar, "bid_price", "bid", "bp"))
+    ask_price = _float(_bar_value(bar, "ask_price", "ask", "ap"))
+    spread_pct = _float(
+        _bar_value(bar, "bid_ask_spread_pct", "spread_pct", "spread_percent")
+    )
+    if spread_pct is None and bid_price is not None and ask_price is not None and close:
+        spread_pct = max(0.0, (ask_price - bid_price) / close * 100.0)
     return {
         "timestamp": _timestamp(_bar_value(bar, "timestamp", "t")),
         "open": _float(_bar_value(bar, "open", "o")),
         "high": _float(_bar_value(bar, "high", "h")),
         "low": _float(_bar_value(bar, "low", "l")),
-        "close": _float(_bar_value(bar, "close", "c")),
+        "close": close,
         "volume": _float(_bar_value(bar, "volume", "v")),
         "vwap": _float(_bar_value(bar, "vwap", "vw", "VWAP")),
         "source": _bar_value(bar, "source", "Source", "bar_source"),
@@ -76,6 +118,24 @@ def normalize_bar(bar: Any) -> dict[str, Any]:
             "interval_semantics",
             "IntervalSemantics",
             "bar_interval_semantics",
+        ),
+        "bid_price": bid_price,
+        "ask_price": ask_price,
+        "bid_ask_spread_pct": spread_pct,
+        "slippage_estimate_pct": _float(
+            _bar_value(bar, "slippage_estimate_pct", "predicted_slippage_pct")
+        ),
+        "execution_cost_estimate_pct": _float(
+            _bar_value(bar, "execution_cost_estimate_pct", "transaction_cost_pct")
+        ),
+        "liquidity_zone_label": _bar_value(
+            bar,
+            "liquidity_zone_label",
+            "liquidity_zone",
+            "stop_cluster_zone",
+        ),
+        "liquidity_sweep_risk": _float(
+            _bar_value(bar, "liquidity_sweep_risk", "sweep_risk")
         ),
     }
 
@@ -587,6 +647,9 @@ class BarPatternBackfillResult:
     rows_with_source: int
     rows_with_adjustment_flag: int
     rows_with_trade_count: int
+    rows_with_bollinger_context: int
+    rows_with_temporal_context: int
+    rows_with_microstructure_context: int
     label_summary: list[dict[str, Any]]
     opportunity_summary: list[dict[str, Any]]
     error: str | None = None
@@ -673,7 +736,37 @@ class BarPatternFeatureService:
         for idx in range(20, len(normalized)):
             close = closes[idx]
             vwap = vwaps[idx]
-            sma20 = sum(closes[idx - 19 : idx + 1]) / 20.0
+            closes_20 = closes[idx - 19 : idx + 1]
+            returns_20 = [
+                (closes[pos] - closes[pos - 1]) / closes[pos - 1] * 100.0
+                for pos in range(max(1, idx - 19), idx + 1)
+                if closes[pos - 1]
+            ]
+            sma20 = sum(closes_20) / 20.0
+            bollinger_std_20 = _std(closes_20)
+            bollinger_upper_20 = (
+                sma20 + 2.0 * bollinger_std_20 if bollinger_std_20 is not None else None
+            )
+            bollinger_lower_20 = (
+                sma20 - 2.0 * bollinger_std_20 if bollinger_std_20 is not None else None
+            )
+            bollinger_width_20_pct = (
+                (bollinger_upper_20 - bollinger_lower_20) / sma20 * 100.0
+                if bollinger_upper_20 is not None and bollinger_lower_20 is not None and sma20
+                else None
+            )
+            bollinger_percent_b_20 = (
+                (close - bollinger_lower_20) / (bollinger_upper_20 - bollinger_lower_20)
+                if bollinger_upper_20 is not None
+                and bollinger_lower_20 is not None
+                and (bollinger_upper_20 - bollinger_lower_20)
+                else None
+            )
+            rolling_volatility_20_pct = _std(returns_20)
+            market_dt = _parse_timestamp(normalized[idx]["timestamp"])
+            day_of_week = market_dt.weekday() if market_dt else None
+            minute_of_day = market_dt.hour * 60 + market_dt.minute if market_dt else None
+            session_phase = _session_phase(market_dt)
             prev_high_20 = max(highs[idx - 20 : idx]) if idx >= 20 else None
             price_return_5 = _pct_change(closes[idx - 5], close) if idx >= 5 else None
             pressure_return_3 = _pct_change(closes[idx - 3], close) if idx >= 3 else None
@@ -781,6 +874,13 @@ class BarPatternFeatureService:
                 or interval_semantics
                 or "inclusive_start_1m"
             )
+            bid_price = normalized[idx].get("bid_price")
+            ask_price = normalized[idx].get("ask_price")
+            bid_ask_spread_pct = normalized[idx].get("bid_ask_spread_pct")
+            slippage_estimate_pct = normalized[idx].get("slippage_estimate_pct")
+            execution_cost_estimate_pct = normalized[idx].get("execution_cost_estimate_pct")
+            liquidity_zone_label = normalized[idx].get("liquidity_zone_label")
+            liquidity_sweep_risk = normalized[idx].get("liquidity_sweep_risk")
 
             feature_json = {
                 "bar_source": row_source,
@@ -795,8 +895,23 @@ class BarPatternFeatureService:
                 "close": close,
                 "volume": volumes[idx],
                 "vwap": vwap,
-                "sma20": sma20,
+                "sma_20": sma20,
                 "prev_high_20": prev_high_20,
+                "bollinger_upper_20": bollinger_upper_20,
+                "bollinger_lower_20": bollinger_lower_20,
+                "bollinger_width_20_pct": bollinger_width_20_pct,
+                "bollinger_percent_b_20": bollinger_percent_b_20,
+                "rolling_volatility_20_pct": rolling_volatility_20_pct,
+                "day_of_week": day_of_week,
+                "minute_of_day": minute_of_day,
+                "session_phase": session_phase,
+                "bid_price": bid_price,
+                "ask_price": ask_price,
+                "bid_ask_spread_pct": bid_ask_spread_pct,
+                "slippage_estimate_pct": slippage_estimate_pct,
+                "execution_cost_estimate_pct": execution_cost_estimate_pct,
+                "liquidity_zone_label": liquidity_zone_label,
+                "liquidity_sweep_risk": liquidity_sweep_risk,
                 "ema_12": ema_12[idx],
                 "ema_26": ema_26[idx],
                 "macd": macd,
@@ -854,6 +969,22 @@ class BarPatternFeatureService:
                     "close": _round(close),
                     "volume": _round(volumes[idx]),
                     "vwap": _round(vwap),
+                    "sma_20": _round(sma20),
+                    "bollinger_upper_20": _round(bollinger_upper_20),
+                    "bollinger_lower_20": _round(bollinger_lower_20),
+                    "bollinger_width_20_pct": _round(bollinger_width_20_pct),
+                    "bollinger_percent_b_20": _round(bollinger_percent_b_20),
+                    "rolling_volatility_20_pct": _round(rolling_volatility_20_pct),
+                    "day_of_week": day_of_week,
+                    "minute_of_day": minute_of_day,
+                    "session_phase": session_phase,
+                    "bid_price": _round(bid_price),
+                    "ask_price": _round(ask_price),
+                    "bid_ask_spread_pct": _round(bid_ask_spread_pct),
+                    "slippage_estimate_pct": _round(slippage_estimate_pct),
+                    "execution_cost_estimate_pct": _round(execution_cost_estimate_pct),
+                    "liquidity_zone_label": liquidity_zone_label,
+                    "liquidity_sweep_risk": _round(liquidity_sweep_risk),
                     "ema_12": _round(ema_12[idx]),
                     "ema_26": _round(ema_26[idx]),
                     "macd": _round(macd),
@@ -972,6 +1103,20 @@ class BarPatternFeatureService:
             ),
             rows_with_trade_count=sum(
                 1 for row in rows if row.get("bar_trade_count") is not None
+            ),
+            rows_with_bollinger_context=sum(
+                1 for row in rows if row.get("bollinger_percent_b_20") is not None
+            ),
+            rows_with_temporal_context=sum(
+                1 for row in rows if row.get("minute_of_day") is not None
+            ),
+            rows_with_microstructure_context=sum(
+                1
+                for row in rows
+                if row.get("bid_ask_spread_pct") is not None
+                or row.get("slippage_estimate_pct") is not None
+                or row.get("execution_cost_estimate_pct") is not None
+                or row.get("liquidity_sweep_risk") is not None
             ),
             label_summary=label_summary,
             opportunity_summary=opportunity_summary,

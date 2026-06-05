@@ -68,6 +68,15 @@ def test_bar_pattern_service_builds_efi_pvt_forward_features():
     assert first["high"] is not None
     assert first["low"] is not None
     assert first["vwap"] is not None
+    assert first["sma_20"] is not None
+    assert first["bollinger_upper_20"] is not None
+    assert first["bollinger_lower_20"] is not None
+    assert first["bollinger_width_20_pct"] is not None
+    assert first["bollinger_percent_b_20"] is not None
+    assert first["rolling_volatility_20_pct"] is not None
+    assert first["day_of_week"] is not None
+    assert first["minute_of_day"] is not None
+    assert first["session_phase"] is not None
     assert first["ema_12"] is not None
     assert first["ema_26"] is not None
     assert first["macd"] is not None
@@ -116,6 +125,8 @@ def test_bar_pattern_repository_persists_and_summarizes(tmp_path: Path):
     assert summary["symbols"] == 1
     assert summary["rows_with_raw_bar_contract"] == result.feature_rows
     assert summary["rows_with_source"] == result.feature_rows
+    assert summary["rows_with_bollinger_context"] == result.feature_rows
+    assert summary["rows_with_temporal_context"] == result.feature_rows
     assert summary["rows_with_technical_indicators"] == result.feature_rows
     assert summary["rows_with_forward_outcome"] > 0
     assert summary["labels"]
@@ -140,6 +151,12 @@ def test_bar_pattern_service_preserves_source_feed_adjustment_and_trade_count():
         item["adjusted"] = False
         item["trade_count"] = 10 + idx
         item["interval_semantics"] = "inclusive_start_live_closed_1m"
+        item["bid_price"] = float(item["close"]) - 0.01
+        item["ask_price"] = float(item["close"]) + 0.01
+        item["slippage_estimate_pct"] = 0.015
+        item["execution_cost_estimate_pct"] = 0.02
+        item["liquidity_zone_label"] = "near_prior_high_stop_cluster"
+        item["liquidity_sweep_risk"] = 0.3
         bars.append(item)
 
     service = BarPatternFeatureService()
@@ -161,7 +178,15 @@ def test_bar_pattern_service_preserves_source_feed_adjustment_and_trade_count():
     assert first["bar_adjusted"] == 0
     assert first["bar_trade_count"] is not None
     assert first["bar_interval_semantics"] == "inclusive_start_live_closed_1m"
+    assert first["bid_price"] is not None
+    assert first["ask_price"] is not None
+    assert first["bid_ask_spread_pct"] is not None
+    assert first["slippage_estimate_pct"] == 0.015
+    assert first["execution_cost_estimate_pct"] == 0.02
+    assert first["liquidity_zone_label"] == "near_prior_high_stop_cluster"
+    assert first["liquidity_sweep_risk"] == 0.3
     assert first["feature_json"]["bar_source"] == "alpaca_live_bar_stream"
+    assert first["feature_json"]["bid_ask_spread_pct"] is not None
 
 
 class _FakePolygon:

@@ -86,6 +86,9 @@ def run_bar_pattern_backfill(
             "rows": result.feature_rows,
             "symbols": 1 if result.feature_rows else 0,
             "rows_with_forward_outcome": result.rows_with_forward_outcome,
+            "rows_with_bollinger_context": result.rows_with_bollinger_context,
+            "rows_with_temporal_context": result.rows_with_temporal_context,
+            "rows_with_microstructure_context": result.rows_with_microstructure_context,
             "rows_with_order_flow": 0,
             "rows_with_fractional_memory": 0,
             "labels": result.label_summary,
@@ -101,6 +104,9 @@ def run_bar_pattern_backfill(
     print(f"  rows                         : {summary['rows']}")
     print(f"  symbols                      : {summary['symbols']}")
     print(f"  rows_with_forward_outcome    : {summary['rows_with_forward_outcome']}")
+    print(f"  rows_with_bollinger_context  : {summary.get('rows_with_bollinger_context', 0)}")
+    print(f"  rows_with_temporal_context   : {summary.get('rows_with_temporal_context', 0)}")
+    print(f"  rows_with_microstructure     : {summary.get('rows_with_microstructure_context', 0)}")
     print(f"  rows_with_order_flow         : {summary.get('rows_with_order_flow', 0)}")
     print(f"  rows_with_fractional_memory  : {summary.get('rows_with_fractional_memory', 0)}")
     if summary["labels"]:

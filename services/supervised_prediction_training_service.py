@@ -33,6 +33,14 @@ DEFAULT_FEATURE_COLUMNS = (
     "setup_score",
 )
 CANDLE_PHYSICS_FEATURE_COLUMNS = (
+    "sma_20",
+    "bollinger_upper_20",
+    "bollinger_lower_20",
+    "bollinger_width_20_pct",
+    "bollinger_percent_b_20",
+    "rolling_volatility_20_pct",
+    "day_of_week",
+    "minute_of_day",
     "ema_12",
     "ema_26",
     "macd",
@@ -62,10 +70,17 @@ ADVANCED_ALPHA_FEATURE_COLUMNS = (
     "fractional_diff_close_045",
     "fractional_diff_zscore_20",
 )
+EXECUTION_MICROSTRUCTURE_FEATURE_COLUMNS = (
+    "bid_ask_spread_pct",
+    "slippage_estimate_pct",
+    "execution_cost_estimate_pct",
+    "liquidity_sweep_risk",
+)
 DEFAULT_FEATURE_COLUMNS = (
     DEFAULT_FEATURE_COLUMNS
     + CANDLE_PHYSICS_FEATURE_COLUMNS
     + ADVANCED_ALPHA_FEATURE_COLUMNS
+    + EXECUTION_MICROSTRUCTURE_FEATURE_COLUMNS
 )
 TRIPLE_BARRIER_TARGETS = ("triple_barrier", "triple_barrier_label")
 TREND_SCAN_TARGETS = ("trend_scan", "trend_scan_label")

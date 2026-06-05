@@ -34,6 +34,22 @@ class BarPatternFeatureRepository:
                     close REAL,
                     volume REAL,
                     vwap REAL,
+                    sma_20 REAL,
+                    bollinger_upper_20 REAL,
+                    bollinger_lower_20 REAL,
+                    bollinger_width_20_pct REAL,
+                    bollinger_percent_b_20 REAL,
+                    rolling_volatility_20_pct REAL,
+                    day_of_week INTEGER,
+                    minute_of_day INTEGER,
+                    session_phase TEXT,
+                    bid_price REAL,
+                    ask_price REAL,
+                    bid_ask_spread_pct REAL,
+                    slippage_estimate_pct REAL,
+                    execution_cost_estimate_pct REAL,
+                    liquidity_zone_label TEXT,
+                    liquidity_sweep_risk REAL,
                     ema_12 REAL,
                     ema_26 REAL,
                     macd REAL,
@@ -111,6 +127,22 @@ class BarPatternFeatureRepository:
             self._ensure_column(con, "high", "REAL")
             self._ensure_column(con, "low", "REAL")
             self._ensure_column(con, "vwap", "REAL")
+            self._ensure_column(con, "sma_20", "REAL")
+            self._ensure_column(con, "bollinger_upper_20", "REAL")
+            self._ensure_column(con, "bollinger_lower_20", "REAL")
+            self._ensure_column(con, "bollinger_width_20_pct", "REAL")
+            self._ensure_column(con, "bollinger_percent_b_20", "REAL")
+            self._ensure_column(con, "rolling_volatility_20_pct", "REAL")
+            self._ensure_column(con, "day_of_week", "INTEGER")
+            self._ensure_column(con, "minute_of_day", "INTEGER")
+            self._ensure_column(con, "session_phase", "TEXT")
+            self._ensure_column(con, "bid_price", "REAL")
+            self._ensure_column(con, "ask_price", "REAL")
+            self._ensure_column(con, "bid_ask_spread_pct", "REAL")
+            self._ensure_column(con, "slippage_estimate_pct", "REAL")
+            self._ensure_column(con, "execution_cost_estimate_pct", "REAL")
+            self._ensure_column(con, "liquidity_zone_label", "TEXT")
+            self._ensure_column(con, "liquidity_sweep_risk", "REAL")
             self._ensure_column(con, "ema_12", "REAL")
             self._ensure_column(con, "ema_26", "REAL")
             self._ensure_column(con, "macd", "REAL")
@@ -183,7 +215,13 @@ class BarPatternFeatureRepository:
                 INSERT INTO bar_pattern_features (
                     symbol, bar_timestamp, bar_source, bar_feed, bar_adjusted,
                     bar_trade_count, bar_interval_start_ts, bar_interval_semantics,
-                    timeframe, open, high, low, close, volume, vwap, ema_12,
+                    timeframe, open, high, low, close, volume, vwap,
+                    sma_20, bollinger_upper_20, bollinger_lower_20,
+                    bollinger_width_20_pct, bollinger_percent_b_20,
+                    rolling_volatility_20_pct, day_of_week, minute_of_day,
+                    session_phase, bid_price, ask_price, bid_ask_spread_pct,
+                    slippage_estimate_pct, execution_cost_estimate_pct,
+                    liquidity_zone_label, liquidity_sweep_risk, ema_12,
                     ema_26, macd, macd_signal, rsi_14,
                     efi, efi_ema_13, efi_slope_3, efi_zscore_20,
                     pvt, pvt_slope_5, pvt_new_high_30,
@@ -210,8 +248,14 @@ class BarPatternFeatureRepository:
                     :symbol, :bar_timestamp, :bar_source, :bar_feed, :bar_adjusted,
                     :bar_trade_count, :bar_interval_start_ts,
                     :bar_interval_semantics, :timeframe, :open, :high, :low,
-                    :close, :volume, :vwap, :ema_12, :ema_26, :macd,
-                    :macd_signal, :rsi_14,
+                    :close, :volume, :vwap, :sma_20, :bollinger_upper_20,
+                    :bollinger_lower_20, :bollinger_width_20_pct,
+                    :bollinger_percent_b_20, :rolling_volatility_20_pct,
+                    :day_of_week, :minute_of_day, :session_phase,
+                    :bid_price, :ask_price, :bid_ask_spread_pct,
+                    :slippage_estimate_pct, :execution_cost_estimate_pct,
+                    :liquidity_zone_label, :liquidity_sweep_risk, :ema_12,
+                    :ema_26, :macd, :macd_signal, :rsi_14,
                     :efi, :efi_ema_13, :efi_slope_3, :efi_zscore_20,
                     :pvt, :pvt_slope_5, :pvt_new_high_30,
                     :price_return_5, :price_vs_sma_20_pct, :breakout_20,
@@ -248,6 +292,22 @@ class BarPatternFeatureRepository:
                     close = excluded.close,
                     volume = excluded.volume,
                     vwap = excluded.vwap,
+                    sma_20 = excluded.sma_20,
+                    bollinger_upper_20 = excluded.bollinger_upper_20,
+                    bollinger_lower_20 = excluded.bollinger_lower_20,
+                    bollinger_width_20_pct = excluded.bollinger_width_20_pct,
+                    bollinger_percent_b_20 = excluded.bollinger_percent_b_20,
+                    rolling_volatility_20_pct = excluded.rolling_volatility_20_pct,
+                    day_of_week = excluded.day_of_week,
+                    minute_of_day = excluded.minute_of_day,
+                    session_phase = excluded.session_phase,
+                    bid_price = excluded.bid_price,
+                    ask_price = excluded.ask_price,
+                    bid_ask_spread_pct = excluded.bid_ask_spread_pct,
+                    slippage_estimate_pct = excluded.slippage_estimate_pct,
+                    execution_cost_estimate_pct = excluded.execution_cost_estimate_pct,
+                    liquidity_zone_label = excluded.liquidity_zone_label,
+                    liquidity_sweep_risk = excluded.liquidity_sweep_risk,
                     ema_12 = excluded.ema_12,
                     ema_26 = excluded.ema_26,
                     macd = excluded.macd,
@@ -348,6 +408,16 @@ class BarPatternFeatureRepository:
                         AS rows_with_adjustment_flag,
                     SUM(CASE WHEN bar_trade_count IS NOT NULL THEN 1 ELSE 0 END)
                         AS rows_with_trade_count,
+                    SUM(CASE WHEN bollinger_percent_b_20 IS NOT NULL AND rolling_volatility_20_pct IS NOT NULL THEN 1 ELSE 0 END)
+                        AS rows_with_bollinger_context,
+                    SUM(CASE WHEN day_of_week IS NOT NULL AND minute_of_day IS NOT NULL AND session_phase IS NOT NULL THEN 1 ELSE 0 END)
+                        AS rows_with_temporal_context,
+                    SUM(CASE
+                        WHEN bid_ask_spread_pct IS NOT NULL
+                          OR slippage_estimate_pct IS NOT NULL
+                          OR execution_cost_estimate_pct IS NOT NULL
+                          OR liquidity_sweep_risk IS NOT NULL
+                        THEN 1 ELSE 0 END) AS rows_with_microstructure_context,
                     SUM(CASE WHEN ema_12 IS NOT NULL AND ema_26 IS NOT NULL AND macd IS NOT NULL AND rsi_14 IS NOT NULL THEN 1 ELSE 0 END)
                         AS rows_with_technical_indicators,
                     SUM(CASE WHEN forward_return_pct IS NOT NULL THEN 1 ELSE 0 END)
@@ -460,6 +530,9 @@ class BarPatternFeatureRepository:
             "rows_with_source": int(row["rows_with_source"] or 0),
             "rows_with_adjustment_flag": int(row["rows_with_adjustment_flag"] or 0),
             "rows_with_trade_count": int(row["rows_with_trade_count"] or 0),
+            "rows_with_bollinger_context": int(row["rows_with_bollinger_context"] or 0),
+            "rows_with_temporal_context": int(row["rows_with_temporal_context"] or 0),
+            "rows_with_microstructure_context": int(row["rows_with_microstructure_context"] or 0),
             "rows_with_technical_indicators": int(row["rows_with_technical_indicators"] or 0),
             "rows_with_forward_outcome": int(row["rows_with_forward_outcome"] or 0),
             "rows_with_order_flow": int(row["rows_with_order_flow"] or 0),

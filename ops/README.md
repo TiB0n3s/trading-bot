@@ -112,12 +112,23 @@ python3 ops_check.py historical-bar-coverage \
   --end-date 2026-06-04 \
   --min-days 252 \
   --min-symbols 20
+
+python3 ops_check.py historical-bar-progress \
+  2024-06-01 \
+  --end-date 2026-06-04 \
+  --min-days 252 \
+  --min-symbols 20 \
+  --limit 20
 ```
 
 If the coverage report is not ready, train only as a smoke test or
 observe-only comparison. Do not promote model authority from short history.
 The report also shows per-symbol balance metrics. A dataset with enough total
 days can still be weak if only a few symbols have deep history.
+Use `historical-bar-progress` while the backfill is running to see the latest
+manifest, recent errors, and the next symbols that need more historical days.
+It is cache/manifest based for speed; use `historical-bar-coverage` for
+DB-derived training readiness.
 
 Inspect or write the canonical ML training export:
 

@@ -381,6 +381,13 @@ python3 ops_check.py historical-bar-coverage \
   --end-date 2026-06-04 \
   --min-days 252 \
   --min-symbols 20
+
+python3 ops_check.py historical-bar-progress \
+  2024-06-01 \
+  --end-date 2026-06-04 \
+  --min-days 252 \
+  --min-symbols 20 \
+  --limit 20
 ```
 
 The backfill writes chunked CSVs under `data/historical_bars/polygon_1min` and
@@ -391,6 +398,10 @@ The coverage report prints both aggregate readiness and per-symbol balance:
 minimum/median/maximum symbol rows, symbols meeting the configured market-day
 floor, and a symbol-imbalance ratio. Treat `training_ready=True` as a configured
 dataset floor, not proof that every approved symbol has equivalent history.
+The progress report adds approved-universe awareness, latest manifest status,
+recent manifest errors, and a prioritized list of symbols still below the
+market-day floor. It is cache/manifest based so it stays fast while backfills
+run. Use `historical-bar-coverage` for DB-derived training readiness.
 
 Build or inspect the canonical ML training export after coverage is acceptable:
 

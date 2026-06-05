@@ -79,6 +79,31 @@ class HistoricalBarCoverageRepository:
                 if has_all("ema_12", "ema_26", "macd", "rsi_14")
                 else "0 AS technical_indicator_rows"
             )
+            triple_expr = (
+                "SUM(CASE WHEN triple_barrier_label IS NOT NULL THEN 1 ELSE 0 END) AS triple_rows"
+                if has_all("triple_barrier_label")
+                else "0 AS triple_rows"
+            )
+            trend_scan_expr = (
+                "SUM(CASE WHEN trend_scan_label IS NOT NULL THEN 1 ELSE 0 END) AS trend_scan_rows"
+                if has_all("trend_scan_label")
+                else "0 AS trend_scan_rows"
+            )
+            fractional_expr = (
+                "SUM(CASE WHEN fractional_diff_zscore_20 IS NOT NULL THEN 1 ELSE 0 END) AS fractional_rows"
+                if has_all("fractional_diff_zscore_20")
+                else "0 AS fractional_rows"
+            )
+            vpin_expr = (
+                "SUM(CASE WHEN vpin_toxicity_20 IS NOT NULL THEN 1 ELSE 0 END) AS vpin_rows"
+                if has_all("vpin_toxicity_20")
+                else "0 AS vpin_rows"
+            )
+            cvd_expr = (
+                "SUM(CASE WHEN cumulative_volume_delta IS NOT NULL THEN 1 ELSE 0 END) AS cvd_rows"
+                if has_all("cumulative_volume_delta")
+                else "0 AS cvd_rows"
+            )
 
             where = "WHERE timeframe = '1m'"
             params: list[str] = []
@@ -99,16 +124,27 @@ class HistoricalBarCoverageRepository:
                     MAX(bar_timestamp) AS max_ts,
                     {raw_contract_expr},
                     {technical_indicator_expr},
-                    SUM(CASE WHEN triple_barrier_label IS NOT NULL THEN 1 ELSE 0 END) AS triple_rows,
-                    SUM(CASE WHEN trend_scan_label IS NOT NULL THEN 1 ELSE 0 END) AS trend_scan_rows,
-                    SUM(CASE WHEN fractional_diff_zscore_20 IS NOT NULL THEN 1 ELSE 0 END) AS fractional_rows,
-                    SUM(CASE WHEN vpin_toxicity_20 IS NOT NULL THEN 1 ELSE 0 END) AS vpin_rows,
-                    SUM(CASE WHEN cumulative_volume_delta IS NOT NULL THEN 1 ELSE 0 END) AS cvd_rows
+                    {triple_expr},
+                    {trend_scan_expr},
+                    {fractional_expr},
+                    {vpin_expr},
+                    {cvd_expr}
                 FROM bar_pattern_features
                 {where}
                 """,
                 params,
             ).fetchone()
+
+            symbol_triple_expr = (
+                "SUM(CASE WHEN triple_barrier_label IS NOT NULL THEN 1 ELSE 0 END) AS triple_rows"
+                if has_all("triple_barrier_label")
+                else "0 AS triple_rows"
+            )
+            symbol_trend_expr = (
+                "SUM(CASE WHEN trend_scan_label IS NOT NULL THEN 1 ELSE 0 END) AS trend_scan_rows"
+                if has_all("trend_scan_label")
+                else "0 AS trend_scan_rows"
+            )
 
             top_symbols = con.execute(
                 f"""
@@ -128,8 +164,8 @@ class HistoricalBarCoverageRepository:
                 f"""
                 SELECT symbol, COUNT(*) AS rows,
                        COUNT(DISTINCT substr(bar_timestamp, 1, 10)) AS market_dates,
-                       SUM(CASE WHEN triple_barrier_label IS NOT NULL THEN 1 ELSE 0 END) AS triple_rows,
-                       SUM(CASE WHEN trend_scan_label IS NOT NULL THEN 1 ELSE 0 END) AS trend_scan_rows
+                       {symbol_triple_expr},
+                       {symbol_trend_expr}
                 FROM bar_pattern_features
                 {where}
                 GROUP BY symbol
@@ -142,5 +178,74 @@ class HistoricalBarCoverageRepository:
             "table_exists": True,
             "summary": dict(summary),
             "top_symbols": [dict(row) for row in top_symbols],
+            "symbol_rows": [dict(row) for row in symbol_rows],
+        }
+
+    def symbol_progress_payload(
+        self,
+        *,
+        start_date: str | None = None,
+        end_date: str | None = None,
+        symbols: list[str] | None = None,
+    ) -> dict[str, Any] | None:
+        if not self.exists():
+            return None
+        with self._connect() as con:
+            if not self._table_exists(con, "bar_pattern_features"):
+                return {"table_exists": False}
+            columns = self._table_columns(con, "bar_pattern_features")
+
+            def has(name: str) -> bool:
+                return name in columns
+
+            triple_expr = (
+                "SUM(CASE WHEN triple_barrier_label IS NOT NULL THEN 1 ELSE 0 END) AS triple_rows"
+                if has("triple_barrier_label")
+                else "0 AS triple_rows"
+            )
+            trend_expr = (
+                "SUM(CASE WHEN trend_scan_label IS NOT NULL THEN 1 ELSE 0 END) AS trend_scan_rows"
+                if has("trend_scan_label")
+                else "0 AS trend_scan_rows"
+            )
+
+            where_tail = "AND timeframe = '1m'"
+            if start_date:
+                where_tail += " AND substr(bar_timestamp, 1, 10) >= ?"
+            if end_date:
+                where_tail += " AND substr(bar_timestamp, 1, 10) <= ?"
+
+            if symbols:
+                target_symbols = [str(symbol).upper().strip() for symbol in symbols if str(symbol).strip()]
+            else:
+                target_symbols = [
+                    row["symbol"]
+                    for row in con.execute(
+                        "SELECT DISTINCT symbol FROM bar_pattern_features ORDER BY symbol"
+                    ).fetchall()
+                ]
+
+            symbol_rows = []
+            for symbol in target_symbols:
+                params: list[str] = [symbol]
+                if start_date:
+                    params.append(start_date)
+                if end_date:
+                    params.append(end_date)
+                row = con.execute(
+                    f"""
+                    SELECT ? AS symbol, COUNT(*) AS rows,
+                           COUNT(DISTINCT substr(bar_timestamp, 1, 10)) AS market_dates,
+                           {triple_expr},
+                           {trend_expr}
+                    FROM bar_pattern_features
+                    WHERE symbol = ?
+                    {where_tail}
+                    """,
+                    [symbol, *params],
+                ).fetchone()
+                symbol_rows.append(dict(row))
+        return {
+            "table_exists": True,
             "symbol_rows": [dict(row) for row in symbol_rows],
         }

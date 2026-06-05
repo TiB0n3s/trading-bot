@@ -70,6 +70,7 @@ Usage:
   python3 ops_check.py bar-pattern-backfill YYYY-MM-DD --symbol AAPL [--dry-run]
   python3 ops_check.py historical-bar-archive START_DATE --end-date YYYY-MM-DD --symbol AAPL
   python3 ops_check.py historical-bar-coverage [START_DATE] [--end-date YYYY-MM-DD]
+  python3 ops_check.py historical-bar-progress [START_DATE] [--end-date YYYY-MM-DD]
   python3 ops_check.py ml-dataset-export START_DATE [END_DATE] [--output PATH] [--format jsonl|csv] [--max-rows N]
   python3 ops_check.py learning-readiness START_DATE [END_DATE]
   python3 ops_check.py learning-effectiveness START_DATE [END_DATE]
@@ -130,6 +131,7 @@ from services.ops_checks.pattern_learning_inputs_checks import run_pattern_learn
 from services.ops_checks.bar_pattern_checks import run_bar_pattern_backfill
 from services.ops_checks.historical_bar_archive_checks import run_historical_bar_archive
 from services.ops_checks.historical_bar_coverage_checks import run_historical_bar_coverage
+from services.ops_checks.historical_bar_progress_checks import run_historical_bar_progress
 from services.ops_checks.ml_dataset_checks import run_ml_dataset_export_check
 from services.ops_checks.learning_readiness_checks import (
     run_learning_effectiveness,
@@ -886,6 +888,21 @@ def historical_bar_coverage(start_date: str | None = None) -> bool:
     )
 
 
+def historical_bar_progress(start_date: str | None = None) -> bool:
+    date_arg = start_date
+    if date_arg in {"today", "current"}:
+        date_arg = None
+    end_date = _str_option("--end-date", "")
+    return run_historical_bar_progress(
+        base_dir=BASE_DIR,
+        start_date=date_arg,
+        end_date=end_date or None,
+        min_days=_int_option("--min-days", 252),
+        min_symbols=_int_option("--min-symbols", 20),
+        limit=_int_option("--limit", 15),
+    )
+
+
 def ml_dataset_export(start_date: str) -> bool:
     end_date = start_date
     if len(sys.argv) > 3 and not sys.argv[3].startswith("--"):
@@ -1297,6 +1314,14 @@ def main():
             else None
         )
         return 0 if historical_bar_coverage(start_arg) else 1
+
+    if command == "historical-bar-progress":
+        start_arg = (
+            sys.argv[2]
+            if len(sys.argv) > 2 and not sys.argv[2].startswith("--")
+            else None
+        )
+        return 0 if historical_bar_progress(start_arg) else 1
 
     if command == "ml-dataset-export":
         return 0 if ml_dataset_export(target_date) else 1

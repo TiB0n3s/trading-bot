@@ -42,6 +42,7 @@ Usage:
   python3 ops_check.py data-freshness-gate
   python3 ops_check.py event-source-coverage
   python3 ops_check.py event-context-validation
+  python3 ops_check.py external-symbol-discovery [START_DATE] [--end-date YYYY-MM-DD] [--min-mentions N]
   python3 ops_check.py log-ledger-consistency
   python3 ops_check.py portfolio-risk
   python3 ops_check.py production-evidence
@@ -155,6 +156,7 @@ from services.ops_checks.runtime_checks import run_runtime_health, run_runtime_h
 from services.ops_checks.context_freshness_checks import run_context_freshness, run_data_freshness_gate
 from services.ops_checks.event_source_checks import run_event_source_coverage
 from services.ops_checks.event_context_validation_checks import run_event_context_validation
+from services.ops_checks.external_symbol_discovery_checks import run_external_symbol_discovery
 from services.ops_checks.log_ledger_checks import run_log_ledger_consistency
 from services.ops_checks.portfolio_risk_checks import run_portfolio_risk_report
 from services.ops_checks.point_in_time_archive_checks import run_point_in_time_archive
@@ -596,6 +598,16 @@ def event_source_coverage(target_date):
 
 def event_context_validation(target_date):
     return run_event_context_validation(target_date, base_dir=BASE_DIR)
+
+
+def external_symbol_discovery(start_date):
+    return run_external_symbol_discovery(
+        start_date,
+        base_dir=BASE_DIR,
+        end_date=_str_option("--end-date", "") or None,
+        min_mentions=_int_option("--min-mentions", 2),
+        limit=_int_option("--limit", 12),
+    )
 
 
 def log_ledger_consistency():
@@ -1246,6 +1258,9 @@ def main():
 
     if command == "event-context-validation":
         return 0 if event_context_validation(target_date) else 1
+
+    if command == "external-symbol-discovery":
+        return 0 if external_symbol_discovery(target_date) else 1
 
     if command == "log-ledger-consistency":
         return 0 if log_ledger_consistency() else 1

@@ -130,6 +130,8 @@ TESTS = [
     "tests/test_symbol_pattern_outcome_service.py",
     "tests/test_symbol_universe_retraining_service.py",
     "tests/test_symbol_universe_retrain_pipeline.py",
+    "tests/test_external_symbol_candidate_service.py",
+    "tests/test_external_symbol_candidate_refresh_pipeline.py",
     "tests/test_pattern_learning_inputs_service.py",
     "tests/test_bar_pattern_feature_service.py",
     "tests/test_historical_bar_archive_service.py",

@@ -163,6 +163,13 @@ def _build_steps(target_date: str) -> list[Step]:
             description="trigger guarded observe-only training when historical bar backfill crosses readiness floor",
         ),
         Step(
+            name="external_symbol_candidate_refresh",
+            module="pipeline.external_symbol_candidate_refresh",
+            argv=["--date", target_date, "--lookback-days", "5", "--max-chunks", "3"],
+            critical=False,
+            description="discover repeated external symbols, queue research candidates, and backfill bounded Polygon history",
+        ),
+        Step(
             name="symbol_universe_retraining",
             module="pipeline.symbol_universe_retrain",
             argv=["--date", target_date],

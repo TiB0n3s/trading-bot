@@ -70,6 +70,50 @@ snapshots are at least 35 minutes old, `labeled_setups` should begin increasing.
 An `eligible_35m_plus` backlog means label_features has snapshots old enough to
 label but has not labeled them yet.
 
+## Polygon Historical Bar Backfill
+
+Use Polygon history to build the multi-year 1-minute regular-session bar corpus
+needed for serious ML training. The backfill is offline/observe-only: it writes
+cached CSV chunks and persists derived `bar_pattern_features`; it does not alter
+live trading authority.
+
+First run a smoke chunk:
+
+```bash
+cd ~/trading-bot
+set -a && . /etc/trading-bot.env && set +a
+python3 pipeline/historical_bar_backfill.py \
+  --start-date 2024-06-01 \
+  --end-date 2026-06-04 \
+  --symbol AAPL \
+  --chunk-days 30 \
+  --max-chunks 1 \
+  --dry-run
+```
+
+Then run the full approved-universe backfill:
+
+```bash
+python3 pipeline/historical_bar_backfill.py \
+  --start-date 2024-06-01 \
+  --end-date 2026-06-04 \
+  --all \
+  --chunk-days 30
+```
+
+Verify coverage before making model-readiness claims:
+
+```bash
+python3 ops_check.py historical-bar-coverage \
+  2024-06-01 \
+  --end-date 2026-06-04 \
+  --min-days 252 \
+  --min-symbols 20
+```
+
+If the coverage report is not ready, train only as a smoke test or
+observe-only comparison. Do not promote model authority from short history.
+
 ## AI Analytics And Storage Checks
 
 Use these checks after dependency installs, DB restore, or Timescale changes:

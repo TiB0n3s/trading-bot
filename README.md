@@ -347,6 +347,43 @@ python3 pipeline/historical_bar_archive.py --date 2026-06-03 --all
 
 This is an offline learning job only. It does not place orders or grant live authority.
 
+pipeline/historical_bar_backfill.py
+
+Chunked multi-month or multi-year Polygon backfill for ML training history.
+Use this instead of a single giant archive invocation when building the local
+historical bar corpus.
+
+Recommended sequence:
+
+```bash
+# 1. Confirm Polygon access and chunk shape without writing.
+python3 pipeline/historical_bar_backfill.py \
+  --start-date 2024-06-01 \
+  --end-date 2026-06-04 \
+  --symbol AAPL \
+  --chunk-days 30 \
+  --max-chunks 1 \
+  --dry-run
+
+# 2. Backfill the approved universe in resumable chunks.
+python3 pipeline/historical_bar_backfill.py \
+  --start-date 2024-06-01 \
+  --end-date 2026-06-04 \
+  --all \
+  --chunk-days 30
+
+# 3. Verify DB feature coverage before using the data for model claims.
+python3 ops_check.py historical-bar-coverage \
+  2024-06-01 \
+  --end-date 2026-06-04 \
+  --min-days 252 \
+  --min-symbols 20
+```
+
+The backfill writes chunked CSVs under `data/historical_bars/polygon_1min` and
+persists the derived `bar_pattern_features` rows used by supervised training,
+advanced-alpha readiness, pattern-learning reports, and research exports.
+
 ML advanced per-bar integration
 
 `bar_pattern_features` is now part of the ML/export surface:

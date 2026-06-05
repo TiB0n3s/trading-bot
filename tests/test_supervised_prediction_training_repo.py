@@ -93,7 +93,7 @@ def _build_db(path: Path) -> None:
                     relative_strength_5m, spread_pct, setup_score
                 ) VALUES (?, 'AAPL', ?, ?, 1, 2, 3, 0.5, 1, 1.2, 0.3, 0.01, 70)
                 """,
-                (idx, f"2026-06-03T0{idx}:00:00+00:00", available_at),
+                (idx, f"2026-06-03T0{idx}:00:08+00:00", available_at),
             )
             con.execute(
                 """
@@ -149,7 +149,7 @@ def test_fetch_training_rows_respects_feature_available_at_cutoff():
         )
 
     assert len(rows) == 1
-    assert rows[0]["timestamp"] == "2026-06-03T01:00:00+00:00"
+    assert rows[0]["timestamp"] == "2026-06-03T01:00:08+00:00"
     assert rows[0]["candle_body_pct"] == 0.6
     assert rows[0]["cvd_price_corr_20"] == 0.42
     assert rows[0]["trend_scan_label"] == 1

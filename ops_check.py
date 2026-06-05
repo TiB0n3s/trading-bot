@@ -69,6 +69,7 @@ Usage:
   python3 ops_check.py pattern-learning-inputs
   python3 ops_check.py bar-pattern-backfill YYYY-MM-DD --symbol AAPL [--dry-run]
   python3 ops_check.py historical-bar-archive START_DATE --end-date YYYY-MM-DD --symbol AAPL
+  python3 ops_check.py historical-bar-coverage [START_DATE] [--end-date YYYY-MM-DD]
   python3 ops_check.py learning-readiness START_DATE [END_DATE]
   python3 ops_check.py learning-effectiveness START_DATE [END_DATE]
   python3 ops_check.py learning-artifacts YYYY-MM-DD
@@ -127,6 +128,7 @@ from services.ops_checks.symbol_pattern_checks import run_symbol_pattern_outcome
 from services.ops_checks.pattern_learning_inputs_checks import run_pattern_learning_inputs_report
 from services.ops_checks.bar_pattern_checks import run_bar_pattern_backfill
 from services.ops_checks.historical_bar_archive_checks import run_historical_bar_archive
+from services.ops_checks.historical_bar_coverage_checks import run_historical_bar_coverage
 from services.ops_checks.learning_readiness_checks import (
     run_learning_effectiveness,
     run_learning_readiness,
@@ -868,6 +870,20 @@ def historical_bar_archive(start_date: str) -> bool:
     )
 
 
+def historical_bar_coverage(start_date: str | None = None) -> bool:
+    date_arg = start_date
+    if date_arg in {"today", "current"}:
+        date_arg = None
+    end_date = _str_option("--end-date", "")
+    return run_historical_bar_coverage(
+        base_dir=BASE_DIR,
+        start_date=date_arg,
+        end_date=end_date or None,
+        min_days=_int_option("--min-days", 252),
+        min_symbols=_int_option("--min-symbols", 20),
+    )
+
+
 def learning_readiness(start_date):
     end_date = None
     if len(sys.argv) > 3 and not sys.argv[3].startswith("--"):
@@ -1253,6 +1269,14 @@ def main():
 
     if command == "historical-bar-archive":
         return 0 if historical_bar_archive(target_date) else 1
+
+    if command == "historical-bar-coverage":
+        start_arg = (
+            sys.argv[2]
+            if len(sys.argv) > 2 and not sys.argv[2].startswith("--")
+            else None
+        )
+        return 0 if historical_bar_coverage(start_arg) else 1
 
     if command == "learning-readiness":
         return 0 if learning_readiness(target_date) else 1

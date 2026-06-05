@@ -15,7 +15,11 @@ from services.supervised_prediction_training_service import (
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--symbol")
-    parser.add_argument("--horizon", default="15m", choices=("5m", "15m", "30m"))
+    parser.add_argument(
+        "--horizon",
+        default="15m",
+        choices=("5m", "15m", "30m", "triple_barrier", "triple_barrier_label", "trend_scan", "trend_scan_label"),
+    )
     parser.add_argument("--limit", type=int, default=5000)
     parser.add_argument("--min-samples", type=int, default=40)
     parser.add_argument("--artifact-output", default="ml/models/supervised_entry_v1/model.joblib")

@@ -131,24 +131,28 @@ class HistoricalBarArchiveService:
         days_with_rows = 0
         errors: list[str] = []
 
-        for day in days:
-            try:
-                bars = self.polygon_market_data.aggregate_bar_dicts(
-                    symbol,
-                    from_date=day.isoformat(),
-                    to_date=day.isoformat(),
-                    multiplier=1,
-                    timespan="minute",
-                    limit=50000,
-                )
-            except Exception as exc:
-                errors.append(f"{day.isoformat()}: {type(exc).__name__}: {exc}")
-                continue
-            raw_bars += len(bars)
-            filtered = [bar for bar in bars if _is_regular_hours_bar(bar)]
-            if filtered:
-                days_with_rows += 1
-            regular_bars.extend(filtered)
+        try:
+            bars = self.polygon_market_data.aggregate_bar_dicts(
+                symbol,
+                from_date=start.isoformat(),
+                to_date=end.isoformat(),
+                multiplier=1,
+                timespan="minute",
+                adjusted=True,
+                limit=50000,
+            )
+        except Exception as exc:
+            errors.append(f"{start.isoformat()}..{end.isoformat()}: {type(exc).__name__}: {exc}")
+            bars = []
+        raw_bars = len(bars)
+        regular_bars = [bar for bar in bars if _is_regular_hours_bar(bar)]
+        days_with_rows = len(
+            {
+                _timestamp_et(bar.get("timestamp")).date().isoformat()
+                for bar in regular_bars
+                if _timestamp_et(bar.get("timestamp")) is not None
+            }
+        )
 
         csv_rows = [_csv_row(symbol, bar) for bar in regular_bars]
         cached_rows = 0

@@ -9,6 +9,7 @@ It does not place orders or alter live authority.
 from __future__ import annotations
 
 import argparse
+from dataclasses import asdict, is_dataclass
 import json
 from pathlib import Path
 import sys
@@ -17,7 +18,10 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from market_time import expected_market_context_date  # noqa: E402
-from services.historical_bar_archive_service import HistoricalBarArchiveService  # noqa: E402
+from services.historical_bar_archive_service import (  # noqa: E402
+    DEFAULT_HISTORICAL_BAR_DIR,
+    HistoricalBarArchiveService,
+)
 from symbols_config import APPROVED_SYMBOLS_LIST  # noqa: E402
 
 
@@ -28,6 +32,16 @@ def _parse_symbols(values: list[str] | None, all_symbols: bool) -> list[str]:
     if all_symbols:
         symbols.extend(APPROVED_SYMBOLS_LIST)
     return sorted(set(symbols))
+
+
+def _result_payload(result) -> dict:
+    if hasattr(result, "as_dict"):
+        return result.as_dict()
+    if is_dataclass(result):
+        return asdict(result)
+    if isinstance(result, dict):
+        return result
+    raise TypeError(f"Unsupported archive result type: {type(result)!r}")
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -56,7 +70,8 @@ def main(argv: list[str] | None = None) -> int:
     if not symbols:
         parser.error("Provide --symbol SYMBOL or --all")
 
-    service = HistoricalBarArchiveService(cache_dir=args.cache_dir)
+    service = HistoricalBarArchiveService()
+    cache_dir = Path(args.cache_dir) if args.cache_dir else ROOT / DEFAULT_HISTORICAL_BAR_DIR
     results = []
     rows_written = 0
     errors = []
@@ -66,11 +81,12 @@ def main(argv: list[str] | None = None) -> int:
                 symbol=symbol,
                 start_date=start_date,
                 end_date=end_date,
+                cache_dir=cache_dir,
                 build_patterns=not args.no_patterns,
                 horizon_bars=args.horizon_bars,
                 dry_run=args.dry_run,
             )
-            payload = result.as_dict()
+            payload = _result_payload(result)
             results.append(payload)
             rows_written += int(payload.get("persisted_pattern_rows") or 0)
             errors.extend(payload.get("errors") or [])

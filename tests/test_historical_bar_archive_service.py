@@ -21,7 +21,11 @@ from services.ops_checks.historical_bar_archive_checks import run_historical_bar
 class _FakePolygon:
     configured = True
 
+    def __init__(self):
+        self.calls = []
+
     def aggregate_bar_dicts(self, symbol, **kwargs):
+        self.calls.append((symbol, kwargs))
         start = datetime(2026, 6, 2, 13, 30, tzinfo=timezone.utc)
         rows = []
         close = 100.0
@@ -53,7 +57,8 @@ class _FakePolygon:
 
 
 def test_historical_bar_archive_filters_rth_caches_csv_and_builds_patterns(tmp_path: Path):
-    service = HistoricalBarArchiveService(polygon_market_data=_FakePolygon())
+    fake = _FakePolygon()
+    service = HistoricalBarArchiveService(polygon_market_data=fake)
     result = service.archive_polygon_1m_bars(
         symbol="aapl",
         start_date="2026-06-02",
@@ -71,6 +76,10 @@ def test_historical_bar_archive_filters_rth_caches_csv_and_builds_patterns(tmp_p
     assert result.cached_rows == 35
     assert result.pattern_rows > 0
     assert result.persisted_pattern_rows == result.pattern_rows
+    assert len(fake.calls) == 1
+    assert fake.calls[0][1]["from_date"] == "2026-06-02"
+    assert fake.calls[0][1]["to_date"] == "2026-06-02"
+    assert fake.calls[0][1]["adjusted"] is True
 
     with Path(result.cache_path).open(newline="", encoding="utf-8") as fh:
         rows = list(csv.DictReader(fh))

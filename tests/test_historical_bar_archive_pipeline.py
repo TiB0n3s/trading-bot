@@ -16,8 +16,8 @@ import pipeline.historical_bar_archive as archive_pipeline  # noqa: E402
 class FakeArchiveService:
     calls = []
 
-    def __init__(self, cache_dir=None):
-        self.cache_dir = cache_dir
+    def __init__(self):
+        pass
 
     def archive_polygon_1m_bars(self, **kwargs):
         FakeArchiveService.calls.append(kwargs)
@@ -48,10 +48,39 @@ def test_historical_archive_pipeline_loops_symbols_and_reports_rows(monkeypatch=
     assert FakeArchiveService.calls[0]["symbol"] == "AAPL"
     assert FakeArchiveService.calls[0]["start_date"] == "2026-06-03"
     assert FakeArchiveService.calls[0]["end_date"] == "2026-06-03"
+    assert str(FakeArchiveService.calls[0]["cache_dir"]).endswith(
+        "data/historical_bars/polygon_1min"
+    )
     assert FakeArchiveService.calls[0]["dry_run"] is True
+
+
+def test_historical_archive_pipeline_uses_custom_cache_dir():
+    original_service = archive_pipeline.HistoricalBarArchiveService
+    try:
+        FakeArchiveService.calls = []
+        archive_pipeline.HistoricalBarArchiveService = FakeArchiveService
+        code = archive_pipeline.main(
+            [
+                "--date",
+                "2026-06-03",
+                "--symbol",
+                "AAPL",
+                "--cache-dir",
+                "/tmp/polygon-bars",
+                "--dry-run",
+            ]
+        )
+    finally:
+        archive_pipeline.HistoricalBarArchiveService = original_service
+
+    assert code == 0
+    assert len(FakeArchiveService.calls) == 1
+    assert str(FakeArchiveService.calls[0]["cache_dir"]) == "/tmp/polygon-bars"
 
 
 if __name__ == "__main__":
     test_historical_archive_pipeline_loops_symbols_and_reports_rows()
+    test_historical_archive_pipeline_uses_custom_cache_dir()
     print("[OK] test_historical_archive_pipeline_loops_symbols_and_reports_rows")
-    print("\nAll 1 historical archive pipeline tests passed.")
+    print("[OK] test_historical_archive_pipeline_uses_custom_cache_dir")
+    print("\nAll 2 historical archive pipeline tests passed.")

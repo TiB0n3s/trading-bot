@@ -120,7 +120,8 @@ def test_train_supervised_prediction_model_can_use_trend_scan_target():
 
     assert result["trained"] is True
     assert result["sample_size"] == 90
-    assert "trend_scan_tstat" in result["feature_columns"]
+    assert "trend_scan_tstat" not in result["feature_columns"]
+    assert "trend_scan_return_pct" not in result["feature_columns"]
     assert result["runtime_effect"] == "observe_only_no_live_authority"
 
 

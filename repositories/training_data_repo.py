@@ -105,15 +105,13 @@ class TrainingDataRepository:
             """ if has_predictions else ""
             bar_pattern_join = """
                 LEFT JOIN bar_pattern_features bp
-                  ON bp.symbol = fs.symbol
-                 AND bp.bar_timestamp = fs.timestamp
-                 AND bp.timeframe = '1m'
-                 AND bp.rowid = (
+                  ON bp.rowid = (
                     SELECT MAX(bp2.rowid)
                     FROM bar_pattern_features bp2
                     WHERE bp2.symbol = fs.symbol
-                      AND bp2.bar_timestamp = fs.timestamp
                       AND bp2.timeframe = '1m'
+                      AND datetime(bp2.bar_timestamp) <= datetime(fs.timestamp)
+                      AND datetime(bp2.bar_timestamp) >= datetime(fs.timestamp, '-90 seconds')
                  )
             """ if has_bar_patterns else ""
 
@@ -195,15 +193,13 @@ class TrainingDataRepository:
             if bp_cols:
                 bar_pattern_join = """
                 LEFT JOIN bar_pattern_features bp
-                  ON bp.symbol = fs.symbol
-                 AND bp.bar_timestamp = fs.timestamp
-                 AND bp.timeframe = '1m'
-                 AND bp.rowid = (
+                  ON bp.rowid = (
                     SELECT MAX(bp2.rowid)
                     FROM bar_pattern_features bp2
                     WHERE bp2.symbol = fs.symbol
-                      AND bp2.bar_timestamp = fs.timestamp
                       AND bp2.timeframe = '1m'
+                      AND datetime(bp2.bar_timestamp) <= datetime(fs.timestamp)
+                      AND datetime(bp2.bar_timestamp) >= datetime(fs.timestamp, '-90 seconds')
                  )
                 """
             query = f"""

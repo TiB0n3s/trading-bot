@@ -170,6 +170,13 @@ def _build_steps(target_date: str) -> list[Step]:
             critical=False,
             description="audit learning artifact freshness",
         ),
+        Step(
+            name="historical_bar_coverage",
+            module="ops_check",
+            argv=["historical-bar-coverage", "--min-days", "252", "--min-symbols", "20"],
+            critical=False,
+            description="verify Polygon 1-minute bar ML history is deep enough for training claims",
+        ),
     ]
 
 

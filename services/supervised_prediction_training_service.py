@@ -10,6 +10,7 @@ from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+from collections import Counter
 
 from repositories.supervised_prediction_training_repo import (
     fetch_training_rows as repo_fetch_training_rows,
@@ -55,8 +56,6 @@ ADVANCED_ALPHA_FEATURE_COLUMNS = (
     "vpin_toxicity_20",
     "fractional_diff_close_045",
     "fractional_diff_zscore_20",
-    "trend_scan_tstat",
-    "trend_scan_return_pct",
 )
 DEFAULT_FEATURE_COLUMNS = (
     DEFAULT_FEATURE_COLUMNS
@@ -175,6 +174,16 @@ def _accuracy(y_true: list[int], y_pred: list[int]) -> float | None:
     return round(sum(1 for actual, pred in zip(y_true, y_pred) if actual == pred) / len(y_true), 4)
 
 
+def _positive_rate(labels: list[int]) -> float | None:
+    if not labels:
+        return None
+    return round(sum(1 for value in labels if value > 0) / len(labels), 4)
+
+
+def _majority_label(labels: list[int]) -> int:
+    return Counter(labels).most_common(1)[0][0]
+
+
 def _model_row(
     *,
     provider: str,
@@ -230,7 +239,7 @@ def train_supervised_prediction_model(
     deps = optional_dependency_status()
     sample_size = len(labels)
     if sample_size < min_samples:
-        positive_rate = sum(labels) / sample_size if sample_size else None
+        positive_rate = _positive_rate(labels)
         return SupervisedTrainingResult(
             version=SUPERVISED_MODEL_VERSION,
             provider="baseline_insufficient_data",
@@ -238,7 +247,7 @@ def train_supervised_prediction_model(
             sample_size=sample_size,
             feature_columns=feature_columns,
             accuracy=None,
-            baseline_positive_rate=round(positive_rate, 4) if positive_rate is not None else None,
+            baseline_positive_rate=positive_rate,
             reason=f"insufficient labeled rows; need {min_samples}",
             generated_at=_now(),
             runtime_effect="observe_only_no_live_authority",
@@ -268,7 +277,7 @@ def train_supervised_prediction_model(
                         "feature_columns": feature_columns,
                         "horizon": horizon,
                         "sample_size": sample_size,
-                        "baseline_positive_rate": round(sum(labels) / sample_size, 4),
+                        "baseline_positive_rate": _positive_rate(labels),
                         "accuracy": round(float(accuracy), 4) if accuracy is not None else None,
                         "generated_at": _now(),
                         "runtime_effect": "observe_only_no_live_authority",
@@ -287,7 +296,7 @@ def train_supervised_prediction_model(
                 sample_size=sample_size,
                 feature_columns=feature_columns,
                 accuracy=round(float(accuracy), 4) if accuracy is not None else None,
-                baseline_positive_rate=round(sum(labels) / sample_size, 4),
+                baseline_positive_rate=_positive_rate(labels),
                 reason="trained sklearn RandomForestClassifier",
                 generated_at=_now(),
                 runtime_effect="observe_only_no_live_authority",
@@ -302,8 +311,7 @@ def train_supervised_prediction_model(
         reason = "sklearn unavailable; using positive-rate baseline"
 
     split = max(1, int(sample_size * 0.8))
-    train_rate = sum(labels[:split]) / len(labels[:split])
-    baseline_pred = 1 if train_rate >= 0.5 else 0
+    baseline_pred = _majority_label(labels[:split])
     test = labels[split:]
     accuracy = (
         sum(1 for item in test if item == baseline_pred) / len(test)
@@ -317,7 +325,7 @@ def train_supervised_prediction_model(
         sample_size=sample_size,
         feature_columns=feature_columns,
         accuracy=round(accuracy, 4) if accuracy is not None else None,
-        baseline_positive_rate=round(sum(labels) / sample_size, 4),
+        baseline_positive_rate=_positive_rate(labels),
         reason=reason,
         generated_at=_now(),
         runtime_effect="observe_only_no_live_authority",
@@ -344,7 +352,7 @@ def train_quant_model_suite(
     )
     deps = optional_dependency_status()
     sample_size = len(labels)
-    positive_rate = round(sum(labels) / sample_size, 4) if sample_size else None
+    positive_rate = _positive_rate(labels)
     notes = [
         "suite is observe-only and cannot approve, size, block, or execute trades",
         "chronological split is used; no random shuffling",
@@ -373,8 +381,7 @@ def train_quant_model_suite(
         )
 
     x_train, x_test, y_train, y_test = _chronological_split(features, labels)
-    train_rate = sum(y_train) / len(y_train)
-    baseline_pred = 1 if train_rate >= 0.5 else 0
+    baseline_pred = _majority_label(y_train)
     models.append(
         _model_row(
             provider="chronological_positive_rate_baseline",
@@ -446,8 +453,13 @@ def train_quant_model_suite(
                 eval_metric="logloss",
                 random_state=42,
             )
-            model.fit(x_train, y_train)
-            preds = [int(value) for value in model.predict(x_test)] if x_test else []
+            class_values = sorted(set(y_train + y_test))
+            label_to_index = {value: idx for idx, value in enumerate(class_values)}
+            index_to_label = {idx: value for value, idx in label_to_index.items()}
+            y_train_encoded = [label_to_index[value] for value in y_train]
+            model.fit(x_train, y_train_encoded)
+            raw_preds = [int(value) for value in model.predict(x_test)] if x_test else []
+            preds = [index_to_label.get(value, value) for value in raw_preds]
             artifact_path = None
             if artifact_root is not None:
                 import joblib

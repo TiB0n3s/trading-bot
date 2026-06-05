@@ -53,6 +53,12 @@ Recent completed roadmap items:
 - Retraining reads training rows through a point-in-time guard
   (`feature_available_at <= prediction_time_cutoff`) and prunes unprotected old
   binary artifacts while keeping diagnostic JSON.
+- `pipeline/symbol_universe_retrain.py` runs inside the after-close learning
+  loop before drift-based retraining. It fingerprints approved symbols from
+  `symbols_config.py`, baselines the current universe on first run, waits for
+  added-symbol bar-pattern coverage, then calls guarded retraining with
+  `--force --rerun-completed`. It is observe-only and cannot promote or alter
+  live authority.
 - `pipeline/after_close_learning.py` is the recurring after-close quant
   learning loop. It completes rejected/candidate/exit outcomes, refreshes
   report-memory artifacts, writes DuckDB/PyArrow research exports, runs

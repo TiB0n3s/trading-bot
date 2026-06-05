@@ -41,10 +41,12 @@ def test_after_close_learning_dry_run_lists_recurring_quant_steps():
     assert "strategy_memory_refresh" in out
     assert "research_export" in out
     assert "paper_learning_authority" in out
+    assert "symbol_universe_retraining" in out
     assert "automated_retraining" in out
     assert "policy_artifact_register" in out
     assert "point_in_time_archive" in out
     assert "pipeline.retrain" in out
+    assert "pipeline.symbol_universe_retrain" in out
 
 
 def test_after_close_wrapper_delegates_learning_to_pipeline_only():

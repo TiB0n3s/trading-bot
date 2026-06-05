@@ -766,6 +766,22 @@ with a point-in-time guard using `feature_available_at <=
 unavailable at the decision cutoff. Retraining also prunes unprotected old
 binary artifacts after the run while preserving diagnostic JSON files.
 
+Approved-symbol universe changes have a separate after-close trigger:
+
+```bash
+python3 pipeline/symbol_universe_retrain.py --date 2026-06-05
+```
+
+The trigger records the current `symbols_config.py` approved-symbol fingerprint
+on first run. Later additions/removals are detected by hash. Added symbols must
+first meet bar-pattern coverage gates (`--min-bar-rows`, `--min-bar-days`) so
+the retrainer does not build a candidate artifact before the new symbol has
+usable candle/pattern history. When coverage passes, the trigger calls
+`pipeline/retrain.py --force --rerun-completed`; the result is still
+observe-only candidate training and cannot change live authority. Pending
+coverage and last-trained universe state are stored in
+`runtime_state/symbol_universe_training_state.json`.
+
 The pre-market pipeline includes an observe-only shadow scoring step. If a
 candidate model exists in the registry, `pipeline.shadow_predictions` scores the
 latest feature snapshots and writes `shadow_predictions` rows. Those rows are

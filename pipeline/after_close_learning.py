@@ -156,6 +156,13 @@ def _build_steps(target_date: str) -> list[Step]:
             description="audit paper-only learning overrides against linked lifecycle outcomes",
         ),
         Step(
+            name="symbol_universe_retraining",
+            module="pipeline.symbol_universe_retrain",
+            argv=["--date", target_date],
+            critical=False,
+            description="force guarded observe-only retraining when approved symbols change",
+        ),
+        Step(
             name="automated_retraining",
             module="pipeline.retrain",
             argv=["--date", target_date, "--sessions", "5", "--bad-session-limit", "3"],

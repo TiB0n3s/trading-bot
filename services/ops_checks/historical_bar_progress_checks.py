@@ -73,6 +73,20 @@ def _weekdays_between(start: str, end: str) -> int:
     return days
 
 
+def _cache_file_has_rows(path: Path) -> bool:
+    """Return True when a cached CSV has at least one data row.
+
+    Header-only files should not contribute coverage. They can be produced by
+    interrupted or failed provider fetches and otherwise create false readiness.
+    """
+    try:
+        with path.open("r", encoding="utf-8", newline="") as fh:
+            next(fh, None)
+            return next(fh, None) is not None
+    except Exception:
+        return False
+
+
 def _cache_symbol_progress(
     cache_dir: Path,
     *,
@@ -92,6 +106,7 @@ def _cache_symbol_progress(
             "triple_barrier_rows": 0,
             "trend_scan_rows": 0,
             "cache_chunks": 0,
+            "empty_cache_chunks": 0,
             "coverage_source": "cache_chunk_estimate",
         }
         for symbol in APPROVED_SYMBOLS_LIST
@@ -118,6 +133,9 @@ def _cache_symbol_progress(
             end = end_date
         rec = by_symbol[symbol]
         rec["cache_chunks"] += 1
+        if not _cache_file_has_rows(path):
+            rec["empty_cache_chunks"] += 1
+            continue
         rec["market_dates"] += _weekdays_between(start, end)
     for rec in by_symbol.values():
         rec["days_remaining"] = max(0, min_days - int(rec["market_dates"] or 0))
@@ -218,6 +236,7 @@ def run_historical_bar_progress(
                 f"  {row['symbol']:<8} dates={row['market_dates']:<4} "
                 f"rows={row['rows']:<8} remaining_days={row['days_remaining']:<4} "
                 f"chunks={row.get('cache_chunks', '-'):<4} "
+                f"empty={row.get('empty_cache_chunks', 0):<4} "
                 f"triple={row['triple_barrier_rows']:<8} trend={row['trend_scan_rows']:<8}"
             )
     else:

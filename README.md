@@ -425,7 +425,9 @@ metrics print as `not_scanned` rather than zero. Use
 `historical-bar-coverage` for DB-derived aggregate training readiness. Use
 `historical-bar-retry-plan` after a broad run to prioritize only symbols below
 the day floor and symbols tied to recent manifest errors; add `--execute` only
-when you want it to launch the focused retry backfill.
+when you want it to launch the focused retry backfill. Header-only/empty cache
+CSVs do not count toward coverage, and `--skip-existing-cache` retries them
+rather than treating them as complete.
 
 The after-close learning loop also runs
 `pipeline/historical_bar_completion_hook.py`. This hook watches the cache/
@@ -457,6 +459,9 @@ python3 ops_check.py ml-dataset-export \
 manifest when `--output` is supplied, and remains export-only with no live
 authority. The default `--max-rows 5000` keeps operator checks responsive while
 the archive is large; use `--max-rows 0` only for an intentional full export.
+Operator exports write a lightweight manifest by default. Add
+`--full-manifest` when you intentionally want full DB/policy hashing for an
+audited dataset snapshot.
 
 Historical bar contract:
 
@@ -542,9 +547,15 @@ Readiness command:
 ```bash
 python3 ops_check.py advanced-alpha-readiness 2026-06-04
 python3 ops_check.py advanced-alpha-comparison 2026-06-04
+python3 ops_check.py historical-bar-models
+python3 ops_check.py monday-readiness
 ```
 
 These reports distinguish the currently integrated bar-level proxies from true trade-level order flow, ETF/component lead-lag, and options-skew features that still require external feeds or mappings. The comparison report also shows whether an asymmetric false-positive guard would have reduced bad pattern candidates without granting authority.
+`historical-bar-models` reports latest observe-only historical-bar model
+candidates, threshold failures, and artifact hygiene. `monday-readiness`
+summarizes market context presence, Polygon key configuration, current
+historical-bar symbol coverage, and observe-only model candidate readiness.
 
 fill_poller.py
 

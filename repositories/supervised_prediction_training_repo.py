@@ -10,7 +10,11 @@ from db import DB_PATH
 from services.bar_pattern_feature_service import BAR_PATTERN_FEATURE_VERSION
 
 
-CURRENT_FEATURE_VERSION_ALIASES = (BAR_PATTERN_FEATURE_VERSION, "v4")
+SNAPSHOT_JOIN_FEATURE_VERSION_ALIASES = (
+    BAR_PATTERN_FEATURE_VERSION,
+    "v4",
+    "efi_pvt_orderflow_math_bar_pattern_v3",
+)
 
 
 def fetch_training_rows(
@@ -51,7 +55,7 @@ def fetch_training_rows(
             }
         bp_version_filter = ""
         if "feature_version" in bp_cols:
-            values = ", ".join(f"'{value}'" for value in CURRENT_FEATURE_VERSION_ALIASES)
+            values = ", ".join(f"'{value}'" for value in SNAPSHOT_JOIN_FEATURE_VERSION_ALIASES)
             bp_version_filter = f"AND bp2.feature_version IN ({values})"
 
         def bp_expr(name: str) -> str:

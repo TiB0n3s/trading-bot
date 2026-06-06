@@ -74,6 +74,7 @@ def run_ml_dataset_export_check(
     min_rows: int = 500,
     min_symbols: int = 20,
     max_rows: int | None = 5000,
+    full_manifest: bool = False,
 ) -> bool:
     print()
     print("=" * 72)
@@ -93,7 +94,7 @@ def run_ml_dataset_export_check(
                 db_path=db_path,
                 include_incomplete_labels=include_incomplete,
                 max_source_rows=max_rows,
-                build_manifest=bool(output_path),
+                build_manifest=bool(output_path and full_manifest),
             )
         )
     except Exception as exc:
@@ -126,6 +127,7 @@ def run_ml_dataset_export_check(
     print("runtime_effect          : dataset_export_only_no_live_authority")
     print(f"source_rows             : {source_rows}")
     print(f"source_row_limit        : {max_rows or 'none'}")
+    print(f"full_manifest          : {full_manifest}")
     print(f"export_rows             : {rows}")
     print(f"complete_horizon_rows   : {result.complete_horizon_rows}")
     print(f"labeled_rows            : {result.labeled_rows}")

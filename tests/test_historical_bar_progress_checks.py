@@ -71,6 +71,12 @@ def _write_manifest(base_dir: Path) -> None:
         json.dumps(payload),
         encoding="utf-8",
     )
+    cache_dir = base_dir / "data" / "historical_bars" / "polygon_1min"
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    (cache_dir / "MSFT_1min_rth_2026-01-01_2026-01-03.csv").write_text(
+        "Timestamp,Open,High,Low,Close,Volume\n",
+        encoding="utf-8",
+    )
 
 
 def test_historical_bar_progress_reports_manifest_and_priority_symbols():
@@ -95,6 +101,7 @@ def test_historical_bar_progress_reports_manifest_and_priority_symbols():
     assert "recent_manifest_errors  : 1" in out
     assert "file                  : historical_bar_backfill_20260102T120000Z.json" in out
     assert "MSFT" in out
+    assert "empty=1" in out
     assert "too few cached symbols meet" in out
 
 

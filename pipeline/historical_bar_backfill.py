@@ -66,6 +66,15 @@ def _cache_path(cache_dir: Path, symbol: str, start: date, end: date) -> Path:
     return cache_dir / f"{symbol}_1min_rth_{start.isoformat()}_{end.isoformat()}.csv"
 
 
+def _cache_file_has_rows(path: Path) -> bool:
+    try:
+        with path.open("r", encoding="utf-8", newline="") as fh:
+            next(fh, None)
+            return next(fh, None) is not None
+    except Exception:
+        return False
+
+
 def _write_manifest(cache_dir: Path, payload: dict) -> Path:
     manifest_dir = cache_dir / "backfill_manifests"
     manifest_dir.mkdir(parents=True, exist_ok=True)
@@ -126,7 +135,7 @@ def main(argv: list[str] | None = None) -> int:
             if args.max_chunks and attempted_chunks >= args.max_chunks:
                 break
             cache_path = _cache_path(cache_dir, symbol, chunk_start, chunk_end)
-            if args.skip_existing_cache and cache_path.exists():
+            if args.skip_existing_cache and cache_path.exists() and _cache_file_has_rows(cache_path):
                 skipped_chunks += 1
                 print(
                     "archive_skip "
@@ -134,6 +143,12 @@ def main(argv: list[str] | None = None) -> int:
                     f"end={chunk_end.isoformat()} reason=cache_exists"
                 )
                 continue
+            if args.skip_existing_cache and cache_path.exists():
+                print(
+                    "archive_retry "
+                    f"symbol={symbol} start={chunk_start.isoformat()} "
+                    f"end={chunk_end.isoformat()} reason=empty_or_unreadable_cache"
+                )
 
             attempted_chunks += 1
             try:

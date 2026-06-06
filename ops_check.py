@@ -75,7 +75,9 @@ Usage:
   python3 ops_check.py historical-bar-progress [START_DATE] [--end-date YYYY-MM-DD]
   python3 ops_check.py historical-bar-readiness [START_DATE] [--end-date YYYY-MM-DD] [--include-db-quality]
   python3 ops_check.py historical-bar-retry-plan START_DATE [--end-date YYYY-MM-DD] [--execute]
+  python3 ops_check.py historical-bar-models
   python3 ops_check.py ml-dataset-export START_DATE [END_DATE] [--output PATH] [--format jsonl|csv] [--max-rows N]
+  python3 ops_check.py monday-readiness
   python3 ops_check.py learning-readiness START_DATE [END_DATE]
   python3 ops_check.py learning-effectiveness START_DATE [END_DATE]
   python3 ops_check.py learning-artifacts YYYY-MM-DD
@@ -137,7 +139,11 @@ from services.ops_checks.historical_bar_archive_checks import run_historical_bar
 from services.ops_checks.historical_bar_coverage_checks import run_historical_bar_coverage
 from services.ops_checks.historical_bar_progress_checks import run_historical_bar_progress
 from services.ops_checks.historical_bar_readiness_checks import run_historical_bar_readiness
+from services.ops_checks.historical_bar_model_checks import (
+    run_historical_bar_model_readiness,
+)
 from services.ops_checks.ml_dataset_checks import run_ml_dataset_export_check
+from services.ops_checks.monday_readiness_checks import run_monday_readiness_check
 from services.ops_checks.learning_readiness_checks import (
     run_learning_effectiveness,
     run_learning_readiness,
@@ -964,6 +970,24 @@ def ml_dataset_export(start_date: str) -> bool:
         min_rows=_int_option("--min-rows", 500),
         min_symbols=_int_option("--min-symbols", 20),
         max_rows=(_int_option("--max-rows", 5000) or None),
+        full_manifest="--full-manifest" in sys.argv,
+    )
+
+
+def historical_bar_models() -> bool:
+    return run_historical_bar_model_readiness(
+        min_rows=_int_option("--min-rows", 5000),
+        min_symbols=_int_option("--min-symbols", 59),
+        min_accuracy=float(_str_option("--min-accuracy", "0.50")),
+        stale_days=_int_option("--stale-days", 30),
+        limit=_int_option("--limit", 12),
+    )
+
+
+def monday_readiness() -> bool:
+    return run_monday_readiness_check(
+        base_dir=BASE_DIR,
+        min_historical_symbols=_int_option("--min-historical-symbols", 59),
     )
 
 
@@ -1402,8 +1426,14 @@ def main():
             args.append("--json")
         return 0 if run("Historical Bar Retry Plan", args) else 1
 
+    if command == "historical-bar-models":
+        return 0 if historical_bar_models() else 1
+
     if command == "ml-dataset-export":
         return 0 if ml_dataset_export(target_date) else 1
+
+    if command == "monday-readiness":
+        return 0 if monday_readiness() else 1
 
     if command == "learning-readiness":
         return 0 if learning_readiness(target_date) else 1

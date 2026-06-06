@@ -87,18 +87,32 @@ def build_retry_plan(
     ]
     failed_symbols = _error_symbols(recent_errors)
 
+    failed_symbol_set = set(failed_symbols)
+    incomplete.sort(
+        key=lambda row: (
+            0 if str(row.get("symbol") or "") in failed_symbol_set else 1,
+            int(row.get("market_dates") or 0),
+            str(row.get("symbol") or ""),
+        )
+    )
+
     ordered: list[str] = []
     reasons: dict[str, list[str]] = {}
-    for symbol in failed_symbols:
-        ordered.append(symbol)
-        reasons.setdefault(symbol, []).append("recent_manifest_error")
     for row in incomplete:
         symbol = str(row.get("symbol") or "")
         if symbol not in ordered:
             ordered.append(symbol)
+        if symbol in failed_symbol_set:
+            reasons.setdefault(symbol, []).append("recent_manifest_error")
         reasons.setdefault(symbol, []).append(
             f"below_day_floor:{int(row.get('market_dates') or 0)}/{min_days}"
         )
+    for symbol in failed_symbols:
+        if symbol not in ordered:
+            ordered.append(symbol)
+        reason_list = reasons.setdefault(symbol, [])
+        if "recent_manifest_error" not in reason_list:
+            reason_list.append("recent_manifest_error")
 
     selected = ordered[: max(1, max_symbols)]
     command = [
@@ -113,6 +127,7 @@ def build_retry_plan(
         "--chunk-days",
         "30",
         "--skip-existing-cache",
+        "--rebuild-patterns-for-existing-cache",
         "--request-sleep-seconds",
         "13",
         "--retry-attempts",

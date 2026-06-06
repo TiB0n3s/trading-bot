@@ -9,6 +9,7 @@ derived bar_pattern_features used by observe-only ML training.
 from __future__ import annotations
 
 import argparse
+import csv
 from dataclasses import asdict, is_dataclass
 from datetime import date, datetime, timedelta, timezone
 import json
@@ -24,6 +25,7 @@ from services.historical_bar_archive_service import (  # noqa: E402
     DEFAULT_HISTORICAL_BAR_DIR,
     HistoricalBarArchiveService,
 )
+from services.bar_pattern_feature_service import BarPatternFeatureService  # noqa: E402
 from services.polygon_market_data_service import PolygonMarketDataService  # noqa: E402
 from symbols_config import APPROVED_SYMBOLS_LIST  # noqa: E402
 
@@ -92,6 +94,27 @@ def _cache_file_has_rows(path: Path) -> bool:
         return False
 
 
+def _cached_row_to_bar(row: dict[str, str]) -> dict[str, str | None]:
+    return {
+        "timestamp": row.get("Timestamp") or row.get("IntervalStart"),
+        "interval_start": row.get("IntervalStart") or row.get("Timestamp"),
+        "interval_semantics": row.get("IntervalSemantics") or "inclusive_start_regular_hours_1m",
+        "source": row.get("Source") or "polygon_aggregate_1m_cache",
+        "adjusted": row.get("Adjusted"),
+        "open": row.get("Open"),
+        "high": row.get("High"),
+        "low": row.get("Low"),
+        "close": row.get("Close"),
+        "volume": row.get("Volume"),
+        "vwap": row.get("VWAP") or row.get("Close"),
+    }
+
+
+def _read_cached_bars(path: Path) -> list[dict[str, str | None]]:
+    with path.open("r", encoding="utf-8", newline="") as fh:
+        return [_cached_row_to_bar(row) for row in csv.DictReader(fh)]
+
+
 def _write_manifest(cache_dir: Path, payload: dict) -> Path:
     manifest_dir = cache_dir / "backfill_manifests"
     manifest_dir.mkdir(parents=True, exist_ok=True)
@@ -113,6 +136,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--horizon-bars", type=int, default=20)
     parser.add_argument("--no-patterns", action="store_true")
     parser.add_argument("--skip-existing-cache", action="store_true")
+    parser.add_argument(
+        "--rebuild-patterns-for-existing-cache",
+        action="store_true",
+        help="When --skip-existing-cache skips a populated CSV, rebuild DB pattern rows from that cache without calling Polygon.",
+    )
     parser.add_argument("--max-chunks", type=int, default=0, help="Safety limit for smoke runs; 0 means all chunks")
     parser.add_argument("--request-sleep-seconds", type=float, default=0.0)
     parser.add_argument("--retry-attempts", type=int, default=2)
@@ -129,6 +157,7 @@ def main(argv: list[str] | None = None) -> int:
     cache_dir = Path(args.cache_dir) if args.cache_dir else ROOT / DEFAULT_HISTORICAL_BAR_DIR
     chunks = _date_chunks(start, end, args.chunk_days)
     service = HistoricalBarArchiveService(
+        bar_pattern_service=BarPatternFeatureService(),
         polygon_market_data=PolygonMarketDataService(
             timeout_seconds=20.0,
             retry_attempts=args.retry_attempts,
@@ -138,6 +167,8 @@ def main(argv: list[str] | None = None) -> int:
     results: list[dict] = []
     errors: list[str] = []
     skipped_chunks = 0
+    cache_repair_chunks = 0
+    cache_repair_rows = 0
     attempted_chunks = 0
     persisted_rows = 0
     cached_rows = 0
@@ -155,6 +186,36 @@ def main(argv: list[str] | None = None) -> int:
             cache_path = _cache_path(cache_dir, symbol, chunk_start, chunk_end)
             if args.skip_existing_cache and cache_path.exists() and _cache_file_has_rows(cache_path):
                 skipped_chunks += 1
+                if args.rebuild_patterns_for_existing_cache and not args.no_patterns:
+                    try:
+                        bars = _read_cached_bars(cache_path)
+                        result = service.bar_pattern_service.persist_features(
+                            bars,
+                            symbol=symbol,
+                            target_date=chunk_end.isoformat(),
+                            timeframe="1m",
+                            horizon_bars=args.horizon_bars,
+                            bar_source="polygon_aggregate_1m_cache_repair",
+                            adjusted=True,
+                            interval_semantics="inclusive_start_regular_hours_1m",
+                            dry_run=args.dry_run,
+                        )
+                        cache_repair_chunks += 1
+                        cache_repair_rows += int(result.persisted_rows or 0)
+                        persisted_rows += int(result.persisted_rows or 0)
+                        print(
+                            "archive_cache_repair "
+                            f"symbol={symbol} start={chunk_start.isoformat()} "
+                            f"end={chunk_end.isoformat()} bars={len(bars)} "
+                            f"persisted_pattern_rows={result.persisted_rows}"
+                        )
+                    except Exception as exc:
+                        message = (
+                            f"{symbol} {chunk_start.isoformat()}..{chunk_end.isoformat()}: "
+                            f"{type(exc).__name__}: cache feature repair failed: {exc}"
+                        )
+                        errors.append(message)
+                        print(f"[WARN] archive_cache_repair_failed {message}")
                 print(
                     "archive_skip "
                     f"symbol={symbol} start={chunk_start.isoformat()} "
@@ -214,6 +275,8 @@ def main(argv: list[str] | None = None) -> int:
         "chunks_per_symbol": len(chunks),
         "attempted_chunks": attempted_chunks,
         "skipped_chunks": skipped_chunks,
+        "cache_repair_chunks": cache_repair_chunks,
+        "cache_repair_rows": cache_repair_rows,
         "successful_chunks": sum(1 for row in results if not row.get("errors")),
         "cached_rows": cached_rows,
         "persisted_pattern_rows": persisted_rows,
@@ -225,7 +288,7 @@ def main(argv: list[str] | None = None) -> int:
         summary["manifest_path"] = str(_write_manifest(cache_dir, summary))
     print(json.dumps(summary, sort_keys=True))
     print(f"rows_written: {persisted_rows}")
-    return 0 if attempted_chunks and not errors else 1
+    return 0 if (attempted_chunks or cache_repair_chunks or skipped_chunks) and not errors else 1
 
 
 if __name__ == "__main__":

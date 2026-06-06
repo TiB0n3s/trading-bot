@@ -14,7 +14,7 @@ from pathlib import Path
 
 DB_PATH = Path(__file__).resolve().parent / "trades.db"
 
-BUSY_TIMEOUT_MS = 5000
+BUSY_TIMEOUT_MS = 60000
 
 
 def get_connection(db_path: Path | str = DB_PATH) -> sqlite3.Connection:

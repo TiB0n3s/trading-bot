@@ -55,6 +55,7 @@ def test_retry_plan_prioritizes_manifest_error_and_incomplete_symbols():
     assert payload["selected_symbols"][0] == "VZ"
     assert "recent_manifest_error" in payload["selection_reasons"]["VZ"]
     assert "--skip-existing-cache" in payload["command"]
+    assert "--rebuild-patterns-for-existing-cache" in payload["command"]
     assert ",".join(payload["selected_symbols"]) in payload["command"]
 
 

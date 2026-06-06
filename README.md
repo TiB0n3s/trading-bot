@@ -548,14 +548,50 @@ Readiness command:
 python3 ops_check.py advanced-alpha-readiness 2026-06-04
 python3 ops_check.py advanced-alpha-comparison 2026-06-04
 python3 ops_check.py historical-bar-models
+python3 ops_check.py historical-bar-validation 2024-06-01 --end-date 2026-06-04 --label-target triple_barrier_label
 python3 ops_check.py monday-readiness
 ```
 
 These reports distinguish the currently integrated bar-level proxies from true trade-level order flow, ETF/component lead-lag, and options-skew features that still require external feeds or mappings. The comparison report also shows whether an asymmetric false-positive guard would have reduced bad pattern candidates without granting authority.
 `historical-bar-models` reports latest observe-only historical-bar model
-candidates, threshold failures, and artifact hygiene. `monday-readiness`
+candidates, threshold failures, and artifact hygiene. Add `--prune` for a
+dry-run cleanup plan, and add `--execute-prune` only when you intentionally
+want older non-protected binaries removed. Diagnostics are preserved.
+`historical-bar-validation` reports label distributions by symbol, session
+phase, volatility, CVD, VPIN, and fractional-memory buckets. `monday-readiness`
 summarizes market context presence, Polygon key configuration, current
-historical-bar symbol coverage, and observe-only model candidate readiness.
+historical-bar symbol coverage, observe-only model candidate readiness, and
+advisory full-window cache gaps.
+
+Off-hours historical-bar learning pipeline:
+
+```bash
+python3 pipeline/off_hours_historical_bar_learning.py \
+  --start-date 2024-06-01 \
+  --end-date 2026-06-04 \
+  --dry-run
+```
+
+Long-running retry command for direct SSH/session use:
+
+```bash
+cd /home/tradingbot/trading-bot
+set -a; source /etc/trading-bot.env; set +a
+./venv/bin/python job_runner.py \
+  --job-name historical_bar_weekend_retry \
+  --lock-file /tmp/tradingbot_historical_bar_weekend_retry.lock \
+  --log-file /home/tradingbot/trading-bot/historical_bar_weekend_retry.log \
+  -- ./venv/bin/python pipeline/off_hours_historical_bar_learning.py \
+       --start-date 2024-06-01 \
+       --end-date 2026-06-04 \
+       --max-symbols 10 \
+       --execute-retry
+```
+
+Repeat the retry command until `python3 ops_check.py historical-bar-progress
+2024-06-01 --end-date 2026-06-04` shows `symbols_ready=59` and no remaining
+empty-cache advisory items. Then rerun the same off-hours pipeline with
+`--train` to refresh observe-only candidates from the larger repaired archive.
 
 fill_poller.py
 

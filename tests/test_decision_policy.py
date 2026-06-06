@@ -388,6 +388,42 @@ def test_symbol_pattern_observation_cannot_change_authority_by_itself():
     assert_equal(result["size_multiplier"], 1.0, "pattern telemetry does not size")
 
 
+def test_historical_bar_model_artifact_cannot_change_authority_by_itself():
+    original = decision_policy.contextual_memory_for_signal
+    try:
+        decision_policy.contextual_memory_for_signal = neutral_memory
+        result = decision_policy.evaluate_decision_policy(
+            "AAPL",
+            "buy",
+            intelligence_context={
+                "summary": {"recommended_action": "allow"},
+                "opportunity_score": {"score": 90, "decision": "allow"},
+                "prediction": {"prediction_decision": "allow", "prediction_score": 80},
+            },
+            account_state={
+                "historical_bar_model_candidate": {
+                    "report_version": "historical_bar_observe_training_v1",
+                    "runtime_effect": "observe_only_no_live_authority",
+                    "label_target": "triple_barrier_label",
+                    "training": {"trained": True, "accuracy": 0.99},
+                    "suggested_decision": "block",
+                    "suggested_size_multiplier": 0.0,
+                },
+                "historical_bar_model_readiness": {
+                    "status": "observe_only_candidate_ready",
+                    "runtime_effect": "observe_only_report_no_live_authority",
+                },
+                "portfolio_decision": {"decision": "allow"},
+                "execution_quality": {"decision": "allow"},
+            },
+        )
+    finally:
+        decision_policy.contextual_memory_for_signal = original
+
+    assert_equal(result["decision"], "allow", "historical-bar artifact is not authority")
+    assert_equal(result["size_multiplier"], 1.0, "historical-bar artifact does not size")
+
+
 def test_decision_policy_module_does_not_import_order_execution():
     source = inspect.getsource(decision_policy)
 
@@ -421,6 +457,8 @@ if __name__ == "__main__":
     print("[OK] test_rollout_candidate_status_cannot_change_authority_by_itself")
     test_symbol_pattern_observation_cannot_change_authority_by_itself()
     print("[OK] test_symbol_pattern_observation_cannot_change_authority_by_itself")
+    test_historical_bar_model_artifact_cannot_change_authority_by_itself()
+    print("[OK] test_historical_bar_model_artifact_cannot_change_authority_by_itself")
     test_decision_policy_module_does_not_import_order_execution()
     print("[OK] test_decision_policy_module_does_not_import_order_execution")
-    print("\nAll 13 decision policy tests passed.")
+    print("\nAll 14 decision policy tests passed.")

@@ -70,8 +70,8 @@ def fetch_training_rows(
                     FROM bar_pattern_features bp2
                     WHERE bp2.symbol = fs.symbol
                       AND bp2.timeframe = '1m'
-                      AND bp2.bar_timestamp <= fs.timestamp
-                      AND bp2.bar_timestamp >= datetime(fs.timestamp, '-90 seconds')
+                      AND bp2.bar_timestamp <= strftime('%Y-%m-%dT%H:%M:%S', fs.timestamp) || '+00:00'
+                      AND bp2.bar_timestamp >= strftime('%Y-%m-%dT%H:%M:%S', datetime(fs.timestamp, '-90 seconds')) || '+00:00'
                       {bp_version_filter}
                  )
             """

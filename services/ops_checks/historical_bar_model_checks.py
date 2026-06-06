@@ -119,6 +119,68 @@ def _artifact_hygiene(candidate_dir: Path, *, stale_days: int) -> dict[str, Any]
     }
 
 
+def prune_historical_bar_model_artifacts(
+    *,
+    candidate_dir: Path | None = None,
+    keep_per_label: int = 2,
+    dry_run: bool = True,
+) -> dict[str, Any]:
+    """Prune older historical-bar binary artifacts while preserving diagnostics."""
+    candidate_dir = candidate_dir or DEFAULT_CANDIDATE_DIR
+    diagnostics = _diagnostics(candidate_dir)
+    by_label: dict[str, list[dict[str, Any]]] = {}
+    for row in diagnostics:
+        by_label.setdefault(str(row.get("label_target") or "unknown"), []).append(row)
+    protected_ids: set[str] = set()
+    for rows in by_label.values():
+        rows.sort(key=lambda item: str(item.get("generated_at") or ""), reverse=True)
+        protected_ids.update(str(row.get("model_id") or "") for row in rows[: max(1, keep_per_label)])
+
+    candidate_files = [
+        path
+        for path in candidate_dir.glob("historical_bar_*")
+        if path.is_file()
+        and (
+            path.suffix == ".joblib"
+            or path.name.endswith(".joblib.metadata.json")
+            or path.name.endswith(".baseline.json")
+        )
+    ]
+    deleted: list[str] = []
+    would_delete: list[str] = []
+    protected: list[str] = []
+    for path in candidate_files:
+        model_id = path.name
+        for suffix in (".joblib.metadata.json", ".baseline.json", ".joblib"):
+            if model_id.endswith(suffix):
+                model_id = model_id[: -len(suffix)]
+                break
+        if model_id in protected_ids:
+            protected.append(str(path))
+            continue
+        if dry_run:
+            would_delete.append(str(path))
+            continue
+        try:
+            path.unlink()
+            deleted.append(str(path))
+        except FileNotFoundError:
+            continue
+    return {
+        "report_version": "historical_bar_artifact_prune_v1",
+        "runtime_effect": "artifact_cleanup_no_live_authority",
+        "candidate_dir": str(candidate_dir),
+        "dry_run": dry_run,
+        "keep_per_label": keep_per_label,
+        "protected_model_ids": sorted(protected_ids),
+        "protected_count": len(protected),
+        "would_delete_count": len(would_delete),
+        "deleted_count": len(deleted),
+        "would_delete": would_delete[:50],
+        "deleted": deleted[:50],
+    }
+
+
 def run_historical_bar_model_readiness(
     *,
     candidate_dir: Path | None = None,
@@ -126,6 +188,9 @@ def run_historical_bar_model_readiness(
     min_symbols: int = 59,
     min_accuracy: float = 0.50,
     stale_days: int = 30,
+    prune: bool = False,
+    dry_run: bool = True,
+    keep_per_label: int = 2,
     limit: int = 12,
 ) -> bool:
     candidate_dir = candidate_dir or DEFAULT_CANDIDATE_DIR
@@ -142,6 +207,15 @@ def run_historical_bar_model_readiness(
     ]
     assessments.sort(key=lambda item: item.label_target)
     hygiene = _artifact_hygiene(candidate_dir, stale_days=stale_days)
+    pruning = (
+        prune_historical_bar_model_artifacts(
+            candidate_dir=candidate_dir,
+            keep_per_label=keep_per_label,
+            dry_run=dry_run,
+        )
+        if prune
+        else None
+    )
 
     print()
     print("=" * 72)
@@ -179,6 +253,17 @@ def run_historical_bar_model_readiness(
     if hygiene["stale_binaries"]:
         for path in hygiene["stale_binaries"][:limit]:
             print(f"  stale                  : {path}")
+
+    if pruning:
+        print()
+        print("Artifact pruning")
+        print(f"  dry_run                : {pruning['dry_run']}")
+        print(f"  keep_per_label         : {pruning['keep_per_label']}")
+        print(f"  protected_count        : {pruning['protected_count']}")
+        print(f"  would_delete_count     : {pruning['would_delete_count']}")
+        print(f"  deleted_count          : {pruning['deleted_count']}")
+        for path in (pruning["would_delete"] or pruning["deleted"])[:limit]:
+            print(f"  prune_candidate        : {path}")
 
     ok = bool(assessments) and all(item.status == "observe_only_candidate_ready" for item in assessments)
     print()

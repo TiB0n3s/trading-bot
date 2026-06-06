@@ -76,6 +76,7 @@ Usage:
   python3 ops_check.py historical-bar-readiness [START_DATE] [--end-date YYYY-MM-DD] [--include-db-quality]
   python3 ops_check.py historical-bar-retry-plan START_DATE [--end-date YYYY-MM-DD] [--execute]
   python3 ops_check.py historical-bar-models
+  python3 ops_check.py historical-bar-validation START_DATE [--end-date YYYY-MM-DD]
   python3 ops_check.py ml-dataset-export START_DATE [END_DATE] [--output PATH] [--format jsonl|csv] [--max-rows N]
   python3 ops_check.py monday-readiness
   python3 ops_check.py learning-readiness START_DATE [END_DATE]
@@ -141,6 +142,9 @@ from services.ops_checks.historical_bar_progress_checks import run_historical_ba
 from services.ops_checks.historical_bar_readiness_checks import run_historical_bar_readiness
 from services.ops_checks.historical_bar_model_checks import (
     run_historical_bar_model_readiness,
+)
+from services.ops_checks.historical_bar_validation_checks import (
+    run_historical_bar_validation,
 )
 from services.ops_checks.ml_dataset_checks import run_ml_dataset_export_check
 from services.ops_checks.monday_readiness_checks import run_monday_readiness_check
@@ -980,7 +984,23 @@ def historical_bar_models() -> bool:
         min_symbols=_int_option("--min-symbols", 59),
         min_accuracy=float(_str_option("--min-accuracy", "0.50")),
         stale_days=_int_option("--stale-days", 30),
+        prune="--prune" in sys.argv,
+        dry_run="--execute-prune" not in sys.argv,
+        keep_per_label=_int_option("--keep-per-label", 2),
         limit=_int_option("--limit", 12),
+    )
+
+
+def historical_bar_validation(start_date: str) -> bool:
+    return run_historical_bar_validation(
+        base_dir=BASE_DIR,
+        start_date=start_date,
+        end_date=_str_option("--end-date", date.today().isoformat()),
+        label_target=_str_option("--label-target", "triple_barrier_label"),
+        rows_per_symbol=_int_option("--rows-per-symbol", 250),
+        limit=_int_option("--max-rows", 20000),
+        min_bucket_rows=_int_option("--min-bucket-rows", 50),
+        print_limit=_int_option("--limit", 30),
     )
 
 
@@ -1428,6 +1448,9 @@ def main():
 
     if command == "historical-bar-models":
         return 0 if historical_bar_models() else 1
+
+    if command == "historical-bar-validation":
+        return 0 if historical_bar_validation(target_date) else 1
 
     if command == "ml-dataset-export":
         return 0 if ml_dataset_export(target_date) else 1

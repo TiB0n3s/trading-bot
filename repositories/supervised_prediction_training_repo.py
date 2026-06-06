@@ -7,6 +7,10 @@ from pathlib import Path
 from typing import Any
 
 from db import DB_PATH
+from services.bar_pattern_feature_service import BAR_PATTERN_FEATURE_VERSION
+
+
+CURRENT_FEATURE_VERSION_ALIASES = (BAR_PATTERN_FEATURE_VERSION, "v4")
 
 
 def fetch_training_rows(
@@ -45,21 +49,26 @@ def fetch_training_rows(
                 row["name"]
                 for row in con.execute("PRAGMA table_info(bar_pattern_features)").fetchall()
             }
+        bp_version_filter = ""
+        if "feature_version" in bp_cols:
+            values = ", ".join(f"'{value}'" for value in CURRENT_FEATURE_VERSION_ALIASES)
+            bp_version_filter = f"AND bp2.feature_version IN ({values})"
 
         def bp_expr(name: str) -> str:
             return f"bp.{name}" if name in bp_cols else f"NULL AS {name}"
 
         bar_pattern_join = ""
         if has_bar_patterns:
-            bar_pattern_join = """
+            bar_pattern_join = f"""
                 LEFT JOIN bar_pattern_features bp
                   ON bp.rowid = (
                     SELECT MAX(bp2.rowid)
                     FROM bar_pattern_features bp2
                     WHERE bp2.symbol = fs.symbol
                       AND bp2.timeframe = '1m'
-                      AND datetime(bp2.bar_timestamp) <= datetime(fs.timestamp)
-                      AND datetime(bp2.bar_timestamp) >= datetime(fs.timestamp, '-90 seconds')
+                      AND bp2.bar_timestamp <= fs.timestamp
+                      AND bp2.bar_timestamp >= datetime(fs.timestamp, '-90 seconds')
+                      {bp_version_filter}
                  )
             """
         point_in_time_sql = ""

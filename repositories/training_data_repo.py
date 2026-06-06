@@ -7,6 +7,10 @@ from pathlib import Path
 from typing import Any
 
 from db import DB_PATH
+from services.bar_pattern_feature_service import BAR_PATTERN_FEATURE_VERSION
+
+
+CURRENT_FEATURE_VERSION_ALIASES = (BAR_PATTERN_FEATURE_VERSION, "v4")
 
 
 class TrainingDataRepository:
@@ -88,6 +92,8 @@ class TrainingDataRepository:
             has_context = self._table_exists(con, "daily_symbol_context")
             has_predictions = self._table_exists(con, "daily_symbol_predictions")
             has_bar_patterns = self._table_exists(con, "bar_pattern_features")
+            bp_cols = self._table_columns(con, "bar_pattern_features")
+            bp_version_filter = self._bar_pattern_version_filter(bp_cols)
 
             label_join = """
                 LEFT JOIN labeled_setups ls
@@ -103,15 +109,16 @@ class TrainingDataRepository:
                   ON p.market_date = substr(fs.timestamp, 1, 10)
                  AND p.symbol = fs.symbol
             """ if has_predictions else ""
-            bar_pattern_join = """
+            bar_pattern_join = f"""
                 LEFT JOIN bar_pattern_features bp
                   ON bp.rowid = (
                     SELECT MAX(bp2.rowid)
                     FROM bar_pattern_features bp2
                     WHERE bp2.symbol = fs.symbol
                       AND bp2.timeframe = '1m'
-                      AND datetime(bp2.bar_timestamp) <= datetime(fs.timestamp)
-                      AND datetime(bp2.bar_timestamp) >= datetime(fs.timestamp, '-90 seconds')
+                      AND bp2.bar_timestamp <= fs.timestamp
+                      AND bp2.bar_timestamp >= datetime(fs.timestamp, '-90 seconds')
+                      {bp_version_filter}
                  )
             """ if has_bar_patterns else ""
 
@@ -180,6 +187,13 @@ class TrainingDataRepository:
     def _opt(columns: set[str], alias: str, col: str, fallback: str = "NULL") -> str:
         return f"{alias}.{col}" if col in columns else f"{fallback} AS {col}"
 
+    @staticmethod
+    def _bar_pattern_version_filter(columns: set[str]) -> str:
+        if "feature_version" not in columns:
+            return ""
+        values = ", ".join(f"'{value}'" for value in CURRENT_FEATURE_VERSION_ALIASES)
+        return f" AND bp2.feature_version IN ({values})"
+
     def raw_training_rows(
         self,
         start_date: str,
@@ -194,6 +208,7 @@ class TrainingDataRepository:
 
             fs_cols = self._table_columns(con, "feature_snapshots")
             bp_cols = self._table_columns(con, "bar_pattern_features")
+            bp_version_filter = self._bar_pattern_version_filter(bp_cols)
             opt = self._opt
 
             def bp_opt(col: str, alias: str | None = None, fallback: str = "NULL") -> str:
@@ -202,15 +217,16 @@ class TrainingDataRepository:
 
             bar_pattern_join = ""
             if bp_cols:
-                bar_pattern_join = """
+                bar_pattern_join = f"""
                 LEFT JOIN bar_pattern_features bp
                   ON bp.rowid = (
                     SELECT MAX(bp2.rowid)
                     FROM bar_pattern_features bp2
                     WHERE bp2.symbol = fs.symbol
                       AND bp2.timeframe = '1m'
-                      AND datetime(bp2.bar_timestamp) <= datetime(fs.timestamp)
-                      AND datetime(bp2.bar_timestamp) >= datetime(fs.timestamp, '-90 seconds')
+                      AND bp2.bar_timestamp <= fs.timestamp
+                      AND bp2.bar_timestamp >= datetime(fs.timestamp, '-90 seconds')
+                      {bp_version_filter}
                  )
                 """
             limit_sql = ""

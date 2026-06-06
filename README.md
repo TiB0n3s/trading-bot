@@ -504,6 +504,39 @@ trend_scan_label
 
 These features and targets are available for observe-only training/research. ETF lead-lag vectors and options-skew signals still require additional reference/options feeds before they can be populated. Promotion into live authority still requires model-readiness, calibration, stability, and rollout-governance checks.
 
+Train observe-only models directly from the completed historical bar archive:
+
+```bash
+python3 pipeline/train_historical_bar_model.py \
+  --start-date 2024-06-01 \
+  --end-date 2026-06-04 \
+  --label-target triple_barrier_label \
+  --rows-per-symbol 1000 \
+  --limit 60000 \
+  --skip-suite \
+  --baseline-only
+
+python3 pipeline/train_historical_bar_model.py \
+  --start-date 2024-06-01 \
+  --end-date 2026-06-04 \
+  --label-target trend_scan_label \
+  --rows-per-symbol 1000 \
+  --limit 60000 \
+  --skip-suite \
+  --baseline-only
+```
+
+This path reads current-version `bar_pattern_features` directly, writes
+candidate diagnostics/artifacts under `ml/models/historical_bar_patterns_v1`,
+and remains `observe_only_no_live_authority`. It is the fastest way to verify
+that the multi-year Polygon bar backfill is being consumed by ML without
+requiring a matching multi-year `feature_snapshots` table.
+Use `--rows-per-symbol` for balanced universe sampling; a plain chronological
+global limit can overrepresent the earliest symbols in the archive. Use
+`--skip-suite --baseline-only` for routine validation; omit `--baseline-only`
+for sklearn training, and omit both flags for heavier after-hours comparative
+model training.
+
 Readiness command:
 
 ```bash

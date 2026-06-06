@@ -942,6 +942,9 @@ def historical_bar_readiness(start_date: str | None = None) -> bool:
         max_feature_missing_pct=float(_str_option("--max-feature-missing-pct", "5.0")),
         include_db_quality="--include-db-quality" in sys.argv,
         include_duplicate_scan="--include-duplicate-scan" in sys.argv,
+        quality_symbol_limit=_int_option("--quality-symbol-limit", 0),
+        db_quality_mode=_str_option("--db-quality-mode", "sample"),
+        sample_rows_per_symbol=_int_option("--sample-rows-per-symbol", 2000),
         limit=_int_option("--limit", 15),
     )
 

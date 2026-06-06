@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 from datetime import date
 import json
+import os
 from pathlib import Path
 import re
 import subprocess
@@ -30,6 +31,22 @@ from symbols_config import APPROVED_SYMBOLS_LIST  # noqa: E402
 
 RETRY_PLAN_VERSION = "historical_bar_retry_plan_v1"
 ERROR_SYMBOL_RE = re.compile(r"\b([A-Z]{1,5})\s+\d{4}-\d{2}-\d{2}\.\.\d{4}-\d{2}-\d{2}:")
+ENV_FILE = Path("/etc/trading-bot.env")
+
+
+def _load_env_file(path: Path = ENV_FILE) -> bool:
+    if not path.exists():
+        return False
+    for raw_line in path.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        key = key.strip()
+        value = value.strip().strip('"').strip("'")
+        if key and key not in os.environ:
+            os.environ[key] = value
+    return True
 
 
 def _error_symbols(errors: list[str]) -> list[str]:
@@ -144,6 +161,7 @@ def _print_human(payload: dict, *, execute: bool) -> None:
 
 
 def main(argv: list[str] | None = None) -> int:
+    _load_env_file()
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--start-date", required=True)
     parser.add_argument("--end-date", default=date.today().isoformat())

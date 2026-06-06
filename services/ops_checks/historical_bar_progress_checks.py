@@ -201,6 +201,7 @@ def run_historical_bar_progress(
         for manifest in manifests
         for err in (manifest.get("errors") or [])
     ]
+    latest_errors = manifests[0].get("errors") or [] if manifests else []
 
     print(f"report_version          : {HISTORICAL_BAR_PROGRESS_VERSION}")
     print("runtime_effect          : readiness_only_no_live_authority")
@@ -215,6 +216,7 @@ def run_historical_bar_progress(
     print(f"cache_floor_ready       : {len(ready_symbols) >= min_symbols}")
     print(f"recent_manifest_count   : {len(manifests)}")
     print(f"recent_manifest_errors  : {len(recent_errors)}")
+    print(f"latest_manifest_errors  : {len(latest_errors)}")
 
     if manifests:
         latest = manifests[0]
@@ -248,14 +250,18 @@ def run_historical_bar_progress(
         for err in recent_errors[:limit]:
             print(f"  {err}")
 
-    if len(ready_symbols) >= min_symbols and not recent_errors:
+    if len(ready_symbols) >= min_symbols and not latest_errors:
         print()
+        if recent_errors:
+            print("[INFO] older recent manifests contain errors, but the latest manifest is clean")
         print("[OK] cached backfill progress meets configured symbol/day floor")
         return True
 
     print()
-    if recent_errors:
-        print("[WARN] recent backfill manifests contain errors")
+    if latest_errors:
+        print("[WARN] latest backfill manifest contains errors")
+    elif recent_errors:
+        print("[INFO] older recent manifests contain errors, but the latest manifest is clean")
     if len(ready_symbols) < min_symbols:
         print("[WARN] too few cached symbols meet the configured historical day floor")
     return False

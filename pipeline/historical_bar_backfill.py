@@ -12,6 +12,7 @@ import argparse
 from dataclasses import asdict, is_dataclass
 from datetime import date, datetime, timedelta, timezone
 import json
+import os
 from pathlib import Path
 import sys
 import time
@@ -28,6 +29,22 @@ from symbols_config import APPROVED_SYMBOLS_LIST  # noqa: E402
 
 
 BACKFILL_REPORT_VERSION = "historical_bar_backfill_v1"
+ENV_FILE = Path("/etc/trading-bot.env")
+
+
+def _load_env_file(path: Path = ENV_FILE) -> bool:
+    if not path.exists():
+        return False
+    for raw_line in path.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        key = key.strip()
+        value = value.strip().strip('"').strip("'")
+        if key and key not in os.environ:
+            os.environ[key] = value
+    return True
 
 
 def _parse_symbols(values: list[str] | None, all_symbols: bool) -> list[str]:
@@ -85,6 +102,7 @@ def _write_manifest(cache_dir: Path, payload: dict) -> Path:
 
 
 def main(argv: list[str] | None = None) -> int:
+    _load_env_file()
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--start-date", required=True, help="Backfill start date, YYYY-MM-DD")
     parser.add_argument("--end-date", required=True, help="Backfill end date, YYYY-MM-DD")

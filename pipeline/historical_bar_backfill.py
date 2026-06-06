@@ -12,6 +12,7 @@ import argparse
 import csv
 from dataclasses import asdict, is_dataclass
 from datetime import date, datetime, timedelta, timezone
+import fcntl
 import json
 import os
 from pathlib import Path
@@ -32,6 +33,7 @@ from symbols_config import APPROVED_SYMBOLS_LIST  # noqa: E402
 
 BACKFILL_REPORT_VERSION = "historical_bar_backfill_v1"
 ENV_FILE = Path("/etc/trading-bot.env")
+DEFAULT_LOCK_FILE = Path("/tmp/tradingbot_historical_bar_backfill.lock")
 
 
 def _load_env_file(path: Path = ENV_FILE) -> bool:
@@ -124,6 +126,19 @@ def _write_manifest(cache_dir: Path, payload: dict) -> Path:
     return path
 
 
+def _acquire_lock(path: Path):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fh = path.open("w", encoding="utf-8")
+    try:
+        fcntl.flock(fh.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        fh.close()
+        return None
+    fh.write(str(os.getpid()))
+    fh.flush()
+    return fh
+
+
 def main(argv: list[str] | None = None) -> int:
     _load_env_file()
     parser = argparse.ArgumentParser(description=__doc__)
@@ -145,8 +160,25 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--request-sleep-seconds", type=float, default=0.0)
     parser.add_argument("--retry-attempts", type=int, default=2)
     parser.add_argument("--retry-sleep-seconds", type=float, default=15.0)
+    parser.add_argument("--lock-file", default=str(DEFAULT_LOCK_FILE))
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args(argv)
+
+    lock_handle = _acquire_lock(Path(args.lock_file))
+    if lock_handle is None:
+        print(
+            json.dumps(
+                {
+                    "report_version": BACKFILL_REPORT_VERSION,
+                    "runtime_effect": "offline_learning_archive_no_live_authority",
+                    "status": "lock_busy",
+                    "lock_file": str(args.lock_file),
+                    "message": "another historical_bar_backfill process is already running",
+                },
+                sort_keys=True,
+            )
+        )
+        return 75
 
     start = date.fromisoformat(args.start_date)
     end = date.fromisoformat(args.end_date)

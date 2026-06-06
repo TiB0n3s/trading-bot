@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
+import tempfile
 from types import SimpleNamespace
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -89,9 +90,36 @@ def test_historical_bar_backfill_max_chunks_limits_smoke_runs():
     assert len(FakeArchiveService.calls) == 1
 
 
+def test_historical_bar_backfill_refuses_concurrent_lock():
+    with tempfile.TemporaryDirectory() as tmp:
+        lock_path = Path(tmp) / "historical.lock"
+        lock_handle = backfill_pipeline._acquire_lock(lock_path)
+        try:
+            code = backfill_pipeline.main(
+                [
+                    "--start-date",
+                    "2026-01-01",
+                    "--end-date",
+                    "2026-01-02",
+                    "--symbol",
+                    "AAPL",
+                    "--dry-run",
+                    "--lock-file",
+                    str(lock_path),
+                ]
+            )
+        finally:
+            if lock_handle:
+                lock_handle.close()
+
+    assert code == 75
+
+
 if __name__ == "__main__":
     test_historical_bar_backfill_chunks_date_range_and_symbols()
     print("[OK] test_historical_bar_backfill_chunks_date_range_and_symbols")
     test_historical_bar_backfill_max_chunks_limits_smoke_runs()
     print("[OK] test_historical_bar_backfill_max_chunks_limits_smoke_runs")
-    print("\nAll 2 historical bar backfill pipeline tests passed.")
+    test_historical_bar_backfill_refuses_concurrent_lock()
+    print("[OK] test_historical_bar_backfill_refuses_concurrent_lock")
+    print("\nAll 3 historical bar backfill pipeline tests passed.")

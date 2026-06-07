@@ -549,3 +549,39 @@ class BarPatternFeatureRepository:
             "trend_scans": [dict(item) for item in trend_scans],
             "cvd_divergences": [dict(item) for item in cvd_divergences],
         }
+
+    def latest_for_symbol(
+        self,
+        symbol: str,
+        *,
+        timeframe: str = "1Min",
+        feature_version: str | None = None,
+    ) -> dict[str, Any] | None:
+        """Return the latest persisted bar-pattern feature row for a symbol."""
+        self.init_table()
+        params: list[Any] = [symbol.upper(), timeframe]
+        extra = ""
+        if feature_version:
+            extra = " AND feature_version = ?"
+            params.append(feature_version)
+        with get_connection(self.db_path) as con:
+            row = con.execute(
+                f"""
+                SELECT *
+                FROM bar_pattern_features
+                WHERE symbol = ?
+                  AND timeframe = ?
+                  {extra}
+                ORDER BY bar_timestamp DESC, id DESC
+                LIMIT 1
+                """,
+                params,
+            ).fetchone()
+        if not row:
+            return None
+        payload = dict(row)
+        try:
+            payload["feature_json"] = json.loads(payload.get("feature_json") or "{}")
+        except Exception:
+            payload["feature_json"] = {}
+        return payload

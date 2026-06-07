@@ -507,6 +507,10 @@ def build_canonical_intelligence_snapshot(
     )
     ai_pattern = analytics_state.get("ai_momentum_pattern") or {}
     historical_bar_model = analytics_state.get("historical_bar_model_intelligence") or {}
+    historical_bar_paper = analytics_state.get("historical_bar_paper_strategy") or {}
+    analytics_families = analytics_state.get("families") or {}
+    historical_bar_family = analytics_families.get("historical_bar_ml") or {}
+    paper_strategy_family = analytics_families.get("paper_strategy_ensemble") or {}
     prediction_layer = ai_pattern.get("prediction_layer") or {}
     pattern_state = {
         "version": ai_pattern.get("version") or AI_MOMENTUM_PATTERN_VERSION,
@@ -533,7 +537,27 @@ def build_canonical_intelligence_snapshot(
             "ready_label_count"
         ),
         "historical_bar_label_targets": historical_bar_model.get("label_targets") or [],
-        "historical_bar_runtime_effect": historical_bar_model.get("runtime_effect"),
+        "historical_bar_runtime_effect": (
+            historical_bar_model.get("runtime_effect")
+            or historical_bar_family.get("runtime_effect")
+        ),
+        "historical_bar_master_confidence_score": historical_bar_paper.get(
+            "master_confidence_score"
+        ),
+        "historical_bar_confidence_bucket": historical_bar_paper.get(
+            "confidence_bucket"
+        ),
+        "historical_bar_paper_recommendation": historical_bar_paper.get(
+            "paper_recommendation"
+        ),
+        "historical_bar_paper_position_size_pct": historical_bar_paper.get(
+            "paper_position_size_pct"
+        ),
+        "historical_bar_baseline_delta": historical_bar_paper.get("baseline_delta"),
+        "historical_bar_paper_runtime_effect": (
+            historical_bar_paper.get("runtime_effect")
+            or paper_strategy_family.get("runtime_effect")
+        ),
         "missing_evidence": ai_pattern.get("missing_evidence") or [],
         "provider": ai_pattern.get("provider") or "deterministic_fallback",
         "authority": "observe_only_no_live_authority",

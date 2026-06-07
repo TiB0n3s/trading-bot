@@ -288,6 +288,40 @@ def _snapshot(**overrides):
                     "requires_explicit_authority_wiring_for_runtime_use": True,
                 },
             },
+            "historical_bar_paper_strategy": {
+                "version": "historical_bar_paper_strategy_v1",
+                "runtime_effect": "paper_only_recommendation_no_live_authority",
+                "authority": "paper_only_recommendation_no_live_order_sizing_or_gate_authority",
+                "status": "paper_ready",
+                "master_confidence_score": 72.5,
+                "confidence_bucket": "medium",
+                "paper_recommendation": "paper_trade_candidate",
+                "model_component_score": 70.1,
+                "current_feature_score": 78.2,
+                "naive_baseline_score": 54.0,
+                "baseline_delta": 18.5,
+                "weighted_model_accuracy": 0.80,
+                "impact_score": 68.0,
+                "volatility_adjustment": 1.1,
+                "paper_position_size_pct": 1.25,
+                "max_paper_risk_pct": 2.0,
+                "stop_risk_pct": 1.2,
+                "portfolio_correlation_penalty": 1.0,
+                "model_weights": [],
+                "feature_snapshot": {
+                    "symbol": "AAPL",
+                    "bar_timestamp": "2026-06-04T15:00:00+00:00",
+                },
+                "reasons": ["model_component_score=70.10"],
+                "guardrails": {
+                    "paper_only": True,
+                    "loads_model_binaries": False,
+                    "can_block_live_trades": False,
+                    "can_size_live_orders": False,
+                    "can_submit_orders": False,
+                    "requires_holdout_validation_before_authority": True,
+                },
+            },
             "paper_learning_authority_override": {
                 "allowed": True,
                 "setup_score": 82,
@@ -367,6 +401,15 @@ def test_build_canonical_snapshot_collects_core_state_and_hashes():
         "triple_barrier_label",
     ]
     assert data["pattern_state"]["historical_bar_runtime_effect"] == "observe_only_no_live_authority"
+    assert data["pattern_state"]["historical_bar_master_confidence_score"] == 72.5
+    assert data["pattern_state"]["historical_bar_confidence_bucket"] == "medium"
+    assert data["pattern_state"]["historical_bar_paper_recommendation"] == "paper_trade_candidate"
+    assert data["pattern_state"]["historical_bar_paper_position_size_pct"] == 1.25
+    assert data["pattern_state"]["historical_bar_baseline_delta"] == 18.5
+    assert (
+        data["pattern_state"]["historical_bar_paper_runtime_effect"]
+        == "paper_only_recommendation_no_live_authority"
+    )
     assert data["setup_state"]["policy_action"] == "boost"
     assert data["setup_state"]["quality_source"] == "setup_engine"
     assert data["setup_state"]["quality_recommendation"] == "favorable"
@@ -427,6 +470,7 @@ def test_build_canonical_snapshot_collects_core_state_and_hashes():
     assert data["event_state"]["support_count"] == 3
     assert data["analytics_state"]["runtime_effect"] == "canonical_audit_and_ml_context_only"
     assert data["analytics_state"]["families"]["historical_bar_ml"]["status"] == "active"
+    assert data["analytics_state"]["families"]["paper_strategy_ensemble"]["status"] == "active"
     assert (
         data["analytics_state"]["families"]["historical_bar_ml"]["authority"]
         == "observe_only_report_only_no_order_sizing_or_gate_authority"
@@ -447,9 +491,18 @@ def test_build_canonical_snapshot_collects_core_state_and_hashes():
     historical_bar = data["analytics_state"]["historical_bar_model_intelligence"]
     assert historical_bar["status"] == "observe_only_ready"
     assert historical_bar["ready_label_count"] == 2
-    assert historical_bar["guardrails"]["can_block_trades"] is False
-    assert historical_bar["guardrails"]["can_size_orders"] is False
-    assert historical_bar["labels"][0]["label_target"] == "trend_scan_label"
+    assert (
+        data["analytics_state"]["families"]["historical_bar_ml"]["authority"]
+        == "observe_only_report_only_no_order_sizing_or_gate_authority"
+    )
+    assert historical_bar["label_targets"] == ["trend_scan_label", "triple_barrier_label"]
+    paper_strategy = data["analytics_state"]["historical_bar_paper_strategy"]
+    assert paper_strategy["paper_recommendation"] == "paper_trade_candidate"
+    assert paper_strategy["baseline_delta"] == 18.5
+    assert (
+        data["analytics_state"]["families"]["paper_strategy_ensemble"]["authority"]
+        == "paper_only_recommendation_no_live_order_sizing_or_gate_authority"
+    )
     assert "predictive" in data["analytics_state"]["active_families"]
     assert "historical_bar_ml" in data["analytics_state"]["active_families"]
     assert "sentiment_nlp" in data["analytics_state"]["active_families"]

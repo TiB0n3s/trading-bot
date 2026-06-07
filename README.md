@@ -548,6 +548,7 @@ Readiness command:
 python3 ops_check.py advanced-alpha-readiness 2026-06-04
 python3 ops_check.py advanced-alpha-comparison 2026-06-04
 python3 ops_check.py historical-bar-models
+python3 ops_check.py historical-bar-paper-strategy AAPL --action buy
 python3 ops_check.py historical-bar-validation 2024-06-01 --end-date 2026-06-04 --label-target triple_barrier_label
 python3 ops_check.py monday-readiness
 ```
@@ -563,6 +564,11 @@ canonical `analytics_state.historical_bar_model_intelligence` as
 observe-only evidence. That payload is report/replay context only: it does not
 load model binaries, block trades, size orders, submit orders, or affect the
 live decision policy without a separate approved authority path.
+`historical-bar-paper-strategy` combines ready historical-bar diagnostics,
+current bar-pattern features when available, a naive baseline comparison, and
+portfolio correlation friction into a paper-only master confidence score and
+paper sizing recommendation. It is intentionally non-authoritative and does not
+feed live sizing, blocking, approval, or order submission.
 `historical-bar-validation` reports label distributions by symbol, session
 phase, volatility, CVD, VPIN, and fractional-memory buckets. `monday-readiness`
 summarizes market context presence, Polygon key configuration, current

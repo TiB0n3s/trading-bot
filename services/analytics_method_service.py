@@ -15,6 +15,9 @@ from services.ai_review_suite_service import build_ai_review_suite
 from services.historical_bar_model_intelligence_service import (
     build_historical_bar_model_intelligence,
 )
+from services.historical_bar_paper_strategy_service import (
+    build_historical_bar_paper_strategy,
+)
 from services.optional_dependency_service import optional_dependency_status
 from services.portfolio_ai_toolkit_service import symbol_ai_tool_profile
 from services.regime_risk_protocol_service import crash_risk_protocol, reentry_protocol
@@ -91,32 +94,23 @@ def _compact_ai_review_suite(review: dict[str, Any]) -> dict[str, Any]:
 def _compact_historical_bar_intelligence(payload: dict[str, Any]) -> dict[str, Any]:
     labels = payload.get("labels") or []
     return {
-        "version": payload.get("version"),
-        "runtime_effect": payload.get("runtime_effect"),
-        "authority": payload.get("authority"),
         "status": payload.get("status"),
-        "diagnostics_found": payload.get("diagnostics_found"),
-        "labels_assessed": payload.get("labels_assessed"),
         "ready_label_count": payload.get("ready_label_count"),
         "label_targets": payload.get("label_targets") or [],
         "latest_generated_at": payload.get("latest_generated_at"),
         "accuracy_min": payload.get("accuracy_min"),
         "accuracy_max": payload.get("accuracy_max"),
-        "labels": [
-            {
-                "label_target": item.get("label_target"),
-                "model_id": item.get("model_id"),
-                "status": item.get("status"),
-                "rows_loaded": item.get("rows_loaded"),
-                "symbol_count": item.get("symbol_count"),
-                "accuracy": item.get("accuracy"),
-                "positive_label_rate": item.get("positive_label_rate"),
-                "negative_label_rate": item.get("negative_label_rate"),
-                "failed_thresholds": item.get("failed_thresholds") or [],
-            }
-            for item in labels[:4]
-        ],
-        "guardrails": payload.get("guardrails") or {},
+    }
+
+
+def _compact_historical_bar_paper_strategy(payload: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "status": payload.get("status"),
+        "master_confidence_score": payload.get("master_confidence_score"),
+        "confidence_bucket": payload.get("confidence_bucket"),
+        "paper_recommendation": payload.get("paper_recommendation"),
+        "baseline_delta": payload.get("baseline_delta"),
+        "paper_position_size_pct": payload.get("paper_position_size_pct"),
     }
 
 
@@ -158,6 +152,15 @@ def build_analytics_method_state(
     historical_bar_model_intelligence = _dict(
         account_state.get("historical_bar_model_intelligence")
     ) or build_historical_bar_model_intelligence()
+    historical_bar_paper_strategy = _dict(
+        account_state.get("historical_bar_paper_strategy")
+    ) or build_historical_bar_paper_strategy(
+        symbol=symbol,
+        action=context.get("action") or account_state.get("action"),
+        context=context,
+        account_state=account_state,
+        historical_bar_intelligence=historical_bar_model_intelligence,
+    ).to_dict()
     existing_ai_review_suite = _dict(account_state.get("ai_review_suite"))
     rollout_contract = _dict(account_state.get("rollout_contract"))
 
@@ -250,6 +253,7 @@ def build_analytics_method_state(
         "observe_only_ready",
         "partially_ready",
     }
+    historical_bar_paper_ready = historical_bar_paper_strategy.get("status") == "paper_ready"
     pattern_active = _has_any(
         setup,
         ("setup_label", "setup_score", "setup_policy_action"),
@@ -305,6 +309,21 @@ def build_analytics_method_state(
             "authority": historical_bar_model_intelligence.get("authority"),
             "ready_label_count": historical_bar_model_intelligence.get("ready_label_count"),
             "label_targets": historical_bar_model_intelligence.get("label_targets") or [],
+        },
+        "paper_strategy_ensemble": {
+            "status": _status(historical_bar_paper_ready),
+            "sources": [
+                "historical_bar_model_intelligence",
+                "current_bar_pattern_features",
+                "naive_baseline_comparison",
+                "portfolio_correlation_penalty",
+            ],
+            "runtime_effect": historical_bar_paper_strategy.get("runtime_effect"),
+            "authority": historical_bar_paper_strategy.get("authority"),
+            "paper_recommendation": historical_bar_paper_strategy.get("paper_recommendation"),
+            "master_confidence_score": historical_bar_paper_strategy.get(
+                "master_confidence_score"
+            ),
         },
         "risk_analytics": {
             "status": _status(risk_active),
@@ -439,6 +458,9 @@ def build_analytics_method_state(
         "ai_momentum_pattern": ai_pattern_payload,
         "historical_bar_model_intelligence": _compact_historical_bar_intelligence(
             historical_bar_model_intelligence
+        ),
+        "historical_bar_paper_strategy": _compact_historical_bar_paper_strategy(
+            historical_bar_paper_strategy
         ),
         "ai_review_suite": _compact_ai_review_suite(ai_review_suite),
         "model_router": {

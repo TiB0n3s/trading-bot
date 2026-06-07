@@ -76,6 +76,7 @@ Usage:
   python3 ops_check.py historical-bar-readiness [START_DATE] [--end-date YYYY-MM-DD] [--include-db-quality]
   python3 ops_check.py historical-bar-retry-plan START_DATE [--end-date YYYY-MM-DD] [--execute]
   python3 ops_check.py historical-bar-models
+  python3 ops_check.py historical-bar-paper-strategy SYMBOL [--action buy|sell]
   python3 ops_check.py historical-bar-validation START_DATE [--end-date YYYY-MM-DD]
   python3 ops_check.py ml-dataset-export START_DATE [END_DATE] [--output PATH] [--format jsonl|csv] [--max-rows N]
   python3 ops_check.py monday-readiness
@@ -142,6 +143,9 @@ from services.ops_checks.historical_bar_progress_checks import run_historical_ba
 from services.ops_checks.historical_bar_readiness_checks import run_historical_bar_readiness
 from services.ops_checks.historical_bar_model_checks import (
     run_historical_bar_model_readiness,
+)
+from services.ops_checks.historical_bar_paper_strategy_checks import (
+    run_historical_bar_paper_strategy_report,
 )
 from services.ops_checks.historical_bar_validation_checks import (
     run_historical_bar_validation,
@@ -991,6 +995,13 @@ def historical_bar_models() -> bool:
     )
 
 
+def historical_bar_paper_strategy(symbol: str) -> bool:
+    return run_historical_bar_paper_strategy_report(
+        symbol=symbol,
+        action=_str_option("--action", "buy"),
+    )
+
+
 def historical_bar_validation(start_date: str) -> bool:
     return run_historical_bar_validation(
         base_dir=BASE_DIR,
@@ -1448,6 +1459,9 @@ def main():
 
     if command == "historical-bar-models":
         return 0 if historical_bar_models() else 1
+
+    if command == "historical-bar-paper-strategy":
+        return 0 if historical_bar_paper_strategy(target_date) else 1
 
     if command == "historical-bar-validation":
         return 0 if historical_bar_validation(target_date) else 1

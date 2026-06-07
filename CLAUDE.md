@@ -568,6 +568,15 @@ canonical `analytics_state.historical_bar_model_intelligence`. It is
 observe-only: it reads diagnostics only, never loads model binaries, and cannot
 block, size, approve, or submit trades without explicit future authority wiring.
 
+`services/historical_bar_paper_strategy_service.py` builds a paper-only master
+confidence score from historical-bar candidate readiness, current bar-pattern
+features, a naive baseline comparison, and portfolio correlation friction. It
+also computes a paper sizing recommendation using a 2% risk budget and
+volatility adjustment. The output is archived in canonical pattern/analytics
+state and available through `python3 ops_check.py historical-bar-paper-strategy
+SYMBOL --action buy`, but it is not consumed by live approval, live sizing, or
+order submission.
+
 Use `python3 ops_check.py advanced-alpha-readiness YYYY-MM-DD` to see which
 advanced families are integrated, partially integrated, or blocked by missing
 feeds/schema/outcomes.

@@ -88,9 +88,14 @@ Recent completed roadmap items:
 - `ops_check.py advanced-alpha-comparison YYYY-MM-DD` compares standard score
   thresholding against an asymmetric false-positive guard using linked forward
   outcomes. It is diagnostic-only and must not be treated as authority.
+- `ops_check.py friction-heatmap YYYY-MM-DD` reports LSI/VPIN bucketed
+  symmetric-vs-asymmetric stop-outs and toxic stop-outs avoided. The Streamlit
+  dashboard at `dashboards/friction_heatmap_dashboard.py` reads the same
+  payload and remains read-only.
 - Slippage-adjusted fractional Kelly sizing is a final BUY size cap only. It
-  may reduce or zero size when predicted slippage erodes ATR-based reward/risk,
-  but it must never approve trades, increase size, or bypass execution safety.
+  may reduce or zero size when predicted slippage or LSI/VPIN stress erodes
+  ATR-based reward/risk, but it must never approve trades, increase size, or
+  bypass execution safety.
 - The pre-market pipeline may write `shadow_predictions` for candidate models;
   this is observe-only and must not be read by live execution. Operators compare
   it with `python3 ops_check.py shadow-predictions YYYY-MM-DD`.

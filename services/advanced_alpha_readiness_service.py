@@ -163,6 +163,8 @@ def build_advanced_alpha_readiness_payload(
     coverage_threshold_met = rows >= 500
     outcome_threshold_met = rows_with_forward >= 500
     comparison_report_available = trend_scan_rows > 0 and outcome_threshold_met
+    dashboard_path = Path(__file__).resolve().parents[1] / "dashboards" / "friction_heatmap_dashboard.py"
+    friction_heatmap_available = dashboard_path.exists()
 
     items = [
         _item(
@@ -223,16 +225,17 @@ def build_advanced_alpha_readiness_payload(
                 "lsi_feature_enabled": lsi_enabled,
                 "schema_integrated": False,
                 "outcome_linkage_ge_500": outcome_threshold_met,
-                "ops_report_visible": False,
+                "ops_report_visible": friction_heatmap_available,
                 "authority_leak_safe": True,
             },
             current_capability=(
                 "Inputs exist partially through VPIN/CVD proxies and execution "
-                "quality fields, but no unified LSI feature is persisted."
+                "quality fields; LSI now feeds observe-only friction reporting "
+                "and Kelly sizing telemetry."
             ),
             next_action=(
-                "Aggregate VPIN, spread/slippage deterioration, quote instability, "
-                "and volatility stretch into an observe-only LSI bucket."
+                "Use friction heatmap evidence to compare toxic stop-outs avoided "
+                "before considering any authority promotion."
             ),
         ),
         _item(
@@ -295,13 +298,13 @@ def build_advanced_alpha_readiness_payload(
             checks={
                 "plotly_available": plotly_available,
                 "streamlit_available": streamlit_available,
-                "reads_real_reports": False,
+                "reads_real_reports": friction_heatmap_available,
                 "shadow_vs_live_model_metrics_available": False,
                 "no_execution_imports": True,
                 "authority_leak_safe": True,
             },
-            current_capability="No dashboard is wired; ops CLI reports remain the current monitor surface.",
-            next_action="Add a read-only dashboard only after the DB/report payloads stabilize.",
+            current_capability="Read-only friction heatmap dashboard is wired to report payloads.",
+            next_action="Add shadow-vs-live model metrics once live shadow rows are available.",
         ),
     ]
 

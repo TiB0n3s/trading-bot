@@ -100,6 +100,7 @@ TESTS = [
     "tests/test_supervised_prediction_training_service.py",
     "tests/test_supervised_prediction_training_repo.py",
     "tests/test_advanced_alpha_model_comparison_service.py",
+    "tests/test_friction_heatmap_service.py",
     "tests/test_advanced_alpha_readiness_service.py",
     "tests/test_shadow_prediction_service.py",
     "tests/test_timescale_tick_writer_service.py",

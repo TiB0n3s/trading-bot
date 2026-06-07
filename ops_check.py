@@ -50,6 +50,7 @@ Usage:
   python3 ops_check.py resource-readiness
   python3 ops_check.py advanced-alpha-readiness
   python3 ops_check.py advanced-alpha-comparison
+  python3 ops_check.py friction-heatmap
   python3 ops_check.py trading-education-health
   python3 ops_check.py trading-education-ingest [--max-pages N] [--dry-run]
   python3 ops_check.py trading-education-review
@@ -184,6 +185,7 @@ from services.ops_checks.advanced_alpha_readiness_checks import (
 from services.ops_checks.advanced_alpha_model_comparison_checks import (
     run_advanced_alpha_model_comparison,
 )
+from services.ops_checks.friction_heatmap_checks import run_friction_heatmap
 from services.ops_checks.trading_education_checks import (
     run_trading_education_coverage,
     run_trading_education_health,
@@ -680,6 +682,10 @@ def advanced_alpha_readiness(target_date):
 
 def advanced_alpha_comparison(target_date):
     return run_advanced_alpha_model_comparison(target_date, base_dir=BASE_DIR)
+
+
+def friction_heatmap(target_date):
+    return run_friction_heatmap(target_date, base_dir=BASE_DIR)
 
 
 def trading_education_health():
@@ -1349,6 +1355,8 @@ def main():
         return 0 if advanced_alpha_readiness(target_date) else 1
     if command == "advanced-alpha-comparison":
         return 0 if advanced_alpha_comparison(target_date) else 1
+    if command == "friction-heatmap":
+        return 0 if friction_heatmap(target_date) else 1
 
     if command == "trading-education-health":
         return 0 if trading_education_health() else 1

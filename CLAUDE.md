@@ -562,6 +562,12 @@ signals require additional feeds before they can be populated. Live promotion
 still requires model-readiness, calibration, stability, and rollout-governance
 checks.
 
+`services/historical_bar_model_intelligence_service.py` summarizes the latest
+historical-bar candidate diagnostics and injects compact readiness evidence into
+canonical `analytics_state.historical_bar_model_intelligence`. It is
+observe-only: it reads diagnostics only, never loads model binaries, and cannot
+block, size, approve, or submit trades without explicit future authority wiring.
+
 Use `python3 ops_check.py advanced-alpha-readiness YYYY-MM-DD` to see which
 advanced families are integrated, partially integrated, or blocked by missing
 feeds/schema/outcomes.

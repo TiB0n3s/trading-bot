@@ -557,6 +557,12 @@ These reports distinguish the currently integrated bar-level proxies from true t
 candidates, threshold failures, and artifact hygiene. Add `--prune` for a
 dry-run cleanup plan, and add `--execute-prune` only when you intentionally
 want older non-protected binaries removed. Diagnostics are preserved.
+The latest diagnostics are also summarized by
+`services/historical_bar_model_intelligence_service.py` and included in
+canonical `analytics_state.historical_bar_model_intelligence` as
+observe-only evidence. That payload is report/replay context only: it does not
+load model binaries, block trades, size orders, submit orders, or affect the
+live decision policy without a separate approved authority path.
 `historical-bar-validation` reports label distributions by symbol, session
 phase, volatility, CVD, VPIN, and fractional-memory buckets. `monday-readiness`
 summarizes market context presence, Polygon key configuration, current

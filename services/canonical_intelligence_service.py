@@ -506,6 +506,7 @@ def build_canonical_intelligence_snapshot(
         account_state=account_state,
     )
     ai_pattern = analytics_state.get("ai_momentum_pattern") or {}
+    historical_bar_model = analytics_state.get("historical_bar_model_intelligence") or {}
     prediction_layer = ai_pattern.get("prediction_layer") or {}
     pattern_state = {
         "version": ai_pattern.get("version") or AI_MOMENTUM_PATTERN_VERSION,
@@ -527,6 +528,12 @@ def build_canonical_intelligence_snapshot(
         "historical_sample_size": ai_pattern.get("historical_sample_size"),
         "historical_status": ai_pattern.get("historical_status"),
         "prediction_status": prediction_layer.get("status"),
+        "historical_bar_model_status": historical_bar_model.get("status"),
+        "historical_bar_ready_label_count": historical_bar_model.get(
+            "ready_label_count"
+        ),
+        "historical_bar_label_targets": historical_bar_model.get("label_targets") or [],
+        "historical_bar_runtime_effect": historical_bar_model.get("runtime_effect"),
         "missing_evidence": ai_pattern.get("missing_evidence") or [],
         "provider": ai_pattern.get("provider") or "deterministic_fallback",
         "authority": "observe_only_no_live_authority",

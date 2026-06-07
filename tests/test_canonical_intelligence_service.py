@@ -244,6 +244,50 @@ def _snapshot(**overrides):
                     }
                 ],
             },
+            "historical_bar_model_intelligence": {
+                "version": "historical_bar_model_intelligence_v1",
+                "runtime_effect": "observe_only_no_live_authority",
+                "authority": "observe_only_report_only_no_order_sizing_or_gate_authority",
+                "status": "observe_only_ready",
+                "diagnostics_found": 10,
+                "labels_assessed": 2,
+                "ready_label_count": 2,
+                "label_targets": ["trend_scan_label", "triple_barrier_label"],
+                "latest_generated_at": "2026-06-07T13:22:37+00:00",
+                "accuracy_min": 0.7556,
+                "accuracy_max": 0.8308,
+                "labels": [
+                    {
+                        "label_target": "trend_scan_label",
+                        "model_id": "historical_bar_trend_scan_label_20260607T132237Z",
+                        "status": "observe_only_candidate_ready",
+                        "rows_loaded": 14750,
+                        "symbol_count": 59,
+                        "accuracy": 0.8308,
+                        "positive_label_rate": 0.5263,
+                        "negative_label_rate": 0.4521,
+                        "failed_thresholds": [],
+                    },
+                    {
+                        "label_target": "triple_barrier_label",
+                        "model_id": "historical_bar_triple_barrier_label_20260607T132203Z",
+                        "status": "observe_only_candidate_ready",
+                        "rows_loaded": 14750,
+                        "symbol_count": 59,
+                        "accuracy": 0.7556,
+                        "positive_label_rate": 0.4406,
+                        "negative_label_rate": 0.5536,
+                        "failed_thresholds": [],
+                    },
+                ],
+                "guardrails": {
+                    "loads_model_binaries": False,
+                    "can_block_trades": False,
+                    "can_size_orders": False,
+                    "can_submit_orders": False,
+                    "requires_explicit_authority_wiring_for_runtime_use": True,
+                },
+            },
             "paper_learning_authority_override": {
                 "allowed": True,
                 "setup_score": 82,
@@ -316,6 +360,13 @@ def test_build_canonical_snapshot_collects_core_state_and_hashes():
     assert data["pattern_state"]["expected_mae_pct"] == -0.45
     assert data["pattern_state"]["historical_status"] == "needs_lifecycle_outcomes"
     assert data["pattern_state"]["prediction_status"] == "observe_only"
+    assert data["pattern_state"]["historical_bar_model_status"] == "observe_only_ready"
+    assert data["pattern_state"]["historical_bar_ready_label_count"] == 2
+    assert data["pattern_state"]["historical_bar_label_targets"] == [
+        "trend_scan_label",
+        "triple_barrier_label",
+    ]
+    assert data["pattern_state"]["historical_bar_runtime_effect"] == "observe_only_no_live_authority"
     assert data["setup_state"]["policy_action"] == "boost"
     assert data["setup_state"]["quality_source"] == "setup_engine"
     assert data["setup_state"]["quality_recommendation"] == "favorable"
@@ -375,6 +426,11 @@ def test_build_canonical_snapshot_collects_core_state_and_hashes():
     assert data["confidence"]["confidence_quality"] == "medium"
     assert data["event_state"]["support_count"] == 3
     assert data["analytics_state"]["runtime_effect"] == "canonical_audit_and_ml_context_only"
+    assert data["analytics_state"]["families"]["historical_bar_ml"]["status"] == "active"
+    assert (
+        data["analytics_state"]["families"]["historical_bar_ml"]["authority"]
+        == "observe_only_report_only_no_order_sizing_or_gate_authority"
+    )
     assert data["analytics_state"]["model_router"]["current_regime_label"] == "quiet_bull"
     assert data["analytics_state"]["model_router"]["active_model_slot"] == "regime_0_model"
     ai_pattern = data["analytics_state"]["ai_momentum_pattern"]
@@ -388,7 +444,14 @@ def test_build_canonical_snapshot_collects_core_state_and_hashes():
     ai_review = data["analytics_state"]["ai_review_suite"]
     assert ai_review["r"] == "observe_only_no_live_authority"
     assert ai_review["n"] == 10
+    historical_bar = data["analytics_state"]["historical_bar_model_intelligence"]
+    assert historical_bar["status"] == "observe_only_ready"
+    assert historical_bar["ready_label_count"] == 2
+    assert historical_bar["guardrails"]["can_block_trades"] is False
+    assert historical_bar["guardrails"]["can_size_orders"] is False
+    assert historical_bar["labels"][0]["label_target"] == "trend_scan_label"
     assert "predictive" in data["analytics_state"]["active_families"]
+    assert "historical_bar_ml" in data["analytics_state"]["active_families"]
     assert "sentiment_nlp" in data["analytics_state"]["active_families"]
     assert data["analytics_state"]["families"]["alternative_data"]["status"] == "not_integrated"
     assert data["policy_artifact_ref"]["state_hash"] == "abc"

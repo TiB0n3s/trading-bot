@@ -12,6 +12,9 @@ from typing import Any
 from services.async_ai_pipeline_architecture_service import async_pipeline_contract
 from services.ai_momentum_pattern_service import deterministic_momentum_pattern
 from services.ai_review_suite_service import build_ai_review_suite
+from services.historical_bar_model_intelligence_service import (
+    build_historical_bar_model_intelligence,
+)
 from services.optional_dependency_service import optional_dependency_status
 from services.portfolio_ai_toolkit_service import symbol_ai_tool_profile
 from services.regime_risk_protocol_service import crash_risk_protocol, reentry_protocol
@@ -85,6 +88,38 @@ def _compact_ai_review_suite(review: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _compact_historical_bar_intelligence(payload: dict[str, Any]) -> dict[str, Any]:
+    labels = payload.get("labels") or []
+    return {
+        "version": payload.get("version"),
+        "runtime_effect": payload.get("runtime_effect"),
+        "authority": payload.get("authority"),
+        "status": payload.get("status"),
+        "diagnostics_found": payload.get("diagnostics_found"),
+        "labels_assessed": payload.get("labels_assessed"),
+        "ready_label_count": payload.get("ready_label_count"),
+        "label_targets": payload.get("label_targets") or [],
+        "latest_generated_at": payload.get("latest_generated_at"),
+        "accuracy_min": payload.get("accuracy_min"),
+        "accuracy_max": payload.get("accuracy_max"),
+        "labels": [
+            {
+                "label_target": item.get("label_target"),
+                "model_id": item.get("model_id"),
+                "status": item.get("status"),
+                "rows_loaded": item.get("rows_loaded"),
+                "symbol_count": item.get("symbol_count"),
+                "accuracy": item.get("accuracy"),
+                "positive_label_rate": item.get("positive_label_rate"),
+                "negative_label_rate": item.get("negative_label_rate"),
+                "failed_thresholds": item.get("failed_thresholds") or [],
+            }
+            for item in labels[:4]
+        ],
+        "guardrails": payload.get("guardrails") or {},
+    }
+
+
 def build_analytics_method_state(
     *,
     symbol: str | None = None,
@@ -120,6 +155,9 @@ def build_analytics_method_state(
         or _dict(account_state.get("decision_policy")).get("utility_estimate")
     )
     ai_momentum_pattern = _dict(account_state.get("ai_momentum_pattern"))
+    historical_bar_model_intelligence = _dict(
+        account_state.get("historical_bar_model_intelligence")
+    ) or build_historical_bar_model_intelligence()
     existing_ai_review_suite = _dict(account_state.get("ai_review_suite"))
     rollout_contract = _dict(account_state.get("rollout_contract"))
 
@@ -208,13 +246,17 @@ def build_analytics_method_state(
             "reversion_risk",
         ),
     )
+    historical_bar_ready = historical_bar_model_intelligence.get("status") in {
+        "observe_only_ready",
+        "partially_ready",
+    }
     pattern_active = _has_any(
         setup,
         ("setup_label", "setup_score", "setup_policy_action"),
     ) or _has_any(
         setup_quality,
         ("label", "score", "structure"),
-    )
+    ) or historical_bar_ready
 
     analytics_families = {
         "predictive": {
@@ -249,7 +291,20 @@ def build_analytics_method_state(
         },
         "pattern_recognition": {
             "status": _status(pattern_active or _present(ai_momentum_pattern)),
-            "sources": ["setup_engine", "setup_structure_service", "ai_momentum_pattern_service"],
+            "sources": [
+                "setup_engine",
+                "setup_structure_service",
+                "ai_momentum_pattern_service",
+                "historical_bar_patterns_v1",
+            ],
+        },
+        "historical_bar_ml": {
+            "status": _status(historical_bar_ready),
+            "sources": ["polygon_1min_bars", "bar_pattern_features", "historical_bar_patterns_v1"],
+            "runtime_effect": historical_bar_model_intelligence.get("runtime_effect"),
+            "authority": historical_bar_model_intelligence.get("authority"),
+            "ready_label_count": historical_bar_model_intelligence.get("ready_label_count"),
+            "label_targets": historical_bar_model_intelligence.get("label_targets") or [],
         },
         "risk_analytics": {
             "status": _status(risk_active),
@@ -382,6 +437,9 @@ def build_analytics_method_state(
         "optional_dependency_status": dependency_payload,
         "portfolio_toolkit": symbol_ai_tool_profile(symbol),
         "ai_momentum_pattern": ai_pattern_payload,
+        "historical_bar_model_intelligence": _compact_historical_bar_intelligence(
+            historical_bar_model_intelligence
+        ),
         "ai_review_suite": _compact_ai_review_suite(ai_review_suite),
         "model_router": {
             "status": "active" if regime_routing else "contract_defined",

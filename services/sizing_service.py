@@ -197,6 +197,11 @@ def apply_final_sizing(
                     "cap_pct": slippage_kelly.cap_pct,
                     "reason": slippage_kelly.reason,
                     "friction_ratio": slippage_kelly.friction_ratio,
+                    "liquidity_stress_score": slippage_kelly.liquidity_stress_score,
+                    "liquidity_stress_bucket": slippage_kelly.liquidity_stress_bucket,
+                    "liquidity_stress_size_multiplier": (
+                        slippage_kelly.liquidity_stress_size_multiplier
+                    ),
                     "model_prob": slippage_kelly.model_prob,
                     "predicted_slippage_pct": slippage_kelly.predicted_slippage_pct,
                     "adjusted_risk_reward_ratio": (

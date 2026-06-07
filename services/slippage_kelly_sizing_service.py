@@ -32,6 +32,9 @@ class SlippageKellyDecision:
     adjusted_risk_reward_ratio: float | None
     predicted_slippage_pct: float | None
     friction_ratio: float | None
+    liquidity_stress_score: float | None
+    liquidity_stress_bucket: str | None
+    liquidity_stress_size_multiplier: float | None
     kelly_fraction: float | None
     fractional_kelly_pct: float | None
     cap_pct: float | None
@@ -122,6 +125,85 @@ def _predicted_slippage_pct(account_state: dict[str, Any]) -> float | None:
     return None
 
 
+def _liquidity_stress_from_state(account_state: dict[str, Any]) -> tuple[float | None, str | None]:
+    paper_strategy = _dict(account_state.get("historical_bar_paper_strategy"))
+    explicit_score = _float(paper_strategy.get("liquidity_stress_score"))
+    explicit_bucket = str(paper_strategy.get("liquidity_stress_bucket") or "").strip().lower()
+    if explicit_score is not None:
+        bucket = explicit_bucket or _bucket_liquidity_stress(explicit_score)
+        return explicit_score, bucket
+
+    bar_features = _dict(account_state.get("bar_pattern_features"))
+    execution_quality = _dict(account_state.get("execution_quality"))
+    volatility = _dict(account_state.get("volatility_normalization"))
+    components: list[float] = []
+
+    vpin = _float(bar_features.get("vpin_toxicity_20"))
+    if vpin is not None:
+        components.append(max(0.0, min(100.0, vpin * 100.0)))
+
+    spread = _float(bar_features.get("bid_ask_spread_pct")) or _float(
+        execution_quality.get("spread_pct")
+    )
+    if spread is not None:
+        components.append(max(0.0, min(100.0, spread * 80.0)))
+
+    slippage = _float(bar_features.get("slippage_estimate_pct")) or _float(
+        execution_quality.get("slippage_estimate_pct")
+    )
+    if slippage is not None:
+        components.append(max(0.0, min(100.0, slippage * 120.0)))
+
+    sweep = _float(bar_features.get("liquidity_sweep_risk"))
+    if sweep is not None:
+        components.append(max(0.0, min(100.0, sweep * 100.0)))
+
+    move_zscore = _float(volatility.get("move_zscore"))
+    if move_zscore is not None:
+        components.append(max(0.0, min(100.0, abs(move_zscore) * 20.0)))
+
+    if not components:
+        return None, None
+    score = sum(components) / len(components)
+    return score, _bucket_liquidity_stress(score)
+
+
+def _bucket_liquidity_stress(score: float) -> str:
+    if score >= 70:
+        return "severe"
+    if score >= 45:
+        return "elevated"
+    if score >= 20:
+        return "moderate"
+    return "normal"
+
+
+def _liquidity_stress_multiplier(
+    *,
+    score: float | None,
+    bucket: str | None,
+    account_state: dict[str, Any],
+) -> tuple[float, str | None]:
+    if score is None and not bucket:
+        return 1.0, None
+    bucket = (bucket or _bucket_liquidity_stress(float(score or 0.0))).lower()
+    severe_mult = _env_float("SLIPPAGE_KELLY_LSI_SEVERE_MULT", 0.25)
+    elevated_mult = _env_float("SLIPPAGE_KELLY_LSI_ELEVATED_MULT", 0.50)
+    moderate_mult = _env_float("SLIPPAGE_KELLY_LSI_MODERATE_MULT", 0.75)
+    normal_mult = _env_float("SLIPPAGE_KELLY_LSI_NORMAL_MULT", 1.0)
+    toxic_vpin_zero = _env_float("SLIPPAGE_KELLY_TOXIC_VPIN_ZERO_THRESHOLD", 0.95)
+    vpin = _float(_dict(account_state.get("bar_pattern_features")).get("vpin_toxicity_20"))
+    if vpin is not None and vpin >= toxic_vpin_zero:
+        return 0.0, f"toxic_vpin_exceeds_{toxic_vpin_zero:.2f}"
+    if bucket == "severe":
+        return max(0.0, min(1.0, severe_mult)), "lsi_severe"
+    if bucket == "elevated":
+        return max(0.0, min(1.0, elevated_mult)), "lsi_elevated"
+    if bucket == "moderate":
+        return max(0.0, min(1.0, moderate_mult)), "lsi_moderate"
+    return max(0.0, min(1.0, normal_mult)), "lsi_normal"
+
+
 def _decision(
     *,
     enabled: bool,
@@ -135,6 +217,9 @@ def _decision(
     adjusted_risk_reward_ratio: float | None = None,
     predicted_slippage_pct: float | None = None,
     friction_ratio: float | None = None,
+    liquidity_stress_score: float | None = None,
+    liquidity_stress_bucket: str | None = None,
+    liquidity_stress_size_multiplier: float | None = None,
     kelly_fraction: float | None = None,
     fractional_kelly_pct: float | None = None,
     cap_pct: float | None = None,
@@ -159,6 +244,17 @@ def _decision(
             round(predicted_slippage_pct, 4) if predicted_slippage_pct is not None else None
         ),
         friction_ratio=round(friction_ratio, 4) if friction_ratio is not None else None,
+        liquidity_stress_score=(
+            round(liquidity_stress_score, 4)
+            if liquidity_stress_score is not None
+            else None
+        ),
+        liquidity_stress_bucket=liquidity_stress_bucket,
+        liquidity_stress_size_multiplier=(
+            round(liquidity_stress_size_multiplier, 4)
+            if liquidity_stress_size_multiplier is not None
+            else None
+        ),
         kelly_fraction=round(kelly_fraction, 4) if kelly_fraction is not None else None,
         fractional_kelly_pct=(
             round(fractional_kelly_pct, 4) if fractional_kelly_pct is not None else None
@@ -219,6 +315,12 @@ def calculate_slippage_adjusted_kelly_cap(
     max_friction = _env_float("SLIPPAGE_KELLY_MAX_FRICTION_RATIO", 0.20)
     fractional_mult = _env_float("SLIPPAGE_KELLY_FRACTION", 0.25)
     max_cap_pct = _env_float("SLIPPAGE_KELLY_MAX_CAP_PCT", requested_size_pct)
+    lsi_score, lsi_bucket = _liquidity_stress_from_state(account_state)
+    lsi_multiplier, lsi_reason = _liquidity_stress_multiplier(
+        score=lsi_score,
+        bucket=lsi_bucket,
+        account_state=account_state,
+    )
 
     raw_reward_pct = reward_mult * atr_pct
     raw_risk_pct = risk_mult * atr_pct
@@ -238,6 +340,9 @@ def calculate_slippage_adjusted_kelly_cap(
             adjusted_risk_pct=adjusted_risk_pct,
             predicted_slippage_pct=predicted_slippage_pct,
             friction_ratio=1.0,
+            liquidity_stress_score=lsi_score,
+            liquidity_stress_bucket=lsi_bucket,
+            liquidity_stress_size_multiplier=lsi_multiplier,
             cap_pct=0.0,
         )
 
@@ -256,6 +361,9 @@ def calculate_slippage_adjusted_kelly_cap(
             adjusted_risk_reward_ratio=adjusted_r,
             predicted_slippage_pct=predicted_slippage_pct,
             friction_ratio=friction_ratio,
+            liquidity_stress_score=lsi_score,
+            liquidity_stress_bucket=lsi_bucket,
+            liquidity_stress_size_multiplier=lsi_multiplier,
             cap_pct=0.0,
         )
 
@@ -265,12 +373,20 @@ def calculate_slippage_adjusted_kelly_cap(
     kelly_fraction = max(0.0, kelly_fraction)
     fractional_kelly_pct = kelly_fraction * fractional_mult * 100.0
     cap_pct = max(0.0, min(requested_size_pct, max_cap_pct, fractional_kelly_pct))
+    if lsi_multiplier < 1.0:
+        cap_pct = max(0.0, cap_pct * lsi_multiplier)
     action_out = "cap" if cap_pct < requested_size_pct else "none"
-    reason = (
-        "slippage_adjusted_kelly_cap"
-        if action_out == "cap"
-        else "slippage_adjusted_kelly_no_tighter_cap"
-    )
+    if lsi_multiplier <= 0:
+        action_out = "zero"
+        reason = lsi_reason or "liquidity_stress_zero"
+    elif lsi_multiplier < 1.0:
+        reason = f"slippage_adjusted_kelly_cap:{lsi_reason or 'liquidity_stress'}"
+    else:
+        reason = (
+            "slippage_adjusted_kelly_cap"
+            if action_out == "cap"
+            else "slippage_adjusted_kelly_no_tighter_cap"
+        )
 
     return _decision(
         enabled=True,
@@ -284,6 +400,9 @@ def calculate_slippage_adjusted_kelly_cap(
         adjusted_risk_reward_ratio=adjusted_r,
         predicted_slippage_pct=predicted_slippage_pct,
         friction_ratio=friction_ratio,
+        liquidity_stress_score=lsi_score,
+        liquidity_stress_bucket=lsi_bucket,
+        liquidity_stress_size_multiplier=lsi_multiplier,
         kelly_fraction=kelly_fraction,
         fractional_kelly_pct=fractional_kelly_pct,
         cap_pct=cap_pct,

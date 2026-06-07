@@ -90,11 +90,73 @@ def test_slippage_kelly_missing_inputs_is_observational_no_cap():
     assert decision.reason == "missing_model_probability"
 
 
+def test_slippage_kelly_scales_down_for_elevated_liquidity_stress():
+    with _temporary_env(
+        SLIPPAGE_KELLY_SIZING_ENABLED="true",
+        SLIPPAGE_KELLY_FRACTION="0.25",
+        SLIPPAGE_KELLY_LSI_ELEVATED_MULT="0.50",
+    ):
+        baseline = calculate_slippage_adjusted_kelly_cap(
+            action="buy",
+            requested_size_pct=4.0,
+            account_state={
+                "prediction_gate": {"ml_prediction_score": 0.70},
+                "atr_20_pct": 1.0,
+                "execution_quality": {"slippage_estimate_pct": 0.05},
+            },
+        )
+        stressed = calculate_slippage_adjusted_kelly_cap(
+            action="buy",
+            requested_size_pct=4.0,
+            account_state={
+                "prediction_gate": {"ml_prediction_score": 0.70},
+                "atr_20_pct": 1.0,
+                "execution_quality": {"slippage_estimate_pct": 0.05},
+                "historical_bar_paper_strategy": {
+                    "liquidity_stress_score": 55,
+                    "liquidity_stress_bucket": "elevated",
+                },
+            },
+        )
+
+    assert stressed.action == "cap"
+    assert stressed.reason == "slippage_adjusted_kelly_cap:lsi_elevated"
+    assert stressed.liquidity_stress_bucket == "elevated"
+    assert stressed.liquidity_stress_size_multiplier == 0.5
+    assert stressed.cap_pct < baseline.cap_pct
+
+
+def test_slippage_kelly_zeroes_for_toxic_vpin_even_with_high_conviction():
+    with _temporary_env(
+        SLIPPAGE_KELLY_SIZING_ENABLED="true",
+        SLIPPAGE_KELLY_TOXIC_VPIN_ZERO_THRESHOLD="0.95",
+    ):
+        decision = calculate_slippage_adjusted_kelly_cap(
+            action="buy",
+            requested_size_pct=2.0,
+            account_state={
+                "prediction_gate": {"ml_prediction_score": 0.90},
+                "atr_20_pct": 1.0,
+                "execution_quality": {"slippage_estimate_pct": 0.05},
+                "bar_pattern_features": {
+                    "vpin_toxicity_20": 0.97,
+                },
+            },
+        )
+
+    assert decision.action == "zero"
+    assert decision.cap_pct == 0.0
+    assert decision.reason == "toxic_vpin_exceeds_0.95"
+    assert decision.liquidity_stress_size_multiplier == 0.0
+
+
 def main():
     tests = [
         test_slippage_kelly_caps_size_when_edge_is_positive_but_thinner,
         test_slippage_kelly_zeroes_trade_when_friction_exceeds_threshold,
         test_slippage_kelly_missing_inputs_is_observational_no_cap,
+        test_slippage_kelly_scales_down_for_elevated_liquidity_stress,
+        test_slippage_kelly_zeroes_for_toxic_vpin_even_with_high_conviction,
     ]
     for test in tests:
         test()

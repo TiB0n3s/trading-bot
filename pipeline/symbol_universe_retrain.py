@@ -13,13 +13,15 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 if str(BASE_DIR) not in sys.path:
     sys.path.insert(0, str(BASE_DIR))
 
-from db import DB_PATH
 from services.symbol_universe_retraining_service import (
     DEFAULT_MIN_BAR_DAYS,
     DEFAULT_MIN_BAR_ROWS,
     DEFAULT_STATE_PATH,
     SymbolUniverseRetrainingService,
 )
+
+
+DEFAULT_DB_PATH = Path("trades.db")
 
 
 def _print_human(payload: dict) -> None:
@@ -116,7 +118,7 @@ def _run_added_symbol_backfill(
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--date", required=True)
-    parser.add_argument("--db-path", default=str(DB_PATH))
+    parser.add_argument("--db-path", default=str(DEFAULT_DB_PATH))
     parser.add_argument("--state-path", default=str(DEFAULT_STATE_PATH))
     parser.add_argument("--min-bar-rows", type=int, default=DEFAULT_MIN_BAR_ROWS)
     parser.add_argument("--min-bar-days", type=int, default=DEFAULT_MIN_BAR_DAYS)

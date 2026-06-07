@@ -249,3 +249,121 @@ class HistoricalBarCoverageRepository:
             "table_exists": True,
             "symbol_rows": [dict(row) for row in symbol_rows],
         }
+
+    def symbol_coverage_summary(
+        self,
+        *,
+        symbols: list[str],
+    ) -> dict[str, dict[str, Any]]:
+        normalized_symbols = [
+            str(symbol).upper().strip()
+            for symbol in symbols
+            if str(symbol).strip()
+        ]
+        if not normalized_symbols:
+            return {}
+        if not self.exists():
+            return {
+                symbol: {"rows": 0, "trading_days": 0, "coverage_status": "missing_db"}
+                for symbol in normalized_symbols
+            }
+
+        placeholders = ",".join("?" for _ in normalized_symbols)
+        try:
+            with self._connect() as con:
+                if not self._table_exists(con, "bar_pattern_features"):
+                    return {
+                        symbol: {
+                            "rows": 0,
+                            "trading_days": 0,
+                            "coverage_status": "missing_bar_pattern_features",
+                        }
+                        for symbol in normalized_symbols
+                    }
+                columns = self._table_columns(con, "bar_pattern_features")
+                timeframe_filter = "AND timeframe = '1m'" if "timeframe" in columns else ""
+                rows = con.execute(
+                    f"""
+                    SELECT
+                        symbol,
+                        COUNT(*) AS rows,
+                        COUNT(DISTINCT substr(bar_timestamp, 1, 10)) AS trading_days,
+                        MIN(substr(bar_timestamp, 1, 10)) AS first_date,
+                        MAX(substr(bar_timestamp, 1, 10)) AS last_date
+                    FROM bar_pattern_features
+                    WHERE symbol IN ({placeholders})
+                      {timeframe_filter}
+                    GROUP BY symbol
+                    """,
+                    normalized_symbols,
+                ).fetchall()
+        except Exception as exc:
+            return {
+                symbol: {
+                    "rows": 0,
+                    "trading_days": 0,
+                    "coverage_status": f"coverage_query_failed:{type(exc).__name__}",
+                }
+                for symbol in normalized_symbols
+            }
+
+        observed = {
+            str(row["symbol"]).upper(): {
+                "rows": int(row["rows"] or 0),
+                "trading_days": int(row["trading_days"] or 0),
+                "first_date": row["first_date"],
+                "last_date": row["last_date"],
+                "coverage_status": "observed",
+            }
+            for row in rows
+        }
+        return {
+            symbol: observed.get(
+                symbol,
+                {"rows": 0, "trading_days": 0, "coverage_status": "no_rows"},
+            )
+            for symbol in normalized_symbols
+        }
+
+    def direct_bar_pattern_rows(
+        self,
+        *,
+        symbols: list[str],
+        label_column: str,
+        wanted_columns: list[str],
+        per_symbol_limit: int,
+        total_limit: int,
+    ) -> list[dict[str, Any]]:
+        if not self.exists():
+            return []
+        rows: list[dict[str, Any]] = []
+        with self._connect() as con:
+            if not self._table_exists(con, "bar_pattern_features"):
+                return []
+            columns = self._table_columns(con, "bar_pattern_features")
+            if label_column not in columns:
+                return []
+            select_cols = [column for column in wanted_columns if column in columns]
+            if not select_cols:
+                return []
+            select_sql = ", ".join(select_cols)
+            for symbol in symbols:
+                fetched = con.execute(
+                    f"""
+                    SELECT {select_sql}
+                    FROM bar_pattern_features
+                    WHERE symbol = ?
+                      AND timeframe = '1m'
+                      AND {label_column} IS NOT NULL
+                    ORDER BY bar_timestamp DESC
+                    LIMIT ?
+                    """,
+                    (str(symbol).upper().strip(), int(per_symbol_limit)),
+                ).fetchall()
+                for row in fetched:
+                    item = dict(row)
+                    item["timestamp"] = item.get("bar_timestamp")
+                    rows.append(item)
+                if len(rows) >= total_limit:
+                    return rows[:total_limit]
+        return rows

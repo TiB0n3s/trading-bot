@@ -11,14 +11,14 @@ from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 import json
 from pathlib import Path
-import sqlite3
 from typing import Any
 
-from db import DB_PATH
+from repositories.historical_bar_coverage_repo import HistoricalBarCoverageRepository
 
 
 EXTERNAL_SYMBOL_CANDIDATE_VERSION = "external_symbol_candidate_v1"
 DEFAULT_STATE_PATH = Path("runtime_state/external_symbol_candidates.json")
+DEFAULT_DB_PATH = Path("trades.db")
 DEFAULT_MIN_MENTIONS = 2
 DEFAULT_MIN_TRUSTED_MENTIONS = 1
 DEFAULT_MIN_BAR_ROWS = 1000
@@ -61,77 +61,7 @@ def _coverage_for_symbols(
     db_path: Path,
     symbols: list[str],
 ) -> dict[str, dict[str, Any]]:
-    if not symbols:
-        return {}
-    if not db_path.exists():
-        return {
-            symbol: {"rows": 0, "trading_days": 0, "coverage_status": "missing_db"}
-            for symbol in symbols
-        }
-
-    placeholders = ",".join("?" for _ in symbols)
-    try:
-        with sqlite3.connect(f"file:{db_path}?mode=ro", uri=True) as con:
-            con.row_factory = sqlite3.Row
-            exists = con.execute(
-                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='bar_pattern_features'"
-            ).fetchone()
-            if not exists:
-                return {
-                    symbol: {
-                        "rows": 0,
-                        "trading_days": 0,
-                        "coverage_status": "missing_bar_pattern_features",
-                    }
-                    for symbol in symbols
-                }
-            columns = {
-                str(row["name"])
-                for row in con.execute("PRAGMA table_info(bar_pattern_features)").fetchall()
-            }
-            timeframe_filter = "AND timeframe = '1m'" if "timeframe" in columns else ""
-            rows = con.execute(
-                f"""
-                SELECT
-                    symbol,
-                    COUNT(*) AS rows,
-                    COUNT(DISTINCT substr(bar_timestamp, 1, 10)) AS trading_days,
-                    MIN(substr(bar_timestamp, 1, 10)) AS first_date,
-                    MAX(substr(bar_timestamp, 1, 10)) AS last_date
-                FROM bar_pattern_features
-                WHERE symbol IN ({placeholders})
-                  {timeframe_filter}
-                GROUP BY symbol
-                """,
-                symbols,
-            ).fetchall()
-    except Exception as exc:
-        return {
-            symbol: {
-                "rows": 0,
-                "trading_days": 0,
-                "coverage_status": f"coverage_query_failed:{type(exc).__name__}",
-            }
-            for symbol in symbols
-        }
-
-    observed = {
-        str(row["symbol"]).upper(): {
-            "rows": int(row["rows"] or 0),
-            "trading_days": int(row["trading_days"] or 0),
-            "first_date": row["first_date"],
-            "last_date": row["last_date"],
-            "coverage_status": "observed",
-        }
-        for row in rows
-    }
-    return {
-        symbol: observed.get(
-            symbol,
-            {"rows": 0, "trading_days": 0, "coverage_status": "no_rows"},
-        )
-        for symbol in symbols
-    }
+    return HistoricalBarCoverageRepository(db_path).symbol_coverage_summary(symbols=symbols)
 
 
 def _confidence_score(
@@ -203,7 +133,7 @@ class ExternalSymbolCandidateService:
         self,
         *,
         state_path: Path | str = DEFAULT_STATE_PATH,
-        db_path: Path | str = DB_PATH,
+        db_path: Path | str = DEFAULT_DB_PATH,
     ):
         self.state_path = Path(state_path)
         self.db_path = Path(db_path)

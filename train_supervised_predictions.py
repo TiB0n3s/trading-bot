@@ -5,10 +5,8 @@ from __future__ import annotations
 
 import argparse
 import json
-import sqlite3
 from pathlib import Path
 
-from db import DB_PATH
 from repositories.historical_bar_coverage_repo import HistoricalBarCoverageRepository
 from services.supervised_prediction_training_service import (
     DEFAULT_FEATURE_COLUMNS,
@@ -20,6 +18,7 @@ from symbols_config import APPROVED_SYMBOLS_LIST
 
 
 HISTORICAL_BAR_CACHE_DIR = Path("data") / "historical_bars" / "polygon_1min"
+DEFAULT_DB_PATH = Path("trades.db")
 DIRECT_BAR_FEATURE_COLUMNS = tuple(
     column for column in DEFAULT_FEATURE_COLUMNS
     if column not in {
@@ -148,7 +147,7 @@ def _fetch_direct_bar_pattern_rows(
     horizon: str,
     per_symbol_limit: int,
     total_limit: int,
-    db_path: Path = DB_PATH,
+    db_path: Path = DEFAULT_DB_PATH,
 ) -> list[dict]:
     if horizon in {"triple_barrier", "triple_barrier_label"}:
         label_column = "triple_barrier_label"
@@ -165,35 +164,13 @@ def _fetch_direct_bar_pattern_rows(
         "triple_barrier_label",
         "trend_scan_label",
     })
-    rows: list[dict] = []
-    with sqlite3.connect(f"file:{db_path}?mode=ro", uri=True) as con:
-        con.row_factory = sqlite3.Row
-        cols = {
-            row["name"]
-            for row in con.execute("PRAGMA table_info(bar_pattern_features)").fetchall()
-        }
-        select_cols = [column for column in wanted if column in cols]
-        select_sql = ", ".join(select_cols)
-        for symbol in symbols:
-            fetched = con.execute(
-                f"""
-                SELECT {select_sql}
-                FROM bar_pattern_features
-                WHERE symbol = ?
-                  AND timeframe = '1m'
-                  AND {label_column} IS NOT NULL
-                ORDER BY bar_timestamp DESC
-                LIMIT ?
-                """,
-                (symbol, int(per_symbol_limit)),
-            ).fetchall()
-            for row in fetched:
-                item = dict(row)
-                item["timestamp"] = item.get("bar_timestamp")
-                rows.append(item)
-            if len(rows) >= total_limit:
-                return rows[:total_limit]
-    return rows
+    return HistoricalBarCoverageRepository(db_path).direct_bar_pattern_rows(
+        symbols=symbols,
+        label_column=label_column,
+        wanted_columns=wanted,
+        per_symbol_limit=per_symbol_limit,
+        total_limit=total_limit,
+    )
 
 
 def main() -> int:

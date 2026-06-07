@@ -5,11 +5,11 @@ from __future__ import annotations
 from collections import Counter, defaultdict
 import json
 import re
-import sqlite3
 from pathlib import Path
 from typing import Any
 
 from market_intelligence.source_reliability import classify_source
+from repositories.external_symbol_discovery_repo import ExternalSymbolDiscoveryRepository
 from symbols_config import (
     APPROVED_SYMBOLS,
     CONTEXT_ONLY_SYMBOL_CONFIG,
@@ -19,28 +19,6 @@ from symbols_config import (
 
 EXTERNAL_SYMBOL_DISCOVERY_VERSION = "external_symbol_discovery_v1"
 TOKEN_RE = re.compile(r"\b[A-Z]{2,5}\b")
-
-
-def _connect_ro(db_path: Path) -> sqlite3.Connection:
-    con = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
-    con.row_factory = sqlite3.Row
-    return con
-
-
-def _table_exists(con: sqlite3.Connection, table: str) -> bool:
-    return bool(
-        con.execute(
-            "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?",
-            (table,),
-        ).fetchone()
-    )
-
-
-def _table_columns(con: sqlite3.Connection, table: str) -> set[str]:
-    return {
-        str(row["name"])
-        for row in con.execute(f"PRAGMA table_info({table})").fetchall()
-    }
 
 
 def _load_json(raw: Any) -> dict[str, Any]:
@@ -108,48 +86,6 @@ def _recommendation(
     return "ignore_or_keep_watch"
 
 
-def _event_rows(
-    con: sqlite3.Connection,
-    *,
-    start_date: str,
-    end_date: str,
-) -> list[dict[str, Any]]:
-    columns = _table_columns(con, "daily_symbol_events")
-    optional = {
-        "id": "id",
-        "market_date": "market_date",
-        "symbol": "symbol",
-        "event_type": "event_type",
-        "event_subtype": "event_subtype",
-        "event_summary": "event_summary",
-        "expected_market_impact": "expected_market_impact",
-        "trade_relevance": "trade_relevance",
-        "confidence": "confidence",
-        "source": "source",
-        "source_url": "source_url",
-        "raw_json": "raw_json",
-        "created_at": "created_at",
-    }
-    select_parts = [
-        column if column in columns else f"NULL AS {alias}"
-        for alias, column in optional.items()
-    ]
-    order_expr = "created_at ASC, id ASC" if "created_at" in columns and "id" in columns else "market_date ASC"
-    return [
-        dict(row)
-        for row in con.execute(
-            f"""
-            SELECT {", ".join(select_parts)}
-            FROM daily_symbol_events
-            WHERE market_date >= ?
-              AND market_date <= ?
-            ORDER BY {order_expr}
-            """,
-            (start_date, end_date),
-        ).fetchall()
-    ]
-
-
 def build_external_symbol_discovery_payload(
     *,
     base_dir: Path,
@@ -160,7 +96,11 @@ def build_external_symbol_discovery_payload(
 ) -> dict[str, Any]:
     end_date = end_date or start_date
     db_path = base_dir / "trades.db"
-    if not db_path.exists():
+    repo_payload = ExternalSymbolDiscoveryRepository(db_path).daily_symbol_event_rows(
+        start_date=start_date,
+        end_date=end_date,
+    )
+    if repo_payload["status"] == "missing_db":
         return {
             "report_version": EXTERNAL_SYMBOL_DISCOVERY_VERSION,
             "status": "missing_db",
@@ -170,16 +110,16 @@ def build_external_symbol_discovery_payload(
             "findings": [],
         }
 
-    with _connect_ro(db_path) as con:
-        if not _table_exists(con, "daily_symbol_events"):
-            return {
-                "report_version": EXTERNAL_SYMBOL_DISCOVERY_VERSION,
-                "status": "missing_table",
-                "start_date": start_date,
-                "end_date": end_date,
-                "findings": [],
-            }
-        rows = _event_rows(con, start_date=start_date, end_date=end_date)
+    if repo_payload["status"] == "missing_table":
+        return {
+            "report_version": EXTERNAL_SYMBOL_DISCOVERY_VERSION,
+            "status": "missing_table",
+            "start_date": start_date,
+            "end_date": end_date,
+            "findings": [],
+        }
+
+    rows = list(repo_payload.get("rows") or [])
 
     findings: dict[str, dict[str, Any]] = {}
     mention_sources: defaultdict[str, Counter[str]] = defaultdict(Counter)

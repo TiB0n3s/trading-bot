@@ -110,6 +110,7 @@ def _compact_historical_bar_paper_strategy(payload: dict[str, Any]) -> dict[str,
         "confidence_bucket": payload.get("confidence_bucket"),
         "paper_recommendation": payload.get("paper_recommendation"),
         "baseline_delta": payload.get("baseline_delta"),
+        "liquidity_stress_bucket": payload.get("liquidity_stress_bucket"),
         "paper_position_size_pct": payload.get("paper_position_size_pct"),
     }
 

@@ -59,6 +59,8 @@ def test_asymmetric_filter_reduces_false_positive_exposure():
     assert data["summary"]["authority_ready"] is False
     assert by_name["standard_score_threshold"]["trades_taken"] == 3
     assert by_name["asymmetric_false_positive_guard"]["trades_taken"] == 1
+    assert "sharpe_proxy" in by_name["standard_score_threshold"]
+    assert "sharpe_proxy_delta" in data["summary"]
     assert data["summary"]["false_positive_reduction"] == 2
 
 

@@ -46,6 +46,8 @@ def run_historical_bar_paper_strategy_report(
     print(f"max_paper_risk_pct      : {strategy['max_paper_risk_pct']}")
     print(f"stop_risk_pct           : {strategy['stop_risk_pct']}")
     print(f"impact_score            : {strategy['impact_score']}")
+    print(f"liquidity_stress_score  : {strategy['liquidity_stress_score']}")
+    print(f"liquidity_stress_bucket : {strategy['liquidity_stress_bucket']}")
     print(f"model_component_score   : {strategy['model_component_score']}")
     print(f"current_feature_score   : {strategy['current_feature_score']}")
     print(f"naive_baseline_score    : {strategy['naive_baseline_score']}")

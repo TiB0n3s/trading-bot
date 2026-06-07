@@ -42,6 +42,7 @@ def test_after_close_learning_dry_run_lists_recurring_quant_steps():
     assert "research_export" in out
     assert "paper_learning_authority" in out
     assert "historical_bar_completion_training" in out
+    assert "historical_bar_paper_strategy_spy" in out
     assert "symbol_universe_retraining" in out
     assert "automated_retraining" in out
     assert "policy_artifact_register" in out

@@ -39,12 +39,13 @@ def run_advanced_alpha_model_comparison(
     print()
     print(
         f"  {'profile':<36} {'taken':>7} {'win_rate':>9} "
-        f"{'avg_ret':>9} {'net':>9} {'max_dd':>9} {'fp':>6}"
+        f"{'avg_ret':>9} {'net':>9} {'max_dd':>9} {'sharpe':>9} {'fp':>6}"
     )
-    print(f"  {'-' * 36} {'-' * 7} {'-' * 9} {'-' * 9} {'-' * 9} {'-' * 9} {'-' * 6}")
+    print(f"  {'-' * 36} {'-' * 7} {'-' * 9} {'-' * 9} {'-' * 9} {'-' * 9} {'-' * 9} {'-' * 6}")
     for profile in data["profiles"]:
         win_rate = profile["win_rate"]
         avg_return = profile["avg_forward_return_pct"]
+        sharpe = profile["sharpe_proxy"]
         print(
             f"  {profile['name']:<36} "
             f"{profile['trades_taken']:>7} "
@@ -52,12 +53,14 @@ def run_advanced_alpha_model_comparison(
             f"{(avg_return if avg_return is not None else 0.0):>9.4f} "
             f"{profile['net_return_units']:>9.4f} "
             f"{profile['max_drawdown_units']:>9.4f} "
+            f"{(sharpe if sharpe is not None else 0.0):>9.4f} "
             f"{profile['false_positives']:>6}"
         )
 
     print()
     print(f"false_positive_reduction: {data['summary']['false_positive_reduction']}")
     print(f"drawdown_reduction_units: {data['summary']['drawdown_reduction_units']}")
+    print(f"sharpe_proxy_delta      : {data['summary']['sharpe_proxy_delta']}")
     print(
         "asym_takes_fewer_trades : "
         f"{data['summary']['asymmetric_takes_fewer_or_equal_trades']}"

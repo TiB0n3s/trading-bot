@@ -170,6 +170,13 @@ def _build_steps(target_date: str) -> list[Step]:
             description="report observe-only historical-bar model readiness and artifact hygiene",
         ),
         Step(
+            name="historical_bar_paper_strategy_spy",
+            module="ops_check",
+            argv=["historical-bar-paper-strategy", "SPY", "--action", "buy"],
+            critical=False,
+            description="journal paper-only historical-bar ensemble score for market benchmark",
+        ),
+        Step(
             name="historical_bar_validation_triple",
             module="ops_check",
             argv=[

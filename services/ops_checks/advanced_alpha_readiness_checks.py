@@ -36,6 +36,7 @@ def run_advanced_alpha_readiness(
     print(f"rows                    : {summary['rows']}")
     print(f"rows_with_forward       : {summary['rows_with_forward_outcome']}")
     print(f"order_flow_coverage     : {summary['order_flow_coverage_rate']:.2f}%")
+    print(f"microstructure_coverage : {summary['microstructure_coverage_rate']:.2f}%")
     print(f"fractional_memory_cov   : {summary['fractional_memory_coverage_rate']:.2f}%")
     print(f"authority_ready         : {summary['authority_ready']}")
 

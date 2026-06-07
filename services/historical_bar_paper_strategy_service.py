@@ -41,6 +41,8 @@ class HistoricalBarPaperStrategy:
     baseline_delta: float | None
     weighted_model_accuracy: float | None
     impact_score: float | None
+    liquidity_stress_score: float | None
+    liquidity_stress_bucket: str
     volatility_adjustment: float | None
     paper_position_size_pct: float
     max_paper_risk_pct: float
@@ -236,6 +238,56 @@ def _portfolio_correlation_penalty(account_state: dict[str, Any]) -> tuple[float
     return round(_clamp(penalty, 0.0, 20.0), 4), reasons
 
 
+def _liquidity_stress(
+    features: dict[str, Any],
+    account_state: dict[str, Any],
+) -> tuple[float, str, list[str]]:
+    execution = _dict(account_state.get("execution_quality"))
+    volatility = _dict(account_state.get("volatility_normalization"))
+    components: list[float] = []
+    reasons: list[str] = []
+
+    vpin = _float(features.get("vpin_toxicity_20"))
+    if vpin is not None:
+        components.append(_clamp(vpin * 100.0))
+        reasons.append(f"lsi_vpin={vpin:.3f}")
+
+    spread = _float(features.get("bid_ask_spread_pct")) or _float(execution.get("spread_pct"))
+    if spread is not None:
+        components.append(_clamp(spread * 80.0))
+        reasons.append(f"lsi_spread_pct={spread:.3f}")
+
+    slippage = _float(features.get("slippage_estimate_pct")) or _float(
+        execution.get("slippage_estimate_pct")
+    )
+    if slippage is not None:
+        components.append(_clamp(slippage * 120.0))
+        reasons.append(f"lsi_slippage_pct={slippage:.3f}")
+
+    liquidity_sweep = _float(features.get("liquidity_sweep_risk"))
+    if liquidity_sweep is not None:
+        components.append(_clamp(liquidity_sweep * 100.0))
+        reasons.append(f"lsi_liquidity_sweep={liquidity_sweep:.3f}")
+
+    stretch = _float(volatility.get("move_zscore"))
+    if stretch is not None:
+        components.append(_clamp(abs(stretch) * 20.0))
+        reasons.append(f"lsi_move_zscore={stretch:.3f}")
+
+    if not components:
+        return 0.0, "unknown", ["lsi_missing_inputs"]
+    score = round(sum(components) / len(components), 4)
+    if score >= 70:
+        bucket = "severe"
+    elif score >= 45:
+        bucket = "elevated"
+    elif score >= 20:
+        bucket = "moderate"
+    else:
+        bucket = "normal"
+    return score, bucket, reasons
+
+
 def _paper_sizing(
     *,
     confidence: float,
@@ -318,6 +370,12 @@ def build_historical_bar_paper_strategy(
     reasons.append(baseline_reason)
     correlation_penalty, correlation_reasons = _portfolio_correlation_penalty(account_state)
     reasons.extend(correlation_reasons)
+    liquidity_stress_score, liquidity_stress_bucket, liquidity_reasons = _liquidity_stress(
+        features,
+        account_state,
+    )
+    reasons.extend(liquidity_reasons)
+    liquidity_penalty = _clamp(liquidity_stress_score / 6.0, 0.0, 15.0)
 
     if model_score is None:
         master = None
@@ -336,6 +394,7 @@ def build_historical_bar_paper_strategy(
             + (current_score * 0.35)
             + (baseline_score * 0.10)
             - correlation_penalty
+            - liquidity_penalty
         )
         baseline_delta = round(master - baseline_score, 4)
         if master >= 75:
@@ -401,6 +460,8 @@ def build_historical_bar_paper_strategy(
         baseline_delta=baseline_delta,
         weighted_model_accuracy=weighted_accuracy,
         impact_score=impact_score,
+        liquidity_stress_score=liquidity_stress_score,
+        liquidity_stress_bucket=liquidity_stress_bucket,
         volatility_adjustment=volatility_adjustment,
         paper_position_size_pct=size_pct,
         max_paper_risk_pct=max_risk_pct,

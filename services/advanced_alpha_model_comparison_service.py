@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
+import math
 from typing import Any, Iterable
 
 
@@ -20,6 +21,7 @@ class ModelComparisonProfile:
     avg_forward_return_pct: float | None
     net_return_units: float
     max_drawdown_units: float
+    sharpe_proxy: float | None
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -86,6 +88,17 @@ def _max_drawdown(values: list[float]) -> float:
     return round(drawdown, 4)
 
 
+def _sharpe_proxy(values: list[float]) -> float | None:
+    if len(values) < 2:
+        return None
+    avg = sum(values) / len(values)
+    variance = sum((value - avg) ** 2 for value in values) / (len(values) - 1)
+    std = math.sqrt(variance)
+    if std <= 0:
+        return None
+    return round(avg / std * math.sqrt(len(values)), 4)
+
+
 def _success(row: dict[str, Any]) -> bool | None:
     triple = _int(row.get("triple_barrier_label"))
     if triple is not None:
@@ -140,6 +153,7 @@ def _profile(name: str, rows: list[dict[str, Any]], predicate) -> ModelCompariso
         avg_forward_return_pct=_mean(returns),
         net_return_units=round(sum(returns), 4),
         max_drawdown_units=_max_drawdown(returns),
+        sharpe_proxy=_sharpe_proxy(returns),
     )
 
 
@@ -152,6 +166,9 @@ def build_advanced_alpha_model_comparison_payload(
     asymmetric = _profile("asymmetric_false_positive_guard", outcome_rows, _asymmetric_takes)
     fp_delta = standard.false_positives - asymmetric.false_positives
     dd_delta = round(standard.max_drawdown_units - asymmetric.max_drawdown_units, 4)
+    sharpe_delta = None
+    if standard.sharpe_proxy is not None and asymmetric.sharpe_proxy is not None:
+        sharpe_delta = round(asymmetric.sharpe_proxy - standard.sharpe_proxy, 4)
 
     return AdvancedAlphaModelComparisonPayload(
         report_version=ADVANCED_ALPHA_COMPARISON_VERSION,
@@ -162,6 +179,7 @@ def build_advanced_alpha_model_comparison_payload(
         summary={
             "false_positive_reduction": fp_delta,
             "drawdown_reduction_units": dd_delta,
+            "sharpe_proxy_delta": sharpe_delta,
             "asymmetric_takes_fewer_or_equal_trades": (
                 asymmetric.trades_taken <= standard.trades_taken
             ),

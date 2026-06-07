@@ -136,6 +136,7 @@ def build_advanced_alpha_readiness_payload(
     rows_with_forward = int(summary.get("rows_with_forward_outcome") or 0)
     rows_with_order_flow = int(summary.get("rows_with_order_flow") or 0)
     rows_with_fractional = int(summary.get("rows_with_fractional_memory") or 0)
+    rows_with_microstructure = int(summary.get("rows_with_microstructure_context") or 0)
     trend_scan_rows = sum(int(row.get("rows") or 0) for row in summary.get("trend_scans", []))
     cvd_rows = sum(int(row.get("rows") or 0) for row in summary.get("cvd_divergences", []))
 
@@ -150,6 +151,10 @@ def build_advanced_alpha_readiness_payload(
     true_order_flow_feed = _env_true(env, "ORDER_FLOW_TRADE_FEED_ENABLED") or _env_true(
         env, "POLYGON_TRADES_API_ENABLED"
     )
+    volume_clock_enabled = _env_true(env, "VOLUME_CLOCK_VPIN_ENABLED") or _env_true(
+        env, "VOLUME_BAR_FEATURES_ENABLED"
+    )
+    lsi_enabled = _env_true(env, "LIQUIDITY_STRESS_INDICATOR_ENABLED")
     reference_feed = _env_true(env, "ETF_LEAD_LAG_ENABLED") or bool(
         env.get("ETF_LEAD_LAG_REFERENCE_SYMBOLS")
     )
@@ -189,6 +194,46 @@ def build_advanced_alpha_readiness_payload(
             },
             current_capability="Not populated; current system has only bar-level proxy order-flow features.",
             next_action="Enable a trade-level feed with aggressor side or a validated classifier, then add a separate trade-flow table.",
+        ),
+        _item(
+            feature_family="volume_clock_vpin",
+            checks={
+                "volume_clock_enabled": volume_clock_enabled,
+                "bar_feed_available": polygon_configured or alpaca_configured,
+                "schema_integrated": False,
+                "feature_coverage_ge_95pct": False,
+                "outcome_linkage_ge_500": False,
+                "ops_report_visible": False,
+                "authority_leak_safe": True,
+            },
+            current_capability=(
+                "Not populated; current VPIN proxy is calculated on fixed-time "
+                "1-minute bars, not fixed-volume buckets."
+            ),
+            next_action=(
+                "Build volume-bar sampling from trade/bar volume, persist volume "
+                "bucket IDs, then compare volume-clock VPIN against MFE/MAE."
+            ),
+        ),
+        _item(
+            feature_family="liquidity_stress_indicator",
+            checks={
+                "bar_order_flow_proxy_available": rows > 0 and _rate(rows_with_order_flow, rows) >= 0.80,
+                "execution_microstructure_available": rows > 0 and _rate(rows_with_microstructure, rows) >= 0.80,
+                "lsi_feature_enabled": lsi_enabled,
+                "schema_integrated": False,
+                "outcome_linkage_ge_500": outcome_threshold_met,
+                "ops_report_visible": False,
+                "authority_leak_safe": True,
+            },
+            current_capability=(
+                "Inputs exist partially through VPIN/CVD proxies and execution "
+                "quality fields, but no unified LSI feature is persisted."
+            ),
+            next_action=(
+                "Aggregate VPIN, spread/slippage deterioration, quote instability, "
+                "and volatility stretch into an observe-only LSI bucket."
+            ),
         ),
         _item(
             feature_family="etf_component_lead_lag",
@@ -275,9 +320,11 @@ def build_advanced_alpha_readiness_payload(
             "rows_with_forward_outcome": rows_with_forward,
             "rows_with_order_flow": rows_with_order_flow,
             "rows_with_fractional_memory": rows_with_fractional,
+            "rows_with_microstructure_context": rows_with_microstructure,
             "trend_scan_rows": trend_scan_rows,
             "cvd_divergence_rows": cvd_rows,
             "order_flow_coverage_rate": _pct(rows_with_order_flow, rows),
+            "microstructure_coverage_rate": _pct(rows_with_microstructure, rows),
             "fractional_memory_coverage_rate": _pct(rows_with_fractional, rows),
             "status_counts": dict(sorted(ready_counts.items())),
             "authority_ready": False,

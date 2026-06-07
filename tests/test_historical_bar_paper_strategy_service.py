@@ -60,6 +60,9 @@ def test_paper_strategy_builds_master_confidence_and_paper_size():
                 "volume_weighted_pressure_3": 1.1,
                 "cvd_price_corr_20": 0.35,
                 "vpin_toxicity_20": 0.15,
+                "bid_ask_spread_pct": 0.04,
+                "slippage_estimate_pct": 0.02,
+                "liquidity_sweep_risk": 0.10,
                 "rsi_14": 48,
                 "price_vs_sma_20_pct": -0.3,
                 "close_location": 0.72,
@@ -80,6 +83,8 @@ def test_paper_strategy_builds_master_confidence_and_paper_size():
     assert result["max_paper_risk_pct"] == 2.0
     assert result["model_weights"][0]["label_target"] == "trend_scan_label"
     assert result["baseline_delta"] is not None
+    assert result["liquidity_stress_score"] is not None
+    assert result["liquidity_stress_bucket"] in {"normal", "moderate"}
     assert result["guardrails"]["paper_only"] is True
     assert result["guardrails"]["can_block_live_trades"] is False
     assert result["guardrails"]["can_size_live_orders"] is False

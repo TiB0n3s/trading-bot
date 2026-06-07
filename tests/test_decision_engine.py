@@ -7,13 +7,15 @@ Coverage:
     happy path valid JSON response
     JSON parse error → fail-open rejection
     API exception → fail-open rejection
-    markdown code fence stripping (```json...``` and ```...```)
+    assistant prefill `{` present in messages list
+    trailing junk after closing `}` still fails-closed gracefully
     diagnostic key removal before API call
     symbol_history injected for BUY signals
     symbol_history NOT injected for SELL signals
     None account_state handled safely
     Claude called with correct model name
     timeout is configured
+    system is a content-block list with cache_control
 
   _get_symbol_history:
     no rows → {"sample_size": 0}
@@ -83,6 +85,10 @@ _VALID_RESPONSE = {
     "confidence": "high",
 }
 
+# The model completes after the `{` prefill, so the mock text is everything after the
+# opening brace — the full JSON minus its first character.
+_VALID_RESPONSE_TEXT = json.dumps(_VALID_RESPONSE)[1:]
+
 
 def _mock_message(text: str):
     msg = MagicMock()
@@ -107,7 +113,7 @@ def _capture_create(response_text: str):
 
 def test_evaluate_signal_happy_path():
     with patch.object(_de._client.messages, "create",
-                      return_value=_mock_message(json.dumps(_VALID_RESPONSE))):
+                      return_value=_mock_message(_VALID_RESPONSE_TEXT)):
         with patch.object(_de, "_get_symbol_history", return_value={"sample_size": 0}):
             result = _de.evaluate_signal(
                 {"action": "buy", "symbol": "AAPL", "price": 200.0},
@@ -148,28 +154,31 @@ def test_evaluate_signal_api_exception_rejects_safely():
     assert_equal(result["confidence"], "low", "confidence")
 
 
-def test_evaluate_signal_strips_json_code_fence():
-    wrapped = "```json\n" + json.dumps(_VALID_RESPONSE) + "\n```"
+def test_evaluate_signal_prefill_in_messages():
+    """Assistant prefill { must be the second message sent to the API."""
+    fake_create, captured = _capture_create(_VALID_RESPONSE_TEXT)
+    with patch.object(_de._client.messages, "create", side_effect=fake_create):
+        with patch.object(_de, "_get_symbol_history", return_value={"sample_size": 0}):
+            _de.evaluate_signal({"action": "buy", "symbol": "AAPL", "price": 200.0}, {})
+
+    msgs = captured["kwargs"]["messages"]
+    assert_equal(len(msgs), 2, "two messages: user + assistant prefill")
+    assert_equal(msgs[1]["role"], "assistant", "second message is assistant")
+    assert_equal(msgs[1]["content"], "{", "prefill content is opening brace")
+
+
+def test_evaluate_signal_trailing_junk_rejects_safely():
+    """Trailing prose after the closing } is still caught by JSON parse fail-closed."""
+    junk_completion = _VALID_RESPONSE_TEXT + "\n\nSome unexpected trailing text."
     with patch.object(_de._client.messages, "create",
-                      return_value=_mock_message(wrapped)):
+                      return_value=_mock_message(junk_completion)):
         with patch.object(_de, "_get_symbol_history", return_value={"sample_size": 0}):
             result = _de.evaluate_signal(
                 {"action": "buy", "symbol": "AAPL", "price": 200.0},
                 {},
             )
-    assert_equal(result["approved"], True, "approved after ```json fence strip")
-
-
-def test_evaluate_signal_strips_bare_code_fence():
-    wrapped = "```\n" + json.dumps(_VALID_RESPONSE) + "\n```"
-    with patch.object(_de._client.messages, "create",
-                      return_value=_mock_message(wrapped)):
-        with patch.object(_de, "_get_symbol_history", return_value={"sample_size": 0}):
-            result = _de.evaluate_signal(
-                {"action": "buy", "symbol": "AAPL", "price": 200.0},
-                {},
-            )
-    assert_equal(result["approved"], True, "approved after bare fence strip")
+    assert_equal(result["approved"], False, "approved is False on trailing junk")
+    assert_in("Parse error", result["reason"], "reason mentions parse error")
 
 
 # ---------------------------------------------------------------------------
@@ -177,7 +186,7 @@ def test_evaluate_signal_strips_bare_code_fence():
 # ---------------------------------------------------------------------------
 
 def test_evaluate_signal_removes_diagnostic_keys():
-    fake_create, captured = _capture_create(json.dumps(_VALID_RESPONSE))
+    fake_create, captured = _capture_create(_VALID_RESPONSE_TEXT)
     with patch.object(_de._client.messages, "create", side_effect=fake_create):
         with patch.object(_de, "_get_symbol_history", return_value={"sample_size": 0}):
             _de.evaluate_signal(
@@ -201,7 +210,7 @@ def test_evaluate_signal_removes_diagnostic_keys():
 
 
 def test_evaluate_signal_preserves_non_diagnostic_keys():
-    fake_create, captured = _capture_create(json.dumps(_VALID_RESPONSE))
+    fake_create, captured = _capture_create(_VALID_RESPONSE_TEXT)
     with patch.object(_de._client.messages, "create", side_effect=fake_create):
         with patch.object(_de, "_get_symbol_history", return_value={"sample_size": 0}):
             _de.evaluate_signal(
@@ -218,7 +227,7 @@ def test_evaluate_signal_preserves_non_diagnostic_keys():
 
 
 def test_evaluate_signal_injects_symbol_history_for_buy():
-    fake_create, captured = _capture_create(json.dumps(_VALID_RESPONSE))
+    fake_create, captured = _capture_create(_VALID_RESPONSE_TEXT)
     with patch.object(_de._client.messages, "create", side_effect=fake_create):
         with patch.object(_de, "_get_symbol_history",
                           return_value={"sample_size": 3, "win_rate": 0.667}) as mock_hist:
@@ -236,7 +245,7 @@ def test_evaluate_signal_injects_symbol_history_for_buy():
 
 
 def test_evaluate_signal_no_symbol_history_for_sell():
-    fake_create, captured = _capture_create(json.dumps(_VALID_RESPONSE))
+    fake_create, captured = _capture_create(_VALID_RESPONSE_TEXT)
     with patch.object(_de._client.messages, "create", side_effect=fake_create):
         with patch.object(_de, "_get_symbol_history") as mock_hist:
             _de.evaluate_signal(
@@ -253,7 +262,7 @@ def test_evaluate_signal_no_symbol_history_for_sell():
 
 def test_evaluate_signal_none_account_state_safe():
     with patch.object(_de._client.messages, "create",
-                      return_value=_mock_message(json.dumps(_VALID_RESPONSE))):
+                      return_value=_mock_message(_VALID_RESPONSE_TEXT)):
         with patch.object(_de, "_get_symbol_history", return_value={"sample_size": 0}):
             result = _de.evaluate_signal(
                 {"action": "buy", "symbol": "AAPL", "price": 200.0},
@@ -267,7 +276,7 @@ def test_evaluate_signal_none_account_state_safe():
 # ---------------------------------------------------------------------------
 
 def test_evaluate_signal_uses_haiku_model():
-    fake_create, captured = _capture_create(json.dumps(_VALID_RESPONSE))
+    fake_create, captured = _capture_create(_VALID_RESPONSE_TEXT)
     with patch.object(_de._client.messages, "create", side_effect=fake_create):
         with patch.object(_de, "_get_symbol_history", return_value={"sample_size": 0}):
             _de.evaluate_signal({"action": "buy", "symbol": "AAPL", "price": 200.0}, {})
@@ -276,7 +285,7 @@ def test_evaluate_signal_uses_haiku_model():
 
 
 def test_evaluate_signal_timeout_configured():
-    fake_create, captured = _capture_create(json.dumps(_VALID_RESPONSE))
+    fake_create, captured = _capture_create(_VALID_RESPONSE_TEXT)
     with patch.object(_de._client.messages, "create", side_effect=fake_create):
         with patch.object(_de, "_get_symbol_history", return_value={"sample_size": 0}):
             _de.evaluate_signal({"action": "buy", "symbol": "AAPL", "price": 200.0}, {})
@@ -287,12 +296,17 @@ def test_evaluate_signal_timeout_configured():
 
 
 def test_evaluate_signal_system_prompt_set():
-    fake_create, captured = _capture_create(json.dumps(_VALID_RESPONSE))
+    fake_create, captured = _capture_create(_VALID_RESPONSE_TEXT)
     with patch.object(_de._client.messages, "create", side_effect=fake_create):
         with patch.object(_de, "_get_symbol_history", return_value={"sample_size": 0}):
             _de.evaluate_signal({"action": "buy", "symbol": "AAPL", "price": 200.0}, {})
 
-    assert_true(len(captured["kwargs"].get("system", "")) > 100, "system prompt is non-trivial")
+    system = captured["kwargs"].get("system")
+    assert_true(isinstance(system, list) and len(system) == 1, "system is a single-block list")
+    block = system[0]
+    assert_equal(block.get("type"), "text", "system block type is text")
+    assert_true(len(block.get("text", "")) > 100, "system block text is non-trivial")
+    assert_equal(block.get("cache_control"), {"type": "ephemeral"}, "cache_control is ephemeral")
 
 
 # ---------------------------------------------------------------------------
@@ -413,8 +427,8 @@ def main():
         test_evaluate_signal_happy_path,
         test_evaluate_signal_json_parse_error_rejects_safely,
         test_evaluate_signal_api_exception_rejects_safely,
-        test_evaluate_signal_strips_json_code_fence,
-        test_evaluate_signal_strips_bare_code_fence,
+        test_evaluate_signal_prefill_in_messages,
+        test_evaluate_signal_trailing_junk_rejects_safely,
         test_evaluate_signal_removes_diagnostic_keys,
         test_evaluate_signal_preserves_non_diagnostic_keys,
         test_evaluate_signal_injects_symbol_history_for_buy,

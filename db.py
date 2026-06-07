@@ -54,7 +54,6 @@ def upsert_recent_favorable_setup(
     setup_label: str | None,
     setup_policy_action: str | None,
 ) -> None:
-    ensure_recent_favorable_setups_table()
     with get_connection(DB_PATH) as con:
         con.execute(
             """
@@ -74,7 +73,6 @@ def upsert_recent_favorable_setup(
 
 
 def get_recent_favorable_setup(symbol: str, ttl_minutes: int = 15):
-    ensure_recent_favorable_setups_table()
     with get_connection(DB_PATH) as con:
         row = con.execute(
             """
@@ -93,7 +91,6 @@ def get_recent_favorable_setup(symbol: str, ttl_minutes: int = 15):
 
 
 def prune_recent_favorable_setups(ttl_minutes: int = 15) -> None:
-    ensure_recent_favorable_setups_table()
     with get_connection(DB_PATH) as con:
         con.execute(
             """

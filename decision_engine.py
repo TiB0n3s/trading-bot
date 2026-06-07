@@ -20,7 +20,7 @@ def _get_client() -> Any:
                 "anthropic is required for Claude decisions; install runtime "
                 "dependencies or patch decision_engine._get_client/evaluate_signal in tests"
             ) from exc
-        _client = Anthropic()
+        _client = Anthropic(max_retries=0)
     return _client
 
 TRADING_RULES = '''
@@ -494,17 +494,28 @@ def evaluate_signal(signal_data, account_state):
         )
         prompt = 'Evaluate this signal: ' + json.dumps(signal_data) + ' Account: ' + json.dumps(account_state)
         response_text = ""
-        message = _get_client().messages.create(
-            model='claude-haiku-4-5-20251001',
-            max_tokens=1000,
-            system=TRADING_RULES,
-            messages=[{'role': 'user', 'content': prompt}],
-            timeout=10.0,
-        )
-        response_text = message.content[0].text
+        from anthropic import APIConnectionError, APITimeoutError
+        message = None
+        for attempt in range(2):
+            try:
+                message = _get_client().messages.create(
+                    model='claude-haiku-4-5-20251001',
+                    max_tokens=1000,
+                    system=[{"type": "text", "text": TRADING_RULES, "cache_control": {"type": "ephemeral"}}],
+                    messages=[
+                        {'role': 'user', 'content': prompt},
+                        {'role': 'assistant', 'content': '{'},
+                    ],
+                    timeout=13.0,
+                )
+                break
+            except (APITimeoutError, APIConnectionError) as e:
+                if attempt == 1:
+                    raise
+                logger.warning(f'Decision engine transient error (attempt {attempt + 1}): {e}')
+        response_text = '{' + message.content[0].text
         logger.info(f'AI decision: {response_text}')
-        response_clean = response_text.strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip()
-        return json.loads(response_clean)
+        return json.loads(response_text.strip())
     except json.JSONDecodeError as e:
         logger.error(f'JSON parse error: {e} | Raw response: {response_text}')
         return {'approved': False, 'reason': 'Parse error - rejecting for safety', 'position_size_pct': 0, 'stop_loss_pct': 1.75, 'take_profit_pct': 0, 'confidence': 'low'}

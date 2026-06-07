@@ -159,10 +159,13 @@ research. Both artifacts remain observe-only unless an explicit future
 promotion process adds validation, model-card review, default-off env flags,
 runtime tests, and rollback.
 
-The root `requirements.txt` includes the optional research dependencies needed
+The root `requirements.txt` delegates to `requirements-research.txt`, which
+installs `requirements-base.txt` plus the optional research dependencies needed
 for these checked-in workflows: `duckdb`, `pyarrow`, `scikit-learn`, `joblib`,
-and `hmmlearn`. They are installed for reproducible exports/training/tests, not
-for live authority.
+`xgboost`, and `hmmlearn`. They are installed for reproducible
+exports/training/tests, not for live authority. The `runtime` container target
+uses only `requirements-base.txt`, so optional-dependency fallback behavior must
+be validated separately from research-image training behavior.
 
 `score_financial_sentiment.py` separates the lightweight lexicon fallback from
 the optional FinBERT transformer path. Use it to generate sentiment evidence,

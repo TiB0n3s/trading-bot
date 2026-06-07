@@ -178,11 +178,15 @@ Recent completed roadmap items:
   `services/live_features_service.py` mirrors compact ticks through
   `services/timescale_tick_writer_service.py`; this path is storage-only and
   has no order, sizing, or risk-gate authority.
-- DuckDB/PyArrow research exports, sklearn/joblib supervised artifacts, and
-  hmmlearn HMM regime artifacts are included in `requirements.txt` for
-  reproducible local research/test runs. These dependencies remain observe-only
-  unless separately promoted through tests, reports, and explicit operator
-  review.
+- `requirements.txt` delegates to `requirements-research.txt`; the slim runtime
+  dependency subset lives in `requirements-base.txt`. DuckDB/PyArrow research
+  exports, sklearn/joblib supervised artifacts, XGBoost candidates, and hmmlearn
+  HMM regime artifacts are pinned in the research overlay for reproducible local
+  research/test runs. These dependencies remain observe-only unless separately
+  promoted through tests, reports, and explicit operator review. The runtime
+  container target intentionally excludes those heavy optional dependencies, so
+  fallback behavior must be tested with the runtime target as well as the
+  research target.
 - `ops_check.py trading-education-health` reports the curated
   `trading_education_corpus_v1` source/concept contract. Education content can
   support explanation, taxonomy, backtesting, and overfitting-governance work,

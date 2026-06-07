@@ -136,10 +136,31 @@ pip install -e '.[dev]'
 python run_tests.py
 ```
 
-`requirements.txt` includes the core runtime stack plus optional research
-dependencies used by checked-in commands: DuckDB/PyArrow research exports,
-scikit-learn/joblib supervised prediction artifacts, and hmmlearn HMM regime
-experiments. These packages do not grant live trading authority by themselves.
+`requirements.txt` delegates to `requirements-research.txt` for the full local
+research/test environment. `requirements-base.txt` is the slim runtime subset.
+`requirements-research.txt` layers the optional research stack on top:
+DuckDB/PyArrow research exports, scikit-learn/joblib supervised prediction
+artifacts, XGBoost supervised candidates, and hmmlearn HMM regime experiments.
+These packages do not grant live trading authority by themselves.
+
+Container build targets are split the same way:
+
+```bash
+docker build --target runtime -t tradingbot-runtime .
+docker build --target research -t tradingbot-research .
+docker run --rm tradingbot-research python tests/test_dependency_packaging_contract.py
+```
+
+Before moving any live service into a slim container, run fallback-focused tests
+inside the `runtime` target with heavy ML dependencies absent. That validates the
+optional-dependency fallback branch separately from the research image where ML
+dependencies are present.
+
+For SQLite, reason about write ownership per database file. Keep `trades.db`,
+`predictions.db`, and `jobs.db` on same-host bind mounts, never NFS/network
+volumes, and run at most one writer for any given DB file. The live runtime
+should own live order/trade writes; research jobs may run concurrently only when
+their writes are isolated to separate DB files or read-only access.
 
 Additional validation commands:
 

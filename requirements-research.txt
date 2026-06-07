@@ -1,0 +1,10 @@
+-r requirements-base.txt
+
+duckdb==1.5.3
+hmmlearn==0.3.3
+joblib==1.5.3
+pyarrow==24.0.0
+scikit-learn==1.8.0
+scipy==1.17.1
+threadpoolctl==3.6.0
+xgboost==3.2.0

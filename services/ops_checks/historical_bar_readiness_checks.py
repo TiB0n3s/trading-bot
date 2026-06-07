@@ -311,11 +311,14 @@ def _manifest_summary(base_dir: Path) -> dict[str, Any]:
     manifests = _load_manifests(base_dir / DEFAULT_MANIFEST_DIR, limit=10)
     errors = [err for manifest in manifests for err in (manifest.get("errors") or [])]
     latest = manifests[0] if manifests else {}
+    latest_errors = latest.get("errors") or []
     return {
         "recent_manifest_count": len(manifests),
         "recent_manifest_errors": len(errors),
+        "latest_manifest_errors": len(latest_errors),
         "latest_manifest": latest,
         "recent_errors": errors,
+        "latest_errors": latest_errors,
     }
 
 
@@ -399,7 +402,11 @@ def run_historical_bar_readiness(
         for row in feature_nulls
         if row.get("present") and float(row.get("missing_pct") or 0.0) <= max_feature_missing_pct
     ]
-    feature_ready_pct = _pct(len(feature_ready), len(feature_nulls))
+    feature_ready_pct = (
+        _pct(len(feature_ready), len(feature_nulls))
+        if feature_nulls
+        else 100.0
+    )
     quality_ready = (not include_db_quality) or (
         (total_rows or 0) > 0
         and (null_ohlcv or 0) == 0
@@ -410,7 +417,7 @@ def run_historical_bar_readiness(
         len(ready_symbols) >= min_symbols
         and quality_ready
         and feature_ready_pct >= 80.0
-        and int(manifest.get("recent_manifest_errors") or 0) == 0
+        and int(manifest.get("latest_manifest_errors") or 0) == 0
     )
     score = _readiness_score(
         symbols_ready=len(ready_symbols),
@@ -441,6 +448,7 @@ def run_historical_bar_readiness(
     print(f"completion_hook_ready      : {hook_ready}")
     print(f"recent_manifest_count      : {manifest['recent_manifest_count']}")
     print(f"recent_manifest_errors     : {manifest['recent_manifest_errors']}")
+    print(f"latest_manifest_errors     : {manifest['latest_manifest_errors']}")
     if include_db_quality:
         print(f"db_quality_mode           : {quality.get('quality_mode', 'unknown')}")
         if quality.get("sample_rows_per_symbol"):
@@ -462,7 +470,10 @@ def run_historical_bar_readiness(
     recent_errors = manifest.get("recent_errors") or []
     if recent_errors:
         print()
-        print("Recent manifest errors")
+        if int(manifest.get("latest_manifest_errors") or 0) == 0:
+            print("Recent manifest errors (historical; latest manifest is clean)")
+        else:
+            print("Recent manifest errors")
         for err in recent_errors[:limit]:
             print(f"  {err}")
 

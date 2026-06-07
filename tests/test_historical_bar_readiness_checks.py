@@ -96,7 +96,16 @@ def _build_db(path: Path) -> None:
         )
 
 
-def _write_manifest(base_dir: Path) -> None:
+def _write_cache_chunk(base_dir: Path, symbol: str, start: str, end: str) -> None:
+    cache_dir = base_dir / "data" / "historical_bars" / "polygon_1min"
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    (cache_dir / f"{symbol}_1min_rth_{start}_{end}.csv").write_text(
+        "Timestamp,Close\n2026-01-01T14:30:00+00:00,100\n",
+        encoding="utf-8",
+    )
+
+
+def _write_manifest(base_dir: Path, *, errors=None, stamp: str = "20260102T120000Z") -> None:
     manifest_dir = (
         base_dir
         / "data"
@@ -105,7 +114,7 @@ def _write_manifest(base_dir: Path) -> None:
         / "backfill_manifests"
     )
     manifest_dir.mkdir(parents=True, exist_ok=True)
-    (manifest_dir / "historical_bar_backfill_20260102T120000Z.json").write_text(
+    (manifest_dir / f"historical_bar_backfill_{stamp}.json").write_text(
         json.dumps(
             {
                 "attempted_chunks": 1,
@@ -113,7 +122,7 @@ def _write_manifest(base_dir: Path) -> None:
                 "skipped_chunks": 0,
                 "cached_rows": 3,
                 "persisted_pattern_rows": 3,
-                "errors": [],
+                "errors": errors or [],
             }
         ),
         encoding="utf-8",
@@ -131,7 +140,7 @@ def test_historical_bar_readiness_reports_quality_and_hook_status():
                 base_dir=base_dir,
                 start_date="2026-01-01",
                 end_date="2026-01-03",
-                min_days=3,
+                min_days=2,
                 min_symbols=1,
                 include_db_quality=True,
                 include_duplicate_scan=True,
@@ -158,7 +167,7 @@ def test_historical_bar_readiness_marks_skipped_db_metrics_not_scanned():
                 base_dir=base_dir,
                 start_date="2026-01-01",
                 end_date="2026-01-03",
-                min_days=3,
+                min_days=2,
                 min_symbols=1,
                 include_db_quality=False,
                 limit=5,
@@ -173,9 +182,38 @@ def test_historical_bar_readiness_marks_skipped_db_metrics_not_scanned():
     assert "zero_volume_rows           : not_scanned" in out
 
 
+def test_historical_bar_readiness_allows_clean_latest_manifest_with_old_errors():
+    with tempfile.TemporaryDirectory() as tmp:
+        base_dir = Path(tmp)
+        _build_db(base_dir / "trades.db")
+        _write_cache_chunk(base_dir, "AAPL", "2026-01-01", "2026-01-03")
+        _write_manifest(base_dir, errors=["old timeout"], stamp="20260101T120000Z")
+        _write_manifest(base_dir, errors=[], stamp="20260102T120000Z")
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            ok = run_historical_bar_readiness(
+                base_dir=base_dir,
+                start_date="2026-01-01",
+                end_date="2026-01-03",
+                min_days= 2,
+                min_symbols=1,
+                include_db_quality=False,
+                limit=5,
+            )
+
+    out = buf.getvalue()
+    assert ok is True
+    assert "completion_hook_ready      : True" in out
+    assert "recent_manifest_errors     : 1" in out
+    assert "latest_manifest_errors     : 0" in out
+    assert "latest manifest is clean" in out
+
+
 if __name__ == "__main__":
     test_historical_bar_readiness_reports_quality_and_hook_status()
     test_historical_bar_readiness_marks_skipped_db_metrics_not_scanned()
+    test_historical_bar_readiness_allows_clean_latest_manifest_with_old_errors()
     print("[OK] test_historical_bar_readiness_reports_quality_and_hook_status")
     print("[OK] test_historical_bar_readiness_marks_skipped_db_metrics_not_scanned")
-    print("\nAll 2 historical bar readiness tests passed.")
+    print("[OK] test_historical_bar_readiness_allows_clean_latest_manifest_with_old_errors")
+    print("\nAll 3 historical bar readiness tests passed.")

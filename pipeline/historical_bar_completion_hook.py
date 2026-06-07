@@ -61,6 +61,7 @@ def build_completion_assessment(args: argparse.Namespace) -> dict:
     )
     manifests = _load_manifests(BASE_DIR / DEFAULT_MANIFEST_DIR, limit=10)
     errors = [err for manifest in manifests for err in (manifest.get("errors") or [])]
+    latest_errors = (manifests[0] or {}).get("errors") or [] if manifests else []
     ready_symbols = sorted(row["symbol"] for row in progress if row.get("ready"))
     remaining_symbols = sorted(row["symbol"] for row in progress if not row.get("ready"))
     readiness = {
@@ -71,9 +72,10 @@ def build_completion_assessment(args: argparse.Namespace) -> dict:
         "min_days": args.min_days,
         "latest_manifest": (manifests[0] or {}).get("manifest_file") if manifests else None,
         "recent_manifest_errors": len(errors),
+        "latest_manifest_errors": len(latest_errors),
     }
     readiness["coverage_hash"] = _fingerprint(readiness)
-    ready = len(ready_symbols) >= args.min_symbols and not errors
+    ready = len(ready_symbols) >= args.min_symbols and not latest_errors
     return {
         "report_version": "historical_bar_completion_hook_v1",
         "runtime_effect": "candidate_training_trigger_only_no_live_authority",
@@ -82,10 +84,11 @@ def build_completion_assessment(args: argparse.Namespace) -> dict:
         "reason": (
             "historical bar cache coverage crossed configured floor"
             if ready
-            else "historical bar cache coverage is not ready or recent manifests have errors"
+            else "historical bar cache coverage is not ready or latest manifest has errors"
         ),
         "readiness": readiness,
         "recent_errors": errors,
+        "latest_errors": latest_errors,
         "remaining_symbols": remaining_symbols,
     }
 
@@ -123,6 +126,7 @@ def _print_payload(payload: dict, *, as_json: bool) -> None:
     print(f"min_days              : {readiness.get('min_days')}")
     print(f"latest_manifest       : {readiness.get('latest_manifest')}")
     print(f"recent_manifest_errors: {readiness.get('recent_manifest_errors')}")
+    print(f"latest_manifest_errors: {readiness.get('latest_manifest_errors')}")
     if payload.get("retrain_exit_code") is not None:
         print(f"retrain_exit_code     : {payload.get('retrain_exit_code')}")
 

@@ -74,6 +74,7 @@ policy_backtest_summary.json
 strategy_memory_history/
 runtime_state/
 research_exports/
+data/exports/
 data/historical_bars/
 data/historical_ticks/
 manual_polygon_backfill_v4_*.log

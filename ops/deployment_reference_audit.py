@@ -76,7 +76,7 @@ def missing_references_in_text(
 def current_crontab_text() -> str:
     try:
         return subprocess.check_output(["crontab", "-l"], text=True, stderr=subprocess.DEVNULL)
-    except subprocess.CalledProcessError:
+    except (OSError, subprocess.CalledProcessError):
         return ""
 
 

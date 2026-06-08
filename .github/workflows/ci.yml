@@ -33,8 +33,10 @@ jobs:
         run: |
           python -m py_compile \
             app.py \
+            db_migrations.py \
+            fill_stream.py \
             ops_check.py \
-            decision_policy.py \
+            scripts/decision_policy.py \
             services/slippage_kelly_sizing_service.py \
             services/supervised_prediction_training_service.py \
             services/transformer_authority_model_service.py \

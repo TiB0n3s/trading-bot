@@ -53,6 +53,7 @@ Usage:
   python3 ops_check.py secrets-hygiene [--env-file PATH]
   python3 ops_check.py architecture-surface
   python3 ops_check.py database-backups
+  python3 ops_check.py local-load-probe [--requests N] [--concurrency N] [--symbol AAPL] [--action buy]
   python3 ops_check.py resource-readiness
   python3 ops_check.py advanced-alpha-readiness
   python3 ops_check.py advanced-alpha-comparison
@@ -198,6 +199,7 @@ from services.ops_checks.lifecycle_dashboard_checks import run_lifecycle_dashboa
 from services.ops_checks.live_bar_pattern_capture_checks import (
     run_live_bar_pattern_capture_report,
 )
+from services.ops_checks.local_load_probe_checks import run_local_load_probe_report
 from services.ops_checks.log_ledger_checks import run_log_ledger_consistency
 from services.ops_checks.market_data_parity_checks import run_market_data_parity
 from services.ops_checks.missed_buy_review_checks import run_missed_buy_review
@@ -753,6 +755,15 @@ def production_evidence(target_date):
 
 def resource_readiness():
     return run_resource_readiness(base_dir=BASE_DIR)
+
+
+def local_load_probe():
+    return run_local_load_probe_report(
+        requests=_int_option("--requests", 100),
+        concurrency=_int_option("--concurrency", 4),
+        symbol=_str_option("--symbol", "AAPL"),
+        action=_str_option("--action", "buy"),
+    )
 
 
 def config_audit():

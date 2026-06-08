@@ -80,6 +80,7 @@ OPS_COMMAND_SPECS: dict[str, OpsCommandSpec] = {
     "secrets-hygiene": _noarg("secrets-hygiene"),
     "architecture-surface": _noarg("architecture-surface"),
     "database-backups": _noarg("database-backups"),
+    "local-load-probe": _noarg("local-load-probe"),
     "resource-readiness": _noarg("resource-readiness"),
     "advanced-alpha-readiness": _spec("advanced-alpha-readiness"),
     "advanced-alpha-comparison": _spec("advanced-alpha-comparison"),

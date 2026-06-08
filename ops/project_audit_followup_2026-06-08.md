@@ -40,6 +40,10 @@ items have since been implemented:
   measures root/module sprawl, oversized decision files, raw env access, and
   `src/trading_bot` skeleton readiness. `ops/compatibility_deletion_plan.md`
   tracks wrapper/module migration and deletion conditions.
+- **Local load diagnostics**: `ops_check.py local-load-probe` exercises the
+  Flask webhook route, auth, payload parser, event-record callback, and
+  signal-submit callback under bounded local bursts. It is diagnostic-only and
+  cannot submit broker orders or mutate trading state.
 - **Phase 2 web-runtime extraction**: `src/trading_bot/web/app_factory.py` now
   owns Flask app construction and route registration mechanics. Root `app.py`
   remains the deployed runtime compatibility context while runtime callbacks and
@@ -62,8 +66,10 @@ These remain valid roadmap items before any cash-live promotion:
      local hygiene checks.
    - Evaluate a secrets manager only after the operational surface stabilizes.
 3. **Load and burst testing**
-   - Add a local paper-only webhook/load harness that can replay high-volume
-     signal bursts without touching the broker.
+   - Local diagnostic webhook bursts are available through
+     `ops_check.py local-load-probe`.
+   - Remaining gap: broader end-to-end paper-session replay with realistic
+     market-data cadence, DB-write pressure, and order/fill callbacks.
 4. **Incident management**
    - Add a simple incident/postmortem template and link incidents to job-run,
      order, and learning artifacts.

@@ -1,21 +1,19 @@
 repos:
-  - repo: local
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.15.15
     hooks:
-      - id: ruff-check
+      - id: ruff
         name: Ruff check staged Python files
-        entry: ./venv/bin/python -m ruff check --fix
-        language: system
-        types: [python]
+        args: [--fix]
 
       - id: ruff-format
         name: Ruff format staged Python files
-        entry: ./venv/bin/python -m ruff format
-        language: system
-        types: [python]
 
+  - repo: local
+    hooks:
       - id: trading-bot-safety-checks
         name: Trading bot fast safety checks
-        entry: ./venv/bin/python run_safety_checks.py
+        entry: python3 run_safety_checks.py
         language: system
         pass_filenames: false
         always_run: true

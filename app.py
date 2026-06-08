@@ -50,8 +50,9 @@ from position_intelligence import (
 )
 from prediction_cache import (
     get_cached_prediction,
-    prediction_cache_status,
-    start_prediction_cache_loader,
+)
+from prediction_cache import (
+    prediction_cache_status as prediction_cache_status,  # noqa: F401
 )
 from prior_session_context import prior_session_context
 from repositories import context_repo, cooldown_repo, trades_repo
@@ -75,8 +76,10 @@ from runtime_config import (
     is_cash_mode,
     is_cash_safe_mode,
     public_decision_policy_config,
-    public_ml_authority_config,
     public_runtime_config,
+)
+from runtime_config import (
+    public_ml_authority_config as public_ml_authority_config,  # noqa: F401
 )
 from services import dedupe_service, trade_audit_service
 from services.container import ApplicationContainer
@@ -117,15 +120,14 @@ from services.signal_models import SignalRuntimeState
 from services.sizing_service import apply_final_sizing as apply_final_sizing  # noqa: F401
 from services.sizing_service import apply_size_cap
 from services.sizing_service import build_conviction_stack as build_conviction_stack  # noqa: F401
-from services.startup_service import StartupDeps, StartupService
 from services.symbol_override_service import SymbolOverrideService
 from services.trend_state_service import TrendStateService
 from session_momentum import (
     get_latest_session_momentum,
-    init_session_momentum_table,
 )
 from setup_policy import evaluate_setup_policy
-from src.trading_bot.web.app_factory import create_runtime_flask_app, register_runtime_routes
+from src.trading_bot.runtime.startup import run_runtime_startup_tasks
+from src.trading_bot.web.app_factory import create_runtime_flask_app
 from strategy.strategy_engine import evaluate_strategy_observe_only
 from strategy_constants import (
     ADAPTIVE_BUY_CONFIRMATION_ENABLED,
@@ -193,7 +195,9 @@ _RUNTIME_COMPAT_EXPORTS = (
     normalize_signal_identity,
     policy_artifact_status,
     policy_from_market_context,
+    prediction_cache_status,
     public_decision_policy_config,
+    public_ml_authority_config,
     public_policy_control_config,
     public_runtime_config,
     rolling_summary,
@@ -213,7 +217,6 @@ ET = ZoneInfo("America/New_York")
 et = pytz.timezone("America/New_York")
 logger = logging.getLogger(__name__)
 
-app = Flask(__name__)
 container = ApplicationContainer.create_default(
     logger=logger,
     signal_executor_factory=lambda: _get_signal_executor(),
@@ -319,39 +322,14 @@ def _get_signal_executor() -> ThreadPoolExecutor:
     return _signal_executor
 
 
-def _build_startup_service(app_container: ApplicationContainer | None = None) -> StartupService:
-    app_container = app_container or container
-    return StartupService(
-        StartupDeps(
-            container=app_container,
-            logger=logger,
-            init_core_tables=lambda: context_repo.init_core_tables(DB_PATH),
-            ensure_recent_favorable_setups_table=context_repo.ensure_recent_favorable_setups_table,
-            prune_recent_favorable_setups=context_repo.prune_recent_favorable_setups,
-            recent_favorable_setup_ttl_minutes=RECENT_FAVORABLE_SETUP_TTL_MINUTES,
-            init_session_momentum_table=init_session_momentum_table,
-            init_db_performance_indexes=context_repo.init_db_performance_indexes,
-            start_prediction_cache_loader=start_prediction_cache_loader,
-            prediction_cache_status=prediction_cache_status,
-            get_signal_executor=_get_signal_executor,
-            load_symbol_overrides=_load_symbol_overrides,
-            build_trend_table=_build_trend_table,
-            hydrate_cooldowns=_hydrate_cooldowns,
-            hydrate_recent_sells=_hydrate_recent_sells,
-            load_market_context=_load_market_context,
-            env_get=os.environ.get,
-            ml_authority_config=public_ml_authority_config,
-        )
-    )
-
-
 def run_startup_tasks(app_container: ApplicationContainer | None = None) -> None:
     """Execute non-critical startup tasks. Call explicitly from an entrypoint
     or from tests by passing run_startup=True to `create_app()` when safe.
     """
-    global _STARTUP_TASKS_RAN
-    _build_startup_service(app_container).run()
-    _STARTUP_TASKS_RAN = True
+    run_runtime_startup_tasks(
+        sys.modules[__name__],
+        app_container=app_container,
+    )
 
 
 def create_app(
@@ -1445,12 +1423,7 @@ def process_signal(data):
     return _build_signal_pipeline().run(data)
 
 
-app.extensions["application_container"] = container
-register_runtime_routes(
-    app,
-    runtime_module=sys.modules[__name__],
-    app_container=container,
-)
+app = create_app(run_startup=False, app_container=container)
 
 
 if __name__ == "__main__":

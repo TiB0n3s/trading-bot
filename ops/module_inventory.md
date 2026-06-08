@@ -13,6 +13,10 @@ support, which are operator/reporting tools, and which are research-only.
   - Owns Flask app creation and route registration mechanics.
   - Delegates route payload context to the current runtime compatibility module
     until root `app.py` is reduced to a small shim.
+- `src/trading_bot/runtime/startup.py`
+  - Owns startup-service wiring for the deployed runtime.
+  - Delegates runtime callbacks to the current compatibility module until
+    config/runtime context is packaged.
 - `services/live_signal_processor.py`
   - Owns live signal orchestration.
   - Calls preflight, context, approval, sizing, execution, and audit services.

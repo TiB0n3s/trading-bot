@@ -31,7 +31,8 @@ items have since been implemented:
 - **Phase 2 web-runtime extraction**: `src/trading_bot/web/app_factory.py` now
   owns Flask app construction and route registration mechanics. Root `app.py`
   remains the deployed runtime compatibility context while startup/config/global
-  exports are migrated in later cleanup slices.
+  exports are migrated in later cleanup slices. `src/trading_bot/runtime/startup.py`
+  now owns startup-service wiring.
 
 ## Current High-Priority Gaps
 
@@ -69,8 +70,9 @@ These remain valid roadmap items before any cash-live promotion:
      still need staged migration out of root files, generic `services/`, and
      oversized decision modules.
    - Current Phase 2 status: app factory and route registration moved into
-     `src/trading_bot/web/app_factory.py`; remaining work is root `app.py`
-     shim reduction, startup/runtime-context extraction, and packaged
+     `src/trading_bot/web/app_factory.py`, and startup-service wiring moved
+     into `src/trading_bot/runtime/startup.py`; remaining work is root
+     `app.py` shim reduction, config/runtime-context extraction, and packaged
      Gunicorn/systemd entrypoint validation.
 
 ## Documentation Rule

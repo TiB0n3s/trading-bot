@@ -1247,9 +1247,11 @@ and the compatibility deletion plan. It intentionally returns a warning until
 the repo is within the cleanup targets.
 
 Phase 2 web-runtime cleanup has begun: `src/trading_bot/web/app_factory.py`
-owns Flask app creation and route registration, and root `app.py` delegates to
-it. Remaining Phase 2 work is reducing root `app.py` to a small compatibility
-shim, moving startup/runtime context into package modules, and updating
+owns Flask app creation and route registration, and
+`src/trading_bot/runtime/startup.py` owns startup-service wiring. Root `app.py`
+delegates to both while remaining the deployed runtime compatibility context.
+Remaining Phase 2 work is reducing root `app.py` to a small compatibility shim,
+moving config/runtime globals into package modules, and updating
 Gunicorn/systemd only after smoke tests prove the packaged entrypoint.
 
 Common resource environment variables:
@@ -1689,6 +1691,7 @@ Current ownership:
 app.py remains the deployed Flask compatibility root and runtime context holder.
 src/trading_bot/web/app_factory.py owns Flask app creation and route
 registration mechanics.
+src/trading_bot/runtime/startup.py owns startup-service wiring.
 SignalPipeline owns runtime flow entry.
 LiveSignalProcessor owns live signal orchestration.
 ApprovalService owns deterministic and Claude/confidence decisions.

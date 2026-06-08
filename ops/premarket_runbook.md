@@ -2,9 +2,6 @@
 
 Use this before the next market session.
 
-For the Tuesday 2026-05-26 paper-session QA plan, also see
-`ops/tuesday_qa_runbook.md`.
-
 ## 1. Confirm repo state
 
 ```bash

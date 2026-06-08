@@ -85,9 +85,9 @@ only and selection-biased.
 - Symbol-universe changes must be versioned. Historical datasets should not
   treat newly added symbols as if they were always eligible.
 
-## Post-QA Symbol Candidates
+## Symbol Candidates
 
-Candidate additions to review after Tuesday QA:
+Candidate additions to review during the normal symbol-discovery workflow:
 
 - AMZN
 - JPM

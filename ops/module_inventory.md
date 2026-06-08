@@ -86,8 +86,8 @@ support, which are operator/reporting tools, and which are research-only.
   - Main operator report router.
   - Reports should read through services/repositories, not direct SQL or
     direct market-data calls.
-- `*_report.py`, `*_builder.py`, and `ops/tuesday_qa_runner.py`
-  - Report, labeling, QA, and post-session tools.
+- `*_report.py` and `*_builder.py`
+  - Report, labeling, and post-session tools.
   - They must not change live policy without an explicit config/policy artifact
     path.
 - `live_score_monitor.py` and `intelligence_status.py`

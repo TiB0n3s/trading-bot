@@ -771,8 +771,8 @@ risk review.
 
 Current state:
 
-- `/status`, `ops_check.py`, Tuesday QA automation, and read-only reports cover
-  much of the operator surface.
+- `/status`, `ops_check.py`, and read-only reports cover much of the operator
+  surface.
 
 Remaining:
 

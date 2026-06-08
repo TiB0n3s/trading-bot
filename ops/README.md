@@ -583,36 +583,10 @@ curl -s -H "X-Webhook-Secret: $WEBHOOK_SECRET" \
 treated as legacy because reverse proxies and access logs often record URLs.
 
 
-## Tuesday QA Runbook
+## Staged Validation
 
-Use the Tuesday QA runbook to turn the 2026-05-26 paper session into a structured
-validation pass:
+Use these docs and checks to decide what to improve next:
 
-```bash
-less ops/tuesday_qa_runbook.md
-```
-
-It defines premarket, open, mid-session, close, and after-close checks plus a
-QA scorecard for deciding what to fix next.
-
-
-## Tuesday QA Automation
-
-Start the read-only QA runner if you will be away during market hours:
-
-```bash
-cd ~/trading-bot
-python3 ops/tuesday_qa_runner.py --date 2026-05-26
-```
-
-It follows `ops/tuesday_qa_runbook.md` and writes logs under `ops/qa_logs/`.
-Use `--dry-run` to preview the schedule without running checks.
-
-## Post-Tuesday Planning
-
-Use these docs after the paper session to decide what to improve next:
-
-- `ops/tuesday_debrief_template.md`: debrief scorecard and decision tree.
 - `ops/module_inventory.md`: active vs scheduled vs research-only module map.
 - `ops/ml_platform_roadmap.md`: staged ML/research-platform direction.
 

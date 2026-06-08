@@ -22,7 +22,7 @@ Options:
   --apply                 Delete selected artifacts.
   --dry-run               Print selected artifacts. Default.
   --include-logs          Include root/runtime *.log and *.log.* files.
-  --include-session-logs  Include session_logs/ and ops/qa_logs/ logs too.
+  --include-session-logs  Include session_logs/ logs too.
   --include-db-backups    Include *.db.bak* files.
   --no-caches             Do not include Python/cache artifacts.
   --no-backups            Do not include local source backup artifacts.
@@ -115,7 +115,7 @@ if [[ "$INCLUDE_LOGS" -eq 1 ]]; then
   while IFS= read -r path; do
     if [[ "$INCLUDE_SESSION_LOGS" -eq 0 ]]; then
       case "$path" in
-        ./session_logs/*|./ops/qa_logs/*)
+        ./session_logs/*)
           continue
           ;;
       esac

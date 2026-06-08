@@ -11,7 +11,7 @@ This project is currently operated as a paper-trading system. Several live-safe 
 As of the latest roadmap work:
 
 - Bot is operational in paper trading.
-- `app.py` is a Flask composition root: startup entry point, runtime compatibility context, container selection, and the public `process_signal()` compatibility wrapper. Flask app construction and route registration mechanics now live in `src/trading_bot/web/app_factory.py`, while root `app.py` remains the deployed compatibility module.
+- `app.py` is a Flask composition root: startup entry point, runtime compatibility context, container selection, and the public `process_signal()` compatibility wrapper. Flask app construction and route registration mechanics now live in `src/trading_bot/web/app_factory.py`, startup wiring lives in `src/trading_bot/runtime/startup.py`, and app-specific runtime settings are loaded by `src/trading_bot/config/runtime.py`.
 - Live signal orchestration is owned by `services/live_signal_processor.py`; approval gates, sizing, execution adapters, audit persistence, runtime context, and repositories are service-owned.
 - The legacy live signal processor, `execute_legacy`, `run_legacy_*` service functions, and app-level audit shims have been removed.
 - Architecture boundary tests enforce DB access through `db.py`, repositories, and migrations; broker/market-data access through approved adapter boundaries; and no temporary architecture allowlists remain.
@@ -1248,11 +1248,13 @@ the repo is within the cleanup targets.
 
 Phase 2 web-runtime cleanup has begun: `src/trading_bot/web/app_factory.py`
 owns Flask app creation and route registration, and
-`src/trading_bot/runtime/startup.py` owns startup-service wiring. Root `app.py`
-delegates to both while remaining the deployed runtime compatibility context.
+`src/trading_bot/runtime/startup.py` owns startup-service wiring.
+`src/trading_bot/config/runtime.py` owns app-specific runtime settings parsing.
+Root `app.py` delegates to these package modules while remaining the deployed
+runtime compatibility context.
 Remaining Phase 2 work is reducing root `app.py` to a small compatibility shim,
-moving config/runtime globals into package modules, and updating
-Gunicorn/systemd only after smoke tests prove the packaged entrypoint.
+packaging more runtime context, and updating Gunicorn/systemd only after smoke
+tests prove the packaged entrypoint.
 
 Common resource environment variables:
 
@@ -1692,6 +1694,7 @@ app.py remains the deployed Flask compatibility root and runtime context holder.
 src/trading_bot/web/app_factory.py owns Flask app creation and route
 registration mechanics.
 src/trading_bot/runtime/startup.py owns startup-service wiring.
+src/trading_bot/config/runtime.py owns app-specific runtime settings parsing.
 SignalPipeline owns runtime flow entry.
 LiveSignalProcessor owns live signal orchestration.
 ApprovalService owns deterministic and Claude/confidence decisions.

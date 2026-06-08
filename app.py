@@ -126,6 +126,7 @@ from session_momentum import (
     get_latest_session_momentum,
 )
 from setup_policy import evaluate_setup_policy
+from src.trading_bot.config.runtime import load_runtime_settings
 from src.trading_bot.runtime.startup import run_runtime_startup_tasks
 from src.trading_bot.web.app_factory import create_runtime_flask_app
 from strategy.strategy_engine import evaluate_strategy_observe_only
@@ -206,8 +207,6 @@ _RUNTIME_COMPAT_EXPORTS = (
     time,
 )
 
-IS_PAPER_MODE = EXECUTION_MODE == "paper"
-
 logging.basicConfig(
     level=os.environ.get("LOG_LEVEL", "INFO").upper(),
     format="%(asctime)s - %(levelname)s - %(message)s",
@@ -229,84 +228,39 @@ tape_service = container.tape_service
 
 DB_PATH = Path(__file__).parent / "trades.db"
 _START_TIME = datetime.now(timezone.utc)
-ENFORCE_SETUP_POLICY_BLOCKS = True
-SIGNAL_TTL_SECONDS = int(os.getenv("SIGNAL_TTL_SECONDS", "300"))
-
-PREDICTION_GATE_MODE = os.getenv("PREDICTION_GATE_MODE", "warn").strip().lower()
-PREDICTION_SOFT_AVOID_MIN_SAMPLE_SIZE = int(
-    os.getenv("PREDICTION_SOFT_AVOID_MIN_SAMPLE_SIZE", "20")
+_runtime_settings = load_runtime_settings(
+    env_get=os.environ.get,
+    execution_mode=EXECUTION_MODE,
+    warn=logger.warning,
 )
-
-INTRA_SESSION_TAPE_DEGRADATION_ENABLED = os.getenv(
-    "INTRA_SESSION_TAPE_DEGRADATION_ENABLED", "true"
-).strip().lower() in ("1", "true", "yes", "on")
-INTRA_SESSION_TAPE_DEGRADATION_START_HOUR_ET = int(
-    os.getenv("INTRA_SESSION_TAPE_DEGRADATION_START_HOUR_ET", "12")
+IS_PAPER_MODE = _runtime_settings.IS_PAPER_MODE
+ENFORCE_SETUP_POLICY_BLOCKS = _runtime_settings.ENFORCE_SETUP_POLICY_BLOCKS
+SIGNAL_TTL_SECONDS = _runtime_settings.SIGNAL_TTL_SECONDS
+PREDICTION_GATE_MODE = _runtime_settings.PREDICTION_GATE_MODE
+PREDICTION_SOFT_AVOID_MIN_SAMPLE_SIZE = _runtime_settings.PREDICTION_SOFT_AVOID_MIN_SAMPLE_SIZE
+INTRA_SESSION_TAPE_DEGRADATION_ENABLED = _runtime_settings.INTRA_SESSION_TAPE_DEGRADATION_ENABLED
+INTRA_SESSION_TAPE_DEGRADATION_START_HOUR_ET = (
+    _runtime_settings.INTRA_SESSION_TAPE_DEGRADATION_START_HOUR_ET
 )
-INTRA_SESSION_TAPE_DEGRADATION_MIN_SETUP_SCORE = float(
-    os.getenv("INTRA_SESSION_TAPE_DEGRADATION_MIN_SETUP_SCORE", "55")
+INTRA_SESSION_TAPE_DEGRADATION_MIN_SETUP_SCORE = (
+    _runtime_settings.INTRA_SESSION_TAPE_DEGRADATION_MIN_SETUP_SCORE
 )
-
-ONE_BAR_CONFIRMATION_HOLD_ENABLED = os.getenv(
-    "ONE_BAR_CONFIRMATION_HOLD_ENABLED", "true"
-).strip().lower() in ("1", "true", "yes", "on")
-ONE_BAR_CONFIRMATION_EXTENSION_THRESHOLD_PCT = float(
-    os.getenv("ONE_BAR_CONFIRMATION_EXTENSION_THRESHOLD_PCT", "0.25")
+ONE_BAR_CONFIRMATION_HOLD_ENABLED = _runtime_settings.ONE_BAR_CONFIRMATION_HOLD_ENABLED
+ONE_BAR_CONFIRMATION_EXTENSION_THRESHOLD_PCT = (
+    _runtime_settings.ONE_BAR_CONFIRMATION_EXTENSION_THRESHOLD_PCT
 )
-ONE_BAR_CONFIRMATION_TIMEOUT_SECONDS = int(os.getenv("ONE_BAR_CONFIRMATION_TIMEOUT_SECONDS", "75"))
-
-# Tape exception for the neutral-bias confidence gate.
-# When true, accelerating momentum + elevated/surge volume + clean_momentum tape
-# overrides a stale neutral pre-market classification and allows medium confidence through.
-TAPE_EXCEPTION_ENABLED = os.getenv("TAPE_EXCEPTION_ENABLED", "true").strip().lower() in (
-    "1",
-    "true",
-    "yes",
-    "on",
-)
-
-# Open-momentum fast lane for the trend confirmation gate.
-# When true, surge volume + accelerating momentum within the first 60 minutes
-# bypasses the consecutive-count requirement on buy-bias symbols.
-# gap_up_chase_risk exclusion prevents firing on extended gap-up chases.
-OPEN_MOMENTUM_FAST_LANE_ENABLED = os.getenv(
-    "OPEN_MOMENTUM_FAST_LANE_ENABLED", "true"
-).strip().lower() in ("1", "true", "yes", "on")
-
-# Minimum market_value (USD) for a position to count toward the macro position cap.
-# Positions below this floor are residual/micro lots and should not consume a slot.
-MACRO_POSITION_COUNT_FLOOR = float(os.getenv("MACRO_POSITION_COUNT_FLOOR", "500.0"))
-
-if PREDICTION_GATE_MODE not in ("off", "warn", "soft", "hard"):
-    logger.warning(f"Invalid PREDICTION_GATE_MODE={PREDICTION_GATE_MODE!r}; defaulting to warn")
-    PREDICTION_GATE_MODE = "warn"
-
-# Prediction promotion ladder:
-# - warn/off/soft: do not hard-reject; keep telemetry and reports active
-# - hard: block prediction_decision=block and block watch in cash mode only
-# Hard mode requires enough labeled paper-session outcomes and operator review.
-ENFORCE_PREDICTION_BLOCKS = PREDICTION_GATE_MODE == "hard"
-ENFORCE_PREDICTION_WATCH_IN_CASH = PREDICTION_GATE_MODE == "hard"
-
-STRATEGY_ENGINE_MODE = os.getenv("STRATEGY_ENGINE_MODE", "observe").strip().lower()
-if STRATEGY_ENGINE_MODE not in ("off", "observe"):
-    logger.warning(f"Invalid STRATEGY_ENGINE_MODE={STRATEGY_ENGINE_MODE!r}; defaulting to observe")
-    STRATEGY_ENGINE_MODE = "observe"
-
-RISK_POLICY_MODE = os.getenv("RISK_POLICY_MODE", "compare").strip().lower()
-if RISK_POLICY_MODE not in ("off", "compare"):
-    logger.warning(f"Invalid RISK_POLICY_MODE={RISK_POLICY_MODE!r}; defaulting to compare")
-    RISK_POLICY_MODE = "compare"
-
-ENFORCE_SESSION_MOMENTUM_GATE = os.getenv(
-    "ENFORCE_SESSION_MOMENTUM_GATE", "false"
-).strip().lower() in ("1", "true", "yes", "on")
-
-ENFORCE_ADAPTIVE_CHURN_REENTRY = os.getenv(
-    "ENFORCE_ADAPTIVE_CHURN_REENTRY", "true"
-).strip().lower() in ("1", "true", "yes", "on")
-SIGNAL_WORKER_COUNT = int(os.environ.get("SIGNAL_WORKER_COUNT", "3"))
-RECENT_FAVORABLE_SETUP_TTL_MINUTES = 15
+ONE_BAR_CONFIRMATION_TIMEOUT_SECONDS = _runtime_settings.ONE_BAR_CONFIRMATION_TIMEOUT_SECONDS
+TAPE_EXCEPTION_ENABLED = _runtime_settings.TAPE_EXCEPTION_ENABLED
+OPEN_MOMENTUM_FAST_LANE_ENABLED = _runtime_settings.OPEN_MOMENTUM_FAST_LANE_ENABLED
+MACRO_POSITION_COUNT_FLOOR = _runtime_settings.MACRO_POSITION_COUNT_FLOOR
+ENFORCE_PREDICTION_BLOCKS = _runtime_settings.ENFORCE_PREDICTION_BLOCKS
+ENFORCE_PREDICTION_WATCH_IN_CASH = _runtime_settings.ENFORCE_PREDICTION_WATCH_IN_CASH
+STRATEGY_ENGINE_MODE = _runtime_settings.STRATEGY_ENGINE_MODE
+RISK_POLICY_MODE = _runtime_settings.RISK_POLICY_MODE
+ENFORCE_SESSION_MOMENTUM_GATE = _runtime_settings.ENFORCE_SESSION_MOMENTUM_GATE
+ENFORCE_ADAPTIVE_CHURN_REENTRY = _runtime_settings.ENFORCE_ADAPTIVE_CHURN_REENTRY
+SIGNAL_WORKER_COUNT = _runtime_settings.SIGNAL_WORKER_COUNT
+RECENT_FAVORABLE_SETUP_TTL_MINUTES = _runtime_settings.RECENT_FAVORABLE_SETUP_TTL_MINUTES
 _signal_executor = None
 _STARTUP_TASKS_RAN = False
 

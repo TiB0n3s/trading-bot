@@ -17,6 +17,10 @@ support, which are operator/reporting tools, and which are research-only.
   - Owns startup-service wiring for the deployed runtime.
   - Delegates runtime callbacks to the current compatibility module until
     config/runtime context is packaged.
+- `src/trading_bot/config/runtime.py`
+  - Owns app-specific runtime settings parsing for the deployed Flask
+    compatibility root.
+  - Does not read the environment directly; callers inject an env reader.
 - `services/live_signal_processor.py`
   - Owns live signal orchestration.
   - Calls preflight, context, approval, sizing, execution, and audit services.

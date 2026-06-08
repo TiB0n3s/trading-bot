@@ -11,6 +11,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 from collections import Counter
+import math
 
 from repositories.supervised_prediction_training_repo import (
     fetch_training_rows as repo_fetch_training_rows,
@@ -84,6 +85,7 @@ DEFAULT_FEATURE_COLUMNS = (
 )
 TRIPLE_BARRIER_TARGETS = ("triple_barrier", "triple_barrier_label")
 TREND_SCAN_TARGETS = ("trend_scan", "trend_scan_label")
+ASYMMETRIC_XGBOOST_FALSE_POSITIVE_PENALTY = 10.0
 
 
 @dataclass(frozen=True)
@@ -202,6 +204,45 @@ def _positive_rate(labels: list[int]) -> float | None:
 
 def _majority_label(labels: list[int]) -> int:
     return Counter(labels).most_common(1)[0][0]
+
+
+def _binary_labels(labels: list[int]) -> list[int]:
+    return [1 if int(value) > 0 else 0 for value in labels]
+
+
+def _sigmoid(value: float) -> float:
+    if value >= 0:
+        z = math.exp(-value)
+        return 1.0 / (1.0 + z)
+    z = math.exp(value)
+    return z / (1.0 + z)
+
+
+def asymmetric_false_positive_logistic_objective(
+    preds: Any,
+    dtrain: Any,
+    *,
+    false_positive_penalty: float = ASYMMETRIC_XGBOOST_FALSE_POSITIVE_PENALTY,
+) -> tuple[Any, Any]:
+    """XGBoost custom objective that penalizes false-positive pressure harder.
+
+    Labels are binary: 1 means the forward label supports a trade, 0 means it
+    does not. When the model assigns high probability to a 0 label, the gradient
+    and Hessian are scaled up so stop-out-prone false positives cost more than
+    missed positives. This remains observe-only until promotion governance says
+    otherwise.
+    """
+    labels = dtrain.get_label()
+    penalty = max(1.0, float(false_positive_penalty or 1.0))
+    grad = []
+    hess = []
+    for raw_pred, label in zip(preds, labels):
+        prob = _sigmoid(float(raw_pred))
+        y = 1.0 if float(label) > 0.0 else 0.0
+        weight = penalty if y < prob else 1.0
+        grad.append((prob - y) * weight)
+        hess.append(max(prob * (1.0 - prob) * weight, 1e-6))
+    return grad, hess
 
 
 def _model_row(
@@ -517,6 +558,74 @@ def train_quant_model_suite(
                     accuracy=None,
                     baseline_positive_rate=positive_rate,
                     reason=f"xgboost training failed: {exc}",
+                )
+            )
+        try:
+            import xgboost as xgb
+
+            y_train_binary = _binary_labels(y_train)
+            y_test_binary = _binary_labels(y_test)
+            dtrain = xgb.DMatrix(x_train, label=y_train_binary, feature_names=feature_columns)
+            dtest = xgb.DMatrix(x_test, label=y_test_binary, feature_names=feature_columns)
+            params = {
+                "max_depth": 3,
+                "eta": 0.08,
+                "subsample": 0.9,
+                "colsample_bytree": 0.9,
+                "eval_metric": "logloss",
+                "seed": 42,
+            }
+            model = xgb.train(
+                params,
+                dtrain,
+                num_boost_round=50,
+                obj=asymmetric_false_positive_logistic_objective,
+                verbose_eval=False,
+            )
+            raw_probs = [float(value) for value in model.predict(dtest)] if x_test else []
+            preds = [1 if _sigmoid(value) >= 0.5 else 0 for value in raw_probs]
+            artifact_path = None
+            if artifact_root is not None:
+                import joblib
+
+                artifact_root.mkdir(parents=True, exist_ok=True)
+                path = artifact_root / f"{model_id_prefix}_xgboost_asymmetric.joblib"
+                metadata = {
+                    "version": SUPERVISED_MODEL_VERSION,
+                    "suite_version": QUANT_MODEL_SUITE_VERSION,
+                    "provider": "xgboost_asymmetric_false_positive",
+                    "objective": "custom_asymmetric_false_positive_logistic",
+                    "false_positive_penalty": ASYMMETRIC_XGBOOST_FALSE_POSITIVE_PENALTY,
+                    "feature_columns": feature_columns,
+                    "horizon": horizon,
+                    "sample_size": sample_size,
+                    "generated_at": _now(),
+                    "runtime_effect": "observe_only_no_live_authority",
+                }
+                joblib.dump({"model": model, "metadata": metadata}, path)
+                atomic_write_json(path.with_suffix(path.suffix + ".metadata.json"), metadata)
+                artifact_path = str(path)
+            models.append(
+                _model_row(
+                    provider="xgboost_asymmetric_false_positive",
+                    trained=True,
+                    accuracy=_accuracy(y_test_binary, preds),
+                    baseline_positive_rate=_positive_rate(y_test_binary),
+                    reason=(
+                        "trained xgboost custom objective with "
+                        f"{ASYMMETRIC_XGBOOST_FALSE_POSITIVE_PENALTY:g}x false-positive penalty"
+                    ),
+                    artifact_path=artifact_path,
+                )
+            )
+        except Exception as exc:
+            models.append(
+                _model_row(
+                    provider="xgboost_asymmetric_false_positive",
+                    trained=False,
+                    accuracy=None,
+                    baseline_positive_rate=positive_rate,
+                    reason=f"asymmetric xgboost training failed: {exc}",
                 )
             )
 

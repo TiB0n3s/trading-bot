@@ -48,8 +48,9 @@ def test_advanced_alpha_readiness_scores_integrated_bar_features():
     assert by_family["fractional_memory_trend_scan"]["readiness_pct"] >= 85
     assert by_family["true_trade_level_vpin"]["status"] == "not_ready"
     assert "schema_integrated" in by_family["true_trade_level_vpin"]["failed"]
-    assert by_family["volume_clock_vpin"]["status"] == "not_ready"
-    assert "volume_clock_enabled" in by_family["volume_clock_vpin"]["failed"]
+    assert by_family["volume_clock_vpin"]["status"] == "partially_integrated"
+    assert "live_volume_clock_enabled" in by_family["volume_clock_vpin"]["failed"]
+    assert "outcome_linkage_ge_500" in by_family["volume_clock_vpin"]["failed"]
     assert by_family["liquidity_stress_indicator"]["status"] == "partially_integrated"
     assert "lsi_feature_enabled" in by_family["liquidity_stress_indicator"]["failed"]
     assert data["summary"]["microstructure_coverage_rate"] == 85.0

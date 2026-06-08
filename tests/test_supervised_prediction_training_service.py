@@ -11,9 +11,11 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from services.supervised_prediction_training_service import (
+    asymmetric_false_positive_logistic_objective,
     train_quant_model_suite,
     train_supervised_prediction_model,
 )
+from services.optional_dependency_service import optional_dependency_status
 
 
 def _rows(n=60):
@@ -101,9 +103,29 @@ def test_train_quant_model_suite_compares_available_observe_only_models():
     assert result["runtime_effect"] == "observe_only_no_live_authority"
     assert result["sample_size"] == 80
     assert "chronological_positive_rate_baseline" in providers
-    assert "sklearn_random_forest" in providers
+    deps = optional_dependency_status()["packages"]
+    if deps.get("sklearn", {}).get("available"):
+        assert "sklearn_random_forest" in providers
+    if deps.get("xgboost", {}).get("available"):
+        assert "xgboost_asymmetric_false_positive" in providers
     assert result["best_model"] is None or result["best_model"]["provider"] in providers
     assert all(row["runtime_effect"] == "observe_only_no_live_authority" for row in result["models"])
+
+
+def test_asymmetric_objective_penalizes_false_positive_pressure():
+    class FakeDTrain:
+        @staticmethod
+        def get_label():
+            return [0, 1]
+
+    grad, hess = asymmetric_false_positive_logistic_objective(
+        [2.0, -2.0],
+        FakeDTrain(),
+        false_positive_penalty=10.0,
+    )
+
+    assert grad[0] > abs(grad[1])
+    assert hess[0] > hess[1]
 
 
 def test_train_supervised_prediction_model_can_use_triple_barrier_target():
@@ -138,6 +160,7 @@ def main():
         test_train_supervised_prediction_model_uses_baseline_without_required_deps,
         test_train_supervised_prediction_model_blocks_small_samples,
         test_train_quant_model_suite_compares_available_observe_only_models,
+        test_asymmetric_objective_penalizes_false_positive_pressure,
         test_train_supervised_prediction_model_can_use_triple_barrier_target,
         test_train_supervised_prediction_model_can_use_trend_scan_target,
     ]

@@ -52,6 +52,8 @@ Usage:
   python3 ops_check.py advanced-alpha-readiness
   python3 ops_check.py advanced-alpha-comparison
   python3 ops_check.py friction-heatmap
+  python3 ops_check.py volume-clock-vpin YYYY-MM-DD --symbol AAPL
+  python3 ops_check.py cross-asset-lead-map
   python3 ops_check.py trading-education-health
   python3 ops_check.py trading-education-ingest [--max-pages N] [--dry-run]
   python3 ops_check.py trading-education-review
@@ -204,6 +206,10 @@ from services.ops_checks.advanced_alpha_model_comparison_checks import (
     run_advanced_alpha_model_comparison,
 )
 from services.ops_checks.friction_heatmap_checks import run_friction_heatmap
+from services.ops_checks.volume_clock_vpin_checks import run_volume_clock_vpin_report
+from services.ops_checks.cross_asset_lead_lag_checks import (
+    run_cross_asset_lead_lag_map_report,
+)
 from services.ops_checks.trading_education_checks import (
     run_trading_education_coverage,
     run_trading_education_health,
@@ -715,6 +721,31 @@ def advanced_alpha_comparison(target_date):
 
 def friction_heatmap(target_date):
     return run_friction_heatmap(target_date, base_dir=BASE_DIR)
+
+
+def volume_clock_vpin(target_date):
+    symbol = _str_option("--symbol", "")
+    if not symbol and len(sys.argv) > 3 and not sys.argv[3].startswith("--"):
+        symbol = sys.argv[3]
+    if not symbol:
+        print("[FAIL] --symbol is required")
+        return False
+    return run_volume_clock_vpin_report(
+        target_date,
+        base_dir=BASE_DIR,
+        symbol=symbol,
+        bucket_volume=float(_str_option("--bucket-volume", "500000")),
+        window_buckets=_int_option("--window-buckets", 20),
+        timeframe=_str_option("--timeframe", "1m"),
+        limit=_int_option("--max-rows", 20000),
+        print_limit=_int_option("--limit", 12),
+    )
+
+
+def cross_asset_lead_map():
+    return run_cross_asset_lead_lag_map_report(
+        limit=_int_option("--limit", 20),
+    )
 
 
 def trading_education_health():
@@ -1447,6 +1478,10 @@ def main():
         return 0 if advanced_alpha_comparison(target_date) else 1
     if command == "friction-heatmap":
         return 0 if friction_heatmap(target_date) else 1
+    if command == "volume-clock-vpin":
+        return 0 if volume_clock_vpin(target_date) else 1
+    if command == "cross-asset-lead-map":
+        return 0 if cross_asset_lead_map() else 1
 
     if command == "trading-education-health":
         return 0 if trading_education_health() else 1

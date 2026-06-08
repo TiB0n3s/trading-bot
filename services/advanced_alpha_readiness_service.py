@@ -200,21 +200,24 @@ def build_advanced_alpha_readiness_payload(
         _item(
             feature_family="volume_clock_vpin",
             checks={
-                "volume_clock_enabled": volume_clock_enabled,
                 "bar_feed_available": polygon_configured or alpaca_configured,
-                "schema_integrated": False,
-                "feature_coverage_ge_95pct": False,
+                "bucketization_report_available": True,
+                "schema_integrated": rows > 0,
+                "feature_coverage_ge_95pct": rows >= 500,
+                "live_volume_clock_enabled": volume_clock_enabled,
                 "outcome_linkage_ge_500": False,
-                "ops_report_visible": False,
+                "ops_report_visible": True,
                 "authority_leak_safe": True,
             },
             current_capability=(
-                "Not populated; current VPIN proxy is calculated on fixed-time "
-                "1-minute bars, not fixed-volume buckets."
+                "Volume-clock VPIN can be generated from existing 1-minute "
+                "bar rows with Bulk Volume Classification. It is not true "
+                "trade-level aggressor-side VPIN and is not persisted as a "
+                "live feature yet."
             ),
             next_action=(
-                "Build volume-bar sampling from trade/bar volume, persist volume "
-                "bucket IDs, then compare volume-clock VPIN against MFE/MAE."
+                "Compare bucketed VPIN against MFE/MAE and stop-out outcomes, "
+                "then decide whether to persist bucket IDs as a research table."
             ),
         ),
         _item(

@@ -212,6 +212,12 @@ class BarPatternFeatureRepository:
             )
             con.execute(
                 """
+                CREATE INDEX IF NOT EXISTS idx_bar_pattern_features_ts
+                ON bar_pattern_features(bar_timestamp)
+                """
+            )
+            con.execute(
+                """
                 CREATE INDEX IF NOT EXISTS idx_bar_pattern_features_label
                 ON bar_pattern_features(pattern_label, bar_timestamp)
                 """
@@ -408,11 +414,17 @@ class BarPatternFeatureRepository:
 
     def summary(self, target_date: str, symbol: str | None = None) -> dict[str, Any]:
         self.init_table()
-        params: list[Any] = [target_date]
+        try:
+            start = date.fromisoformat(target_date)
+            end_text = (start + timedelta(days=1)).isoformat()
+        except Exception:
+            end_text = target_date
+        params: list[Any] = [target_date, end_text]
         extra = ""
         if symbol:
             extra = " AND symbol = ?"
             params.append(symbol.upper())
+        where = "bar_timestamp >= ? AND bar_timestamp < ?"
         with get_connection(self.db_path) as con:
             row = con.execute(
                 f"""
@@ -453,7 +465,7 @@ class BarPatternFeatureRepository:
                     SUM(CASE WHEN fractional_diff_zscore_20 IS NOT NULL THEN 1 ELSE 0 END)
                         AS rows_with_fractional_memory
                 FROM bar_pattern_features
-                WHERE substr(bar_timestamp, 1, 10) = ?
+                WHERE {where}
                 {extra}
                 """,
                 params,
@@ -467,7 +479,7 @@ class BarPatternFeatureRepository:
                     AVG(forward_mfe_pct) AS avg_forward_mfe_pct,
                     AVG(forward_mae_pct) AS avg_forward_mae_pct
                 FROM bar_pattern_features
-                WHERE substr(bar_timestamp, 1, 10) = ?
+                WHERE {where}
                 {extra}
                 GROUP BY pattern_label
                 ORDER BY rows DESC, pattern_label
@@ -486,7 +498,7 @@ class BarPatternFeatureRepository:
                     AVG(forward_mfe_pct) AS avg_forward_mfe_pct,
                     AVG(forward_mae_pct) AS avg_forward_mae_pct
                 FROM bar_pattern_features
-                WHERE substr(bar_timestamp, 1, 10) = ?
+                WHERE {where}
                 {extra}
                 GROUP BY opportunity_action, opportunity_quality
                 ORDER BY rows DESC, opportunity_action, opportunity_quality
@@ -504,7 +516,7 @@ class BarPatternFeatureRepository:
                     AVG(forward_mae_pct) AS avg_forward_mae_pct,
                     AVG(triple_barrier_bars_to_event) AS avg_bars_to_event
                 FROM bar_pattern_features
-                WHERE substr(bar_timestamp, 1, 10) = ?
+                WHERE {where}
                 {extra}
                   AND triple_barrier_label IS NOT NULL
                 GROUP BY triple_barrier_label, triple_barrier_reason
@@ -524,7 +536,7 @@ class BarPatternFeatureRepository:
                     AVG(trend_scan_tstat) AS avg_trend_scan_tstat,
                     AVG(trend_scan_bars) AS avg_trend_scan_bars
                 FROM bar_pattern_features
-                WHERE substr(bar_timestamp, 1, 10) = ?
+                WHERE {where}
                 {extra}
                   AND trend_scan_label IS NOT NULL
                 GROUP BY trend_scan_label, trend_scan_reason
@@ -542,7 +554,7 @@ class BarPatternFeatureRepository:
                     AVG(forward_mae_pct) AS avg_forward_mae_pct,
                     AVG(vpin_toxicity_20) AS avg_vpin_toxicity_20
                 FROM bar_pattern_features
-                WHERE substr(bar_timestamp, 1, 10) = ?
+                WHERE {where}
                 {extra}
                 GROUP BY cvd_divergence_label
                 ORDER BY rows DESC, cvd_divergence_label
@@ -723,3 +735,59 @@ class BarPatternFeatureRepository:
             "feature_versions": versions,
             "latest_rows": latest_rows,
         }
+
+    def volume_clock_source_rows(
+        self,
+        *,
+        target_date: str,
+        symbol: str,
+        timeframe: str = "1m",
+        feature_version: str | None = None,
+        limit: int = 20000,
+    ) -> list[dict[str, Any]]:
+        """Return target-date OHLCV rows for volume-clock VPIN research."""
+        try:
+            start = date.fromisoformat(target_date)
+            end_text = (start + timedelta(days=1)).isoformat()
+        except Exception:
+            end_text = target_date
+        with get_connection(self.db_path) as con:
+            if not self._table_exists(con):
+                return []
+            columns = self._table_columns(con)
+            optional = {
+                name: name if name in columns else "NULL"
+                for name in ("open", "high", "low", "close", "volume", "vwap")
+            }
+            version_sql = ""
+            params: list[Any] = [symbol.upper(), target_date, end_text, timeframe]
+            if feature_version:
+                version_sql = " AND feature_version = ?"
+                params.append(feature_version)
+            params.append(max(1, int(limit or 1)))
+            rows = con.execute(
+                f"""
+                SELECT
+                    symbol,
+                    bar_timestamp,
+                    timeframe,
+                    {optional['open']} AS open,
+                    {optional['high']} AS high,
+                    {optional['low']} AS low,
+                    {optional['close']} AS close,
+                    {optional['volume']} AS volume,
+                    {optional['vwap']} AS vwap,
+                    feature_version,
+                    runtime_effect
+                FROM bar_pattern_features
+                WHERE symbol = ?
+                  AND bar_timestamp >= ?
+                  AND bar_timestamp < ?
+                  AND timeframe = ?
+                  {version_sql}
+                ORDER BY bar_timestamp ASC, id ASC
+                LIMIT ?
+                """,
+                params,
+            ).fetchall()
+        return [dict(row) for row in rows]

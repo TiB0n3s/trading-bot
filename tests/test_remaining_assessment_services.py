@@ -13,6 +13,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from services.feature_flag_change_history_service import (  # noqa: E402
+    append_feature_flag_change_record,
     build_feature_flag_change_history_payload,
 )
 from services.full_session_paper_replay_service import (  # noqa: E402
@@ -21,6 +22,9 @@ from services.full_session_paper_replay_service import (  # noqa: E402
 )
 from services.incident_escalation_readiness_service import (  # noqa: E402
     build_incident_escalation_readiness_payload,
+)
+from services.model_promotion_evidence_service import (  # noqa: E402
+    build_model_promotion_evidence_payload,
 )
 from services.packaged_entrypoint_validation_service import (  # noqa: E402
     build_packaged_entrypoint_validation_payload,
@@ -66,6 +70,25 @@ def test_feature_flag_change_history_validates_required_fields():
     assert payload["errors"]
 
 
+def test_append_feature_flag_change_record_writes_valid_history_row():
+    with TemporaryDirectory() as tmp:
+        base_dir = Path(tmp)
+        result = append_feature_flag_change_record(
+            base_dir=base_dir,
+            flag="LIVE_TRADING_ENABLED",
+            old_value="false",
+            new_value="false",
+            operator="tester",
+            approval_reference="paper-only-check",
+            rollback_plan="set false",
+        )
+        payload = build_feature_flag_change_history_payload(base_dir=base_dir)
+
+    assert result["history_ready"] is True
+    assert payload["record_count"] == 1
+    assert payload["cash_live_record_count"] == 1
+
+
 def test_incident_escalation_readiness_uses_metadata_and_alert_env():
     with TemporaryDirectory() as tmp:
         base_dir = Path(tmp)
@@ -99,13 +122,34 @@ def test_packaged_entrypoint_validation_reports_current_runtime_imports():
     assert payload["failed_count"] == 0
 
 
+def test_model_promotion_evidence_writes_artifacts_without_live_promotion_claim():
+    with TemporaryDirectory() as tmp:
+        base_dir = Path(tmp)
+        payload = build_model_promotion_evidence_payload(
+            base_dir=base_dir,
+            write=True,
+            operator="tester",
+            approval_reference="paper-only",
+            execute_replay=False,
+        )
+        operator_approval_exists = (
+            base_dir / "ops" / "model_promotion_evidence" / "operator_approval.json"
+        ).exists()
+
+    assert payload["artifact_count"] == 5
+    assert payload["ready_for_live_promotion"] is False
+    assert operator_approval_exists
+
+
 def main():
     tests = [
         test_full_session_paper_replay_plans_regular_session_cadence,
         test_feature_flag_change_history_accepts_empty_existing_file,
         test_feature_flag_change_history_validates_required_fields,
+        test_append_feature_flag_change_record_writes_valid_history_row,
         test_incident_escalation_readiness_uses_metadata_and_alert_env,
         test_packaged_entrypoint_validation_reports_current_runtime_imports,
+        test_model_promotion_evidence_writes_artifacts_without_live_promotion_claim,
     ]
     for test in tests:
         test()

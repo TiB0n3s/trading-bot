@@ -74,6 +74,11 @@ items have since been implemented:
 - **Feature-flag change history**:
   `ops_check.py feature-flag-change-history` validates the JSONL audit trail
   used for cash-live flag changes.
+- **Model-promotion evidence generation**:
+  `ops_check.py model-promotion-evidence --write` creates the baseline,
+  cost/slippage/exit, regime, live-observation, and operator-approval evidence
+  files checked by model governance. Evidence that is not supported by real
+  observations remains `ready: false`.
 - **Packaged entrypoint validation**: `ops_check.py packaged-entrypoints`
   verifies package app factory/startup imports, WSGI importability, and the
   current root compatibility shim size.
@@ -114,8 +119,9 @@ These remain valid roadmap items before any cash-live promotion:
    - Promotion evidence placeholders are explicitly checked for baseline,
      cost/slippage/exit, regime, live-observation, and operator-approval
      artifacts.
-   - Remaining gap: populate those evidence artifacts from real paper-session
-     observations.
+   - Baseline, bounded cost/slippage/exit, and operator-approval evidence can
+     be generated locally. Remaining gap: populate regime-stability and
+     live-observation evidence from real paper-session observations.
 6. **Feature flags and kill switches**
    - Local feature-flag inventory exists with inferred ownership, authority
      level, and rollback action.

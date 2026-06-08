@@ -147,6 +147,7 @@ from symbols_config import (
 )
 from symbols_config import PRICE_RANGES as PRICE_RANGES  # noqa: F401
 from trading_bot.config.runtime import load_runtime_settings
+from trading_bot.runtime.signal_entrypoint import process_signal as process_runtime_signal
 from trading_bot.runtime.startup import run_runtime_startup_tasks
 from trading_bot.web.app_factory import create_runtime_flask_app
 
@@ -1368,13 +1369,8 @@ def _allow_medium_confidence_momentum_override(
         return False, f"override_error={e}"
 
 
-def _build_signal_pipeline(app_container: ApplicationContainer | None = None):
-    app_container = app_container or container
-    return app_container.build_signal_pipeline(runtime=sys.modules[__name__])
-
-
 def process_signal(data):
-    return _build_signal_pipeline().run(data)
+    return process_runtime_signal(sys.modules[__name__], data)
 
 
 app = create_app(run_startup=False, app_container=container)

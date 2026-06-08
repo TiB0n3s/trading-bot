@@ -1,0 +1,16 @@
+{
+  "baseline_requirement": "candidate_accuracy_at_or_above_minimum_threshold",
+  "best_candidate": {
+    "accuracy": 0.8308,
+    "failed_thresholds": [],
+    "label_target": "trend_scan_label",
+    "model_id": "historical_bar_trend_scan_label_20260607T132237Z",
+    "rows_loaded": 14750,
+    "runtime_effect": "observe_only_no_live_authority",
+    "status": "observe_only_ready",
+    "symbol_count": 59
+  },
+  "generated_at": "2026-06-08T18:09:22.518586+00:00",
+  "ready": true,
+  "runtime_effect": "evidence_only_no_registry_change"
+}

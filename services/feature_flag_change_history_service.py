@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -62,4 +63,42 @@ def build_feature_flag_change_history_payload(*, base_dir: Path) -> dict[str, An
             "Append one JSON object per operator-approved cash-live flag change.",
             "An empty file is valid when no cash-live flag changes have occurred.",
         ],
+    }
+
+
+def append_feature_flag_change_record(
+    *,
+    base_dir: Path,
+    flag: str,
+    old_value: str,
+    new_value: str,
+    operator: str,
+    approval_reference: str,
+    rollback_plan: str,
+) -> dict[str, Any]:
+    path = base_dir / "ops" / "feature_flag_change_history.jsonl"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    record = {
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "flag": flag,
+        "old_value": old_value,
+        "new_value": new_value,
+        "operator": operator,
+        "approval_reference": approval_reference,
+        "rollback_plan": rollback_plan,
+    }
+    path.write_text(
+        path.read_text(encoding="utf-8") + json.dumps(record, sort_keys=True) + "\n"
+        if path.exists()
+        else json.dumps(record, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    validation = build_feature_flag_change_history_payload(base_dir=base_dir)
+    return {
+        "report_version": "feature_flag_change_record_v1",
+        "runtime_effect": "operator_record_only_no_runtime_config_change",
+        "history_path": str(path),
+        "record": record,
+        "history_ready": validation["ready"],
+        "errors": validation["errors"],
     }

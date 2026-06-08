@@ -1,0 +1,46 @@
+{
+  "generated_at": "2026-06-08T18:09:22.518586+00:00",
+  "ready": true,
+  "replay": {
+    "events_per_symbol_per_minute": 1,
+    "execute": true,
+    "executed_requests": 780,
+    "execution_cap": 780,
+    "notes": [
+      "This is a local paper replay diagnostic and cannot submit broker orders.",
+      "Use --execute for bounded callback/database exercise; omit it for cadence planning."
+    ],
+    "planned_requests": 780,
+    "ready": true,
+    "replay_result": {
+      "action": "buy",
+      "concurrency": 4,
+      "failed_count": 0,
+      "fill_rows": 780,
+      "latency_ms_avg": 30.136,
+      "latency_ms_max": 1578.221,
+      "latency_ms_p95": 44.746,
+      "ok_count": 780,
+      "passed": true,
+      "report_version": "paper_replay_load_probe_v1",
+      "requests": 780,
+      "requests_per_second": 131.77,
+      "runtime_effect": "diagnostic_only_temp_db_no_broker_orders",
+      "signal_rows": 780,
+      "status_counts": {
+        "200": 780
+      },
+      "symbol": "AAPL"
+    },
+    "report_version": "full_session_paper_replay_v1",
+    "runtime_effect": "diagnostic_only_no_broker_orders",
+    "session_minutes": 390,
+    "symbol_count": 2,
+    "symbols": [
+      "AAPL",
+      "MSFT"
+    ]
+  },
+  "runtime_effect": "evidence_only_no_broker_orders",
+  "source": "bounded_full_session_paper_replay"
+}

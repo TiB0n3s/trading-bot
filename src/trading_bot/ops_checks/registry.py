@@ -91,6 +91,7 @@ OPS_COMMAND_SPECS: dict[str, OpsCommandSpec] = {
     "secrets-manager-readiness": _noarg("secrets-manager-readiness"),
     "feature-flag-change-history": _noarg("feature-flag-change-history"),
     "packaged-entrypoints": _noarg("packaged-entrypoints"),
+    "model-promotion-evidence": _noarg("model-promotion-evidence"),
     "resource-readiness": _noarg("resource-readiness"),
     "advanced-alpha-readiness": _spec("advanced-alpha-readiness"),
     "advanced-alpha-comparison": _spec("advanced-alpha-comparison"),

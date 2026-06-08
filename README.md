@@ -1232,7 +1232,9 @@ python3 ops_check.py incident-escalation-readiness
 python3 ops_check.py config-audit
 python3 ops_check.py feature-flags --limit 40
 python3 ops_check.py feature-flag-change-history
+python3 ops_check.py feature-flag-change-history --append --flag LIVE_TRADING_ENABLED --old false --new false --operator USER --approval REF --rollback "set false"
 python3 ops_check.py model-governance --min-rows 5000 --min-symbols 20 --min-accuracy 0.50
+python3 ops_check.py model-promotion-evidence --write --execute-replay --max-requests 1000 --symbols AAPL,MSFT --operator USER --approval REF
 python3 ops_check.py packaged-entrypoints
 python3 ops_check.py external-observability-readiness
 python3 ops_check.py secrets-manager-readiness
@@ -1663,6 +1665,7 @@ incident escalation readiness through `ops_check.py incident-escalation-readines
 feature-flag inventory through `ops_check.py feature-flags`
 feature-flag change-history validation through `ops_check.py feature-flag-change-history`
 consolidated model-governance diagnostic through `ops_check.py model-governance`
+model-promotion evidence generation through `ops_check.py model-promotion-evidence`
 packaged entrypoint validation through `ops_check.py packaged-entrypoints`
 external observability readiness through `ops_check.py external-observability-readiness`
 external secrets manager readiness through `ops_check.py secrets-manager-readiness`

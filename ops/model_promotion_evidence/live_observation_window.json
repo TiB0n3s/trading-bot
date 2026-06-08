@@ -1,0 +1,6 @@
+{
+  "generated_at": "2026-06-08T18:09:22.518586+00:00",
+  "ready": false,
+  "reason": "requires required live/paper observation-window artifact from market sessions",
+  "runtime_effect": "evidence_placeholder_no_runtime_change"
+}

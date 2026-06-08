@@ -63,7 +63,9 @@ Usage:
   python3 ops_check.py external-observability-readiness
   python3 ops_check.py secrets-manager-readiness
   python3 ops_check.py feature-flag-change-history
+  python3 ops_check.py feature-flag-change-history --append --flag NAME --old OLD --new NEW --operator USER --approval REF --rollback PLAN
   python3 ops_check.py packaged-entrypoints
+  python3 ops_check.py model-promotion-evidence [--write] [--execute-replay]
   python3 ops_check.py resource-readiness
   python3 ops_check.py advanced-alpha-readiness
   python3 ops_check.py advanced-alpha-comparison
@@ -228,6 +230,9 @@ from services.ops_checks.log_ledger_checks import run_log_ledger_consistency
 from services.ops_checks.market_data_parity_checks import run_market_data_parity
 from services.ops_checks.missed_buy_review_checks import run_missed_buy_review
 from services.ops_checks.ml_dataset_checks import run_ml_dataset_export_check
+from services.ops_checks.model_promotion_evidence_checks import (
+    run_model_promotion_evidence_report,
+)
 from services.ops_checks.model_validation_governance_checks import (
     run_model_validation_governance_report,
 )
@@ -838,11 +843,37 @@ def incident_escalation_readiness():
 
 
 def feature_flag_change_history():
-    return run_feature_flag_change_history_report(base_dir=BASE_DIR)
+    return run_feature_flag_change_history_report(
+        base_dir=BASE_DIR,
+        append="--append" in sys.argv,
+        flag=_str_option("--flag", ""),
+        old_value=_str_option("--old", ""),
+        new_value=_str_option("--new", ""),
+        operator=_str_option("--operator", ""),
+        approval_reference=_str_option("--approval", ""),
+        rollback_plan=_str_option("--rollback", ""),
+    )
 
 
 def packaged_entrypoints():
     return run_packaged_entrypoint_validation_report(base_dir=BASE_DIR)
+
+
+def model_promotion_evidence():
+    symbols = tuple(
+        symbol.strip().upper()
+        for symbol in _str_option("--symbols", "AAPL").split(",")
+        if symbol.strip()
+    )
+    return run_model_promotion_evidence_report(
+        base_dir=BASE_DIR,
+        write="--write" in sys.argv,
+        operator=_str_option("--operator", "unassigned"),
+        approval_reference=_str_option("--approval", ""),
+        replay_symbols=symbols,
+        execute_replay="--execute-replay" in sys.argv,
+        max_replay_requests=_int_option("--max-requests", 1000),
+    )
 
 
 def incident_workflow():

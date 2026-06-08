@@ -182,11 +182,15 @@ Recent completed roadmap items:
   references; cash-live promotion still requires explicit human ownership and
   default/change-approval metadata for high-authority flags.
 - Feature-flag change-history validation is available through
-  `ops_check.py feature-flag-change-history`.
+  `ops_check.py feature-flag-change-history`; append records with `--append`
+  and explicit flag/operator/approval/rollback fields.
 - Consolidated model-governance diagnostics are available through
   `ops_check.py model-governance`. This report checks candidate diagnostics,
   observe-only runtime effect, basic quality thresholds, promotion evidence
   placeholders, and registry live-status blockers; it cannot promote or load models.
+- Model promotion evidence artifacts can be generated with
+  `ops_check.py model-promotion-evidence --write`. Generated evidence must stay
+  honest: missing regime/live-window data should remain `ready: false`.
 - External observability and secrets-manager readiness are checked with
   `ops_check.py external-observability-readiness` and
   `ops_check.py secrets-manager-readiness`. These reports validate metadata
@@ -1394,6 +1398,7 @@ incident escalation readiness through `ops_check.py incident-escalation-readines
 feature-flag inventory through `ops_check.py feature-flags`
 feature-flag change-history validation through `ops_check.py feature-flag-change-history`
 consolidated model-governance diagnostic through `ops_check.py model-governance`
+model-promotion evidence generation through `ops_check.py model-promotion-evidence`
 packaged entrypoint validation through `ops_check.py packaged-entrypoints`
 external observability readiness through `ops_check.py external-observability-readiness`
 external secrets manager readiness through `ops_check.py secrets-manager-readiness`

@@ -1,0 +1,7 @@
+{
+  "approval_reference": "paper-diagnostic-full-session-local-replay",
+  "generated_at": "2026-06-08T18:09:22.518586+00:00",
+  "operator": "codex",
+  "ready": true,
+  "runtime_effect": "operator_record_only_no_runtime_change"
+}

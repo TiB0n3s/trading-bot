@@ -288,7 +288,12 @@ from services.ops_checks.volatile_session_intelligence_checks import (
     run_volatile_session_intelligence_report,
 )
 from services.ops_checks.volume_clock_vpin_checks import run_volume_clock_vpin_report
+from trading_bot.ops_checks.bundles import run_all_bundle, run_premarket_bundle
 from trading_bot.ops_checks.registry import OPS_COMMAND_SPECS, build_command_args
+from trading_bot.ops_checks.subprocess_commands import (
+    build_legacy_subprocess_commands,
+    script_path,
+)
 
 BASE_DIR = ROOT_DIR
 SCRIPT_DIR = BASE_DIR / "scripts"
@@ -330,10 +335,8 @@ def load_env_file(path=ENV_FILE):
     return True
 
 
-# Non-report operational scripts still dispatched via subprocess.
-# *_report.py scripts are handled in-process via the reports/ package instead.
 def _script(name: str) -> str:
-    return str(SCRIPT_DIR / name)
+    return script_path(SCRIPT_DIR, name)
 
 
 def _compat_env() -> dict[str, str]:
@@ -345,18 +348,9 @@ def _compat_env() -> dict[str, str]:
     return env
 
 
-COMMANDS = {
-    "morning": [_script("morning_check.py")],
-    "positions": [_script("position_review.py")],
-    "session": [_script("session_momentum.py"), "--all"],
-    "position-momentum": [_script("position_momentum_monitor.py")],
-    "post": [_script("post_session_check.py")],
-    "events": [_script("bot_events.py"), "--limit", "25"],
-    "bot-events": [_script("bot_events.py"), "--limit", "25"],
-    "regime": [_script("regime_status.py")],
-    "regime-json": [_script("regime_status.py"), "--json"],
-    "regime-matrix": [_script("regime_status.py"), "--routing-matrix"],
-}
+# Non-report operational scripts still dispatched via subprocess.
+# *_report.py scripts are handled in-process via the reports/ package instead.
+COMMANDS = build_legacy_subprocess_commands(SCRIPT_DIR)
 
 REPORT_COMMANDS = get_report_commands()
 
@@ -1675,68 +1669,22 @@ def main():
         return 0 if run("Historical Bar Retry Plan", args) else 1
 
     if command == "premarket":
-        checks = []
-        checks.append(run("DB Migration Status", ["ops_check.py", "migration-status"]))
-        checks.append(run("Morning Check", [_script("morning_check.py")]))
-        checks.append(run("Position Review", [_script("position_review.py")]))
-        _print_section("Market Alignment Report")
-        checks.append(run_report("alignment", target_date))
-        checks.append(run("Session Momentum Refresh", [_script("session_momentum.py"), "--all"]))
-        checks.append(run("Position Momentum Monitor", [_script("position_momentum_monitor.py")]))
-        checks.append(run("Bot Events", [_script("bot_events.py"), "--limit", "25"]))
-
-        print()
-        print("=" * 72)
-        if all(checks):
-            print("[OK] premarket checks completed successfully")
-            return 0
-
-        print("[WARN] one or more premarket checks reported issues")
-        return 1
+        return run_premarket_bundle(
+            target_date=target_date,
+            run=run,
+            run_report=run_report,
+            script=_script,
+            print_section=_print_section,
+        )
 
     if command == "all":
-        checks = []
-        checks.append(run("DB Migration Status", ["ops_check.py", "migration-status"]))
-        checks.append(run("Morning Check", [_script("morning_check.py")]))
-        checks.append(run("Position Review", [_script("position_review.py")]))
-        _print_section("Market Alignment Report")
-        checks.append(run_report("alignment", target_date))
-        checks.append(run("Session Momentum Refresh", [_script("session_momentum.py"), "--all"]))
-        checks.append(run("Position Momentum Monitor", [_script("position_momentum_monitor.py")]))
-        _print_section("Adaptive Confirmation Report")
-        checks.append(run_report("adaptive", target_date))
-        _print_section("Adaptive Impact Report")
-        checks.append(run_report("adaptive_impact", target_date))
-        _print_section("Filter Report")
-        checks.append(run_report("filters", target_date))
-        _print_section("Blocked Signal Outcome Report")
-        checks.append(run_report("blocked", target_date))
-        _print_section("Strong-Day Participation")
-        checks.append(run_report("strong-days", target_date, write_db=True))
-        checks.append(run("Rejected Outcomes", ["ops_check.py", "rejected-outcomes", target_date]))
-        checks.append(run("Auto-Buy Candidates", ["ops_check.py", "auto-buy", target_date]))
-        _print_section("Auto-Buy Outcomes")
-        checks.append(run_report("auto-buy-outcomes", target_date))
-        checks.append(
-            run("Decision Snapshots", ["ops_check.py", "decision-snapshots", target_date])
+        return run_all_bundle(
+            target_date=target_date,
+            run=run,
+            run_report=run_report,
+            script=_script,
+            print_section=_print_section,
         )
-        checks.append(
-            run("AI Intelligence Review", ["ops_check.py", "ai-intelligence-review", target_date])
-        )
-        checks.append(run("Policy Artifacts", ["ops_check.py", "policy-artifacts"]))
-        checks.append(run("Retention Policy", ["ops_check.py", "retention"]))
-        _print_section("Drawdown Report")
-        checks.append(run_report("drawdown", target_date))
-        checks.append(run("Post-Session Check", [_script("post_session_check.py"), target_date]))
-
-        print()
-        print("=" * 72)
-        if all(checks):
-            print("[OK] all requested checks completed successfully")
-            return 0
-
-        print("[WARN] one or more checks reported issues")
-        return 1
 
     # In-process report dispatch — no subprocess overhead.
     if command in REPORT_COMMANDS:

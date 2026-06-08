@@ -182,15 +182,18 @@ Recent completed roadmap items:
   `services/live_features_service.py` mirrors compact ticks through
   `services/timescale_tick_writer_service.py`; this path is storage-only and
   has no order, sizing, or risk-gate authority.
-- `requirements.txt` delegates to `requirements-research.txt`; the slim runtime
-  dependency subset lives in `requirements-base.txt`. DuckDB/PyArrow research
-  exports, sklearn/joblib supervised artifacts, XGBoost candidates, and hmmlearn
-  HMM regime artifacts are pinned in the research overlay for reproducible local
-  research/test runs. These dependencies remain observe-only unless separately
-  promoted through tests, reports, and explicit operator review. The runtime
+- `requirements.txt` delegates to `requirements-base.txt`, the slim runtime
+  dependency subset. `requirements-research.txt` layers DuckDB/PyArrow research
+  exports, sklearn/joblib supervised artifacts, XGBoost candidates, torch
+  Transformer authority candidates, and hmmlearn HMM regime artifacts for
+  reproducible local research/test runs. These dependencies remain observe-only
+  unless separately promoted through tests, reports, and explicit operator review. The runtime
   container target intentionally excludes those heavy optional dependencies, so
   fallback behavior must be tested with the runtime target as well as the
   research target.
+- The project uses normal `src/` package discovery. Runtime package imports
+  should use `trading_bot.*`, not `src.trading_bot.*`. Fresh checkouts should run
+  `pip install -e .` or set `PYTHONPATH=src` before invoking packaged modules.
 - Development guardrails are active. `.github/workflows/ci.yml` runs compile
   checks plus `run_safety_checks.py` on push/PR. `.pre-commit-config.yaml` runs
   Ruff on staged Python files and the same fast safety harness before commits.

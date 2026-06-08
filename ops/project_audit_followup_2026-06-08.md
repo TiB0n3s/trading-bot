@@ -32,9 +32,10 @@ items have since been implemented:
   `/etc/trading-bot.env` permissions, repo-local env-file candidates,
   `.gitignore` coverage, and Dockerfile leakage risk without printing secret
   values.
-- **Dependency split**: `requirements-base.txt` is the slim runtime subset,
-  `requirements-research.txt` adds optional ML/quant dependencies, and
-  `requirements.txt` delegates to the full research environment.
+- **Dependency split**: `requirements.txt` delegates to the slim runtime
+  `requirements-base.txt`; `requirements-research.txt` adds optional ML/quant
+  dependencies for explicit research installs. `pyproject.toml` uses normal
+  `src/` package discovery, so package imports should use `trading_bot.*`.
 - **Architecture surface tracking**: `ops_check.py architecture-surface` now
   measures root/module sprawl, oversized decision files, raw env access, and
   `src/trading_bot` skeleton readiness. `ops/compatibility_deletion_plan.md`

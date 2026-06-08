@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import importlib.util
 import sys
 import tomllib
 from pathlib import Path
@@ -74,14 +75,22 @@ def test_pyproject_declares_intended_optional_integration_extras():
         assert expected_names.issubset(_pyproject_extra_names(extra))
 
 
-def test_legacy_requirements_delegate_to_research_requirements():
+def test_default_requirements_delegate_to_runtime_requirements():
     lines = [
         line.strip()
         for line in (ROOT / "requirements.txt").read_text(encoding="utf-8").splitlines()
         if line.strip()
     ]
 
-    assert lines == ["-r requirements-research.txt"]
+    assert lines == ["-r requirements-base.txt"]
+
+
+def test_trading_bot_package_imports_without_src_prefix():
+    spec = importlib.util.find_spec("trading_bot")
+
+    assert spec is not None
+    assert spec.origin is not None
+    assert "/src/trading_bot/" in spec.origin
 
 
 def main():
@@ -90,7 +99,8 @@ def main():
         test_research_requirements_pin_intended_optional_ml_dependencies,
         test_pyproject_research_extra_matches_research_requirement_pins,
         test_pyproject_declares_intended_optional_integration_extras,
-        test_legacy_requirements_delegate_to_research_requirements,
+        test_default_requirements_delegate_to_runtime_requirements,
+        test_trading_bot_package_imports_without_src_prefix,
     ]
     for test in tests:
         test()

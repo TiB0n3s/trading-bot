@@ -126,9 +126,6 @@ from session_momentum import (
     get_latest_session_momentum,
 )
 from setup_policy import evaluate_setup_policy
-from src.trading_bot.config.runtime import load_runtime_settings
-from src.trading_bot.runtime.startup import run_runtime_startup_tasks
-from src.trading_bot.web.app_factory import create_runtime_flask_app
 from strategy.strategy_engine import evaluate_strategy_observe_only
 from strategy_constants import (
     ADAPTIVE_BUY_CONFIRMATION_ENABLED,
@@ -149,6 +146,9 @@ from symbols_config import (
     SYMBOL_MAX_SPREAD_PCT,
 )
 from symbols_config import PRICE_RANGES as PRICE_RANGES  # noqa: F401
+from trading_bot.config.runtime import load_runtime_settings
+from trading_bot.runtime.startup import run_runtime_startup_tasks
+from trading_bot.web.app_factory import create_runtime_flask_app
 
 _RUNTIME_COMPAT_EXPORTS = (
     ADAPTIVE_BUY_CONFIRMATION_ENABLED,

@@ -136,6 +136,13 @@ import sys
 from datetime import date
 from pathlib import Path
 
+ROOT_DIR = Path(__file__).resolve().parent
+SCRIPTS_DIR = ROOT_DIR / "scripts"
+if SCRIPTS_DIR.exists():
+    scripts_path = str(SCRIPTS_DIR)
+    if scripts_path not in sys.path:
+        sys.path.insert(0, scripts_path)
+
 from pipeline.trading_education_ingest import main as run_trading_education_ingest_cli
 from reports.registry import get_report_commands, run_report
 from services.ops_checks.active_learning_checks import run_active_learning_integration
@@ -283,7 +290,8 @@ from services.ops_checks.volatile_session_intelligence_checks import (
 from services.ops_checks.volume_clock_vpin_checks import run_volume_clock_vpin_report
 from trading_bot.ops_checks.registry import OPS_COMMAND_SPECS, build_command_args
 
-BASE_DIR = Path(__file__).resolve().parent
+BASE_DIR = ROOT_DIR
+SCRIPT_DIR = BASE_DIR / "scripts"
 VENV_PYTHON = BASE_DIR / "venv" / "bin" / "python"
 ENV_FILE = Path("/etc/trading-bot.env")
 
@@ -324,17 +332,30 @@ def load_env_file(path=ENV_FILE):
 
 # Non-report operational scripts still dispatched via subprocess.
 # *_report.py scripts are handled in-process via the reports/ package instead.
+def _script(name: str) -> str:
+    return str(SCRIPT_DIR / name)
+
+
+def _compat_env() -> dict[str, str]:
+    env = os.environ.copy()
+    pythonpath_parts = [str(SCRIPT_DIR), str(BASE_DIR)]
+    if env.get("PYTHONPATH"):
+        pythonpath_parts.append(env["PYTHONPATH"])
+    env["PYTHONPATH"] = os.pathsep.join(pythonpath_parts)
+    return env
+
+
 COMMANDS = {
-    "morning": ["morning_check.py"],
-    "positions": ["position_review.py"],
-    "session": ["session_momentum.py", "--all"],
-    "position-momentum": ["position_momentum_monitor.py"],
-    "post": ["post_session_check.py"],
-    "events": ["bot_events.py", "--limit", "25"],
-    "bot-events": ["bot_events.py", "--limit", "25"],
-    "regime": ["regime_status.py"],
-    "regime-json": ["regime_status.py", "--json"],
-    "regime-matrix": ["regime_status.py", "--routing-matrix"],
+    "morning": [_script("morning_check.py")],
+    "positions": [_script("position_review.py")],
+    "session": [_script("session_momentum.py"), "--all"],
+    "position-momentum": [_script("position_momentum_monitor.py")],
+    "post": [_script("post_session_check.py")],
+    "events": [_script("bot_events.py"), "--limit", "25"],
+    "bot-events": [_script("bot_events.py"), "--limit", "25"],
+    "regime": [_script("regime_status.py")],
+    "regime-json": [_script("regime_status.py"), "--json"],
+    "regime-matrix": [_script("regime_status.py"), "--routing-matrix"],
 }
 
 REPORT_COMMANDS = get_report_commands()
@@ -354,6 +375,7 @@ def run(label, args):
         r = subprocess.run(
             [sys.executable] + args,
             cwd=BASE_DIR,
+            env=_compat_env(),
             text=True,
             timeout=180,
         )
@@ -1655,13 +1677,13 @@ def main():
     if command == "premarket":
         checks = []
         checks.append(run("DB Migration Status", ["ops_check.py", "migration-status"]))
-        checks.append(run("Morning Check", ["morning_check.py"]))
-        checks.append(run("Position Review", ["position_review.py"]))
+        checks.append(run("Morning Check", [_script("morning_check.py")]))
+        checks.append(run("Position Review", [_script("position_review.py")]))
         _print_section("Market Alignment Report")
         checks.append(run_report("alignment", target_date))
-        checks.append(run("Session Momentum Refresh", ["session_momentum.py", "--all"]))
-        checks.append(run("Position Momentum Monitor", ["position_momentum_monitor.py"]))
-        checks.append(run("Bot Events", ["bot_events.py", "--limit", "25"]))
+        checks.append(run("Session Momentum Refresh", [_script("session_momentum.py"), "--all"]))
+        checks.append(run("Position Momentum Monitor", [_script("position_momentum_monitor.py")]))
+        checks.append(run("Bot Events", [_script("bot_events.py"), "--limit", "25"]))
 
         print()
         print("=" * 72)
@@ -1675,12 +1697,12 @@ def main():
     if command == "all":
         checks = []
         checks.append(run("DB Migration Status", ["ops_check.py", "migration-status"]))
-        checks.append(run("Morning Check", ["morning_check.py"]))
-        checks.append(run("Position Review", ["position_review.py"]))
+        checks.append(run("Morning Check", [_script("morning_check.py")]))
+        checks.append(run("Position Review", [_script("position_review.py")]))
         _print_section("Market Alignment Report")
         checks.append(run_report("alignment", target_date))
-        checks.append(run("Session Momentum Refresh", ["session_momentum.py", "--all"]))
-        checks.append(run("Position Momentum Monitor", ["position_momentum_monitor.py"]))
+        checks.append(run("Session Momentum Refresh", [_script("session_momentum.py"), "--all"]))
+        checks.append(run("Position Momentum Monitor", [_script("position_momentum_monitor.py")]))
         _print_section("Adaptive Confirmation Report")
         checks.append(run_report("adaptive", target_date))
         _print_section("Adaptive Impact Report")
@@ -1705,7 +1727,7 @@ def main():
         checks.append(run("Retention Policy", ["ops_check.py", "retention"]))
         _print_section("Drawdown Report")
         checks.append(run_report("drawdown", target_date))
-        checks.append(run("Post-Session Check", ["post_session_check.py", target_date]))
+        checks.append(run("Post-Session Check", [_script("post_session_check.py"), target_date]))
 
         print()
         print("=" * 72)

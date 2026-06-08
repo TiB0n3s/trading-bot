@@ -6,7 +6,8 @@ cd /home/tradingbot/trading-bot
 set -a
 source /etc/trading-bot.env
 set +a
+export PYTHONPATH="/home/tradingbot/trading-bot/scripts:/home/tradingbot/trading-bot${PYTHONPATH:+:${PYTHONPATH}}"
 
 source /home/tradingbot/trading-bot/venv/bin/activate
 
-python3 position_manager.py --live
+python3 scripts/position_manager.py --live

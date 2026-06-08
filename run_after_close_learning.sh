@@ -6,6 +6,7 @@ cd /home/tradingbot/trading-bot
 set -a
 source /etc/trading-bot.env
 set +a
+export PYTHONPATH="/home/tradingbot/trading-bot/scripts:/home/tradingbot/trading-bot${PYTHONPATH:+:${PYTHONPATH}}"
 
 source /home/tradingbot/trading-bot/venv/bin/activate
 

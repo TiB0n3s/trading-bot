@@ -54,6 +54,11 @@ def reexec_under_venv_if_available() -> None:
 
 def main() -> int:
     reexec_under_venv_if_available()
+    env = os.environ.copy()
+    pythonpath_parts = [str(ROOT / "scripts"), str(ROOT)]
+    if env.get("PYTHONPATH"):
+        pythonpath_parts.append(env["PYTHONPATH"])
+    env["PYTHONPATH"] = os.pathsep.join(pythonpath_parts)
     print("=" * 72)
     print("  Trading Bot Fast Safety Checks")
     print("=" * 72)
@@ -63,7 +68,7 @@ def main() -> int:
     for test_file in SAFETY_TESTS:
         print()
         print(f"-- {test_file} {'-' * max(0, 60 - len(test_file))}")
-        result = subprocess.run([sys.executable, test_file], cwd=ROOT)
+        result = subprocess.run([sys.executable, test_file], cwd=ROOT, env=env)
         if result.returncode != 0:
             failures += 1
 

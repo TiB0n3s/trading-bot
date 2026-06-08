@@ -81,8 +81,8 @@ def _assert_no_import(directory: str, banned: set[str], label: str):
 
 
 APPROVED_DB_BOUNDARIES = {
-    "db.py",
-    "db_migrations.py",
+    "scripts/db.py",
+    "scripts/db_migrations.py",
     "ops/database_backup_service.py",
 }
 APPROVED_DB_BOUNDARY_PREFIXES = {
@@ -99,7 +99,7 @@ TEMPORARY_DB_ACCESS_ALLOWLIST = (
 )
 
 APPROVED_BROKER_BOUNDARIES = {
-    "broker.py",
+    "scripts/broker.py",
     "services/broker_service.py",
     "services/container.py",
     "services/fill_stream_service.py",
@@ -109,7 +109,7 @@ APPROVED_BROKER_BOUNDARIES = {
 TEMPORARY_BROKER_ACCESS_ALLOWLIST = set()
 
 APPROVED_MARKET_DATA_BOUNDARIES = {
-    "broker.py",
+    "scripts/broker.py",
     "services/market_data_service.py",
     "services/market_data_parity_service.py",
     "services/execution_adapters.py",

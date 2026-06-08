@@ -17,12 +17,16 @@ from datetime import datetime, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-import pytz
-from flask import Flask, abort
+ROOT_DIR = Path(__file__).resolve().parent
+SCRIPTS_DIR = ROOT_DIR / "scripts"
+if SCRIPTS_DIR.exists():
+    scripts_path = str(SCRIPTS_DIR)
+    if scripts_path not in sys.path:
+        sys.path.insert(0, scripts_path)
 
+import pytz
 from alerts import alert_config_public as alert_config_public  # noqa: F401
 from bot_events import log_event as log_event  # noqa: F401
-from data_layer.ledger import ledger_summary as ledger_summary  # noqa: F401
 from decision_context import build_intelligence_context as build_intelligence_context  # noqa: F401
 from decision_engine import evaluate_signal as evaluate_signal  # noqa: F401
 from decision_engine import get_mock_account_state as get_mock_account_state  # noqa: F401
@@ -31,6 +35,7 @@ from decision_thresholds import (
     PREDICTION_GATE_THRESHOLDS as PREDICTION_GATE_THRESHOLDS,  # noqa: F401
 )
 from exceptions import ValidationError as ValidationError  # noqa: F401
+from flask import Flask, abort
 from indicator_state import (
     is_fast_lane_buy_flip as is_fast_lane_buy_flip,  # noqa: F401
 )
@@ -55,11 +60,6 @@ from prediction_cache import (
     prediction_cache_status as prediction_cache_status,  # noqa: F401
 )
 from prior_session_context import prior_session_context
-from repositories import context_repo, cooldown_repo, trades_repo
-from risk.account_risk import account_risk_snapshot as account_risk_snapshot  # noqa: F401
-from risk.live_guards import live_guard_policy as live_guard_policy  # noqa: F401
-from risk.live_guards import live_order_allowed as live_order_allowed  # noqa: F401
-from risk.macro_policy import policy_from_market_context as policy_from_market_context  # noqa: F401
 from rolling_context import rolling_summary as rolling_summary  # noqa: F401
 from rolling_context import rolling_symbol_context
 from runtime_config import (
@@ -81,6 +81,36 @@ from runtime_config import (
 from runtime_config import (
     public_ml_authority_config as public_ml_authority_config,  # noqa: F401
 )
+from session_momentum import (
+    get_latest_session_momentum,
+)
+from setup_policy import evaluate_setup_policy
+from strategy_constants import (
+    ADAPTIVE_BUY_CONFIRMATION_ENABLED,
+    DAILY_LOSS_LIMIT_PCT,
+    MARKET_CLOSE_MINUTES,
+    MARKET_OPEN_MINUTES,
+    MAX_BUYS_PER_SYMBOL_PER_DAY,
+    MAX_OPEN_POSITIONS,
+    SYMBOL_MARKET_ALIGNMENT,
+    WEBHOOK_DEDUPE_SECONDS,
+)
+from strategy_memory import memory_for_signal as memory_for_signal  # noqa: F401
+from symbols_config import (
+    APPROVED_SYMBOLS,
+    CLUSTER_EXPOSURE_LIMITS,
+    CORRELATION_CLUSTERS,
+    IEX_THIN_SYMBOLS,
+    SYMBOL_MAX_SPREAD_PCT,
+)
+from symbols_config import PRICE_RANGES as PRICE_RANGES  # noqa: F401
+
+from data_layer.ledger import ledger_summary as ledger_summary  # noqa: F401
+from repositories import context_repo, cooldown_repo, trades_repo
+from risk.account_risk import account_risk_snapshot as account_risk_snapshot  # noqa: F401
+from risk.live_guards import live_guard_policy as live_guard_policy  # noqa: F401
+from risk.live_guards import live_order_allowed as live_order_allowed  # noqa: F401
+from risk.macro_policy import policy_from_market_context as policy_from_market_context  # noqa: F401
 from services import dedupe_service, trade_audit_service
 from services.container import ApplicationContainer
 from services.context_builder import (
@@ -122,30 +152,7 @@ from services.sizing_service import apply_size_cap
 from services.sizing_service import build_conviction_stack as build_conviction_stack  # noqa: F401
 from services.symbol_override_service import SymbolOverrideService
 from services.trend_state_service import TrendStateService
-from session_momentum import (
-    get_latest_session_momentum,
-)
-from setup_policy import evaluate_setup_policy
 from strategy.strategy_engine import evaluate_strategy_observe_only
-from strategy_constants import (
-    ADAPTIVE_BUY_CONFIRMATION_ENABLED,
-    DAILY_LOSS_LIMIT_PCT,
-    MARKET_CLOSE_MINUTES,
-    MARKET_OPEN_MINUTES,
-    MAX_BUYS_PER_SYMBOL_PER_DAY,
-    MAX_OPEN_POSITIONS,
-    SYMBOL_MARKET_ALIGNMENT,
-    WEBHOOK_DEDUPE_SECONDS,
-)
-from strategy_memory import memory_for_signal as memory_for_signal  # noqa: F401
-from symbols_config import (
-    APPROVED_SYMBOLS,
-    CLUSTER_EXPOSURE_LIMITS,
-    CORRELATION_CLUSTERS,
-    IEX_THIN_SYMBOLS,
-    SYMBOL_MAX_SPREAD_PCT,
-)
-from symbols_config import PRICE_RANGES as PRICE_RANGES  # noqa: F401
 from trading_bot.config.runtime import load_runtime_settings
 from trading_bot.runtime.signal_entrypoint import process_signal as process_runtime_signal
 from trading_bot.runtime.startup import run_runtime_startup_tasks

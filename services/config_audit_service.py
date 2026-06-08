@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any
 
 import runtime_config
+
 from config import (
     load_auto_buy_config,
     load_ml_config,
@@ -32,6 +33,7 @@ SOURCE_ROOTS = (
     "pipeline/**/*.py",
     "repositories/**/*.py",
     "risk/**/*.py",
+    "scripts/**/*.py",
     "services/**/*.py",
 )
 

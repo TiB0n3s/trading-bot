@@ -26,8 +26,8 @@ COUNT_TARGETS = {
 LINE_COUNT_TARGETS = {
     "app.py": 100,
     "ops_check.py": 100,
-    "auto_buy_manager.py": 500,
-    "position_manager.py": 500,
+    "scripts/auto_buy_manager.py": 500,
+    "scripts/position_manager.py": 500,
     "services/approval_service.py": 700,
     "services/context_builder.py": 700,
     "services/live_signal_processor.py": 700,

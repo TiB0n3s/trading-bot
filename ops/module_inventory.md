@@ -5,6 +5,10 @@ support, which are operator/reporting tools, and which are research-only.
 
 ## Live Runtime
 
+- Root Python files
+  - Capped at five compatibility entrypoints. Current root entrypoints are
+    `app.py`, `wsgi.py`, `ops_check.py`, and `run_safety_checks.py`.
+  - Legacy root scripts/modules live under `scripts/` during staged migration.
 - `app.py`
   - Deployed Flask compatibility root: startup entry point, runtime context,
     container selection, and `process_signal()` compatibility.

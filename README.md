@@ -12,6 +12,7 @@ As of the latest roadmap work:
 
 - Bot is operational in paper trading.
 - `app.py` is a Flask composition root: startup entry point, runtime compatibility context, container selection, and the public `process_signal()` compatibility wrapper. Flask app construction and route registration mechanics now live in `src/trading_bot/web/app_factory.py`, startup wiring lives in `src/trading_bot/runtime/startup.py`, and app-specific runtime settings are loaded by `src/trading_bot/config/runtime.py`.
+- Root Python file count is capped at five compatibility entrypoints. Legacy root scripts/modules have moved to `scripts/` while package migration continues into `src/trading_bot/`.
 - Live signal orchestration is owned by `services/live_signal_processor.py`; approval gates, sizing, execution adapters, audit persistence, runtime context, and repositories are service-owned.
 - The legacy live signal processor, `execute_legacy`, `run_legacy_*` service functions, and app-level audit shims have been removed.
 - Architecture boundary tests enforce DB access through `db.py`, repositories, and migrations; broker/market-data access through approved adapter boundaries; and no temporary architecture allowlists remain.

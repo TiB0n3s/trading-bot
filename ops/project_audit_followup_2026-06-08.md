@@ -25,6 +25,9 @@ items have since been implemented:
   SQLite files with the SQLite online backup API, writes manifests under
   `backups/databases/`, and verifies copied files with `PRAGMA integrity_check`.
   `ops_check.py database-backups` reports freshness and manifest health.
+- **Lightweight observability**: `ops_check.py observability-health` rolls up
+  job-ledger cleanliness, backup freshness, service watchdog warnings, and ML
+  staleness-guard state without posting external alerts.
 - **Dependency split**: `requirements-base.txt` is the slim runtime subset,
   `requirements-research.txt` adds optional ML/quant dependencies, and
   `requirements.txt` delegates to the full research environment.
@@ -43,11 +46,12 @@ items have since been implemented:
 
 These remain valid roadmap items before any cash-live promotion:
 
-1. **Observability and alerting**
-   - Add service/job metrics for runtime health, DB lock pressure, broker
+1. **External observability and alerting**
+   - Lightweight local observability exists; the remaining gap is external
+     metrics/alert publishing for runtime health, DB lock pressure, broker
      errors, order latency, rejected/approved flow, and model-staleness state.
-   - Start with lightweight local metrics/log summaries before committing to a
-     full Prometheus/Grafana stack.
+   - Promote to Prometheus/Grafana or another external stack only after the
+     local rollup proves the right signals.
 2. **Secrets management hardening**
    - `/etc/trading-bot.env` remains the current secret source.
    - Keep secrets out of images, docs, logs, and systemd unit files.

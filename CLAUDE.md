@@ -1343,10 +1343,11 @@ core safety/authority/dependency/architecture tests
 runtime/research dependency split
 configuration audit diagnostics
 verified SQLite database backup/restore-readability manifests
+lightweight observability summary through `ops_check.py observability-health`
 
 Open before any cash-live promotion:
 
-observability and alerting
+external observability/alerting stack
 secrets-management hardening
 paper-only load/burst testing
 incident/postmortem workflow

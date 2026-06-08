@@ -39,6 +39,7 @@ Usage:
   python3 ops_check.py order-health
   python3 ops_check.py runtime-health
   python3 ops_check.py runtime-health-trend START_DATE END_DATE
+  python3 ops_check.py observability-health [YYYY-MM-DD]
   python3 ops_check.py context-freshness
   python3 ops_check.py data-freshness-gate
   python3 ops_check.py event-source-coverage
@@ -201,6 +202,7 @@ from services.ops_checks.market_data_parity_checks import run_market_data_parity
 from services.ops_checks.missed_buy_review_checks import run_missed_buy_review
 from services.ops_checks.ml_dataset_checks import run_ml_dataset_export_check
 from services.ops_checks.monday_readiness_checks import run_monday_readiness_check
+from services.ops_checks.observability_health_checks import run_observability_health
 from services.ops_checks.operator_intelligence_dashboard_checks import (
     run_operator_intelligence_dashboard,
 )
@@ -671,6 +673,10 @@ def runtime_health(target_date):
 
 def runtime_health_trend(start_date, end_date):
     return run_runtime_health_trend(start_date, end_date=end_date, base_dir=BASE_DIR)
+
+
+def observability_health(target_date):
+    return run_observability_health(target_date, base_dir=BASE_DIR)
 
 
 def context_freshness(target_date):
@@ -1520,6 +1526,9 @@ def main():
             sys.argv[3] if len(sys.argv) > 3 and not sys.argv[3].startswith("--") else target_date
         )
         return 0 if runtime_health_trend(target_date, end_date) else 1
+
+    if command == "observability-health":
+        return 0 if observability_health(target_date) else 1
 
     if command == "context-freshness":
         return 0 if context_freshness(target_date) else 1

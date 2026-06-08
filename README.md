@@ -20,7 +20,7 @@ As of the latest roadmap work:
 - Daily intelligence pipeline creates `daily_symbol_context`, `daily_symbol_events`, `daily_symbol_predictions`, `strong_day_participation`, trend context, and prediction-validation reports.
 - `ops_check.py external-symbol-discovery START_DATE --end-date YYYY-MM-DD` reviews event references to non-approved symbols, separates configured context-only symbols from unknown external symbols, shows linked approved symbols, source reliability, examples, and whether a symbol should remain context-only/watch-only or be reviewed for context/approval. This report is advisory-only and cannot expand the trade universe automatically.
 - `pipeline/external_symbol_candidate_refresh.py --date YYYY-MM-DD` turns repeated unknown external-symbol findings into a research-only candidate queue, can run bounded Polygon historical backfill for eligible symbols, and then marks each symbol as context-only, backfill-pending, training-pending, review-ready, pooled, or rejected. `ops_check.py external-symbol-candidates` inspects this queue. Candidate status never grants trading authority or updates `SYMBOL_CONFIG`.
-- `ops_check.py` includes performance, runtime, resource, and persistence diagnostics such as `runtime-health`, `resource-readiness`, `lifecycle-analysis`, `setup-breakdown`, `conviction-stack-report`, `conviction-persistence-health`, `peak-bucket-report`, `winner-became-loser`, and prediction validation.
+- `ops_check.py` includes performance, runtime, resource, and persistence diagnostics such as `observability-health`, `runtime-health`, `database-backups`, `resource-readiness`, `lifecycle-analysis`, `setup-breakdown`, `conviction-stack-report`, `conviction-persistence-health`, `peak-bucket-report`, `winner-became-loser`, and prediction validation.
 - `ops_check.py config-audit` inventories remaining raw env-var access, validates typed config factories, and flags unsafe runtime defaults such as default webhook secrets, query-string secrets, cash mode without live-trading enablement, or unbacked live ML authority. This report is diagnostic-only and does not change runtime configuration.
 - `ops_check.py architecture-surface` measures root/module sprawl, oversized decision files, raw env access, and `src/trading_bot` migration skeleton readiness. It is diagnostic-only and supports the cleanup plan in `ops/compatibility_deletion_plan.md`.
 - Development guardrails are active: `.github/workflows/ci.yml` runs compile checks plus `run_safety_checks.py` on push/PR, and `.pre-commit-config.yaml` runs Ruff plus the same fast safety harness before commits.
@@ -1637,10 +1637,11 @@ core safety/authority/dependency/architecture tests
 runtime/research dependency split
 configuration audit diagnostics
 verified SQLite database backup/restore-readability manifests
+lightweight observability summary through `ops_check.py observability-health`
 
 Open before any cash-live promotion:
 
-observability and alerting
+external observability/alerting stack
 secrets-management hardening
 paper-only load/burst testing
 incident/postmortem workflow

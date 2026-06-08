@@ -26,6 +26,7 @@ SAFETY_TESTS = [
     "tests/test_volatile_session_intelligence_service.py",
     "tests/test_config_audit_service.py",
     "tests/test_database_backup_service.py",
+    "tests/test_observability_health_checks.py",
     "tests/test_architecture_surface_audit_service.py",
     "tests/test_dependency_packaging_contract.py",
     "tests/test_optional_dependency_service.py",

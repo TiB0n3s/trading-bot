@@ -107,10 +107,25 @@ staged Python files and the same fast safety harness before commits.
 external project-audit and missing-tools findings. As of that follow-up, CI,
 pre-commit guardrails, core safety tests, config audit, and dependency split are
 implemented. Verified SQLite backup manifests are also implemented through
-`pipeline/database_backup.py` and `ops_check.py database-backups`.
-Observability/alerting, secrets hardening, load testing, incident management,
-consolidated model validation governance, and a feature-flag inventory remain
-open roadmap items.
+`pipeline/database_backup.py` and `ops_check.py database-backups`. Lightweight
+local observability is available through `ops_check.py observability-health`.
+External observability/alerting, secrets hardening, load testing, incident
+management, consolidated model validation governance, and a feature-flag
+inventory remain open roadmap items.
+
+## Observability
+
+Use the local health rollup before adding heavier monitoring:
+
+```bash
+python3 ops_check.py observability-health
+python3 ops_check.py runtime-health "$(date +%F)"
+python3 ops_check.py database-backups
+```
+
+`observability-health` consolidates the job-run ledger, verified database backup
+freshness, service watchdog warnings, and ML staleness-guard state. It is
+diagnostic-only and does not post external alerts.
 
 ## Database Backups
 

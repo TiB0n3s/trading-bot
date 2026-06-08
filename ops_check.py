@@ -53,6 +53,7 @@ Usage:
   python3 ops_check.py advanced-alpha-comparison
   python3 ops_check.py friction-heatmap
   python3 ops_check.py volume-clock-vpin YYYY-MM-DD --symbol AAPL
+  python3 ops_check.py volatile-session-intelligence YYYY-MM-DD --symbols QQQ,AAPL,NVDA
   python3 ops_check.py cross-asset-lead-map
   python3 ops_check.py transformer-authority [--symbol AAPL]
   python3 ops_check.py trading-education-health
@@ -208,6 +209,9 @@ from services.ops_checks.advanced_alpha_model_comparison_checks import (
 )
 from services.ops_checks.friction_heatmap_checks import run_friction_heatmap
 from services.ops_checks.volume_clock_vpin_checks import run_volume_clock_vpin_report
+from services.ops_checks.volatile_session_intelligence_checks import (
+    run_volatile_session_intelligence_report,
+)
 from services.ops_checks.cross_asset_lead_lag_checks import (
     run_cross_asset_lead_lag_map_report,
 )
@@ -741,8 +745,25 @@ def volume_clock_vpin(target_date):
         bucket_volume=float(_str_option("--bucket-volume", "500000")),
         window_buckets=_int_option("--window-buckets", 20),
         timeframe=_str_option("--timeframe", "1m"),
+        start_time=_str_option("--start-time", ""),
+        end_time=_str_option("--end-time", ""),
         limit=_int_option("--max-rows", 20000),
         print_limit=_int_option("--limit", 12),
+    )
+
+
+def volatile_session_intelligence(target_date):
+    raw_symbols = _str_option("--symbols", "QQQ,AAPL,NVDA,MSFT,AMD,TSLA")
+    symbols = [item.strip().upper() for item in raw_symbols.split(",") if item.strip()]
+    return run_volatile_session_intelligence_report(
+        target_date,
+        base_dir=BASE_DIR,
+        symbols=symbols,
+        bucket_volume=float(_str_option("--bucket-volume", "500000")),
+        window_buckets=_int_option("--window-buckets", 20),
+        start_time=_str_option("--start-time", "09:30"),
+        end_time=_str_option("--end-time", "10:00"),
+        timeframe=_str_option("--timeframe", "1m"),
     )
 
 
@@ -1492,6 +1513,8 @@ def main():
         return 0 if friction_heatmap(target_date) else 1
     if command == "volume-clock-vpin":
         return 0 if volume_clock_vpin(target_date) else 1
+    if command == "volatile-session-intelligence":
+        return 0 if volatile_session_intelligence(target_date) else 1
     if command == "cross-asset-lead-map":
         return 0 if cross_asset_lead_map() else 1
     if command == "transformer-authority":

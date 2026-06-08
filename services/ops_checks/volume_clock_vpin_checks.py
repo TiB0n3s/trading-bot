@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from repositories.bar_pattern_feature_repo import BarPatternFeatureRepository
+from services.volatile_session_intelligence_service import filter_rows_by_market_time
 from services.volume_clock_vpin_service import build_volume_clock_vpin_payload
 
 
@@ -16,6 +17,8 @@ def run_volume_clock_vpin_report(
     bucket_volume: float = 500_000.0,
     window_buckets: int = 20,
     timeframe: str = "1m",
+    start_time: str | None = None,
+    end_time: str | None = None,
     limit: int = 20000,
     print_limit: int = 12,
 ) -> bool:
@@ -24,6 +27,11 @@ def run_volume_clock_vpin_report(
         symbol=symbol,
         timeframe=timeframe,
         limit=limit,
+    )
+    rows = filter_rows_by_market_time(
+        rows,
+        start_time=start_time,
+        end_time=end_time,
     )
     payload = build_volume_clock_vpin_payload(
         rows=rows,
@@ -44,6 +52,8 @@ def run_volume_clock_vpin_report(
     print(f"symbol                  : {data['symbol']}")
     print(f"target_date             : {data['target_date']}")
     print(f"timeframe               : {timeframe}")
+    print(f"market_time_start       : {start_time or '-'}")
+    print(f"market_time_end         : {end_time or '-'}")
     print(f"source_rows             : {data['source_rows']}")
     print(f"bucket_volume           : {data['bucket_volume']}")
     print(f"window_buckets          : {data['window_buckets']}")

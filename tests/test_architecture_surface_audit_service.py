@@ -1,0 +1,81 @@
+"""Tests for architecture surface audit diagnostics.
+
+Run:
+  python3 tests/test_architecture_surface_audit_service.py
+"""
+
+from __future__ import annotations
+
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
+
+from services.architecture_surface_audit_service import (  # noqa: E402
+    SRC_CONTEXTS,
+    build_architecture_surface_payload,
+)
+
+
+def _write(path: Path, text: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text)
+
+
+def _create_skeleton(base: Path) -> None:
+    root = base / "src" / "trading_bot"
+    root.mkdir(parents=True, exist_ok=True)
+    _write(root / "__init__.py", "")
+    for context in SRC_CONTEXTS:
+        _write(root / context / "__init__.py", "")
+
+
+def test_architecture_surface_payload_counts_core_surfaces(tmp_path):
+    _write(tmp_path / "app.py", "import os\nVALUE = os.getenv('APP_FLAG')\n")
+    _write(tmp_path / "worker.py", "print('worker')\n")
+    _write(tmp_path / "services" / "approval_service.py", "print('service')\n")
+    _write(tmp_path / "services" / "ops_checks" / "runtime_checks.py", "print('check')\n")
+    _write(tmp_path / "repositories" / "trades_repo.py", "print('repo')\n")
+    _write(tmp_path / "ops" / "compatibility_deletion_plan.md", "# plan\n")
+    _create_skeleton(tmp_path)
+
+    payload = build_architecture_surface_payload(base_dir=tmp_path)
+    metrics = {row["name"]: row for row in payload["surface_metrics"]}
+
+    assert payload["version"] == "architecture_surface_audit_v1"
+    assert payload["runtime_effect"] == "diagnostic_only_no_runtime_change"
+    assert metrics["root_python_files"]["current"] == 2
+    assert metrics["services_direct_modules"]["current"] == 1
+    assert metrics["services_ops_check_modules"]["current"] == 1
+    assert metrics["repository_modules"]["current"] == 1
+    assert payload["raw_env_files"] == 1
+    assert payload["raw_env_keys"] == 1
+    assert payload["compatibility_plan_exists"] is True
+    assert payload["src_skeleton"]["contexts_ready"] == len(SRC_CONTEXTS)
+
+
+def test_architecture_surface_payload_flags_missing_skeleton(tmp_path):
+    _write(tmp_path / "app.py", "print('app')\n")
+
+    payload = build_architecture_surface_payload(base_dir=tmp_path)
+
+    assert payload["src_skeleton"]["root_exists"] is False
+    assert payload["src_skeleton"]["contexts_ready"] == 0
+    assert payload["ready"] is False
+
+
+if __name__ == "__main__":
+    tests = [
+        test_architecture_surface_payload_counts_core_surfaces,
+        test_architecture_surface_payload_flags_missing_skeleton,
+    ]
+    for test in tests:
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmp:
+            test(Path(tmp))
+        print(f"[OK] {test.__name__}")
+
+    print()
+    print(f"All {len(tests)} architecture surface audit tests passed.")

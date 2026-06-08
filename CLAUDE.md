@@ -193,6 +193,15 @@ Recent completed roadmap items:
 - `ops_check.py config-audit` validates typed config factories, inventories raw
   env-var access, and flags unsafe runtime defaults. It is diagnostic-only and
   should be run after changing `/etc/trading-bot.env` or adding config flags.
+- `ops_check.py architecture-surface` tracks root/module sprawl, oversized
+  decision files, raw env access, `src/trading_bot` package skeleton readiness,
+  and compatibility-deletion planning. It is diagnostic-only and should guide
+  architecture cleanup work before moving files.
+- `src/trading_bot/` is the future bounded-context package skeleton. Do not move
+  runtime code into it without compatibility wrappers, characterization tests,
+  updated cron/systemd/docs, and passing safety checks.
+- `ops/compatibility_deletion_plan.md` tracks wrapper/module replacement,
+  callers, deletion conditions, and phase targets.
 - `ops/project_audit_followup_2026-06-08.md` is the current repo-owned follow-up
   to the external project-audit/missing-tools documents. Treat stale external
   claims about empty tests or missing CI as superseded by the checked-in CI,
@@ -971,6 +980,7 @@ python3 ops_check.py signal-lessons
 python3 ops_check.py trends
 python3 ops_check.py prediction-validation
 python3 ops_check.py config-audit
+python3 ops_check.py architecture-surface
 python3 ops_check.py resource-readiness
 python3 ops_check.py historical-bar-coverage START_DATE --end-date END_DATE
 python3 ops_check.py historical-bar-progress START_DATE --end-date END_DATE

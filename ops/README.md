@@ -110,6 +110,25 @@ implemented. Database backups, observability/alerting, secrets hardening, load
 testing, incident management, consolidated model validation governance, and a
 feature-flag inventory remain open roadmap items.
 
+## Architecture Surface Cleanup
+
+Use the architecture-surface report before and after structural refactors:
+
+```bash
+cd ~/trading-bot
+python3 ops_check.py architecture-surface
+```
+
+The report measures root Python file count, direct `services/` module count,
+`services/ops_checks/` module count, repository module count, oversized runtime
+decision files, raw env access, `src/trading_bot` package skeleton readiness,
+and whether `ops/compatibility_deletion_plan.md` exists.
+
+It is diagnostic-only and is expected to warn until cleanup targets are met.
+Use `ops/compatibility_deletion_plan.md` as the staged migration tracker. Do not
+move runtime decision code without compatibility wrappers, characterization
+tests, command smoke tests, and a market-safe deployment window.
+
 ## Polygon Historical Bar Backfill
 
 Use Polygon history to build the multi-year 1-minute regular-session bar corpus

@@ -49,6 +49,7 @@ Usage:
   python3 ops_check.py portfolio-risk
   python3 ops_check.py production-evidence
   python3 ops_check.py config-audit
+  python3 ops_check.py architecture-surface
   python3 ops_check.py resource-readiness
   python3 ops_check.py advanced-alpha-readiness
   python3 ops_check.py advanced-alpha-comparison
@@ -130,6 +131,7 @@ from services.ops_checks.advanced_alpha_readiness_checks import (
 )
 from services.ops_checks.advisory_authority_checks import run_advisory_authority_report
 from services.ops_checks.ai_intelligence_review_checks import run_ai_intelligence_review
+from services.ops_checks.architecture_surface_checks import run_architecture_surface_report
 from services.ops_checks.auto_buy_checks import run_auto_buy_health
 from services.ops_checks.bar_pattern_checks import run_bar_pattern_backfill
 from services.ops_checks.calibration_bucket_checks import run_calibration_buckets
@@ -744,6 +746,10 @@ def resource_readiness():
 
 def config_audit():
     return run_config_audit_report(base_dir=BASE_DIR)
+
+
+def architecture_surface():
+    return run_architecture_surface_report(base_dir=BASE_DIR)
 
 
 def advanced_alpha_readiness(target_date):
@@ -1535,6 +1541,9 @@ def main():
 
     if command == "config-audit":
         return 0 if config_audit() else 1
+
+    if command == "architecture-surface":
+        return 0 if architecture_surface() else 1
 
     if command == "resource-readiness":
         return 0 if resource_readiness() else 1

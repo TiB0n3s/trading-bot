@@ -22,6 +22,7 @@ As of the latest roadmap work:
 - `pipeline/external_symbol_candidate_refresh.py --date YYYY-MM-DD` turns repeated unknown external-symbol findings into a research-only candidate queue, can run bounded Polygon historical backfill for eligible symbols, and then marks each symbol as context-only, backfill-pending, training-pending, review-ready, pooled, or rejected. `ops_check.py external-symbol-candidates` inspects this queue. Candidate status never grants trading authority or updates `SYMBOL_CONFIG`.
 - `ops_check.py` includes performance, runtime, resource, and persistence diagnostics such as `runtime-health`, `resource-readiness`, `lifecycle-analysis`, `setup-breakdown`, `conviction-stack-report`, `conviction-persistence-health`, `peak-bucket-report`, `winner-became-loser`, and prediction validation.
 - `ops_check.py config-audit` inventories remaining raw env-var access, validates typed config factories, and flags unsafe runtime defaults such as default webhook secrets, query-string secrets, cash mode without live-trading enablement, or unbacked live ML authority. This report is diagnostic-only and does not change runtime configuration.
+- `ops_check.py architecture-surface` measures root/module sprawl, oversized decision files, raw env access, and `src/trading_bot` migration skeleton readiness. It is diagnostic-only and supports the cleanup plan in `ops/compatibility_deletion_plan.md`.
 - Development guardrails are active: `.github/workflows/ci.yml` runs compile checks plus `run_safety_checks.py` on push/PR, and `.pre-commit-config.yaml` runs Ruff plus the same fast safety harness before commits.
 - `ops/project_audit_followup_2026-06-08.md` reconciles the external project-audit/missing-tools notes with the current repo state. CI, local pre-commit guardrails, core safety tests, dependency split, and config audit are now implemented; backups, observability, secrets hardening, load testing, incident management, consolidated model validation, and a feature-flag inventory remain roadmap items.
 - Approved BUY audit persistence records final sizing attribution, dominant limiter, active cap-derived effective cap, ML prediction bucket/score, buy-opportunity recommendation, strategy score, session label, and setup policy action.
@@ -161,6 +162,10 @@ DuckDB/PyArrow research exports, scikit-learn/joblib supervised prediction
 artifacts, XGBoost supervised candidates, torch Transformer authority
 candidates, and hmmlearn HMM regime experiments.
 These packages do not grant live trading authority by themselves.
+`pyproject.toml` also declares optional extras for metadata and future packaging:
+`research`, `dashboard` (`streamlit`), `timescale` (`asyncpg`), `sentiment`
+(`transformers`), and `dev`. Docker and CI still use the requirements files as
+the operational install source.
 
 Container build targets are split the same way:
 
@@ -1199,6 +1204,7 @@ python3 ops_check.py trends
 python3 ops_check.py prediction-validation
 python3 ops_check.py runtime-health YYYY-MM-DD
 python3 ops_check.py config-audit
+python3 ops_check.py architecture-surface
 python3 ops_check.py resource-readiness
 python3 ops_check.py lifecycle-analysis YYYY-MM-DD
 python3 ops_check.py lifecycle-analysis YYYY-MM-DD --symbol AAPL --samples 25
@@ -1233,6 +1239,12 @@ through a service boundary and validated by reports/tests.
 environment, inventories raw env-var access, and flags unsafe runtime defaults.
 Use it after changing `/etc/trading-bot.env`, adding a new env flag, or changing
 config factory behavior. It is diagnostic-only and does not mutate config.
+
+`ops_check.py architecture-surface` tracks the structural cleanup roadmap:
+root Python file count, direct service/repository module counts, oversized
+runtime decision files, raw env access, `src/trading_bot` skeleton readiness,
+and the compatibility deletion plan. It intentionally returns a warning until
+the repo is within the cleanup targets.
 
 Common resource environment variables:
 

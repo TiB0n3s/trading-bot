@@ -99,3 +99,6 @@ is installed, but sentiment output remains supporting evidence only.
 Container targets preserve the same boundary: `tradingbot-runtime` excludes the
 heavy ML/research stack and must pass fallback-focused tests; `tradingbot-research`
 includes the optional quant/ML packages for training, validation, and diagnostics.
+`pyproject.toml` mirrors the research dependency group and also declares optional
+`dashboard`, `timescale`, and `sentiment` extras for intentionally optional
+Streamlit, asyncpg, and transformer integrations.

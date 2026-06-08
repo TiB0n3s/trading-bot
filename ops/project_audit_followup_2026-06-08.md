@@ -24,6 +24,10 @@ items have since been implemented:
 - **Dependency split**: `requirements-base.txt` is the slim runtime subset,
   `requirements-research.txt` adds optional ML/quant dependencies, and
   `requirements.txt` delegates to the full research environment.
+- **Architecture surface tracking**: `ops_check.py architecture-surface` now
+  measures root/module sprawl, oversized decision files, raw env access, and
+  `src/trading_bot` skeleton readiness. `ops/compatibility_deletion_plan.md`
+  tracks wrapper/module migration and deletion conditions.
 
 ## Current High-Priority Gaps
 
@@ -56,6 +60,10 @@ These remain valid roadmap items before any cash-live promotion:
 7. **Feature flags and kill switches**
    - Many env flags exist, but there is not yet a single feature-flag inventory
      with ownership, default, authority level, rollback action, and audit link.
+8. **Architecture surface reduction**
+   - The package skeleton and audit metrics exist, but runtime implementations
+     still need staged migration out of root files, generic `services/`, and
+     oversized decision modules.
 
 ## Documentation Rule
 

@@ -192,3 +192,71 @@ class ExitSnapshotRepository:
                 """,
                 (symbol, limit),
             ).fetchall()
+
+    def exit_intelligence_summary(
+        self,
+        *,
+        start_date: str,
+        end_date: str | None = None,
+        limit: int = 12,
+    ) -> dict[str, Any]:
+        self.init_table()
+        end_date = end_date or start_date
+        with get_connection(self.db_path) as con:
+            summary = con.execute(
+                """
+                SELECT
+                    COUNT(*) AS rows,
+                    AVG(realized_return_pct) AS avg_realized_return_pct,
+                    AVG(mfe_pct) AS avg_mfe_pct,
+                    AVG(capture_ratio) AS avg_capture_ratio,
+                    AVG(avoided_drawdown_pct) AS avg_avoided_drawdown_pct,
+                    AVG(missed_upside_pct) AS avg_missed_upside_pct,
+                    AVG(post_exit_return_30m_pct) AS avg_post_exit_return_30m_pct,
+                    AVG(post_exit_return_60m_pct) AS avg_post_exit_return_60m_pct,
+                    SUM(CASE WHEN missed_upside_pct >= 1.0 THEN 1 ELSE 0 END) AS high_missed_upside_count,
+                    SUM(CASE WHEN post_exit_return_30m_pct > 0.5 THEN 1 ELSE 0 END) AS post_exit_recovery_count,
+                    SUM(CASE WHEN avoided_drawdown_pct > 0.5 THEN 1 ELSE 0 END) AS avoided_drawdown_count
+                FROM exit_snapshots
+                WHERE date(exit_timestamp) BETWEEN ? AND ?
+                """,
+                (start_date, end_date),
+            ).fetchone()
+            trigger_rows = con.execute(
+                """
+                SELECT
+                    COALESCE(exit_trigger, 'unknown') AS exit_trigger,
+                    COUNT(*) AS rows,
+                    AVG(realized_return_pct) AS avg_realized_return_pct,
+                    AVG(capture_ratio) AS avg_capture_ratio,
+                    AVG(missed_upside_pct) AS avg_missed_upside_pct,
+                    AVG(post_exit_return_30m_pct) AS avg_post_exit_return_30m_pct
+                FROM exit_snapshots
+                WHERE date(exit_timestamp) BETWEEN ? AND ?
+                GROUP BY COALESCE(exit_trigger, 'unknown')
+                ORDER BY rows DESC, exit_trigger
+                LIMIT ?
+                """,
+                (start_date, end_date, int(limit)),
+            ).fetchall()
+            symbol_rows = con.execute(
+                """
+                SELECT
+                    COALESCE(symbol, 'unknown') AS symbol,
+                    COUNT(*) AS rows,
+                    AVG(realized_return_pct) AS avg_realized_return_pct,
+                    AVG(capture_ratio) AS avg_capture_ratio,
+                    AVG(missed_upside_pct) AS avg_missed_upside_pct
+                FROM exit_snapshots
+                WHERE date(exit_timestamp) BETWEEN ? AND ?
+                GROUP BY COALESCE(symbol, 'unknown')
+                ORDER BY rows DESC, symbol
+                LIMIT ?
+                """,
+                (start_date, end_date, int(limit)),
+            ).fetchall()
+        return {
+            "summary": dict(summary) if summary else {},
+            "trigger_rows": [dict(row) for row in trigger_rows],
+            "symbol_rows": [dict(row) for row in symbol_rows],
+        }

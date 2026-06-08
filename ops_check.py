@@ -78,9 +78,14 @@ Usage:
   python3 ops_check.py historical-bar-retry-plan START_DATE [--end-date YYYY-MM-DD] [--execute]
   python3 ops_check.py historical-bar-models
   python3 ops_check.py historical-bar-paper-strategy SYMBOL [--action buy|sell]
+  python3 ops_check.py historical-bar-paper-validation START_DATE [--end-date YYYY-MM-DD]
+  python3 ops_check.py historical-bar-walk-forward START_DATE [--end-date YYYY-MM-DD]
   python3 ops_check.py historical-bar-validation START_DATE [--end-date YYYY-MM-DD]
   python3 ops_check.py ml-dataset-export START_DATE [END_DATE] [--output PATH] [--format jsonl|csv] [--max-rows N]
   python3 ops_check.py monday-readiness
+  python3 ops_check.py exit-intelligence START_DATE [END_DATE]
+  python3 ops_check.py sqlite-ownership
+  python3 ops_check.py operator-intelligence [YYYY-MM-DD]
   python3 ops_check.py learning-readiness START_DATE [END_DATE]
   python3 ops_check.py learning-effectiveness START_DATE [END_DATE]
   python3 ops_check.py learning-artifacts YYYY-MM-DD
@@ -148,11 +153,20 @@ from services.ops_checks.historical_bar_model_checks import (
 from services.ops_checks.historical_bar_paper_strategy_checks import (
     run_historical_bar_paper_strategy_report,
 )
+from services.ops_checks.historical_bar_paper_validation_checks import (
+    run_historical_bar_paper_validation,
+    run_historical_bar_walk_forward,
+)
 from services.ops_checks.historical_bar_validation_checks import (
     run_historical_bar_validation,
 )
 from services.ops_checks.ml_dataset_checks import run_ml_dataset_export_check
 from services.ops_checks.monday_readiness_checks import run_monday_readiness_check
+from services.ops_checks.exit_intelligence_checks import run_exit_intelligence_summary
+from services.ops_checks.sqlite_ownership_checks import run_sqlite_ownership_report
+from services.ops_checks.operator_intelligence_dashboard_checks import (
+    run_operator_intelligence_dashboard,
+)
 from services.ops_checks.learning_readiness_checks import (
     run_learning_effectiveness,
     run_learning_readiness,
@@ -1008,6 +1022,31 @@ def historical_bar_paper_strategy(symbol: str) -> bool:
     )
 
 
+def historical_bar_paper_validation(start_date: str) -> bool:
+    return run_historical_bar_paper_validation(
+        base_dir=BASE_DIR,
+        start_date=start_date,
+        end_date=_str_option("--end-date", date.today().isoformat()),
+        label_target=_str_option("--label-target", "triple_barrier_label"),
+        rows_per_symbol=_int_option("--rows-per-symbol", 250),
+        limit=_int_option("--max-rows", 30000),
+        threshold=float(_str_option("--threshold", "65.0")),
+    )
+
+
+def historical_bar_walk_forward(start_date: str) -> bool:
+    return run_historical_bar_walk_forward(
+        base_dir=BASE_DIR,
+        start_date=start_date,
+        end_date=_str_option("--end-date", date.today().isoformat()),
+        label_target=_str_option("--label-target", "triple_barrier_label"),
+        rows_per_symbol=_int_option("--rows-per-symbol", 250),
+        limit=_int_option("--max-rows", 30000),
+        threshold=float(_str_option("--threshold", "65.0")),
+        folds=_int_option("--folds", 5),
+    )
+
+
 def historical_bar_validation(start_date: str) -> bool:
     return run_historical_bar_validation(
         base_dir=BASE_DIR,
@@ -1025,6 +1064,29 @@ def monday_readiness() -> bool:
     return run_monday_readiness_check(
         base_dir=BASE_DIR,
         min_historical_symbols=_int_option("--min-historical-symbols", 59),
+    )
+
+
+def exit_intelligence(start_date: str) -> bool:
+    end_date = start_date
+    if len(sys.argv) > 3 and not sys.argv[3].startswith("--"):
+        end_date = sys.argv[3]
+    return run_exit_intelligence_summary(
+        base_dir=BASE_DIR,
+        start_date=start_date,
+        end_date=end_date,
+        limit=_int_option("--limit", 12),
+    )
+
+
+def sqlite_ownership() -> bool:
+    return run_sqlite_ownership_report(base_dir=BASE_DIR)
+
+
+def operator_intelligence(target_date: str) -> bool:
+    return run_operator_intelligence_dashboard(
+        base_dir=BASE_DIR,
+        target_date=target_date,
     )
 
 
@@ -1471,6 +1533,12 @@ def main():
     if command == "historical-bar-paper-strategy":
         return 0 if historical_bar_paper_strategy(target_date) else 1
 
+    if command == "historical-bar-paper-validation":
+        return 0 if historical_bar_paper_validation(target_date) else 1
+
+    if command == "historical-bar-walk-forward":
+        return 0 if historical_bar_walk_forward(target_date) else 1
+
     if command == "historical-bar-validation":
         return 0 if historical_bar_validation(target_date) else 1
 
@@ -1479,6 +1547,15 @@ def main():
 
     if command == "monday-readiness":
         return 0 if monday_readiness() else 1
+
+    if command == "exit-intelligence":
+        return 0 if exit_intelligence(target_date) else 1
+
+    if command == "sqlite-ownership":
+        return 0 if sqlite_ownership() else 1
+
+    if command == "operator-intelligence":
+        return 0 if operator_intelligence(target_date) else 1
 
     if command == "learning-readiness":
         return 0 if learning_readiness(target_date) else 1

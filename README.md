@@ -570,8 +570,13 @@ python3 ops_check.py advanced-alpha-readiness 2026-06-04
 python3 ops_check.py advanced-alpha-comparison 2026-06-04
 python3 ops_check.py historical-bar-models
 python3 ops_check.py historical-bar-paper-strategy AAPL --action buy
+python3 ops_check.py historical-bar-paper-validation 2024-06-01 --end-date 2026-06-04
+python3 ops_check.py historical-bar-walk-forward 2024-06-01 --end-date 2026-06-04
 python3 ops_check.py historical-bar-validation 2024-06-01 --end-date 2026-06-04 --label-target triple_barrier_label
 python3 ops_check.py monday-readiness
+python3 ops_check.py exit-intelligence 2026-06-04
+python3 ops_check.py sqlite-ownership
+python3 ops_check.py operator-intelligence 2026-06-04
 ```
 
 These reports distinguish the currently integrated bar-level proxies from true trade-level order flow, ETF/component lead-lag, and options-skew features that still require external feeds or mappings. The comparison report also shows whether an asymmetric false-positive guard would have reduced bad pattern candidates without granting authority.
@@ -590,11 +595,22 @@ current bar-pattern features when available, a naive baseline comparison, and
 portfolio correlation friction into a paper-only master confidence score and
 paper sizing recommendation. It is intentionally non-authoritative and does not
 feed live sizing, blocking, approval, or order submission.
+`historical-bar-paper-validation` compares the paper ensemble score against a
+naive RSI/SMA/close-location baseline on labeled historical bars, reporting hit
+rate delta, false-positive avoidance, and false-negative cost. `historical-bar-
+walk-forward` repeats that comparison over chronological folds so one strong
+period does not masquerade as stable intelligence.
 `historical-bar-validation` reports label distributions by symbol, session
 phase, volatility, CVD, VPIN, and fractional-memory buckets. `monday-readiness`
 summarizes market context presence, Polygon key configuration, current
 historical-bar symbol coverage, observe-only model candidate readiness, and
 advisory full-window cache gaps.
+`exit-intelligence` summarizes canonical exit snapshots by trigger and symbol,
+including capture ratio, missed upside, post-exit recovery, and avoided
+drawdown. `sqlite-ownership` documents the per-DB one-writer rule for container
+planning. `operator-intelligence` is the compact dashboard view that points the
+operator to the next validation reports; it is dashboard-only and has no live
+authority.
 
 Off-hours historical-bar learning pipeline:
 

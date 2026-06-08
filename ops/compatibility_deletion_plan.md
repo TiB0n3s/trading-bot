@@ -18,7 +18,7 @@ reports, and tests are updated.
 
 | Wrapper/module | Current callers | Replacement | Deletion condition | Target |
 | --- | --- | --- | --- | --- |
-| `app.py` | Gunicorn/systemd, tests, imports of `process_signal` | `src/trading_bot/web/app_factory.py` plus temporary root shim | Root file below 100 lines, routes/startup/container moved, `/status` and webhook smoke tests pass | Phase 2 |
+| `app.py` | Gunicorn/systemd, tests, imports of `process_signal` | `src/trading_bot/web/app_factory.py` plus temporary root shim | Root file below 100 lines, routes/startup/container moved, `/status` and webhook smoke tests pass | Phase 2 in progress: Flask app construction and route registration moved to `src/trading_bot/web/app_factory.py`; startup/runtime context still in root shim |
 | `wsgi.py` | Gunicorn | Imports app from `trading_bot.web.app_factory` | Gunicorn config points at package app or stable shim | Phase 2 |
 | `ops_check.py` | Operator CLI, cron, docs | `src/trading_bot/ops_checks/cli.py` command registry | Root file below 100 lines, command registry covers existing commands, docs updated | Phase 3 |
 | `auto_buy_manager.py` | Cron/operator CLI | `src/trading_bot/signals/auto_buy/cli.py` | Candidate scoring/execution split, paper smoke test passes, cron updated | Phase 4 |
@@ -42,7 +42,11 @@ reports, and tests are updated.
 
 - Move Flask factory, routes, auth, response helpers, startup, and container
   wiring into `src/trading_bot/web/` and `src/trading_bot/runtime/`.
-- Keep root `app.py` as compatibility shim.
+- Done: `src/trading_bot/web/app_factory.py` owns Flask app creation and route
+  registration while delegating route payload context to the current runtime
+  compatibility module.
+- Keep root `app.py` as compatibility shim/runtime context until startup,
+  config/runtime globals, and systemd/Gunicorn callers are migrated.
 - Lower `app.py` architecture threshold after migration.
 
 ### Phase 3: Operator CLI And Reports

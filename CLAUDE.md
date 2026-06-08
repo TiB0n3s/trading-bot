@@ -12,7 +12,7 @@ The bot is operational in paper trading.
 
 Recent completed roadmap items:
 
-- `app.py` is now a Flask composition root only: app creation, startup entry point, container selection, route registration, and the public `process_signal()` compatibility wrapper.
+- `app.py` is now a Flask composition/runtime compatibility root: startup entry point, runtime compatibility context, container selection, and the public `process_signal()` compatibility wrapper. Flask app construction and route registration mechanics live in `src/trading_bot/web/app_factory.py`.
 - Live signal orchestration is owned by `services/live_signal_processor.py`; approval gates, sizing, execution, context runtime, audit persistence, and repositories are service-owned.
 - The legacy live processor, `execute_legacy`, `run_legacy_*` service names, and app-level `log_trade` / `log_rejection` shims have been removed.
 - Architecture tests enforce approved DB, broker, market-data, Flask, repository, policy, report, and runtime boundaries. Temporary architecture allowlists are empty and expected to stay empty.
@@ -197,8 +197,11 @@ Recent completed roadmap items:
   decision files, raw env access, `src/trading_bot` package skeleton readiness,
   and compatibility-deletion planning. It is diagnostic-only and should guide
   architecture cleanup work before moving files.
-- `src/trading_bot/` is the future bounded-context package skeleton. Do not move
-  runtime code into it without compatibility wrappers, characterization tests,
+- `src/trading_bot/` is the future bounded-context package skeleton. Phase 2
+  has started there with `src/trading_bot/web/app_factory.py`, which owns Flask
+  app construction and route registration while root `app.py` remains the
+  deployed compatibility context. Do not move additional runtime code into
+  `src/trading_bot/` without compatibility wrappers, characterization tests,
   updated cron/systemd/docs, and passing safety checks.
 - `ops/compatibility_deletion_plan.md` tracks wrapper/module replacement,
   callers, deletion conditions, and phase targets.
@@ -1394,11 +1397,14 @@ benchmark alignment
 QQQ/SPY/IWM/GLD support/conflict
 6. app.py decomposition
 
-Status: Complete for the live signal path.
+Status: Complete for the live signal path; Phase 2 web-runtime extraction is
+partially complete.
 
 Current ownership:
 
-app.py remains the Flask composition root.
+app.py remains the deployed Flask compatibility root and runtime context holder.
+src/trading_bot/web/app_factory.py owns Flask app creation and route
+registration mechanics.
 SignalPipeline owns runtime flow entry.
 LiveSignalProcessor owns live signal orchestration.
 ApprovalService owns deterministic and Claude/confidence decisions.

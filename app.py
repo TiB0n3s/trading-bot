@@ -6,51 +6,105 @@ compatibility wrapper. Trading behavior belongs in services, policies,
 repositories, and infrastructure adapters.
 """
 
-import os
-import sys
+import hashlib
 import json
 import logging
-import hashlib
+import os
+import sys
+import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
-from zoneinfo import ZoneInfo
-import pytz
-import time
-from setup_policy import evaluate_setup_policy
 from pathlib import Path
-from live_features import build_snapshot
+from zoneinfo import ZoneInfo
+
+import pytz
 from flask import Flask, abort
-from api.register_routes import RouteRegistrationDeps, register_routes
+
+from alerts import alert_config_public as alert_config_public  # noqa: F401
+from bot_events import log_event as log_event  # noqa: F401
+from data_layer.ledger import ledger_summary as ledger_summary  # noqa: F401
+from decision_context import build_intelligence_context as build_intelligence_context  # noqa: F401
+from decision_engine import evaluate_signal as evaluate_signal  # noqa: F401
+from decision_engine import get_mock_account_state as get_mock_account_state  # noqa: F401
+from decision_policy import evaluate_decision_policy as evaluate_decision_policy  # noqa: F401
+from decision_thresholds import (
+    PREDICTION_GATE_THRESHOLDS as PREDICTION_GATE_THRESHOLDS,  # noqa: F401
+)
+from exceptions import ValidationError as ValidationError  # noqa: F401
+from indicator_state import (
+    is_fast_lane_buy_flip as is_fast_lane_buy_flip,  # noqa: F401
+)
+from indicator_state import (
+    is_fast_lane_sell_flip as is_fast_lane_sell_flip,  # noqa: F401
+)
+from intelligence_snapshot import (
+    get_intelligence_snapshot as get_intelligence_snapshot,  # noqa: F401
+)
+from live_features import build_snapshot
+from macro_risk import get_macro_risk as _legacy_get_macro_risk
+from market_time import expected_market_context_date, is_market_hours, market_session, now_et
+from opportunity_score import score_buy_opportunity as score_buy_opportunity  # noqa: F401
+from policy_artifacts import policy_artifact_status as policy_artifact_status  # noqa: F401
+from position_intelligence import (
+    get_position_intelligence as get_position_intelligence,  # noqa: F401
+)
+from prediction_cache import (
+    get_cached_prediction,
+    prediction_cache_status,
+    start_prediction_cache_loader,
+)
+from prior_session_context import prior_session_context
+from repositories import context_repo, cooldown_repo, trades_repo
+from risk.account_risk import account_risk_snapshot as account_risk_snapshot  # noqa: F401
+from risk.live_guards import live_guard_policy as live_guard_policy  # noqa: F401
+from risk.live_guards import live_order_allowed as live_order_allowed  # noqa: F401
+from risk.macro_policy import policy_from_market_context as policy_from_market_context  # noqa: F401
+from rolling_context import rolling_summary as rolling_summary  # noqa: F401
+from rolling_context import rolling_symbol_context
+from runtime_config import (
+    CASH_SAFE_MAX_NEW_BUYS_PER_SYMBOL_PER_DAY,
+    CASH_SAFE_MAX_OPEN_POSITIONS,
+    CASH_SAFE_MAX_ORDER_DOLLARS,
+    CASH_SAFE_SYMBOLS,
+    DECISION_POLICY_LIVE_BLOCK,
+    DECISION_POLICY_LIVE_SIZE_DOWN,
+    EXECUTION_MODE,
+    LIVE_TRADING_ENABLED,
+    MAX_LIVE_ORDER_DOLLARS,
+    decision_policy_live_authority_enabled,
+    is_cash_mode,
+    is_cash_safe_mode,
+    public_decision_policy_config,
+    public_ml_authority_config,
+    public_runtime_config,
+)
+from services import dedupe_service, trade_audit_service
 from services.container import ApplicationContainer
-from services.status_service import build_health_payload, build_status_payload
-from services.positions_service import build_positions_payload
-from services.debug_symbol_service import build_debug_symbol_payload
-from services import dedupe_service
-from services.observability import metrics_snapshot
-from services.policies import entry_policy, sizing_policy
-from services.policy_controls import public_policy_control_config
 from services.context_builder import (
     ContextAssemblyDeps,
-    apply_market_bias_context as context_builder_apply_market_bias_context,
-    build_signal_context_runtime,
 )
+from services.context_builder import (
+    apply_market_bias_context as context_builder_apply_market_bias_context,
+)
+from services.context_builder import (
+    build_signal_context_runtime as build_signal_context_runtime,  # noqa: F401
+)
+from services.execution_adapters import ExecutionAdapterService
+from services.execution_service import execute_order as execute_order  # noqa: F401
+from services.market_context_service import MarketContextService
+from services.momentum_service import MomentumService
+from services.observability import metrics_snapshot as metrics_snapshot  # noqa: F401
+from services.policies import entry_policy
+from services.policies import sizing_policy as sizing_policy  # noqa: F401
+from services.policy_controls import (
+    public_policy_control_config as public_policy_control_config,  # noqa: F401
+)
+from services.portfolio_rotation_service import PortfolioRotationService
 from services.preflight_service import (
     PreflightDeps,
     PreflightService,
     normalize_signal_identity,
 )
-from services.sizing_service import apply_final_sizing, apply_size_cap, build_conviction_stack
-from services.execution_service import execute_order
-from services.signal_models import SignalRuntimeState
-from services.startup_service import StartupDeps, StartupService
-from services.market_context_service import MarketContextService
-from services.symbol_override_service import SymbolOverrideService
-from services.trend_state_service import TrendStateService
-from services.momentum_service import MomentumService
-from services.execution_adapters import ExecutionAdapterService
-from services.portfolio_rotation_service import PortfolioRotationService
-from services import trade_audit_service
-from services.setup_engine_service import build_default_setup_engine_service
 from services.regime_observation_service import build_default_regime_observation_service
 from services.setup_context_service import (
     SetupContextDeps,
@@ -58,87 +112,105 @@ from services.setup_context_service import (
     is_favorable_setup_label,
     is_unrecognized_setup_label,
 )
-from repositories import context_repo, cooldown_repo, trades_repo
-from indicator_state import (
-    is_fast_lane_buy_flip,
-    is_fast_lane_sell_flip,
-)
+from services.setup_engine_service import build_default_setup_engine_service
+from services.signal_models import SignalRuntimeState
+from services.sizing_service import apply_final_sizing as apply_final_sizing  # noqa: F401
+from services.sizing_service import apply_size_cap
+from services.sizing_service import build_conviction_stack as build_conviction_stack  # noqa: F401
+from services.startup_service import StartupDeps, StartupService
+from services.symbol_override_service import SymbolOverrideService
+from services.trend_state_service import TrendStateService
 from session_momentum import (
-    init_session_momentum_table,
     get_latest_session_momentum,
+    init_session_momentum_table,
 )
-from decision_engine import evaluate_signal, get_mock_account_state
-from opportunity_score import score_buy_opportunity
-from macro_risk import get_macro_risk as _legacy_get_macro_risk
-from strategy_memory import memory_for_signal
-from decision_context import build_intelligence_context
-from decision_policy import evaluate_decision_policy
-from intelligence_snapshot import get_intelligence_snapshot
-from position_intelligence import get_position_intelligence
-from bot_events import log_event
-from rolling_context import rolling_summary, rolling_symbol_context
-from prior_session_context import prior_session_context
-from decision_thresholds import PREDICTION_GATE_THRESHOLDS
+from setup_policy import evaluate_setup_policy
+from src.trading_bot.web.app_factory import create_runtime_flask_app, register_runtime_routes
 from strategy.strategy_engine import evaluate_strategy_observe_only
-from risk.account_risk import account_risk_snapshot
-from risk.live_guards import live_guard_policy, live_order_allowed
-from risk.macro_policy import policy_from_market_context
-from data_layer.ledger import ledger_summary
-from alerts import alert_config_public
-from policy_artifacts import policy_artifact_status
-from prediction_cache import (
-    get_cached_prediction,
-    prediction_cache_status,
-    start_prediction_cache_loader,
-)
-from exceptions import ValidationError
-from runtime_config import (
-    EXECUTION_MODE,
-    LIVE_TRADING_ENABLED,
-    CASH_SAFE_SYMBOLS,
-    CASH_SAFE_MAX_OPEN_POSITIONS,
-    CASH_SAFE_MAX_NEW_BUYS_PER_SYMBOL_PER_DAY,
-    MAX_LIVE_ORDER_DOLLARS,
-    CASH_SAFE_MAX_ORDER_DOLLARS,
-    DECISION_POLICY_LIVE_BLOCK,
-    DECISION_POLICY_LIVE_SIZE_DOWN,
-    decision_policy_live_authority_enabled,
-    public_decision_policy_config,
-    public_ml_authority_config,
-    is_cash_mode,
-    is_cash_safe_mode,
-    public_runtime_config,
-)
-from symbols_config import (
-    APPROVED_SYMBOLS,
-    CORRELATION_CLUSTERS,
-    CLUSTER_EXPOSURE_LIMITS,
-    PRICE_RANGES,
-    SYMBOL_MAX_SPREAD_PCT,
-    IEX_THIN_SYMBOLS,
-)
-from market_time import now_et, is_market_hours, market_session, expected_market_context_date
 from strategy_constants import (
-    MARKET_OPEN_MINUTES,
-    MARKET_CLOSE_MINUTES,
+    ADAPTIVE_BUY_CONFIRMATION_ENABLED,
     DAILY_LOSS_LIMIT_PCT,
+    MARKET_CLOSE_MINUTES,
+    MARKET_OPEN_MINUTES,
     MAX_BUYS_PER_SYMBOL_PER_DAY,
     MAX_OPEN_POSITIONS,
-    WEBHOOK_DEDUPE_SECONDS,
     SYMBOL_MARKET_ALIGNMENT,
-    ADAPTIVE_BUY_CONFIRMATION_ENABLED,
+    WEBHOOK_DEDUPE_SECONDS,
 )
+from strategy_memory import memory_for_signal as memory_for_signal  # noqa: F401
+from symbols_config import (
+    APPROVED_SYMBOLS,
+    CLUSTER_EXPOSURE_LIMITS,
+    CORRELATION_CLUSTERS,
+    IEX_THIN_SYMBOLS,
+    SYMBOL_MAX_SPREAD_PCT,
+)
+from symbols_config import PRICE_RANGES as PRICE_RANGES  # noqa: F401
+
+_RUNTIME_COMPAT_EXPORTS = (
+    ADAPTIVE_BUY_CONFIRMATION_ENABLED,
+    CASH_SAFE_MAX_NEW_BUYS_PER_SYMBOL_PER_DAY,
+    CASH_SAFE_MAX_OPEN_POSITIONS,
+    CASH_SAFE_MAX_ORDER_DOLLARS,
+    CASH_SAFE_SYMBOLS,
+    DECISION_POLICY_LIVE_BLOCK,
+    DECISION_POLICY_LIVE_SIZE_DOWN,
+    LIVE_TRADING_ENABLED,
+    MARKET_CLOSE_MINUTES,
+    MARKET_OPEN_MINUTES,
+    MAX_LIVE_ORDER_DOLLARS,
+    MAX_OPEN_POSITIONS,
+    PREDICTION_GATE_THRESHOLDS,
+    PRICE_RANGES,
+    ValidationError,
+    account_risk_snapshot,
+    alert_config_public,
+    apply_final_sizing,
+    build_signal_context_runtime,
+    build_conviction_stack,
+    build_intelligence_context,
+    decision_policy_live_authority_enabled,
+    evaluate_decision_policy,
+    evaluate_signal,
+    execute_order,
+    get_cached_prediction,
+    get_intelligence_snapshot,
+    get_mock_account_state,
+    get_position_intelligence,
+    is_cash_mode,
+    is_cash_safe_mode,
+    is_degraded_setup,
+    is_fast_lane_buy_flip,
+    is_fast_lane_sell_flip,
+    is_unrecognized_setup_label,
+    ledger_summary,
+    live_guard_policy,
+    live_order_allowed,
+    log_event,
+    market_session,
+    memory_for_signal,
+    metrics_snapshot,
+    normalize_signal_identity,
+    policy_artifact_status,
+    policy_from_market_context,
+    public_decision_policy_config,
+    public_policy_control_config,
+    public_runtime_config,
+    rolling_summary,
+    score_buy_opportunity,
+    sizing_policy,
+    time,
+)
+
 IS_PAPER_MODE = EXECUTION_MODE == "paper"
 
 logging.basicConfig(
     level=os.environ.get("LOG_LEVEL", "INFO").upper(),
     format="%(asctime)s - %(levelname)s - %(message)s",
-    handlers=[
-        logging.FileHandler("trading_bot.log"),
-        logging.StreamHandler()
-    ]
+    handlers=[logging.FileHandler("trading_bot.log"), logging.StreamHandler()],
 )
 ET = ZoneInfo("America/New_York")
+et = pytz.timezone("America/New_York")
 logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
@@ -155,9 +227,12 @@ tape_service = container.tape_service
 DB_PATH = Path(__file__).parent / "trades.db"
 _START_TIME = datetime.now(timezone.utc)
 ENFORCE_SETUP_POLICY_BLOCKS = True
+SIGNAL_TTL_SECONDS = int(os.getenv("SIGNAL_TTL_SECONDS", "300"))
 
 PREDICTION_GATE_MODE = os.getenv("PREDICTION_GATE_MODE", "warn").strip().lower()
-PREDICTION_SOFT_AVOID_MIN_SAMPLE_SIZE = int(os.getenv("PREDICTION_SOFT_AVOID_MIN_SAMPLE_SIZE", "20"))
+PREDICTION_SOFT_AVOID_MIN_SAMPLE_SIZE = int(
+    os.getenv("PREDICTION_SOFT_AVOID_MIN_SAMPLE_SIZE", "20")
+)
 
 INTRA_SESSION_TAPE_DEGRADATION_ENABLED = os.getenv(
     "INTRA_SESSION_TAPE_DEGRADATION_ENABLED", "true"
@@ -175,16 +250,17 @@ ONE_BAR_CONFIRMATION_HOLD_ENABLED = os.getenv(
 ONE_BAR_CONFIRMATION_EXTENSION_THRESHOLD_PCT = float(
     os.getenv("ONE_BAR_CONFIRMATION_EXTENSION_THRESHOLD_PCT", "0.25")
 )
-ONE_BAR_CONFIRMATION_TIMEOUT_SECONDS = int(
-    os.getenv("ONE_BAR_CONFIRMATION_TIMEOUT_SECONDS", "75")
-)
+ONE_BAR_CONFIRMATION_TIMEOUT_SECONDS = int(os.getenv("ONE_BAR_CONFIRMATION_TIMEOUT_SECONDS", "75"))
 
 # Tape exception for the neutral-bias confidence gate.
 # When true, accelerating momentum + elevated/surge volume + clean_momentum tape
 # overrides a stale neutral pre-market classification and allows medium confidence through.
-TAPE_EXCEPTION_ENABLED = os.getenv(
-    "TAPE_EXCEPTION_ENABLED", "true"
-).strip().lower() in ("1", "true", "yes", "on")
+TAPE_EXCEPTION_ENABLED = os.getenv("TAPE_EXCEPTION_ENABLED", "true").strip().lower() in (
+    "1",
+    "true",
+    "yes",
+    "on",
+)
 
 # Open-momentum fast lane for the trend confirmation gate.
 # When true, surge volume + accelerating momentum within the first 60 minutes
@@ -196,14 +272,10 @@ OPEN_MOMENTUM_FAST_LANE_ENABLED = os.getenv(
 
 # Minimum market_value (USD) for a position to count toward the macro position cap.
 # Positions below this floor are residual/micro lots and should not consume a slot.
-MACRO_POSITION_COUNT_FLOOR = float(
-    os.getenv("MACRO_POSITION_COUNT_FLOOR", "500.0")
-)
+MACRO_POSITION_COUNT_FLOOR = float(os.getenv("MACRO_POSITION_COUNT_FLOOR", "500.0"))
 
 if PREDICTION_GATE_MODE not in ("off", "warn", "soft", "hard"):
-    logger.warning(
-        f"Invalid PREDICTION_GATE_MODE={PREDICTION_GATE_MODE!r}; defaulting to warn"
-    )
+    logger.warning(f"Invalid PREDICTION_GATE_MODE={PREDICTION_GATE_MODE!r}; defaulting to warn")
     PREDICTION_GATE_MODE = "warn"
 
 # Prediction promotion ladder:
@@ -215,26 +287,20 @@ ENFORCE_PREDICTION_WATCH_IN_CASH = PREDICTION_GATE_MODE == "hard"
 
 STRATEGY_ENGINE_MODE = os.getenv("STRATEGY_ENGINE_MODE", "observe").strip().lower()
 if STRATEGY_ENGINE_MODE not in ("off", "observe"):
-    logger.warning(
-        f"Invalid STRATEGY_ENGINE_MODE={STRATEGY_ENGINE_MODE!r}; defaulting to observe"
-    )
+    logger.warning(f"Invalid STRATEGY_ENGINE_MODE={STRATEGY_ENGINE_MODE!r}; defaulting to observe")
     STRATEGY_ENGINE_MODE = "observe"
 
 RISK_POLICY_MODE = os.getenv("RISK_POLICY_MODE", "compare").strip().lower()
 if RISK_POLICY_MODE not in ("off", "compare"):
-    logger.warning(
-        f"Invalid RISK_POLICY_MODE={RISK_POLICY_MODE!r}; defaulting to compare"
-    )
+    logger.warning(f"Invalid RISK_POLICY_MODE={RISK_POLICY_MODE!r}; defaulting to compare")
     RISK_POLICY_MODE = "compare"
 
 ENFORCE_SESSION_MOMENTUM_GATE = os.getenv(
-    "ENFORCE_SESSION_MOMENTUM_GATE",
-    "false"
+    "ENFORCE_SESSION_MOMENTUM_GATE", "false"
 ).strip().lower() in ("1", "true", "yes", "on")
 
 ENFORCE_ADAPTIVE_CHURN_REENTRY = os.getenv(
-    "ENFORCE_ADAPTIVE_CHURN_REENTRY",
-    "true"
+    "ENFORCE_ADAPTIVE_CHURN_REENTRY", "true"
 ).strip().lower() in ("1", "true", "yes", "on")
 SIGNAL_WORKER_COUNT = int(os.environ.get("SIGNAL_WORKER_COUNT", "3"))
 RECENT_FAVORABLE_SETUP_TTL_MINUTES = 15
@@ -251,6 +317,7 @@ def _get_signal_executor() -> ThreadPoolExecutor:
             thread_name_prefix="signal-worker",
         )
     return _signal_executor
+
 
 def _build_startup_service(app_container: ApplicationContainer | None = None) -> StartupService:
     app_container = app_container or container
@@ -287,38 +354,6 @@ def run_startup_tasks(app_container: ApplicationContainer | None = None) -> None
     _STARTUP_TASKS_RAN = True
 
 
-def _register_routes(flask_app: Flask, app_container: ApplicationContainer) -> None:
-    register_routes(
-        flask_app,
-        RouteRegistrationDeps(
-            validate_secret=validate_secret,
-            approved_symbols=APPROVED_SYMBOLS,
-            price_ranges=PRICE_RANGES,
-            logger=logger,
-            make_dedupe_key=_make_dedupe_key,
-            record_webhook_event=_record_webhook_event,
-            mark_webhook_event_status=(
-                lambda dedupe_key, status, **kwargs: _trade_audit_recorder().record_webhook_status(
-                    dedupe_key=dedupe_key,
-                    status=status,
-                    **kwargs,
-                )
-            ),
-            submit_signal=lambda data: app_container.signal_executor_factory().submit(
-                process_signal,
-                data,
-            ),
-            health_payload=lambda: build_health_payload(sys.modules[__name__]),
-            status_payload=lambda: build_status_payload(sys.modules[__name__]),
-            positions_payload=lambda: build_positions_payload(sys.modules[__name__]),
-            debug_symbol_payload=lambda symbol: build_debug_symbol_payload(
-                sys.modules[__name__],
-                symbol,
-            ),
-        ),
-    )
-
-
 def create_app(
     run_startup: bool = False,
     app_container: ApplicationContainer | None = None,
@@ -329,19 +364,24 @@ def create_app(
     When `run_startup` is True, execute non-critical startup tasks explicitly.
     """
     app_container = app_container or container
-    if run_startup:
-        run_startup_tasks(app_container)
-    flask_app = Flask(__name__)
-    flask_app.extensions["application_container"] = app_container
-    _register_routes(flask_app, app_container)
-    return flask_app
+    return create_runtime_flask_app(
+        import_name=__name__,
+        runtime_module=sys.modules[__name__],
+        app_container=app_container,
+        run_startup=run_startup,
+    )
+
 
 def _ml_prediction_bucket(score) -> str:
     return entry_policy.ml_prediction_bucket(score)
 
+
 def _buy_opportunity_sizing_enabled() -> bool:
     return os.getenv("BUY_OPPORTUNITY_SIZING_ENABLED", "true").strip().lower() in (
-        "1", "true", "yes", "on"
+        "1",
+        "true",
+        "yes",
+        "on",
     )
 
 
@@ -412,11 +452,13 @@ def evaluate_prediction_gate(**kwargs):
     """Backward-compatible alias for the deterministic signal-quality gate."""
     return entry_policy.evaluate_prediction_gate(**kwargs)
 
+
 WEBHOOK_SECRET = os.environ.get("WEBHOOK_SECRET", "changeme")
 ALLOW_QUERY_STRING_SECRET = os.environ.get(
     "ALLOW_QUERY_STRING_SECRET",
     "false",
 ).strip().lower() in ("1", "true", "yes", "on")
+
 
 def _webhook_dedupe_key(symbol, action, price):
     """Build a loose duplicate key for near-identical TradingView alerts.
@@ -435,9 +477,7 @@ def _is_duplicate_webhook(symbol, action, price):
     """Return True if the same symbol/action/rounded-price arrived recently."""
     try:
         key = _webhook_dedupe_key(symbol, action, price)
-        return cooldown_repo.recent_webhook_seen(
-            key, symbol, action, price, WEBHOOK_DEDUPE_SECONDS
-        )
+        return cooldown_repo.recent_webhook_seen(key, symbol, action, price, WEBHOOK_DEDUPE_SECONDS)
     except Exception as e:
         logger.error(f"_is_duplicate_webhook failed for {symbol}/{action}: {e}")
         return False
@@ -459,11 +499,11 @@ def _filled_buys_today(symbol):
         return 0
 
 
-_last_order: dict = {}     # {(symbol, action): datetime in ET} — reset on restart
-_last_sell: dict = {}      # {symbol: (datetime in ET, price)} — last successful sell, for churn prevention
-_trend_table: dict = {}    # {symbol: {direction, strength, consecutive_count, last_signal, last_time}}
-_signal_history: dict = {} # {symbol: [action, ...]} most recent first, max 10 — internal
-_market_bias: dict = {}    # {symbol: {bias, reason, confidence}} — populated from market_context.json
+_last_order: dict = {}  # {(symbol, action): datetime in ET} — reset on restart
+_last_sell: dict = {}  # {symbol: (datetime in ET, price)} — last successful sell, for churn prevention
+_trend_table: dict = {}  # {symbol: {direction, strength, consecutive_count, last_signal, last_time}}
+_signal_history: dict = {}  # {symbol: [action, ...]} most recent first, max 10 — internal
+_market_bias: dict = {}  # {symbol: {bias, reason, confidence}} — populated from market_context.json
 _symbol_overrides: dict = {}
 
 _symbol_override_service = SymbolOverrideService(
@@ -532,6 +572,7 @@ def _symbol_override_block(symbol, action):
 def _compute_trend(recent_actions: list) -> dict:
     return _trend_state_service.compute_trend(recent_actions)
 
+
 def _build_trend_table():
     """Build trend table for every approved symbol.
 
@@ -540,6 +581,7 @@ def _build_trend_table():
     trend-gate logic can see all approved symbols, not only symbols with DB history.
     """
     _trend_state_service.build_table()
+
 
 def _hydrate_cooldowns():
     try:
@@ -556,9 +598,12 @@ def _hydrate_cooldowns():
                     loaded += 1
             except Exception as e:
                 logger.warning(f"_hydrate_cooldowns: skipping {symbol}/{action}: {e}")
-        logger.info(f"Hydrated {loaded} active cooldowns from cooldowns table (of {len(rows)} total)")
+        logger.info(
+            f"Hydrated {loaded} active cooldowns from cooldowns table (of {len(rows)} total)"
+        )
     except Exception as e:
         logger.error(f"_hydrate_cooldowns failed: {e}")
+
 
 def _hydrate_recent_sells():
     try:
@@ -575,7 +620,9 @@ def _hydrate_recent_sells():
                     loaded += 1
             except Exception as e:
                 logger.warning(f"_hydrate_recent_sells: skipping {symbol}: {e}")
-        logger.info(f"Hydrated {loaded} recent sells from recent_sells table (of {len(rows)} total)")
+        logger.info(
+            f"Hydrated {loaded} recent sells from recent_sells table (of {len(rows)} total)"
+        )
     except Exception as e:
         logger.error(f"_hydrate_recent_sells failed: {e}")
 
@@ -641,6 +688,7 @@ def _load_market_context():
     each day's cron output without a service restart."""
     _market_context_service.load()
 
+
 def _make_dedupe_key(data):
     return dedupe_service.make_dedupe_key(data)
 
@@ -686,6 +734,7 @@ def _context_assembly_deps():
         regime_observation_provider=_regime_observation_service.observe,
     )
 
+
 def validate_secret(req):
     auth_header = req.headers.get("Authorization", "")
     bearer_secret = ""
@@ -712,6 +761,7 @@ def validate_secret(req):
             "Secret accepted from query parameter due to ALLOW_QUERY_STRING_SECRET; "
             "prefer X-Webhook-Secret or Authorization header"
         )
+
 
 def _open_entry_context(symbol):
     """Return the oldest currently-open buy lot context for a symbol."""
@@ -794,8 +844,10 @@ def _required_buy_confirmations(symbol, account_state=None):
         log=logger,
     )
 
+
 def _required_sell_confirmations(symbol, account_state=None):
     return entry_policy.required_sell_confirmations(symbol, account_state)
+
 
 def _symbol_market_alignment(symbol):
     try:
@@ -809,6 +861,7 @@ def _symbol_market_alignment(symbol):
             "aligned_for_buy": None,
             "reason": f"alignment error: {e}",
         }
+
 
 def _session_momentum_is_fresh(session_momentum, max_age_minutes=5):
     """Return True when session momentum exists and was refreshed recently."""
@@ -826,6 +879,7 @@ def _session_momentum_is_fresh(session_momentum, max_age_minutes=5):
     except Exception:
         return False
 
+
 def _cluster_exposure(symbol, balance):
     """Return cluster exposure info for the symbol across current Alpaca positions."""
     if not balance:
@@ -834,31 +888,27 @@ def _cluster_exposure(symbol, balance):
     results = []
     try:
         positions = broker_service.list_positions()
-        position_values = {
-            p.symbol: float(p.market_value)
-            for p in positions
-        }
+        position_values = {p.symbol: float(p.market_value) for p in positions}
 
         for cluster_name, members in CORRELATION_CLUSTERS.items():
             if symbol not in members:
                 continue
 
-            cluster_value = sum(
-                value for sym, value in position_values.items()
-                if sym in members
-            )
+            cluster_value = sum(value for sym, value in position_values.items() if sym in members)
 
             exposure_pct = cluster_value / balance * 100
             limit_pct = CLUSTER_EXPOSURE_LIMITS.get(cluster_name, 100.0)
 
-            results.append({
-                "cluster": cluster_name,
-                "members": sorted(members),
-                "current_value": round(cluster_value, 2),
-                "exposure_pct": round(exposure_pct, 2),
-                "limit_pct": limit_pct,
-                "limit_hit": exposure_pct >= limit_pct,
-            })
+            results.append(
+                {
+                    "cluster": cluster_name,
+                    "members": sorted(members),
+                    "current_value": round(cluster_value, 2),
+                    "exposure_pct": round(exposure_pct, 2),
+                    "limit_pct": limit_pct,
+                    "limit_hit": exposure_pct >= limit_pct,
+                }
+            )
 
     except Exception as e:
         logger.error(f"_cluster_exposure failed for {symbol}: {e}")
@@ -924,6 +974,7 @@ def _is_signal_stale(data):
 
     return False, age_seconds, f"signal age {age_seconds:.1f}s within TTL"
 
+
 def _make_client_order_id(symbol, action, data):
     """Create a stable Alpaca client_order_id for idempotent broker submission.
 
@@ -953,6 +1004,7 @@ def _make_client_order_id(symbol, action, data):
 
     digest = hashlib.sha256(raw.encode("utf-8")).hexdigest()[:16]
     return f"tb-{symbol.lower()}-{action.lower()}-{digest}"
+
 
 def _safe_float(value):
     try:
@@ -993,9 +1045,13 @@ def _sell_continuation_delay_reason(account_state, trend, unrealized_pct):
     vwap_dist = _safe_float(session.get("distance_from_vwap_pct"))
     session_label = session.get("trend_label")
 
-    if session_5m is not None and session_5m <= _env_float("SELL_CONTINUATION_MAX_5M_DROP_PCT", -0.20):
+    if session_5m is not None and session_5m <= _env_float(
+        "SELL_CONTINUATION_MAX_5M_DROP_PCT", -0.20
+    ):
         return None
-    if session_15m is not None and session_15m <= _env_float("SELL_CONTINUATION_MAX_15M_DROP_PCT", -0.10):
+    if session_15m is not None and session_15m <= _env_float(
+        "SELL_CONTINUATION_MAX_15M_DROP_PCT", -0.10
+    ):
         return None
 
     supports = []
@@ -1016,9 +1072,7 @@ def _sell_continuation_delay_reason(account_state, trend, unrealized_pct):
     strength = trend.get("strength")
     consecutive_count = int(trend.get("consecutive_count") or 0)
     strong_bearish_pressure = (
-        direction == "bearish"
-        and strength == "confirmed"
-        and consecutive_count >= 3
+        direction == "bearish" and strength == "confirmed" and consecutive_count >= 3
     )
 
     required_support_count = int(os.getenv("SELL_CONTINUATION_MIN_SUPPORTS", "2"))
@@ -1054,12 +1108,16 @@ _validate_spread_with_retry = _execution_adapter_service.validate_spread_with_re
 _pre_order_safety_check = _execution_adapter_service.pre_order_safety_check
 _one_bar_confirmation_hold = _execution_adapter_service.one_bar_confirmation_hold
 
-PORTFOLIO_ROTATION_ENABLED = os.environ.get("PORTFOLIO_ROTATION_ENABLED", "false").lower().strip() in (
-    "1", "true", "yes", "on"
+PORTFOLIO_ROTATION_ENABLED = os.environ.get(
+    "PORTFOLIO_ROTATION_ENABLED", "false"
+).lower().strip() in ("1", "true", "yes", "on")
+PORTFOLIO_ROTATION_MIN_CANDIDATE_SCORE = int(
+    os.environ.get("PORTFOLIO_ROTATION_MIN_CANDIDATE_SCORE", "12")
 )
-PORTFOLIO_ROTATION_MIN_CANDIDATE_SCORE = int(os.environ.get("PORTFOLIO_ROTATION_MIN_CANDIDATE_SCORE", "12"))
 PORTFOLIO_ROTATION_MAX_PER_DAY = int(os.environ.get("PORTFOLIO_ROTATION_MAX_PER_DAY", "2"))
-PORTFOLIO_ROTATION_MIN_HOLD_MINUTES = int(os.environ.get("PORTFOLIO_ROTATION_MIN_HOLD_MINUTES", "30"))
+PORTFOLIO_ROTATION_MIN_HOLD_MINUTES = int(
+    os.environ.get("PORTFOLIO_ROTATION_MIN_HOLD_MINUTES", "30")
+)
 PORTFOLIO_ROTATION_MAX_WEAK_PLPC = float(os.environ.get("PORTFOLIO_ROTATION_MAX_WEAK_PLPC", "0.0"))
 
 PORTFOLIO_ROTATION_EXCLUDED_SYMBOLS = {
@@ -1078,7 +1136,7 @@ PORTFOLIO_ROTATION_ALLOWED_ENTRY_QUALITIES = {
     s.strip().lower()
     for s in os.environ.get(
         "PORTFOLIO_ROTATION_ALLOWED_ENTRY_QUALITIES",
-        "excellent,high,good_on_pullbacks,good_if_holds_gap,good_if_breadth_holds"
+        "excellent,high,good_on_pullbacks,good_if_holds_gap,good_if_breadth_holds",
     ).split(",")
     if s.strip()
 }
@@ -1090,11 +1148,13 @@ _portfolio_rotation_service = PortfolioRotationService(
     market_bias=_market_bias,
     open_entry_context=_open_entry_context,
     log_trade=(
-        lambda signal, decision, order, account_state=None: _trade_audit_recorder().record_execution(
-            signal=signal,
-            decision=decision,
-            order=order,
-            account_state=account_state,
+        lambda signal, decision, order, account_state=None: (
+            _trade_audit_recorder().record_execution(
+                signal=signal,
+                decision=decision,
+                order=order,
+                account_state=account_state,
+            )
         )
     ),
     last_order=_last_order,
@@ -1117,12 +1177,14 @@ _weakest_rotation_holding = _portfolio_rotation_service.weakest_rotation_holding
 _try_portfolio_rotation = _portfolio_rotation_service.try_rotation
 _get_weakest_position_context = _portfolio_rotation_service.weakest_position_context
 
+
 def _count_second_look_blocks_today(symbol):
     try:
         return trades_repo.second_look_blocks_today(symbol)
     except Exception as e:
         logger.warning(f"Failed to count second-look blocks for {symbol}: {e}")
         return 0
+
 
 def _adaptive_churn_reentry_allowed(symbol, signal_price, last_sell_price, account_state):
     """
@@ -1184,7 +1246,7 @@ def _adaptive_churn_reentry_allowed(symbol, signal_price, last_sell_price, accou
             f"count={consecutive_count}, "
             f"setup_label={setup_label}, "
             f"setup_policy_action={setup_policy_action}, "
-            f"recent_favorable_setup={bool(recent_favorable_setup)}"
+            f"recent_favorable_setup={bool(recent_favorable_setup)}",
         )
 
     return (
@@ -1196,7 +1258,7 @@ def _adaptive_churn_reentry_allowed(symbol, signal_price, last_sell_price, accou
         f"last_signal={last_signal}, "
         f"setup_label={setup_label}, "
         f"setup_policy_action={setup_policy_action}, "
-        f"recent_favorable_setup={bool(recent_favorable_setup)}"
+        f"recent_favorable_setup={bool(recent_favorable_setup)}",
     )
 
 
@@ -1315,10 +1377,9 @@ def _allow_medium_confidence_momentum_override(
 
         trend_direction = trend.get("direction") or account_state.get("trend_direction")
         trend_strength = trend.get("strength") or account_state.get("trend_strength")
-        momentum_direction = (
-            account_state.get("momentum_direction")
-            or (account_state.get("momentum") or {}).get("direction")
-        )
+        momentum_direction = account_state.get("momentum_direction") or (
+            account_state.get("momentum") or {}
+        ).get("direction")
         session = account_state.get("session_momentum") or {}
         session_label = session.get("trend_label") or account_state.get("session_trend_label")
 
@@ -1383,8 +1444,13 @@ def _build_signal_pipeline(app_container: ApplicationContainer | None = None):
 def process_signal(data):
     return _build_signal_pipeline().run(data)
 
+
 app.extensions["application_container"] = container
-_register_routes(app, container)
+register_runtime_routes(
+    app,
+    runtime_module=sys.modules[__name__],
+    app_container=container,
+)
 
 
 if __name__ == "__main__":

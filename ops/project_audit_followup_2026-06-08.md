@@ -28,6 +28,10 @@ items have since been implemented:
   measures root/module sprawl, oversized decision files, raw env access, and
   `src/trading_bot` skeleton readiness. `ops/compatibility_deletion_plan.md`
   tracks wrapper/module migration and deletion conditions.
+- **Phase 2 web-runtime extraction**: `src/trading_bot/web/app_factory.py` now
+  owns Flask app construction and route registration mechanics. Root `app.py`
+  remains the deployed runtime compatibility context while startup/config/global
+  exports are migrated in later cleanup slices.
 
 ## Current High-Priority Gaps
 
@@ -64,6 +68,10 @@ These remain valid roadmap items before any cash-live promotion:
    - The package skeleton and audit metrics exist, but runtime implementations
      still need staged migration out of root files, generic `services/`, and
      oversized decision modules.
+   - Current Phase 2 status: app factory and route registration moved into
+     `src/trading_bot/web/app_factory.py`; remaining work is root `app.py`
+     shim reduction, startup/runtime-context extraction, and packaged
+     Gunicorn/systemd entrypoint validation.
 
 ## Documentation Rule
 

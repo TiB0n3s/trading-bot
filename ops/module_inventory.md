@@ -6,9 +6,13 @@ support, which are operator/reporting tools, and which are research-only.
 ## Live Runtime
 
 - `app.py`
-  - Flask composition root only: app creation, startup entry point, container
-    selection, route registration, and `process_signal()` compatibility.
+  - Deployed Flask compatibility root: startup entry point, runtime context,
+    container selection, and `process_signal()` compatibility.
   - Must not own trading policy, broker calls, SQL, or setup classification.
+- `src/trading_bot/web/app_factory.py`
+  - Owns Flask app creation and route registration mechanics.
+  - Delegates route payload context to the current runtime compatibility module
+    until root `app.py` is reduced to a small shim.
 - `services/live_signal_processor.py`
   - Owns live signal orchestration.
   - Calls preflight, context, approval, sizing, execution, and audit services.
@@ -107,7 +111,7 @@ can be cleaned with `ops/clean_local_artifacts.sh` when no longer needed.
 
 ## Current Integration Targets
 
-1. Keep `app.py` composition-only through architecture tests.
+1. Keep `app.py` composition/runtime-context only through architecture tests.
 2. Keep root `setup_classifier.py` out of live wiring.
 3. Continue moving report/script reads through services and repositories.
 4. Treat ML/regime/analytics additions as observe-only unless explicit

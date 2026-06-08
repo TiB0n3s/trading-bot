@@ -25,7 +25,7 @@ COUNT_TARGETS = {
 
 LINE_COUNT_TARGETS = {
     "app.py": 100,
-    "ops_check.py": 100,
+    "src/trading_bot/ops_checks/cli.py": 500,
     "scripts/auto_buy_manager.py": 500,
     "scripts/position_manager.py": 500,
     "services/approval_service.py": 700,

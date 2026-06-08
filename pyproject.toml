@@ -54,6 +54,7 @@ ignore = [
 "tests/*" = ["F811"]  # redefined-while-unused (common in test fixtures/parametrize)
 "app.py" = ["E402"]  # compatibility path setup precedes legacy imports during migration
 "ops_check.py" = ["E402"]  # compatibility path setup precedes legacy imports during migration
+"src/trading_bot/ops_checks/cli.py" = ["E402"]  # compatibility path setup precedes legacy imports
 "scripts/*.py" = ["E402"]  # legacy scripts load env/path context before some imports
 
 [tool.mypy]

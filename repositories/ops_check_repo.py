@@ -297,9 +297,6 @@ class OpsCheckRepository:
 
         where_sql = "bar_timestamp >= ? AND bar_timestamp < date(?, '+1 day')"
         params = (target_date, target_date)
-        if "timeframe" in columns:
-            where_sql = "timeframe = ? AND bar_timestamp >= ? AND bar_timestamp < date(?, '+1 day')"
-            params = ("1m", target_date, target_date)
 
         return self._fetchall(
             f"""
@@ -502,7 +499,9 @@ class OpsCheckRepository:
             params,
         )
 
-    def winner_became_loser_summary(self, target_date: str, mfe_threshold: float) -> sqlite3.Row | None:
+    def winner_became_loser_summary(
+        self, target_date: str, mfe_threshold: float
+    ) -> sqlite3.Row | None:
         return self._fetchone(
             """
             SELECT
@@ -1286,9 +1285,7 @@ class OpsCheckRepository:
             return []
         columns = self.table_columns("daily_symbol_events")
         raw_expr = "raw_json" if "raw_json" in columns else "NULL AS raw_json"
-        summary_expr = (
-            "event_summary" if "event_summary" in columns else "NULL AS event_summary"
-        )
+        summary_expr = "event_summary" if "event_summary" in columns else "NULL AS event_summary"
         impact_expr = (
             "expected_market_impact"
             if "expected_market_impact" in columns
@@ -1345,11 +1342,17 @@ class OpsCheckRepository:
             return self.table_count(table, where_sql, params)
 
         return {
-            "daily_symbol_context_latest_at": latest("daily_symbol_context", "updated_at", "market_date"),
+            "daily_symbol_context_latest_at": latest(
+                "daily_symbol_context", "updated_at", "market_date"
+            ),
             "daily_symbol_context_rows": count("daily_symbol_context", "market_date"),
-            "daily_symbol_events_latest_at": latest("daily_symbol_events", "created_at", "market_date"),
+            "daily_symbol_events_latest_at": latest(
+                "daily_symbol_events", "created_at", "market_date"
+            ),
             "daily_symbol_events_rows": count("daily_symbol_events", "market_date"),
-            "daily_symbol_predictions_latest_at": latest("daily_symbol_predictions", "updated_at", "market_date"),
+            "daily_symbol_predictions_latest_at": latest(
+                "daily_symbol_predictions", "updated_at", "market_date"
+            ),
             "daily_symbol_predictions_rows": count("daily_symbol_predictions", "market_date"),
             "feature_snapshots_latest_at": latest("feature_snapshots", "timestamp"),
             "feature_snapshots_rows": count("feature_snapshots"),

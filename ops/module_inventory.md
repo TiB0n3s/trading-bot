@@ -13,6 +13,15 @@ support, which are operator/reporting tools, and which are research-only.
   - Deployed Flask compatibility root: startup entry point, runtime context,
     container selection, and `process_signal()` compatibility.
   - Must not own trading policy, broker calls, SQL, or setup classification.
+- `ops_check.py`
+  - Root compatibility shim only. Imports and delegates to
+    `src/trading_bot/ops_checks/cli.py`.
+- `src/trading_bot/ops_checks/cli.py`
+  - Owns the current operator CLI implementation while the handler functions
+    are migrated into smaller command modules.
+- `src/trading_bot/ops_checks/commands/`
+  - Owns grouped command-spec registry modules for runtime, architecture,
+    config, learning, market-data, portfolio, and prediction commands.
 - `src/trading_bot/web/app_factory.py`
   - Owns Flask app creation and route registration mechanics.
   - Delegates route payload context to the current runtime compatibility module

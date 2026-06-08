@@ -1291,6 +1291,12 @@ Remaining Phase 2 work is reducing root `app.py` to a small compatibility shim,
 packaging more runtime context, and updating Gunicorn/systemd only after smoke
 tests prove the packaged entrypoint.
 
+Ops-check cleanup has also begun: root `ops_check.py` is now a small
+compatibility shim delegating to `src/trading_bot/ops_checks/cli.py`, and
+command specs are grouped under `src/trading_bot/ops_checks/commands/`.
+The remaining ops-check cleanup target is splitting the packaged CLI handler
+functions into those command modules.
+
 Common resource environment variables:
 
 ```text

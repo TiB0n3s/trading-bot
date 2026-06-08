@@ -16,8 +16,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-import ops_check
-from repositories import auto_buy_repo
+import ops_check  # noqa: E402
+from repositories import auto_buy_repo  # noqa: E402
 
 
 def _run_cli(tmp_path: Path, *args: str) -> tuple[int, str]:
@@ -342,7 +342,11 @@ def test_ops_reliability_cli_missing_db_exits_cleanly(tmp_path):
         ("learning-readiness", "Learning Readiness", None),
         ("advanced-alpha-readiness", "Advanced Alpha Readiness", None),
         ("advanced-alpha-comparison", "Advanced Alpha Model Comparison", None),
-        ("ai-intelligence-review", "AI Intelligence Integration Review", "ai_intelligence_review_v1"),
+        (
+            "ai-intelligence-review",
+            "AI Intelligence Integration Review",
+            "ai_intelligence_review_v1",
+        ),
     ):
         code, out = _run_cli(tmp_path, command, "2026-05-30")
         assert code == 1
@@ -1223,10 +1227,12 @@ def test_learning_effectiveness_cli_uses_readiness_payload_with_daily_framing(tm
 
 def test_regime_status_json_smoke(tmp_path):
     state_path = tmp_path / "regime_state.json"
+    env = os.environ.copy()
+    env["PYTHONPATH"] = f"{ROOT / 'scripts'}:{ROOT}{os.pathsep}{env.get('PYTHONPATH', '')}"
     result = subprocess.run(
         [
             sys.executable,
-            str(ROOT / "regime_status.py"),
+            str(ROOT / "scripts" / "regime_status.py"),
             "--json",
             "--no-save",
             "--state",
@@ -1235,6 +1241,7 @@ def test_regime_status_json_smoke(tmp_path):
             str(tmp_path / "risk_lockout.json"),
         ],
         cwd=ROOT,
+        env=env,
         text=True,
         capture_output=True,
     )

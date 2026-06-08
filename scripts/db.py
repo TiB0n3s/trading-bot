@@ -12,7 +12,7 @@ Goals:
 import sqlite3
 from pathlib import Path
 
-DB_PATH = Path(__file__).resolve().parent / "trades.db"
+DB_PATH = Path(__file__).resolve().parents[1] / "trades.db"
 
 BUSY_TIMEOUT_MS = 60000
 

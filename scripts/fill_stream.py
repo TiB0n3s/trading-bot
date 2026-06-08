@@ -4,11 +4,13 @@ from pathlib import Path
 from services.container import ApplicationContainer
 from services.fill_stream_service import FillStreamService
 
+ROOT = Path(__file__).resolve().parents[1]
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(levelname)s - %(message)s",
     handlers=[
-        logging.FileHandler(Path(__file__).parent / "fill_stream.log"),
+        logging.FileHandler(ROOT / "fill_stream.log"),
         logging.StreamHandler(),
     ],
 )

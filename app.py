@@ -6,8 +6,6 @@ compatibility wrapper. Trading behavior belongs in services, policies,
 repositories, and infrastructure adapters.
 """
 
-import hashlib
-import json
 import logging
 import os
 import sys
@@ -148,7 +146,8 @@ from services.setup_context_service import (
 from services.setup_engine_service import build_default_setup_engine_service
 from services.signal_models import SignalRuntimeState
 from services.signals import cooldowns as signal_cooldowns
-from services.signals import webhook_state
+from services.signals import sell_discipline, webhook_state
+from services.signals import timing as signal_timing
 from services.sizing_service import apply_final_sizing as apply_final_sizing  # noqa: F401
 from services.sizing_service import apply_size_cap
 from services.sizing_service import build_conviction_stack as build_conviction_stack  # noqa: F401
@@ -824,175 +823,32 @@ def _cluster_exposure(symbol, balance):
 
 
 def _parse_signal_timestamp(data):
-    """Best-effort parse of an optional TradingView/client timestamp.
-
-    Supported keys:
-      - timestamp
-      - time
-      - alert_time
-      - alert_timestamp
-
-    If no timestamp is present, return None so alerts continue to work.
-    """
-    raw = (
-        data.get("timestamp")
-        or data.get("time")
-        or data.get("alert_time")
-        or data.get("alert_timestamp")
-    )
-    if not raw:
-        return None
-
-    try:
-        if isinstance(raw, (int, float)):
-            # Treat very large values as milliseconds.
-            ts = float(raw) / 1000 if float(raw) > 10_000_000_000 else float(raw)
-            return datetime.fromtimestamp(ts, tz=timezone.utc)
-
-        raw_s = str(raw).strip()
-        if raw_s.isdigit():
-            ts = float(raw_s) / 1000 if len(raw_s) > 10 else float(raw_s)
-            return datetime.fromtimestamp(ts, tz=timezone.utc)
-
-        # Accept ISO strings with either "+00:00" or "Z".
-        parsed = datetime.fromisoformat(raw_s.replace("Z", "+00:00"))
-        if parsed.tzinfo is None:
-            parsed = parsed.replace(tzinfo=timezone.utc)
-        return parsed.astimezone(timezone.utc)
-    except Exception as e:
-        logger.warning(f"Unable to parse signal timestamp {raw!r}: {e}")
-        return None
+    return signal_timing.parse_signal_timestamp(data, log=logger)
 
 
 def _is_signal_stale(data):
-    """Return (is_stale, age_seconds, reason). Missing timestamps are allowed."""
-    ts = _parse_signal_timestamp(data)
-    if ts is None:
-        return False, None, "no timestamp provided"
-
-    now = datetime.now(timezone.utc)
-    age_seconds = (now - ts).total_seconds()
-
-    if age_seconds < -30:
-        return True, age_seconds, f"signal timestamp is {abs(age_seconds):.1f}s in the future"
-
-    if age_seconds > SIGNAL_TTL_SECONDS:
-        return True, age_seconds, f"signal age {age_seconds:.1f}s exceeds TTL {SIGNAL_TTL_SECONDS}s"
-
-    return False, age_seconds, f"signal age {age_seconds:.1f}s within TTL"
+    return signal_timing.signal_staleness(
+        data,
+        ttl_seconds=SIGNAL_TTL_SECONDS,
+        log=logger,
+    )
 
 
 def _make_client_order_id(symbol, action, data):
-    """Create a stable Alpaca client_order_id for idempotent broker submission.
-
-    Alpaca client_order_id has a length limit, so keep this compact.
-    """
-    dedupe_key = str(data.get("_dedupe_key") or "")
-    timestamp_hint = str(
-        data.get("timestamp")
-        or data.get("time")
-        or data.get("alert_time")
-        or data.get("alert_timestamp")
-        or datetime.now(timezone.utc).isoformat()
-    )
-
-    raw = json.dumps(
-        {
-            "symbol": symbol,
-            "action": action,
-            "price": data.get("price"),
-            "source": data.get("source"),
-            "dedupe_key": dedupe_key,
-            "timestamp": timestamp_hint,
-        },
-        sort_keys=True,
-        separators=(",", ":"),
-    )
-
-    digest = hashlib.sha256(raw.encode("utf-8")).hexdigest()[:16]
-    return f"tb-{symbol.lower()}-{action.lower()}-{digest}"
+    return signal_timing.make_client_order_id(symbol, action, data)
 
 
 def _safe_float(value):
-    try:
-        if value is None:
-            return None
-        return float(value)
-    except (TypeError, ValueError):
-        return None
+    return sell_discipline.safe_float(value)
 
 
 def _sell_continuation_delay_reason(account_state, trend, unrealized_pct):
-    """
-    Return a rejection reason when a normal webhook SELL looks early.
-
-    This protects against indicator-alert noise cutting a position while the
-    latest session tape still supports continuation. Hard loss exits and broker
-    brackets do not use this path.
-    """
-    enabled = os.getenv("SELL_CONTINUATION_CHECK_ENABLED", "true").strip().lower()
-    if enabled not in ("1", "true", "yes", "on"):
-        return None
-
-    unrealized_pct = _safe_float(unrealized_pct)
-    if unrealized_pct is None:
-        return None
-
-    hard_loss_floor = _env_float("SELL_CONTINUATION_HARD_LOSS_FLOOR_PCT", -0.75)
-    if unrealized_pct <= hard_loss_floor:
-        return None
-
-    session = (account_state or {}).get("session_momentum") or {}
-    trend = trend or {}
-
-    session_score = _safe_float(session.get("trend_score"))
-    session_5m = _safe_float(session.get("momentum_5m_pct"))
-    session_15m = _safe_float(session.get("momentum_15m_pct"))
-    session_30m = _safe_float(session.get("momentum_30m_pct"))
-    vwap_dist = _safe_float(session.get("distance_from_vwap_pct"))
-    session_label = session.get("trend_label")
-
-    if session_5m is not None and session_5m <= _env_float(
-        "SELL_CONTINUATION_MAX_5M_DROP_PCT", -0.20
-    ):
-        return None
-    if session_15m is not None and session_15m <= _env_float(
-        "SELL_CONTINUATION_MAX_15M_DROP_PCT", -0.10
-    ):
-        return None
-
-    supports = []
-    min_momentum = _env_float("SELL_CONTINUATION_MIN_MOMENTUM_PCT", 0.15)
-    min_vwap_dist = _env_float("SELL_CONTINUATION_MIN_VWAP_DIST_PCT", 0.10)
-    min_session_score = _env_float("SELL_CONTINUATION_MIN_SESSION_SCORE", 2.0)
-
-    if session_15m is not None and session_15m >= min_momentum:
-        supports.append(f"15m={session_15m:.3f}%")
-    if session_30m is not None and session_30m >= min_momentum:
-        supports.append(f"30m={session_30m:.3f}%")
-    if vwap_dist is not None and vwap_dist >= min_vwap_dist:
-        supports.append(f"vwap_dist={vwap_dist:.3f}%")
-    if session_score is not None and session_score >= min_session_score:
-        supports.append(f"session_score={session_score:.1f}")
-
-    direction = trend.get("direction")
-    strength = trend.get("strength")
-    consecutive_count = int(trend.get("consecutive_count") or 0)
-    strong_bearish_pressure = (
-        direction == "bearish" and strength == "confirmed" and consecutive_count >= 3
+    return sell_discipline.sell_continuation_delay_reason(
+        account_state,
+        trend,
+        unrealized_pct,
+        env_float=_env_float,
     )
-
-    required_support_count = int(os.getenv("SELL_CONTINUATION_MIN_SUPPORTS", "2"))
-    if len(supports) >= required_support_count and not strong_bearish_pressure:
-        return (
-            "sell continuation check: "
-            f"unrealized={unrealized_pct:.2f}% "
-            f"session_label={session_label} "
-            f"trend={direction}/{strength} count={consecutive_count}; "
-            f"supports={', '.join(supports)}"
-        )
-
-    return None
 
 
 # Second-look safety thresholds.

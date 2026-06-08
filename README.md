@@ -153,14 +153,15 @@ python3 -m venv venv
 . venv/bin/activate
 pip install -U pip
 pip install -r requirements.txt
+pip install -r requirements-dev.txt
 pip install -e '.[dev]'
 python run_tests.py
 ```
 
 `requirements.txt` delegates to `requirements-base.txt`, the slim runtime
 dependency subset. Use `requirements-research.txt` when explicitly setting up
-the full local research/test environment. It layers the optional research stack
-on top:
+the full local research/test environment after installing runtime requirements.
+It is an overlay-only file for:
 DuckDB/PyArrow research exports, scikit-learn/joblib supervised prediction
 artifacts, XGBoost supervised candidates, torch Transformer authority
 candidates, and hmmlearn HMM regime experiments.
@@ -169,9 +170,9 @@ These packages do not grant live trading authority by themselves.
 use `trading_bot.*`, not `src.trading_bot.*`. Fresh checkouts should run
 `pip install -e .` or set `PYTHONPATH=src` before invoking packaged modules.
 `pyproject.toml` also declares optional extras for metadata and future packaging:
-`research`, `dashboard` (`streamlit`), `timescale` (`asyncpg`), `sentiment`
-(`transformers`), and `dev`. Docker and CI still use the requirements files as
-the operational install source.
+`runtime`, `research`, `dashboard` (`streamlit`), `timescale` (`asyncpg`),
+`sentiment` (`transformers`), and `dev`. Docker and CI still use the
+requirements files as the operational install source.
 
 Container build targets are split the same way:
 

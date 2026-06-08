@@ -28,6 +28,13 @@ OPTIONAL_EXTRA_EXPECTATIONS = {
     "timescale": {"asyncpg"},
     "sentiment": {"transformers"},
 }
+DEV_ONLY_PINS = {
+    "mypy",
+    "pip-audit",
+    "pre-commit",
+    "pytest",
+    "ruff",
+}
 
 
 def _pinned_names(path: Path) -> set[str]:
@@ -56,6 +63,24 @@ def test_runtime_requirements_exclude_research_only_dependencies():
     assert RESEARCH_ONLY_PINS.isdisjoint(base_names)
 
 
+def test_default_requirements_delegate_to_runtime_requirements():
+    lines = [
+        line.strip()
+        for line in (ROOT / "requirements.txt").read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+
+    assert lines == ["-r requirements-base.txt"]
+
+
+def test_research_and_dev_requirements_are_overlays_only():
+    research_lines = (ROOT / "requirements-research.txt").read_text(encoding="utf-8").splitlines()
+    dev_lines = (ROOT / "requirements-dev.txt").read_text(encoding="utf-8").splitlines()
+
+    assert all(not line.strip().startswith("-r ") for line in research_lines if line.strip())
+    assert all(not line.strip().startswith("-r ") for line in dev_lines if line.strip())
+
+
 def test_research_requirements_pin_intended_optional_ml_dependencies():
     research_names = _pinned_names(ROOT / "requirements-research.txt")
 
@@ -70,19 +95,24 @@ def test_pyproject_research_extra_matches_research_requirement_pins():
     assert pyproject_research == research_names
 
 
+def test_pyproject_runtime_extra_matches_runtime_requirement_pins():
+    base_names = _pinned_names(ROOT / "requirements-base.txt")
+    pyproject_runtime = _pyproject_extra_names("runtime")
+
+    assert pyproject_runtime == base_names
+
+
+def test_pyproject_dev_extra_matches_dev_requirement_pins():
+    dev_names = _pinned_names(ROOT / "requirements-dev.txt")
+    pyproject_dev = _pyproject_extra_names("dev")
+
+    assert DEV_ONLY_PINS.issubset(dev_names)
+    assert pyproject_dev == dev_names
+
+
 def test_pyproject_declares_intended_optional_integration_extras():
     for extra, expected_names in OPTIONAL_EXTRA_EXPECTATIONS.items():
         assert expected_names.issubset(_pyproject_extra_names(extra))
-
-
-def test_default_requirements_delegate_to_runtime_requirements():
-    lines = [
-        line.strip()
-        for line in (ROOT / "requirements.txt").read_text(encoding="utf-8").splitlines()
-        if line.strip()
-    ]
-
-    assert lines == ["-r requirements-base.txt"]
 
 
 def test_trading_bot_package_imports_without_src_prefix():
@@ -96,10 +126,13 @@ def test_trading_bot_package_imports_without_src_prefix():
 def main():
     tests = [
         test_runtime_requirements_exclude_research_only_dependencies,
+        test_default_requirements_delegate_to_runtime_requirements,
+        test_research_and_dev_requirements_are_overlays_only,
         test_research_requirements_pin_intended_optional_ml_dependencies,
         test_pyproject_research_extra_matches_research_requirement_pins,
+        test_pyproject_runtime_extra_matches_runtime_requirement_pins,
+        test_pyproject_dev_extra_matches_dev_requirement_pins,
         test_pyproject_declares_intended_optional_integration_extras,
-        test_default_requirements_delegate_to_runtime_requirements,
         test_trading_bot_package_imports_without_src_prefix,
     ]
     for test in tests:

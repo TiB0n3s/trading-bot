@@ -221,9 +221,10 @@ Recent completed roadmap items:
   `services/timescale_tick_writer_service.py`; this path is storage-only and
   has no order, sizing, or risk-gate authority.
 - `requirements.txt` delegates to `requirements-base.txt`, the slim runtime
-  dependency subset. `requirements-research.txt` layers DuckDB/PyArrow research
-  exports, sklearn/joblib supervised artifacts, XGBoost candidates, torch
-  Transformer authority candidates, and hmmlearn HMM regime artifacts for
+  dependency subset. `requirements-research.txt` is an overlay-only file for
+  DuckDB/PyArrow research exports, sklearn/joblib supervised artifacts, XGBoost
+  candidates, torch Transformer authority candidates, and hmmlearn HMM regime
+  artifacts. Install runtime first, then apply the research overlay only for
   reproducible local research/test runs. These dependencies remain observe-only
   unless separately promoted through tests, reports, and explicit operator review. The runtime
   container target intentionally excludes those heavy optional dependencies, so

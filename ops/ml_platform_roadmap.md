@@ -1043,9 +1043,11 @@ A model can only move from observe-only to paper-trading influence after it has:
 28. Done: add a curated, non-authoritative trading education source/concept
     contract through `ops_check.py trading-education-health`; use it for
     taxonomy/explanation context only.
-29. Done: include DuckDB/PyArrow/sklearn/joblib/hmmlearn in
-    `requirements.txt` so research exports, supervised artifacts, and HMM regime
-    experiments are reproducible from a fresh install.
+29. Done: keep `requirements.txt` runtime-only and place
+    DuckDB/PyArrow/sklearn/joblib/hmmlearn in the explicit
+    `requirements-research.txt` overlay so research exports, supervised
+    artifacts, and HMM regime experiments are reproducible without bloating the
+    default runtime install.
 30. Done: wire candle-physics and triple-barrier pattern learning into the
     ML/export surface. `live_bar_stream.py` can feed closed 1-minute bars into
     `session_momentum` and `bar_pattern_features`; `pipeline/historical_bar_archive.py`

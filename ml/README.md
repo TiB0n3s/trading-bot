@@ -68,8 +68,15 @@ python3 run_staged_tests.py
 Generated experiment/model artifacts are local research outputs and are ignored
 by default. Promote only reviewed metadata/artifacts intentionally.
 
-Fresh research installs should use the root `requirements.txt`; it includes the
-optional research packages used by checked-in commands:
+Fresh research installs should install the runtime requirements first, then the
+research overlay:
+
+```bash
+pip install -r requirements.txt
+pip install -r requirements-research.txt
+```
+
+The research overlay includes the optional packages used by checked-in commands:
 
 - DuckDB and PyArrow for Parquet/research exports.
 - scikit-learn and joblib for supervised entry-prediction artifacts.

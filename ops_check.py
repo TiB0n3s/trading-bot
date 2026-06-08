@@ -50,6 +50,7 @@ Usage:
   python3 ops_check.py production-evidence
   python3 ops_check.py config-audit
   python3 ops_check.py architecture-surface
+  python3 ops_check.py database-backups
   python3 ops_check.py resource-readiness
   python3 ops_check.py advanced-alpha-readiness
   python3 ops_check.py advanced-alpha-comparison
@@ -151,6 +152,7 @@ from services.ops_checks.conviction_checks import (
 from services.ops_checks.cross_asset_lead_lag_checks import (
     run_cross_asset_lead_lag_map_report,
 )
+from services.ops_checks.database_backup_checks import run_database_backup_report
 from services.ops_checks.dataset_checks import run_dataset_health
 from services.ops_checks.decision_quality_checks import run_decision_quality_review
 from services.ops_checks.event_context_validation_checks import run_event_context_validation
@@ -1391,6 +1393,13 @@ def shadow_predictions(target_date: str) -> bool:
     return run_shadow_prediction_report(target_date, base_dir=BASE_DIR)
 
 
+def database_backups() -> bool:
+    return run_database_backup_report(
+        base_dir=BASE_DIR,
+        max_age_hours=_float_option("--max-age-hours", 30.0),
+    )
+
+
 def jobs_status(job_name_filter: str | None = None) -> bool:
     """Print latest-run-per-job status table from the job_runs ledger."""
     from repositories.job_runs_repo import JobRunsRepository
@@ -1544,6 +1553,9 @@ def main():
 
     if command == "architecture-surface":
         return 0 if architecture_surface() else 1
+
+    if command == "database-backups":
+        return 0 if database_backups() else 1
 
     if command == "resource-readiness":
         return 0 if resource_readiness() else 1

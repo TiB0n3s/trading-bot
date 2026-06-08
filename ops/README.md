@@ -106,9 +106,27 @@ staged Python files and the same fast safety harness before commits.
 `ops/project_audit_followup_2026-06-08.md` tracks the current status of the
 external project-audit and missing-tools findings. As of that follow-up, CI,
 pre-commit guardrails, core safety tests, config audit, and dependency split are
-implemented. Database backups, observability/alerting, secrets hardening, load
-testing, incident management, consolidated model validation governance, and a
-feature-flag inventory remain open roadmap items.
+implemented. Verified SQLite backup manifests are also implemented through
+`pipeline/database_backup.py` and `ops_check.py database-backups`.
+Observability/alerting, secrets hardening, load testing, incident management,
+consolidated model validation governance, and a feature-flag inventory remain
+open roadmap items.
+
+## Database Backups
+
+Use the Python backup path instead of shell-only `sqlite3 .backup` commands:
+
+```bash
+python3 pipeline/database_backup.py
+python3 ops_check.py database-backups
+```
+
+The backup service uses SQLite's online backup API, stores verified copies under
+`backups/databases/`, writes a manifest, and runs `PRAGMA integrity_check` on
+each copied database. The default set is `trades.db`, `predictions.db`, and
+`jobs.db`; missing optional files are reported but do not fail the run if at
+least one database verifies. The tracked cron file schedules this weekly after
+Friday close.
 
 ## Architecture Surface Cleanup
 

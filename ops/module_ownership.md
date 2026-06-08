@@ -11,7 +11,7 @@ This file defines the operational boundary for each major runtime surface.
 | Execution | `services/policies/execution_policy.py`, `services/execution_service.py`, `services/broker_service.py` | Final safety checks, broker abstraction, order submission path. | Own entry scoring or HTTP request parsing. |
 | Exits | `position_manager.py`, `position_momentum_monitor.py`, `services/policies/execution_policy.py` | Exit decisions, sell continuation checks, broker-side sell handling. | Bypass audit logging when running live execution paths. |
 | Market data | `services/market_data_service.py`, `services/tape_service.py` | Bar/quote/trade reads, SIP-to-IEX fallback, live tape reads. | Encode approval or sizing policy. |
-| Persistence | `repositories/*.py`, `decision_snapshots.py` | SQL access and audit records behind repository functions. | Import Flask, route modules, or broker clients. |
+| Persistence | `repositories/*.py`, `decision_snapshots.py`, `ops/database_backup_service.py` | SQL access, audit records, and operational SQLite backup/restore verification. | Import Flask, route modules, or broker clients. |
 | Reporting / ops | `*_report.py`, `ops/*.md`, `morning_check.py`, `post_session_check.py` | Read-only diagnostics and scheduled operational checks. | Change runtime policy without an explicit policy artifact or config flag. |
 | Observability / guardrails | `services/observability.py`, `services/policy_controls.py`, `tests/test_architecture_boundaries.py` | Runtime metrics, policy kill switches, import-boundary tests. | Submit orders or perform market-data reads. |
 

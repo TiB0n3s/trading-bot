@@ -21,6 +21,10 @@ items have since been implemented:
   boundaries.
 - **Config visibility**: `ops_check.py config-audit` validates typed config
   factories, inventories raw env access, and flags unsafe runtime defaults.
+- **Database backups**: `pipeline/database_backup.py` backs up operational
+  SQLite files with the SQLite online backup API, writes manifests under
+  `backups/databases/`, and verifies copied files with `PRAGMA integrity_check`.
+  `ops_check.py database-backups` reports freshness and manifest health.
 - **Dependency split**: `requirements-base.txt` is the slim runtime subset,
   `requirements-research.txt` adds optional ML/quant dependencies, and
   `requirements.txt` delegates to the full research environment.
@@ -39,34 +43,29 @@ items have since been implemented:
 
 These remain valid roadmap items before any cash-live promotion:
 
-1. **Database backups and restore drills**
-   - Add automated local SQLite backups for `trades.db`, `predictions.db`, and
-     `jobs.db`.
-   - Add restore verification so backup success is not assumed from file
-     existence alone.
-2. **Observability and alerting**
+1. **Observability and alerting**
    - Add service/job metrics for runtime health, DB lock pressure, broker
      errors, order latency, rejected/approved flow, and model-staleness state.
    - Start with lightweight local metrics/log summaries before committing to a
      full Prometheus/Grafana stack.
-3. **Secrets management hardening**
+2. **Secrets management hardening**
    - `/etc/trading-bot.env` remains the current secret source.
    - Keep secrets out of images, docs, logs, and systemd unit files.
    - Evaluate a secrets manager only after the operational surface stabilizes.
-4. **Load and burst testing**
+3. **Load and burst testing**
    - Add a local paper-only webhook/load harness that can replay high-volume
      signal bursts without touching the broker.
-5. **Incident management**
+4. **Incident management**
    - Add a simple incident/postmortem template and link incidents to job-run,
      order, and learning artifacts.
-6. **Model validation governance**
+5. **Model validation governance**
    - Existing validation reports are strong, but promotion still needs a
      consolidated gate comparing candidate models against baseline behavior,
      costs, slippage, exits, and regime stability.
-7. **Feature flags and kill switches**
+6. **Feature flags and kill switches**
    - Many env flags exist, but there is not yet a single feature-flag inventory
      with ownership, default, authority level, rollback action, and audit link.
-8. **Architecture surface reduction**
+7. **Architecture surface reduction**
    - The package skeleton and audit metrics exist, but runtime implementations
      still need staged migration out of root files, generic `services/`, and
      oversized decision modules.

@@ -18,9 +18,7 @@ def assert_true(value, label):
 
 def _python_files(directory: str) -> list[Path]:
     return sorted(
-        path
-        for path in (ROOT / directory).rglob("*.py")
-        if "__pycache__" not in path.parts
+        path for path in (ROOT / directory).rglob("*.py") if "__pycache__" not in path.parts
     )
 
 
@@ -85,6 +83,7 @@ def _assert_no_import(directory: str, banned: set[str], label: str):
 APPROVED_DB_BOUNDARIES = {
     "db.py",
     "db_migrations.py",
+    "ops/database_backup_service.py",
 }
 APPROVED_DB_BOUNDARY_PREFIXES = {
     "repositories/",

@@ -156,6 +156,10 @@ Recent completed roadmap items:
 - Migrations are manual before deploy/restore, but pending migrations are
   surfaced by `morning_check.py`, `ops_check.py premarket`, and
   `ops_check.py migration-status`.
+- Operational SQLite backups are handled by `pipeline/database_backup.py`.
+  The backup service covers `trades.db`, `predictions.db`, and `jobs.db`, writes
+  manifests under `backups/databases/`, and verifies copied DB files with
+  `PRAGMA integrity_check`. Check freshness with `ops_check.py database-backups`.
 - App startup no longer owns schema `ALTER TABLE` migration work.
 - Webhook/status secrets should use `X-Webhook-Secret` or
   `Authorization: Bearer ...`; query-string secrets are rejected unless
@@ -1338,10 +1342,10 @@ local pre-commit guardrails
 core safety/authority/dependency/architecture tests
 runtime/research dependency split
 configuration audit diagnostics
+verified SQLite database backup/restore-readability manifests
 
 Open before any cash-live promotion:
 
-database backup and restore drills
 observability and alerting
 secrets-management hardening
 paper-only load/burst testing

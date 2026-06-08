@@ -1103,6 +1103,22 @@ Migrations are manual before deployment or DB restore. Pending migrations are
 also surfaced by `morning_check.py`, `ops_check.py migration-status`, and the
 premarket/all ops check bundles.
 
+Operational SQLite backups are handled by `pipeline/database_backup.py`.
+It uses SQLite's online backup API, writes a JSON manifest under
+`backups/databases/`, and verifies each copied DB with `PRAGMA integrity_check`.
+The default target set is `trades.db`, `predictions.db`, and `jobs.db`; missing
+optional DB files are reported in the manifest without failing the backup if at
+least one DB verifies.
+
+```bash
+python3 pipeline/database_backup.py
+python3 ops_check.py database-backups
+```
+
+The tracked cron snapshot runs the verified backup weekly after Friday close.
+Because `trades.db` can be tens of GB, increase backup frequency only after
+checking available disk and retention impact.
+
 Current tracked migrations cover feature leakage/audit fields,
 `rejected_signal_outcomes`, webhook-event lifecycle/status columns, and trade
 decision-context columns that used to be added during app startup, plus the
@@ -1620,10 +1636,10 @@ local pre-commit guardrails
 core safety/authority/dependency/architecture tests
 runtime/research dependency split
 configuration audit diagnostics
+verified SQLite database backup/restore-readability manifests
 
 Open before any cash-live promotion:
 
-database backup and restore drills
 observability and alerting
 secrets-management hardening
 paper-only load/burst testing

@@ -17,17 +17,26 @@ from services.model_validation_governance_service import (  # noqa: E402
 )
 
 
-def _write_diag(candidate_dir: Path, *, label: str, accuracy: float = 0.76) -> None:
+def _write_diag(
+    candidate_dir: Path,
+    *,
+    label: str,
+    accuracy: float | None = 0.76,
+    rows_loaded: int = 6000,
+    generated_at: str = "2026-06-08T12:00:00+00:00",
+    trained: bool = True,
+) -> None:
     payload = {
         "runtime_effect": "observe_only_no_live_authority",
-        "model_id": f"historical_bar_{label}_test",
+        "model_id": f"historical_bar_{label}_{generated_at}",
         "label_target": label,
-        "generated_at": "2026-06-08T12:00:00+00:00",
-        "rows_loaded": 6000,
+        "generated_at": generated_at,
+        "rows_loaded": rows_loaded,
         "symbol_count": 59,
-        "training": {"trained": True, "accuracy": accuracy},
+        "training": {"trained": trained, "accuracy": accuracy},
     }
-    (candidate_dir / f"historical_bar_{label}_test.diagnostic.json").write_text(
+    safe_ts = generated_at.replace(":", "").replace("-", "")
+    (candidate_dir / f"historical_bar_{label}_{safe_ts}.diagnostic.json").write_text(
         json.dumps(payload),
         encoding="utf-8",
     )
@@ -37,7 +46,9 @@ def test_model_validation_governance_accepts_observe_only_candidates():
     with TemporaryDirectory() as tmp:
         base = Path(tmp)
         candidate_dir = base / "candidates"
+        evidence_dir = base / "evidence"
         candidate_dir.mkdir()
+        evidence_dir.mkdir()
         registry_path = base / "registry.json"
         registry_path.write_text(json.dumps({"entries": {}}), encoding="utf-8")
         _write_diag(candidate_dir, label="triple_barrier_label")
@@ -45,6 +56,7 @@ def test_model_validation_governance_accepts_observe_only_candidates():
         payload = build_model_validation_governance_payload(
             candidate_dir=candidate_dir,
             registry_path=registry_path,
+            promotion_evidence_dir=evidence_dir,
             min_rows=5000,
             min_symbols=20,
             min_accuracy=0.50,
@@ -107,11 +119,53 @@ def test_model_validation_governance_requires_promotion_evidence_for_live_readin
     assert len(payload["promotion_evidence"]) == 5
 
 
+def test_model_validation_governance_prefers_better_candidate_over_newer_partial():
+    with TemporaryDirectory() as tmp:
+        base = Path(tmp)
+        candidate_dir = base / "candidates"
+        evidence_dir = base / "evidence"
+        candidate_dir.mkdir()
+        evidence_dir.mkdir()
+        registry_path = base / "registry.json"
+        registry_path.write_text(json.dumps({"entries": {}}), encoding="utf-8")
+        _write_diag(
+            candidate_dir,
+            label="triple_barrier_label",
+            accuracy=0.76,
+            rows_loaded=6000,
+            generated_at="2026-06-07T12:00:00+00:00",
+            trained=True,
+        )
+        _write_diag(
+            candidate_dir,
+            label="triple_barrier_label",
+            accuracy=None,
+            rows_loaded=59,
+            generated_at="2026-06-08T12:00:00+00:00",
+            trained=False,
+        )
+
+        payload = build_model_validation_governance_payload(
+            candidate_dir=candidate_dir,
+            registry_path=registry_path,
+            promotion_evidence_dir=evidence_dir,
+            min_rows=5000,
+            min_symbols=20,
+            min_accuracy=0.50,
+        )
+
+    candidate = payload["candidates"][0]
+    assert candidate["status"] == "observe_only_ready"
+    assert candidate["rows_loaded"] == 6000
+    assert candidate["accuracy"] == 0.76
+
+
 def main():
     tests = [
         test_model_validation_governance_accepts_observe_only_candidates,
         test_model_validation_governance_blocks_live_registry_status,
         test_model_validation_governance_requires_promotion_evidence_for_live_readiness,
+        test_model_validation_governance_prefers_better_candidate_over_newer_partial,
     ]
     for test in tests:
         test()

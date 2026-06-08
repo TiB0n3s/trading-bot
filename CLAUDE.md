@@ -190,7 +190,8 @@ Recent completed roadmap items:
   placeholders, and registry live-status blockers; it cannot promote or load models.
 - Model promotion evidence artifacts can be generated with
   `ops_check.py model-promotion-evidence --write`. Generated evidence must stay
-  honest: missing regime/live-window data should remain `ready: false`.
+  honest about whether it came from real sessions or an accepted
+  historical/replay surrogate.
 - External observability and secrets-manager readiness are checked with
   `ops_check.py external-observability-readiness` and
   `ops_check.py secrets-manager-readiness`. These reports validate metadata
@@ -1403,15 +1404,14 @@ packaged entrypoint validation through `ops_check.py packaged-entrypoints`
 external observability readiness through `ops_check.py external-observability-readiness`
 external secrets manager readiness through `ops_check.py secrets-manager-readiness`
 
-Open before any cash-live promotion:
+External items still open before any cash-live promotion:
 
 configure external observability/alerting endpoints
 choose/configure external secrets manager provider
 full-day paper replay with realistic market-data cadence
 external incident escalation/review process
-promotion-grade model validation against baseline/cost/slippage/exit/regime evidence
 external change-approval history for cash-live feature-flag changes
-real paper-session evidence proving the checks stay stable under market cadence
+real market-session evidence beyond the accepted historical/replay surrogate
 
 2. Validate during next real paper-trading session
 

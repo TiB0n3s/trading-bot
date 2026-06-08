@@ -1,6 +1,240 @@
 {
-  "generated_at": "2026-06-08T18:09:22.518586+00:00",
-  "ready": false,
-  "reason": "requires required live/paper observation-window artifact from market sessions",
-  "runtime_effect": "evidence_placeholder_no_runtime_change"
+  "caveat": "operator accepted replay/historical surrogate because current live behavior was non-trading",
+  "generated_at": "2026-06-08T18:17:20.400830+00:00",
+  "paper_validation": {
+    "avg_paper_minus_baseline_score": 6.5781,
+    "baseline_hit_rate": 0.4362,
+    "baseline_taken": 7903,
+    "end_date": "2026-06-04",
+    "false_negative_cost": 4510,
+    "false_positive_avoided": 3574,
+    "hit_rate_delta": 0.0829,
+    "label_target": "triple_barrier_label",
+    "paper_hit_rate": 0.5191,
+    "paper_loss_rate": 0.4747,
+    "paper_taken": 3832,
+    "phase_rows": [
+      {
+        "phase": "late",
+        "positive_rate": 0.2948,
+        "rows": 268
+      },
+      {
+        "phase": "midday",
+        "positive_rate": 0.4407,
+        "rows": 8621
+      },
+      {
+        "phase": "open",
+        "positive_rate": 0.4472,
+        "rows": 5861
+      }
+    ],
+    "promotion_readiness": {
+      "best": {
+        "avg_paper_minus_baseline_score": 17.575,
+        "baseline_hit_rate": 0.4707,
+        "baseline_taken": 495,
+        "false_negative_cost": 6449,
+        "false_positive_avoided": 262,
+        "hit_rate_delta": 0.2756,
+        "paper_hit_rate": 0.7463,
+        "paper_loss_rate": 0.2537,
+        "paper_taken": 67,
+        "phase_rows": [
+          {
+            "phase": "late",
+            "positive_rate": 0.2948,
+            "rows": 268
+          },
+          {
+            "phase": "midday",
+            "positive_rate": 0.4407,
+            "rows": 8621
+          },
+          {
+            "phase": "open",
+            "positive_rate": 0.4472,
+            "rows": 5861
+          }
+        ],
+        "rows": 14750,
+        "threshold": 65.0
+      },
+      "blockers": [],
+      "recommended_threshold": 65.0,
+      "status": "paper_soft_modifier_candidate"
+    },
+    "report_version": "historical_bar_paper_validation_v1",
+    "rows": 14750,
+    "runtime_effect": "paper_validation_only_no_live_authority",
+    "start_date": "2024-06-01",
+    "symbol_count": 59,
+    "threshold": 55.0,
+    "threshold_sweep": [
+      {
+        "avg_paper_minus_baseline_score": 2.5804,
+        "baseline_hit_rate": 0.4382,
+        "baseline_taken": 11877,
+        "false_negative_cost": 2803,
+        "false_positive_avoided": 3893,
+        "hit_rate_delta": 0.0475,
+        "paper_hit_rate": 0.4857,
+        "paper_loss_rate": 0.5067,
+        "paper_taken": 7610,
+        "phase_rows": [
+          {
+            "phase": "late",
+            "positive_rate": 0.2948,
+            "rows": 268
+          },
+          {
+            "phase": "midday",
+            "positive_rate": 0.4407,
+            "rows": 8621
+          },
+          {
+            "phase": "open",
+            "positive_rate": 0.4472,
+            "rows": 5861
+          }
+        ],
+        "rows": 14750,
+        "threshold": 50.0
+      },
+      {
+        "avg_paper_minus_baseline_score": 6.5781,
+        "baseline_hit_rate": 0.4362,
+        "baseline_taken": 7903,
+        "false_negative_cost": 4510,
+        "false_positive_avoided": 3574,
+        "hit_rate_delta": 0.0829,
+        "paper_hit_rate": 0.5191,
+        "paper_loss_rate": 0.4747,
+        "paper_taken": 3832,
+        "phase_rows": [
+          {
+            "phase": "late",
+            "positive_rate": 0.2948,
+            "rows": 268
+          },
+          {
+            "phase": "midday",
+            "positive_rate": 0.4407,
+            "rows": 8621
+          },
+          {
+            "phase": "open",
+            "positive_rate": 0.4472,
+            "rows": 5861
+          }
+        ],
+        "rows": 14750,
+        "threshold": 55.0
+      },
+      {
+        "avg_paper_minus_baseline_score": 12.5482,
+        "baseline_hit_rate": 0.4262,
+        "baseline_taken": 2515,
+        "false_negative_cost": 5972,
+        "false_positive_avoided": 1410,
+        "hit_rate_delta": 0.183,
+        "paper_hit_rate": 0.6092,
+        "paper_loss_rate": 0.3838,
+        "paper_taken": 865,
+        "phase_rows": [
+          {
+            "phase": "late",
+            "positive_rate": 0.2948,
+            "rows": 268
+          },
+          {
+            "phase": "midday",
+            "positive_rate": 0.4407,
+            "rows": 8621
+          },
+          {
+            "phase": "open",
+            "positive_rate": 0.4472,
+            "rows": 5861
+          }
+        ],
+        "rows": 14750,
+        "threshold": 60.0
+      },
+      {
+        "avg_paper_minus_baseline_score": 17.575,
+        "baseline_hit_rate": 0.4707,
+        "baseline_taken": 495,
+        "false_negative_cost": 6449,
+        "false_positive_avoided": 262,
+        "hit_rate_delta": 0.2756,
+        "paper_hit_rate": 0.7463,
+        "paper_loss_rate": 0.2537,
+        "paper_taken": 67,
+        "phase_rows": [
+          {
+            "phase": "late",
+            "positive_rate": 0.2948,
+            "rows": 268
+          },
+          {
+            "phase": "midday",
+            "positive_rate": 0.4407,
+            "rows": 8621
+          },
+          {
+            "phase": "open",
+            "positive_rate": 0.4472,
+            "rows": 5861
+          }
+        ],
+        "rows": 14750,
+        "threshold": 65.0
+      }
+    ]
+  },
+  "ready": true,
+  "replay": {
+    "events_per_symbol_per_minute": 1,
+    "execute": true,
+    "executed_requests": 780,
+    "execution_cap": 780,
+    "notes": [
+      "This is a local paper replay diagnostic and cannot submit broker orders.",
+      "Use --execute for bounded callback/database exercise; omit it for cadence planning."
+    ],
+    "planned_requests": 780,
+    "ready": true,
+    "replay_result": {
+      "action": "buy",
+      "concurrency": 4,
+      "failed_count": 0,
+      "fill_rows": 780,
+      "latency_ms_avg": 39.381,
+      "latency_ms_max": 3421.338,
+      "latency_ms_p95": 61.49,
+      "ok_count": 780,
+      "passed": true,
+      "report_version": "paper_replay_load_probe_v1",
+      "requests": 780,
+      "requests_per_second": 100.0,
+      "runtime_effect": "diagnostic_only_temp_db_no_broker_orders",
+      "signal_rows": 780,
+      "status_counts": {
+        "200": 780
+      },
+      "symbol": "AAPL"
+    },
+    "report_version": "full_session_paper_replay_v1",
+    "runtime_effect": "diagnostic_only_no_broker_orders",
+    "session_minutes": 390,
+    "symbol_count": 2,
+    "symbols": [
+      "AAPL",
+      "MSFT"
+    ]
+  },
+  "runtime_effect": "paper_replay_surrogate_evidence_no_live_authority",
+  "source": "historical_validation_plus_full_session_local_replay_surrogate"
 }

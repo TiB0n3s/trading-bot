@@ -78,7 +78,7 @@ items have since been implemented:
   `ops_check.py model-promotion-evidence --write` creates the baseline,
   cost/slippage/exit, regime, live-observation, and operator-approval evidence
   files checked by model governance. Evidence that is not supported by real
-  observations remains `ready: false`.
+  observations must identify its source and caveat.
 - **Packaged entrypoint validation**: `ops_check.py packaged-entrypoints`
   verifies package app factory/startup imports, WSGI importability, and the
   current root compatibility shim size.
@@ -108,7 +108,8 @@ These remain valid roadmap items before any cash-live promotion:
      `ops_check.py paper-replay-load-probe`.
    - Regular-session replay planning and bounded execution are available
      through `ops_check.py full-session-paper-replay`.
-   - Remaining gap: collect a real full-day paper-session evidence record.
+   - Current status: full planned local replay evidence has been generated for
+     the accepted paper/replay surrogate path.
 4. **Incident management**
    - Local incident templates and records exist.
    - Escalation metadata can be checked locally.
@@ -119,9 +120,11 @@ These remain valid roadmap items before any cash-live promotion:
    - Promotion evidence placeholders are explicitly checked for baseline,
      cost/slippage/exit, regime, live-observation, and operator-approval
      artifacts.
-   - Baseline, bounded cost/slippage/exit, and operator-approval evidence can
-     be generated locally. Remaining gap: populate regime-stability and
-     live-observation evidence from real paper-session observations.
+   - Baseline, bounded cost/slippage/exit, regime-stability, live-observation
+     surrogate, and operator-approval evidence can be generated locally.
+   - Current status: these artifacts are populated under
+     `ops/model_promotion_evidence/` for the accepted historical/replay
+     surrogate path.
 6. **Feature flags and kill switches**
    - Local feature-flag inventory exists with inferred ownership, authority
      level, and rollback action.

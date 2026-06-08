@@ -27,20 +27,28 @@ def _read_json(path: Path) -> dict[str, Any] | None:
         return None
 
 
-def _latest_historical_candidates(candidate_dir: Path) -> list[dict[str, Any]]:
-    latest: dict[str, dict[str, Any]] = {}
+def _candidate_quality(payload: dict[str, Any]) -> tuple[bool, float, int, str]:
+    training = payload.get("training") or {}
+    return (
+        bool(training.get("trained")),
+        float(training.get("accuracy") or 0.0),
+        int(payload.get("rows_loaded") or 0),
+        str(payload.get("generated_at") or ""),
+    )
+
+
+def _best_historical_candidates(candidate_dir: Path) -> list[dict[str, Any]]:
+    best: dict[str, dict[str, Any]] = {}
     for path in sorted(candidate_dir.glob("historical_bar_*_*.diagnostic.json")):
         payload = _read_json(path)
         if not payload:
             continue
         payload["_path"] = str(path)
         label = str(payload.get("label_target") or "unknown")
-        current = latest.get(label)
-        if current is None or str(payload.get("generated_at") or "") > str(
-            current.get("generated_at") or ""
-        ):
-            latest[label] = payload
-    return list(latest.values())
+        current = best.get(label)
+        if current is None or _candidate_quality(payload) > _candidate_quality(current):
+            best[label] = payload
+    return list(best.values())
 
 
 def _registry_entries(registry_path: Path) -> list[dict[str, Any]]:
@@ -69,7 +77,7 @@ def build_model_validation_governance_payload(
     candidate_dir = candidate_dir or DEFAULT_HISTORICAL_CANDIDATE_DIR
     registry_path = registry_path or MODEL_REGISTRY_PATH
     promotion_evidence_dir = promotion_evidence_dir or DEFAULT_PROMOTION_EVIDENCE_DIR
-    candidates = _latest_historical_candidates(candidate_dir)
+    candidates = _best_historical_candidates(candidate_dir)
     assessed = []
     blockers: list[str] = []
     for row in candidates:

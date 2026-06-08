@@ -1,6 +1,1246 @@
 {
-  "generated_at": "2026-06-08T18:09:22.518586+00:00",
-  "ready": false,
-  "reason": "requires multi-session paper evidence across at least two regimes",
-  "runtime_effect": "evidence_placeholder_no_runtime_change"
+  "generated_at": "2026-06-08T18:17:20.400830+00:00",
+  "ready": true,
+  "regime_bucket_families": [
+    "session_phase",
+    "volatility",
+    "vpin_toxicity"
+  ],
+  "runtime_effect": "historical_validation_evidence_no_runtime_change",
+  "trend_scan_validation": {
+    "bucket_rows": [
+      {
+        "bucket": "AAPL",
+        "bucket_family": "symbol",
+        "negative_rate": 0.436,
+        "positive_rate": 0.548,
+        "rows": 250,
+        "timeout_rate": 0.016
+      },
+      {
+        "bucket": "ABBV",
+        "bucket_family": "symbol",
+        "negative_rate": 0.456,
+        "positive_rate": 0.544,
+        "rows": 250,
+        "timeout_rate": 0.0
+      },
+      {
+        "bucket": "ADSK",
+        "bucket_family": "symbol",
+        "negative_rate": 0.58,
+        "positive_rate": 0.404,
+        "rows": 250,
+        "timeout_rate": 0.016
+      },
+      {
+        "bucket": "AMD",
+        "bucket_family": "symbol",
+        "negative_rate": 0.38,
+        "positive_rate": 0.62,
+        "rows": 250,
+        "timeout_rate": 0.0
+      },
+      {
+        "bucket": "AMZN",
+        "bucket_family": "symbol",
+        "negative_rate": 0.408,
+        "positive_rate": 0.572,
+        "rows": 250,
+        "timeout_rate": 0.02
+      },
+      {
+        "bucket": "ASML",
+        "bucket_family": "symbol",
+        "negative_rate": 0.324,
+        "positive_rate": 0.66,
+        "rows": 250,
+        "timeout_rate": 0.016
+      },
+      {
+        "bucket": "AVGO",
+        "bucket_family": "symbol",
+        "negative_rate": 0.564,
+        "positive_rate": 0.416,
+        "rows": 250,
+        "timeout_rate": 0.02
+      },
+      {
+        "bucket": "BE",
+        "bucket_family": "symbol",
+        "negative_rate": 0.712,
+        "positive_rate": 0.276,
+        "rows": 250,
+        "timeout_rate": 0.012
+      },
+      {
+        "bucket": "BURL",
+        "bucket_family": "symbol",
+        "negative_rate": 0.42,
+        "positive_rate": 0.564,
+        "rows": 250,
+        "timeout_rate": 0.016
+      },
+      {
+        "bucket": "CAT",
+        "bucket_family": "symbol",
+        "negative_rate": 0.488,
+        "positive_rate": 0.472,
+        "rows": 250,
+        "timeout_rate": 0.04
+      },
+      {
+        "bucket": "CMCSA",
+        "bucket_family": "symbol",
+        "negative_rate": 0.572,
+        "positive_rate": 0.404,
+        "rows": 250,
+        "timeout_rate": 0.024
+      },
+      {
+        "bucket": "COST",
+        "bucket_family": "symbol",
+        "negative_rate": 0.54,
+        "positive_rate": 0.452,
+        "rows": 250,
+        "timeout_rate": 0.008
+      },
+      {
+        "bucket": "CRDO",
+        "bucket_family": "symbol",
+        "negative_rate": 0.572,
+        "positive_rate": 0.396,
+        "rows": 250,
+        "timeout_rate": 0.032
+      },
+      {
+        "bucket": "CRM",
+        "bucket_family": "symbol",
+        "negative_rate": 0.668,
+        "positive_rate": 0.308,
+        "rows": 250,
+        "timeout_rate": 0.024
+      },
+      {
+        "bucket": "CRSP",
+        "bucket_family": "symbol",
+        "negative_rate": 0.456,
+        "positive_rate": 0.5,
+        "rows": 250,
+        "timeout_rate": 0.044
+      },
+      {
+        "bucket": "CVX",
+        "bucket_family": "symbol",
+        "negative_rate": 0.456,
+        "positive_rate": 0.528,
+        "rows": 250,
+        "timeout_rate": 0.016
+      },
+      {
+        "bucket": "DELL",
+        "bucket_family": "symbol",
+        "negative_rate": 0.568,
+        "positive_rate": 0.384,
+        "rows": 250,
+        "timeout_rate": 0.048
+      },
+      {
+        "bucket": "DKS",
+        "bucket_family": "symbol",
+        "negative_rate": 0.54,
+        "positive_rate": 0.428,
+        "rows": 250,
+        "timeout_rate": 0.032
+      },
+      {
+        "bucket": "GE",
+        "bucket_family": "symbol",
+        "negative_rate": 0.664,
+        "positive_rate": 0.332,
+        "rows": 250,
+        "timeout_rate": 0.004
+      },
+      {
+        "bucket": "GEV",
+        "bucket_family": "symbol",
+        "negative_rate": 0.564,
+        "positive_rate": 0.42,
+        "rows": 250,
+        "timeout_rate": 0.016
+      },
+      {
+        "bucket": "GLD",
+        "bucket_family": "symbol",
+        "negative_rate": 0.408,
+        "positive_rate": 0.54,
+        "rows": 250,
+        "timeout_rate": 0.052
+      },
+      {
+        "bucket": "GOOGL",
+        "bucket_family": "symbol",
+        "negative_rate": 0.408,
+        "positive_rate": 0.592,
+        "rows": 250,
+        "timeout_rate": 0.0
+      },
+      {
+        "bucket": "HWM",
+        "bucket_family": "symbol",
+        "negative_rate": 0.596,
+        "positive_rate": 0.388,
+        "rows": 250,
+        "timeout_rate": 0.016
+      },
+      {
+        "bucket": "IWM",
+        "bucket_family": "symbol",
+        "negative_rate": 0.544,
+        "positive_rate": 0.432,
+        "rows": 250,
+        "timeout_rate": 0.024
+      },
+      {
+        "bucket": "JPM",
+        "bucket_family": "symbol",
+        "negative_rate": 0.608,
+        "positive_rate": 0.372,
+        "rows": 250,
+        "timeout_rate": 0.02
+      },
+      {
+        "bucket": "KO",
+        "bucket_family": "symbol",
+        "negative_rate": 0.42,
+        "positive_rate": 0.576,
+        "rows": 250,
+        "timeout_rate": 0.004
+      },
+      {
+        "bucket": "LIN",
+        "bucket_family": "symbol",
+        "negative_rate": 0.464,
+        "positive_rate": 0.536,
+        "rows": 250,
+        "timeout_rate": 0.0
+      },
+      {
+        "bucket": "LLY",
+        "bucket_family": "symbol",
+        "negative_rate": 0.388,
+        "positive_rate": 0.592,
+        "rows": 250,
+        "timeout_rate": 0.02
+      },
+      {
+        "bucket": "LMT",
+        "bucket_family": "symbol",
+        "negative_rate": 0.516,
+        "positive_rate": 0.48,
+        "rows": 250,
+        "timeout_rate": 0.004
+      },
+      {
+        "bucket": "MA",
+        "bucket_family": "symbol",
+        "negative_rate": 0.48,
+        "positive_rate": 0.504,
+        "rows": 250,
+        "timeout_rate": 0.016
+      },
+      {
+        "bucket": "MDB",
+        "bucket_family": "symbol",
+        "negative_rate": 0.528,
+        "positive_rate": 0.46,
+        "rows": 250,
+        "timeout_rate": 0.012
+      },
+      {
+        "bucket": "META",
+        "bucket_family": "symbol",
+        "negative_rate": 0.408,
+        "positive_rate": 0.564,
+        "rows": 250,
+        "timeout_rate": 0.028
+      },
+      {
+        "bucket": "MRK",
+        "bucket_family": "symbol",
+        "negative_rate": 0.332,
+        "positive_rate": 0.624,
+        "rows": 250,
+        "timeout_rate": 0.044
+      },
+      {
+        "bucket": "MRNA",
+        "bucket_family": "symbol",
+        "negative_rate": 0.424,
+        "positive_rate": 0.536,
+        "rows": 250,
+        "timeout_rate": 0.04
+      },
+      {
+        "bucket": "MSFT",
+        "bucket_family": "symbol",
+        "negative_rate": 0.344,
+        "positive_rate": 0.652,
+        "rows": 250,
+        "timeout_rate": 0.004
+      },
+      {
+        "bucket": "NFLX",
+        "bucket_family": "symbol",
+        "negative_rate": 0.452,
+        "positive_rate": 0.512,
+        "rows": 250,
+        "timeout_rate": 0.036
+      },
+      {
+        "bucket": "NTAP",
+        "bucket_family": "symbol",
+        "negative_rate": 0.42,
+        "positive_rate": 0.568,
+        "rows": 250,
+        "timeout_rate": 0.012
+      },
+      {
+        "bucket": "NVDA",
+        "bucket_family": "symbol",
+        "negative_rate": 0.372,
+        "positive_rate": 0.612,
+        "rows": 250,
+        "timeout_rate": 0.016
+      },
+      {
+        "bucket": "OKTA",
+        "bucket_family": "symbol",
+        "negative_rate": 0.44,
+        "positive_rate": 0.552,
+        "rows": 250,
+        "timeout_rate": 0.008
+      },
+      {
+        "bucket": "ORCL",
+        "bucket_family": "symbol",
+        "negative_rate": 0.252,
+        "positive_rate": 0.732,
+        "rows": 250,
+        "timeout_rate": 0.016
+      },
+      {
+        "bucket": "PFE",
+        "bucket_family": "symbol",
+        "negative_rate": 0.628,
+        "positive_rate": 0.356,
+        "rows": 250,
+        "timeout_rate": 0.016
+      },
+      {
+        "bucket": "PYPL",
+        "bucket_family": "symbol",
+        "negative_rate": 0.5,
+        "positive_rate": 0.496,
+        "rows": 250,
+        "timeout_rate": 0.004
+      },
+      {
+        "bucket": "QQQ",
+        "bucket_family": "symbol",
+        "negative_rate": 0.26,
+        "positive_rate": 0.728,
+        "rows": 250,
+        "timeout_rate": 0.012
+      },
+      {
+        "bucket": "RKLB",
+        "bucket_family": "symbol",
+        "negative_rate": 0.32,
+        "positive_rate": 0.616,
+        "rows": 250,
+        "timeout_rate": 0.064
+      },
+      {
+        "bucket": "RTX",
+        "bucket_family": "symbol",
+        "negative_rate": 0.312,
+        "positive_rate": 0.672,
+        "rows": 250,
+        "timeout_rate": 0.016
+      },
+      {
+        "bucket": "SNPS",
+        "bucket_family": "symbol",
+        "negative_rate": 0.296,
+        "positive_rate": 0.692,
+        "rows": 250,
+        "timeout_rate": 0.012
+      },
+      {
+        "bucket": "SOFI",
+        "bucket_family": "symbol",
+        "negative_rate": 0.3,
+        "positive_rate": 0.66,
+        "rows": 250,
+        "timeout_rate": 0.04
+      },
+      {
+        "bucket": "SPY",
+        "bucket_family": "symbol",
+        "negative_rate": 0.288,
+        "positive_rate": 0.688,
+        "rows": 250,
+        "timeout_rate": 0.024
+      },
+      {
+        "bucket": "T",
+        "bucket_family": "symbol",
+        "negative_rate": 0.46,
+        "positive_rate": 0.472,
+        "rows": 250,
+        "timeout_rate": 0.068
+      },
+      {
+        "bucket": "TSCO",
+        "bucket_family": "symbol",
+        "negative_rate": 0.56,
+        "positive_rate": 0.408,
+        "rows": 250,
+        "timeout_rate": 0.032
+      },
+      {
+        "bucket": "TSLA",
+        "bucket_family": "symbol",
+        "negative_rate": 0.412,
+        "positive_rate": 0.56,
+        "rows": 250,
+        "timeout_rate": 0.028
+      },
+      {
+        "bucket": "TSM",
+        "bucket_family": "symbol",
+        "negative_rate": 0.448,
+        "positive_rate": 0.544,
+        "rows": 250,
+        "timeout_rate": 0.008
+      },
+      {
+        "bucket": "UNH",
+        "bucket_family": "symbol",
+        "negative_rate": 0.384,
+        "positive_rate": 0.612,
+        "rows": 250,
+        "timeout_rate": 0.004
+      },
+      {
+        "bucket": "V",
+        "bucket_family": "symbol",
+        "negative_rate": 0.412,
+        "positive_rate": 0.588,
+        "rows": 250,
+        "timeout_rate": 0.0
+      },
+      {
+        "bucket": "VRT",
+        "bucket_family": "symbol",
+        "negative_rate": 0.332,
+        "positive_rate": 0.648,
+        "rows": 250,
+        "timeout_rate": 0.02
+      },
+      {
+        "bucket": "VRTX",
+        "bucket_family": "symbol",
+        "negative_rate": 0.284,
+        "positive_rate": 0.676,
+        "rows": 250,
+        "timeout_rate": 0.04
+      },
+      {
+        "bucket": "VZ",
+        "bucket_family": "symbol",
+        "negative_rate": 0.616,
+        "positive_rate": 0.36,
+        "rows": 250,
+        "timeout_rate": 0.024
+      },
+      {
+        "bucket": "XOM",
+        "bucket_family": "symbol",
+        "negative_rate": 0.368,
+        "positive_rate": 0.596,
+        "rows": 250,
+        "timeout_rate": 0.036
+      },
+      {
+        "bucket": "ZS",
+        "bucket_family": "symbol",
+        "negative_rate": 0.32,
+        "positive_rate": 0.628,
+        "rows": 250,
+        "timeout_rate": 0.052
+      },
+      {
+        "bucket": "unknown",
+        "bucket_family": "session_phase",
+        "negative_rate": 0.4027,
+        "positive_rate": 0.578,
+        "rows": 5505,
+        "timeout_rate": 0.0193
+      },
+      {
+        "bucket": "midday",
+        "bucket_family": "session_phase",
+        "negative_rate": 0.4708,
+        "positive_rate": 0.5079,
+        "rows": 5367,
+        "timeout_rate": 0.0212
+      },
+      {
+        "bucket": "morning",
+        "bucket_family": "session_phase",
+        "negative_rate": 0.4687,
+        "positive_rate": 0.5055,
+        "rows": 3254,
+        "timeout_rate": 0.0258
+      },
+      {
+        "bucket": "open",
+        "bucket_family": "session_phase",
+        "negative_rate": 0.691,
+        "positive_rate": 0.3006,
+        "rows": 356,
+        "timeout_rate": 0.0084
+      },
+      {
+        "bucket": "afternoon",
+        "bucket_family": "session_phase",
+        "negative_rate": 0.5709,
+        "positive_rate": 0.3843,
+        "rows": 268,
+        "timeout_rate": 0.0448
+      },
+      {
+        "bucket": "unknown",
+        "bucket_family": "volatility",
+        "negative_rate": 0.4027,
+        "positive_rate": 0.578,
+        "rows": 5505,
+        "timeout_rate": 0.0193
+      },
+      {
+        "bucket": "normal_vol",
+        "bucket_family": "volatility",
+        "negative_rate": 0.5033,
+        "positive_rate": 0.4762,
+        "rows": 5078,
+        "timeout_rate": 0.0205
+      },
+      {
+        "bucket": "low_vol",
+        "bucket_family": "volatility",
+        "negative_rate": 0.4506,
+        "positive_rate": 0.5243,
+        "rows": 4099,
+        "timeout_rate": 0.0251
+      },
+      {
+        "bucket": "high_vol",
+        "bucket_family": "volatility",
+        "negative_rate": 0.7059,
+        "positive_rate": 0.2059,
+        "rows": 68,
+        "timeout_rate": 0.0882
+      },
+      {
+        "bucket": "high_toxicity",
+        "bucket_family": "vpin_toxicity",
+        "negative_rate": 0.4521,
+        "positive_rate": 0.5263,
+        "rows": 14750,
+        "timeout_rate": 0.0216
+      },
+      {
+        "bucket": "cvd_confirming",
+        "bucket_family": "cvd_alignment",
+        "negative_rate": 0.4583,
+        "positive_rate": 0.5181,
+        "rows": 10229,
+        "timeout_rate": 0.0236
+      },
+      {
+        "bucket": "cvd_mixed",
+        "bucket_family": "cvd_alignment",
+        "negative_rate": 0.4558,
+        "positive_rate": 0.5247,
+        "rows": 2819,
+        "timeout_rate": 0.0195
+      },
+      {
+        "bucket": "cvd_divergent",
+        "bucket_family": "cvd_alignment",
+        "negative_rate": 0.4083,
+        "positive_rate": 0.5781,
+        "rows": 1702,
+        "timeout_rate": 0.0135
+      },
+      {
+        "bucket": "memory_neutral",
+        "bucket_family": "fractional_memory",
+        "negative_rate": 0.454,
+        "positive_rate": 0.5253,
+        "rows": 7897,
+        "timeout_rate": 0.0208
+      },
+      {
+        "bucket": "memory_negative",
+        "bucket_family": "fractional_memory",
+        "negative_rate": 0.4589,
+        "positive_rate": 0.5232,
+        "rows": 4757,
+        "timeout_rate": 0.0179
+      },
+      {
+        "bucket": "memory_positive",
+        "bucket_family": "fractional_memory",
+        "negative_rate": 0.4294,
+        "positive_rate": 0.5372,
+        "rows": 2096,
+        "timeout_rate": 0.0334
+      }
+    ],
+    "end_date": "2026-06-04",
+    "label_counts": {
+      "-1": 6668,
+      "0": 319,
+      "1": 7763
+    },
+    "label_target": "trend_scan_label",
+    "min_bucket_rows": 50,
+    "report_version": "historical_bar_validation_buckets_v1",
+    "rows_loaded": 14750,
+    "rows_per_symbol": 250,
+    "runtime_effect": "validation_only_no_live_authority",
+    "start_date": "2024-06-01",
+    "symbol_count": 59
+  },
+  "triple_barrier_validation": {
+    "bucket_rows": [
+      {
+        "bucket": "AAPL",
+        "bucket_family": "symbol",
+        "negative_rate": 0.508,
+        "positive_rate": 0.492,
+        "rows": 250,
+        "timeout_rate": 0.0
+      },
+      {
+        "bucket": "ABBV",
+        "bucket_family": "symbol",
+        "negative_rate": 0.588,
+        "positive_rate": 0.412,
+        "rows": 250,
+        "timeout_rate": 0.0
+      },
+      {
+        "bucket": "ADSK",
+        "bucket_family": "symbol",
+        "negative_rate": 0.624,
+        "positive_rate": 0.372,
+        "rows": 250,
+        "timeout_rate": 0.004
+      },
+      {
+        "bucket": "AMD",
+        "bucket_family": "symbol",
+        "negative_rate": 0.504,
+        "positive_rate": 0.496,
+        "rows": 250,
+        "timeout_rate": 0.0
+      },
+      {
+        "bucket": "AMZN",
+        "bucket_family": "symbol",
+        "negative_rate": 0.552,
+        "positive_rate": 0.432,
+        "rows": 250,
+        "timeout_rate": 0.016
+      },
+      {
+        "bucket": "ASML",
+        "bucket_family": "symbol",
+        "negative_rate": 0.52,
+        "positive_rate": 0.48,
+        "rows": 250,
+        "timeout_rate": 0.0
+      },
+      {
+        "bucket": "AVGO",
+        "bucket_family": "symbol",
+        "negative_rate": 0.604,
+        "positive_rate": 0.396,
+        "rows": 250,
+        "timeout_rate": 0.0
+      },
+      {
+        "bucket": "BE",
+        "bucket_family": "symbol",
+        "negative_rate": 0.728,
+        "positive_rate": 0.272,
+        "rows": 250,
+        "timeout_rate": 0.0
+      },
+      {
+        "bucket": "BURL",
+        "bucket_family": "symbol",
+        "negative_rate": 0.552,
+        "positive_rate": 0.428,
+        "rows": 250,
+        "timeout_rate": 0.02
+      },
+      {
+        "bucket": "CAT",
+        "bucket_family": "symbol",
+        "negative_rate": 0.54,
+        "positive_rate": 0.46,
+        "rows": 250,
+        "timeout_rate": 0.0
+      },
+      {
+        "bucket": "CMCSA",
+        "bucket_family": "symbol",
+        "negative_rate": 0.644,
+        "positive_rate": 0.356,
+        "rows": 250,
+        "timeout_rate": 0.0
+      },
+      {
+        "bucket": "COST",
+        "bucket_family": "symbol",
+        "negative_rate": 0.592,
+        "positive_rate": 0.408,
+        "rows": 250,
+        "timeout_rate": 0.0
+      },
+      {
+        "bucket": "CRDO",
+        "bucket_family": "symbol",
+        "negative_rate": 0.744,
+        "positive_rate": 0.256,
+        "rows": 250,
+        "timeout_rate": 0.0
+      },
+      {
+        "bucket": "CRM",
+        "bucket_family": "symbol",
+        "negative_rate": 0.684,
+        "positive_rate": 0.316,
+        "rows": 250,
+        "timeout_rate": 0.0
+      },
+      {
+        "bucket": "CRSP",
+        "bucket_family": "symbol",
+        "negative_rate": 0.596,
+        "positive_rate": 0.404,
+        "rows": 250,
+        "timeout_rate": 0.0
+      },
+      {
+        "bucket": "CVX",
+        "bucket_family": "symbol",
+        "negative_rate": 0.548,
+        "positive_rate": 0.452,
+        "rows": 250,
+        "timeout_rate": 0.0
+      },
+      {
+        "bucket": "DELL",
+        "bucket_family": "symbol",
+        "negative_rate": 0.64,
+        "positive_rate": 0.36,
+        "rows": 250,
+        "timeout_rate": 0.0
+      },
+      {
+        "bucket": "DKS",
+        "bucket_family": "symbol",
+        "negative_rate": 0.564,
+        "positive_rate": 0.436,
+        "rows": 250,
+        "timeout_rate": 0.0
+      },
+      {
+        "bucket": "GE",
+        "bucket_family": "symbol",
+        "negative_rate": 0.664,
+        "positive_rate": 0.336,
+        "rows": 250,
+        "timeout_rate": 0.0
+      },
+      {
+        "bucket": "GEV",
+        "bucket_family": "symbol",
+        "negative_rate": 0.62,
+        "positive_rate": 0.38,
+        "rows": 250,
+        "timeout_rate": 0.0
+      },
+      {
+        "bucket": "GLD",
+        "bucket_family": "symbol",
+        "negative_rate": 0.464,
+        "positive_rate": 0.536,
+        "rows": 250,
+        "timeout_rate": 0.0
+      },
+      {
+        "bucket": "GOOGL",
+        "bucket_family": "symbol",
+        "negative_rate": 0.476,
+        "positive_rate": 0.524,
+        "rows": 250,
+        "timeout_rate": 0.0
+      },
+      {
+        "bucket": "HWM",
+        "bucket_family": "symbol",
+        "negative_rate": 0.608,
+        "positive_rate": 0.388,
+        "rows": 250,
+        "timeout_rate": 0.004
+      },
+      {
+        "bucket": "IWM",
+        "bucket_family": "symbol",
+        "negative_rate": 0.616,
+        "positive_rate": 0.384,
+        "rows": 250,
+        "timeout_rate": 0.0
+      },
+      {
+        "bucket": "JPM",
+        "bucket_family": "symbol",
+        "negative_rate": 0.644,
+        "positive_rate": 0.356,
+        "rows": 250,
+        "timeout_rate": 0.0
+      },
+      {
+        "bucket": "KO",
+        "bucket_family": "symbol",
+        "negative_rate": 0.504,
+        "positive_rate": 0.496,
+        "rows": 250,
+        "timeout_rate": 0.0
+      },
+      {
+        "bucket": "LIN",
+        "bucket_family": "symbol",
+        "negative_rate": 0.568,
+        "positive_rate": 0.424,
+        "rows": 250,
+        "timeout_rate": 0.008
+      },
+      {
+        "bucket": "LLY",
+        "bucket_family": "symbol",
+        "negative_rate": 0.516,
+        "positive_rate": 0.48,
+        "rows": 250,
+        "timeout_rate": 0.004
+      },
+      {
+        "bucket": "LMT",
+        "bucket_family": "symbol",
+        "negative_rate": 0.488,
+        "positive_rate": 0.504,
+        "rows": 250,
+        "timeout_rate": 0.008
+      },
+      {
+        "bucket": "MA",
+        "bucket_family": "symbol",
+        "negative_rate": 0.624,
+        "positive_rate": 0.376,
+        "rows": 250,
+        "timeout_rate": 0.0
+      },
+      {
+        "bucket": "MDB",
+        "bucket_family": "symbol",
+        "negative_rate": 0.616,
+        "positive_rate": 0.384,
+        "rows": 250,
+        "timeout_rate": 0.0
+      },
+      {
+        "bucket": "META",
+        "bucket_family": "symbol",
+        "negative_rate": 0.536,
+        "positive_rate": 0.464,
+        "rows": 250,
+        "timeout_rate": 0.0
+      },
+      {
+        "bucket": "MRK",
+        "bucket_family": "symbol",
+        "negative_rate": 0.46,
+        "positive_rate": 0.536,
+        "rows": 250,
+        "timeout_rate": 0.004
+      },
+      {
+        "bucket": "MRNA",
+        "bucket_family": "symbol",
+        "negative_rate": 0.616,
+        "positive_rate": 0.384,
+        "rows": 250,
+        "timeout_rate": 0.0
+      },
+      {
+        "bucket": "MSFT",
+        "bucket_family": "symbol",
+        "negative_rate": 0.472,
+        "positive_rate": 0.524,
+        "rows": 250,
+        "timeout_rate": 0.004
+      },
+      {
+        "bucket": "NFLX",
+        "bucket_family": "symbol",
+        "negative_rate": 0.592,
+        "positive_rate": 0.408,
+        "rows": 250,
+        "timeout_rate": 0.0
+      },
+      {
+        "bucket": "NTAP",
+        "bucket_family": "symbol",
+        "negative_rate": 0.452,
+        "positive_rate": 0.548,
+        "rows": 250,
+        "timeout_rate": 0.0
+      },
+      {
+        "bucket": "NVDA",
+        "bucket_family": "symbol",
+        "negative_rate": 0.58,
+        "positive_rate": 0.376,
+        "rows": 250,
+        "timeout_rate": 0.044
+      },
+      {
+        "bucket": "OKTA",
+        "bucket_family": "symbol",
+        "negative_rate": 0.604,
+        "positive_rate": 0.396,
+        "rows": 250,
+        "timeout_rate": 0.0
+      },
+      {
+        "bucket": "ORCL",
+        "bucket_family": "symbol",
+        "negative_rate": 0.424,
+        "positive_rate": 0.576,
+        "rows": 250,
+        "timeout_rate": 0.0
+      },
+      {
+        "bucket": "PFE",
+        "bucket_family": "symbol",
+        "negative_rate": 0.708,
+        "positive_rate": 0.288,
+        "rows": 250,
+        "timeout_rate": 0.004
+      },
+      {
+        "bucket": "PYPL",
+        "bucket_family": "symbol",
+        "negative_rate": 0.54,
+        "positive_rate": 0.46,
+        "rows": 250,
+        "timeout_rate": 0.0
+      },
+      {
+        "bucket": "QQQ",
+        "bucket_family": "symbol",
+        "negative_rate": 0.38,
+        "positive_rate": 0.604,
+        "rows": 250,
+        "timeout_rate": 0.016
+      },
+      {
+        "bucket": "RKLB",
+        "bucket_family": "symbol",
+        "negative_rate": 0.492,
+        "positive_rate": 0.48,
+        "rows": 250,
+        "timeout_rate": 0.028
+      },
+      {
+        "bucket": "RTX",
+        "bucket_family": "symbol",
+        "negative_rate": 0.392,
+        "positive_rate": 0.552,
+        "rows": 250,
+        "timeout_rate": 0.056
+      },
+      {
+        "bucket": "SNPS",
+        "bucket_family": "symbol",
+        "negative_rate": 0.528,
+        "positive_rate": 0.472,
+        "rows": 250,
+        "timeout_rate": 0.0
+      },
+      {
+        "bucket": "SOFI",
+        "bucket_family": "symbol",
+        "negative_rate": 0.588,
+        "positive_rate": 0.38,
+        "rows": 250,
+        "timeout_rate": 0.032
+      },
+      {
+        "bucket": "SPY",
+        "bucket_family": "symbol",
+        "negative_rate": 0.364,
+        "positive_rate": 0.564,
+        "rows": 250,
+        "timeout_rate": 0.072
+      },
+      {
+        "bucket": "T",
+        "bucket_family": "symbol",
+        "negative_rate": 0.672,
+        "positive_rate": 0.324,
+        "rows": 250,
+        "timeout_rate": 0.004
+      },
+      {
+        "bucket": "TSCO",
+        "bucket_family": "symbol",
+        "negative_rate": 0.572,
+        "positive_rate": 0.424,
+        "rows": 250,
+        "timeout_rate": 0.004
+      },
+      {
+        "bucket": "TSLA",
+        "bucket_family": "symbol",
+        "negative_rate": 0.584,
+        "positive_rate": 0.416,
+        "rows": 250,
+        "timeout_rate": 0.0
+      },
+      {
+        "bucket": "TSM",
+        "bucket_family": "symbol",
+        "negative_rate": 0.596,
+        "positive_rate": 0.404,
+        "rows": 250,
+        "timeout_rate": 0.0
+      },
+      {
+        "bucket": "UNH",
+        "bucket_family": "symbol",
+        "negative_rate": 0.432,
+        "positive_rate": 0.568,
+        "rows": 250,
+        "timeout_rate": 0.0
+      },
+      {
+        "bucket": "V",
+        "bucket_family": "symbol",
+        "negative_rate": 0.444,
+        "positive_rate": 0.556,
+        "rows": 250,
+        "timeout_rate": 0.0
+      },
+      {
+        "bucket": "VRT",
+        "bucket_family": "symbol",
+        "negative_rate": 0.512,
+        "positive_rate": 0.484,
+        "rows": 250,
+        "timeout_rate": 0.004
+      },
+      {
+        "bucket": "VRTX",
+        "bucket_family": "symbol",
+        "negative_rate": 0.384,
+        "positive_rate": 0.616,
+        "rows": 250,
+        "timeout_rate": 0.0
+      },
+      {
+        "bucket": "VZ",
+        "bucket_family": "symbol",
+        "negative_rate": 0.604,
+        "positive_rate": 0.396,
+        "rows": 250,
+        "timeout_rate": 0.0
+      },
+      {
+        "bucket": "XOM",
+        "bucket_family": "symbol",
+        "negative_rate": 0.496,
+        "positive_rate": 0.504,
+        "rows": 250,
+        "timeout_rate": 0.0
+      },
+      {
+        "bucket": "ZS",
+        "bucket_family": "symbol",
+        "negative_rate": 0.5,
+        "positive_rate": 0.496,
+        "rows": 250,
+        "timeout_rate": 0.004
+      },
+      {
+        "bucket": "unknown",
+        "bucket_family": "session_phase",
+        "negative_rate": 0.531,
+        "positive_rate": 0.4596,
+        "rows": 5505,
+        "timeout_rate": 0.0094
+      },
+      {
+        "bucket": "midday",
+        "bucket_family": "session_phase",
+        "negative_rate": 0.5474,
+        "positive_rate": 0.449,
+        "rows": 5367,
+        "timeout_rate": 0.0035
+      },
+      {
+        "bucket": "morning",
+        "bucket_family": "session_phase",
+        "negative_rate": 0.5691,
+        "positive_rate": 0.4269,
+        "rows": 3254,
+        "timeout_rate": 0.004
+      },
+      {
+        "bucket": "open",
+        "bucket_family": "session_phase",
+        "negative_rate": 0.7444,
+        "positive_rate": 0.2556,
+        "rows": 356,
+        "timeout_rate": 0.0
+      },
+      {
+        "bucket": "afternoon",
+        "bucket_family": "session_phase",
+        "negative_rate": 0.7015,
+        "positive_rate": 0.2948,
+        "rows": 268,
+        "timeout_rate": 0.0037
+      },
+      {
+        "bucket": "unknown",
+        "bucket_family": "volatility",
+        "negative_rate": 0.531,
+        "positive_rate": 0.4596,
+        "rows": 5505,
+        "timeout_rate": 0.0094
+      },
+      {
+        "bucket": "normal_vol",
+        "bucket_family": "volatility",
+        "negative_rate": 0.6046,
+        "positive_rate": 0.3931,
+        "rows": 5078,
+        "timeout_rate": 0.0024
+      },
+      {
+        "bucket": "low_vol",
+        "bucket_family": "volatility",
+        "negative_rate": 0.517,
+        "positive_rate": 0.4782,
+        "rows": 4099,
+        "timeout_rate": 0.0049
+      },
+      {
+        "bucket": "high_vol",
+        "bucket_family": "volatility",
+        "negative_rate": 0.7941,
+        "positive_rate": 0.1912,
+        "rows": 68,
+        "timeout_rate": 0.0147
+      },
+      {
+        "bucket": "high_toxicity",
+        "bucket_family": "vpin_toxicity",
+        "negative_rate": 0.5536,
+        "positive_rate": 0.4406,
+        "rows": 14750,
+        "timeout_rate": 0.0058
+      },
+      {
+        "bucket": "cvd_confirming",
+        "bucket_family": "cvd_alignment",
+        "negative_rate": 0.5619,
+        "positive_rate": 0.4313,
+        "rows": 10229,
+        "timeout_rate": 0.0067
+      },
+      {
+        "bucket": "cvd_mixed",
+        "bucket_family": "cvd_alignment",
+        "negative_rate": 0.5452,
+        "positive_rate": 0.4509,
+        "rows": 2819,
+        "timeout_rate": 0.0039
+      },
+      {
+        "bucket": "cvd_divergent",
+        "bucket_family": "cvd_alignment",
+        "negative_rate": 0.5176,
+        "positive_rate": 0.4794,
+        "rows": 1702,
+        "timeout_rate": 0.0029
+      },
+      {
+        "bucket": "memory_neutral",
+        "bucket_family": "fractional_memory",
+        "negative_rate": 0.5497,
+        "positive_rate": 0.4449,
+        "rows": 7897,
+        "timeout_rate": 0.0054
+      },
+      {
+        "bucket": "memory_negative",
+        "bucket_family": "fractional_memory",
+        "negative_rate": 0.5627,
+        "positive_rate": 0.4328,
+        "rows": 4757,
+        "timeout_rate": 0.0044
+      },
+      {
+        "bucket": "memory_positive",
+        "bucket_family": "fractional_memory",
+        "negative_rate": 0.5477,
+        "positive_rate": 0.4423,
+        "rows": 2096,
+        "timeout_rate": 0.01
+      }
+    ],
+    "end_date": "2026-06-04",
+    "label_counts": {
+      "-1": 8166,
+      "0": 85,
+      "1": 6499
+    },
+    "label_target": "triple_barrier_label",
+    "min_bucket_rows": 50,
+    "report_version": "historical_bar_validation_buckets_v1",
+    "rows_loaded": 14750,
+    "rows_per_symbol": 250,
+    "runtime_effect": "validation_only_no_live_authority",
+    "start_date": "2024-06-01",
+    "symbol_count": 59
+  }
 }

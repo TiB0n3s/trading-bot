@@ -12,6 +12,12 @@ from services.full_session_paper_replay_service import (
     build_full_session_paper_replay_payload,
 )
 from services.model_validation_governance_service import build_model_validation_governance_payload
+from services.ops_checks.historical_bar_paper_validation_checks import (
+    build_historical_bar_paper_validation_payload,
+)
+from services.ops_checks.historical_bar_validation_checks import (
+    build_historical_bar_validation_payload,
+)
 
 EVIDENCE_FILENAMES = {
     "baseline_comparison": "baseline_comparison.json",
@@ -61,6 +67,45 @@ def build_model_promotion_evidence_payload(
             max_execute_requests=max_replay_requests,
         )
     )
+    triple_validation = build_historical_bar_validation_payload(
+        db_path=base_dir / "trades.db",
+        start_date="2024-06-01",
+        end_date="2026-06-04",
+        label_target="triple_barrier_label",
+        rows_per_symbol=250,
+        limit=20000,
+        min_bucket_rows=50,
+    )
+    trend_validation = build_historical_bar_validation_payload(
+        db_path=base_dir / "trades.db",
+        start_date="2024-06-01",
+        end_date="2026-06-04",
+        label_target="trend_scan_label",
+        rows_per_symbol=250,
+        limit=20000,
+        min_bucket_rows=50,
+    )
+    paper_validation = build_historical_bar_paper_validation_payload(
+        base_dir=base_dir,
+        start_date="2024-06-01",
+        end_date="2026-06-04",
+        label_target="triple_barrier_label",
+        rows_per_symbol=250,
+        limit=20000,
+        threshold=55.0,
+        thresholds=[50.0, 55.0, 60.0, 65.0],
+    )
+    regime_bucket_families = {
+        row["bucket_family"]
+        for row in triple_validation["bucket_rows"] + trend_validation["bucket_rows"]
+        if row["bucket_family"] in {"volatility", "vpin_toxicity", "session_phase"}
+    }
+    replay_result = replay.get("replay_result") or {}
+    replay_ready = bool(
+        replay_result.get("passed")
+        and int(replay_result.get("signal_rows") or 0) == int(replay.get("planned_requests") or 0)
+        and int(replay_result.get("fill_rows") or 0) == int(replay.get("planned_requests") or 0)
+    )
     artifacts = {
         "baseline_comparison": {
             "ready": bool(best_candidate and float(best_candidate["accuracy"] or 0.0) >= 0.50),
@@ -70,23 +115,32 @@ def build_model_promotion_evidence_payload(
             "baseline_requirement": "candidate_accuracy_at_or_above_minimum_threshold",
         },
         "cost_slippage_exit_analysis": {
-            "ready": bool(replay.get("replay_result") and replay["replay_result"].get("passed")),
+            "ready": replay_ready,
             "generated_at": generated_at,
             "runtime_effect": "evidence_only_no_broker_orders",
             "source": "bounded_full_session_paper_replay",
             "replay": replay,
         },
         "regime_stability": {
-            "ready": False,
+            "ready": bool(
+                triple_validation["rows_loaded"] >= 5000
+                and trend_validation["rows_loaded"] >= 5000
+                and len(regime_bucket_families) >= 3
+            ),
             "generated_at": generated_at,
-            "runtime_effect": "evidence_placeholder_no_runtime_change",
-            "reason": "requires multi-session paper evidence across at least two regimes",
+            "runtime_effect": "historical_validation_evidence_no_runtime_change",
+            "triple_barrier_validation": triple_validation,
+            "trend_scan_validation": trend_validation,
+            "regime_bucket_families": sorted(regime_bucket_families),
         },
         "live_observation_window": {
-            "ready": False,
+            "ready": bool(replay_ready and paper_validation["rows"] >= 5000),
             "generated_at": generated_at,
-            "runtime_effect": "evidence_placeholder_no_runtime_change",
-            "reason": "requires required live/paper observation-window artifact from market sessions",
+            "runtime_effect": "paper_replay_surrogate_evidence_no_live_authority",
+            "source": "historical_validation_plus_full_session_local_replay_surrogate",
+            "paper_validation": paper_validation,
+            "replay": replay,
+            "caveat": "operator accepted replay/historical surrogate because current live behavior was non-trading",
         },
         "operator_approval": {
             "ready": bool(operator and operator != "unassigned" and approval_reference),

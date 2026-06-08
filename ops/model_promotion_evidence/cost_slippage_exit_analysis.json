@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-06-08T18:09:22.518586+00:00",
+  "generated_at": "2026-06-08T18:17:20.400830+00:00",
   "ready": true,
   "replay": {
     "events_per_symbol_per_minute": 1,
@@ -17,14 +17,14 @@
       "concurrency": 4,
       "failed_count": 0,
       "fill_rows": 780,
-      "latency_ms_avg": 30.136,
-      "latency_ms_max": 1578.221,
-      "latency_ms_p95": 44.746,
+      "latency_ms_avg": 39.381,
+      "latency_ms_max": 3421.338,
+      "latency_ms_p95": 61.49,
       "ok_count": 780,
       "passed": true,
       "report_version": "paper_replay_load_probe_v1",
       "requests": 780,
-      "requests_per_second": 131.77,
+      "requests_per_second": 100.0,
       "runtime_effect": "diagnostic_only_temp_db_no_broker_orders",
       "signal_rows": 780,
       "status_counts": {

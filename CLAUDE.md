@@ -1344,11 +1344,12 @@ runtime/research dependency split
 configuration audit diagnostics
 verified SQLite database backup/restore-readability manifests
 lightweight observability summary through `ops_check.py observability-health`
+local secrets-hygiene diagnostic
 
 Open before any cash-live promotion:
 
 external observability/alerting stack
-secrets-management hardening
+external secrets manager evaluation
 paper-only load/burst testing
 incident/postmortem workflow
 consolidated model-validation promotion gate

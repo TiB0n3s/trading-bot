@@ -109,9 +109,10 @@ pre-commit guardrails, core safety tests, config audit, and dependency split are
 implemented. Verified SQLite backup manifests are also implemented through
 `pipeline/database_backup.py` and `ops_check.py database-backups`. Lightweight
 local observability is available through `ops_check.py observability-health`.
-External observability/alerting, secrets hardening, load testing, incident
-management, consolidated model validation governance, and a feature-flag
-inventory remain open roadmap items.
+Local secrets hygiene is available through `ops_check.py secrets-hygiene`.
+External observability/alerting, external secrets-manager evaluation, load
+testing, incident management, consolidated model validation governance, and a
+feature-flag inventory remain open roadmap items.
 
 ## Observability
 
@@ -126,6 +127,20 @@ python3 ops_check.py database-backups
 `observability-health` consolidates the job-run ledger, verified database backup
 freshness, service watchdog warnings, and ML staleness-guard state. It is
 diagnostic-only and does not post external alerts.
+
+## Secrets Hygiene
+
+Use the local diagnostic before changing credentials or container/runtime
+configuration:
+
+```bash
+python3 ops_check.py secrets-hygiene
+```
+
+The report checks `/etc/trading-bot.env` permissions, repo-local env-file
+candidates, `.gitignore` coverage, and Dockerfile leakage risk. It never prints
+secret values. A dedicated external secrets manager remains a future hardening
+option rather than a current dependency.
 
 ## Database Backups
 

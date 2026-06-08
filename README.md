@@ -22,6 +22,7 @@ As of the latest roadmap work:
 - `pipeline/external_symbol_candidate_refresh.py --date YYYY-MM-DD` turns repeated unknown external-symbol findings into a research-only candidate queue, can run bounded Polygon historical backfill for eligible symbols, and then marks each symbol as context-only, backfill-pending, training-pending, review-ready, pooled, or rejected. `ops_check.py external-symbol-candidates` inspects this queue. Candidate status never grants trading authority or updates `SYMBOL_CONFIG`.
 - `ops_check.py` includes performance, runtime, resource, and persistence diagnostics such as `observability-health`, `runtime-health`, `database-backups`, `resource-readiness`, `lifecycle-analysis`, `setup-breakdown`, `conviction-stack-report`, `conviction-persistence-health`, `peak-bucket-report`, `winner-became-loser`, and prediction validation.
 - `ops_check.py config-audit` inventories remaining raw env-var access, validates typed config factories, and flags unsafe runtime defaults such as default webhook secrets, query-string secrets, cash mode without live-trading enablement, or unbacked live ML authority. This report is diagnostic-only and does not change runtime configuration.
+- `ops_check.py secrets-hygiene` checks local secret-storage hygiene without printing secret values, including `/etc/trading-bot.env` permissions, repo-local env files, `.gitignore` coverage, and Dockerfile leakage risk.
 - `ops_check.py architecture-surface` measures root/module sprawl, oversized decision files, raw env access, and `src/trading_bot` migration skeleton readiness. It is diagnostic-only and supports the cleanup plan in `ops/compatibility_deletion_plan.md`.
 - Development guardrails are active: `.github/workflows/ci.yml` runs compile checks plus `run_safety_checks.py` on push/PR, and `.pre-commit-config.yaml` runs Ruff plus the same fast safety harness before commits.
 - `ops/project_audit_followup_2026-06-08.md` reconciles the external project-audit/missing-tools notes with the current repo state. CI, local pre-commit guardrails, core safety tests, dependency split, and config audit are now implemented; backups, observability, secrets hardening, load testing, incident management, consolidated model validation, and a feature-flag inventory remain roadmap items.
@@ -1638,11 +1639,12 @@ runtime/research dependency split
 configuration audit diagnostics
 verified SQLite database backup/restore-readability manifests
 lightweight observability summary through `ops_check.py observability-health`
+local secrets-hygiene diagnostic
 
 Open before any cash-live promotion:
 
 external observability/alerting stack
-secrets-management hardening
+external secrets manager evaluation
 paper-only load/burst testing
 incident/postmortem workflow
 consolidated model-validation promotion gate

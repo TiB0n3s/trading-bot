@@ -28,6 +28,10 @@ items have since been implemented:
 - **Lightweight observability**: `ops_check.py observability-health` rolls up
   job-ledger cleanliness, backup freshness, service watchdog warnings, and ML
   staleness-guard state without posting external alerts.
+- **Local secrets hygiene**: `ops_check.py secrets-hygiene` checks
+  `/etc/trading-bot.env` permissions, repo-local env-file candidates,
+  `.gitignore` coverage, and Dockerfile leakage risk without printing secret
+  values.
 - **Dependency split**: `requirements-base.txt` is the slim runtime subset,
   `requirements-research.txt` adds optional ML/quant dependencies, and
   `requirements.txt` delegates to the full research environment.
@@ -52,9 +56,9 @@ These remain valid roadmap items before any cash-live promotion:
      errors, order latency, rejected/approved flow, and model-staleness state.
    - Promote to Prometheus/Grafana or another external stack only after the
      local rollup proves the right signals.
-2. **Secrets management hardening**
-   - `/etc/trading-bot.env` remains the current secret source.
-   - Keep secrets out of images, docs, logs, and systemd unit files.
+2. **External secrets manager evaluation**
+   - `/etc/trading-bot.env` remains the current secret source and is covered by
+     local hygiene checks.
    - Evaluate a secrets manager only after the operational surface stabilizes.
 3. **Load and burst testing**
    - Add a local paper-only webhook/load harness that can replay high-volume

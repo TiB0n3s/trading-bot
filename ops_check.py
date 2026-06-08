@@ -50,6 +50,7 @@ Usage:
   python3 ops_check.py portfolio-risk
   python3 ops_check.py production-evidence
   python3 ops_check.py config-audit
+  python3 ops_check.py secrets-hygiene [--env-file PATH]
   python3 ops_check.py architecture-surface
   python3 ops_check.py database-backups
   python3 ops_check.py resource-readiness
@@ -220,6 +221,7 @@ from services.ops_checks.research_export_checks import run_research_export
 from services.ops_checks.resource_readiness_checks import run_resource_readiness
 from services.ops_checks.rollout_contract_checks import run_rollout_contract_report
 from services.ops_checks.runtime_checks import run_runtime_health, run_runtime_health_trend
+from services.ops_checks.secrets_hygiene_checks import run_secrets_hygiene_report
 from services.ops_checks.setup_breakdown import run_setup_breakdown
 from services.ops_checks.shadow_prediction_checks import run_shadow_prediction_report
 from services.ops_checks.signal_source_checks import run_signal_source_readiness
@@ -754,6 +756,11 @@ def resource_readiness():
 
 def config_audit():
     return run_config_audit_report(base_dir=BASE_DIR)
+
+
+def secrets_hygiene():
+    env_file = Path(_str_option("--env-file", str(ENV_FILE)))
+    return run_secrets_hygiene_report(base_dir=BASE_DIR, env_file=env_file)
 
 
 def architecture_surface():
@@ -1559,6 +1566,9 @@ def main():
 
     if command == "config-audit":
         return 0 if config_audit() else 1
+
+    if command == "secrets-hygiene":
+        return 0 if secrets_hygiene() else 1
 
     if command == "architecture-surface":
         return 0 if architecture_surface() else 1

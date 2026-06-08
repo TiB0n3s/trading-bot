@@ -5,13 +5,17 @@ from __future__ import annotations
 from pathlib import Path
 
 from repositories.trading_education_repo import TradingEducationRepository
-from services.trading_education_corpus_service import build_trading_education_health_payload
-from services.trading_education_coverage_service import build_trading_education_coverage_payload
+from services.intelligence.education.corpus import build_trading_education_health_payload
+from services.intelligence.education.coverage import build_trading_education_coverage_payload
 
 
 def run_trading_education_health(*, base_dir: Path | None = None) -> bool:
     payload = build_trading_education_health_payload()
-    repo = TradingEducationRepository(base_dir / "trades.db") if base_dir else TradingEducationRepository()
+    repo = (
+        TradingEducationRepository(base_dir / "trades.db")
+        if base_dir
+        else TradingEducationRepository()
+    )
     stored = repo.summary()
 
     print()
@@ -61,9 +65,7 @@ def run_trading_education_health(*, base_dir: Path | None = None) -> bool:
     print(f"  {'-' * 28} {'-' * 20} {'-' * 24}")
     for concept in payload["concepts"]:
         print(
-            f"  {concept['key']:<28} "
-            f"{concept['concept_type']:<20} "
-            f"{concept['live_authority']:<24}"
+            f"  {concept['key']:<28} {concept['concept_type']:<20} {concept['live_authority']:<24}"
         )
 
     if stored["by_source"]:
@@ -96,7 +98,11 @@ def run_trading_education_health(*, base_dir: Path | None = None) -> bool:
 
 
 def run_trading_education_review(*, base_dir: Path | None = None) -> bool:
-    repo = TradingEducationRepository(base_dir / "trades.db") if base_dir else TradingEducationRepository()
+    repo = (
+        TradingEducationRepository(base_dir / "trades.db")
+        if base_dir
+        else TradingEducationRepository()
+    )
     summary = repo.summary()
     rows = repo.review_rows(limit=30)
 
@@ -157,10 +163,7 @@ def run_trading_education_coverage(*, base_dir: Path) -> bool:
         f"  {'concept':<32} {'status':<14} {'stored':>6} {'refs':>5} "
         f"{'feature_refs':>12} {'missing_capabilities'}"
     )
-    print(
-        f"  {'-' * 32} {'-' * 14} {'-' * 6} {'-' * 5} "
-        f"{'-' * 12} {'-' * 28}"
-    )
+    print(f"  {'-' * 32} {'-' * 14} {'-' * 6} {'-' * 5} {'-' * 12} {'-' * 28}")
     for row in payload["concepts"]:
         missing = ",".join(row["missing_capabilities"]) if row["missing_capabilities"] else "-"
         print(

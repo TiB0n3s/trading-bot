@@ -6,12 +6,12 @@ the AI/ML education corpus may ingest or reference before any crawler is added.
 
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
-from datetime import datetime, timezone
-from html.parser import HTMLParser
 import hashlib
 import json
 import re
+from dataclasses import asdict, dataclass
+from datetime import datetime, timezone
+from html.parser import HTMLParser
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 from urllib.parse import urljoin, urlparse
@@ -262,8 +262,15 @@ CURATED_TRADING_EDUCATION_CONCEPTS: tuple[TradingEducationConcept, ...] = (
         ),
         bot_usage="Map to trend-continuation setup review, regime routing, and exit deterioration checks.",
         live_authority="education_context_only",
-        related_features=("trend_slope", "relative_strength", "adx_like_strength", "pullback_depth"),
-        guardrails=("Require regime, breadth, and execution-quality confirmation before promotion.",),
+        related_features=(
+            "trend_slope",
+            "relative_strength",
+            "adx_like_strength",
+            "pullback_depth",
+        ),
+        guardrails=(
+            "Require regime, breadth, and execution-quality confirmation before promotion.",
+        ),
     ),
     TradingEducationConcept(
         key="range_trading",
@@ -275,8 +282,15 @@ CURATED_TRADING_EDUCATION_CONCEPTS: tuple[TradingEducationConcept, ...] = (
         ),
         bot_usage="Use as a classification pattern for mean-reversion or chop regimes.",
         live_authority="education_context_only",
-        related_features=("range_width", "support_resistance_distance", "rsi_state", "bollinger_position"),
-        guardrails=("Do not apply range assumptions during volatility expansion or confirmed breakout regimes.",),
+        related_features=(
+            "range_width",
+            "support_resistance_distance",
+            "rsi_state",
+            "bollinger_position",
+        ),
+        guardrails=(
+            "Do not apply range assumptions during volatility expansion or confirmed breakout regimes.",
+        ),
     ),
     TradingEducationConcept(
         key="breakout_trading",
@@ -288,8 +302,15 @@ CURATED_TRADING_EDUCATION_CONCEPTS: tuple[TradingEducationConcept, ...] = (
         ),
         bot_usage="Use for setup-structure scoring, opening-range continuation, and missed-buy review.",
         live_authority="education_context_only",
-        related_features=("breakout_level", "volume_expansion", "opening_range_state", "failed_breakout_count"),
-        guardrails=("Treat low-volume or liquidity-vacuum breakouts as degraded until outcome evidence supports them.",),
+        related_features=(
+            "breakout_level",
+            "volume_expansion",
+            "opening_range_state",
+            "failed_breakout_count",
+        ),
+        guardrails=(
+            "Treat low-volume or liquidity-vacuum breakouts as degraded until outcome evidence supports them.",
+        ),
     ),
     TradingEducationConcept(
         key="reversal_trading",
@@ -301,7 +322,12 @@ CURATED_TRADING_EDUCATION_CONCEPTS: tuple[TradingEducationConcept, ...] = (
         ),
         bot_usage="Use for exit-learning, pullback-vs-reversal labeling, and failed-trend diagnostics.",
         live_authority="education_context_only",
-        related_features=("reversal_signal", "retracement_depth", "trend_break", "volume_confirmation"),
+        related_features=(
+            "reversal_signal",
+            "retracement_depth",
+            "trend_break",
+            "volume_confirmation",
+        ),
         guardrails=("Require stronger evidence than a single counter-trend bar.",),
     ),
     TradingEducationConcept(
@@ -315,7 +341,9 @@ CURATED_TRADING_EDUCATION_CONCEPTS: tuple[TradingEducationConcept, ...] = (
         bot_usage="Use for premarket context, opening range, event-driven regime, and downside-asymmetry features.",
         live_authority="education_context_only",
         related_features=("gap_pct", "gap_acceptance", "opening_range_break", "event_context"),
-        guardrails=("Do not assume every up-gap is bullish; classify acceptance versus rejection first.",),
+        guardrails=(
+            "Do not assume every up-gap is bullish; classify acceptance versus rejection first.",
+        ),
     ),
     TradingEducationConcept(
         key="pairs_trading",
@@ -328,7 +356,9 @@ CURATED_TRADING_EDUCATION_CONCEPTS: tuple[TradingEducationConcept, ...] = (
         bot_usage="Use for portfolio overlap, peer confirmation, and relative-strength diagnostics.",
         live_authority="education_context_only",
         related_features=("peer_relative_strength", "correlation_cluster", "spread_zscore"),
-        guardrails=("Do not introduce short/hedged execution authority without a separate risk model.",),
+        guardrails=(
+            "Do not introduce short/hedged execution authority without a separate risk model.",
+        ),
     ),
     TradingEducationConcept(
         key="arbitrage",
@@ -628,7 +658,11 @@ CURATED_TRADING_EDUCATION_CONCEPTS: tuple[TradingEducationConcept, ...] = (
 def approved_domains() -> set[str]:
     domains: set[str] = set()
     for source in CURATED_TRADING_EDUCATION_SOURCES:
-        if not source.url or source.ingestion_status in {"metadata_only", "manual_review_only", "not_ingested"}:
+        if not source.url or source.ingestion_status in {
+            "metadata_only",
+            "manual_review_only",
+            "not_ingested",
+        }:
             continue
         host = urlparse(source.url).netloc.lower()
         if host.startswith("www."):
@@ -964,7 +998,9 @@ def _concept_matches(text: str) -> tuple[list[str], list[str]]:
 def _same_domain(base_url: str, candidate_url: str) -> bool:
     base = urlparse(base_url)
     candidate = urlparse(candidate_url)
-    base_host = base.netloc.lower()[4:] if base.netloc.lower().startswith("www.") else base.netloc.lower()
+    base_host = (
+        base.netloc.lower()[4:] if base.netloc.lower().startswith("www.") else base.netloc.lower()
+    )
     candidate_host = (
         candidate.netloc.lower()[4:]
         if candidate.netloc.lower().startswith("www.")
@@ -979,7 +1015,10 @@ def _blocked_or_error_page(title: str, text: str) -> str | None:
         return "authorization_error_page"
     if "access denied" in combined or "forbidden" in combined:
         return "access_denied_page"
-    if title.strip().lower() == "charles schwab" and "we apologize for any inconvenience" in combined:
+    if (
+        title.strip().lower() == "charles schwab"
+        and "we apologize for any inconvenience" in combined
+    ):
         return "schwab_authorization_error_page"
     return None
 
@@ -1147,9 +1186,7 @@ class TradingEducationIngestionService:
             "extraction_warnings": json.dumps(warnings, sort_keys=True) if warnings else None,
             "ingestion_method": ingestion_method,
             "_links": [
-                urljoin(url, link)
-                for link in parser.links
-                if _same_domain(url, urljoin(url, link))
+                urljoin(url, link) for link in parser.links if _same_domain(url, urljoin(url, link))
             ],
         }
 
@@ -1192,7 +1229,14 @@ class TradingEducationIngestionService:
                 failed += 1
                 if not dry_run:
                     self._store_failure(source, url, str(exc))
-                visited.append({"url": url, "source_key": source.key, "status": "fetch_failed", "error": str(exc)})
+                visited.append(
+                    {
+                        "url": url,
+                        "source_key": source.key,
+                        "status": "fetch_failed",
+                        "error": str(exc),
+                    }
+                )
 
         return {
             "report_version": "trading_education_ingest_report_v1",

@@ -8,12 +8,11 @@ from pathlib import Path
 from typing import Any
 
 from repositories.trading_education_repo import TradingEducationRepository
-from services.optional_dependency_service import optional_dependency_status
-from services.trading_education_corpus_service import (
+from services.intelligence.education.corpus import (
     CURATED_TRADING_EDUCATION_CONCEPTS,
     TRADING_EDUCATION_RUNTIME_EFFECT,
 )
-
+from services.optional_dependency_service import optional_dependency_status
 
 TRADING_EDUCATION_COVERAGE_VERSION = "trading_education_coverage_v1"
 
@@ -243,8 +242,12 @@ def build_trading_education_coverage_payload(
         ),
         "concept_count": len(concept_rows),
         "connected_count": sum(1 for row in concept_rows if row["coverage_status"] == "connected"),
-        "stored_only_count": sum(1 for row in concept_rows if row["coverage_status"] == "stored_only"),
-        "taxonomy_only_count": sum(1 for row in concept_rows if row["coverage_status"] == "taxonomy_only"),
+        "stored_only_count": sum(
+            1 for row in concept_rows if row["coverage_status"] == "stored_only"
+        ),
+        "taxonomy_only_count": sum(
+            1 for row in concept_rows if row["coverage_status"] == "taxonomy_only"
+        ),
         "concepts": concept_rows,
         "backtest_readiness": backtest_rows,
         "quant_stack_dependencies": dependency_rows,

@@ -10,8 +10,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from services.trading_education_corpus_service import CURATED_TRADING_EDUCATION_CONCEPTS
-
+from services.intelligence.education.corpus import CURATED_TRADING_EDUCATION_CONCEPTS
 
 EDUCATION_DECISION_CONTEXT_VERSION = "trading_education_decision_context_v1"
 EDUCATION_DECISION_RUNTIME_EFFECT = "education_advisory_context_no_direct_authority"
@@ -154,7 +153,9 @@ def education_context_for_account_state(
         )
 
     volatility_blob = _text_blob(volatility, event_context)
-    if any(term in volatility_blob for term in ("implied", "iv_", "vix", "expected_move", "tail_risk")):
+    if any(
+        term in volatility_blob for term in ("implied", "iv_", "vix", "expected_move", "tail_risk")
+    ):
         _add(
             rows,
             lookup,

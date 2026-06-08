@@ -10,21 +10,21 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from services.trading_education_corpus_service import (  # noqa: E402
+from repositories.trading_education_repo import TradingEducationRepository  # noqa: E402
+from services.intelligence.education.corpus import (  # noqa: E402
     TRADING_EDUCATION_RUNTIME_EFFECT,
     TradingEducationIngestionService,
     approved_domains,
     build_trading_education_health_payload,
     classify_education_url,
 )
-from services.trading_education_coverage_service import (  # noqa: E402
+from services.intelligence.education.coverage import (  # noqa: E402
     build_trading_education_coverage_payload,
 )
-from services.trading_education_decision_context_service import (  # noqa: E402
+from services.intelligence.education.decision_context import (  # noqa: E402
     EDUCATION_DECISION_RUNTIME_EFFECT,
     education_context_for_account_state,
 )
-from repositories.trading_education_repo import TradingEducationRepository  # noqa: E402
 
 
 def test_trading_education_payload_is_non_authoritative_and_versioned():
@@ -104,10 +104,15 @@ def test_strategy_concepts_are_normalized_and_non_authoritative():
     assert "data_leakage_guard" in concepts["algorithmic_trading_pipeline"]["related_features"]
     assert "paper_trading_duration" in concepts["algorithmic_trading_pipeline"]["related_features"]
     assert "pandas_numpy_stack" in concepts["algorithmic_trading_pipeline"]["related_features"]
-    assert "stationary_return_transform" in concepts["algorithmic_trading_pipeline"]["related_features"]
+    assert (
+        "stationary_return_transform"
+        in concepts["algorithmic_trading_pipeline"]["related_features"]
+    )
     assert "time_series_split" in concepts["algorithmic_trading_pipeline"]["related_features"]
     assert "out-of-sample" in concepts["backtesting_overfitting_control"]["summary"]
-    assert all(concept["live_authority"] == "education_context_only" for concept in concepts.values())
+    assert all(
+        concept["live_authority"] == "education_context_only" for concept in concepts.values()
+    )
 
 
 def test_education_ingestion_stores_compact_concept_metadata():
@@ -167,18 +172,30 @@ def test_schwab_child_seeds_are_approved_and_blocked_pages_fail(tmp_path=None):
     )
 
     schwab_pairs = [
-        url
-        for source, url in service.approved_seed_pairs()
-        if source.key == "schwab_learn_trading"
+        url for source, url in service.approved_seed_pairs() if source.key == "schwab_learn_trading"
     ]
     assert "https://www.schwab.com/learn/story/what-are-derivatives" in schwab_pairs
     assert "https://www.schwab.com/learn/story/options-strategy-covered-call" in schwab_pairs
-    assert "https://www.schwab.com/learn/story/why-stocks-sometimes-ignore-good-or-bad-news" in schwab_pairs
+    assert (
+        "https://www.schwab.com/learn/story/why-stocks-sometimes-ignore-good-or-bad-news"
+        in schwab_pairs
+    )
     assert "https://www.schwab.com/learn/story/ins-and-outs-short-selling" in schwab_pairs
-    assert "https://www.schwab.com/learn/story/ways-traders-spot-rallys-potential-end" in schwab_pairs
-    assert "https://www.schwab.com/learn/story/aligning-your-options-with-implied-volatility" in schwab_pairs
-    assert "https://www.schwab.com/learn/story/heikin-ashi-candles-reversals-and-strategies" in schwab_pairs
-    assert "https://www.schwab.com/learn/story/pre-ipo-company-equity-6-actions-to-take-now" in schwab_pairs
+    assert (
+        "https://www.schwab.com/learn/story/ways-traders-spot-rallys-potential-end" in schwab_pairs
+    )
+    assert (
+        "https://www.schwab.com/learn/story/aligning-your-options-with-implied-volatility"
+        in schwab_pairs
+    )
+    assert (
+        "https://www.schwab.com/learn/story/heikin-ashi-candles-reversals-and-strategies"
+        in schwab_pairs
+    )
+    assert (
+        "https://www.schwab.com/learn/story/pre-ipo-company-equity-6-actions-to-take-now"
+        in schwab_pairs
+    )
 
     result = service.ingest(max_pages=len(service.approved_seed_pairs()), follow_links=False)
     summary = repo.summary()
@@ -461,9 +478,10 @@ def test_trading_education_coverage_reports_storage_gaps_and_readiness():
     assert rows["rally_exhaustion_exit_patterns"]["stored_pages"] == 1
     assert rows["rally_exhaustion_exit_patterns"]["coverage_status"] == "connected"
     assert all(row["present"] for row in payload["backtest_readiness"])
-    assert "live approval/sizing/execution requires explicit promotion" in payload[
-        "decision_influence_policy"
-    ]
+    assert (
+        "live approval/sizing/execution requires explicit promotion"
+        in payload["decision_influence_policy"]
+    )
     tmp.cleanup()
 
 
@@ -492,9 +510,9 @@ def test_education_context_can_inform_decision_context_without_authority():
 
 def test_runtime_education_context_does_not_import_education_repository_or_table():
     runtime_files = [
-        ROOT / "decision_context.py",
+        ROOT / "scripts" / "decision_context.py",
         ROOT / "services" / "context_builder.py",
-        ROOT / "services" / "trading_education_decision_context_service.py",
+        ROOT / "services" / "intelligence" / "education" / "decision_context.py",
     ]
     combined = "\n".join(path.read_text() for path in runtime_files)
 

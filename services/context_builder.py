@@ -7,20 +7,20 @@ from datetime import datetime, timezone
 from typing import Any, Callable
 
 from services.downside_asymmetry_service import evaluate_downside_asymmetry
+from services.execution_quality_service import estimate_execution_quality
 from services.exit_decision_quality_service import evaluate_exit_decision_quality
+from services.intelligence.education.decision_context import education_context_for_account_state
 from services.market_microstructure_service import classify_market_microstructure
 from services.market_participation_service import evaluate_market_participation
 from services.market_regime_service import classify_market_regime
-from services.execution_quality_service import estimate_execution_quality
 from services.portfolio_decision_service import evaluate_portfolio_decision
-from services.signal_models import DecisionContext, SignalContext, SignalRuntimeState
 from services.setup_context_service import (
     SetupContextDeps,
     build_setup_observation,
     get_recent_favorable_setup,
     remember_favorable_setup,
 )
-from services.trading_education_decision_context_service import education_context_for_account_state
+from services.signal_models import DecisionContext, SignalContext, SignalRuntimeState
 from services.volatility_normalization_service import classify_volatility_normalization
 
 
@@ -685,9 +685,7 @@ def build_session_momentum_observation(
                 "trend_score": 0,
                 "reason": "missing or stale session momentum",
             }
-            log.info(
-                f"Session momentum unavailable/stale for {symbol}; using insufficient_data"
-            )
+            log.info(f"Session momentum unavailable/stale for {symbol}; using insufficient_data")
     except Exception as exc:
         account_state["session_momentum"] = {
             "trend_label": "insufficient_data",
@@ -795,16 +793,11 @@ def build_trend_confirmation_observation(
 
         momentum = account_state.get("momentum") or {}
         bias = (market_bias.get(symbol) or {}).get("bias")
-        special_labels = (
-            (account_state.get("rolling_momentum") or {}).get("special_labels") or []
-        )
-        session_elapsed_minutes = (
-            current_et.hour * 60 + current_et.minute - market_open_minutes
-        )
+        special_labels = (account_state.get("rolling_momentum") or {}).get("special_labels") or []
+        session_elapsed_minutes = current_et.hour * 60 + current_et.minute - market_open_minutes
         volume_state = momentum.get("volume_state")
         volume_ok = (
-            symbol in iex_thin_symbols
-            and volume_state in ("normal", "elevated", "surge")
+            symbol in iex_thin_symbols and volume_state in ("normal", "elevated", "surge")
         ) or volume_state == "surge"
         open_momentum_fast_lane = open_momentum_fast_lane_enabled and (
             0 <= session_elapsed_minutes <= 60
@@ -1061,8 +1054,7 @@ def hydrate_strategy_context(
                     payload={"score": score, "cap_pct": cap},
                 )
                 context_runtime.deps.log.info(
-                    f"Strategy score size cap for {symbol}: "
-                    f"score={score:.1f} → {cap}%"
+                    f"Strategy score size cap for {symbol}: score={score:.1f} → {cap}%"
                 )
 
     except Exception as exc:
@@ -1145,8 +1137,7 @@ def _opportunity_observation(opportunity: dict[str, Any]) -> OpportunityObservat
         score=_float_or_none(opportunity.get("buy_opportunity_score") or opportunity.get("score")),
         bucket=opportunity.get("bucket"),
         recommendation=(
-            opportunity.get("buy_opportunity_recommendation")
-            or opportunity.get("decision")
+            opportunity.get("buy_opportunity_recommendation") or opportunity.get("decision")
         ),
         reasons=list(reasons) if isinstance(reasons, (list, tuple)) else [reasons],
         cap=_float_or_none(opportunity.get("cap") or opportunity.get("size_cap_pct")),
@@ -1197,9 +1188,7 @@ def _volatility_normalization_observation(
         data=volatility,
         stretch_state=volatility.get("stretch_state"),
         chase_risk=volatility.get("chase_risk"),
-        volatility_adjusted_score=_float_or_none(
-            volatility.get("volatility_adjusted_score")
-        )
+        volatility_adjusted_score=_float_or_none(volatility.get("volatility_adjusted_score"))
         or 0.0,
         expectancy_modifier=_float_or_none(volatility.get("expectancy_modifier")) or 1.0,
     )
@@ -1212,10 +1201,7 @@ def _downside_asymmetry_observation(
         data=downside,
         downside_state=downside.get("downside_state"),
         downside_score=_float_or_none(downside.get("downside_score")) or 0.0,
-        expected_adverse_modifier=_float_or_none(
-            downside.get("expected_adverse_modifier")
-        )
-        or 1.0,
+        expected_adverse_modifier=_float_or_none(downside.get("expected_adverse_modifier")) or 1.0,
     )
 
 
@@ -1239,14 +1225,15 @@ def _portfolio_observation(portfolio: dict[str, Any]) -> PortfolioObservation:
     )
 
 
-def _execution_quality_observation(execution_quality: dict[str, Any]) -> ExecutionQualityObservation:
+def _execution_quality_observation(
+    execution_quality: dict[str, Any],
+) -> ExecutionQualityObservation:
     return ExecutionQualityObservation(
         data=execution_quality,
         decision=execution_quality.get("decision"),
         fill_quality=execution_quality.get("fill_quality"),
-        net_execution_cost_pct=_float_or_none(
-            execution_quality.get("net_execution_cost_pct")
-        ) or 0.0,
+        net_execution_cost_pct=_float_or_none(execution_quality.get("net_execution_cost_pct"))
+        or 0.0,
     )
 
 
@@ -1269,10 +1256,13 @@ def build_final_signal_context(
     trend = trend or {}
     strategy = account_state.get("strategy_observation") or {}
     market_alignment = account_state.get("market_alignment") or {}
-    market_regime = account_state.get("market_regime") or classify_market_regime(
-        account_state=account_state,
-        market_context=market_alignment,
-    ).to_dict()
+    market_regime = (
+        account_state.get("market_regime")
+        or classify_market_regime(
+            account_state=account_state,
+            market_context=market_alignment,
+        ).to_dict()
+    )
     account_state["market_regime"] = market_regime
     market_microstructure = (
         account_state.get("market_microstructure")
@@ -1302,18 +1292,24 @@ def build_final_signal_context(
         or evaluate_exit_decision_quality(account_state=account_state).to_dict()
     )
     account_state["exit_decision_quality"] = exit_decision_quality
-    portfolio_decision = account_state.get("portfolio_decision") or evaluate_portfolio_decision(
-        symbol=str(symbol or ""),
-        action=str(account_state.get("action") or ""),
-        account_state=account_state,
-    ).to_dict()
+    portfolio_decision = (
+        account_state.get("portfolio_decision")
+        or evaluate_portfolio_decision(
+            symbol=str(symbol or ""),
+            action=str(account_state.get("action") or ""),
+            account_state=account_state,
+        ).to_dict()
+    )
     account_state["portfolio_decision"] = portfolio_decision
-    execution_quality = account_state.get("execution_quality") or estimate_execution_quality(
-        symbol=str(symbol or ""),
-        action=str(account_state.get("action") or ""),
-        signal_price=account_state.get("signal_price"),
-        account_state=account_state,
-    ).to_dict()
+    execution_quality = (
+        account_state.get("execution_quality")
+        or estimate_execution_quality(
+            symbol=str(symbol or ""),
+            action=str(account_state.get("action") or ""),
+            signal_price=account_state.get("signal_price"),
+            account_state=account_state,
+        ).to_dict()
+    )
     account_state["execution_quality"] = execution_quality
     opportunity = account_state.get("buy_opportunity") or {}
     intelligence_context = intelligence_context or account_state.get("intelligence_context") or {}
@@ -1360,19 +1356,13 @@ def build_final_signal_context(
         "session_phase": market_microstructure.get("session_phase"),
         "breakout_quality": market_microstructure.get("breakout_quality"),
         "microstructure_score": market_microstructure.get("microstructure_score"),
-        "microstructure_expectancy_modifier": market_microstructure.get(
-            "expectancy_modifier"
-        ),
+        "microstructure_expectancy_modifier": market_microstructure.get("expectancy_modifier"),
         "participation_state": market_participation.get("participation_state"),
-        "participation_confirmation_score": market_participation.get(
-            "confirmation_score"
-        ),
+        "participation_confirmation_score": market_participation.get("confirmation_score"),
         "isolated_move_risk": market_participation.get("isolated_move_risk"),
         "volatility_stretch_state": volatility_normalization.get("stretch_state"),
         "volatility_chase_risk": volatility_normalization.get("chase_risk"),
-        "volatility_adjusted_score": volatility_normalization.get(
-            "volatility_adjusted_score"
-        ),
+        "volatility_adjusted_score": volatility_normalization.get("volatility_adjusted_score"),
         "downside_state": downside_asymmetry.get("downside_state"),
         "downside_score": downside_asymmetry.get("downside_score"),
         "exit_pressure_state": exit_decision_quality.get("exit_pressure_state"),
@@ -1400,13 +1390,9 @@ def build_final_signal_context(
         market_regime=_market_regime_observation(market_regime),
         market_microstructure=_market_microstructure_observation(market_microstructure),
         market_participation=_market_participation_observation(market_participation),
-        volatility_normalization=_volatility_normalization_observation(
-            volatility_normalization
-        ),
+        volatility_normalization=_volatility_normalization_observation(volatility_normalization),
         downside_asymmetry=_downside_asymmetry_observation(downside_asymmetry),
-        exit_decision_quality=_exit_decision_quality_observation(
-            exit_decision_quality
-        ),
+        exit_decision_quality=_exit_decision_quality_observation(exit_decision_quality),
         portfolio=_portfolio_observation(portfolio_decision),
         execution_quality=_execution_quality_observation(execution_quality),
         opportunity=_opportunity_observation(opportunity),

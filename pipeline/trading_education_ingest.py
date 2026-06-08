@@ -6,7 +6,7 @@ from __future__ import annotations
 import argparse
 import json
 
-from services.trading_education_corpus_service import TradingEducationIngestionService
+from services.intelligence.education.corpus import TradingEducationIngestionService
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -64,7 +64,9 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.manual_file:
         return 0 if result["status"] in {"stored", "needs_review"} or result["dry_run"] else 1
-    return 0 if result["stored"] > 0 or result.get("needs_review", 0) > 0 or result["dry_run"] else 1
+    return (
+        0 if result["stored"] > 0 or result.get("needs_review", 0) > 0 or result["dry_run"] else 1
+    )
 
 
 if __name__ == "__main__":

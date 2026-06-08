@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from portfolio_replacement_memory import load_portfolio_replacement_memory
 
-from services.trading_education_decision_context_service import education_context_for_account_state
+from services.intelligence.education.decision_context import education_context_for_account_state
 
 
 def _safe_dict(value):

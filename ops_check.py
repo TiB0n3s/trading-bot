@@ -50,6 +50,7 @@ Usage:
   python3 ops_check.py portfolio-risk
   python3 ops_check.py production-evidence
   python3 ops_check.py config-audit
+  python3 ops_check.py feature-flags [--limit N]
   python3 ops_check.py secrets-hygiene [--env-file PATH]
   python3 ops_check.py architecture-surface
   python3 ops_check.py database-backups
@@ -171,6 +172,7 @@ from services.ops_checks.external_symbol_candidate_checks import run_external_sy
 from services.ops_checks.external_symbol_discovery_checks import run_external_symbol_discovery
 from services.ops_checks.feature_attribution_checks import run_feature_attribution_report
 from services.ops_checks.feature_checks import run_feature_health, run_feature_watch
+from services.ops_checks.feature_flag_inventory_checks import run_feature_flag_inventory_report
 from services.ops_checks.friction_heatmap_checks import run_friction_heatmap
 from services.ops_checks.historical_bar_archive_checks import run_historical_bar_archive
 from services.ops_checks.historical_bar_coverage_checks import run_historical_bar_coverage
@@ -784,6 +786,13 @@ def incident_workflow():
 
 def config_audit():
     return run_config_audit_report(base_dir=BASE_DIR)
+
+
+def feature_flags():
+    return run_feature_flag_inventory_report(
+        base_dir=BASE_DIR,
+        limit=_int_option("--limit", 40),
+    )
 
 
 def secrets_hygiene():

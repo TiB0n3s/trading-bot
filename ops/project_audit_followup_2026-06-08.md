@@ -47,6 +47,8 @@ items have since been implemented:
 - **Incident workflow**: `ops_check.py incident-workflow --title "..."` renders
   a structured postmortem template, and `--create` writes an overwrite-safe
   record under `ops/incidents/`.
+- **Feature-flag inventory**: `ops_check.py feature-flags` derives a
+  diagnostic owner/authority/rollback view from static env-var references.
 - **Phase 2 web-runtime extraction**: `src/trading_bot/web/app_factory.py` now
   owns Flask app construction and route registration mechanics. Root `app.py`
   remains the deployed runtime compatibility context while runtime callbacks and
@@ -82,8 +84,10 @@ These remain valid roadmap items before any cash-live promotion:
      consolidated gate comparing candidate models against baseline behavior,
      costs, slippage, exits, and regime stability.
 6. **Feature flags and kill switches**
-   - Many env flags exist, but there is not yet a single feature-flag inventory
-     with ownership, default, authority level, rollback action, and audit link.
+   - Local feature-flag inventory exists with inferred ownership, authority
+     level, and rollback action.
+   - Remaining gap: explicit human ownership/default metadata for every
+     cash-live flag and external change-approval history.
 7. **Architecture surface reduction**
    - The package skeleton and audit metrics exist, but runtime implementations
      still need staged migration out of root files, generic `services/`, and

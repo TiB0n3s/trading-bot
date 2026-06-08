@@ -44,6 +44,20 @@ As of the latest roadmap work:
 - Webhook/status secrets should be supplied by `X-Webhook-Secret` or `Authorization: Bearer ...`; query-string secrets are rejected unless `ALLOW_QUERY_STRING_SECRET=true` is explicitly set for temporary compatibility.
 - Prediction gate mode defaults to warn-only for hard blocking. Weak ML predictions can only reduce risk through explicit size caps; they do not place orders, loosen gates, or override broker/order safeguards.
 
+Development safety workflow:
+
+```bash
+./venv/bin/pip install -r requirements-dev.txt
+./venv/bin/pre-commit install
+./venv/bin/python run_safety_checks.py
+```
+
+The pre-commit hook runs Ruff on staged Python files and then runs the fast
+trading safety harness. It intentionally does not run full-repo Ruff yet because
+the legacy tree still has existing lint debt; CI and local hooks focus on
+changed files plus core risk, authority, dependency-packaging, and architecture
+regressions. Full targeted tests remain available through `python3 run_tests.py`.
+
 ---
 
 ## High-Level Architecture

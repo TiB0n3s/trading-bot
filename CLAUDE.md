@@ -173,6 +173,10 @@ Recent completed roadmap items:
   It infers owner, authority level, and rollback action from static env-var
   references; cash-live promotion still requires explicit human ownership and
   default/change-approval metadata for high-authority flags.
+- Consolidated model-governance diagnostics are available through
+  `ops_check.py model-governance`. This report checks candidate diagnostics,
+  observe-only runtime effect, basic quality thresholds, and registry
+  live-status blockers; it cannot promote or load models.
 - App startup no longer owns schema `ALTER TABLE` migration work.
 - Webhook/status secrets should use `X-Webhook-Secret` or
   `Authorization: Bearer ...`; query-string secrets are rejected unless
@@ -1007,6 +1011,7 @@ python3 ops_check.py prediction-validation
 python3 ops_check.py local-load-probe --requests 100 --concurrency 4 --symbol AAPL --action buy
 python3 ops_check.py incident-workflow --title "brief title" --severity medium --create
 python3 ops_check.py feature-flags --limit 40
+python3 ops_check.py model-governance --min-rows 5000 --min-symbols 20 --min-accuracy 0.50
 python3 ops_check.py config-audit
 python3 ops_check.py architecture-surface
 python3 ops_check.py resource-readiness
@@ -1367,6 +1372,7 @@ local secrets-hygiene diagnostic
 local webhook burst diagnostic through `ops_check.py local-load-probe`
 local incident/postmortem workflow through `ops_check.py incident-workflow`
 feature-flag inventory through `ops_check.py feature-flags`
+consolidated model-governance diagnostic through `ops_check.py model-governance`
 
 Open before any cash-live promotion:
 
@@ -1374,7 +1380,7 @@ external observability/alerting stack
 external secrets manager evaluation
 end-to-end paper replay/load testing with DB and fill callbacks
 external incident escalation/review process
-consolidated model-validation promotion gate
+promotion-grade model validation against baseline/cost/slippage/exit/regime evidence
 explicit cash-live feature-flag ownership/default/change-approval metadata
 
 2. Validate during next real paper-trading session

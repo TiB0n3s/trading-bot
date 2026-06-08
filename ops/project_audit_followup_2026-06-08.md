@@ -49,6 +49,9 @@ items have since been implemented:
   record under `ops/incidents/`.
 - **Feature-flag inventory**: `ops_check.py feature-flags` derives a
   diagnostic owner/authority/rollback view from static env-var references.
+- **Model validation governance**: `ops_check.py model-governance` consolidates
+  candidate diagnostics, observe-only runtime-effect checks, basic quality
+  thresholds, and registry live-status blockers without promoting models.
 - **Phase 2 web-runtime extraction**: `src/trading_bot/web/app_factory.py` now
   owns Flask app construction and route registration mechanics. Root `app.py`
   remains the deployed runtime compatibility context while runtime callbacks and
@@ -80,9 +83,10 @@ These remain valid roadmap items before any cash-live promotion:
    - Remaining gap: external alert escalation and a required review process for
      cash-live incidents.
 5. **Model validation governance**
-   - Existing validation reports are strong, but promotion still needs a
-     consolidated gate comparing candidate models against baseline behavior,
-     costs, slippage, exits, and regime stability.
+   - A consolidated diagnostic governance report exists.
+   - Remaining gap: promotion-grade comparison against baseline behavior,
+     costs, slippage, exits, and regime stability across the required live
+     observation window.
 6. **Feature flags and kill switches**
    - Local feature-flag inventory exists with inferred ownership, authority
      level, and rollback action.

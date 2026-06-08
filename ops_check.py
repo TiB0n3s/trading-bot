@@ -51,6 +51,7 @@ Usage:
   python3 ops_check.py production-evidence
   python3 ops_check.py config-audit
   python3 ops_check.py feature-flags [--limit N]
+  python3 ops_check.py model-governance [--min-rows N] [--min-symbols N] [--min-accuracy F]
   python3 ops_check.py secrets-hygiene [--env-file PATH]
   python3 ops_check.py architecture-surface
   python3 ops_check.py database-backups
@@ -208,6 +209,9 @@ from services.ops_checks.log_ledger_checks import run_log_ledger_consistency
 from services.ops_checks.market_data_parity_checks import run_market_data_parity
 from services.ops_checks.missed_buy_review_checks import run_missed_buy_review
 from services.ops_checks.ml_dataset_checks import run_ml_dataset_export_check
+from services.ops_checks.model_validation_governance_checks import (
+    run_model_validation_governance_report,
+)
 from services.ops_checks.monday_readiness_checks import run_monday_readiness_check
 from services.ops_checks.observability_health_checks import run_observability_health
 from services.ops_checks.operator_intelligence_dashboard_checks import (
@@ -792,6 +796,15 @@ def feature_flags():
     return run_feature_flag_inventory_report(
         base_dir=BASE_DIR,
         limit=_int_option("--limit", 40),
+    )
+
+
+def model_governance():
+    return run_model_validation_governance_report(
+        min_rows=_int_option("--min-rows", 5000),
+        min_symbols=_int_option("--min-symbols", 20),
+        min_accuracy=_float_option("--min-accuracy", 0.50),
+        limit=_int_option("--limit", 12),
     )
 
 

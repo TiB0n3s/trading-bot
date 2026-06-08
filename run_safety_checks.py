@@ -19,6 +19,7 @@ SAFETY_TESTS = [
     "tests/test_risk_core.py",
     "tests/test_slippage_kelly_sizing_service.py",
     "tests/test_supervised_prediction_training_service.py",
+    "tests/test_model_validation_governance_service.py",
     "tests/test_transformer_authority_model_service.py",
     "tests/test_decision_policy.py",
     "tests/test_context_approval_sizing_services.py",

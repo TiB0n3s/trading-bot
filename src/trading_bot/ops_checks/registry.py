@@ -78,6 +78,7 @@ OPS_COMMAND_SPECS: dict[str, OpsCommandSpec] = {
     "production-evidence": _spec("production-evidence"),
     "config-audit": _noarg("config-audit"),
     "feature-flags": _noarg("feature-flags"),
+    "model-governance": _noarg("model-governance"),
     "secrets-hygiene": _noarg("secrets-hygiene"),
     "architecture-surface": _noarg("architecture-surface"),
     "database-backups": _noarg("database-backups"),

@@ -25,14 +25,16 @@ python3 -m ml_platform.cli list-models
 
 ## Boundaries
 
-- No model serving.
+- No direct model serving from this package into order execution.
 - `serving.py` is a read-only provider scaffold only; it is not imported by runtime.
 - `staged.py` composes ahead-of-live integration evidence only; it is not imported by runtime.
 - `replay.py` is read-only. It joins changed replay decisions to
   `matched_trades` and `rejected_signal_outcomes` when available, then reports
   avoided losers, missed winners, recovered missed winners, introduced losers,
   friction-adjusted simulated delta, and best/worst changed decisions.
-- No runtime decision changes.
+- No runtime decision changes unless a separately tested policy/authority
+  adapter is enabled by explicit env flags, registry status, staleness checks,
+  and promotion evidence.
 - No writes to `trades.db`.
 - No broker/order calls.
 - Registry status defaults to `research`.
@@ -40,6 +42,12 @@ python3 -m ml_platform.cli list-models
 - Root-level AI analytics/training CLIs may write local research artifacts or
   optional Timescale smoke-test rows, but they do not place orders or change
   live signal authority.
+- Governed Transformer authority is available only through the explicit
+  registry/env/staleness-checked adapter. When enabled and promoted, it can
+  block or reduce size only; it cannot approve, increase size, or submit orders.
+- Historical-bar trend-scan/triple-barrier candidates and asymmetric supervised
+  candidates are validation inputs until promotion evidence and authority
+  configuration explicitly allow a conservative paper/live role.
 
 Promotion beyond research requires explicit operator approval, tests, reports,
 environment flags defaulting off, and rollback.

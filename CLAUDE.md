@@ -187,6 +187,16 @@ Recent completed roadmap items:
   container target intentionally excludes those heavy optional dependencies, so
   fallback behavior must be tested with the runtime target as well as the
   research target.
+- Development guardrails are active. `.github/workflows/ci.yml` runs compile
+  checks plus `run_safety_checks.py` on push/PR. `.pre-commit-config.yaml` runs
+  Ruff on staged Python files and the same fast safety harness before commits.
+- `ops_check.py config-audit` validates typed config factories, inventories raw
+  env-var access, and flags unsafe runtime defaults. It is diagnostic-only and
+  should be run after changing `/etc/trading-bot.env` or adding config flags.
+- `ops/project_audit_followup_2026-06-08.md` is the current repo-owned follow-up
+  to the external project-audit/missing-tools documents. Treat stale external
+  claims about empty tests or missing CI as superseded by the checked-in CI,
+  pre-commit, safety tests, dependency split, and config audit.
 - `ops_check.py trading-education-health` reports the curated
   `trading_education_corpus_v1` source/concept contract. Education content can
   support explanation, taxonomy, backtesting, and overfitting-governance work,
@@ -960,7 +970,11 @@ python3 ops_check.py predictions
 python3 ops_check.py signal-lessons
 python3 ops_check.py trends
 python3 ops_check.py prediction-validation
-python3 ops_check.py historical-backfill START_DATE END_DATE
+python3 ops_check.py config-audit
+python3 ops_check.py resource-readiness
+python3 ops_check.py historical-bar-coverage START_DATE --end-date END_DATE
+python3 ops_check.py historical-bar-progress START_DATE --end-date END_DATE
+python3 ops_check.py historical-bar-readiness START_DATE --end-date END_DATE --include-db-quality
 python3 ops_check.py all
 
 Next-session readiness:
@@ -1217,6 +1231,17 @@ Activate:
 cd ~/trading-bot
 source venv/bin/activate
 
+Install local guardrails:
+
+```bash
+./venv/bin/pip install -r requirements-dev.txt
+./venv/bin/pre-commit install
+./venv/bin/python run_safety_checks.py
+```
+
+CI runs the same fast safety harness from `.github/workflows/ci.yml` on pushes
+to `main` and pull requests.
+
 Compile changed files:
 
 python3 -m py_compile app.py broker.py decision_engine.py
@@ -1249,13 +1274,16 @@ Testing Pattern for Code Changes
 
 Preferred patch flow:
 
-1. Backup file with timestamp.
-2. Patch file.
-3. Run py_compile.
-4. Run script/report smoke test.
-5. If app.py changed, restart trading-bot.
-6. Validate endpoint/report.
-7. Commit.
+1. Patch the file.
+2. Run targeted tests for the changed behavior.
+3. Run `python3 -m py_compile` for changed entry points when applicable.
+4. Run a script/report smoke test for new operator commands.
+5. Run `./venv/bin/python run_safety_checks.py` for risk, authority,
+   dependency, config, and architecture-sensitive changes.
+6. If app/runtime behavior changed, restart `trading-bot` only after market-safe
+   review.
+7. Validate endpoint/report.
+8. Commit.
 
 Example:
 
@@ -1284,6 +1312,28 @@ ops_check.py
 README.md
 CLAUDE.md
 Roadmap
+1. Operational audit follow-up
+
+Status: Active.
+
+Completed from the June 8 audit follow-up:
+
+CI fast safety workflow
+local pre-commit guardrails
+core safety/authority/dependency/architecture tests
+runtime/research dependency split
+configuration audit diagnostics
+
+Open before any cash-live promotion:
+
+database backup and restore drills
+observability and alerting
+secrets-management hardening
+paper-only load/burst testing
+incident/postmortem workflow
+consolidated model-validation promotion gate
+feature-flag inventory with ownership and rollback actions
+
 2. Validate during next real paper-trading session
 
 Status: Ready.

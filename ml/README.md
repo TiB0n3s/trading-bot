@@ -6,10 +6,11 @@ in behind tests, logging, environment flags, and rollback.
 
 ## Current Rule
 
-ML output is observe-only.
-Generated model artifacts under `ml/models/` are research artifacts unless a
-future promotion explicitly changes their status through review, tests, default
-off env flags, logging, and rollback.
+ML output starts observe-only. Some governed adapters can now be wired as
+paper/live conservative authority only after registry status, staleness, env
+flags, tests, and promotion evidence pass. They may block or reduce size where
+explicitly allowed; they must not increase size, loosen hard gates, submit
+orders, or bypass broker/risk controls.
 
 ## Planned Layers
 
@@ -73,6 +74,8 @@ optional research packages used by checked-in commands:
 - DuckDB and PyArrow for Parquet/research exports.
 - scikit-learn and joblib for supervised entry-prediction artifacts.
 - hmmlearn for HMM regime artifacts.
+- XGBoost for supervised asymmetric candidate models.
+- torch for governed Transformer authority candidates.
 
 These packages are research infrastructure only. Installing them does not grant
 model output any live authority.
@@ -92,3 +95,7 @@ research evidence to review, not as a runtime failure or promotion signal.
 
 The optional sentiment command can use FinBERT when the transformer dependency
 is installed, but sentiment output remains supporting evidence only.
+
+Container targets preserve the same boundary: `tradingbot-runtime` excludes the
+heavy ML/research stack and must pass fallback-focused tests; `tradingbot-research`
+includes the optional quant/ML packages for training, validation, and diagnostics.

@@ -22,6 +22,8 @@ As of the latest roadmap work:
 - `pipeline/external_symbol_candidate_refresh.py --date YYYY-MM-DD` turns repeated unknown external-symbol findings into a research-only candidate queue, can run bounded Polygon historical backfill for eligible symbols, and then marks each symbol as context-only, backfill-pending, training-pending, review-ready, pooled, or rejected. `ops_check.py external-symbol-candidates` inspects this queue. Candidate status never grants trading authority or updates `SYMBOL_CONFIG`.
 - `ops_check.py` includes performance, runtime, resource, and persistence diagnostics such as `runtime-health`, `resource-readiness`, `lifecycle-analysis`, `setup-breakdown`, `conviction-stack-report`, `conviction-persistence-health`, `peak-bucket-report`, `winner-became-loser`, and prediction validation.
 - `ops_check.py config-audit` inventories remaining raw env-var access, validates typed config factories, and flags unsafe runtime defaults such as default webhook secrets, query-string secrets, cash mode without live-trading enablement, or unbacked live ML authority. This report is diagnostic-only and does not change runtime configuration.
+- Development guardrails are active: `.github/workflows/ci.yml` runs compile checks plus `run_safety_checks.py` on push/PR, and `.pre-commit-config.yaml` runs Ruff plus the same fast safety harness before commits.
+- `ops/project_audit_followup_2026-06-08.md` reconciles the external project-audit/missing-tools notes with the current repo state. CI, local pre-commit guardrails, core safety tests, dependency split, and config audit are now implemented; backups, observability, secrets hardening, load testing, incident management, consolidated model validation, and a feature-flag inventory remain roadmap items.
 - Approved BUY audit persistence records final sizing attribution, dominant limiter, active cap-derived effective cap, ML prediction bucket/score, buy-opportunity recommendation, strategy score, session label, and setup policy action.
 - `db_migrations.py` provides the idempotent migration runner; app startup no longer owns schema `ALTER TABLE` work.
 - `feature_snapshots`, `decision_snapshots`, `rejected_signal_outcomes`, `exit_snapshots`, `matched_trades`, and related report tables support ML governance, counterfactual coverage, lifecycle analysis, and replay validation.
@@ -1196,6 +1198,7 @@ python3 ops_check.py signal-lessons
 python3 ops_check.py trends
 python3 ops_check.py prediction-validation
 python3 ops_check.py runtime-health YYYY-MM-DD
+python3 ops_check.py config-audit
 python3 ops_check.py resource-readiness
 python3 ops_check.py lifecycle-analysis YYYY-MM-DD
 python3 ops_check.py lifecycle-analysis YYYY-MM-DD --symbol AAPL --samples 25
@@ -1225,6 +1228,11 @@ Databento market data, SEC EDGAR disclosures, premium news APIs, local
 embedding/vector search, DuckDB/Parquet research exports, and Prometheus-style
 metrics. A configured resource is still observe-only until explicitly wired
 through a service boundary and validated by reports/tests.
+
+`ops_check.py config-audit` validates typed config factories against the current
+environment, inventories raw env-var access, and flags unsafe runtime defaults.
+Use it after changing `/etc/trading-bot.env`, adding a new env flag, or changing
+config factory behavior. It is diagnostic-only and does not mutate config.
 
 Common resource environment variables:
 
@@ -1524,6 +1532,17 @@ Activate environment:
 cd ~/trading-bot
 source venv/bin/activate
 
+Install and run the local development guardrails:
+
+```bash
+./venv/bin/pip install -r requirements-dev.txt
+./venv/bin/pre-commit install
+./venv/bin/python run_safety_checks.py
+```
+
+CI runs the same fast safety harness from `.github/workflows/ci.yml` on push to
+`main` and pull requests.
+
 Compile changed Python files:
 
 python3 -m py_compile app.py broker.py decision_engine.py
@@ -1568,6 +1587,28 @@ Claude prompt changes
 Webhook processing changes
 Broker behavior changes
 Roadmap Status
+1. Operational audit follow-up
+
+Status: Active.
+
+Completed from the June 8 audit follow-up:
+
+CI fast safety workflow
+local pre-commit guardrails
+core safety/authority/dependency/architecture tests
+runtime/research dependency split
+configuration audit diagnostics
+
+Open before any cash-live promotion:
+
+database backup and restore drills
+observability and alerting
+secrets-management hardening
+paper-only load/burst testing
+incident/postmortem workflow
+consolidated model-validation promotion gate
+feature-flag inventory with ownership and rollback actions
+
 2. Validate next real paper-trading session
 
 Status: Ready.
@@ -1668,10 +1709,13 @@ expected_pnl negative + weak trend_score → avoid/chase block
 recommended_entry_timing = prefer_wait_for_confirmation → require confirmation
 trend_label = extended_uptrend + weak expectancy → reduce size or block chase
 Known Issues / Watch Items
-Prediction confidence is currently very_low until more sessions accumulate.
-Some historical outcomes were reconstructed and should not be over-weighted.
+Live-session prediction promotion remains blocked until enough clean observed
+sessions prove stability across regimes. Historical-bar candidates can provide
+observe-only/paper validation evidence, but reconstructed outcomes and
+backfilled labels should not be treated as cash-live proof by themselves.
 Holiday targeting is now improved, but early closes are not modeled.
-Prediction data is observe-only and should not be used as a live gate yet.
+Prediction data can reduce size only where explicitly wired through governed
+downside-only policy; it should not be used as a broad hard live gate yet.
 Event collection can surface low-quality financial news items; validation is needed.
 Large share-price symbols may still hit affordability constraints.
 Historical bracket stop/take-profit exits depend on synthetic exit capture.

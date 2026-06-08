@@ -70,6 +70,46 @@ snapshots are at least 35 minutes old, `labeled_setups` should begin increasing.
 An `eligible_35m_plus` backlog means label_features has snapshots old enough to
 label but has not labeled them yet.
 
+## Configuration Audit
+
+Use the config audit after changing `/etc/trading-bot.env`, adding new env
+flags, or refactoring config factories:
+
+```bash
+cd ~/trading-bot
+python3 ops_check.py config-audit
+```
+
+The report validates typed config factories, inventories raw env-var access,
+and flags unsafe runtime defaults such as default webhook secrets,
+query-string-secret compatibility, cash mode without live-trading enablement,
+unbacked live ML authority, or Transformer authority without a model id.
+
+This command is diagnostic-only. It does not mutate config and does not grant
+trading authority.
+
+## Development Safety And Audit Follow-Up
+
+Local and CI guardrails are now part of the repo:
+
+```bash
+cd ~/trading-bot
+./venv/bin/pip install -r requirements-dev.txt
+./venv/bin/pre-commit install
+./venv/bin/python run_safety_checks.py
+```
+
+`.github/workflows/ci.yml` runs compile checks plus `run_safety_checks.py` on
+pushes to `main` and pull requests. `.pre-commit-config.yaml` runs Ruff on
+staged Python files and the same fast safety harness before commits.
+
+`ops/project_audit_followup_2026-06-08.md` tracks the current status of the
+external project-audit and missing-tools findings. As of that follow-up, CI,
+pre-commit guardrails, core safety tests, config audit, and dependency split are
+implemented. Database backups, observability/alerting, secrets hardening, load
+testing, incident management, consolidated model validation governance, and a
+feature-flag inventory remain open roadmap items.
+
 ## Polygon Historical Bar Backfill
 
 Use Polygon history to build the multi-year 1-minute regular-session bar corpus
@@ -222,6 +262,7 @@ python3 ops_check.py decision-snapshots 2026-05-26
 python3 ops_check.py policy-artifacts
 python3 ops_check.py retention
 python3 ops_check.py order-health 2026-05-26
+python3 ops_check.py config-audit
 python3 ops_check.py trading-education-health
 python3 ops_check.py trading-education-ingest --max-pages 6 --no-follow
 python3 prediction_cache.py preload --date 2026-05-26

@@ -31,6 +31,7 @@ SAFETY_TESTS = [
     "tests/test_architecture_surface_audit_service.py",
     "tests/test_dependency_packaging_contract.py",
     "tests/test_optional_dependency_service.py",
+    "tests/test_ops_check_registry.py",
     "tests/test_architecture_boundaries.py",
 ]
 

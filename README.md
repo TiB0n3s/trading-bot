@@ -37,6 +37,7 @@ As of the latest roadmap work:
 - Paper learning authority is enabled by default for paper/dry-run only. It can override Claude low-confidence soft rejections when canonical setup quality and buy-opportunity evidence are strong, and it caps the resulting paper size. It cannot override stale signals, broker/account constraints, cash-safe/cash-full mode, explicit symbol overrides, macro/regime hard blocks, or Claude infrastructure failures.
 - `ops_check.py paper-learning-authority YYYY-MM-DD` audits those paper-only overrides against linked lifecycle evidence. This report is diagnostic and does not grant live/cash authority.
 - `ops_check.py advanced-alpha-readiness YYYY-MM-DD` scores advanced alpha families such as bar-level order-flow proxies, true trade-level VPIN, ETF lead-lag, options skew, fractional-memory/trend-scan features, asymmetric-loss comparison, and model dashboards. `ops_check.py advanced-alpha-comparison YYYY-MM-DD` compares standard score thresholding against an asymmetric false-positive guard using linked forward outcomes. `ops_check.py friction-heatmap YYYY-MM-DD` buckets symmetric-vs-asymmetric outcomes by LSI and VPIN toxicity. `ops_check.py volume-clock-vpin YYYY-MM-DD --symbol AAPL` converts existing 1-minute rows into equal-volume VPIN buckets using Bulk Volume Classification, and `ops_check.py cross-asset-lead-map` prints the broad/sector lead ticker map for ensemble research. These reports are diagnostic-only and cannot affect live trading.
+- `ops_check.py transformer-authority --symbol AAPL` audits the governed torch Transformer authority adapter. It only affects `decision_policy` when `TRANSFORMER_AUTHORITY_ENABLED=true`, a promoted `TRANSFORMER_MODEL_ID` exists in `ml/models/registry.json`, the registry status is one of `warn_only`, `paper_soft`, `paper_gate`, or `live_candidate`, and the staleness guard passes. Even then it can only block or reduce size; it cannot increase size or submit orders.
 - Final BUY sizing now applies an optional slippage-adjusted fractional Kelly cap. It uses predicted slippage, ATR context, model probability, and LSI/VPIN stress to reduce or zero paper/live size when execution friction erodes edge; it cannot approve trades, increase sizing, or bypass broker/order safeguards.
 - Position-manager partial exits now fail safe when open-order cancellation or Alpaca available-quantity state has not settled; the job records a failed/queued action instead of crashing on stale quantity.
 - The trading education corpus is versioned and non-authoritative. `ops_check.py trading-education-health` reports curated source and concept coverage for SEC/FINRA/CFTC/CME/NerdWallet/Investopedia/Schwab plus normalized strategy, risk, backtesting, and overfitting-control concepts; `ops_check.py trading-education-ingest --max-pages 6 --no-follow` stores compact approved-source concept metadata with URL, timestamp, content hash, and corpus version.
@@ -140,7 +141,8 @@ python run_tests.py
 research/test environment. `requirements-base.txt` is the slim runtime subset.
 `requirements-research.txt` layers the optional research stack on top:
 DuckDB/PyArrow research exports, scikit-learn/joblib supervised prediction
-artifacts, XGBoost supervised candidates, and hmmlearn HMM regime experiments.
+artifacts, XGBoost supervised candidates, torch Transformer authority
+candidates, and hmmlearn HMM regime experiments.
 These packages do not grant live trading authority by themselves.
 
 Container build targets are split the same way:

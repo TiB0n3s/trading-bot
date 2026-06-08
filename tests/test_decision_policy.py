@@ -424,6 +424,73 @@ def test_historical_bar_model_artifact_cannot_change_authority_by_itself():
     assert_equal(result["size_multiplier"], 1.0, "historical-bar artifact does not size")
 
 
+def test_promoted_transformer_authority_can_block_buy_review():
+    original = decision_policy.contextual_memory_for_signal
+    try:
+        decision_policy.contextual_memory_for_signal = neutral_memory
+        result = decision_policy.evaluate_decision_policy(
+            "AAPL",
+            "buy",
+            intelligence_context={
+                "summary": {"recommended_action": "allow"},
+                "opportunity_score": {"score": 90, "decision": "allow"},
+                "prediction": {"prediction_decision": "allow", "prediction_score": 80},
+            },
+            account_state={
+                "transformer_authority": {
+                    "enabled": True,
+                    "mode": "paper_gate",
+                    "model_id": "transformer_test",
+                    "decision": "block",
+                    "probability": 0.21,
+                    "reason": "test low probability",
+                    "size_multiplier": 0.0,
+                },
+                "portfolio_decision": {"decision": "allow"},
+                "execution_quality": {"decision": "allow"},
+            },
+        )
+    finally:
+        decision_policy.contextual_memory_for_signal = original
+
+    assert_equal(result["decision"], "block", "promoted transformer authority can block")
+    assert_equal(result["size_multiplier"], 0.0, "transformer block zeroes size")
+    assert_true("transformer_authority" in result, "transformer signal returned")
+
+
+def test_promoted_transformer_authority_can_size_down_buy_review():
+    original = decision_policy.contextual_memory_for_signal
+    try:
+        decision_policy.contextual_memory_for_signal = neutral_memory
+        result = decision_policy.evaluate_decision_policy(
+            "AAPL",
+            "buy",
+            intelligence_context={
+                "summary": {"recommended_action": "allow"},
+                "opportunity_score": {"score": 90, "decision": "allow"},
+                "prediction": {"prediction_decision": "allow", "prediction_score": 80},
+            },
+            account_state={
+                "transformer_authority": {
+                    "enabled": True,
+                    "mode": "paper_soft",
+                    "model_id": "transformer_test",
+                    "decision": "size_down",
+                    "probability": 0.42,
+                    "reason": "test marginal probability",
+                    "size_multiplier": 0.65,
+                },
+                "portfolio_decision": {"decision": "allow"},
+                "execution_quality": {"decision": "allow"},
+            },
+        )
+    finally:
+        decision_policy.contextual_memory_for_signal = original
+
+    assert_equal(result["decision"], "size_down", "promoted transformer authority can size down")
+    assert_equal(result["size_multiplier"], 0.65, "transformer size multiplier applied")
+
+
 def test_decision_policy_module_does_not_import_order_execution():
     source = inspect.getsource(decision_policy)
 
@@ -459,6 +526,10 @@ if __name__ == "__main__":
     print("[OK] test_symbol_pattern_observation_cannot_change_authority_by_itself")
     test_historical_bar_model_artifact_cannot_change_authority_by_itself()
     print("[OK] test_historical_bar_model_artifact_cannot_change_authority_by_itself")
+    test_promoted_transformer_authority_can_block_buy_review()
+    print("[OK] test_promoted_transformer_authority_can_block_buy_review")
+    test_promoted_transformer_authority_can_size_down_buy_review()
+    print("[OK] test_promoted_transformer_authority_can_size_down_buy_review")
     test_decision_policy_module_does_not_import_order_execution()
     print("[OK] test_decision_policy_module_does_not_import_order_execution")
-    print("\nAll 14 decision policy tests passed.")
+    print("\nAll 16 decision policy tests passed.")

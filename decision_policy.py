@@ -20,6 +20,7 @@ from services.execution_quality_service import estimate_execution_quality
 from services.market_regime_service import classify_market_regime
 from services.portfolio_decision_service import evaluate_portfolio_decision
 from services.rollout_contract_service import telemetry_only_rollout_contract
+from services.transformer_authority_model_service import evaluate_transformer_authority
 from strategy_constants import DAILY_LOSS_LIMIT_PCT
 from strategy_memory import contextual_memory_for_signal
 
@@ -207,6 +208,28 @@ def evaluate_decision_policy(
     elif pred_decision in ("allow", "pass", "buy"):
         supports.append("prediction supports")
 
+    transformer_authority = account_state.get("transformer_authority")
+    if not isinstance(transformer_authority, dict):
+        transformer_authority = evaluate_transformer_authority(
+            symbol=symbol,
+            action=action,
+            account_state=account_state,
+        )
+        account_state["transformer_authority"] = transformer_authority
+    transformer_decision = transformer_authority.get("decision")
+    transformer_probability = transformer_authority.get("probability")
+    if transformer_authority.get("enabled") or transformer_authority.get("model_id"):
+        evidence.append(
+            "transformer_authority="
+            f"{transformer_decision} prob={transformer_probability} mode={transformer_authority.get('mode')}"
+        )
+    if transformer_decision == "block":
+        risks.append(f"transformer authority blocks: {transformer_authority.get('reason')}")
+    elif transformer_decision == "size_down":
+        risks.append(f"transformer authority sizes down: {transformer_authority.get('reason')}")
+    elif transformer_decision == "allow" and transformer_probability is not None:
+        supports.append("transformer authority supports/allows")
+
     session_gate = intelligence_context.get("session_momentum_gate") or {}
     if session_gate.get("would_block"):
         risks.append(f"session momentum gate would block: {session_gate.get('reason')}")
@@ -294,13 +317,15 @@ def evaluate_decision_policy(
             opp_decision == "block"
             or pred_decision == "block"
             or portfolio_action == "block"
+            or transformer_decision == "block"
         ):
             decision = "block"
             size_multiplier = 0.0
             reason = (
                 "deterministic policy block: "
                 f"opportunity={opp_decision}, prediction={pred_decision}, "
-                f"portfolio={portfolio_action}, execution={execution_action}"
+                f"portfolio={portfolio_action}, execution={execution_action}, "
+                f"transformer={transformer_decision}"
             )
 
     # Intelligence block-preferred becomes live block only if support is weak.
@@ -333,6 +358,13 @@ def evaluate_decision_policy(
                 float(execution_quality.get("size_multiplier") or 0.75),
             )
             reason = "execution quality cost/block-candidate; reduce size"
+        elif transformer_decision == "size_down":
+            decision = "size_down"
+            size_multiplier = min(
+                0.75,
+                float(transformer_authority.get("size_multiplier") or 0.75),
+            )
+            reason = "transformer authority requested reduced size"
         elif recommended_action == "caution" or len(risks) >= 2:
             decision = "size_down"
             size_multiplier = 0.75
@@ -354,4 +386,5 @@ def evaluate_decision_policy(
         "utility_estimate": utility_estimate,
         "portfolio_decision": portfolio_decision,
         "execution_quality": execution_quality,
+        "transformer_authority": transformer_authority,
     }

@@ -10,7 +10,7 @@ from typing import Any
 
 from ml_platform.config import MODEL_REGISTRY_PATH, MODEL_STATUSES, ensure_ml_dirs
 
-MODEL_ARTIFACT_SUFFIXES = {".joblib", ".pkl", ".pickle", ".bin"}
+MODEL_ARTIFACT_SUFFIXES = {".joblib", ".pkl", ".pickle", ".bin", ".pt"}
 LIVE_MODEL_STATUSES = {"paper_gate", "paper_soft", "live_candidate", "warn_only"}
 CANDIDATE_MODEL_STATUSES = {"candidate", "shadow", "observe_only"}
 

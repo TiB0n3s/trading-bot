@@ -26,6 +26,7 @@ from services.supervised_prediction_training_service import (
     train_quant_model_suite,
     train_supervised_prediction_model,
 )
+from services.transformer_authority_model_service import train_transformer_authority_model
 
 
 HISTORICAL_BAR_TRAINING_VERSION = "historical_bar_observe_training_v1"
@@ -171,6 +172,22 @@ def _run(args: argparse.Namespace) -> dict[str, Any]:
             artifact_dir=model_root / "model_suite" / model_id,
             model_id_prefix=model_id,
         ).to_dict()
+    if args.skip_transformer:
+        transformer = {
+            "version": "transformer_authority_skipped",
+            "trained": False,
+            "runtime_effect": "candidate_training_only_no_live_authority",
+            "reason": "skipped by --skip-transformer",
+        }
+    else:
+        transformer = train_transformer_authority_model(
+            rows=rows,
+            horizon=horizon,
+            feature_columns=list(DEFAULT_FEATURE_COLUMNS),
+            min_samples=args.transformer_min_samples,
+            artifact_path=model_root / f"{model_id}_transformer.pt",
+            epochs=args.transformer_epochs,
+        ).to_dict()
     diagnostics = {
         "report_version": HISTORICAL_BAR_TRAINING_VERSION,
         "runtime_effect": "observe_only_no_live_authority",
@@ -191,12 +208,13 @@ def _run(args: argparse.Namespace) -> dict[str, Any]:
         "feature_columns": list(DEFAULT_FEATURE_COLUMNS),
         "training": training,
         "quant_model_suite": suite,
+        "transformer_authority_model": transformer,
         "git_sha": _git_sha(),
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "notes": [
             "historical bar model is trained from bar_pattern_features only",
-            "artifact is not registered for live authority",
-            "runtime decision paths do not read this artifact unless separately wired later",
+            "artifacts are not registered for live authority by this training command",
+            "transformer artifacts require registry status, env enablement, and staleness guard before authority",
         ],
     }
     diagnostic_path = model_root / f"{model_id}.diagnostic.json"
@@ -231,6 +249,13 @@ def _parse_args() -> argparse.Namespace:
         action="store_true",
         help="Train only the primary model and skip optional comparative suite models.",
     )
+    parser.add_argument(
+        "--skip-transformer",
+        action="store_true",
+        help="Skip the torch Transformer authority candidate.",
+    )
+    parser.add_argument("--transformer-min-samples", type=int, default=500)
+    parser.add_argument("--transformer-epochs", type=int, default=8)
     parser.add_argument(
         "--baseline-only",
         action="store_true",

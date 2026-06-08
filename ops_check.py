@@ -54,6 +54,7 @@ Usage:
   python3 ops_check.py friction-heatmap
   python3 ops_check.py volume-clock-vpin YYYY-MM-DD --symbol AAPL
   python3 ops_check.py cross-asset-lead-map
+  python3 ops_check.py transformer-authority [--symbol AAPL]
   python3 ops_check.py trading-education-health
   python3 ops_check.py trading-education-ingest [--max-pages N] [--dry-run]
   python3 ops_check.py trading-education-review
@@ -209,6 +210,9 @@ from services.ops_checks.friction_heatmap_checks import run_friction_heatmap
 from services.ops_checks.volume_clock_vpin_checks import run_volume_clock_vpin_report
 from services.ops_checks.cross_asset_lead_lag_checks import (
     run_cross_asset_lead_lag_map_report,
+)
+from services.ops_checks.transformer_authority_checks import (
+    run_transformer_authority_report,
 )
 from services.ops_checks.trading_education_checks import (
     run_trading_education_coverage,
@@ -745,6 +749,14 @@ def volume_clock_vpin(target_date):
 def cross_asset_lead_map():
     return run_cross_asset_lead_lag_map_report(
         limit=_int_option("--limit", 20),
+    )
+
+
+def transformer_authority():
+    return run_transformer_authority_report(
+        base_dir=BASE_DIR,
+        symbol=_str_option("--symbol", "SPY"),
+        action=_str_option("--action", "buy"),
     )
 
 
@@ -1482,6 +1494,8 @@ def main():
         return 0 if volume_clock_vpin(target_date) else 1
     if command == "cross-asset-lead-map":
         return 0 if cross_asset_lead_map() else 1
+    if command == "transformer-authority":
+        return 0 if transformer_authority() else 1
 
     if command == "trading-education-health":
         return 0 if trading_education_health() else 1

@@ -18,6 +18,7 @@ RESEARCH_ONLY_PINS = {
     "scikit-learn",
     "scipy",
     "threadpoolctl",
+    "torch",
     "xgboost",
 }
 

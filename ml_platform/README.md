@@ -162,7 +162,7 @@ runtime tests, and rollback.
 The root `requirements.txt` delegates to `requirements-research.txt`, which
 installs `requirements-base.txt` plus the optional research dependencies needed
 for these checked-in workflows: `duckdb`, `pyarrow`, `scikit-learn`, `joblib`,
-`xgboost`, and `hmmlearn`. They are installed for reproducible
+`xgboost`, `torch`, and `hmmlearn`. They are installed for reproducible
 exports/training/tests, not for live authority. The `runtime` container target
 uses only `requirements-base.txt`, so optional-dependency fallback behavior must
 be validated separately from research-image training behavior.

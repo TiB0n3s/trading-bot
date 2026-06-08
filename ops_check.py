@@ -1023,6 +1023,15 @@ def historical_bar_paper_strategy(symbol: str) -> bool:
 
 
 def historical_bar_paper_validation(start_date: str) -> bool:
+    thresholds_raw = _str_option("--thresholds", "")
+    thresholds = None
+    if thresholds_raw:
+        thresholds = []
+        for part in thresholds_raw.split(","):
+            try:
+                thresholds.append(float(part.strip()))
+            except ValueError:
+                continue
     return run_historical_bar_paper_validation(
         base_dir=BASE_DIR,
         start_date=start_date,
@@ -1031,6 +1040,7 @@ def historical_bar_paper_validation(start_date: str) -> bool:
         rows_per_symbol=_int_option("--rows-per-symbol", 250),
         limit=_int_option("--max-rows", 30000),
         threshold=float(_str_option("--threshold", "65.0")),
+        thresholds=thresholds or None,
     )
 
 

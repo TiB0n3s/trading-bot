@@ -255,8 +255,26 @@ class ExitSnapshotRepository:
                 """,
                 (start_date, end_date, int(limit)),
             ).fetchall()
+            matched_exit_total = con.execute(
+                """
+                SELECT COUNT(*) AS rows
+                FROM matched_trades
+                WHERE exit_timestamp IS NOT NULL
+                  AND date(exit_timestamp) BETWEEN ? AND ?
+                """,
+                (start_date, end_date),
+            ).fetchone()
+        repairable_missing = self.approved_matched_exit_rows_missing_snapshots(
+            start_date=start_date,
+            end_date=end_date,
+            limit=None,
+        )
         return {
             "summary": dict(summary) if summary else {},
             "trigger_rows": [dict(row) for row in trigger_rows],
             "symbol_rows": [dict(row) for row in symbol_rows],
+            "matched_exit_total": int(matched_exit_total["rows"] or 0)
+            if matched_exit_total
+            else 0,
+            "repairable_missing_exit_snapshots": len(repairable_missing),
         }

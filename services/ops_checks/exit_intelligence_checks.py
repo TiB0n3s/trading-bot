@@ -35,6 +35,9 @@ def run_exit_intelligence_summary(
     )
     summary = payload.get("summary") or {}
     rows = int(summary.get("rows") or 0)
+    matched_exit_total = int(payload.get("matched_exit_total") or 0)
+    repairable_missing = int(payload.get("repairable_missing_exit_snapshots") or 0)
+    coverage_pct = round(rows / matched_exit_total * 100.0, 2) if matched_exit_total else 0.0
     print()
     print("=" * 72)
     print("  Exit Intelligence Summary")
@@ -43,6 +46,9 @@ def run_exit_intelligence_summary(
     print("runtime_effect                 : exit_learning_report_no_live_authority")
     print(f"date_filter                    : {start_date}..{end_date}")
     print(f"exit_snapshots                 : {rows}")
+    print(f"matched_exits                  : {matched_exit_total}")
+    print(f"repairable_missing_snapshots   : {repairable_missing}")
+    print(f"exit_snapshot_coverage_pct     : {coverage_pct:.2f}%")
     print(f"avg_realized_return_pct        : {_fmt(summary.get('avg_realized_return_pct'))}")
     print(f"avg_mfe_pct                    : {_fmt(summary.get('avg_mfe_pct'))}")
     print(f"avg_capture_ratio              : {_fmt(summary.get('avg_capture_ratio'))}")
@@ -75,5 +81,15 @@ def run_exit_intelligence_summary(
     if rows:
         print("[OK] exit intelligence summary generated")
         return True
-    print("[WARN] no exit snapshots available for date window")
+    if repairable_missing:
+        print("[WARN] approved matched exits exist but canonical exit snapshots are missing")
+        print(
+            f"next_command                   : python3 ops_check.py exit-snapshot-backfill {start_date}"
+            + (f" {end_date}" if end_date != start_date else "")
+            + " --dry-run"
+        )
+    elif matched_exit_total:
+        print("[WARN] matched exits exist, but none are repairable approved-entry snapshots")
+    else:
+        print("[WARN] no exit snapshots or matched exits available for date window")
     return True

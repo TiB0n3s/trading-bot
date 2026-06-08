@@ -571,6 +571,7 @@ python3 ops_check.py advanced-alpha-comparison 2026-06-04
 python3 ops_check.py historical-bar-models
 python3 ops_check.py historical-bar-paper-strategy AAPL --action buy
 python3 ops_check.py historical-bar-paper-validation 2024-06-01 --end-date 2026-06-04
+python3 ops_check.py historical-bar-paper-validation 2024-06-01 --end-date 2026-06-04 --thresholds 55,60,65,70
 python3 ops_check.py historical-bar-walk-forward 2024-06-01 --end-date 2026-06-04
 python3 ops_check.py historical-bar-validation 2024-06-01 --end-date 2026-06-04 --label-target triple_barrier_label
 python3 ops_check.py monday-readiness
@@ -600,6 +601,9 @@ naive RSI/SMA/close-location baseline on labeled historical bars, reporting hit
 rate delta, false-positive avoidance, and false-negative cost. `historical-bar-
 walk-forward` repeats that comparison over chronological folds so one strong
 period does not masquerade as stable intelligence.
+Use `--thresholds 55,60,65,70` to sweep paper candidate thresholds and surface
+the best observe-only threshold plus blockers before any paper soft-modifier
+promotion is considered.
 `historical-bar-validation` reports label distributions by symbol, session
 phase, volatility, CVD, VPIN, and fractional-memory buckets. `monday-readiness`
 summarizes market context presence, Polygon key configuration, current

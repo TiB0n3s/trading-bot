@@ -152,6 +152,60 @@ def _score_rows(rows: list[dict[str, Any]], *, label_target: str, threshold: flo
     }
 
 
+def _parse_thresholds(raw: str | None, fallback: float) -> list[float]:
+    if not raw:
+        return [fallback]
+    output: list[float] = []
+    for part in raw.split(","):
+        part = part.strip()
+        if not part:
+            continue
+        try:
+            output.append(float(part))
+        except ValueError:
+            continue
+    return output or [fallback]
+
+
+def _readiness_from_thresholds(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    candidates = [row for row in rows if int(row.get("paper_taken") or 0) > 0]
+    if not candidates:
+        return {
+            "status": "not_ready",
+            "recommended_threshold": None,
+            "blockers": ["no_paper_candidates_at_tested_thresholds"],
+        }
+    def blockers_for(row: dict[str, Any]) -> list[str]:
+        blockers = []
+        if int(row.get("paper_taken") or 0) < 20:
+            blockers.append("fewer_than_20_paper_candidates")
+        if float(row.get("hit_rate_delta") or 0.0) <= 0:
+            blockers.append("no_positive_hit_rate_delta")
+        if float(row.get("paper_loss_rate") or 0.0) >= 0.45:
+            blockers.append("paper_loss_rate_at_or_above_45pct")
+        return blockers
+
+    ranked = sorted(
+        candidates,
+        key=lambda row: (
+            len(blockers_for(row)) == 0,
+            float(row.get("hit_rate_delta") or 0.0),
+            int(row.get("false_positive_avoided") or 0),
+            -int(row.get("false_negative_cost") or 0),
+            int(row.get("paper_taken") or 0),
+        ),
+        reverse=True,
+    )
+    best = ranked[0]
+    blockers = blockers_for(best)
+    return {
+        "status": "paper_soft_modifier_candidate" if not blockers else "observe_only",
+        "recommended_threshold": best.get("threshold"),
+        "blockers": blockers,
+        "best": best,
+    }
+
+
 def build_historical_bar_paper_validation_payload(
     *,
     base_dir: Path,
@@ -161,6 +215,7 @@ def build_historical_bar_paper_validation_payload(
     rows_per_symbol: int,
     limit: int,
     threshold: float,
+    thresholds: list[float] | None = None,
 ) -> dict[str, Any]:
     rows = fetch_historical_bar_training_rows(
         db_path=base_dir / "trades.db",
@@ -170,7 +225,13 @@ def build_historical_bar_paper_validation_payload(
         rows_per_symbol=rows_per_symbol,
         limit=limit,
     )
-    scored = _score_rows(rows, label_target=label_target, threshold=threshold)
+    tested_thresholds = thresholds or [threshold]
+    sweep = [
+        _score_rows(rows, label_target=label_target, threshold=item)
+        for item in tested_thresholds
+    ]
+    scored = sweep[0] if len(sweep) == 1 else _score_rows(rows, label_target=label_target, threshold=threshold)
+    readiness = _readiness_from_thresholds(sweep)
     return {
         "report_version": PAPER_VALIDATION_VERSION,
         "runtime_effect": "paper_validation_only_no_live_authority",
@@ -178,6 +239,8 @@ def build_historical_bar_paper_validation_payload(
         "end_date": end_date,
         "label_target": label_target,
         "symbol_count": len({row.get("symbol") for row in rows if row.get("symbol")}),
+        "threshold_sweep": sweep,
+        "promotion_readiness": readiness,
         **scored,
     }
 
@@ -221,6 +284,16 @@ def build_historical_bar_walk_forward_payload(
             }
         )
     hit_rates = [float(row["paper_hit_rate"]) for row in fold_rows if int(row["paper_taken"]) > 0]
+    zero_candidate_folds = sum(1 for row in fold_rows if int(row.get("paper_taken") or 0) == 0)
+    negative_delta_folds = sum(1 for row in fold_rows if float(row.get("hit_rate_delta") or 0.0) <= 0)
+    spread = round(max(hit_rates) - min(hit_rates), 4) if len(hit_rates) >= 2 else None
+    blockers = []
+    if zero_candidate_folds:
+        blockers.append(f"{zero_candidate_folds}_folds_without_paper_candidates")
+    if negative_delta_folds:
+        blockers.append(f"{negative_delta_folds}_folds_without_positive_delta")
+    if spread is not None and spread > 0.25:
+        blockers.append("fold_hit_rate_spread_above_25pct")
     return {
         "report_version": WALK_FORWARD_VERSION,
         "runtime_effect": "walk_forward_validation_only_no_live_authority",
@@ -231,7 +304,11 @@ def build_historical_bar_walk_forward_payload(
         "folds": fold_rows,
         "fold_hit_rate_min": round(min(hit_rates), 4) if hit_rates else None,
         "fold_hit_rate_max": round(max(hit_rates), 4) if hit_rates else None,
-        "fold_hit_rate_spread": round(max(hit_rates) - min(hit_rates), 4) if len(hit_rates) >= 2 else None,
+        "fold_hit_rate_spread": spread,
+        "zero_candidate_folds": zero_candidate_folds,
+        "negative_delta_folds": negative_delta_folds,
+        "stability_status": "stable_paper_candidate" if not blockers else "observe_only",
+        "stability_blockers": blockers,
     }
 
 
@@ -244,6 +321,7 @@ def run_historical_bar_paper_validation(
     rows_per_symbol: int = 250,
     limit: int = 30000,
     threshold: float = 65.0,
+    thresholds: list[float] | None = None,
 ) -> bool:
     payload = build_historical_bar_paper_validation_payload(
         base_dir=base_dir,
@@ -253,6 +331,7 @@ def run_historical_bar_paper_validation(
         rows_per_symbol=rows_per_symbol,
         limit=limit,
         threshold=threshold,
+        thresholds=thresholds,
     )
     print()
     print("=" * 72)
@@ -277,6 +356,26 @@ def run_historical_bar_paper_validation(
         "false_negative_cost",
     ):
         print(f"{key:<28}: {payload.get(key)}")
+    if len(payload.get("threshold_sweep") or []) > 1:
+        print()
+        print("Threshold sweep")
+        for row in payload["threshold_sweep"]:
+            print(
+                f"  threshold={float(row['threshold']):<6.1f} "
+                f"taken={int(row['paper_taken']):<6} "
+                f"hit={float(row['paper_hit_rate']):<6.3f} "
+                f"base={float(row['baseline_hit_rate']):<6.3f} "
+                f"delta={float(row['hit_rate_delta']):<7.3f} "
+                f"fp_avoided={int(row['false_positive_avoided']):<5} "
+                f"fn_cost={int(row['false_negative_cost']):<5}"
+            )
+    readiness = payload.get("promotion_readiness") or {}
+    print()
+    print("Paper promotion readiness")
+    print(f"  status                 : {readiness.get('status')}")
+    print(f"  recommended_threshold  : {readiness.get('recommended_threshold')}")
+    blockers = readiness.get("blockers") or []
+    print(f"  blockers               : {', '.join(blockers) if blockers else '-'}")
     print()
     print("[OK] paper validation generated" if payload["rows"] else "[WARN] no rows available")
     return bool(payload["rows"])
@@ -313,6 +412,11 @@ def run_historical_bar_walk_forward(
     print(f"label_target            : {label_target}")
     print(f"rows                    : {payload['rows']}")
     print(f"fold_hit_rate_spread    : {payload['fold_hit_rate_spread']}")
+    print(f"stability_status        : {payload['stability_status']}")
+    print(
+        "stability_blockers      : "
+        + (", ".join(payload["stability_blockers"]) if payload["stability_blockers"] else "-")
+    )
     print()
     print("Folds")
     for row in payload["folds"]:

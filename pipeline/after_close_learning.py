@@ -190,6 +190,8 @@ def _build_steps(target_date: str) -> list[Step]:
                 "250",
                 "--max-rows",
                 "30000",
+                "--thresholds",
+                "55,60,65,70",
             ],
             critical=False,
             description="compare paper ensemble scoring with naive baseline over labeled bars",

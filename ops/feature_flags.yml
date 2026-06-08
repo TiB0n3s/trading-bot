@@ -1,0 +1,110 @@
+version: feature_flag_metadata_v1
+flags:
+  LIVE_TRADING_ENABLED:
+    owner: operations
+    default: "false"
+    authority_level: high
+    rollback_action: "set false"
+    change_approval: "operator_required_before_cash_live"
+  EXECUTION_MODE:
+    owner: operations
+    default: "paper"
+    authority_level: high
+    rollback_action: "set paper"
+    change_approval: "operator_required_before_cash_live"
+  AUTO_BUY_LIVE_BUYS:
+    owner: operations
+    default: "false"
+    authority_level: high
+    rollback_action: "set false"
+    change_approval: "operator_required_before_cash_live"
+  AUTO_BUY_ALLOW_TRADINGVIEW_LIVE:
+    owner: operations
+    default: "false"
+    authority_level: high
+    rollback_action: "set false"
+    change_approval: "operator_required_before_cash_live"
+  DECISION_POLICY_AUTHORITY_MODE:
+    owner: risk_policy
+    default: "paper_only"
+    authority_level: high
+    rollback_action: "set paper_only or disabled"
+    change_approval: "operator_required_before_cash_live"
+  ML_AUTHORITY_MODE:
+    owner: ml_platform
+    default: "observe_only_compare"
+    authority_level: high
+    rollback_action: "set observe_only_compare"
+    change_approval: "operator_required_before_cash_live"
+  TRANSFORMER_AUTHORITY_ENABLED:
+    owner: ml_platform
+    default: "false"
+    authority_level: high
+    rollback_action: "set false"
+    change_approval: "operator_required_before_cash_live"
+  TRANSFORMER_AUTHORITY_MODE:
+    owner: ml_platform
+    default: "observe_only"
+    authority_level: high
+    rollback_action: "set observe_only"
+    change_approval: "operator_required_before_cash_live"
+  POLICY_ARTIFACTS_ENABLED:
+    owner: risk_policy
+    default: "false"
+    authority_level: high
+    rollback_action: "set false"
+    change_approval: "operator_required_before_cash_live"
+  DECISION_POLICY_LIVE_BLOCK:
+    owner: risk_policy
+    default: "true"
+    authority_level: high
+    rollback_action: "set false or disable DECISION_POLICY_AUTHORITY_MODE"
+    change_approval: "operator_required_before_cash_live"
+  DECISION_POLICY_LIVE_SIZE_DOWN:
+    owner: risk_policy
+    default: "true"
+    authority_level: high
+    rollback_action: "set false or disable DECISION_POLICY_AUTHORITY_MODE"
+    change_approval: "operator_required_before_cash_live"
+  PORTFOLIO_REPLACEMENT_LIVE_SELLS:
+    owner: risk_policy
+    default: "false"
+    authority_level: high
+    rollback_action: "set false"
+    change_approval: "operator_required_before_cash_live"
+  POSITION_MANAGER_LIVE_SELLS:
+    owner: risk_policy
+    default: "false"
+    authority_level: high
+    rollback_action: "set false"
+    change_approval: "operator_required_before_cash_live"
+  LIVE_BAR_GAP_FILL_MINUTES:
+    owner: market_data
+    default: "90"
+    authority_level: high
+    rollback_action: "set 90 or disable live bar stream"
+    change_approval: "operator_required_before_cash_live"
+  LIVE_BAR_MAX_ROLLING_BARS:
+    owner: market_data
+    default: "390"
+    authority_level: high
+    rollback_action: "set 390 or disable live bar stream"
+    change_approval: "operator_required_before_cash_live"
+  LIVE_BAR_STREAM_RECONNECT_DELAY_SECONDS:
+    owner: market_data
+    default: "30"
+    authority_level: high
+    rollback_action: "set 30 or stop live bar stream"
+    change_approval: "operator_required_before_cash_live"
+  ALPACA_LIVE_BASE_URL:
+    owner: operations
+    default: "https://api.alpaca.markets"
+    authority_level: high
+    rollback_action: "switch EXECUTION_MODE to paper"
+    change_approval: "operator_required_before_cash_live"
+  ML_AUTHORITY_MIN_CONFIDENCE:
+    owner: ml_platform
+    default: "medium"
+    authority_level: high
+    rollback_action: "set medium or ML_AUTHORITY_MODE=observe_only_compare"
+    change_approval: "operator_required_before_cash_live"

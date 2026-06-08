@@ -52,6 +52,19 @@ items have since been implemented:
 - **Model validation governance**: `ops_check.py model-governance` consolidates
   candidate diagnostics, observe-only runtime-effect checks, basic quality
   thresholds, and registry live-status blockers without promoting models.
+- **External observability readiness**:
+  `ops_check.py external-observability-readiness` checks metric, alert, and
+  dashboard metadata without making network calls. See
+  `ops/external_observability_runbook.md`.
+- **Secrets manager readiness**: `ops_check.py secrets-manager-readiness`
+  checks external provider metadata without reading secrets or making network
+  calls. See `ops/secrets_manager_runbook.md`.
+- **Paper replay/load probe**: `ops_check.py paper-replay-load-probe` exercises
+  webhook routing plus temporary SQLite signal/fill writes without broker
+  orders.
+- **Explicit high-authority flag metadata**: `ops/feature_flags.yml` documents
+  owner, default, authority level, rollback action, and approval rule for
+  high-authority cash-live flags.
 - **Phase 2 web-runtime extraction**: `src/trading_bot/web/app_factory.py` now
   owns Flask app construction and route registration mechanics. Root `app.py`
   remains the deployed runtime compatibility context while runtime callbacks and
@@ -64,20 +77,19 @@ items have since been implemented:
 These remain valid roadmap items before any cash-live promotion:
 
 1. **External observability and alerting**
-   - Lightweight local observability exists; the remaining gap is external
-     metrics/alert publishing for runtime health, DB lock pressure, broker
-     errors, order latency, rejected/approved flow, and model-staleness state.
-   - Promote to Prometheus/Grafana or another external stack only after the
-     local rollup proves the right signals.
+   - Readiness metadata and runbook now exist.
+   - Remaining external action: configure the actual collector/alert/dashboard
+     endpoints outside the repo.
 2. **External secrets manager evaluation**
-   - `/etc/trading-bot.env` remains the current secret source and is covered by
-     local hygiene checks.
-   - Evaluate a secrets manager only after the operational surface stabilizes.
+   - Provider readiness metadata and runbook now exist.
+   - Remaining external action: choose/configure the provider and validate
+     retrieval in dry-run.
 3. **Load and burst testing**
    - Local diagnostic webhook bursts are available through
      `ops_check.py local-load-probe`.
-   - Remaining gap: broader end-to-end paper-session replay with realistic
-     market-data cadence, DB-write pressure, and order/fill callbacks.
+   - Temporary-DB replay/fill callback coverage is available through
+     `ops_check.py paper-replay-load-probe`.
+   - Remaining gap: full-day replay with realistic market-data cadence.
 4. **Incident management**
    - Local incident templates and records exist.
    - Remaining gap: external alert escalation and a required review process for
@@ -90,8 +102,9 @@ These remain valid roadmap items before any cash-live promotion:
 6. **Feature flags and kill switches**
    - Local feature-flag inventory exists with inferred ownership, authority
      level, and rollback action.
-   - Remaining gap: explicit human ownership/default metadata for every
-     cash-live flag and external change-approval history.
+   - High-authority flag metadata exists in `ops/feature_flags.yml`.
+   - Remaining external action: maintain change-approval history when flags are
+     changed for cash-live testing.
 7. **Architecture surface reduction**
    - The package skeleton and audit metrics exist, but runtime implementations
      still need staged migration out of root files, generic `services/`, and

@@ -56,7 +56,10 @@ Usage:
   python3 ops_check.py architecture-surface
   python3 ops_check.py database-backups
   python3 ops_check.py local-load-probe [--requests N] [--concurrency N] [--symbol AAPL] [--action buy]
+  python3 ops_check.py paper-replay-load-probe [--requests N] [--concurrency N] [--symbol AAPL] [--action buy]
   python3 ops_check.py incident-workflow --title "brief title" [--severity low|medium|high|critical] [--create]
+  python3 ops_check.py external-observability-readiness
+  python3 ops_check.py secrets-manager-readiness
   python3 ops_check.py resource-readiness
   python3 ops_check.py advanced-alpha-readiness
   python3 ops_check.py advanced-alpha-comparison
@@ -169,6 +172,9 @@ from services.ops_checks.excursion_checks import (
 )
 from services.ops_checks.exit_intelligence_checks import run_exit_intelligence_summary
 from services.ops_checks.exit_snapshot_backfill_checks import run_exit_snapshot_backfill
+from services.ops_checks.external_observability_readiness_checks import (
+    run_external_observability_readiness_report,
+)
 from services.ops_checks.external_symbol_candidate_checks import run_external_symbol_candidates
 from services.ops_checks.external_symbol_discovery_checks import run_external_symbol_discovery
 from services.ops_checks.feature_attribution_checks import run_feature_attribution_report
@@ -221,6 +227,7 @@ from services.ops_checks.order_checks import run_order_health
 from services.ops_checks.paper_learning_authority_checks import (
     run_paper_learning_authority_report,
 )
+from services.ops_checks.paper_replay_load_probe_checks import run_paper_replay_load_probe_report
 from services.ops_checks.pattern_learning_inputs_checks import run_pattern_learning_inputs_report
 from services.ops_checks.point_in_time_archive_checks import run_point_in_time_archive
 from services.ops_checks.portfolio_risk_checks import run_portfolio_risk_report
@@ -232,6 +239,9 @@ from services.ops_checks.resource_readiness_checks import run_resource_readiness
 from services.ops_checks.rollout_contract_checks import run_rollout_contract_report
 from services.ops_checks.runtime_checks import run_runtime_health, run_runtime_health_trend
 from services.ops_checks.secrets_hygiene_checks import run_secrets_hygiene_report
+from services.ops_checks.secrets_manager_readiness_checks import (
+    run_secrets_manager_readiness_report,
+)
 from services.ops_checks.setup_breakdown import run_setup_breakdown
 from services.ops_checks.shadow_prediction_checks import run_shadow_prediction_report
 from services.ops_checks.signal_source_checks import run_signal_source_readiness
@@ -772,6 +782,23 @@ def local_load_probe():
         symbol=_str_option("--symbol", "AAPL"),
         action=_str_option("--action", "buy"),
     )
+
+
+def paper_replay_load_probe():
+    return run_paper_replay_load_probe_report(
+        requests=_int_option("--requests", 100),
+        concurrency=_int_option("--concurrency", 4),
+        symbol=_str_option("--symbol", "AAPL"),
+        action=_str_option("--action", "buy"),
+    )
+
+
+def external_observability_readiness():
+    return run_external_observability_readiness_report()
+
+
+def secrets_manager_readiness():
+    return run_secrets_manager_readiness_report()
 
 
 def incident_workflow():

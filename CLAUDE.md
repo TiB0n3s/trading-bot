@@ -165,6 +165,10 @@ Recent completed roadmap items:
   The probe exercises Flask route auth, payload parsing, event-record callback,
   and signal-submit callback only; it is diagnostic-only and cannot submit
   broker orders or mutate trading state.
+- Temporary-DB paper replay/load diagnostics are available through
+  `ops_check.py paper-replay-load-probe --requests N --concurrency N --symbol AAPL --action buy`.
+  This extends the local route probe with SQLite signal/fill callback writes
+  while still avoiding broker orders.
 - Local incident records are available through
   `ops_check.py incident-workflow --title "brief title" --severity medium --create`.
   Records are written under `ops/incidents/` and should link job runs, logs,
@@ -177,6 +181,10 @@ Recent completed roadmap items:
   `ops_check.py model-governance`. This report checks candidate diagnostics,
   observe-only runtime effect, basic quality thresholds, and registry
   live-status blockers; it cannot promote or load models.
+- External observability and secrets-manager readiness are checked with
+  `ops_check.py external-observability-readiness` and
+  `ops_check.py secrets-manager-readiness`. These reports validate metadata
+  only and make no network calls or secret reads.
 - App startup no longer owns schema `ALTER TABLE` migration work.
 - Webhook/status secrets should use `X-Webhook-Secret` or
   `Authorization: Bearer ...`; query-string secrets are rejected unless
@@ -1009,9 +1017,12 @@ python3 ops_check.py signal-lessons
 python3 ops_check.py trends
 python3 ops_check.py prediction-validation
 python3 ops_check.py local-load-probe --requests 100 --concurrency 4 --symbol AAPL --action buy
+python3 ops_check.py paper-replay-load-probe --requests 100 --concurrency 4 --symbol AAPL --action buy
 python3 ops_check.py incident-workflow --title "brief title" --severity medium --create
 python3 ops_check.py feature-flags --limit 40
 python3 ops_check.py model-governance --min-rows 5000 --min-symbols 20 --min-accuracy 0.50
+python3 ops_check.py external-observability-readiness
+python3 ops_check.py secrets-manager-readiness
 python3 ops_check.py config-audit
 python3 ops_check.py architecture-surface
 python3 ops_check.py resource-readiness
@@ -1370,18 +1381,21 @@ verified SQLite database backup/restore-readability manifests
 lightweight observability summary through `ops_check.py observability-health`
 local secrets-hygiene diagnostic
 local webhook burst diagnostic through `ops_check.py local-load-probe`
+temporary-DB paper replay/load diagnostic through `ops_check.py paper-replay-load-probe`
 local incident/postmortem workflow through `ops_check.py incident-workflow`
 feature-flag inventory through `ops_check.py feature-flags`
 consolidated model-governance diagnostic through `ops_check.py model-governance`
+external observability readiness through `ops_check.py external-observability-readiness`
+external secrets manager readiness through `ops_check.py secrets-manager-readiness`
 
 Open before any cash-live promotion:
 
-external observability/alerting stack
-external secrets manager evaluation
-end-to-end paper replay/load testing with DB and fill callbacks
+configure external observability/alerting endpoints
+choose/configure external secrets manager provider
+full-day paper replay with realistic market-data cadence
 external incident escalation/review process
 promotion-grade model validation against baseline/cost/slippage/exit/regime evidence
-explicit cash-live feature-flag ownership/default/change-approval metadata
+external change-approval history for cash-live feature-flag changes
 
 2. Validate during next real paper-trading session
 

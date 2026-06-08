@@ -28,18 +28,37 @@ def test_feature_flag_inventory_discovers_authority_and_rollback_fields():
             ),
             encoding="utf-8",
         )
+        (base_dir / "ops").mkdir()
+        (base_dir / "ops" / "feature_flags.yml").write_text(
+            """
+version: feature_flag_metadata_v1
+flags:
+  LIVE_TRADING_ENABLED:
+    owner: operations
+    default: "false"
+    authority_level: high
+    rollback_action: "set false"
+    change_approval: "operator_required"
+  ML_AUTHORITY_MODE:
+    owner: ml_platform
+    default: "observe_only_compare"
+    authority_level: high
+    rollback_action: "set observe_only_compare"
+    change_approval: "operator_required"
+""",
+            encoding="utf-8",
+        )
         payload = build_feature_flag_inventory(base_dir=base_dir)
 
     names = {row["name"]: row for row in payload["flags"]}
     assert payload["ready"] is True
+    assert payload["metadata_count"] == 2
     assert "LIVE_TRADING_ENABLED" in names
     assert "ML_AUTHORITY_MODE" in names
     assert "SOME_API_KEY" not in names
     assert names["LIVE_TRADING_ENABLED"]["authority_level"] == "high"
-    assert (
-        names["ML_AUTHORITY_MODE"]["rollback_action"]
-        == "set to observe_only, compare, warn, or off"
-    )
+    assert names["ML_AUTHORITY_MODE"]["rollback_action"] == "set observe_only_compare"
+    assert names["ML_AUTHORITY_MODE"]["metadata_present"] is True
 
 
 def main():

@@ -5,6 +5,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+import yaml
+
 from services.config_audit_service import discover_env_var_references
 
 FLAG_TOKENS = (
@@ -58,19 +60,34 @@ def _rollback_action(name: str) -> str:
     return "restore documented default"
 
 
+def _load_metadata(base_dir: Path) -> dict[str, Any]:
+    path = base_dir / "ops" / "feature_flags.yml"
+    try:
+        payload = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    except Exception:
+        return {}
+    flags = payload.get("flags") if isinstance(payload, dict) else None
+    return flags if isinstance(flags, dict) else {}
+
+
 def build_feature_flag_inventory(*, base_dir: Path) -> dict[str, Any]:
     inventory = discover_env_var_references(base_dir)
+    metadata = _load_metadata(base_dir)
     rows = []
     for name, files in inventory["env_keys"].items():
         if not _is_feature_flag(name):
             continue
         file_list = list(files)
+        explicit = metadata.get(name) if isinstance(metadata.get(name), dict) else {}
         rows.append(
             {
                 "name": name,
-                "owner": _owner_from_files(file_list),
-                "authority_level": _authority_level(name),
-                "rollback_action": _rollback_action(name),
+                "owner": explicit.get("owner") or _owner_from_files(file_list),
+                "default": explicit.get("default"),
+                "authority_level": explicit.get("authority_level") or _authority_level(name),
+                "rollback_action": explicit.get("rollback_action") or _rollback_action(name),
+                "change_approval": explicit.get("change_approval"),
+                "metadata_present": bool(explicit),
                 "files": file_list,
                 "file_count": len(file_list),
             }
@@ -78,16 +95,20 @@ def build_feature_flag_inventory(*, base_dir: Path) -> dict[str, Any]:
     rows.sort(key=lambda row: (row["authority_level"], row["owner"], row["name"]))
     high_authority = [row for row in rows if row["authority_level"] == "high"]
     missing_rollback = [row["name"] for row in rows if not row["rollback_action"]]
+    high_missing_metadata = [row["name"] for row in high_authority if not row["metadata_present"]]
     return {
         "report_version": "feature_flag_inventory_v1",
         "runtime_effect": "diagnostic_only_no_runtime_config_change",
         "flag_count": len(rows),
         "high_authority_count": len(high_authority),
         "missing_rollback_count": len(missing_rollback),
+        "metadata_count": sum(1 for row in rows if row["metadata_present"]),
+        "high_authority_missing_metadata_count": len(high_missing_metadata),
+        "high_authority_missing_metadata": high_missing_metadata,
         "owners": {
             owner: sum(1 for row in rows if row["owner"] == owner)
             for owner in sorted({row["owner"] for row in rows})
         },
         "flags": rows,
-        "ready": bool(rows) and not missing_rollback,
+        "ready": bool(rows) and not missing_rollback and not high_missing_metadata,
     }

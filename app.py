@@ -147,6 +147,8 @@ from services.setup_context_service import (
 )
 from services.setup_engine_service import build_default_setup_engine_service
 from services.signal_models import SignalRuntimeState
+from services.signals import cooldowns as signal_cooldowns
+from services.signals import webhook_state
 from services.sizing_service import apply_final_sizing as apply_final_sizing  # noqa: F401
 from services.sizing_service import apply_size_cap
 from services.sizing_service import build_conviction_stack as build_conviction_stack  # noqa: F401
@@ -401,42 +403,34 @@ ALLOW_QUERY_STRING_SECRET = os.environ.get(
 
 
 def _webhook_dedupe_key(symbol, action, price):
-    """Build a loose duplicate key for near-identical TradingView alerts.
-
-    Price is rounded to 2 decimals so tiny floating-point formatting differences
-    do not bypass dedupe.
-    """
-    try:
-        price_key = f"{float(price):.2f}"
-    except Exception:
-        price_key = str(price)
-    return f"{symbol}:{action}:{price_key}"
+    return webhook_state.webhook_dedupe_key(symbol, action, price)
 
 
 def _is_duplicate_webhook(symbol, action, price):
-    """Return True if the same symbol/action/rounded-price arrived recently."""
-    try:
-        key = _webhook_dedupe_key(symbol, action, price)
-        return cooldown_repo.recent_webhook_seen(key, symbol, action, price, WEBHOOK_DEDUPE_SECONDS)
-    except Exception as e:
-        logger.error(f"_is_duplicate_webhook failed for {symbol}/{action}: {e}")
-        return False
+    return webhook_state.is_duplicate_webhook(
+        symbol=symbol,
+        action=action,
+        price=price,
+        cooldown_repository=cooldown_repo,
+        dedupe_seconds=WEBHOOK_DEDUPE_SECONDS,
+        log=logger,
+    )
 
 
 def _successful_buys_today(symbol):
-    try:
-        return trades_repo.successful_buys_today(symbol)
-    except Exception as e:
-        logger.error(f"_successful_buys_today failed for {symbol}: {e}")
-        return 0
+    return webhook_state.successful_buys_today(
+        symbol=symbol,
+        trades_repository=trades_repo,
+        log=logger,
+    )
 
 
 def _filled_buys_today(symbol):
-    try:
-        return trades_repo.filled_buys_today(symbol)
-    except Exception as e:
-        logger.error(f"_filled_buys_today failed for {symbol}: {e}")
-        return 0
+    return webhook_state.filled_buys_today(
+        symbol=symbol,
+        trades_repository=trades_repo,
+        log=logger,
+    )
 
 
 _last_order: dict = {}  # {(symbol, action): datetime in ET} — reset on restart
@@ -524,89 +518,62 @@ def _build_trend_table():
 
 
 def _hydrate_cooldowns():
-    try:
-        current_et = now_et()
-        rows = cooldown_repo.cooldown_rows()
-        loaded = 0
-        for symbol, action, ts_str in rows:
-            try:
-                ts = datetime.fromisoformat(ts_str)
-                if ts.tzinfo is None:
-                    ts = et.localize(ts)
-                if (current_et - ts).total_seconds() < 15 * 60:
-                    _last_order[(symbol, action)] = ts
-                    loaded += 1
-            except Exception as e:
-                logger.warning(f"_hydrate_cooldowns: skipping {symbol}/{action}: {e}")
-        logger.info(
-            f"Hydrated {loaded} active cooldowns from cooldowns table (of {len(rows)} total)"
-        )
-    except Exception as e:
-        logger.error(f"_hydrate_cooldowns failed: {e}")
+    signal_cooldowns.hydrate_cooldowns(
+        cooldown_repository=cooldown_repo,
+        last_order=_last_order,
+        current_et=now_et(),
+        et_timezone=et,
+        log=logger,
+    )
 
 
 def _hydrate_recent_sells():
-    try:
-        current_et = now_et()
-        rows = cooldown_repo.recent_sell_rows()
-        loaded = 0
-        for symbol, ts_str, price in rows:
-            try:
-                ts = datetime.fromisoformat(ts_str)
-                if ts.tzinfo is None:
-                    ts = et.localize(ts)
-                if (current_et - ts).total_seconds() < 30 * 60:
-                    _last_sell[symbol] = (ts, price)
-                    loaded += 1
-            except Exception as e:
-                logger.warning(f"_hydrate_recent_sells: skipping {symbol}: {e}")
-        logger.info(
-            f"Hydrated {loaded} recent sells from recent_sells table (of {len(rows)} total)"
-        )
-    except Exception as e:
-        logger.error(f"_hydrate_recent_sells failed: {e}")
+    signal_cooldowns.hydrate_recent_sells(
+        cooldown_repository=cooldown_repo,
+        last_sell=_last_sell,
+        current_et=now_et(),
+        et_timezone=et,
+        log=logger,
+    )
 
 
 def _read_cooldown(symbol, action):
-    try:
-        row = cooldown_repo.read_cooldown(symbol, action)
-        if not row:
-            return None
-        ts = datetime.fromisoformat(row[0])
-        if ts.tzinfo is None:
-            ts = et.localize(ts)
-        return ts
-    except Exception as e:
-        logger.error(f"_read_cooldown failed for {symbol}/{action}: {e}")
-        return None
+    return signal_cooldowns.read_cooldown(
+        symbol=symbol,
+        action=action,
+        cooldown_repository=cooldown_repo,
+        et_timezone=et,
+        log=logger,
+    )
 
 
 def _read_recent_sell(symbol):
-    try:
-        row = cooldown_repo.read_recent_sell(symbol)
-        if not row:
-            return None
-        ts = datetime.fromisoformat(row[0])
-        if ts.tzinfo is None:
-            ts = et.localize(ts)
-        return (ts, row[1])
-    except Exception as e:
-        logger.error(f"_read_recent_sell failed for {symbol}: {e}")
-        return None
+    return signal_cooldowns.read_recent_sell(
+        symbol=symbol,
+        cooldown_repository=cooldown_repo,
+        et_timezone=et,
+        log=logger,
+    )
 
 
 def _write_cooldown(symbol, action, ts):
-    try:
-        cooldown_repo.write_cooldown(symbol, action, ts.isoformat())
-    except Exception as e:
-        logger.error(f"_write_cooldown failed for {symbol}/{action}: {e}")
+    signal_cooldowns.write_cooldown(
+        symbol=symbol,
+        action=action,
+        ts=ts,
+        cooldown_repository=cooldown_repo,
+        log=logger,
+    )
 
 
 def _write_recent_sell(symbol, ts, price):
-    try:
-        cooldown_repo.write_recent_sell(symbol, ts.isoformat(), price)
-    except Exception as e:
-        logger.error(f"_write_recent_sell failed for {symbol}: {e}")
+    signal_cooldowns.write_recent_sell(
+        symbol=symbol,
+        ts=ts,
+        price=price,
+        cooldown_repository=cooldown_repo,
+        log=logger,
+    )
 
 
 def _refresh_signal_history(symbol):

@@ -45,11 +45,18 @@ def run_model_validation_governance_report(
 
     print()
     print("Blockers")
-    if payload["blockers"]:
-        for blocker in payload["blockers"]:
+    all_blockers = payload["blockers"] + payload["promotion_evidence_blockers"]
+    if all_blockers:
+        for blocker in all_blockers:
             print(f"  - {blocker}")
     else:
         print("  none")
+
+    print()
+    print("Promotion Evidence")
+    for row in payload["promotion_evidence"]:
+        status = "ready" if row["ready"] else "missing_or_not_ready"
+        print(f"  {row['name']:<30} {status:<20} {row['path']}")
 
     print()
     for note in payload["notes"]:

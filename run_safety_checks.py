@@ -31,6 +31,7 @@ SAFETY_TESTS = [
     "tests/test_database_backup_service.py",
     "tests/test_observability_health_checks.py",
     "tests/test_external_readiness_services.py",
+    "tests/test_remaining_assessment_services.py",
     "tests/test_local_load_probe_service.py",
     "tests/test_paper_replay_load_probe_service.py",
     "tests/test_incident_workflow_service.py",

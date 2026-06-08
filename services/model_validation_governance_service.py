@@ -10,6 +10,14 @@ from ml_platform.config import MODEL_REGISTRY_PATH, MODEL_ROOT
 
 DEFAULT_HISTORICAL_CANDIDATE_DIR = MODEL_ROOT / "historical_bar_patterns_v1" / "candidates"
 LIVE_AUTHORITY_STATUSES = {"live", "live_gate", "live_block", "production"}
+DEFAULT_PROMOTION_EVIDENCE_DIR = Path("ops/model_promotion_evidence")
+REQUIRED_PROMOTION_EVIDENCE = {
+    "baseline_comparison.json": "baseline comparison",
+    "cost_slippage_exit_analysis.json": "cost/slippage/exit analysis",
+    "regime_stability.json": "regime stability",
+    "live_observation_window.json": "live observation window",
+    "operator_approval.json": "explicit operator approval",
+}
 
 
 def _read_json(path: Path) -> dict[str, Any] | None:
@@ -53,12 +61,14 @@ def build_model_validation_governance_payload(
     *,
     candidate_dir: Path | None = None,
     registry_path: Path | None = None,
+    promotion_evidence_dir: Path | None = None,
     min_rows: int = 5000,
     min_symbols: int = 20,
     min_accuracy: float = 0.50,
 ) -> dict[str, Any]:
     candidate_dir = candidate_dir or DEFAULT_HISTORICAL_CANDIDATE_DIR
     registry_path = registry_path or MODEL_REGISTRY_PATH
+    promotion_evidence_dir = promotion_evidence_dir or DEFAULT_PROMOTION_EVIDENCE_DIR
     candidates = _latest_historical_candidates(candidate_dir)
     assessed = []
     blockers: list[str] = []
@@ -107,20 +117,45 @@ def build_model_validation_governance_payload(
     if live_entries:
         blockers.append("registry:live_authority_status_present")
 
+    promotion_evidence = []
+    promotion_evidence_blockers = []
+    for filename, label in REQUIRED_PROMOTION_EVIDENCE.items():
+        path = promotion_evidence_dir / filename
+        payload = _read_json(path) if path.exists() else None
+        valid = bool(payload and payload.get("ready") is True)
+        if not valid:
+            promotion_evidence_blockers.append(f"promotion_evidence:{filename}")
+        promotion_evidence.append(
+            {
+                "name": label,
+                "path": str(path),
+                "present": path.exists(),
+                "ready": valid,
+            }
+        )
+
     ready_count = sum(1 for row in assessed if row["status"] == "observe_only_ready")
     return {
         "report_version": "model_validation_governance_v1",
         "runtime_effect": "diagnostic_only_no_registry_or_runtime_authority_change",
         "candidate_dir": str(candidate_dir),
         "registry_path": str(registry_path),
+        "promotion_evidence_dir": str(promotion_evidence_dir),
         "labels_assessed": len(assessed),
         "ready_label_count": ready_count,
         "registry_entry_count": len(registry_entries),
         "live_registry_entry_count": len(live_entries),
         "candidates": sorted(assessed, key=lambda row: str(row["label_target"])),
+        "promotion_evidence": promotion_evidence,
+        "promotion_evidence_blockers": promotion_evidence_blockers,
         "blockers": blockers,
         "ready_for_observe_only_validation": ready_count > 0 and not live_entries,
-        "ready_for_live_promotion": False,
+        "ready_for_live_promotion": bool(
+            ready_count > 0
+            and not live_entries
+            and not blockers
+            and not promotion_evidence_blockers
+        ),
         "notes": [
             "This report cannot promote models or load runtime artifacts.",
             "Live promotion remains blocked without explicit operator approval and session evidence.",

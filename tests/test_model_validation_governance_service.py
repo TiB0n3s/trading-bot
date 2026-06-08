@@ -81,10 +81,37 @@ def test_model_validation_governance_blocks_live_registry_status():
     assert payload["live_registry_entry_count"] == 1
 
 
+def test_model_validation_governance_requires_promotion_evidence_for_live_readiness():
+    with TemporaryDirectory() as tmp:
+        base = Path(tmp)
+        candidate_dir = base / "candidates"
+        evidence_dir = base / "evidence"
+        candidate_dir.mkdir()
+        evidence_dir.mkdir()
+        registry_path = base / "registry.json"
+        registry_path.write_text(json.dumps({"entries": {}}), encoding="utf-8")
+        _write_diag(candidate_dir, label="triple_barrier_label")
+
+        payload = build_model_validation_governance_payload(
+            candidate_dir=candidate_dir,
+            registry_path=registry_path,
+            promotion_evidence_dir=evidence_dir,
+            min_rows=5000,
+            min_symbols=20,
+            min_accuracy=0.50,
+        )
+
+    assert payload["ready_for_observe_only_validation"] is True
+    assert payload["ready_for_live_promotion"] is False
+    assert payload["promotion_evidence_blockers"]
+    assert len(payload["promotion_evidence"]) == 5
+
+
 def main():
     tests = [
         test_model_validation_governance_accepts_observe_only_candidates,
         test_model_validation_governance_blocks_live_registry_status,
+        test_model_validation_governance_requires_promotion_evidence_for_live_readiness,
     ]
     for test in tests:
         test()

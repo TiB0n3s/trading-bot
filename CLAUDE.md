@@ -169,18 +169,24 @@ Recent completed roadmap items:
   `ops_check.py paper-replay-load-probe --requests N --concurrency N --symbol AAPL --action buy`.
   This extends the local route probe with SQLite signal/fill callback writes
   while still avoiding broker orders.
+- Full-session paper replay cadence planning and bounded local execution are
+  available through `ops_check.py full-session-paper-replay`.
 - Local incident records are available through
   `ops_check.py incident-workflow --title "brief title" --severity medium --create`.
   Records are written under `ops/incidents/` and should link job runs, logs,
   order/fill evidence, learning artifacts, model artifacts, and commits.
+- Incident escalation readiness is available through
+  `ops_check.py incident-escalation-readiness`.
 - Feature-flag inventory is available through `ops_check.py feature-flags`.
   It infers owner, authority level, and rollback action from static env-var
   references; cash-live promotion still requires explicit human ownership and
   default/change-approval metadata for high-authority flags.
+- Feature-flag change-history validation is available through
+  `ops_check.py feature-flag-change-history`.
 - Consolidated model-governance diagnostics are available through
   `ops_check.py model-governance`. This report checks candidate diagnostics,
-  observe-only runtime effect, basic quality thresholds, and registry
-  live-status blockers; it cannot promote or load models.
+  observe-only runtime effect, basic quality thresholds, promotion evidence
+  placeholders, and registry live-status blockers; it cannot promote or load models.
 - External observability and secrets-manager readiness are checked with
   `ops_check.py external-observability-readiness` and
   `ops_check.py secrets-manager-readiness`. These reports validate metadata
@@ -1382,9 +1388,13 @@ lightweight observability summary through `ops_check.py observability-health`
 local secrets-hygiene diagnostic
 local webhook burst diagnostic through `ops_check.py local-load-probe`
 temporary-DB paper replay/load diagnostic through `ops_check.py paper-replay-load-probe`
+full-session paper replay diagnostic through `ops_check.py full-session-paper-replay`
 local incident/postmortem workflow through `ops_check.py incident-workflow`
+incident escalation readiness through `ops_check.py incident-escalation-readiness`
 feature-flag inventory through `ops_check.py feature-flags`
+feature-flag change-history validation through `ops_check.py feature-flag-change-history`
 consolidated model-governance diagnostic through `ops_check.py model-governance`
+packaged entrypoint validation through `ops_check.py packaged-entrypoints`
 external observability readiness through `ops_check.py external-observability-readiness`
 external secrets manager readiness through `ops_check.py secrets-manager-readiness`
 
@@ -1396,6 +1406,7 @@ full-day paper replay with realistic market-data cadence
 external incident escalation/review process
 promotion-grade model validation against baseline/cost/slippage/exit/regime evidence
 external change-approval history for cash-live feature-flag changes
+real paper-session evidence proving the checks stay stable under market cadence
 
 2. Validate during next real paper-trading session
 

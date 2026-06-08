@@ -62,9 +62,21 @@ items have since been implemented:
 - **Paper replay/load probe**: `ops_check.py paper-replay-load-probe` exercises
   webhook routing plus temporary SQLite signal/fill writes without broker
   orders.
+- **Full-session paper replay**: `ops_check.py full-session-paper-replay`
+  plans regular-session replay cadence and can execute bounded local callback
+  and database probes without broker orders.
+- **Incident escalation readiness**:
+  `ops_check.py incident-escalation-readiness` validates escalation metadata
+  and alert-destination environment without sending alerts.
 - **Explicit high-authority flag metadata**: `ops/feature_flags.yml` documents
   owner, default, authority level, rollback action, and approval rule for
   high-authority cash-live flags.
+- **Feature-flag change history**:
+  `ops_check.py feature-flag-change-history` validates the JSONL audit trail
+  used for cash-live flag changes.
+- **Packaged entrypoint validation**: `ops_check.py packaged-entrypoints`
+  verifies package app factory/startup imports, WSGI importability, and the
+  current root compatibility shim size.
 - **Phase 2 web-runtime extraction**: `src/trading_bot/web/app_factory.py` now
   owns Flask app construction and route registration mechanics. Root `app.py`
   remains the deployed runtime compatibility context while runtime callbacks and
@@ -89,21 +101,27 @@ These remain valid roadmap items before any cash-live promotion:
      `ops_check.py local-load-probe`.
    - Temporary-DB replay/fill callback coverage is available through
      `ops_check.py paper-replay-load-probe`.
-   - Remaining gap: full-day replay with realistic market-data cadence.
+   - Regular-session replay planning and bounded execution are available
+     through `ops_check.py full-session-paper-replay`.
+   - Remaining gap: collect a real full-day paper-session evidence record.
 4. **Incident management**
    - Local incident templates and records exist.
-   - Remaining gap: external alert escalation and a required review process for
-     cash-live incidents.
+   - Escalation metadata can be checked locally.
+   - Remaining external action: configure real alert destinations and enforce
+     review outside the repo for cash-live incidents.
 5. **Model validation governance**
    - A consolidated diagnostic governance report exists.
-   - Remaining gap: promotion-grade comparison against baseline behavior,
-     costs, slippage, exits, and regime stability across the required live
-     observation window.
+   - Promotion evidence placeholders are explicitly checked for baseline,
+     cost/slippage/exit, regime, live-observation, and operator-approval
+     artifacts.
+   - Remaining gap: populate those evidence artifacts from real paper-session
+     observations.
 6. **Feature flags and kill switches**
    - Local feature-flag inventory exists with inferred ownership, authority
      level, and rollback action.
    - High-authority flag metadata exists in `ops/feature_flags.yml`.
-   - Remaining external action: maintain change-approval history when flags are
+   - JSONL change-history validation exists.
+   - Remaining external action: append approved change records when flags are
      changed for cash-live testing.
 7. **Architecture surface reduction**
    - The package skeleton and audit metrics exist, but runtime implementations
@@ -112,9 +130,10 @@ These remain valid roadmap items before any cash-live promotion:
    - Current Phase 2 status: app factory and route registration moved into
      `src/trading_bot/web/app_factory.py`, and startup-service wiring moved
      into `src/trading_bot/runtime/startup.py`; app-specific runtime settings
-     parsing moved into `src/trading_bot/config/runtime.py`; remaining work is
-     root `app.py` shim reduction, runtime callback extraction, and packaged
-     Gunicorn/systemd entrypoint validation.
+     parsing moved into `src/trading_bot/config/runtime.py`; packaged entrypoint
+     import validation exists through `ops_check.py packaged-entrypoints`.
+     Remaining work is root `app.py` shim reduction and runtime callback
+     extraction.
 
 ## Documentation Rule
 

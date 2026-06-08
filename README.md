@@ -20,12 +20,12 @@ As of the latest roadmap work:
 - Daily intelligence pipeline creates `daily_symbol_context`, `daily_symbol_events`, `daily_symbol_predictions`, `strong_day_participation`, trend context, and prediction-validation reports.
 - `ops_check.py external-symbol-discovery START_DATE --end-date YYYY-MM-DD` reviews event references to non-approved symbols, separates configured context-only symbols from unknown external symbols, shows linked approved symbols, source reliability, examples, and whether a symbol should remain context-only/watch-only or be reviewed for context/approval. This report is advisory-only and cannot expand the trade universe automatically.
 - `pipeline/external_symbol_candidate_refresh.py --date YYYY-MM-DD` turns repeated unknown external-symbol findings into a research-only candidate queue, can run bounded Polygon historical backfill for eligible symbols, and then marks each symbol as context-only, backfill-pending, training-pending, review-ready, pooled, or rejected. `ops_check.py external-symbol-candidates` inspects this queue. Candidate status never grants trading authority or updates `SYMBOL_CONFIG`.
-- `ops_check.py` includes performance, runtime, resource, and persistence diagnostics such as `observability-health`, `external-observability-readiness`, `runtime-health`, `database-backups`, `local-load-probe`, `paper-replay-load-probe`, `incident-workflow`, `feature-flags`, `model-governance`, `secrets-manager-readiness`, `resource-readiness`, `lifecycle-analysis`, `setup-breakdown`, `conviction-stack-report`, `conviction-persistence-health`, `peak-bucket-report`, `winner-became-loser`, and prediction validation.
+- `ops_check.py` includes performance, runtime, resource, and persistence diagnostics such as `observability-health`, `external-observability-readiness`, `runtime-health`, `database-backups`, `local-load-probe`, `paper-replay-load-probe`, `full-session-paper-replay`, `incident-workflow`, `incident-escalation-readiness`, `feature-flags`, `feature-flag-change-history`, `model-governance`, `packaged-entrypoints`, `secrets-manager-readiness`, `resource-readiness`, `lifecycle-analysis`, `setup-breakdown`, `conviction-stack-report`, `conviction-persistence-health`, `peak-bucket-report`, `winner-became-loser`, and prediction validation.
 - `ops_check.py config-audit` inventories remaining raw env-var access, validates typed config factories, and flags unsafe runtime defaults such as default webhook secrets, query-string secrets, cash mode without live-trading enablement, or unbacked live ML authority. This report is diagnostic-only and does not change runtime configuration.
 - `ops_check.py secrets-hygiene` checks local secret-storage hygiene without printing secret values, including `/etc/trading-bot.env` permissions, repo-local env files, `.gitignore` coverage, and Dockerfile leakage risk.
 - `ops_check.py architecture-surface` measures root/module sprawl, oversized decision files, raw env access, and `src/trading_bot` migration skeleton readiness. It is diagnostic-only and supports the cleanup plan in `ops/compatibility_deletion_plan.md`.
 - Development guardrails are active: `.github/workflows/ci.yml` runs compile checks plus `run_safety_checks.py` on push/PR, and `.pre-commit-config.yaml` runs Ruff plus the same fast safety harness before commits.
-- `ops/project_audit_followup_2026-06-08.md` reconciles the external project-audit/missing-tools notes with the current repo state. CI, local pre-commit guardrails, core safety tests, dependency split, config audit, database backup verification, local observability, local secrets hygiene, load probes, incident workflow, model-governance diagnostics, and feature-flag inventory/metadata are implemented. Remaining items are external service configuration and longer-duration paper-session validation.
+- `ops/project_audit_followup_2026-06-08.md` reconciles the external project-audit/missing-tools notes with the current repo state. CI, local pre-commit guardrails, core safety tests, dependency split, config audit, database backup verification, local observability, local secrets hygiene, replay/load probes, incident workflow/escalation readiness, model-governance evidence checks, feature-flag inventory/metadata/change-history validation, and packaged-entrypoint validation are implemented. Remaining items are external service configuration and real-session evidence collection.
 - Approved BUY audit persistence records final sizing attribution, dominant limiter, active cap-derived effective cap, ML prediction bucket/score, buy-opportunity recommendation, strategy score, session label, and setup policy action.
 - `db_migrations.py` provides the idempotent migration runner; app startup no longer owns schema `ALTER TABLE` work.
 - `feature_snapshots`, `decision_snapshots`, `rejected_signal_outcomes`, `exit_snapshots`, `matched_trades`, and related report tables support ML governance, counterfactual coverage, lifecycle analysis, and replay validation.
@@ -1226,10 +1226,14 @@ python3 ops_check.py prediction-validation
 python3 ops_check.py runtime-health YYYY-MM-DD
 python3 ops_check.py local-load-probe --requests 100 --concurrency 4 --symbol AAPL --action buy
 python3 ops_check.py paper-replay-load-probe --requests 100 --concurrency 4 --symbol AAPL --action buy
+python3 ops_check.py full-session-paper-replay --symbols AAPL,MSFT --execute --max-requests 1000
 python3 ops_check.py incident-workflow --title "brief title" --severity medium --create
+python3 ops_check.py incident-escalation-readiness
 python3 ops_check.py config-audit
 python3 ops_check.py feature-flags --limit 40
+python3 ops_check.py feature-flag-change-history
 python3 ops_check.py model-governance --min-rows 5000 --min-symbols 20 --min-accuracy 0.50
+python3 ops_check.py packaged-entrypoints
 python3 ops_check.py external-observability-readiness
 python3 ops_check.py secrets-manager-readiness
 python3 ops_check.py architecture-surface
@@ -1653,9 +1657,13 @@ lightweight observability summary through `ops_check.py observability-health`
 local secrets-hygiene diagnostic
 local webhook burst diagnostic through `ops_check.py local-load-probe`
 temporary-DB paper replay/load diagnostic through `ops_check.py paper-replay-load-probe`
+full-session paper replay diagnostic through `ops_check.py full-session-paper-replay`
 local incident/postmortem workflow through `ops_check.py incident-workflow`
+incident escalation readiness through `ops_check.py incident-escalation-readiness`
 feature-flag inventory through `ops_check.py feature-flags`
+feature-flag change-history validation through `ops_check.py feature-flag-change-history`
 consolidated model-governance diagnostic through `ops_check.py model-governance`
+packaged entrypoint validation through `ops_check.py packaged-entrypoints`
 external observability readiness through `ops_check.py external-observability-readiness`
 external secrets manager readiness through `ops_check.py secrets-manager-readiness`
 
@@ -1667,6 +1675,7 @@ full-day paper replay with realistic market-data cadence
 external incident escalation/review process
 promotion-grade model validation against baseline/cost/slippage/exit/regime evidence
 external change-approval history for cash-live feature-flag changes
+real paper-session evidence proving the checks stay stable under market cadence
 
 2. Validate next real paper-trading session
 

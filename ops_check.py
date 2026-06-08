@@ -57,9 +57,13 @@ Usage:
   python3 ops_check.py database-backups
   python3 ops_check.py local-load-probe [--requests N] [--concurrency N] [--symbol AAPL] [--action buy]
   python3 ops_check.py paper-replay-load-probe [--requests N] [--concurrency N] [--symbol AAPL] [--action buy]
+  python3 ops_check.py full-session-paper-replay [--symbols AAPL,MSFT] [--execute] [--max-requests N]
   python3 ops_check.py incident-workflow --title "brief title" [--severity low|medium|high|critical] [--create]
+  python3 ops_check.py incident-escalation-readiness
   python3 ops_check.py external-observability-readiness
   python3 ops_check.py secrets-manager-readiness
+  python3 ops_check.py feature-flag-change-history
+  python3 ops_check.py packaged-entrypoints
   python3 ops_check.py resource-readiness
   python3 ops_check.py advanced-alpha-readiness
   python3 ops_check.py advanced-alpha-comparison
@@ -179,8 +183,14 @@ from services.ops_checks.external_symbol_candidate_checks import run_external_sy
 from services.ops_checks.external_symbol_discovery_checks import run_external_symbol_discovery
 from services.ops_checks.feature_attribution_checks import run_feature_attribution_report
 from services.ops_checks.feature_checks import run_feature_health, run_feature_watch
+from services.ops_checks.feature_flag_change_history_checks import (
+    run_feature_flag_change_history_report,
+)
 from services.ops_checks.feature_flag_inventory_checks import run_feature_flag_inventory_report
 from services.ops_checks.friction_heatmap_checks import run_friction_heatmap
+from services.ops_checks.full_session_paper_replay_checks import (
+    run_full_session_paper_replay_report,
+)
 from services.ops_checks.historical_bar_archive_checks import run_historical_bar_archive
 from services.ops_checks.historical_bar_coverage_checks import run_historical_bar_coverage
 from services.ops_checks.historical_bar_model_checks import (
@@ -197,6 +207,9 @@ from services.ops_checks.historical_bar_progress_checks import run_historical_ba
 from services.ops_checks.historical_bar_readiness_checks import run_historical_bar_readiness
 from services.ops_checks.historical_bar_validation_checks import (
     run_historical_bar_validation,
+)
+from services.ops_checks.incident_escalation_readiness_checks import (
+    run_incident_escalation_readiness_report,
 )
 from services.ops_checks.incident_workflow_checks import run_incident_workflow_report
 from services.ops_checks.intelligence_checks import run_intelligence_summary
@@ -224,6 +237,9 @@ from services.ops_checks.operator_intelligence_dashboard_checks import (
     run_operator_intelligence_dashboard,
 )
 from services.ops_checks.order_checks import run_order_health
+from services.ops_checks.packaged_entrypoint_validation_checks import (
+    run_packaged_entrypoint_validation_report,
+)
 from services.ops_checks.paper_learning_authority_checks import (
     run_paper_learning_authority_report,
 )
@@ -793,12 +809,40 @@ def paper_replay_load_probe():
     )
 
 
+def full_session_paper_replay():
+    symbols = tuple(
+        symbol.strip().upper()
+        for symbol in _str_option("--symbols", "AAPL").split(",")
+        if symbol.strip()
+    )
+    return run_full_session_paper_replay_report(
+        symbols=symbols,
+        events_per_symbol_per_minute=_int_option("--events-per-minute", 1),
+        session_minutes=_int_option("--session-minutes", 390),
+        concurrency=_int_option("--concurrency", 4),
+        execute="--execute" in sys.argv,
+        max_execute_requests=_int_option("--max-requests", 1000),
+    )
+
+
 def external_observability_readiness():
     return run_external_observability_readiness_report()
 
 
 def secrets_manager_readiness():
     return run_secrets_manager_readiness_report()
+
+
+def incident_escalation_readiness():
+    return run_incident_escalation_readiness_report(base_dir=BASE_DIR)
+
+
+def feature_flag_change_history():
+    return run_feature_flag_change_history_report(base_dir=BASE_DIR)
+
+
+def packaged_entrypoints():
+    return run_packaged_entrypoint_validation_report(base_dir=BASE_DIR)
 
 
 def incident_workflow():

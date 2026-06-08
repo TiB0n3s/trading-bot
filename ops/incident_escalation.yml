@@ -1,0 +1,25 @@
+version: incident_escalation_v1
+cash_live_review_required: true
+contacts:
+  - role: primary_operator
+    channel: local_console
+    escalation_window_minutes: 15
+severity_rules:
+  critical:
+    requires_external_alert: true
+    requires_postmortem: true
+    examples:
+      - live_order_submitted_unexpectedly
+      - broker_connection_loop_failure
+  high:
+    requires_external_alert: true
+    requires_postmortem: true
+    examples:
+      - repeated_job_failures
+      - model_authority_guard_violation
+  medium:
+    requires_external_alert: false
+    requires_postmortem: true
+  low:
+    requires_external_alert: false
+    requires_postmortem: false

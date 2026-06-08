@@ -7,13 +7,12 @@ opportunities and selection bias explicitly.
 
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass, field
 import json
+from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from typing import Any
 
 from repositories.candidate_universe_repo import CandidateUniverseRepository
-
 
 CANDIDATE_UNIVERSE_CONTRACT_VERSION = "candidate_universe_v1"
 ALLOWED_CANDIDATE_KINDS = {"entry", "exit"}

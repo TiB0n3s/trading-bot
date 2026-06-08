@@ -7,12 +7,11 @@ coverage for calibration, replay, and future authority promotion work.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 import json
+from dataclasses import dataclass
 from typing import Any, Iterable
 
-from services.candidate_outcome_coverage_service import summarize_candidate_outcome_coverage
-
+from services.intelligence.candidates.outcome_coverage import summarize_candidate_outcome_coverage
 
 LEARNING_READINESS_REPORT_VERSION = "learning_readiness_v1"
 LEARNING_READINESS_RUNTIME_EFFECT = "diagnostic_only_no_live_authority"
@@ -157,9 +156,8 @@ def _integrated_outcome_progress(
     fully_integrated = 0
     for row in rows_with_outcome:
         canonical = _canonical(row)
-        pattern_value = (
-            row.get("symbol_pattern")
-            or _path(canonical, "pattern_state", "pattern_label")
+        pattern_value = row.get("symbol_pattern") or _path(
+            canonical, "pattern_state", "pattern_label"
         )
         has_pattern = _meaningful(pattern_value, default_values=pattern_defaults)
         momentum_values = [
@@ -169,8 +167,7 @@ def _integrated_outcome_progress(
             row.get("session_trend_label"),
         ]
         has_momentum = any(
-            _meaningful(value, default_values=momentum_defaults)
-            for value in momentum_values
+            _meaningful(value, default_values=momentum_defaults) for value in momentum_values
         )
         prediction_values = [
             _path(canonical, "prediction_state", "ml_bucket"),
@@ -181,8 +178,7 @@ def _integrated_outcome_progress(
             row.get("prediction_score"),
         ]
         has_prediction = any(
-            _meaningful(value, default_values=prediction_defaults)
-            for value in prediction_values
+            _meaningful(value, default_values=prediction_defaults) for value in prediction_values
         )
         if has_pattern:
             pattern_rows += 1
@@ -270,9 +266,7 @@ def _learning_effect_summary(
         "symbol_buy_opportunity_context",
         "symbol_session_trend_context",
     )
-    nonempty_context_sections = sum(
-        1 for section in context_sections if memory.get(section)
-    )
+    nonempty_context_sections = sum(1 for section in context_sections if memory.get(section))
     return {
         "strategy_memory_available": bool(memory),
         "strategy_memory_generated_at": memory.get("generated_at"),
@@ -342,17 +336,12 @@ def build_learning_readiness_payload(
         + int(lifecycle_summary.get("approved_matched_exit_missing_snapshot") or 0)
         + int(lifecycle_summary.get("approved_open_or_unlinked_exit") or 0)
     )
-    rejected_trade_backed = (
-        int(lifecycle_summary.get("rejected_with_counterfactual") or 0)
-        + int(lifecycle_summary.get("rejected_without_counterfactual") or 0)
+    rejected_trade_backed = int(lifecycle_summary.get("rejected_with_counterfactual") or 0) + int(
+        lifecycle_summary.get("rejected_without_counterfactual") or 0
     )
     rows_with_outcome = int(pattern_summary.get("rows_with_outcome") or 0)
     if not rows_with_outcome:
-        rows_with_outcome = sum(
-            1
-            for row in rows
-            if _outcome(row) is not None
-        )
+        rows_with_outcome = sum(1 for row in rows if _outcome(row) is not None)
     progress = _integrated_outcome_progress(
         rows,
         full_readiness_target=full_readiness_target,
@@ -397,11 +386,7 @@ def build_learning_readiness_payload(
     if rows and not learning_effect["decision_policy_rows"]:
         blockers.append("decision_policy_learning_effect_not_recorded")
 
-    not_ready_features = [
-        item
-        for item in guardrails
-        if item.get("status") == "not_ready"
-    ]
+    not_ready_features = [item for item in guardrails if item.get("status") == "not_ready"]
     candidate_features = [
         item
         for item in guardrails
@@ -421,31 +406,39 @@ def build_learning_readiness_payload(
         "readiness_stage": stage,
         "sessions_with_lifecycle_rows": sessions,
         "rows_with_outcome": rows_with_outcome,
-        "clean_for_authority_promotion": (
-            stage == "authority_candidate_review" and not blockers
-        ),
+        "clean_for_authority_promotion": (stage == "authority_candidate_review" and not blockers),
         "authority_note": "diagnostic only; this report cannot approve, size, or execute trades",
     }
 
     next_actions = []
     if "runtime_health_not_clean" in blockers:
-        next_actions.append("run runtime-health/runtime-health-trend and clear failed or launcher-error jobs")
+        next_actions.append(
+            "run runtime-health/runtime-health-trend and clear failed or launcher-error jobs"
+        )
     if "missing_runtime_job_runs" in blockers:
         next_actions.append("confirm scheduled jobs are using job_runner.py and writing job_runs")
     if "missing_outcome_rows" in blockers:
-        next_actions.append("wait for or backfill realized/forward outcomes before drawing expectancy conclusions")
+        next_actions.append(
+            "wait for or backfill realized/forward outcomes before drawing expectancy conclusions"
+        )
     if "rejected_forward_outcome_coverage_below_80pct" in blockers:
-        next_actions.append("backfill rejected_signal_outcomes before trusting counterfactual analysis")
+        next_actions.append(
+            "backfill rejected_signal_outcomes before trusting counterfactual analysis"
+        )
     if "approved_exit_link_rate_below_80pct" in blockers:
         next_actions.append("classify open positions versus missing exit snapshot linkage")
     if "missing_candidate_universe_rows" in blockers:
         next_actions.append("verify candidate-universe capture is running with scope=all")
     if "candidate_forward_outcome_coverage_below_80pct" in blockers:
-        next_actions.append("run candidate-outcome-backfill until candidate forward-outcome coverage is at least 80%")
+        next_actions.append(
+            "run candidate-outcome-backfill until candidate forward-outcome coverage is at least 80%"
+        )
     if "no_ready_calibration_buckets" in blockers:
         next_actions.append("collect more outcomes before using bucket calibration for promotion")
     if "missing_fully_integrated_pattern_momentum_prediction_outcomes" in blockers:
-        next_actions.append("verify canonical rows include outcome + pattern + momentum + prediction fields")
+        next_actions.append(
+            "verify canonical rows include outcome + pattern + momentum + prediction fields"
+        )
     if "strategy_memory_artifact_missing" in blockers:
         next_actions.append("run strategy_learner.py after close so live policy has learned memory")
     if "strategy_memory_has_no_trade_rows" in blockers:
@@ -470,10 +463,16 @@ def build_learning_readiness_payload(
             "job_count": len(runtime.get("jobs") or []),
             "clean": bool(runtime.get("clean")),
             "failures": sum(int(job.get("failures") or 0) for job in runtime.get("jobs") or []),
-            "launcher_errors": sum(int(job.get("launcher_errors") or 0) for job in runtime.get("jobs") or []),
+            "launcher_errors": sum(
+                int(job.get("launcher_errors") or 0) for job in runtime.get("jobs") or []
+            ),
             "lock_skips": sum(int(job.get("lock_skips") or 0) for job in runtime.get("jobs") or []),
-            "zero_row_successes": sum(int(job.get("zero_row_successes") or 0) for job in runtime.get("jobs") or []),
-            "rows_written": sum(int(job.get("rows_written") or 0) for job in runtime.get("jobs") or []),
+            "zero_row_successes": sum(
+                int(job.get("zero_row_successes") or 0) for job in runtime.get("jobs") or []
+            ),
+            "rows_written": sum(
+                int(job.get("rows_written") or 0) for job in runtime.get("jobs") or []
+            ),
         },
         candidate_universe={
             **candidate,

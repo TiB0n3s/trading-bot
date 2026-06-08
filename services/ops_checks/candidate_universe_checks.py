@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-from pathlib import Path
 import json
+from pathlib import Path
 
 from repositories.candidate_universe_repo import CandidateUniverseRepository
 from repositories.lifecycle_analysis_repo import LifecycleAnalysisRepository
-from services.candidate_universe_service import CANDIDATE_UNIVERSE_CONTRACT_VERSION
+from services.intelligence.candidates.universe import CANDIDATE_UNIVERSE_CONTRACT_VERSION
 from services.lifecycle_analysis_service import LifecycleAnalysisService
 
 
@@ -94,7 +94,10 @@ def run_candidate_universe_report(
             bid_ask_rows += 1
         if _nested(payload, "spread_pct") is not None:
             spread_rows += 1
-        if payload.get("forward_reference_price_source") == "first_bar_close_at_or_after_candidate_ts":
+        if (
+            payload.get("forward_reference_price_source")
+            == "first_bar_close_at_or_after_candidate_ts"
+        ):
             fallback_reference_rows += 1
 
     lifecycle = LifecycleAnalysisService(LifecycleAnalysisRepository(db_path))
@@ -111,7 +114,9 @@ def run_candidate_universe_report(
     for row in rows:
         matched = by_hash.get(row.get("canonical_intelligence_hash"))
         payload = _load_json(row.get("candidate_json"))
-        candidate_payload = payload.get("candidate") if isinstance(payload.get("candidate"), dict) else {}
+        candidate_payload = (
+            payload.get("candidate") if isinstance(payload.get("candidate"), dict) else {}
+        )
         pattern = (
             (matched or {}).get("symbol_pattern")
             or candidate_payload.get("symbol_pattern")
@@ -136,18 +141,22 @@ def run_candidate_universe_report(
             else:
                 proven_bad += 1
         if row.get("candidate_status") != "taken" and mfe is not None and mfe > 0:
-            top_missed.append({
-                "candidate_ts": row.get("candidate_ts"),
-                "symbol": row.get("symbol"),
-                "candidate_status": row.get("candidate_status"),
-                "score": row.get("score"),
-                "threshold_distance": row.get("threshold_distance"),
-                "pattern": pattern,
-                "mfe": mfe,
-                "return": ret,
-                "reason": row.get("reason"),
-            })
-    top_missed.sort(key=lambda item: (-float(item.get("mfe") or 0.0), str(item.get("candidate_ts") or "")))
+            top_missed.append(
+                {
+                    "candidate_ts": row.get("candidate_ts"),
+                    "symbol": row.get("symbol"),
+                    "candidate_status": row.get("candidate_status"),
+                    "score": row.get("score"),
+                    "threshold_distance": row.get("threshold_distance"),
+                    "pattern": pattern,
+                    "mfe": mfe,
+                    "return": ret,
+                    "reason": row.get("reason"),
+                }
+            )
+    top_missed.sort(
+        key=lambda item: (-float(item.get("mfe") or 0.0), str(item.get("candidate_ts") or ""))
+    )
 
     print(f"scored                 : {scored}")
     print(f"near_threshold         : {near_threshold}")

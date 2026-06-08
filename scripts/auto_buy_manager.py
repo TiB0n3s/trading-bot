@@ -79,8 +79,8 @@ from repositories.candidate_universe_repo import CandidateUniverseRepository
 from repositories.prediction_repo import PredictionRepository
 from risk.exposure import any_cluster_limit_hit, cluster_exposure
 from services.ai_momentum_pattern_service import deterministic_momentum_pattern
-from services.candidate_reference_service import candidate_reference_service
-from services.candidate_universe_service import CandidateUniverseService
+from services.intelligence.candidates.reference import candidate_reference_service
+from services.intelligence.candidates.universe import CandidateUniverseService
 from services.intraday_trade_feedback_service import (
     IntradayTradeFeedbackService,
     build_default_intraday_trade_feedback_service,

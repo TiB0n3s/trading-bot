@@ -8,17 +8,17 @@ does not add them to SYMBOL_CONFIG and does not change trading authority.
 from __future__ import annotations
 
 import argparse
-from datetime import date, timedelta
 import json
-from pathlib import Path
 import subprocess
 import sys
+from datetime import date, timedelta
+from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 if str(BASE_DIR) not in sys.path:
     sys.path.insert(0, str(BASE_DIR))
 
-from services.external_symbol_candidate_service import (  # noqa: E402
+from services.intelligence.candidates.external_symbols import (  # noqa: E402
     DEFAULT_MIN_BAR_DAYS,
     DEFAULT_MIN_BAR_ROWS,
     DEFAULT_MIN_CONFIDENCE_SCORE,
@@ -74,7 +74,9 @@ def _print_human(payload: dict) -> None:
     print(f"runtime_effect       : {payload.get('runtime_effect')}")
     print(f"status               : {payload.get('status')}")
     print(f"state_path           : {payload.get('state_path')}")
-    print(f"discovery_window     : {payload.get('discovery_start_date')}..{payload.get('discovery_end_date')}")
+    print(
+        f"discovery_window     : {payload.get('discovery_start_date')}..{payload.get('discovery_end_date')}"
+    )
     print(f"candidates_seen      : {payload.get('candidates_seen')}")
     print(f"backfill_symbols     : {', '.join(payload.get('backfill_symbols') or []) or '-'}")
     if payload.get("backfill_exit_code") is not None:

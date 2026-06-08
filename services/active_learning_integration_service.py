@@ -7,12 +7,11 @@ used by current decision plumbing, or are they only passive artifacts?
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 import json
+from dataclasses import dataclass
 from typing import Any, Iterable
 
-from services.candidate_outcome_coverage_service import summarize_candidate_outcome_coverage
-
+from services.intelligence.candidates.outcome_coverage import summarize_candidate_outcome_coverage
 
 ACTIVE_LEARNING_INTEGRATION_VERSION = "active_learning_integration_v1"
 RUNTIME_EFFECT = "diagnostic_only_no_live_authority"
@@ -77,10 +76,16 @@ def _auto_buy_summary(rows: Iterable[dict[str, Any]]) -> dict[str, Any]:
     for row in rows_list:
         reason = str(row.get("reason") or "")
         candidate = _load_json(row.get("candidate_json"))
-        candidate_payload = candidate.get("candidate") if isinstance(candidate.get("candidate"), dict) else candidate
+        candidate_payload = (
+            candidate.get("candidate")
+            if isinstance(candidate.get("candidate"), dict)
+            else candidate
+        )
         if "strategy_memory:" in reason:
             strategy_memory_rows += 1
-        if "strategy_memory_caution" in reason or "strategy_memory_avoid" in str(row.get("hard_block_reason") or ""):
+        if "strategy_memory_caution" in reason or "strategy_memory_avoid" in str(
+            row.get("hard_block_reason") or ""
+        ):
             strategy_memory_constrained += 1
         pattern = candidate_payload.get("symbol_pattern") or _path(
             candidate_payload,
@@ -97,7 +102,11 @@ def _auto_buy_summary(rows: Iterable[dict[str, Any]]) -> dict[str, Any]:
             or candidate_payload.get("runtime_effect")
             or ""
         )
-        if runtime_effect and "observe_only" not in runtime_effect and "capture_only" not in runtime_effect:
+        if (
+            runtime_effect
+            and "observe_only" not in runtime_effect
+            and "capture_only" not in runtime_effect
+        ):
             pattern_authority_rows += 1
         if candidate_payload.get("ml_prediction_score") is not None or _meaningful(
             candidate_payload.get("ml_prediction_bucket"),
@@ -151,7 +160,9 @@ def _lifecycle_summary(rows: Iterable[dict[str, Any]]) -> dict[str, Any]:
         )
         canonical = _load_json(row.get("canonical_intelligence_json"))
         pattern = row.get("symbol_pattern") or _path(canonical, "pattern_state", "pattern_label")
-        momentum = row.get("session_trend_label") or _path(canonical, "momentum_state", "session_label")
+        momentum = row.get("session_trend_label") or _path(
+            canonical, "momentum_state", "session_label"
+        )
         prediction = row.get("prediction_score") or _path(canonical, "prediction_state", "ml_score")
         policy = _path(canonical, "advisory_authority_state", "decision_policy_outcome")
         if isinstance(policy, dict) and policy.get("advisory_decision"):
@@ -194,12 +205,14 @@ def _candidate_summary(rows: Iterable[dict[str, Any]]) -> dict[str, Any]:
         "missing_forward_outcome": coverage["missing_forward_outcome"],
         "non_taken_rows": coverage["non_taken_rows"],
         "non_taken_with_forward_outcome": coverage["non_taken_with_forward_outcome"],
-        "non_taken_forward_outcome_rate": coverage[
-            "non_taken_forward_outcome_coverage_rate"
-        ],
+        "non_taken_forward_outcome_rate": coverage["non_taken_forward_outcome_coverage_rate"],
         "taken_rows": sum(1 for row in rows_list if row.get("candidate_status") == "taken"),
-        "near_threshold_rows": sum(1 for row in rows_list if row.get("candidate_status") == "near_threshold"),
-        "scored_not_taken_rows": sum(1 for row in rows_list if row.get("candidate_status") == "scored_not_taken"),
+        "near_threshold_rows": sum(
+            1 for row in rows_list if row.get("candidate_status") == "near_threshold"
+        ),
+        "scored_not_taken_rows": sum(
+            1 for row in rows_list if row.get("candidate_status") == "scored_not_taken"
+        ),
     }
 
 
@@ -280,19 +293,28 @@ def build_active_learning_integration_payload(
         "start_date": start_date,
         "end_date": end_date,
         "active_learning_signal_count": active_signals,
-        "actively_learning": active_signals >= 4 and "unexpected_symbol_pattern_authority_leak" not in blockers,
+        "actively_learning": active_signals >= 4
+        and "unexpected_symbol_pattern_authority_leak" not in blockers,
         "authority_note": "diagnostic only; this report cannot approve, block, size, or execute trades",
     }
 
     next_actions = []
     if "strategy_memory_not_observed_in_auto_buy_path" in blockers:
-        next_actions.append("verify auto_buy_manager calls memory_for_signal and records strategy_memory reasons")
+        next_actions.append(
+            "verify auto_buy_manager calls memory_for_signal and records strategy_memory reasons"
+        )
     if "symbol_pattern_not_observed_in_auto_buy_path" in blockers:
-        next_actions.append("verify candidate payloads include symbol_pattern from pattern intelligence")
+        next_actions.append(
+            "verify candidate payloads include symbol_pattern from pattern intelligence"
+        )
     if "ml_prediction_not_observed_in_auto_buy_path" in blockers:
-        next_actions.append("verify auto_buy_prediction_context is populated during candidate scoring")
+        next_actions.append(
+            "verify auto_buy_prediction_context is populated during candidate scoring"
+        )
     if "no_lifecycle_outcomes_for_learning" in blockers:
-        next_actions.append("run trade matching / exit snapshot backfill so approved trades have outcomes")
+        next_actions.append(
+            "run trade matching / exit snapshot backfill so approved trades have outcomes"
+        )
     if "candidate_forward_outcomes_missing" in blockers:
         next_actions.append("run candidate-outcome-backfill for missed-buy learning")
     if "strategy_memory_artifact_missing" in blockers:
@@ -300,7 +322,9 @@ def build_active_learning_integration_payload(
     if "unexpected_symbol_pattern_authority_leak" in blockers:
         next_actions.append("remove direct symbol-pattern authority before continuing")
     if not next_actions:
-        next_actions.append("review decision-quality and feature-attribution reports before tuning authority")
+        next_actions.append(
+            "review decision-quality and feature-attribution reports before tuning authority"
+        )
 
     return ActiveLearningIntegrationPayload(
         summary=summary,

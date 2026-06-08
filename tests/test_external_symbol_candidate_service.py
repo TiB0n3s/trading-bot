@@ -11,7 +11,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from services.external_symbol_candidate_service import (  # noqa: E402
+from services.intelligence.candidates.external_symbols import (  # noqa: E402
     STATUS_BACKFILL_PENDING,
     STATUS_CONTEXT_ONLY,
     STATUS_READY_REVIEW,

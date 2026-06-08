@@ -46,7 +46,9 @@ class CandidateReferenceService:
         ask_size = _safe_float(_quote_attr(quote, "ask_size", "as", "asksize"))
         quote_ts = _quote_attr(quote, "timestamp", "t", "quote_timestamp")
         mid = (bid + ask) / 2.0 if bid and ask and bid > 0 and ask > 0 else None
-        spread_pct = ((ask - bid) / mid * 100.0) if mid and ask is not None and bid is not None else None
+        spread_pct = (
+            ((ask - bid) / mid * 100.0) if mid and ask is not None and bid is not None else None
+        )
         return {
             "reference_capture_status": "captured" if mid is not None else "quote_missing_bid_ask",
             "reference_price": round(mid, 6) if mid is not None else None,

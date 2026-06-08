@@ -2,14 +2,14 @@
 
 from __future__ import annotations
 
-from pathlib import Path
 import json
 import sys
+from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from services.candidate_outcome_backfill_service import (
+from services.intelligence.candidates.outcome_backfill import (  # noqa: E402
     CandidateOutcomeBackfillService,
     compute_candidate_outcome,
 )

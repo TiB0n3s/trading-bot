@@ -4,13 +4,13 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
 import sys
+from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from services.candidate_outcome_coverage_service import (
+from services.intelligence.candidates.outcome_coverage import (  # noqa: E402
     candidate_has_forward_outcome,
     summarize_candidate_outcome_coverage,
 )

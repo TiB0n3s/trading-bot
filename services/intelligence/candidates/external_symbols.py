@@ -7,14 +7,13 @@ queue so Polygon history and ML-ready features can be built automatically.
 
 from __future__ import annotations
 
+import json
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
-import json
 from pathlib import Path
 from typing import Any
 
 from repositories.historical_bar_coverage_repo import HistoricalBarCoverageRepository
-
 
 EXTERNAL_SYMBOL_CANDIDATE_VERSION = "external_symbol_candidate_v1"
 DEFAULT_STATE_PATH = Path("runtime_state/external_symbol_candidates.json")
@@ -96,7 +95,10 @@ def _stage(
     pool_review_score: float,
 ) -> tuple[str, str]:
     if symbol_class == "context_only":
-        return STATUS_CONTEXT_ONLY, "configured context-only symbol; not eligible for automatic approval"
+        return (
+            STATUS_CONTEXT_ONLY,
+            "configured context-only symbol; not eligible for automatic approval",
+        )
     if mentions < min_mentions:
         return STATUS_POOL, "below discovery mention threshold"
     if trusted_mentions < min_trusted_mentions:
@@ -106,9 +108,15 @@ def _stage(
     if rows < min_bar_rows or days < min_bar_days:
         return STATUS_BACKFILL_PENDING, "needs Polygon historical bar backfill"
     if confidence_score >= min_confidence_score:
-        return STATUS_READY_REVIEW, "candidate evidence meets review threshold; operator approval still required"
+        return (
+            STATUS_READY_REVIEW,
+            "candidate evidence meets review threshold; operator approval still required",
+        )
     if confidence_score >= pool_review_score:
-        return STATUS_TRAINING_PENDING, "feature history exists but candidate confidence is not review-ready"
+        return (
+            STATUS_TRAINING_PENDING,
+            "feature history exists but candidate confidence is not review-ready",
+        )
     return STATUS_REJECTED, "candidate confidence below minimum; keep out of active research queue"
 
 
@@ -165,11 +173,13 @@ class ExternalSymbolCandidateService:
         state = self.load_state()
         candidates: dict[str, Any] = dict(state.get("candidates") or {})
         findings = discovery_payload.get("findings") or []
-        symbols = sorted({
-            str(row.get("symbol") or "").upper().strip()
-            for row in findings
-            if str(row.get("symbol") or "").strip()
-        })
+        symbols = sorted(
+            {
+                str(row.get("symbol") or "").upper().strip()
+                for row in findings
+                if str(row.get("symbol") or "").strip()
+            }
+        )
         coverage = _coverage_for_symbols(db_path=self.db_path, symbols=symbols)
         now = _now()
 
@@ -248,7 +258,10 @@ class ExternalSymbolCandidateService:
             discovery_end_date=str(discovery_payload.get("end_date") or ""),
             candidates_seen=len(refreshed),
             backfill_symbols=backfill_symbols,
-            candidates=sorted(refreshed, key=lambda item: (-float(item.get("confidence_score") or 0), item["symbol"])),
+            candidates=sorted(
+                refreshed,
+                key=lambda item: (-float(item.get("confidence_score") or 0), item["symbol"]),
+            ),
         )
 
     def report(self, *, limit: int = 20) -> dict[str, Any]:

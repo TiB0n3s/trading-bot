@@ -5,7 +5,6 @@ from __future__ import annotations
 import json
 from typing import Any, Iterable
 
-
 FORWARD_OUTCOME_KEYS = (
     "forward_return_pct",
     "return_60m",

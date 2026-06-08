@@ -11,8 +11,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from repositories.candidate_universe_repo import CandidateUniverseRepository
-from services.candidate_universe_service import (
+from repositories.candidate_universe_repo import CandidateUniverseRepository  # noqa: E402
+from services.intelligence.candidates.universe import (  # noqa: E402
     CANDIDATE_UNIVERSE_CONTRACT_VERSION,
     CandidateCapture,
     CandidateUniverseService,
@@ -55,7 +55,9 @@ def test_persist_entry_candidates_and_near_threshold_status():
         assert_equal(rows[0]["threshold_distance"], -6.0, "threshold distance")
         payload = json.loads(rows[0]["candidate_json"])
         assert_equal(payload["contract_version"], CANDIDATE_UNIVERSE_CONTRACT_VERSION, "version")
-        assert_equal(rows[0]["runtime_effect"], "candidate_capture_only_no_live_authority", "effect")
+        assert_equal(
+            rows[0]["runtime_effect"], "candidate_capture_only_no_live_authority", "effect"
+        )
 
 
 def test_persist_exit_candidate_considered_not_taken():

@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from repositories.candidate_universe_repo import CandidateUniverseRepository
-from services.candidate_outcome_backfill_service import CandidateOutcomeBackfillService
+from services.intelligence.candidates.outcome_backfill import CandidateOutcomeBackfillService
 
 
 def _pct(value) -> str:

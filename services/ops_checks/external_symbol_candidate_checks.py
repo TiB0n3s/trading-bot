@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from services.external_symbol_candidate_service import (
+from services.intelligence.candidates.external_symbols import (
     DEFAULT_STATE_PATH,
     ExternalSymbolCandidateService,
 )

@@ -6,16 +6,16 @@ offline learning can compare taken trades with missed opportunities.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from datetime import datetime, time, timedelta
 import json
 import os
-from typing import Any, Iterable
+from dataclasses import dataclass
+from datetime import datetime, time, timedelta
+from typing import Any
 
 import pytz
 
 from repositories.candidate_universe_repo import CandidateUniverseRepository
-from services.candidate_outcome_coverage_service import (
+from services.intelligence.candidates.outcome_coverage import (
     candidate_has_forward_outcome,
     load_candidate_json,
     summarize_candidate_outcome_coverage,
@@ -23,7 +23,6 @@ from services.candidate_outcome_coverage_service import (
 from services.rejected_signal_outcome_market_data_service import (
     rejected_signal_outcome_market_data_service,
 )
-
 
 CANDIDATE_OUTCOME_BACKFILL_VERSION = "candidate_outcome_backfill_v1"
 CANDIDATE_OUTCOME_RUNTIME_EFFECT = "analysis_backfill_only_no_live_authority"
@@ -111,7 +110,9 @@ def _bar_dt(row: dict[str, Any]) -> datetime:
     return _parse_ts(str(row["timestamp"]))
 
 
-def _first_bar_at_or_after(rows: list[dict[str, Any]], target_dt: datetime) -> dict[str, Any] | None:
+def _first_bar_at_or_after(
+    rows: list[dict[str, Any]], target_dt: datetime
+) -> dict[str, Any] | None:
     for row in rows:
         if _bar_dt(row) >= target_dt:
             return row
@@ -169,12 +170,16 @@ def compute_candidate_outcome(row: dict[str, Any], bars: list[dict[str, Any]]) -
     candidate_dt = _parse_ts(str(row["candidate_ts"]))
     action = str(row.get("action") or "buy").lower()
     payload = _load_json(row.get("candidate_json"))
-    candidate_payload = payload.get("candidate") if isinstance(payload.get("candidate"), dict) else {}
+    candidate_payload = (
+        payload.get("candidate") if isinstance(payload.get("candidate"), dict) else {}
+    )
     captured_reference = _candidate_reference_price(payload, candidate_payload)
     reference_bar = _first_bar_at_or_after(bars, candidate_dt)
     reference_price = captured_reference
     reference_ts = payload.get("quote_ts") or candidate_payload.get("quote_ts")
-    reference_source = payload.get("reference_price_source") or candidate_payload.get("reference_price_source")
+    reference_source = payload.get("reference_price_source") or candidate_payload.get(
+        "reference_price_source"
+    )
     if reference_price is None:
         reference_price = float(reference_bar["close"]) if reference_bar else None
         reference_ts = reference_bar.get("timestamp") if reference_bar else None
@@ -186,7 +191,9 @@ def compute_candidate_outcome(row: dict[str, Any], bars: list[dict[str, Any]]) -
         close = _first_close_at_or_after(bars, candidate_dt + timedelta(minutes=minutes))
         return _action_adjusted(_pct_change(close, reference_price), action)
 
-    close_eod = _last_close_at_or_before(bars, _market_close_for_date(candidate_dt.date().isoformat()))
+    close_eod = _last_close_at_or_before(
+        bars, _market_close_for_date(candidate_dt.date().isoformat())
+    )
     mfe_60m, mae_60m = (
         _excursion_60m(
             bars,
@@ -214,17 +221,26 @@ def compute_candidate_outcome(row: dict[str, Any], bars: list[dict[str, Any]]) -
         "forward_mfe_pct": mfe_60m,
         "forward_mae_pct": mae_60m,
     }
-    values["forward_return_pct"] = values["return_60m"] or values["return_30m"] or values["return_eod"]
+    values["forward_return_pct"] = (
+        values["return_60m"] or values["return_30m"] or values["return_eod"]
+    )
 
     if not bars or reference_price is None:
         values["label_status"] = "no_bars"
         values["partial_reason"] = "no_bars"
-    elif all(values[key] is not None for key in ("return_5m", "return_15m", "return_30m", "return_60m")):
+    elif all(
+        values[key] is not None for key in ("return_5m", "return_15m", "return_30m", "return_60m")
+    ):
         values["label_status"] = "labeled"
         values["partial_reason"] = None
-    elif any(values[key] is not None for key in ("return_5m", "return_15m", "return_30m", "return_60m", "return_eod")):
+    elif any(
+        values[key] is not None
+        for key in ("return_5m", "return_15m", "return_30m", "return_60m", "return_eod")
+    ):
         values["label_status"] = "partial"
-        if candidate_dt + timedelta(minutes=60) > _market_close_for_date(candidate_dt.date().isoformat()):
+        if candidate_dt + timedelta(minutes=60) > _market_close_for_date(
+            candidate_dt.date().isoformat()
+        ):
             values["partial_reason"] = "near_close_no_60m_window"
         else:
             values["partial_reason"] = "missing_forward_bars"
@@ -267,7 +283,9 @@ class CandidateOutcomeBackfillService:
         bars_by_symbol: dict[str, list[dict[str, Any]]] = {}
         coverage_before = summarize_candidate_outcome_coverage(rows)
         projected_rows = [dict(row) for row in rows]
-        projected_by_id = {int(row["id"]): row for row in projected_rows if row.get("id") is not None}
+        projected_by_id = {
+            int(row["id"]): row for row in projected_rows if row.get("id") is not None
+        }
         counts = {
             "eligible": 0,
             "updated": 0,

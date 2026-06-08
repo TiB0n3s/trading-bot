@@ -54,6 +54,7 @@ Usage:
   python3 ops_check.py architecture-surface
   python3 ops_check.py database-backups
   python3 ops_check.py local-load-probe [--requests N] [--concurrency N] [--symbol AAPL] [--action buy]
+  python3 ops_check.py incident-workflow --title "brief title" [--severity low|medium|high|critical] [--create]
   python3 ops_check.py resource-readiness
   python3 ops_check.py advanced-alpha-readiness
   python3 ops_check.py advanced-alpha-comparison
@@ -188,6 +189,7 @@ from services.ops_checks.historical_bar_readiness_checks import run_historical_b
 from services.ops_checks.historical_bar_validation_checks import (
     run_historical_bar_validation,
 )
+from services.ops_checks.incident_workflow_checks import run_incident_workflow_report
 from services.ops_checks.intelligence_checks import run_intelligence_summary
 from services.ops_checks.learning_artifact_checks import run_learning_artifact_consumption
 from services.ops_checks.learning_readiness_checks import (
@@ -763,6 +765,20 @@ def local_load_probe():
         concurrency=_int_option("--concurrency", 4),
         symbol=_str_option("--symbol", "AAPL"),
         action=_str_option("--action", "buy"),
+    )
+
+
+def incident_workflow():
+    title = _str_option("--title", "")
+    if not title and len(sys.argv) > 2 and not sys.argv[2].startswith("--"):
+        title = sys.argv[2]
+    if not title:
+        title = "untitled incident"
+    return run_incident_workflow_report(
+        base_dir=BASE_DIR,
+        title=title,
+        severity=_str_option("--severity", "medium"),
+        create="--create" in sys.argv,
     )
 
 

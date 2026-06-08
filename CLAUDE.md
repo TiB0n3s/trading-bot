@@ -165,6 +165,10 @@ Recent completed roadmap items:
   The probe exercises Flask route auth, payload parsing, event-record callback,
   and signal-submit callback only; it is diagnostic-only and cannot submit
   broker orders or mutate trading state.
+- Local incident records are available through
+  `ops_check.py incident-workflow --title "brief title" --severity medium --create`.
+  Records are written under `ops/incidents/` and should link job runs, logs,
+  order/fill evidence, learning artifacts, model artifacts, and commits.
 - App startup no longer owns schema `ALTER TABLE` migration work.
 - Webhook/status secrets should use `X-Webhook-Secret` or
   `Authorization: Bearer ...`; query-string secrets are rejected unless
@@ -997,6 +1001,7 @@ python3 ops_check.py signal-lessons
 python3 ops_check.py trends
 python3 ops_check.py prediction-validation
 python3 ops_check.py local-load-probe --requests 100 --concurrency 4 --symbol AAPL --action buy
+python3 ops_check.py incident-workflow --title "brief title" --severity medium --create
 python3 ops_check.py config-audit
 python3 ops_check.py architecture-surface
 python3 ops_check.py resource-readiness
@@ -1355,13 +1360,14 @@ verified SQLite database backup/restore-readability manifests
 lightweight observability summary through `ops_check.py observability-health`
 local secrets-hygiene diagnostic
 local webhook burst diagnostic through `ops_check.py local-load-probe`
+local incident/postmortem workflow through `ops_check.py incident-workflow`
 
 Open before any cash-live promotion:
 
 external observability/alerting stack
 external secrets manager evaluation
 end-to-end paper replay/load testing with DB and fill callbacks
-incident/postmortem workflow
+external incident escalation/review process
 consolidated model-validation promotion gate
 feature-flag inventory with ownership and rollback actions
 

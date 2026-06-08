@@ -27,6 +27,7 @@ Usage:
   python3 ops_check.py dataset-health
   python3 ops_check.py feature-health
   python3 ops_check.py feature-watch
+  python3 ops_check.py live-bar-pattern-capture [YYYY-MM-DD]
   python3 ops_check.py rejection-summary
   python3 ops_check.py rejected-outcomes
   python3 ops_check.py auto-buy
@@ -129,6 +130,9 @@ from services.ops_checks.excursion_checks import (
     run_winner_became_loser,
 )
 from services.ops_checks.feature_checks import run_feature_health, run_feature_watch
+from services.ops_checks.live_bar_pattern_capture_checks import (
+    run_live_bar_pattern_capture_report,
+)
 from services.ops_checks.intelligence_checks import run_intelligence_summary
 from services.ops_checks.lifecycle_checks import run_lifecycle_analysis
 from services.ops_checks.lifecycle_dashboard_checks import run_lifecycle_dashboard
@@ -469,6 +473,17 @@ def feature_health(target_date):
 
 def feature_watch(target_date):
     return run_feature_watch(target_date, base_dir=BASE_DIR)
+
+
+def live_bar_pattern_capture(target_date):
+    return run_live_bar_pattern_capture_report(
+        target_date,
+        base_dir=BASE_DIR,
+        max_age_minutes=_int_option("--max-age-minutes", 5),
+        min_symbols=_int_option("--min-symbols", 1),
+        timeframe=_str_option("--timeframe", "1m"),
+        limit=_int_option("--limit", 12),
+    )
 
 
 def rejection_summary(target_date):
@@ -1362,6 +1377,9 @@ def main():
 
     if command == "feature-watch":
         return 0 if feature_watch(target_date) else 1
+
+    if command == "live-bar-pattern-capture":
+        return 0 if live_bar_pattern_capture(target_date) else 1
 
     if command == "rejection-summary":
         return 0 if rejection_summary(target_date) else 1

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from datetime import date, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -12,6 +13,25 @@ from db import DB_PATH, get_connection
 class BarPatternFeatureRepository:
     def __init__(self, db_path: Path | str = DB_PATH):
         self.db_path = db_path
+
+    def _table_exists(self, con) -> bool:
+        row = con.execute(
+            """
+            SELECT 1
+            FROM sqlite_master
+            WHERE type = 'table'
+              AND name = 'bar_pattern_features'
+            """
+        ).fetchone()
+        return row is not None
+
+    def _table_columns(self, con) -> set[str]:
+        if not self._table_exists(con):
+            return set()
+        return {
+            str(row["name"])
+            for row in con.execute("PRAGMA table_info(bar_pattern_features)").fetchall()
+        }
 
     def init_table(self) -> None:
         with get_connection(self.db_path) as con:
@@ -585,3 +605,121 @@ class BarPatternFeatureRepository:
         except Exception:
             payload["feature_json"] = {}
         return payload
+
+    def live_capture_summary(
+        self,
+        *,
+        target_date: str,
+        timeframe: str = "1m",
+        limit: int = 12,
+    ) -> dict[str, Any]:
+        """Summarize target-date live bar-pattern capture without changing authority."""
+        try:
+            start = date.fromisoformat(target_date)
+            end_text = (start + timedelta(days=1)).isoformat()
+        except Exception:
+            end_text = target_date
+        with get_connection(self.db_path) as con:
+            if not self._table_exists(con):
+                return {"table_exists": False, "target_date": target_date}
+            columns = self._table_columns(con)
+
+            def select_col(name: str, alias: str | None = None) -> str:
+                target = alias or name
+                if name in columns:
+                    return f"{name} AS {target}"
+                return f"NULL AS {target}"
+
+            where = "bar_timestamp >= ? AND bar_timestamp < ? AND timeframe = ?"
+            params = [target_date, end_text, timeframe]
+            total = con.execute(
+                f"""
+                SELECT
+                    COUNT(*) AS rows,
+                    COUNT(DISTINCT symbol) AS symbols,
+                    MIN(bar_timestamp) AS first_bar_timestamp,
+                    MAX(bar_timestamp) AS latest_bar_timestamp,
+                    MAX({('created_at' if 'created_at' in columns else 'bar_timestamp')}) AS latest_created_at
+                FROM bar_pattern_features
+                WHERE {where}
+                """,
+                params,
+            ).fetchone()
+            sources = []
+            if "bar_source" in columns:
+                sources = [
+                    dict(row)
+                    for row in con.execute(
+                        f"""
+                        SELECT COALESCE(bar_source, 'unknown') AS source, COUNT(*) AS rows
+                        FROM bar_pattern_features
+                        WHERE {where}
+                        GROUP BY COALESCE(bar_source, 'unknown')
+                        ORDER BY rows DESC, source
+                        """,
+                        params,
+                    ).fetchall()
+                ]
+            versions = [
+                dict(row)
+                for row in con.execute(
+                    f"""
+                    SELECT COALESCE(feature_version, 'unknown') AS feature_version, COUNT(*) AS rows
+                    FROM bar_pattern_features
+                    WHERE {where}
+                    GROUP BY COALESCE(feature_version, 'unknown')
+                    ORDER BY rows DESC, feature_version
+                    """,
+                    params,
+                ).fetchall()
+            ]
+            latest_rows = [
+                dict(row)
+                for row in con.execute(
+                    f"""
+                    WITH ranked AS (
+                        SELECT
+                            symbol,
+                            bar_timestamp,
+                            timeframe,
+                            {select_col('bar_source', 'bar_source')},
+                            {select_col('bar_feed', 'bar_feed')},
+                            feature_version,
+                            runtime_effect,
+                            {select_col('created_at', 'created_at')},
+                            {select_col('close', 'close')},
+                            {select_col('volume', 'volume')},
+                            {select_col('vwap', 'vwap')},
+                            {select_col('vpin_toxicity_20', 'vpin_toxicity_20')},
+                            {select_col('cumulative_volume_delta', 'cumulative_volume_delta')},
+                            {select_col('trend_scan_label', 'trend_scan_label')},
+                            {select_col('triple_barrier_label', 'triple_barrier_label')},
+                            ROW_NUMBER() OVER (
+                                PARTITION BY symbol
+                                ORDER BY bar_timestamp DESC, id DESC
+                            ) AS rn
+                        FROM bar_pattern_features
+                        WHERE {where}
+                    )
+                    SELECT *
+                    FROM ranked
+                    WHERE rn = 1
+                    ORDER BY bar_timestamp DESC, symbol
+                    LIMIT ?
+                    """,
+                    [*params, max(1, int(limit or 1))],
+                ).fetchall()
+            ]
+        return {
+            "table_exists": True,
+            "target_date": target_date,
+            "timeframe": timeframe,
+            "rows": int(total["rows"] or 0),
+            "symbols": int(total["symbols"] or 0),
+            "first_bar_timestamp": total["first_bar_timestamp"],
+            "latest_bar_timestamp": total["latest_bar_timestamp"],
+            "latest_created_at": total["latest_created_at"],
+            "sources": sources,
+            "feature_versions": versions,
+            "latest_rows": latest_rows,
+        }

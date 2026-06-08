@@ -351,6 +351,17 @@ python3 live_bar_stream.py --all --feed iex
 
 Use `--feed sip` only when the Alpaca account has paid consolidated data. IEX can be useful for paper learning, but its volume/VWAP can differ materially from Polygon/SIP history.
 
+Live bar-pattern capture verification:
+
+```bash
+python3 ops_check.py live-bar-pattern-capture 2026-06-08 --max-age-minutes 10 --min-symbols 1
+```
+
+During regular trading hours this report verifies that the session-momentum
+capture path is producing fresh target-date `bar_pattern_features` rows for the
+paper ensemble. Outside the active session it remains a report-only sanity check
+and does not grant model authority.
+
 pipeline/historical_bar_archive.py
 
 Offline Polygon archive/backfill job for 1-minute regular-session bars.

@@ -26,6 +26,7 @@ sys.path.insert(0, str(ROOT))
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 class _CleanEnv:
     """Context manager: removes a set of env vars, restores them on exit."""
 
@@ -72,32 +73,41 @@ def _raises(exc_type, fn, *args, **kwargs) -> Exception:
         fn(*args, **kwargs)
     except exc_type as exc:
         return exc
-    raise AssertionError(
-        f"Expected {exc_type.__name__} but no exception was raised"
-    )
+    raise AssertionError(f"Expected {exc_type.__name__} but no exception was raised")
 
 
 # ---------------------------------------------------------------------------
 # Import factories (no singletons touched)
 # ---------------------------------------------------------------------------
 
-from config.signal import SignalConfig, load_signal_config
-from config.risk import RiskConfig, load_risk_config
-from config.auto_buy import AutoBuyConfig, load_auto_buy_config
-from config.position_manager import PositionManagerConfig, load_position_manager_config
-from config.ml import MLConfig, load_ml_config
+from config.auto_buy import AutoBuyConfig, load_auto_buy_config  # noqa: E402
+from config.ml import MLConfig, load_ml_config  # noqa: E402
+from config.position_manager import (  # noqa: E402
+    PositionManagerConfig,
+    load_position_manager_config,
+)
+from config.risk import RiskConfig, load_risk_config  # noqa: E402
+from config.signal import SignalConfig, load_signal_config  # noqa: E402
 
 RISK_ENV_VARS = [
-    "MACRO_POSITION_COUNT_FLOOR", "PORTFOLIO_ROTATION_ENABLED",
-    "PORTFOLIO_REPLACEMENT_MODE", "RISK_POLICY_MODE",
+    "MACRO_POSITION_COUNT_FLOOR",
+    "PORTFOLIO_ROTATION_ENABLED",
+    "PORTFOLIO_REPLACEMENT_MODE",
+    "RISK_POLICY_MODE",
     "REGIME_CIRCUIT_BREAKER_MODE",
-    "ENFORCE_SESSION_MOMENTUM_GATE", "ENFORCE_ADAPTIVE_CHURN_REENTRY",
+    "ENFORCE_SESSION_MOMENTUM_GATE",
+    "ENFORCE_ADAPTIVE_CHURN_REENTRY",
 ]
 AUTO_BUY_ENV_VARS = [
-    "AUTO_BUY_LIVE_BUYS", "AUTO_BUY_MIN_SCORE", "AUTO_BUY_MAX_ACTIVE_POSITIONS",
-    "AUTO_BUY_MAX_DAILY_ORDERS", "AUTO_BUY_COOLDOWN_MINUTES",
-    "AUTO_BUY_BUCKING_TAPE_MIN_VOLUME_RATIO", "AUTO_BUY_SIGNAL_MODE",
-    "TRADINGVIEW_ALERTS_DEPRECATED", "AUTO_BUY_MAX_ORDERS_PER_RUN",
+    "AUTO_BUY_LIVE_BUYS",
+    "AUTO_BUY_MIN_SCORE",
+    "AUTO_BUY_MAX_ACTIVE_POSITIONS",
+    "AUTO_BUY_MAX_DAILY_ORDERS",
+    "AUTO_BUY_COOLDOWN_MINUTES",
+    "AUTO_BUY_BUCKING_TAPE_MIN_VOLUME_RATIO",
+    "AUTO_BUY_SIGNAL_MODE",
+    "TRADINGVIEW_ALERTS_DEPRECATED",
+    "AUTO_BUY_MAX_ORDERS_PER_RUN",
     "AUTO_BUY_MAX_SIGNALS_PER_SYMBOL",
     "AUTO_BUY_PAPER_STRONG_EVIDENCE_PROMOTION_ENABLED",
     "AUTO_BUY_PAPER_STRONG_EVIDENCE_SCORE_BUFFER",
@@ -110,6 +120,7 @@ AUTO_BUY_ENV_VARS = [
 # ===========================================================================
 # SignalConfig
 # ===========================================================================
+
 
 def test_signal_override_bypasses_env():
     with _PatchEnv(PREDICTION_GATE_MODE="warn"):
@@ -135,12 +146,19 @@ def test_signal_partial_override_preserves_defaults():
 
 def test_signal_no_env_dependency():
     env_vars = [
-        "PREDICTION_GATE_MODE", "PREDICTION_SOFT_AVOID_MIN_SAMPLE_SIZE",
-        "ONE_BAR_CONFIRMATION_HOLD_ENABLED", "ONE_BAR_CONFIRMATION_TIMEOUT_SECONDS",
-        "TAPE_EXCEPTION_ENABLED", "OPEN_MOMENTUM_FAST_LANE_ENABLED",
-        "MAX_SIGNAL_PRICE_DRIFT_PCT", "MAX_BID_ASK_SPREAD_PCT",
-        "SELL_CONTINUATION_CHECK_ENABLED", "SELL_CONTINUATION_MIN_SUPPORTS",
-        "WEBHOOK_SECRET", "SESSION_MAX_TRADE_COUNT", "SIGNAL_WORKER_COUNT",
+        "PREDICTION_GATE_MODE",
+        "PREDICTION_SOFT_AVOID_MIN_SAMPLE_SIZE",
+        "ONE_BAR_CONFIRMATION_HOLD_ENABLED",
+        "ONE_BAR_CONFIRMATION_TIMEOUT_SECONDS",
+        "TAPE_EXCEPTION_ENABLED",
+        "OPEN_MOMENTUM_FAST_LANE_ENABLED",
+        "MAX_SIGNAL_PRICE_DRIFT_PCT",
+        "MAX_BID_ASK_SPREAD_PCT",
+        "SELL_CONTINUATION_CHECK_ENABLED",
+        "SELL_CONTINUATION_MIN_SUPPORTS",
+        "WEBHOOK_SECRET",
+        "SESSION_MAX_TRADE_COUNT",
+        "SIGNAL_WORKER_COUNT",
         "LATE_QUOTE_DELAY_MIN_BLOCKS",
     ]
     with _CleanEnv(*env_vars):
@@ -168,6 +186,7 @@ def test_signal_override_wins_over_env():
 # RiskConfig
 # ===========================================================================
 
+
 def test_risk_override_bypasses_env():
     with _CleanEnv(*RISK_ENV_VARS):
         with _PatchEnv(PORTFOLIO_ROTATION_ENABLED="false"):
@@ -180,6 +199,12 @@ def test_risk_override_goes_through_validation():
         exc = _raises(ValueError, load_risk_config, risk_policy_mode="live")
     assert "risk_policy_mode" in str(exc)
     assert "RISK_POLICY_MODE" in str(exc)
+
+
+def test_risk_portfolio_replacement_accepts_live_rotation_mode():
+    with _CleanEnv(*RISK_ENV_VARS):
+        cfg = load_risk_config(portfolio_replacement_mode="live_rotation")
+    assert cfg.portfolio_replacement_mode == "live_rotation"
 
 
 def test_risk_circuit_breaker_mode_validation():
@@ -196,7 +221,8 @@ def test_risk_circuit_breaker_mode_validation():
 def test_risk_override_loss_pct_sign():
     with _CleanEnv(*RISK_ENV_VARS):
         exc = _raises(
-            ValueError, load_risk_config,
+            ValueError,
+            load_risk_config,
             portfolio_replacement_weak_holding_plpc=0.5,
         )
     assert "portfolio_replacement_weak_holding_plpc" in str(exc)
@@ -233,6 +259,7 @@ def test_risk_circuit_breaker_env_var_is_read_when_no_override():
 # AutoBuyConfig
 # ===========================================================================
 
+
 def test_auto_buy_override_bypasses_env():
     with _PatchEnv(AUTO_BUY_MIN_SCORE="13.0"):
         cfg = load_auto_buy_config(min_score=20.0)
@@ -264,8 +291,7 @@ def test_auto_buy_partial_override_preserves_defaults():
     assert cfg.cooldown_minutes == AutoBuyConfig.cooldown_minutes
     assert cfg.bucking_tape_min_volume_ratio == AutoBuyConfig.bucking_tape_min_volume_ratio
     assert (
-        cfg.paper_strong_evidence_score_buffer
-        == AutoBuyConfig.paper_strong_evidence_score_buffer
+        cfg.paper_strong_evidence_score_buffer == AutoBuyConfig.paper_strong_evidence_score_buffer
     )
 
 
@@ -319,6 +345,7 @@ def test_auto_buy_invalid_signal_mode_is_rejected():
 # PositionManagerConfig
 # ===========================================================================
 
+
 def test_pm_override_bypasses_env():
     with _PatchEnv(POSITION_MANAGER_FULL_EXIT_LOSS_PCT="-1.25"):
         cfg = load_position_manager_config(full_exit_loss_pct=-2.0)
@@ -327,7 +354,8 @@ def test_pm_override_bypasses_env():
 
 def test_pm_positive_loss_pct_rejected():
     exc = _raises(
-        ValueError, load_position_manager_config,
+        ValueError,
+        load_position_manager_config,
         full_exit_loss_pct=0.5,
     )
     assert "full_exit_loss_pct" in str(exc)
@@ -343,8 +371,10 @@ def test_pm_partial_sell_pct_bounds():
 
 def test_pm_tier3_must_exceed_tier2():
     exc = _raises(
-        ValueError, load_position_manager_config,
-        tier2_peak_pct=3.0, tier3_peak_pct=2.0,
+        ValueError,
+        load_position_manager_config,
+        tier2_peak_pct=3.0,
+        tier3_peak_pct=2.0,
     )
     assert "tier3_peak_pct" in str(exc)
     assert "tier2_peak_pct" in str(exc)
@@ -352,8 +382,10 @@ def test_pm_tier3_must_exceed_tier2():
 
 def test_pm_lock_floor_must_be_below_peak():
     exc = _raises(
-        ValueError, load_position_manager_config,
-        lock_tier1_peak_pct=1.0, lock_tier1_floor_pct=1.5,
+        ValueError,
+        load_position_manager_config,
+        lock_tier1_peak_pct=1.0,
+        lock_tier1_floor_pct=1.5,
     )
     assert "lock_tier1_floor_pct" in str(exc)
 
@@ -368,8 +400,10 @@ def test_pm_partial_override_preserves_defaults():
 
 def test_pm_no_env_dependency():
     env_vars = [
-        "POSITION_MANAGER_LIVE_SELLS", "POSITION_MANAGER_FULL_EXIT_LOSS_PCT",
-        "POSITION_MANAGER_PARTIAL_SELL_PCT", "BREAKEVEN_LOCK_TRIGGER_PCT",
+        "POSITION_MANAGER_LIVE_SELLS",
+        "POSITION_MANAGER_FULL_EXIT_LOSS_PCT",
+        "POSITION_MANAGER_PARTIAL_SELL_PCT",
+        "BREAKEVEN_LOCK_TRIGGER_PCT",
         "POSITION_MANAGER_PROFIT_CAPTURE_ENABLED",
     ]
     with _CleanEnv(*env_vars):
@@ -382,6 +416,7 @@ def test_pm_no_env_dependency():
 # ===========================================================================
 # MLConfig
 # ===========================================================================
+
 
 def test_ml_override_bypasses_env():
     with _PatchEnv(STRATEGY_ENGINE_MODE="observe"):
@@ -410,7 +445,9 @@ def test_ml_partial_override_preserves_defaults():
 
 def test_ml_no_env_dependency():
     env_vars = [
-        "STRATEGY_ENGINE_MODE", "EXECUTION_POLICY_MODE", "ML_PLATFORM_ENABLED",
+        "STRATEGY_ENGINE_MODE",
+        "EXECUTION_POLICY_MODE",
+        "ML_PLATFORM_ENABLED",
     ]
     with _CleanEnv(*env_vars):
         cfg = load_ml_config()
@@ -429,8 +466,10 @@ def test_ml_env_var_is_read_when_no_override():
 # Cross-cutting: config package exports only types and factories (no singletons)
 # ===========================================================================
 
+
 def test_config_package_exports_no_singletons():
     import config
+
     for name in ("signal_cfg", "risk_cfg", "auto_buy_cfg", "position_manager_cfg", "ml_cfg"):
         assert not hasattr(config, name), (
             f"config.{name} should not exist — singletons belong at the callsite"
@@ -439,27 +478,28 @@ def test_config_package_exports_no_singletons():
 
 def test_config_package_exports_all_factories():
     from config import (  # noqa: F401
-        load_signal_config,
-        load_risk_config,
         load_auto_buy_config,
-        load_position_manager_config,
         load_ml_config,
+        load_position_manager_config,
+        load_risk_config,
+        load_signal_config,
     )
 
 
 def test_config_package_exports_all_types():
     from config import (  # noqa: F401
-        SignalConfig,
-        RiskConfig,
         AutoBuyConfig,
-        PositionManagerConfig,
         MLConfig,
+        PositionManagerConfig,
+        RiskConfig,
+        SignalConfig,
     )
 
 
 # ===========================================================================
 # Runner
 # ===========================================================================
+
 
 def main():
     tests = [
@@ -473,6 +513,7 @@ def main():
         # RiskConfig
         test_risk_override_bypasses_env,
         test_risk_override_goes_through_validation,
+        test_risk_portfolio_replacement_accepts_live_rotation_mode,
         test_risk_circuit_breaker_mode_validation,
         test_risk_override_loss_pct_sign,
         test_risk_partial_override_preserves_defaults,

@@ -48,6 +48,7 @@ Usage:
   python3 ops_check.py log-ledger-consistency
   python3 ops_check.py portfolio-risk
   python3 ops_check.py production-evidence
+  python3 ops_check.py config-audit
   python3 ops_check.py resource-readiness
   python3 ops_check.py advanced-alpha-readiness
   python3 ops_check.py advanced-alpha-comparison
@@ -118,43 +119,53 @@ import sys
 from datetime import date
 from pathlib import Path
 
+from pipeline.trading_education_ingest import main as run_trading_education_ingest_cli
 from reports.registry import get_report_commands, run_report
-
+from services.ops_checks.active_learning_checks import run_active_learning_integration
+from services.ops_checks.advanced_alpha_model_comparison_checks import (
+    run_advanced_alpha_model_comparison,
+)
+from services.ops_checks.advanced_alpha_readiness_checks import (
+    run_advanced_alpha_readiness,
+)
+from services.ops_checks.advisory_authority_checks import run_advisory_authority_report
+from services.ops_checks.ai_intelligence_review_checks import run_ai_intelligence_review
+from services.ops_checks.auto_buy_checks import run_auto_buy_health
+from services.ops_checks.bar_pattern_checks import run_bar_pattern_backfill
+from services.ops_checks.calibration_bucket_checks import run_calibration_buckets
+from services.ops_checks.candidate_outcome_backfill_checks import run_candidate_outcome_backfill
+from services.ops_checks.candidate_universe_checks import run_candidate_universe_report
+from services.ops_checks.config_audit_checks import run_config_audit_report
+from services.ops_checks.context_freshness_checks import (
+    run_context_freshness,
+    run_data_freshness_gate,
+)
 from services.ops_checks.conviction_checks import (
     run_buy_opportunity_report,
     run_claude_context_audit,
     run_conviction_persistence_health,
     run_conviction_stack_report,
 )
-from services.ops_checks.auto_buy_checks import run_auto_buy_health
-from services.ops_checks.signal_source_checks import run_signal_source_readiness
+from services.ops_checks.cross_asset_lead_lag_checks import (
+    run_cross_asset_lead_lag_map_report,
+)
 from services.ops_checks.dataset_checks import run_dataset_health
+from services.ops_checks.decision_quality_checks import run_decision_quality_review
+from services.ops_checks.event_context_validation_checks import run_event_context_validation
+from services.ops_checks.event_source_checks import run_event_source_coverage
 from services.ops_checks.excursion_checks import (
     run_peak_bucket_report,
     run_winner_became_loser,
 )
-from services.ops_checks.feature_checks import run_feature_health, run_feature_watch
-from services.ops_checks.live_bar_pattern_capture_checks import (
-    run_live_bar_pattern_capture_report,
-)
-from services.ops_checks.intelligence_checks import run_intelligence_summary
-from services.ops_checks.lifecycle_checks import run_lifecycle_analysis
-from services.ops_checks.lifecycle_dashboard_checks import run_lifecycle_dashboard
-from services.ops_checks.decision_quality_checks import run_decision_quality_review
+from services.ops_checks.exit_intelligence_checks import run_exit_intelligence_summary
 from services.ops_checks.exit_snapshot_backfill_checks import run_exit_snapshot_backfill
-from services.ops_checks.candidate_universe_checks import run_candidate_universe_report
-from services.ops_checks.candidate_outcome_backfill_checks import run_candidate_outcome_backfill
-from services.ops_checks.missed_buy_review_checks import run_missed_buy_review
-from services.ops_checks.calibration_bucket_checks import run_calibration_buckets
+from services.ops_checks.external_symbol_candidate_checks import run_external_symbol_candidates
+from services.ops_checks.external_symbol_discovery_checks import run_external_symbol_discovery
 from services.ops_checks.feature_attribution_checks import run_feature_attribution_report
-from services.ops_checks.post_trade_learning_checks import run_post_trade_learning_report
-from services.ops_checks.symbol_pattern_checks import run_symbol_pattern_outcomes
-from services.ops_checks.pattern_learning_inputs_checks import run_pattern_learning_inputs_report
-from services.ops_checks.bar_pattern_checks import run_bar_pattern_backfill
+from services.ops_checks.feature_checks import run_feature_health, run_feature_watch
+from services.ops_checks.friction_heatmap_checks import run_friction_heatmap
 from services.ops_checks.historical_bar_archive_checks import run_historical_bar_archive
 from services.ops_checks.historical_bar_coverage_checks import run_historical_bar_coverage
-from services.ops_checks.historical_bar_progress_checks import run_historical_bar_progress
-from services.ops_checks.historical_bar_readiness_checks import run_historical_bar_readiness
 from services.ops_checks.historical_bar_model_checks import (
     run_historical_bar_model_readiness,
 )
@@ -165,69 +176,62 @@ from services.ops_checks.historical_bar_paper_validation_checks import (
     run_historical_bar_paper_validation,
     run_historical_bar_walk_forward,
 )
+from services.ops_checks.historical_bar_progress_checks import run_historical_bar_progress
+from services.ops_checks.historical_bar_readiness_checks import run_historical_bar_readiness
 from services.ops_checks.historical_bar_validation_checks import (
     run_historical_bar_validation,
 )
-from services.ops_checks.ml_dataset_checks import run_ml_dataset_export_check
-from services.ops_checks.monday_readiness_checks import run_monday_readiness_check
-from services.ops_checks.exit_intelligence_checks import run_exit_intelligence_summary
-from services.ops_checks.sqlite_ownership_checks import run_sqlite_ownership_report
-from services.ops_checks.operator_intelligence_dashboard_checks import (
-    run_operator_intelligence_dashboard,
-)
+from services.ops_checks.intelligence_checks import run_intelligence_summary
+from services.ops_checks.learning_artifact_checks import run_learning_artifact_consumption
 from services.ops_checks.learning_readiness_checks import (
     run_learning_effectiveness,
     run_learning_readiness,
 )
-from services.ops_checks.active_learning_checks import run_active_learning_integration
-from services.ops_checks.learning_artifact_checks import run_learning_artifact_consumption
-from services.ops_checks.rollout_contract_checks import run_rollout_contract_report
-from services.ops_checks.advisory_authority_checks import run_advisory_authority_report
+from services.ops_checks.lifecycle_checks import run_lifecycle_analysis
+from services.ops_checks.lifecycle_dashboard_checks import run_lifecycle_dashboard
+from services.ops_checks.live_bar_pattern_capture_checks import (
+    run_live_bar_pattern_capture_report,
+)
+from services.ops_checks.log_ledger_checks import run_log_ledger_consistency
+from services.ops_checks.market_data_parity_checks import run_market_data_parity
+from services.ops_checks.missed_buy_review_checks import run_missed_buy_review
+from services.ops_checks.ml_dataset_checks import run_ml_dataset_export_check
+from services.ops_checks.monday_readiness_checks import run_monday_readiness_check
+from services.ops_checks.operator_intelligence_dashboard_checks import (
+    run_operator_intelligence_dashboard,
+)
+from services.ops_checks.order_checks import run_order_health
 from services.ops_checks.paper_learning_authority_checks import (
     run_paper_learning_authority_report,
 )
-from services.ops_checks.ai_intelligence_review_checks import run_ai_intelligence_review
-from services.ops_checks.order_checks import run_order_health
-from services.ops_checks.rejection_checks import run_rejection_summary
-from services.ops_checks.rejected_outcome_checks import run_rejected_outcomes_health
-from services.ops_checks.setup_breakdown import run_setup_breakdown
-from services.ops_checks.runtime_checks import run_runtime_health, run_runtime_health_trend
-from services.ops_checks.context_freshness_checks import run_context_freshness, run_data_freshness_gate
-from services.ops_checks.event_source_checks import run_event_source_coverage
-from services.ops_checks.event_context_validation_checks import run_event_context_validation
-from services.ops_checks.external_symbol_discovery_checks import run_external_symbol_discovery
-from services.ops_checks.external_symbol_candidate_checks import run_external_symbol_candidates
-from services.ops_checks.log_ledger_checks import run_log_ledger_consistency
-from services.ops_checks.portfolio_risk_checks import run_portfolio_risk_report
+from services.ops_checks.pattern_learning_inputs_checks import run_pattern_learning_inputs_report
 from services.ops_checks.point_in_time_archive_checks import run_point_in_time_archive
+from services.ops_checks.portfolio_risk_checks import run_portfolio_risk_report
+from services.ops_checks.post_trade_learning_checks import run_post_trade_learning_report
+from services.ops_checks.rejected_outcome_checks import run_rejected_outcomes_health
+from services.ops_checks.rejection_checks import run_rejection_summary
+from services.ops_checks.research_export_checks import run_research_export
 from services.ops_checks.resource_readiness_checks import run_resource_readiness
-from services.ops_checks.advanced_alpha_readiness_checks import (
-    run_advanced_alpha_readiness,
-)
-from services.ops_checks.advanced_alpha_model_comparison_checks import (
-    run_advanced_alpha_model_comparison,
-)
-from services.ops_checks.friction_heatmap_checks import run_friction_heatmap
-from services.ops_checks.volume_clock_vpin_checks import run_volume_clock_vpin_report
-from services.ops_checks.volatile_session_intelligence_checks import (
-    run_volatile_session_intelligence_report,
-)
-from services.ops_checks.cross_asset_lead_lag_checks import (
-    run_cross_asset_lead_lag_map_report,
-)
-from services.ops_checks.transformer_authority_checks import (
-    run_transformer_authority_report,
-)
+from services.ops_checks.rollout_contract_checks import run_rollout_contract_report
+from services.ops_checks.runtime_checks import run_runtime_health, run_runtime_health_trend
+from services.ops_checks.setup_breakdown import run_setup_breakdown
+from services.ops_checks.shadow_prediction_checks import run_shadow_prediction_report
+from services.ops_checks.signal_source_checks import run_signal_source_readiness
+from services.ops_checks.snapshot_checks import run_decision_snapshot_health
+from services.ops_checks.sqlite_ownership_checks import run_sqlite_ownership_report
+from services.ops_checks.symbol_pattern_checks import run_symbol_pattern_outcomes
 from services.ops_checks.trading_education_checks import (
     run_trading_education_coverage,
     run_trading_education_health,
     run_trading_education_review,
 )
-from services.ops_checks.market_data_parity_checks import run_market_data_parity
-from services.ops_checks.research_export_checks import run_research_export
-from services.ops_checks.snapshot_checks import run_decision_snapshot_health
-from services.ops_checks.shadow_prediction_checks import run_shadow_prediction_report
-from pipeline.trading_education_ingest import main as run_trading_education_ingest_cli
+from services.ops_checks.transformer_authority_checks import (
+    run_transformer_authority_report,
+)
+from services.ops_checks.volatile_session_intelligence_checks import (
+    run_volatile_session_intelligence_report,
+)
+from services.ops_checks.volume_clock_vpin_checks import run_volume_clock_vpin_report
 
 BASE_DIR = Path(__file__).resolve().parent
 VENV_PYTHON = BASE_DIR / "venv" / "bin" / "python"
@@ -369,7 +373,8 @@ def check_market_context_file():
     print(f"block_buys  : {data.get('block_new_buys')}")
 
     # Intraday refresh staleness check — only meaningful during market hours.
-    from datetime import datetime, timezone, timedelta
+    from datetime import datetime, timedelta, timezone
+
     intraday_refresh_at = data.get("intraday_refresh_at")
     print(f"intraday_refresh_at : {intraday_refresh_at or 'not present'}")
     now_utc = datetime.now(timezone.utc)
@@ -381,21 +386,27 @@ def check_market_context_file():
     INTRADAY_REFRESH_STALE_MINUTES = 90
     if is_market_hours:
         if not intraday_refresh_at:
-            print(f"[WARN] intraday_refresh_at absent during market hours — intraday_context_refresh.py may not have run yet")
+            print(
+                "[WARN] intraday_refresh_at absent during market hours — intraday_context_refresh.py may not have run yet"
+            )
         else:
             try:
                 refresh_dt = datetime.fromisoformat(intraday_refresh_at).astimezone(timezone.utc)
                 age_minutes = (now_utc - refresh_dt).total_seconds() / 60
                 if age_minutes > INTRADAY_REFRESH_STALE_MINUTES:
-                    print(f"[WARN] intraday_refresh_at is {age_minutes:.0f} min old (>{INTRADAY_REFRESH_STALE_MINUTES} min) — refresh may be silently failing")
+                    print(
+                        f"[WARN] intraday_refresh_at is {age_minutes:.0f} min old (>{INTRADAY_REFRESH_STALE_MINUTES} min) — refresh may be silently failing"
+                    )
                     ok = False
                 else:
-                    print(f"[OK] intraday_refresh_at is {age_minutes:.0f} min old (within {INTRADAY_REFRESH_STALE_MINUTES} min)")
+                    print(
+                        f"[OK] intraday_refresh_at is {age_minutes:.0f} min old (within {INTRADAY_REFRESH_STALE_MINUTES} min)"
+                    )
             except Exception as e:
                 print(f"[WARN] could not parse intraday_refresh_at '{intraday_refresh_at}': {e}")
     else:
         if intraday_refresh_at:
-            print(f"[OK] intraday_refresh_at present (staleness check skipped outside market hours)")
+            print("[OK] intraday_refresh_at present (staleness check skipped outside market hours)")
 
     if not isinstance(symbols, dict) or not symbols:
         print("[FAIL] symbols is empty or not an object")
@@ -567,7 +578,9 @@ def policy_artifact_health():
     print(f"state_hash  : {status.get('state_hash')}")
     registry = status.get("registry") or {}
     known_good = registry.get("known_good") or {}
-    print(f"registry    : entries={registry.get('entry_count', 0)} path={registry.get('registry_path')}")
+    print(
+        f"registry    : entries={registry.get('entry_count', 0)} path={registry.get('registry_path')}"
+    )
     print(f"known_good  : {known_good.get('artifact_set_id') or '-'}")
 
     ok = True
@@ -589,9 +602,13 @@ def policy_artifact_health():
         if name == "policy_backtest_summary.json":
             rec = item.get("recommendation")
             if rec:
-                print(f"    policy_backtest_recommendation={rec} reason={item.get('reason') or '-'}")
+                print(
+                    f"    policy_backtest_recommendation={rec} reason={item.get('reason') or '-'}"
+                )
                 if rec == "policy_too_loose":
-                    print("    [WARN] decision policy remains too loose; keep under review and do not promote")
+                    print(
+                        "    [WARN] decision policy remains too loose; keep under review and do not promote"
+                    )
         if not exists:
             ok = False
             print(f"    [WARN] missing policy artifact: {name}")
@@ -606,7 +623,11 @@ def policy_artifact_health():
         print("[WARN] no known-good policy artifact pointer found")
 
     print()
-    print("[OK] policy artifact check completed" if ok else "[WARN] policy artifact check found issues")
+    print(
+        "[OK] policy artifact check completed"
+        if ok
+        else "[WARN] policy artifact check found issues"
+    )
     return ok
 
 
@@ -624,7 +645,9 @@ def retention_health():
     print(f"rule          : {policy['rule']}")
     print()
     for row in policy["rules"]:
-        window = row["default_window_days"] if row["default_window_days"] is not None else "preserve"
+        window = (
+            row["default_window_days"] if row["default_window_days"] is not None else "preserve"
+        )
         print(
             f"  {row['name']:<30} tier={row['tier']:<5} window={str(window):<8} storage={row['storage']}"
         )
@@ -717,6 +740,10 @@ def production_evidence(target_date):
 
 def resource_readiness():
     return run_resource_readiness(base_dir=BASE_DIR)
+
+
+def config_audit():
+    return run_config_audit_report(base_dir=BASE_DIR)
 
 
 def advanced_alpha_readiness(target_date):
@@ -1284,6 +1311,7 @@ def peak_bucket_report(target_date: str | None = None) -> bool:
 def winner_became_loser(target_date: str) -> bool:
     return run_winner_became_loser(target_date, base_dir=BASE_DIR)
 
+
 def conviction_stack_report(target_date: str) -> bool:
     return run_conviction_stack_report(target_date, base_dir=BASE_DIR)
 
@@ -1384,9 +1412,7 @@ def jobs_status(job_name_filter: str | None = None) -> bool:
 
     failures = [r for r in rows if r["status"] == "FAIL"]
 
-    print(
-        f"\n  {'job':<40} {'status':<8} {'age':>7} {'dur':>7} {'rows':>6} {'warn':>5}"
-    )
+    print(f"\n  {'job':<40} {'status':<8} {'age':>7} {'dur':>7} {'rows':>6} {'warn':>5}")
     print("  " + "-" * 70)
     for r in rows:
         age = f"{r['age_min']:.0f}m" if r["age_min"] is not None else "-"
@@ -1400,7 +1426,9 @@ def jobs_status(job_name_filter: str | None = None) -> bool:
 
     print()
     if failures:
-        print(f"[WARN] {len(failures)} job(s) last run failed: {', '.join(r['job_name'] for r in failures)}")
+        print(
+            f"[WARN] {len(failures)} job(s) last run failed: {', '.join(r['job_name'] for r in failures)}"
+        )
         return False
 
     print(f"[OK] {len(rows)} jobs shown — no recent failures")
@@ -1473,7 +1501,9 @@ def main():
         return 0 if runtime_health(target_date) else 1
 
     if command == "runtime-health-trend":
-        end_date = sys.argv[3] if len(sys.argv) > 3 and not sys.argv[3].startswith("--") else target_date
+        end_date = (
+            sys.argv[3] if len(sys.argv) > 3 and not sys.argv[3].startswith("--") else target_date
+        )
         return 0 if runtime_health_trend(target_date, end_date) else 1
 
     if command == "context-freshness":
@@ -1502,6 +1532,9 @@ def main():
 
     if command == "production-evidence":
         return 0 if production_evidence(target_date) else 1
+
+    if command == "config-audit":
+        return 0 if config_audit() else 1
 
     if command == "resource-readiness":
         return 0 if resource_readiness() else 1
@@ -1585,27 +1618,15 @@ def main():
         return 0 if historical_bar_archive(target_date) else 1
 
     if command == "historical-bar-coverage":
-        start_arg = (
-            sys.argv[2]
-            if len(sys.argv) > 2 and not sys.argv[2].startswith("--")
-            else None
-        )
+        start_arg = sys.argv[2] if len(sys.argv) > 2 and not sys.argv[2].startswith("--") else None
         return 0 if historical_bar_coverage(start_arg) else 1
 
     if command == "historical-bar-progress":
-        start_arg = (
-            sys.argv[2]
-            if len(sys.argv) > 2 and not sys.argv[2].startswith("--")
-            else None
-        )
+        start_arg = sys.argv[2] if len(sys.argv) > 2 and not sys.argv[2].startswith("--") else None
         return 0 if historical_bar_progress(start_arg) else 1
 
     if command == "historical-bar-readiness":
-        start_arg = (
-            sys.argv[2]
-            if len(sys.argv) > 2 and not sys.argv[2].startswith("--")
-            else None
-        )
+        start_arg = sys.argv[2] if len(sys.argv) > 2 and not sys.argv[2].startswith("--") else None
         return 0 if historical_bar_readiness(start_arg) else 1
 
     if command == "historical-bar-retry-plan":
@@ -1752,8 +1773,12 @@ def main():
         checks.append(run("Auto-Buy Candidates", ["ops_check.py", "auto-buy", target_date]))
         _print_section("Auto-Buy Outcomes")
         checks.append(run_report("auto-buy-outcomes", target_date))
-        checks.append(run("Decision Snapshots", ["ops_check.py", "decision-snapshots", target_date]))
-        checks.append(run("AI Intelligence Review", ["ops_check.py", "ai-intelligence-review", target_date]))
+        checks.append(
+            run("Decision Snapshots", ["ops_check.py", "decision-snapshots", target_date])
+        )
+        checks.append(
+            run("AI Intelligence Review", ["ops_check.py", "ai-intelligence-review", target_date])
+        )
         checks.append(run("Policy Artifacts", ["ops_check.py", "policy-artifacts"]))
         checks.append(run("Retention Policy", ["ops_check.py", "retention"]))
         _print_section("Drawdown Report")

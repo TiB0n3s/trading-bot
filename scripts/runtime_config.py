@@ -108,6 +108,30 @@ PAPER_LEARNING_MAX_POSITION_SIZE_PCT = _env_float(
     "PAPER_LEARNING_MAX_POSITION_SIZE_PCT",
     0.75,
 )
+PAPER_EXPLORATION_AUTHORITY_ENABLED = _env_bool(
+    "PAPER_EXPLORATION_AUTHORITY_ENABLED",
+    True,
+)
+PAPER_EXPLORATION_MIN_SETUP_SCORE = _env_float(
+    "PAPER_EXPLORATION_MIN_SETUP_SCORE",
+    78.0,
+)
+PAPER_EXPLORATION_MIN_BUY_OPPORTUNITY_SCORE = _env_float(
+    "PAPER_EXPLORATION_MIN_BUY_OPPORTUNITY_SCORE",
+    10.0,
+)
+PAPER_EXPLORATION_MIN_PREDICTION_SCORE = _env_float(
+    "PAPER_EXPLORATION_MIN_PREDICTION_SCORE",
+    55.0,
+)
+PAPER_EXPLORATION_SIZE_LIFT_MULTIPLIER = _env_float(
+    "PAPER_EXPLORATION_SIZE_LIFT_MULTIPLIER",
+    1.25,
+)
+PAPER_EXPLORATION_MAX_POSITION_SIZE_PCT = _env_float(
+    "PAPER_EXPLORATION_MAX_POSITION_SIZE_PCT",
+    1.50,
+)
 
 
 def is_cash_mode() -> bool:
@@ -211,6 +235,29 @@ def public_ml_authority_config() -> dict:
                 "macro_or_regime_hard_block",
                 "explicit_symbol_override",
                 "claude_parse_or_engine_error",
+            ],
+        },
+        "paper_exploration_authority": {
+            "enabled": PAPER_EXPLORATION_AUTHORITY_ENABLED,
+            "execution_modes": ["paper", "dry_run"],
+            "min_setup_score": PAPER_EXPLORATION_MIN_SETUP_SCORE,
+            "min_buy_opportunity_score": PAPER_EXPLORATION_MIN_BUY_OPPORTUNITY_SCORE,
+            "min_prediction_score": PAPER_EXPLORATION_MIN_PREDICTION_SCORE,
+            "size_lift_multiplier": PAPER_EXPLORATION_SIZE_LIFT_MULTIPLIER,
+            "max_position_size_pct": PAPER_EXPLORATION_MAX_POSITION_SIZE_PCT,
+            "can_approve_trades": True,
+            "can_increase_size": True,
+            "authority_scope": "paper_only_exploration_after_hard_gates",
+            "cannot_override": [
+                "cash_safe_or_cash_full_mode",
+                "stale_signal",
+                "liquidity_or_spread_failure",
+                "broker_or_account_constraints",
+                "macro_or_regime_hard_block",
+                "explicit_symbol_override",
+                "claude_parse_or_engine_error",
+                "deterministic_signal_quality_block",
+                "session_momentum_hard_block",
             ],
         },
         "default_authority_mode": "observe_only_compare",

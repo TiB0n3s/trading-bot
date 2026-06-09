@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 """Unit tests for extracted context, approval, and sizing services."""
+# ruff: noqa: E402
 
 from __future__ import annotations
 
-import sys
 import os
+import sys
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
@@ -18,10 +19,15 @@ from services.context_builder import (
     build_final_signal_context,
     build_initial_signal_context,
 )
+from services.policies import sizing_policy
 from services.setup_context_service import SetupContextDeps
 from services.signal_models import SignalRuntimeState
-from services.sizing_service import apply_final_sizing, apply_size_cap, build_conviction_stack, collect_active_caps
-from services.policies import sizing_policy
+from services.sizing_service import (
+    apply_final_sizing,
+    apply_size_cap,
+    build_conviction_stack,
+    collect_active_caps,
+)
 
 
 def assert_equal(actual, expected, label):
@@ -54,7 +60,9 @@ def test_context_builder_sanitizes_claude_context():
         "setup_observation": {"setup_label": "clean"},
     }
     built = build_final_signal_context(account_state=account_state, trend_table={"AAPL": {}})
-    assert_equal("adaptive_buy_confirmation" in built.claude_account_state, False, "adaptive stripped")
+    assert_equal(
+        "adaptive_buy_confirmation" in built.claude_account_state, False, "adaptive stripped"
+    )
     assert_equal("market_alignment" in built.claude_account_state, False, "alignment stripped")
     assert_equal(
         built.claude_account_state["market_context_summary"]["required_confirmations"],
@@ -378,6 +386,135 @@ def test_paper_learning_authority_can_override_claude_unapproved_soft_response()
     assert_equal(result.claude_payload["position_size_pct"], 0.75, "size cap")
 
 
+def test_paper_exploration_authority_can_approve_and_increase_size():
+    account_state = {
+        "setup_quality": {
+            "recommendation": "buy",
+            "policy_action": "allow",
+            "score": 88,
+        },
+        "buy_opportunity": {
+            "buy_opportunity_recommendation": "strong_buy_candidate",
+            "buy_opportunity_score": 13,
+        },
+        "prediction_gate": {
+            "deterministic_signal_quality_decision": "pass",
+            "prediction_score": 72,
+        },
+        "session_momentum_gate": {"severity": "pass"},
+        "execution_quality": {"decision": "allow"},
+    }
+    config = {
+        "paper_exploration_authority": {
+            "enabled": True,
+            "min_setup_score": 78,
+            "min_buy_opportunity_score": 10,
+            "min_prediction_score": 55,
+            "size_lift_multiplier": 1.25,
+            "max_position_size_pct": 1.5,
+        }
+    }
+    result = evaluate_approval_decision(
+        signal={"symbol": "AAPL", "action": "buy"},
+        action="buy",
+        claude_account_state={},
+        evaluate_signal=lambda *_: {
+            "approved": False,
+            "confidence": "medium",
+            "reason": "Claude is cautious despite strong setup",
+            "position_size_pct": 1.0,
+        },
+        cash_safe_mode=False,
+        market_bias={},
+        account_state=account_state,
+        medium_confidence_override=lambda **_: (True, "test override"),
+        tape_exception_enabled=False,
+        execution_mode="paper",
+        ml_authority_config=config,
+    )
+
+    assert_equal(result.approved, True, "approved")
+    assert_equal(result.source, "paper_exploration_authority", "source")
+    assert_equal(result.claude_payload["position_size_pct"], 1.5, "exploration size cap")
+    assert_equal(
+        account_state["paper_exploration_authority"]["can_approve_trades"],
+        True,
+        "can approve trades",
+    )
+
+    approved_state = dict(account_state)
+    approved_result = evaluate_approval_decision(
+        signal={"symbol": "AAPL", "action": "buy"},
+        action="buy",
+        claude_account_state={},
+        evaluate_signal=lambda *_: {
+            "approved": True,
+            "confidence": "high",
+            "reason": "approved",
+            "position_size_pct": 1.0,
+        },
+        cash_safe_mode=False,
+        market_bias={},
+        account_state=approved_state,
+        medium_confidence_override=lambda **_: (True, "test override"),
+        tape_exception_enabled=False,
+        execution_mode="paper",
+        ml_authority_config=config,
+    )
+    assert_equal(approved_result.approved, True, "approved result")
+    assert_equal(approved_result.source, "paper_exploration_authority", "approved source")
+    assert_equal(approved_result.claude_payload["position_size_pct"], 1.25, "lifted size")
+    assert_equal(
+        approved_state["paper_exploration_authority"]["effect"],
+        "size_increase",
+        "lift effect",
+    )
+
+
+def test_paper_exploration_authority_does_not_run_in_cash_mode():
+    account_state = {
+        "setup_quality": {"recommendation": "buy", "policy_action": "allow", "score": 95},
+        "buy_opportunity": {
+            "buy_opportunity_recommendation": "strong_buy_candidate",
+            "buy_opportunity_score": 15,
+        },
+        "prediction_gate": {
+            "deterministic_signal_quality_decision": "pass",
+            "prediction_score": 90,
+        },
+    }
+    result = evaluate_approval_decision(
+        signal={"symbol": "AAPL", "action": "buy"},
+        action="buy",
+        claude_account_state={},
+        evaluate_signal=lambda *_: {
+            "approved": True,
+            "confidence": "high",
+            "reason": "approved",
+            "position_size_pct": 1.0,
+        },
+        cash_safe_mode=False,
+        market_bias={},
+        account_state=account_state,
+        medium_confidence_override=lambda **_: (True, "test override"),
+        tape_exception_enabled=False,
+        execution_mode="cash_full",
+        ml_authority_config={
+            "paper_exploration_authority": {
+                "enabled": True,
+                "min_setup_score": 78,
+                "min_buy_opportunity_score": 10,
+                "max_position_size_pct": 1.5,
+            }
+        },
+    )
+
+    assert_equal(result.approved, True, "approved")
+    assert_equal(result.source, "claude", "source")
+    assert_equal(result.claude_payload["position_size_pct"], 1.0, "unchanged size")
+    assert_equal("paper_exploration_authority" in account_state, False, "no paper marker")
+
+
 def test_approval_service_separates_claude_parse_error_from_confidence_gate():
     result = evaluate_approval_decision(
         signal={"symbol": "AAPL", "action": "buy"},
@@ -428,8 +565,9 @@ def test_sizing_service_preserves_sell_default_size():
         decision=decision,
         risk_multiplier=1.0,
         account_state={},
-        apply_buy_opportunity_sizing=lambda **kwargs: kwargs["base_position_size_pct"]
-        * kwargs["risk_multiplier"],
+        apply_buy_opportunity_sizing=lambda **kwargs: (
+            kwargs["base_position_size_pct"] * kwargs["risk_multiplier"]
+        ),
     )
     assert_equal(sizing.final_size_pct, 1.0, "sell default size")
 
@@ -658,6 +796,8 @@ def main():
         test_paper_learning_authority_can_override_claude_low_confidence,
         test_paper_learning_authority_does_not_override_cash_mode,
         test_paper_learning_authority_can_override_claude_unapproved_soft_response,
+        test_paper_exploration_authority_can_approve_and_increase_size,
+        test_paper_exploration_authority_does_not_run_in_cash_mode,
         test_approval_service_separates_claude_parse_error_from_confidence_gate,
         test_approval_service_separates_claude_engine_error_from_confidence_gate,
         test_sizing_service_preserves_sell_default_size,

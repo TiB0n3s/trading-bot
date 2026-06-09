@@ -202,6 +202,123 @@ def _paper_learning_override_decision(
     }
 
 
+def _paper_exploration_authority_decision(
+    *,
+    action: str,
+    decision: dict[str, Any],
+    account_state: dict[str, Any],
+    execution_mode: str,
+    ml_authority_config: dict[str, Any] | None,
+) -> dict[str, Any]:
+    config = (ml_authority_config or {}).get("paper_exploration_authority") or {}
+    if action != "buy" or not config.get("enabled") or execution_mode not in {"paper", "dry_run"}:
+        return {
+            "allowed": False,
+            "reason": "paper exploration authority disabled or not applicable",
+        }
+
+    setup_quality = account_state.get("setup_quality") or {}
+    buy_opportunity = account_state.get("buy_opportunity") or {}
+    prediction_gate = account_state.get("prediction_gate") or {}
+    session_gate = account_state.get("session_momentum_gate") or {}
+    execution_quality = account_state.get("execution_quality") or {}
+    macro_risk = account_state.get("macro_risk") or {}
+
+    setup_score = _float_or_none(setup_quality.get("score"))
+    buy_score = _float_or_none(buy_opportunity.get("buy_opportunity_score"))
+    prediction_score = _float_or_none(
+        prediction_gate.get("prediction_score")
+        or prediction_gate.get("ml_prediction_score")
+        or account_state.get("prediction_score")
+    )
+
+    min_setup = float(config.get("min_setup_score") or 78.0)
+    min_buy_score = float(config.get("min_buy_opportunity_score") or 10.0)
+    min_prediction = float(config.get("min_prediction_score") or 55.0)
+    max_size_pct = float(config.get("max_position_size_pct") or 1.5)
+    lift_multiplier = float(config.get("size_lift_multiplier") or 1.25)
+
+    setup_rec = str(setup_quality.get("recommendation") or "").lower()
+    setup_action = str(setup_quality.get("policy_action") or "").lower()
+    buy_rec = str(buy_opportunity.get("buy_opportunity_recommendation") or "").lower()
+    deterministic_gate = str(
+        prediction_gate.get("deterministic_signal_quality_decision")
+        or prediction_gate.get("prediction_decision")
+        or ""
+    ).lower()
+    session_severity = str(session_gate.get("severity") or "").lower()
+    execution_decision = str(execution_quality.get("decision") or "").lower()
+
+    blockers = []
+    if macro_risk.get("block_new_buys"):
+        blockers.append("macro_risk=block_new_buys")
+    if setup_action in {"block", "avoid"} or setup_rec == "avoid":
+        blockers.append(f"setup_quality={setup_action or setup_rec}")
+    if buy_rec in {"avoid", "skip"}:
+        blockers.append(f"buy_opportunity={buy_rec}")
+    if deterministic_gate == "block":
+        blockers.append("deterministic_signal_quality=block")
+    if session_severity in {"block", "hard_block"}:
+        blockers.append(f"session_gate={session_severity}")
+    if execution_decision == "block":
+        blockers.append("execution_quality=block")
+    if setup_score is None or setup_score < min_setup:
+        blockers.append(f"setup_score={setup_score} < {min_setup}")
+    if buy_score is None or buy_score < min_buy_score:
+        blockers.append(f"buy_opportunity_score={buy_score} < {min_buy_score}")
+    if prediction_score is not None and prediction_score < min_prediction:
+        blockers.append(f"prediction_score={prediction_score} < {min_prediction}")
+    if setup_rec not in {"buy", "strong_buy", "favor"} and setup_action not in {
+        "allow",
+        "buy",
+    }:
+        blockers.append(f"setup_recommendation={setup_rec or setup_action or 'unknown'}")
+    if buy_rec not in {"strong_buy_candidate", "buy_candidate", "favor", "allow"}:
+        blockers.append(f"buy_opportunity_recommendation={buy_rec or 'unknown'}")
+
+    if blockers:
+        return {
+            "allowed": False,
+            "reason": "; ".join(blockers),
+            "setup_score": setup_score,
+            "buy_opportunity_score": buy_score,
+            "prediction_score": prediction_score,
+        }
+
+    requested_size = _float_or_none(decision.get("position_size_pct"))
+    if requested_size is None or requested_size <= 0:
+        requested_size = _float_or_none(account_state.get("position_size_pct")) or 1.0
+    approved = bool(decision.get("approved"))
+    final_size = min(
+        max_size_pct,
+        requested_size * lift_multiplier if approved else max(requested_size, max_size_pct),
+    )
+    final_size = round(max(0.0, final_size), 4)
+    effect = "size_increase" if approved and final_size > requested_size else "paper_approval"
+    return {
+        "allowed": True,
+        "reason": (
+            "paper exploration authority used strong deterministic intelligence: "
+            f"setup_score={setup_score}; buy_score={buy_score}; "
+            f"prediction_score={prediction_score}; setup={setup_rec or setup_action}; "
+            f"buy_rec={buy_rec}; effect={effect}"
+        ),
+        "position_size_pct": final_size,
+        "original_position_size_pct": requested_size,
+        "max_position_size_pct": max_size_pct,
+        "size_lift_multiplier": lift_multiplier,
+        "effect": effect,
+        "setup_score": setup_score,
+        "buy_opportunity_score": buy_score,
+        "prediction_score": prediction_score,
+        "setup_recommendation": setup_rec,
+        "buy_opportunity_recommendation": buy_rec,
+        "authority_scope": "paper_only_exploration_after_hard_gates",
+        "can_approve_trades": True,
+        "can_increase_size": True,
+    }
+
+
 def evaluate_approval_decision(
     *,
     signal: dict[str, Any],
@@ -250,6 +367,33 @@ def evaluate_approval_decision(
         )
 
     if action == "buy" and confidence == "low":
+        exploration = _paper_exploration_authority_decision(
+            action=action,
+            decision=decision,
+            account_state=account_state,
+            execution_mode=execution_mode,
+            ml_authority_config=ml_authority_config,
+        )
+        if exploration.get("allowed"):
+            adjusted = dict(decision)
+            adjusted["approved"] = True
+            adjusted["confidence"] = "medium"
+            adjusted["position_size_pct"] = exploration["position_size_pct"]
+            adjusted["reason"] = exploration["reason"]
+            adjusted["paper_exploration_authority"] = exploration
+            account_state["paper_exploration_authority"] = exploration
+            return ApprovalDecision(
+                approved=True,
+                source="paper_exploration_authority",
+                confidence="medium",
+                reason=exploration["reason"],
+                category=None,
+                claude_payload=adjusted,
+                metadata={
+                    "raw_decision": raw_decision,
+                    "paper_exploration_authority": exploration,
+                },
+            )
         paper_override = _paper_learning_override_decision(
             action=action,
             decision=decision,
@@ -305,6 +449,33 @@ def evaluate_approval_decision(
                 account_state=account_state,
             )
             if not medium_ok:
+                exploration = _paper_exploration_authority_decision(
+                    action=action,
+                    decision=decision,
+                    account_state=account_state,
+                    execution_mode=execution_mode,
+                    ml_authority_config=ml_authority_config,
+                )
+                if exploration.get("allowed"):
+                    adjusted = dict(decision)
+                    adjusted["approved"] = True
+                    adjusted["confidence"] = "medium"
+                    adjusted["position_size_pct"] = exploration["position_size_pct"]
+                    adjusted["reason"] = exploration["reason"]
+                    adjusted["paper_exploration_authority"] = exploration
+                    account_state["paper_exploration_authority"] = exploration
+                    return ApprovalDecision(
+                        approved=True,
+                        source="paper_exploration_authority",
+                        confidence="medium",
+                        reason=exploration["reason"],
+                        category=None,
+                        claude_payload=adjusted,
+                        metadata={
+                            "raw_decision": raw_decision,
+                            "paper_exploration_authority": exploration,
+                        },
+                    )
                 paper_override = _paper_learning_override_decision(
                     action=action,
                     decision=decision,
@@ -365,6 +536,33 @@ def evaluate_approval_decision(
             account_state=account_state,
         )
         if not medium_ok:
+            exploration = _paper_exploration_authority_decision(
+                action=action,
+                decision=decision,
+                account_state=account_state,
+                execution_mode=execution_mode,
+                ml_authority_config=ml_authority_config,
+            )
+            if exploration.get("allowed"):
+                adjusted = dict(decision)
+                adjusted["approved"] = True
+                adjusted["confidence"] = "medium"
+                adjusted["position_size_pct"] = exploration["position_size_pct"]
+                adjusted["reason"] = exploration["reason"]
+                adjusted["paper_exploration_authority"] = exploration
+                account_state["paper_exploration_authority"] = exploration
+                return ApprovalDecision(
+                    approved=True,
+                    source="paper_exploration_authority",
+                    confidence="medium",
+                    reason=exploration["reason"],
+                    category=None,
+                    claude_payload=adjusted,
+                    metadata={
+                        "raw_decision": raw_decision,
+                        "paper_exploration_authority": exploration,
+                    },
+                )
             paper_override = _paper_learning_override_decision(
                 action=action,
                 decision=decision,
@@ -413,6 +611,33 @@ def evaluate_approval_decision(
         }
 
     if action == "buy" and not bool(decision.get("approved")):
+        exploration = _paper_exploration_authority_decision(
+            action=action,
+            decision=decision,
+            account_state=account_state,
+            execution_mode=execution_mode,
+            ml_authority_config=ml_authority_config,
+        )
+        if exploration.get("allowed"):
+            adjusted = dict(decision)
+            adjusted["approved"] = True
+            adjusted["confidence"] = "medium"
+            adjusted["position_size_pct"] = exploration["position_size_pct"]
+            adjusted["reason"] = exploration["reason"]
+            adjusted["paper_exploration_authority"] = exploration
+            account_state["paper_exploration_authority"] = exploration
+            return ApprovalDecision(
+                approved=True,
+                source="paper_exploration_authority",
+                confidence="medium",
+                reason=exploration["reason"],
+                category=None,
+                claude_payload=adjusted,
+                metadata={
+                    "raw_decision": raw_decision,
+                    "paper_exploration_authority": exploration,
+                },
+            )
         paper_override = _paper_learning_override_decision(
             action=action,
             decision=decision,
@@ -438,6 +663,32 @@ def evaluate_approval_decision(
                 metadata={
                     "raw_decision": raw_decision,
                     "paper_learning_authority_override": paper_override,
+                },
+            )
+
+    if action == "buy" and bool(decision.get("approved")):
+        exploration = _paper_exploration_authority_decision(
+            action=action,
+            decision=decision,
+            account_state=account_state,
+            execution_mode=execution_mode,
+            ml_authority_config=ml_authority_config,
+        )
+        if exploration.get("allowed") and exploration.get("effect") == "size_increase":
+            adjusted = dict(decision)
+            adjusted["position_size_pct"] = exploration["position_size_pct"]
+            adjusted["paper_exploration_authority"] = exploration
+            account_state["paper_exploration_authority"] = exploration
+            return ApprovalDecision(
+                approved=True,
+                source="paper_exploration_authority",
+                confidence=confidence,
+                reason=exploration["reason"],
+                category=None,
+                claude_payload=adjusted,
+                metadata={
+                    "raw_decision": raw_decision,
+                    "paper_exploration_authority": exploration,
                 },
             )
 

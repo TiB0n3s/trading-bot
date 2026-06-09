@@ -200,7 +200,10 @@ or destabilize the webhook path if treated as routine cleanup.
    - Metric completeness is not the same as authority. Monitored paper
      authority is blocked when EV is non-positive, profit factor is below
      threshold, calibration is weak, or stability coverage/scores are
-     insufficient. In that case ML remains risk-reduction only.
+     insufficient. In that case broad monitored authority is blocked, but
+     bounded paper exploration may still approve trades or increase size when
+     current deterministic evidence passes configured setup/opportunity/
+     prediction thresholds and hard gates are clear.
    - `model_validation_governance_service` reports candidate-registration
      blockers separately from observe-only readiness so research artifacts can
      exist without implying authority.

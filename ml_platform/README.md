@@ -128,7 +128,18 @@ complete metrics can support candidate registration evidence, but monitored
 paper authority additionally requires positive expected value, profit factor
 above threshold, acceptable calibration/Brier values, and measured stability. If
 that authority assessment fails, ML may still reduce size, block weak setups, or
-annotate context, but it may not approve new trades or increase size.
+annotate context. In paper/dry-run, the separate bounded exploration authority
+can approve or increase size when current deterministic evidence is strong
+enough and the configured caps allow it. Cash modes remain excluded.
+
+Paper exploration authority is configured through:
+
+- `PAPER_EXPLORATION_AUTHORITY_ENABLED`
+- `PAPER_EXPLORATION_MIN_SETUP_SCORE`
+- `PAPER_EXPLORATION_MIN_BUY_OPPORTUNITY_SCORE`
+- `PAPER_EXPLORATION_MIN_PREDICTION_SCORE`
+- `PAPER_EXPLORATION_SIZE_LIFT_MULTIPLIER`
+- `PAPER_EXPLORATION_MAX_POSITION_SIZE_PCT`
 
 `services.model_validation_governance_service` and
 `ml_platform.promotion` reject simple split validation for candidate

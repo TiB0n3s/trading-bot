@@ -321,7 +321,7 @@ def build_ml_promotion_metrics_payload(config: PromotionMetricsConfig) -> dict[s
     authority_recommendation = (
         "monitored_paper_risk_reduction_and_candidate_sizing"
         if ready_for_monitored_paper_authority
-        else "risk_reduction_only_no_new_approval_authority"
+        else "bounded_paper_exploration_authority_with_caps"
     )
     return {
         "report_version": PROMOTION_METRICS_VERSION,
@@ -350,8 +350,9 @@ def build_ml_promotion_metrics_payload(config: PromotionMetricsConfig) -> dict[s
                 "min_stability_score": MIN_STABILITY_SCORE_FOR_PAPER_AUTHORITY,
             },
             "allowed_runtime_effect_when_blocked": (
-                "ML may reduce size, block weak setups, or annotate context; "
-                "it may not approve new trades or increase size."
+                "ML may reduce size, block weak setups, annotate context, and in paper/dry-run "
+                "approve or increase size only through explicit bounded exploration caps. "
+                "Cash modes remain excluded."
             ),
         },
         "lifecycle_summary": lifecycle.summary,

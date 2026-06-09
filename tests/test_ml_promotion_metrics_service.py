@@ -222,7 +222,7 @@ def test_ml_promotion_metrics_are_measured_from_lifecycle_and_replay():
         assert payload["ready_for_candidate_registration_metrics"] is False
         assert (
             payload["paper_authority_assessment"]["authority_recommendation"]
-            == "risk_reduction_only_no_new_approval_authority"
+            == "bounded_paper_exploration_authority_with_caps"
         )
 
 

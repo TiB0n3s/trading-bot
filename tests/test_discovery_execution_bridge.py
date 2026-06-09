@@ -11,6 +11,10 @@ from repositories import auto_buy_repo
 from services.discovery_execution_bridge_service import (
     FAILED,
     PENDING,
+    REASON_CODE_COOLDOWN_ACTIVE,
+    REASON_CODE_MISSING_CANONICAL_TRACE,
+    REASON_CODE_OPEN_ORDER_EXISTS,
+    REASON_CODE_OPEN_POSITION_EXISTS,
     ROUTED,
     DiscoveryBridgeConfig,
     DiscoveryExecutionBridgeService,
@@ -156,6 +160,7 @@ def test_strong_candidate_without_canonical_trace_is_failed_without_routing():
         row = _status(db_path, row_id)
         assert len(results) == 1
         assert results[0].status == FAILED
+        assert results[0].reason_code == REASON_CODE_MISSING_CANONICAL_TRACE
         assert broker.calls == []
         assert row["execution_status"] == FAILED
         assert "missing canonical decision trace" in row["execution_error"]
@@ -249,6 +254,7 @@ def test_recent_routed_symbol_cooldown_blocks_reentry():
         assert len(first) == 1
         assert len(second) == 1
         assert second[0].status == FAILED
+        assert second[0].reason_code == REASON_CODE_COOLDOWN_ACTIVE
         assert "symbol cooldown active" in second[0].reason
         assert len(broker.calls) == 1
         assert row["execution_status"] == FAILED
@@ -267,10 +273,33 @@ def test_existing_open_position_blocks_bridge_route():
         row = _status(db_path, row_id)
         assert len(results) == 1
         assert results[0].status == FAILED
+        assert results[0].reason_code == REASON_CODE_OPEN_POSITION_EXISTS
         assert "existing open position" in results[0].reason
         assert broker.calls == []
         assert logger.info_calls
         assert logger.info_calls[0][1][0] == row_id
+        assert logger.info_calls[0][1][2] == REASON_CODE_OPEN_POSITION_EXISTS
+        assert row["execution_status"] == FAILED
+
+
+def test_existing_open_order_blocks_bridge_route_with_reason_code():
+    with tempfile.TemporaryDirectory() as tmpdir:
+        db_path = Path(tmpdir) / "trades.db"
+        auto_buy_repo.init_tables(db_path)
+        row_id = _insert_snapshot(db_path, _candidate(score=20.0, trace=_approved_trace()))
+        broker = FakeBroker(open_orders=[{"id": "open-order-1"}])
+        logger = FakeLogger()
+
+        results = _service(db_path, broker, logger=logger).route_eligible_candidates()
+
+        row = _status(db_path, row_id)
+        assert len(results) == 1
+        assert results[0].status == FAILED
+        assert results[0].reason_code == REASON_CODE_OPEN_ORDER_EXISTS
+        assert "existing open order" in results[0].reason
+        assert broker.calls == []
+        assert logger.info_calls[0][1][0] == row_id
+        assert logger.info_calls[0][1][2] == REASON_CODE_OPEN_ORDER_EXISTS
         assert row["execution_status"] == FAILED
 
 
@@ -309,7 +338,8 @@ def test_symbol_cooldown_drop_logs_candidate_tracking_id():
         assert logger.info_calls
         assert logger.info_calls[-1][1][0] == second_id
         assert logger.info_calls[-1][1][1] == "BURL"
-        assert "symbol cooldown active" in logger.info_calls[-1][1][2]
+        assert logger.info_calls[-1][1][2] == REASON_CODE_COOLDOWN_ACTIVE
+        assert "symbol cooldown active" in logger.info_calls[-1][1][3]
 
 
 def main() -> None:
@@ -320,6 +350,7 @@ def main() -> None:
         test_older_strong_candidate_is_not_routed_when_latest_symbol_snapshot_is_skip,
         test_recent_routed_symbol_cooldown_blocks_reentry,
         test_existing_open_position_blocks_bridge_route,
+        test_existing_open_order_blocks_bridge_route_with_reason_code,
         test_symbol_cooldown_drop_logs_candidate_tracking_id,
     ]
     for test in tests:

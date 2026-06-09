@@ -9,13 +9,13 @@ from pathlib import Path
 from typing import Any
 
 from market_time import ET, is_trading_day
+
 from repositories.bar_pattern_feature_repo import BarPatternFeatureRepository
 from services.bar_pattern_feature_service import (
     BAR_PATTERN_RUNTIME_EFFECT,
     BarPatternFeatureService,
 )
 from services.polygon_market_data_service import PolygonMarketDataService
-
 
 HISTORICAL_BAR_ARCHIVE_VERSION = "historical_bar_archive_v1"
 DEFAULT_HISTORICAL_BAR_DIR = Path("data") / "historical_bars" / "polygon_1min"
@@ -103,7 +103,9 @@ class HistoricalBarArchiveService:
         polygon_market_data: PolygonMarketDataService | None = None,
         bar_pattern_service: BarPatternFeatureService | None = None,
     ):
-        self.polygon_market_data = polygon_market_data or PolygonMarketDataService(timeout_seconds=20.0)
+        self.polygon_market_data = polygon_market_data or PolygonMarketDataService(
+            timeout_seconds=20.0
+        )
         self.bar_pattern_service = bar_pattern_service
 
     def archive_polygon_1m_bars(
@@ -125,12 +127,31 @@ class HistoricalBarArchiveService:
             raise ValueError("symbol is required")
         if end < start:
             raise ValueError("end_date must be on or after start_date")
-        if not self.polygon_market_data.configured:
-            raise RuntimeError("POLYGON_API_KEY is not configured")
 
         days = _trading_days(start, end)
         cache_dir = Path(cache_dir)
         cache_path = cache_dir / f"{symbol}_1min_rth_{start.isoformat()}_{end.isoformat()}.csv"
+        if dry_run:
+            return HistoricalBarArchiveResult(
+                report_version=HISTORICAL_BAR_ARCHIVE_VERSION,
+                runtime_effect=BAR_PATTERN_RUNTIME_EFFECT,
+                symbol=symbol,
+                start_date=start.isoformat(),
+                end_date=end.isoformat(),
+                cache_path=str(cache_path),
+                trading_days_requested=len(days),
+                trading_days_with_rows=0,
+                raw_bars=0,
+                regular_hours_bars=0,
+                cached_rows=0,
+                pattern_rows=0,
+                persisted_pattern_rows=0,
+                dry_run=True,
+                errors=[],
+            )
+        if not self.polygon_market_data.configured:
+            raise RuntimeError("POLYGON_API_KEY is not configured")
+
         raw_bars = 0
         regular_bars: list[dict[str, Any]] = []
         days_with_rows = 0

@@ -16,7 +16,9 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from services.historical_bar_archive_service import HistoricalBarArchiveService  # noqa: E402
-from services.ops_checks.historical_bar_archive_checks import run_historical_bar_archive  # noqa: E402
+from services.ops_checks.historical_bar_archive_checks import (  # noqa: E402
+    run_historical_bar_archive,
+)
 
 
 class _FakePolygon:
@@ -55,6 +57,31 @@ class _FakePolygon:
             }
         )
         return rows
+
+
+class _UnconfiguredPolygon:
+    configured = False
+
+    def aggregate_bar_dicts(self, *args, **kwargs):
+        raise AssertionError("dry-run must not call Polygon")
+
+
+def test_historical_bar_archive_dry_run_does_not_require_polygon_key(tmp_path: Path):
+    service = HistoricalBarArchiveService(polygon_market_data=_UnconfiguredPolygon())
+    result = service.archive_polygon_1m_bars(
+        symbol="AAPL",
+        start_date="2026-06-02",
+        end_date="2026-06-02",
+        cache_dir=tmp_path / "bars",
+        dry_run=True,
+    )
+
+    assert result.dry_run is True
+    assert result.errors == []
+    assert result.trading_days_requested == 1
+    assert result.raw_bars == 0
+    assert result.cached_rows == 0
+    assert not Path(result.cache_path).exists()
 
 
 def test_historical_bar_archive_filters_rth_caches_csv_and_builds_patterns(tmp_path: Path):
@@ -129,6 +156,10 @@ def test_historical_bar_archive_ops_report_uses_fake_polygon(tmp_path: Path):
 
 def main():
     with tempfile.TemporaryDirectory() as tmp:
+        test_historical_bar_archive_dry_run_does_not_require_polygon_key(Path(tmp))
+        print("[OK] test_historical_bar_archive_dry_run_does_not_require_polygon_key")
+
+    with tempfile.TemporaryDirectory() as tmp:
         test_historical_bar_archive_filters_rth_caches_csv_and_builds_patterns(Path(tmp))
         print("[OK] test_historical_bar_archive_filters_rth_caches_csv_and_builds_patterns")
 
@@ -136,7 +167,7 @@ def main():
         test_historical_bar_archive_ops_report_uses_fake_polygon(Path(tmp))
         print("[OK] test_historical_bar_archive_ops_report_uses_fake_polygon")
 
-    print("\nAll 2 historical bar archive tests passed.")
+    print("\nAll 3 historical bar archive tests passed.")
 
 
 if __name__ == "__main__":

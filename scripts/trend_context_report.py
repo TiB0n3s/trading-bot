@@ -16,7 +16,7 @@ from pathlib import Path
 
 from repositories.ops_check_repo import OpsCheckRepository
 
-repo = OpsCheckRepository(Path(__file__).resolve().parent / "trades.db")
+repo = OpsCheckRepository(Path(__file__).resolve().parents[1] / "trades.db")
 
 
 def money(v):

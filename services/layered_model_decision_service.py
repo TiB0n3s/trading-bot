@@ -301,6 +301,8 @@ def _meta_label_layer(
         account_state=account_state,
         artifact_path=counterfactual_config.get("artifact_path")
         or account_state.get("veto_relaxation_model_path"),
+        drift_artifact_path=counterfactual_config.get("drift_artifact_path")
+        or account_state.get("veto_relaxation_drift_path"),
         enabled=counterfactual_enabled and str(action or "").lower() == "buy",
     )
     counterfactual_relaxation = _float(counterfactual.get("threshold_relaxation_pct"))

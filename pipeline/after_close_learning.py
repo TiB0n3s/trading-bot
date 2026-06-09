@@ -156,6 +156,13 @@ def _build_steps(target_date: str) -> list[Step]:
             description="audit paper-only learning overrides against linked lifecycle outcomes",
         ),
         Step(
+            name="counterfactual_concept_drift",
+            module="pipeline.counterfactual_concept_drift",
+            argv=["--date", target_date],
+            critical=False,
+            description="write PSI drift guardrail for counterfactual veto relaxation",
+        ),
+        Step(
             name="counterfactual_veto_relaxation",
             module="pipeline.counterfactual_veto_relaxation",
             argv=["--date", target_date],

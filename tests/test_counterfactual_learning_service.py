@@ -110,6 +110,39 @@ def test_counterfactual_model_trains_and_scores_live_features():
         assert_true(scored["threshold_relaxation_pct"] > 0, "relaxation")
 
 
+def test_counterfactual_model_ignores_unveto_during_severe_concept_drift():
+    with tempfile.TemporaryDirectory() as tmp:
+        artifact = Path(tmp) / "veto_relaxation_model.json"
+        drift_artifact = Path(tmp) / "concept_drift.json"
+        train_counterfactual_veto_relaxation_model(
+            rows=_rows(),
+            artifact_path=artifact,
+            min_samples=20,
+            min_positive=5,
+        )
+        drift_artifact.write_text(
+            json.dumps(
+                {
+                    "report_version": "concept_drift_psi_v1",
+                    "severe_drift": True,
+                    "max_psi": 0.41,
+                }
+            )
+        )
+        scored = evaluate_counterfactual_veto_relaxation(
+            account_state={
+                "historical_bar_paper_strategy": {"master_confidence_score": 63.0},
+                "level_1_expert_ensemble": {"ensemble_probability": 0.61},
+                "level_2_meta_label": {"threshold": 0.65},
+                **_row(100, positive=True),
+            },
+            artifact_path=artifact,
+            drift_artifact_path=drift_artifact,
+        )
+        assert_equal(scored["status"], "concept_drift_disabled", "status")
+        assert_equal(scored["threshold_relaxation_pct"], 0.0, "relaxation")
+
+
 def test_guardrail_deletes_weak_overruled_model():
     with tempfile.TemporaryDirectory() as tmp:
         artifact = Path(tmp) / "veto_relaxation_model.json"
@@ -128,6 +161,7 @@ def main():
     tests = [
         test_relaxation_target_requires_profit_without_stopout,
         test_counterfactual_model_trains_and_scores_live_features,
+        test_counterfactual_model_ignores_unveto_during_severe_concept_drift,
         test_guardrail_deletes_weak_overruled_model,
     ]
     for test in tests:

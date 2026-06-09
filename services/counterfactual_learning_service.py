@@ -17,6 +17,7 @@ from repositories.counterfactual_training_repo import CounterfactualTrainingRepo
 COUNTERFACTUAL_VETO_RELAXATION_VERSION = "counterfactual_veto_relaxation_v1"
 DEFAULT_MODEL_DIR = MODEL_ROOT / "veto_relaxation_v1"
 DEFAULT_MODEL_PATH = DEFAULT_MODEL_DIR / "veto_relaxation_model.json"
+DEFAULT_DRIFT_PATH = DEFAULT_MODEL_DIR / "concept_drift.json"
 DEFAULT_PROFIT_BARRIER_PCT = 0.75
 DEFAULT_STOP_BARRIER_PCT = -0.50
 DEFAULT_UNVETO_THRESHOLD = 0.75
@@ -442,10 +443,27 @@ def evaluate_counterfactual_veto_relaxation(
     *,
     account_state: dict[str, Any],
     artifact_path: Path | str | None = DEFAULT_MODEL_PATH,
+    drift_artifact_path: Path | str | None = DEFAULT_DRIFT_PATH,
     enabled: bool = True,
 ) -> dict[str, Any]:
     if not enabled:
         return {"status": "disabled", "p_unveto": None, "threshold_relaxation_pct": 0.0}
+    drift_path = Path(drift_artifact_path or DEFAULT_DRIFT_PATH)
+    if drift_path.exists():
+        try:
+            drift = json.loads(drift_path.read_text())
+        except Exception:
+            drift = {}
+        if drift.get("severe_drift") is True:
+            return {
+                "status": "concept_drift_disabled",
+                "p_unveto": None,
+                "threshold_relaxation_pct": 0.0,
+                "artifact_path": str(artifact_path or DEFAULT_MODEL_PATH),
+                "drift_artifact_path": str(drift_path),
+                "max_psi": drift.get("max_psi"),
+                "reason": "severe PSI concept drift disables counterfactual veto relaxation",
+            }
     path = Path(artifact_path or DEFAULT_MODEL_PATH)
     if not path.exists():
         return {

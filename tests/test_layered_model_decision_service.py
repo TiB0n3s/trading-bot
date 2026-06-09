@@ -247,6 +247,8 @@ def test_layered_model_decision_uses_counterfactual_unvetoer_artifact():
             min_samples=20,
             min_positive=5,
         )
+        drift_artifact = Path(tmp) / "concept_drift.json"
+        drift_artifact.write_text('{"severe_drift": false}')
         state = _account_state(
             historical_bar_paper_strategy={
                 "status": "paper_ready",
@@ -277,6 +279,7 @@ def test_layered_model_decision_uses_counterfactual_unvetoer_artifact():
                 "counterfactual_veto_relaxation": {
                     "enabled": True,
                     "artifact_path": str(artifact),
+                    "drift_artifact_path": str(drift_artifact),
                 },
             },
             env={"TRANSFORMER_AUTHORITY_ENABLED": "false"},

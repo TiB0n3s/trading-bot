@@ -72,6 +72,22 @@ def _record_snapshot(tmp_path, *, prediction_gate):
                 "buy_opportunity_score": 65,
                 "buy_opportunity_recommendation": "buy_candidate",
             },
+            "historical_bar_paper_strategy": {
+                "status": "paper_ready",
+                "master_confidence_score": 70.0,
+                "paper_recommendation": "paper_trade_candidate",
+                "baseline_delta": 3.0,
+                "liquidity_stress_bucket": "normal",
+                "paper_position_size_pct": 0.8,
+            },
+            "bar_pattern_features": {
+                "atr_20_pct": 0.8,
+                "vpin_toxicity_20": 0.15,
+            },
+            "execution_quality": {
+                "decision": "allow",
+                "slippage_estimate_pct": 0.02,
+            },
             "canonical_decision_trace": {
                 "trace_version": "decision_trace_v1",
                 "final_decision": "approved",
@@ -113,6 +129,9 @@ def test_record_decision_snapshot_builds_expected_row(tmp_path):
     assert canonical["momentum_state"]["session_momentum_60m_pct"] == 1.2
     assert canonical["momentum_state"]["session_trend_regime"] == "mature_uptrend"
     assert canonical["feature_vector_hash"] == row["canonical_intelligence_hash"]
+    account_state = json.loads(row["account_state_json"])
+    assert account_state["layered_model_decision"]["version"] == "layered_model_decision_v1"
+    assert account_state["layered_model_decision"]["level_1_expert_ensemble"]["status"] == "scored"
     assert row["trade_id"] == 7
     assert row["symbol"] == "AAPL"
     assert row["approved"] == 1

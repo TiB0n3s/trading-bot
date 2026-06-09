@@ -116,6 +116,7 @@ Usage:
   python3 ops_check.py rollout-contract
   python3 ops_check.py advisory-authority-report
   python3 ops_check.py paper-learning-authority
+  python3 ops_check.py cross-layer-verification
   python3 ops_check.py ai-intelligence-review
   python3 ops_check.py migration-status
   python3 ops_check.py strong-days
@@ -173,6 +174,9 @@ from services.ops_checks.conviction_checks import (
 )
 from services.ops_checks.cross_asset_lead_lag_checks import (
     run_cross_asset_lead_lag_map_report,
+)
+from services.ops_checks.cross_layer_verification_checks import (
+    run_cross_layer_verification_report,
 )
 from services.ops_checks.database_backup_checks import run_database_backup_report
 from services.ops_checks.dataset_checks import run_dataset_health
@@ -797,6 +801,7 @@ def production_evidence(target_date):
         feature_attribution(target_date),
         post_trade_learning(target_date),
         paper_learning_authority(target_date),
+        cross_layer_verification(target_date),
         ai_intelligence_review(target_date),
     ]
     print()
@@ -1551,6 +1556,10 @@ def advisory_authority_report(target_date: str) -> bool:
 
 def paper_learning_authority(target_date: str) -> bool:
     return run_paper_learning_authority_report(target_date, base_dir=BASE_DIR)
+
+
+def cross_layer_verification(target_date: str) -> bool:
+    return run_cross_layer_verification_report(target_date, base_dir=BASE_DIR)
 
 
 def point_in_time_archive(target_date: str) -> bool:

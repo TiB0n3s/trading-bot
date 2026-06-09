@@ -149,6 +149,7 @@ TESTS = [
     "tests/test_alternative_data_gate_service.py",
     "tests/test_concept_drift_service.py",
     "tests/test_counterfactual_learning_service.py",
+    "tests/test_cross_layer_verification_service.py",
     "tests/test_layered_model_decision_service.py",
     "tests/test_historical_bar_retry_missing.py",
     "tests/test_external_symbol_discovery_checks.py",

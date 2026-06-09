@@ -18,6 +18,7 @@ from services.canonical_intelligence_service import (
     build_canonical_intelligence_snapshot,
     canonical_json,
 )
+from services.layered_model_decision_service import build_layered_model_decision
 
 ENV_PROFILE_KEYS = (
     "EXECUTION_MODE",
@@ -89,6 +90,36 @@ def gate_trace_payload(account_state: dict[str, Any]) -> dict[str, Any]:
         account_state.get("canonical_decision_trace") or account_state.get("decision_trace") or {}
     )
     return trace if isinstance(trace, dict) else {}
+
+
+def attach_layered_model_decision(
+    *,
+    symbol: str | None,
+    action: str | None,
+    decision: dict[str, Any],
+    account_state: dict[str, Any],
+) -> dict[str, Any]:
+    """Return account_state with a persisted layered model payload when possible."""
+    enriched = dict(account_state or {})
+    existing = enriched.get("layered_model_decision")
+    if isinstance(existing, dict) and existing.get("version") == "layered_model_decision_v1":
+        return enriched
+    try:
+        enriched["layered_model_decision"] = build_layered_model_decision(
+            symbol=symbol or enriched.get("symbol"),
+            action=action or enriched.get("action") or "buy",
+            decision=decision,
+            account_state=enriched,
+            execution_mode=str(enriched.get("execution_mode") or "paper"),
+        ).to_dict()
+    except Exception as exc:
+        enriched["layered_model_decision"] = {
+            "version": "layered_model_decision_v1",
+            "status": "capture_failed",
+            "runtime_effect": "paper_model_decision_context_no_order_submission",
+            "reason": f"{type(exc).__name__}: {exc}",
+        }
+    return enriched
 
 
 def file_sha256(path: Path) -> str | None:
@@ -172,7 +203,12 @@ class DecisionSnapshotService:
         decision = decision or {}
         order = order or {}
         context = context or {}
-        account_state = account_state or {}
+        account_state = attach_layered_model_decision(
+            symbol=symbol,
+            action=action,
+            decision=decision,
+            account_state=account_state or {},
+        )
         setup_obs = account_state.get("setup_observation") or {}
         prediction_gate = account_state.get("prediction_gate") or {}
         strategy_observation = account_state.get("strategy_observation") or {}

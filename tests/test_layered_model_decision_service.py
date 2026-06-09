@@ -88,6 +88,7 @@ def test_layered_model_decision_approves_and_sizes_strong_stack():
     ).to_dict()
 
     assert_equal(payload["version"], "layered_model_decision_v1", "version")
+    assert_equal(payload["level_0_alternative_gates"]["decision"], "pass", "alt gate")
     assert_equal(payload["level_0_regime"]["decision"], "pass", "regime")
     assert_equal(payload["level_1_expert_ensemble"]["status"], "scored", "ensemble")
     assert_equal(payload["level_2_meta_label"]["effect"], "paper_approval", "meta effect")
@@ -149,11 +150,33 @@ def test_layered_model_decision_regime_standdown_overrides_strong_experts():
     assert_equal(payload["final_size_pct"], 0.0, "size")
 
 
+def test_layered_model_decision_alternative_data_veto_overrides_strong_experts():
+    state = _account_state(
+        text_sentiment={"sentiment_score": -0.95, "sentiment_velocity": -0.8},
+        intermarket_effects={"yield_curve_spike_score": 0.95, "currency_stress_score": 0.8},
+        hardware_telemetry={"api_latency_ms": 1200},
+    )
+    payload = build_layered_model_decision(
+        symbol="AAPL",
+        action="buy",
+        decision={"approved": False, "position_size_pct": 1.0},
+        account_state=state,
+        execution_mode="paper",
+        ml_authority_config=_meta_config(),
+        env={"TRANSFORMER_AUTHORITY_ENABLED": "false"},
+    ).to_dict()
+
+    assert_equal(payload["level_0_alternative_gates"]["decision"], "veto", "alt gate")
+    assert_equal(payload["final_instruction"], "veto", "final")
+    assert_equal(payload["final_size_pct"], 0.0, "size")
+
+
 def main():
     tests = [
         test_layered_model_decision_approves_and_sizes_strong_stack,
         test_layered_model_decision_vetoes_weak_meta_label,
         test_layered_model_decision_regime_standdown_overrides_strong_experts,
+        test_layered_model_decision_alternative_data_veto_overrides_strong_experts,
     ]
     for test in tests:
         test()

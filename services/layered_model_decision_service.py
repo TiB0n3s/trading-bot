@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass
 from typing import Any
 
+from services.alternative_data_gate_service import evaluate_alternative_data_gate
 from services.historical_bar_meta_label_authority_service import (
     evaluate_historical_bar_meta_label_authority,
 )
@@ -24,6 +25,7 @@ class LayeredModelDecision:
     action: str
     final_instruction: str
     final_size_pct: float
+    level_0_alternative_gates: dict[str, Any]
     level_0_regime: dict[str, Any]
     level_1_expert_ensemble: dict[str, Any]
     level_2_meta_label: dict[str, Any]
@@ -284,6 +286,7 @@ def _sizing_layer(
     ensemble_probability: float | None,
     meta_label: dict[str, Any],
     regime: dict[str, Any],
+    alternative_gate: dict[str, Any],
 ) -> dict[str, Any]:
     requested_size = _float(decision.get("position_size_pct")) or _float(
         account_state.get("position_size_pct")
@@ -293,7 +296,8 @@ def _sizing_layer(
     meta_size = _float(_dict(meta_label.get("authority")).get("position_size_pct"))
     base_size = meta_size if meta_size is not None and meta_size >= 0 else requested_size
     regime_modifier = _float(regime.get("size_modifier")) or 1.0
-    regime_adjusted = max(0.0, base_size * regime_modifier)
+    alternative_modifier = _float(alternative_gate.get("size_modifier")) or 1.0
+    regime_adjusted = max(0.0, base_size * regime_modifier * alternative_modifier)
 
     sizing_state = dict(account_state)
     if ensemble_probability is not None:
@@ -316,6 +320,7 @@ def _sizing_layer(
         "requested_size_pct": round(requested_size, 4),
         "meta_label_size_pct": round(meta_size, 4) if meta_size is not None else None,
         "regime_size_modifier": round(regime_modifier, 4),
+        "alternative_data_size_modifier": round(alternative_modifier, 4),
         "regime_adjusted_size_pct": round(regime_adjusted, 4),
         "kelly": kelly.to_dict(),
         "final_size_pct": round(final_size, 4),
@@ -340,6 +345,10 @@ def build_layered_model_decision(
     action_l = str(action or account_state.get("action") or "buy").lower()
 
     regime = _regime_layer(account_state, action_l)
+    alternative_gate = evaluate_alternative_data_gate(
+        account_state=account_state,
+        action=action_l,
+    ).to_dict()
     _experts, ensemble = _expert_components(
         symbol=symbol_u,
         action=action_l,
@@ -363,9 +372,11 @@ def build_layered_model_decision(
         ensemble_probability=ensemble_probability,
         meta_label=meta_label,
         regime=regime,
+        alternative_gate=alternative_gate,
     )
 
     reasons = [
+        "; ".join(str(reason) for reason in (alternative_gate.get("reasons") or [])[:3]),
         str(regime.get("reason")),
         str(ensemble.get("reason")),
         str(meta_label.get("reason")),
@@ -376,6 +387,10 @@ def build_layered_model_decision(
         final_instruction = "veto"
         final_size = 0.0
         reasons.append("Level 0 regime veto")
+    elif alternative_gate.get("decision") == "veto":
+        final_instruction = "veto"
+        final_size = 0.0
+        reasons.append("Level 0 alternative-data veto")
     elif meta_label.get("instruction") == "veto":
         final_instruction = "veto"
         final_size = 0.0
@@ -395,6 +410,7 @@ def build_layered_model_decision(
         action=action_l,
         final_instruction=final_instruction,
         final_size_pct=round(final_size, 4),
+        level_0_alternative_gates=alternative_gate,
         level_0_regime=regime,
         level_1_expert_ensemble=ensemble,
         level_2_meta_label=meta_label,

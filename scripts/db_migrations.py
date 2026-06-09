@@ -599,6 +599,21 @@ MIGRATIONS: tuple[Migration, ...] = (
             """,
         ),
     ),
+    Migration(
+        migration_id="20260609_025_auto_buy_execution_bridge_state",
+        description="Add idempotent execution state tracking for the paper-only discovery execution bridge.",
+        statements=(
+            "ALTER TABLE auto_buy_decision_snapshots ADD COLUMN execution_status TEXT NOT NULL DEFAULT 'PENDING'",
+            "ALTER TABLE auto_buy_decision_snapshots ADD COLUMN routed_order_id TEXT",
+            "ALTER TABLE auto_buy_decision_snapshots ADD COLUMN execution_error TEXT",
+            "ALTER TABLE auto_buy_decision_snapshots ADD COLUMN execution_attempted_at TEXT",
+            "ALTER TABLE auto_buy_decision_snapshots ADD COLUMN execution_completed_at TEXT",
+            """
+            CREATE INDEX IF NOT EXISTS idx_auto_buy_decision_snapshots_execution
+            ON auto_buy_decision_snapshots(execution_status, decision, score, candidate_timestamp)
+            """,
+        ),
+    ),
 )
 
 

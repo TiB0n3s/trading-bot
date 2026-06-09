@@ -562,6 +562,31 @@ def test_drift_regime_archives_migration_creates_table():
         )
 
 
+def test_auto_buy_execution_bridge_state_migration_adds_columns():
+    with tempfile.TemporaryDirectory() as tmp:
+        db_path = Path(tmp) / "test.db"
+        apply_migration(MIGRATIONS[7], db_path)
+        migration = next(
+            m
+            for m in MIGRATIONS
+            if m.migration_id == "20260609_025_auto_buy_execution_bridge_state"
+        )
+        applied = apply_migration(migration, db_path)
+        assert_equal(applied, True, "apply")
+
+        expected = {
+            "execution_status",
+            "routed_order_id",
+            "execution_error",
+            "execution_attempted_at",
+            "execution_completed_at",
+        }
+        assert_true(
+            expected <= table_columns(db_path, "auto_buy_decision_snapshots"),
+            "auto-buy execution bridge state columns",
+        )
+
+
 if __name__ == "__main__":
     test_feature_audit_migration_is_idempotent()
     print("[OK] test_feature_audit_migration_is_idempotent")
@@ -597,4 +622,6 @@ if __name__ == "__main__":
     print("[OK] test_long_horizon_session_momentum_migration_adds_columns")
     test_drift_regime_archives_migration_creates_table()
     print("[OK] test_drift_regime_archives_migration_creates_table")
-    print("\nAll 17 DB migration tests passed.")
+    test_auto_buy_execution_bridge_state_migration_adds_columns()
+    print("[OK] test_auto_buy_execution_bridge_state_migration_adds_columns")
+    print("\nAll 18 DB migration tests passed.")

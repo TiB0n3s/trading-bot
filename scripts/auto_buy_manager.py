@@ -80,8 +80,14 @@ from repositories.candidate_universe_repo import CandidateUniverseRepository
 from repositories.prediction_repo import PredictionRepository
 from risk.exposure import any_cluster_limit_hit, cluster_exposure
 from services.ai_momentum_pattern_service import deterministic_momentum_pattern
+from services.broker_service import get_default_broker_service
 from services.decision import CapitalAllocator, DecisionEngine
 from services.decision.adapters import auto_buy_candidate_from_raw
+from services.discovery_execution_bridge_service import (
+    DiscoveryExecutionBridgeService,
+    bridge_config_from_env,
+    bridge_enabled_from_env,
+)
 from services.intelligence.candidates.reference import candidate_reference_service
 from services.intelligence.candidates.universe import CandidateUniverseService
 from services.intraday_trade_feedback_service import (
@@ -1594,6 +1600,16 @@ def maybe_execute_auto_buy(
     return None
 
 
+def route_paper_discovery_candidates() -> list[Any]:
+    config = bridge_config_from_env(target_date=_today())
+    bridge = DiscoveryExecutionBridgeService(
+        db_path=DB_PATH,
+        broker=get_default_broker_service(),
+        config=config,
+    )
+    return bridge.route_eligible_candidates()
+
+
 def symbols_for_scope(scope: str) -> list[str]:
     if scope == "all":
         return APPROVED_SYMBOLS_LIST
@@ -1769,10 +1785,36 @@ def main() -> int:
             payload={"candidate": candidate, "order": order},
         )
 
+    bridge_results = []
+    if args.live and AUTO_BUY_LIVE_BUYS and market_open and bridge_enabled_from_env():
+        bridge_results = route_paper_discovery_candidates()
+
     if args.json:
-        print(json.dumps(candidates, indent=2, sort_keys=True, default=str))
+        print(
+            json.dumps(
+                {
+                    "candidates": candidates,
+                    "discovery_execution_bridge": bridge_results,
+                },
+                indent=2,
+                sort_keys=True,
+                default=str,
+            )
+        )
     else:
         render(candidates, args.scope, market_open)
+        if bridge_results:
+            print()
+            print("  Discovery Execution Bridge")
+            for result in bridge_results:
+                print(
+                    "  "
+                    f"id={getattr(result, 'candidate_id', '-'):<6} "
+                    f"symbol={getattr(result, 'symbol', '-'):<6} "
+                    f"status={getattr(result, 'status', '-'):<8} "
+                    f"order={getattr(result, 'routed_order_id', None) or '-'} "
+                    f"reason={getattr(result, 'reason', None) or '-'}"
+                )
 
     return 0
 

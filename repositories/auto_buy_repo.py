@@ -112,11 +112,32 @@ def init_tables(db_path=DB_PATH) -> None:
             """
         )
         existing_cols = {
-            row["name"]
-            for row in con.execute("PRAGMA table_info(auto_buy_candidates)").fetchall()
+            row["name"] for row in con.execute("PRAGMA table_info(auto_buy_candidates)").fetchall()
         }
         if "hard_block_reason" not in existing_cols:
             con.execute("ALTER TABLE auto_buy_candidates ADD COLUMN hard_block_reason TEXT")
+        snapshot_cols = {
+            row["name"]
+            for row in con.execute("PRAGMA table_info(auto_buy_decision_snapshots)").fetchall()
+        }
+        snapshot_column_defaults = {
+            "execution_status": "TEXT NOT NULL DEFAULT 'PENDING'",
+            "routed_order_id": "TEXT",
+            "execution_error": "TEXT",
+            "execution_attempted_at": "TEXT",
+            "execution_completed_at": "TEXT",
+        }
+        for column, column_type in snapshot_column_defaults.items():
+            if column not in snapshot_cols:
+                con.execute(
+                    f"ALTER TABLE auto_buy_decision_snapshots ADD COLUMN {column} {column_type}"
+                )
+        con.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_auto_buy_decision_snapshots_execution
+            ON auto_buy_decision_snapshots(execution_status, decision, score, candidate_timestamp)
+            """
+        )
 
 
 def table_exists(table_name: str, db_path=DB_PATH) -> bool:
@@ -369,7 +390,9 @@ def historical_matched_trade_rows_for_feedback(
         if "entry_source" in columns:
             source_terms.append("entry_source = 'auto_buy_manager'")
         if "signal_source" in columns:
-            source_terms.append("signal_source IN ('auto_buy_manager', 'internal_bar_only', 'tradingview_alert')")
+            source_terms.append(
+                "signal_source IN ('auto_buy_manager', 'internal_bar_only', 'tradingview_alert')"
+            )
         source_filter = f" AND ({' OR '.join(source_terms)})"
 
     with get_connection(db_path) as con:
@@ -477,7 +500,7 @@ def decision_snapshot_rows_between(
             f"""
             SELECT *
             FROM auto_buy_decision_snapshots
-            WHERE {' AND '.join(clauses)}
+            WHERE {" AND ".join(clauses)}
             ORDER BY candidate_timestamp ASC, id ASC
             """,
             params,
@@ -698,8 +721,8 @@ def insert_candidate_and_snapshot(
                 created_at, candidate_timestamp, symbol, signal_source,
                 decision, score, reason, hard_block_reason, live_buy_enabled,
                 live_block_reason, risk_cross_check_reason, order_submitted,
-                order_id, order_status, candidate_json, order_json
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                order_id, order_status, candidate_json, order_json, execution_status
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 created_at,
@@ -718,6 +741,7 @@ def insert_candidate_and_snapshot(
                 order.get("status") if isinstance(order, dict) else None,
                 candidate_json,
                 order_json,
+                "ROUTED" if order else "PENDING",
             ),
         )
 

@@ -11,11 +11,13 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from services.approval_service import evaluate_approval_decision
-from src.trading_bot.intelligence.adjudicator import build_model_adjudication
-from src.trading_bot.runtime.authority import AuthorityMatrix, normalize_authority_mode
+from services.decision import DecisionEngine
+from services.decision.adapters import auto_buy_candidate_from_raw, webhook_candidate_from_raw
+from services.decision.authority import AuthorityMatrix, normalize_authority_mode
+from services.decision.gates import build_intelligence_adjudication
+from services.decision.state import DecisionState
+from services.decision.trace import GateResult
 from src.trading_bot.runtime.gate_engine import CallableGate, GateEngine
-from src.trading_bot.runtime.trace import DecisionState, GateResult
-from src.trading_bot.signals.candidates import candidate_from_auto_buy, candidate_from_webhook
 
 
 def assert_equal(actual, expected, label):
@@ -113,8 +115,8 @@ def test_decision_state_serializes_to_legacy_account_state():
 
 
 def test_signal_candidates_normalize_webhook_and_auto_buy():
-    webhook = candidate_from_webhook({"symbol": "aapl", "action": "BUY", "price": "325.50"})
-    auto_buy = candidate_from_auto_buy(
+    webhook = webhook_candidate_from_raw({"symbol": "aapl", "action": "BUY", "price": "325.50"})
+    auto_buy = auto_buy_candidate_from_raw(
         {
             "symbol": "msft",
             "close": "412.25",
@@ -130,7 +132,7 @@ def test_signal_candidates_normalize_webhook_and_auto_buy():
 
 
 def test_intelligence_adjudicator_aggregates_model_surfaces():
-    adjudication = build_model_adjudication(
+    adjudication = build_intelligence_adjudication(
         account_state=_strong_account_state(),
         intelligence_context={},
     )
@@ -138,6 +140,32 @@ def test_intelligence_adjudicator_aggregates_model_surfaces():
     assert_equal(adjudication.confidence, "high", "confidence")
     assert_equal(adjudication.recommended_effect, "approve", "effect")
     assert_equal(adjudication.sample_size, 5000, "sample size")
+
+
+def test_decision_engine_stores_canonical_trace_directly():
+    account_state = _strong_account_state()
+    evaluation = DecisionEngine().store_to_account_state(
+        account_state=account_state,
+        decision={
+            "approved": True,
+            "confidence": "high",
+            "reason": "canonical engine approved",
+            "position_size_pct": 1.0,
+        },
+        source="claude",
+        execution_mode="paper",
+    )
+    assert_equal(evaluation.trace.final_decision, "approved", "evaluation final")
+    assert_equal(
+        account_state["canonical_decision_trace"]["shadow"]["approval_source"],
+        "claude",
+        "stored source",
+    )
+    assert_equal(
+        account_state["intelligence_adjudication"]["recommended_effect"],
+        "approve",
+        "stored adjudication",
+    )
 
 
 def test_approval_path_stores_canonical_trace_for_paper_authority():
@@ -192,6 +220,7 @@ def main():
         test_decision_state_serializes_to_legacy_account_state,
         test_signal_candidates_normalize_webhook_and_auto_buy,
         test_intelligence_adjudicator_aggregates_model_surfaces,
+        test_decision_engine_stores_canonical_trace_directly,
         test_approval_path_stores_canonical_trace_for_paper_authority,
     ]
     for test in tests:

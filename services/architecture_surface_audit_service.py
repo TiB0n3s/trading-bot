@@ -7,6 +7,7 @@ changing runtime behavior.
 
 from __future__ import annotations
 
+import json
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
@@ -142,6 +143,60 @@ def _src_skeleton_status(base_dir: Path) -> dict[str, Any]:
     }
 
 
+def _legacy_decision_manifest_status(base_dir: Path) -> dict[str, Any]:
+    manifest_path = base_dir / "legacy_architecture" / "decision_v1" / "manifest.json"
+    if not manifest_path.exists():
+        return {
+            "exists": False,
+            "path": manifest_path.relative_to(base_dir).as_posix(),
+            "surfaces_count": 0,
+            "existing_surfaces_count": 0,
+            "missing_surfaces_count": 0,
+            "buckets": {},
+            "surfaces": [],
+        }
+    try:
+        manifest = json.loads(manifest_path.read_text())
+    except Exception as exc:
+        return {
+            "exists": True,
+            "path": manifest_path.relative_to(base_dir).as_posix(),
+            "error": str(exc),
+            "surfaces_count": 0,
+            "existing_surfaces_count": 0,
+            "missing_surfaces_count": 0,
+            "buckets": {},
+            "surfaces": [],
+        }
+    surfaces = []
+    buckets: dict[str, int] = {}
+    for row in manifest.get("surfaces") or []:
+        path = str(row.get("path") or "")
+        bucket = str(row.get("bucket") or "unclassified")
+        buckets[bucket] = buckets.get(bucket, 0) + 1
+        exists = bool(path) and (base_dir / path).exists()
+        surfaces.append(
+            {
+                "path": path,
+                "bucket": bucket,
+                "replacement": row.get("replacement"),
+                "exists": exists,
+            }
+        )
+    return {
+        "exists": True,
+        "path": manifest_path.relative_to(base_dir).as_posix(),
+        "version": manifest.get("version"),
+        "runtime_effect": manifest.get("runtime_effect"),
+        "canonical_package": manifest.get("canonical_package"),
+        "surfaces_count": len(surfaces),
+        "existing_surfaces_count": sum(1 for row in surfaces if row["exists"]),
+        "missing_surfaces_count": sum(1 for row in surfaces if not row["exists"]),
+        "buckets": buckets,
+        "surfaces": surfaces,
+    }
+
+
 def build_architecture_surface_payload(*, base_dir: Path) -> dict[str, Any]:
     surface_metrics = [
         SurfaceMetric(
@@ -171,6 +226,7 @@ def build_architecture_surface_payload(*, base_dir: Path) -> dict[str, Any]:
     ]
     env_inventory = discover_env_var_references(base_dir)
     src_status = _src_skeleton_status(base_dir)
+    legacy_decision = _legacy_decision_manifest_status(base_dir)
     over_target_count = sum(1 for item in surface_metrics if item.over_target)
     over_target_count += sum(1 for item in large_files if item.over_target)
     return {
@@ -183,6 +239,7 @@ def build_architecture_surface_payload(*, base_dir: Path) -> dict[str, Any]:
         "raw_env_keys": env_inventory["total_env_keys"],
         "top_env_access_files": list(env_inventory["by_file"].items())[:10],
         "src_skeleton": src_status,
+        "legacy_decision_v1": legacy_decision,
         "compatibility_plan_exists": (base_dir / "ops" / "compatibility_deletion_plan.md").exists(),
         "over_target_count": over_target_count,
         "ready": over_target_count == 0

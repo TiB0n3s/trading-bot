@@ -1,0 +1,97 @@
+{
+  "version": "decision_v1_legacy_manifest_v1",
+  "runtime_effect": "classification_only_no_runtime_change",
+  "canonical_package": "services/decision",
+  "surfaces": [
+    {
+      "path": "services/signal_pipeline.py",
+      "bucket": "thin_adapter",
+      "replacement": "services/decision/engine.py plus signal orchestration adapter",
+      "reason": "pipeline still owns compatibility orchestration into LiveSignalProcessor"
+    },
+    {
+      "path": "services/preflight_service.py",
+      "bucket": "thin_adapter",
+      "replacement": "services/decision/gates/preflight.py",
+      "reason": "preflight still has live callers from app.py and signal pipeline"
+    },
+    {
+      "path": "services/live_signal_processor.py",
+      "bucket": "archive_after_clean_cycles",
+      "replacement": "services/decision/engine.py plus bounded execution adapter",
+      "reason": "live signal processor remains deployed orchestration owner"
+    },
+    {
+      "path": "services/approval_service.py",
+      "bucket": "thin_adapter",
+      "replacement": "services/decision/gates/* and services/decision/engine.py",
+      "reason": "approval runtime now stores traces through DecisionEngine, but gate families still live here"
+    },
+    {
+      "path": "services/context_builder.py",
+      "bucket": "thin_adapter",
+      "replacement": "services/decision/context/ or src/trading_bot/signals/context/",
+      "reason": "context hydration still has live and test callers"
+    },
+    {
+      "path": "services/signal_stage_guards.py",
+      "bucket": "thin_adapter",
+      "replacement": "services/decision/gates/stage.py",
+      "reason": "live signal processor still calls these gates"
+    },
+    {
+      "path": "services/signal_runtime_wiring.py",
+      "bucket": "thin_adapter",
+      "replacement": "src/trading_bot/runtime/signal_entrypoint.py and services/decision adapters",
+      "reason": "container wiring still builds the deployed compatibility pipeline"
+    },
+    {
+      "path": "services/approval_models.py",
+      "bucket": "thin_adapter",
+      "replacement": "services/decision/trace.py and services/decision/state.py",
+      "reason": "legacy ApprovalDecision models still have broad test/runtime imports"
+    },
+    {
+      "path": "services/signal_models.py",
+      "bucket": "thin_adapter",
+      "replacement": "services/decision/state.py and src/trading_bot/signals/candidates.py",
+      "reason": "legacy runtime state models still have context/sizing test callers"
+    },
+    {
+      "path": "scripts/auto_buy_manager.py",
+      "bucket": "archive_after_clean_cycles",
+      "replacement": "services/decision/adapters/auto_buy.py plus future auto-buy CLI",
+      "reason": "auto-buy is still a cron/operator entrypoint and is not yet a thin adapter"
+    },
+    {
+      "path": "scripts/decision_engine.py",
+      "bucket": "manual_tool",
+      "replacement": "services/decision/gates/claude.py",
+      "reason": "Claude decision script is still imported by app.py and tests"
+    },
+    {
+      "path": "scripts/decision_policy.py",
+      "bucket": "thin_adapter",
+      "replacement": "services/decision/gates/decision_policy.py",
+      "reason": "decision policy logic still has runtime and test callers"
+    },
+    {
+      "path": "scripts/replay_report.py",
+      "bucket": "manual_tool",
+      "replacement": "scripts/decision_trace_report.py or ml_platform.cli replay",
+      "reason": "old replay reports should eventually consume DecisionTrace"
+    },
+    {
+      "path": "scripts/train_supervised_predictions.py",
+      "bucket": "manual_tool",
+      "replacement": "python -m ml_platform.cli",
+      "reason": "training lifecycle should be owned by ml_platform"
+    },
+    {
+      "path": "scripts/prediction_cache.py",
+      "bucket": "thin_adapter",
+      "replacement": "ml_platform.serving",
+      "reason": "runtime prediction cache must eventually use the governed serving contract"
+    }
+  ]
+}

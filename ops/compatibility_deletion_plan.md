@@ -66,6 +66,14 @@ reports, and tests are updated.
   `services/approval_service.py` only after characterization tests are in
   place.
 - Preserve paper/cash authority boundaries.
+- Started: `services/decision/` now owns the canonical decision facade:
+  `engine.py`, `state.py`, `trace.py`, `authority.py`, `gates/`, and
+  `adapters/`. `services/approval_service.py` stores canonical adjudication and
+  traces through `DecisionEngine` instead of building a parallel trace path.
+- Started: `legacy_architecture/decision_v1/manifest.json` classifies legacy
+  decision/orchestration surfaces as `thin_adapter`,
+  `archive_after_clean_cycles`, or `manual_tool`, with explicit replacement
+  targets and archive conditions.
 
 ### Phase 5: Persistence Read Models
 

@@ -6,6 +6,7 @@ Run:
 
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 
@@ -36,9 +37,32 @@ def test_architecture_surface_payload_counts_core_surfaces(tmp_path):
     _write(tmp_path / "app.py", "import os\nVALUE = os.getenv('APP_FLAG')\n")
     _write(tmp_path / "worker.py", "print('worker')\n")
     _write(tmp_path / "services" / "approval_service.py", "print('service')\n")
+    _write(tmp_path / "services" / "signal_pipeline.py", "print('pipeline')\n")
     _write(tmp_path / "services" / "ops_checks" / "runtime_checks.py", "print('check')\n")
     _write(tmp_path / "repositories" / "trades_repo.py", "print('repo')\n")
     _write(tmp_path / "ops" / "compatibility_deletion_plan.md", "# plan\n")
+    _write(
+        tmp_path / "legacy_architecture" / "decision_v1" / "manifest.json",
+        json.dumps(
+            {
+                "version": "decision_v1_legacy_manifest_v1",
+                "runtime_effect": "classification_only_no_runtime_change",
+                "canonical_package": "services/decision",
+                "surfaces": [
+                    {
+                        "path": "services/signal_pipeline.py",
+                        "bucket": "thin_adapter",
+                        "replacement": "services/decision/engine.py",
+                    },
+                    {
+                        "path": "scripts/missing_legacy.py",
+                        "bucket": "manual_tool",
+                        "replacement": "ops/manual_tools",
+                    },
+                ],
+            }
+        ),
+    )
     _create_skeleton(tmp_path)
 
     payload = build_architecture_surface_payload(base_dir=tmp_path)
@@ -47,13 +71,18 @@ def test_architecture_surface_payload_counts_core_surfaces(tmp_path):
     assert payload["version"] == "architecture_surface_audit_v1"
     assert payload["runtime_effect"] == "diagnostic_only_no_runtime_change"
     assert metrics["root_python_files"]["current"] == 2
-    assert metrics["services_direct_modules"]["current"] == 1
+    assert metrics["services_direct_modules"]["current"] == 2
     assert metrics["services_ops_check_modules"]["current"] == 1
     assert metrics["repository_modules"]["current"] == 1
     assert payload["raw_env_files"] == 1
     assert payload["raw_env_keys"] == 1
     assert payload["compatibility_plan_exists"] is True
     assert payload["src_skeleton"]["contexts_ready"] == len(SRC_CONTEXTS)
+    assert payload["legacy_decision_v1"]["exists"] is True
+    assert payload["legacy_decision_v1"]["surfaces_count"] == 2
+    assert payload["legacy_decision_v1"]["existing_surfaces_count"] == 1
+    assert payload["legacy_decision_v1"]["missing_surfaces_count"] == 1
+    assert payload["legacy_decision_v1"]["buckets"]["thin_adapter"] == 1
 
 
 def test_architecture_surface_payload_flags_missing_skeleton(tmp_path):
@@ -63,6 +92,7 @@ def test_architecture_surface_payload_flags_missing_skeleton(tmp_path):
 
     assert payload["src_skeleton"]["root_exists"] is False
     assert payload["src_skeleton"]["contexts_ready"] == 0
+    assert payload["legacy_decision_v1"]["exists"] is False
     assert payload["ready"] is False
 
 

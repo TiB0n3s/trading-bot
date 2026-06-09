@@ -146,6 +146,7 @@ TESTS = [
     "tests/test_historical_bar_model_intelligence_service.py",
     "tests/test_historical_bar_paper_strategy_service.py",
     "tests/test_historical_bar_meta_label_authority_service.py",
+    "tests/test_layered_model_decision_service.py",
     "tests/test_historical_bar_retry_missing.py",
     "tests/test_external_symbol_discovery_checks.py",
     "tests/test_ml_dataset_export_checks.py",

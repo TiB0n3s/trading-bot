@@ -6,6 +6,9 @@ from dataclasses import asdict, dataclass
 from typing import Any
 
 from services.alternative_data_gate_service import evaluate_alternative_data_gate
+from services.counterfactual_learning_service import (
+    evaluate_counterfactual_veto_relaxation,
+)
 from services.historical_bar_meta_label_authority_service import (
     evaluate_historical_bar_meta_label_authority,
 )
@@ -289,6 +292,20 @@ def _meta_label_layer(
         or missed.get("master_confidence_threshold_relaxation_pct")
         or account_state.get("missed_opportunity_threshold_relaxation_pct")
     )
+    counterfactual_config = _dict((ml_authority_config or {}).get("counterfactual_veto_relaxation"))
+    counterfactual_enabled = counterfactual_config.get("enabled")
+    counterfactual_enabled = (
+        True if counterfactual_enabled is None else bool(counterfactual_enabled)
+    )
+    counterfactual = evaluate_counterfactual_veto_relaxation(
+        account_state=account_state,
+        artifact_path=counterfactual_config.get("artifact_path")
+        or account_state.get("veto_relaxation_model_path"),
+        enabled=counterfactual_enabled and str(action or "").lower() == "buy",
+    )
+    counterfactual_relaxation = _float(counterfactual.get("threshold_relaxation_pct"))
+    if counterfactual_relaxation is not None and counterfactual_relaxation > 0:
+        relaxation = max(_float(relaxation) or 0.0, counterfactual_relaxation)
     if relaxation is not None and relaxation > 0:
         config = dict(config)
         current_approve = _float(config.get("min_approve_score") or 65.0) or 65.0
@@ -318,6 +335,7 @@ def _meta_label_layer(
             "missed_opportunity_relaxation_pct": round(relaxation, 4)
             if relaxation is not None
             else None,
+            "counterfactual_veto_relaxation": counterfactual,
             "authority": outcome,
             "reason": outcome.get("reason"),
         }
@@ -333,6 +351,7 @@ def _meta_label_layer(
             "missed_opportunity_relaxation_pct": round(relaxation, 4)
             if relaxation is not None
             else None,
+            "counterfactual_veto_relaxation": counterfactual,
             "authority": outcome,
             "reason": (
                 f"ensemble probability {ensemble_probability:.3f} below "
@@ -352,6 +371,7 @@ def _meta_label_layer(
         "missed_opportunity_relaxation_pct": round(relaxation, 4)
         if relaxation is not None
         else None,
+        "counterfactual_veto_relaxation": counterfactual,
         "authority": outcome,
         "reason": outcome.get("reason") or "meta-label clear",
     }

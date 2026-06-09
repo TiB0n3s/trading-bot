@@ -17,7 +17,7 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 if str(BASE_DIR) not in sys.path:
     sys.path.insert(0, str(BASE_DIR))
 
-from pipeline import Step, run_pipeline
+from pipeline import Step, run_pipeline  # noqa: E402
 
 
 def _build_steps(target_date: str) -> list[Step]:
@@ -154,6 +154,13 @@ def _build_steps(target_date: str) -> list[Step]:
             argv=["paper-learning-authority", target_date],
             critical=False,
             description="audit paper-only learning overrides against linked lifecycle outcomes",
+        ),
+        Step(
+            name="counterfactual_veto_relaxation",
+            module="pipeline.counterfactual_veto_relaxation",
+            argv=["--date", target_date],
+            critical=False,
+            description="train guarded paper-only false-negative veto-relaxation model from rejected outcomes",
         ),
         Step(
             name="historical_bar_completion_training",

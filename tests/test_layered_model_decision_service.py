@@ -4,11 +4,15 @@
 from __future__ import annotations
 
 import sys
+import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
+from services.counterfactual_learning_service import (  # noqa: E402
+    train_counterfactual_veto_relaxation_model,
+)
 from services.layered_model_decision_service import (  # noqa: E402
     build_layered_model_decision,
 )
@@ -207,6 +211,83 @@ def test_layered_model_decision_records_missed_opportunity_relaxation():
     assert_equal(payload["level_2_meta_label"]["effect"], "paper_approval", "effect")
 
 
+def test_layered_model_decision_uses_counterfactual_unvetoer_artifact():
+    def row(i, positive):
+        return {
+            "symbol": "AAPL",
+            "timestamp": f"2026-06-0{(i % 5) + 1}T14:{i % 60:02d}:00+00:00",
+            "action": "buy",
+            "signal_price": 100.0,
+            "rejection_reason": "meta_label:veto",
+            "max_favorable_60m": 1.2 if positive else 0.2,
+            "max_adverse_60m": -0.2 if positive else -0.9,
+            "canonical_intelligence_json": "{}",
+            "setup_score": 72 if positive else 35,
+            "ret_1m": 0.05 if positive else -0.08,
+            "ret_5m": 0.18 if positive else -0.22,
+            "ret_15m": 0.25 if positive else -0.31,
+            "range_pos_15m": 0.82 if positive else 0.22,
+            "distance_from_vwap": 0.15 if positive else -0.7,
+            "volume_ratio_5m": 1.8 if positive else 0.7,
+            "relative_strength_5m": 0.4 if positive else -0.35,
+            "spread_pct": 0.02 if positive else 0.18,
+            "master_confidence_score": 63.0 if positive else 41.0,
+            "ensemble_probability": 0.61 if positive else 0.42,
+            "meta_label_threshold": 0.65,
+            "pattern_score": 78 if positive else 30,
+            "vpin_toxicity_20": 0.2 if positive else 0.8,
+            "trend_scan_tstat": 2.2 if positive else -1.8,
+        }
+
+    with tempfile.TemporaryDirectory() as tmp:
+        artifact = Path(tmp) / "veto_relaxation_model.json"
+        train_counterfactual_veto_relaxation_model(
+            rows=[row(i, i % 2 == 0) for i in range(40)],
+            artifact_path=artifact,
+            min_samples=20,
+            min_positive=5,
+        )
+        state = _account_state(
+            historical_bar_paper_strategy={
+                "status": "paper_ready",
+                "master_confidence_score": 63.0,
+                "paper_recommendation": "paper_trade_candidate",
+                "baseline_delta": 2.0,
+                "liquidity_stress_bucket": "normal",
+                "paper_position_size_pct": 1.1,
+            },
+            prediction_gate={"ml_prediction_score": 63.0},
+            ret_1m=0.05,
+            ret_5m=0.18,
+            ret_15m=0.25,
+            range_pos_15m=0.82,
+            distance_from_vwap=0.15,
+            volume_ratio_5m=1.8,
+            relative_strength_5m=0.4,
+            spread_pct=0.02,
+        )
+        payload = build_layered_model_decision(
+            symbol="AAPL",
+            action="buy",
+            decision={"approved": False, "position_size_pct": 1.0},
+            account_state=state,
+            execution_mode="paper",
+            ml_authority_config={
+                **_meta_config(),
+                "counterfactual_veto_relaxation": {
+                    "enabled": True,
+                    "artifact_path": str(artifact),
+                },
+            },
+            env={"TRANSFORMER_AUTHORITY_ENABLED": "false"},
+        ).to_dict()
+
+    unveto = payload["level_2_meta_label"]["counterfactual_veto_relaxation"]
+    assert_equal(unveto["status"], "active", "unveto status")
+    assert_true(unveto["threshold_relaxation_pct"] > 0, "unveto relaxation")
+    assert_equal(payload["level_2_meta_label"]["effect"], "paper_approval", "effect")
+
+
 def main():
     tests = [
         test_layered_model_decision_approves_and_sizes_strong_stack,
@@ -214,6 +295,7 @@ def main():
         test_layered_model_decision_regime_standdown_overrides_strong_experts,
         test_layered_model_decision_alternative_data_veto_overrides_strong_experts,
         test_layered_model_decision_records_missed_opportunity_relaxation,
+        test_layered_model_decision_uses_counterfactual_unvetoer_artifact,
     ]
     for test in tests:
         test()

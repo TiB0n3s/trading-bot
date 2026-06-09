@@ -15,6 +15,10 @@ python3 -m ml_platform.cli retraining-readiness --start-date 2026-05-26 --end-da
 python3 -m ml_platform.cli governance-contract
 python3 -m ml_platform.cli dataset-manifest --start-date 2026-05-20 --end-date 2026-05-26
 python3 -m ml_platform.cli label-taxonomy
+python3 -m ml_platform.cli lifecycle-contract
+python3 -m ml_platform.cli feature-registry
+python3 -m ml_platform.cli label-hierarchy
+python3 -m ml_platform.cli serving-contract
 python3 -m ml_platform.cli model-card-template --model-id similarity_v0
 python3 -m ml_platform.cli replay-decisions --start-date 2026-05-01 --end-date 2026-05-26 --candidate-model similarity_v0 --friction-bps 10
 python3 -m ml_platform.cli staged-readiness --start-date 2026-05-26 --end-date 2026-05-26 --candidate-model similarity_v0 --prediction-symbol AAPL
@@ -48,6 +52,12 @@ python3 -m ml_platform.cli list-models
 - Historical-bar trend-scan/triple-barrier candidates and asymmetric supervised
   candidates are validation inputs until promotion evidence and authority
   configuration explicitly allow a conservative paper/live role.
+- The mandatory ML lifecycle is:
+  dataset build, manifest, feature parity validation, purged walk-forward
+  validation, calibration report, replay decision delta, cost/slippage report,
+  promotion assessment, registry write, shadow serving, monitored paper
+  authority, and rollback/demotion. Chronological 80/20 validation is allowed
+  only as observe-only research evidence.
 
 Promotion beyond research requires explicit operator approval, tests, reports,
 environment flags defaulting off, and rollback.
@@ -87,6 +97,74 @@ hard timeout 50 ms, in-memory TTL cache loaded outside the webhook path, and
 fail-open to no prediction. Provider failure must never block signal
 processing. `daily_symbol_predictions` values are compare-only beside the
 deterministic signal-quality gate until validation says otherwise.
+
+## Lifecycle Contract
+
+`lifecycle.py` defines the non-negotiable promotion path for every ML surface.
+Model training can still write observe-only artifacts, but candidate
+registration and stronger authority require evidence for all lifecycle stages:
+
+- dataset manifest and point-in-time feature provenance,
+- runtime/offline feature parity,
+- purged and embargoed walk-forward validation,
+- calibration and Brier evidence,
+- replay against actual bot decisions and rejected opportunities,
+- slippage/cost/exit-adjusted trading metrics,
+- promotion assessment and registry metadata,
+- shadow serving with provider/cache/latency/staleness audit,
+- monitored paper authority,
+- rollback and demotion controls.
+
+Required promotion metrics include expected value, false-positive cost,
+false-negative opportunity cost, avoid-loser precision/recall, Brier score,
+calibration error, profit factor, max drawdown, MFE/MAE delta,
+slippage-adjusted decision delta, capture ratio, and stability by regime,
+symbol, and time of day.
+
+`services.model_validation_governance_service` and
+`ml_platform.promotion` reject simple split validation for candidate
+registration/promotion. This keeps 80/20 training scores useful for diagnostics
+without letting them become authority.
+
+## Feature And Label Contracts
+
+Runtime and offline ML features should resolve through the versioned registry
+under `src/trading_bot/learning/features/`. The current registry includes:
+
+- `decision_features_v4`
+- `bar_pattern_features_v1`
+- `advanced_alpha_features_v1`
+
+Each feature has explicit null semantics, point-in-time rules, authority
+eligibility, and semantic version metadata. Dataset builders, replay services,
+and serving adapters should consume these definitions instead of recreating
+feature lists locally.
+
+`src/trading_bot/learning/labels.py` defines authority caps for label families.
+Realized trade and matched lifecycle labels can eventually support narrow
+paper/live risk-reduction roles after the full lifecycle. Rejected-signal,
+triple-barrier, trend-scan, diagnostic, and regime labels remain observe-only or
+paper-review inputs until they have replay evidence and confounder controls.
+
+Transformer/torch outputs are governed the same way. They may be wired as a
+full authority provider only after temporal sequences, feature parity, replay,
+shadow serving, and monitored paper authority evidence exist. A seq_len=1
+transformer is not sufficient promotion evidence by itself.
+
+## Serving Contract
+
+`serving.py` exposes a fail-open, cache-aware prediction provider contract. The
+runtime contract requires:
+
+- provider identity and model id/version audit fields,
+- in-memory TTL cache outside the webhook path,
+- timeout/failure behavior that returns no prediction,
+- stale prediction detection,
+- numeric output clipping before runtime context,
+- shadow-serving support before any paper authority.
+
+Provider failure must reduce ML influence to neutral state. It must not block
+signal processing, broker safeguards, or deterministic risk gates.
 
 ## Existing Policy Artifacts
 

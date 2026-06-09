@@ -11,8 +11,11 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
+from ml_platform.lifecycle import (
+    REQUIRED_PROMOTION_METRICS,
+    validation_method_is_simple_split,
+)
 from ml_platform.registry import register_model
-
 
 PROMOTION_REPORT_VERSION = "ml_promotion_gate_v1"
 AUTOMATED_ALLOWED_STATUSES = {"candidate", "observe_only", "warn_only"}
@@ -42,15 +45,11 @@ def _readiness_blockers(readiness_report: dict[str, Any]) -> list[str]:
 def _validation_evidence(validation_report: dict[str, Any]) -> dict[str, Any]:
     date_scores = validation_report.get("date_scores") or []
     valid = [
-        row
-        for row in date_scores
-        if isinstance(row, dict) and row.get("correlation") is not None
+        row for row in date_scores if isinstance(row, dict) and row.get("correlation") is not None
     ]
     avg = validation_report.get("average_correlation")
     latest = valid[0].get("correlation") if valid else None
-    positive_sessions = [
-        row for row in valid if float(row.get("correlation") or 0.0) > 0.0
-    ]
+    positive_sessions = [row for row in valid if float(row.get("correlation") or 0.0) > 0.0]
     return {
         "valid_session_count": len(valid),
         "positive_session_count": len(positive_sessions),
@@ -85,6 +84,15 @@ def assess_candidate_promotion(
         blockers.append("validation:average_correlation_not_directional")
     if evidence.get("warning"):
         blockers.append("validation:recent_flat_or_negative_prediction_correlation")
+    validation_method = validation_report.get("validation_method")
+    if validation_method_is_simple_split(validation_method):
+        blockers.append("validation:simple_split_not_promotion_eligible")
+    promotion_metrics = validation_report.get("promotion_metrics")
+    if isinstance(promotion_metrics, dict):
+        missing_metrics = [
+            key for key in REQUIRED_PROMOTION_METRICS if promotion_metrics.get(key) is None
+        ]
+        blockers.extend(f"metrics:missing:{key}" for key in missing_metrics)
 
     if requested_status not in AUTOMATED_ALLOWED_STATUSES and not explicit_operator_approval:
         blockers.append("promotion:operator_approval_required_beyond_warn_only")

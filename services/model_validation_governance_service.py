@@ -7,15 +7,27 @@ from pathlib import Path
 from typing import Any
 
 from ml_platform.config import MODEL_REGISTRY_PATH, MODEL_ROOT
+from ml_platform.lifecycle import (
+    REQUIRED_PROMOTION_METRICS,
+    validation_method_is_promotion_eligible,
+    validation_method_is_simple_split,
+)
 
 DEFAULT_HISTORICAL_CANDIDATE_DIR = MODEL_ROOT / "historical_bar_patterns_v1" / "candidates"
 LIVE_AUTHORITY_STATUSES = {"live", "live_gate", "live_block", "production"}
 DEFAULT_PROMOTION_EVIDENCE_DIR = Path("ops/model_promotion_evidence")
 REQUIRED_PROMOTION_EVIDENCE = {
+    "dataset_manifest.json": "dataset manifest",
+    "feature_parity.json": "feature parity validation",
+    "purged_walk_forward.json": "purged walk-forward validation",
+    "calibration_report.json": "calibration report",
+    "replay_decision_delta.json": "replay decision delta",
     "baseline_comparison.json": "baseline comparison",
     "cost_slippage_exit_analysis.json": "cost/slippage/exit analysis",
     "regime_stability.json": "regime stability",
     "live_observation_window.json": "live observation window",
+    "shadow_serving.json": "shadow serving contract",
+    "rollback_demotion.json": "rollback/demotion plan",
     "operator_approval.json": "explicit operator approval",
 }
 
@@ -80,13 +92,19 @@ def build_model_validation_governance_payload(
     candidates = _best_historical_candidates(candidate_dir)
     assessed = []
     blockers: list[str] = []
+    candidate_registration_blockers: list[str] = []
     for row in candidates:
         training = row.get("training") or {}
         rows_loaded = int(row.get("rows_loaded") or 0)
         symbol_count = int(row.get("symbol_count") or 0)
         accuracy = training.get("accuracy")
         accuracy_float = float(accuracy) if accuracy is not None else None
+        validation_method = str(
+            training.get("validation_method") or row.get("validation_method") or "unknown"
+        )
+        promotion_metrics = training.get("promotion_metrics") or row.get("promotion_metrics") or {}
         failed = []
+        registration_failed = []
         if row.get("runtime_effect") != "observe_only_no_live_authority":
             failed.append("runtime_effect_not_observe_only")
         if not training.get("trained"):
@@ -99,7 +117,20 @@ def build_model_validation_governance_payload(
             failed.append("accuracy_missing")
         elif accuracy_float < min_accuracy:
             failed.append(f"accuracy:{accuracy_float:.4f}<{min_accuracy:.4f}")
+        if validation_method_is_simple_split(validation_method):
+            registration_failed.append(
+                "validation:simple_split_not_candidate_registration_eligible"
+            )
+        elif not validation_method_is_promotion_eligible(validation_method):
+            registration_failed.append(f"validation:not_purged_walk_forward:{validation_method}")
+        missing_metrics = [
+            key for key in REQUIRED_PROMOTION_METRICS if promotion_metrics.get(key) is None
+        ]
+        registration_failed.extend(f"metrics:missing:{key}" for key in missing_metrics)
         blockers.extend(f"{row.get('label_target') or 'unknown'}:{item}" for item in failed)
+        candidate_registration_blockers.extend(
+            f"{row.get('label_target') or 'unknown'}:{item}" for item in registration_failed
+        )
         assessed.append(
             {
                 "label_target": row.get("label_target") or "unknown",
@@ -107,9 +138,22 @@ def build_model_validation_governance_payload(
                 "rows_loaded": rows_loaded,
                 "symbol_count": symbol_count,
                 "accuracy": accuracy_float,
+                "validation_method": validation_method,
+                "promotion_metric_count": len(
+                    [
+                        key
+                        for key in REQUIRED_PROMOTION_METRICS
+                        if promotion_metrics.get(key) is not None
+                    ]
+                ),
+                "missing_promotion_metrics": missing_metrics,
                 "runtime_effect": row.get("runtime_effect") or "unknown",
                 "status": "observe_only_ready" if not failed else "not_ready",
                 "failed_thresholds": failed,
+                "candidate_registration_status": (
+                    "ready" if not failed and not registration_failed else "not_ready"
+                ),
+                "candidate_registration_failed_thresholds": registration_failed,
             }
         )
 
@@ -143,6 +187,9 @@ def build_model_validation_governance_payload(
         )
 
     ready_count = sum(1 for row in assessed if row["status"] == "observe_only_ready")
+    candidate_registration_ready_count = sum(
+        1 for row in assessed if row["candidate_registration_status"] == "ready"
+    )
     return {
         "report_version": "model_validation_governance_v1",
         "runtime_effect": "diagnostic_only_no_registry_or_runtime_authority_change",
@@ -151,22 +198,31 @@ def build_model_validation_governance_payload(
         "promotion_evidence_dir": str(promotion_evidence_dir),
         "labels_assessed": len(assessed),
         "ready_label_count": ready_count,
+        "candidate_registration_ready_count": candidate_registration_ready_count,
         "registry_entry_count": len(registry_entries),
         "live_registry_entry_count": len(live_entries),
         "candidates": sorted(assessed, key=lambda row: str(row["label_target"])),
         "promotion_evidence": promotion_evidence,
         "promotion_evidence_blockers": promotion_evidence_blockers,
         "blockers": blockers,
+        "candidate_registration_blockers": candidate_registration_blockers,
         "ready_for_observe_only_validation": ready_count > 0 and not live_entries,
+        "ready_for_candidate_registration": bool(
+            candidate_registration_ready_count > 0
+            and not live_entries
+            and not candidate_registration_blockers
+        ),
         "ready_for_live_promotion": bool(
-            ready_count > 0
+            candidate_registration_ready_count > 0
             and not live_entries
             and not blockers
+            and not candidate_registration_blockers
             and not promotion_evidence_blockers
         ),
         "notes": [
             "This report cannot promote models or load runtime artifacts.",
             "Live promotion remains blocked without explicit operator approval and session evidence.",
-            "Candidate quality must still be compared against baseline behavior, costs, slippage, exits, and regimes.",
+            "Candidate registration requires purged walk-forward validation and required promotion metrics.",
+            "Candidate quality must be compared against baseline behavior, costs, slippage, exits, regimes, calibration, and replay decision deltas.",
         ],
     }

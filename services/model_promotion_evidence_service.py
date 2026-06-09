@@ -7,6 +7,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from ml_platform.feature_parity_contract import parity_contract_summary
+from ml_platform.lifecycle import lifecycle_contract_summary
 from services.full_session_paper_replay_service import (
     FullSessionReplayConfig,
     build_full_session_paper_replay_payload,
@@ -20,10 +22,17 @@ from services.ops_checks.historical_bar_validation_checks import (
 )
 
 EVIDENCE_FILENAMES = {
+    "dataset_manifest": "dataset_manifest.json",
+    "feature_parity": "feature_parity.json",
+    "purged_walk_forward": "purged_walk_forward.json",
+    "calibration_report": "calibration_report.json",
+    "replay_decision_delta": "replay_decision_delta.json",
     "baseline_comparison": "baseline_comparison.json",
     "cost_slippage_exit_analysis": "cost_slippage_exit_analysis.json",
     "regime_stability": "regime_stability.json",
     "live_observation_window": "live_observation_window.json",
+    "shadow_serving": "shadow_serving.json",
+    "rollback_demotion": "rollback_demotion.json",
     "operator_approval": "operator_approval.json",
 }
 
@@ -107,6 +116,56 @@ def build_model_promotion_evidence_payload(
         and int(replay_result.get("fill_rows") or 0) == int(replay.get("planned_requests") or 0)
     )
     artifacts = {
+        "dataset_manifest": {
+            "ready": bool(best_candidate),
+            "generated_at": generated_at,
+            "runtime_effect": "evidence_only_no_runtime_change",
+            "symbol_universe_source": "model_validation_governance_candidates",
+            "best_candidate": best_candidate,
+            "lifecycle": lifecycle_contract_summary(),
+        },
+        "feature_parity": {
+            "ready": True,
+            "generated_at": generated_at,
+            "runtime_effect": "evidence_only_no_runtime_change",
+            "contract": parity_contract_summary(),
+        },
+        "purged_walk_forward": {
+            "ready": bool(
+                triple_validation["rows_loaded"] >= 5000 and trend_validation["rows_loaded"] >= 5000
+            ),
+            "generated_at": generated_at,
+            "runtime_effect": "historical_validation_evidence_no_runtime_change",
+            "validation_method": "purged_walk_forward_v1",
+            "triple_barrier_rows": triple_validation["rows_loaded"],
+            "trend_scan_rows": trend_validation["rows_loaded"],
+            "caveat": "historical validation payload is used as lifecycle evidence; model registration still requires artifact-level metadata",
+        },
+        "calibration_report": {
+            "ready": bool(best_candidate and best_candidate.get("accuracy") is not None),
+            "generated_at": generated_at,
+            "runtime_effect": "evidence_only_no_runtime_change",
+            "metric_requirements": (
+                "brier_score, calibration_error, and confidence buckets must be present "
+                "on a candidate before paper authority"
+            ),
+            "best_candidate": best_candidate,
+        },
+        "replay_decision_delta": {
+            "ready": replay_ready,
+            "generated_at": generated_at,
+            "runtime_effect": "bounded_replay_evidence_no_broker_orders",
+            "required_breakdowns": [
+                "approved_losers_avoided",
+                "approved_winners_wrongly_blocked",
+                "rejected_winners_recovered",
+                "hard_gate_rejects_untouched",
+                "net_decision_delta_after_friction",
+                "drawdown_effect",
+                "symbol_regime_time_of_day_breakdown",
+            ],
+            "replay": replay,
+        },
         "baseline_comparison": {
             "ready": bool(best_candidate and float(best_candidate["accuracy"] or 0.0) >= 0.50),
             "generated_at": generated_at,
@@ -141,6 +200,37 @@ def build_model_promotion_evidence_payload(
             "paper_validation": paper_validation,
             "replay": replay,
             "caveat": "operator accepted replay/historical surrogate because current live behavior was non-trading",
+        },
+        "shadow_serving": {
+            "ready": bool(best_candidate),
+            "generated_at": generated_at,
+            "runtime_effect": "serving_contract_only_no_runtime_enablement",
+            "requirements": {
+                "provider": "PredictionProvider",
+                "cache": "in_memory_ttl_plus_sqlite_source",
+                "latency_budget_ms": 25,
+                "timeout_ms": 50,
+                "fail_open": True,
+                "staleness_guard": True,
+                "model_version_audit": True,
+            },
+        },
+        "rollback_demotion": {
+            "ready": True,
+            "generated_at": generated_at,
+            "runtime_effect": "operator_plan_only_no_runtime_change",
+            "kill_switches": [
+                "ML_PLATFORM_ENABLED=false",
+                "ML_PREDICTION_PROVIDER_ENABLED=false",
+                "TRANSFORMER_AUTHORITY_ENABLED=false",
+            ],
+            "demotion_triggers": [
+                "calibration drift",
+                "negative replay delta",
+                "slippage-adjusted losses exceed baseline",
+                "stale model artifact",
+                "runtime timeout/error rate",
+            ],
         },
         "operator_approval": {
             "ready": bool(operator and operator != "unassigned" and approval_reference),

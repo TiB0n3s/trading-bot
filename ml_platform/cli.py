@@ -4,12 +4,19 @@
 All commands are research/artifact commands. Nothing here affects broker/order
 behavior or live paper-trading decisions.
 """
+# ruff: noqa: E402
 
 from __future__ import annotations
 
 import argparse
 import json
+import sys
 from pathlib import Path
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+SCRIPTS_DIR = REPO_ROOT / "scripts"
+if str(SCRIPTS_DIR) not in sys.path:
+    sys.path.insert(0, str(SCRIPTS_DIR))
 
 from ml_platform.brain_features import (
     brain_feature_manifest,
@@ -18,8 +25,8 @@ from ml_platform.brain_features import (
 )
 from ml_platform.config import DEFAULT_DB_PATH
 from ml_platform.datasets import dataset_profile, write_profile
-from ml_platform.experiments import create_experiment
 from ml_platform.evaluation import default_evaluation_plan
+from ml_platform.experiments import create_experiment
 from ml_platform.governance import (
     ENV_KILL_SWITCH_DEFAULTS,
     build_dataset_manifest,
@@ -28,18 +35,21 @@ from ml_platform.governance import (
     model_card_template,
 )
 from ml_platform.integration_contract import default_contract
-from ml_platform.registry import load_registry, register_model
+from ml_platform.lifecycle import lifecycle_contract_summary
+from ml_platform.pit_context import get_archive_root, pit_coverage_for_range
 from ml_platform.readiness import retraining_readiness_report
-from ml_platform.replay import replay_decisions_scaffold, replay_decisions_v1
-from ml_platform.serving import SQLitePredictionProvider
+from ml_platform.registry import load_registry, register_model
+from ml_platform.replay import replay_decisions_v1
+from ml_platform.serving import SQLitePredictionProvider, serving_contract_summary
 from ml_platform.staged import staged_ml_integration_report, write_staged_report
-from ml_platform.pit_context import get_archive_root, pit_coverage_for_range, select_pit_context
 from ml_platform.validation import (
     EMBARGO_DEFAULT_DAYS,
     N_FOLDS_DEFAULT,
     PURGE_DEFAULT_DAYS,
     walk_forward_split_report,
 )
+from src.trading_bot.learning.features import feature_registry_summary
+from src.trading_bot.learning.labels import label_hierarchy_summary
 
 
 def main() -> int:
@@ -81,7 +91,9 @@ def main() -> int:
     sub.add_parser("list-models", help="List registry contents")
     sub.add_parser("integration-contract", help="Print ML/brain promotion contract")
     sub.add_parser("evaluation-plan", help="Print default evaluation requirements")
-    readiness = sub.add_parser("retraining-readiness", help="Print manual retraining readiness evidence")
+    readiness = sub.add_parser(
+        "retraining-readiness", help="Print manual retraining readiness evidence"
+    )
     readiness.add_argument("--db-path", default=str(DEFAULT_DB_PATH))
     readiness.add_argument("--start-date")
     readiness.add_argument("--end-date")
@@ -89,6 +101,10 @@ def main() -> int:
     readiness.add_argument("--output")
     sub.add_parser("governance-contract", help="Print ML governance requirements")
     sub.add_parser("label-taxonomy", help="Print label taxonomy v1")
+    sub.add_parser("lifecycle-contract", help="Print mandatory ML lifecycle requirements")
+    sub.add_parser("feature-registry", help="Print canonical ML feature registry")
+    sub.add_parser("label-hierarchy", help="Print label authority hierarchy")
+    sub.add_parser("serving-contract", help="Print prediction serving contract")
     sub.add_parser("env-policy", help="Print ML kill-switch defaults")
 
     manifest = sub.add_parser("dataset-manifest", help="Build a read-only dataset manifest")
@@ -102,7 +118,9 @@ def main() -> int:
     model_card = sub.add_parser("model-card-template", help="Print a model-card template")
     model_card.add_argument("--model-id", default="candidate_model")
 
-    replay = sub.add_parser("replay-decisions", help="Re-run decision_policy against stored snapshots (read-only)")
+    replay = sub.add_parser(
+        "replay-decisions", help="Re-run decision_policy against stored snapshots (read-only)"
+    )
     replay.add_argument("--start-date", required=True)
     replay.add_argument("--end-date", required=True)
     replay.add_argument("--policy", default="current")
@@ -112,7 +130,9 @@ def main() -> int:
     replay.add_argument("--max-changed-rows", type=int, default=50)
     replay.add_argument("--output")
 
-    staged = sub.add_parser("staged-readiness", help="Print staged observe-only ML integration report")
+    staged = sub.add_parser(
+        "staged-readiness", help="Print staged observe-only ML integration report"
+    )
     staged.add_argument("--db-path", default=str(DEFAULT_DB_PATH))
     staged.add_argument("--start-date", required=True)
     staged.add_argument("--end-date", required=True)
@@ -261,6 +281,22 @@ def main() -> int:
 
     if args.command == "label-taxonomy":
         print(json.dumps(label_taxonomy(), indent=2, sort_keys=True))
+        return 0
+
+    if args.command == "lifecycle-contract":
+        print(json.dumps(lifecycle_contract_summary(), indent=2, sort_keys=True))
+        return 0
+
+    if args.command == "feature-registry":
+        print(json.dumps(feature_registry_summary(), indent=2, sort_keys=True))
+        return 0
+
+    if args.command == "label-hierarchy":
+        print(json.dumps(label_hierarchy_summary(), indent=2, sort_keys=True))
+        return 0
+
+    if args.command == "serving-contract":
+        print(json.dumps(serving_contract_summary(), indent=2, sort_keys=True))
         return 0
 
     if args.command == "env-policy":

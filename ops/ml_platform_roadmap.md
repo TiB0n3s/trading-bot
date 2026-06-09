@@ -31,6 +31,17 @@ becomes an ML-driven trading system.
   diagnostic surface for those overrides. It reports override coverage,
   lifecycle linkage, realized outcomes, MFE, and counterfactual availability
   without granting any new authority.
+- `ml_platform.lifecycle` now defines the mandatory ML lifecycle from dataset
+  build through rollback/demotion. Simple chronological splits are explicitly
+  observe-only and cannot support candidate registration or promotion.
+- Runtime/offline ML features now have a versioned registry under
+  `src/trading_bot/learning/features/`. Dataset, replay, and serving work
+  should consume these definitions instead of copying feature lists.
+- Label families now have authority caps under
+  `src/trading_bot/learning/labels.py`, so proxy labels cannot silently become
+  paper/live authority without replay, confounder, and lifecycle evidence.
+- Prediction serving now has a provider/cache/staleness/fail-open contract in
+  `ml_platform.serving`; provider failure must produce neutral ML influence.
 
 ## Near-term foundation
 
@@ -93,6 +104,13 @@ or destabilize the webhook path if treated as routine cleanup.
      for the chronological baseline, sklearn RandomForest, and XGBoost when
      available. The suite is evidence for review only and cannot alter live
      authority.
+   - Training diagnostics include a promotion metric shell. Missing full
+     trading metrics, including EV, false-positive/false-negative costs,
+     calibration, drawdown, MFE/MAE, slippage-adjusted delta, capture ratio,
+     and regime/symbol/time-of-day stability, block candidate registration.
+   - Chronological 80/20 validation is retained for fast research feedback but
+     is not promotion-eligible. Candidate registration requires purged
+     walk-forward evidence.
    - Training rows are point-in-time filtered by `feature_available_at <=
      prediction_time_cutoff` to reduce leakage risk.
    - Old unprotected binary model artifacts are pruned while diagnostic JSON is
@@ -140,6 +158,8 @@ or destabilize the webhook path if treated as routine cleanup.
 8. Runtime/offline feature parity:
    - `ml_platform.feature_parity_contract` defines the first enforced
      runtime/offline feature contract for ML-facing decision features.
+   - `src.trading_bot.learning.features` is the canonical feature registry for
+     decision, bar-pattern, and advanced-alpha feature surfaces.
    - `tests/test_feature_parity_contract.py` verifies matching field names
      across `decision_snapshots` and `ml_platform.dataset_builder.ROW_COLUMNS`,
      documented null semantics, and point-in-time cutoff rules.
@@ -168,6 +188,23 @@ or destabilize the webhook path if treated as routine cleanup.
      context.
    - Next step: make dataset export and replay consume these canonical objects
      directly instead of reconstructing equivalent state from several columns.
+10. Lifecycle/promotion governance:
+   - Evidence files now cover the full lifecycle: dataset manifest, feature
+     parity, purged walk-forward, calibration, replay decision delta, baseline
+     comparison, cost/slippage/exit analysis, regime stability, live observation
+     window, shadow serving, rollback/demotion, and operator approval.
+   - `model_validation_governance_service` reports candidate-registration
+     blockers separately from observe-only readiness so research artifacts can
+     exist without implying authority.
+   - `ml_platform.promotion` rejects simple split reports and missing promotion
+     metrics before any registry/promotion path can advance.
+11. Transformer authority:
+   - Transformer outputs remain governed authority inputs, not free-standing
+     approvals. A transformer may reduce/block size only after registry status,
+     env flags, staleness checks, temporal sequence evidence, replay evidence,
+     shadow serving, monitored paper authority, and rollback controls are
+     present.
+   - Seq_len=1 transformer diagnostics are insufficient for promotion.
 
 ## Platform Layers
 

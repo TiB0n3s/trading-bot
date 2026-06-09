@@ -6,19 +6,20 @@ otherwise. It is observe-only and never writes orders or changes live authority.
 
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
+import math
+from collections import Counter
+from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
-from collections import Counter
-import math
 
+from policy_artifacts import atomic_write_json
+
+from ml_platform.lifecycle import REQUIRED_PROMOTION_METRICS
 from repositories.supervised_prediction_training_repo import (
     fetch_training_rows as repo_fetch_training_rows,
 )
 from services.optional_dependency_service import optional_dependency_status
-from policy_artifacts import atomic_write_json
-
 
 SUPERVISED_MODEL_VERSION = "supervised_prediction_model_v2"
 QUANT_MODEL_SUITE_VERSION = "quant_model_suite_v3"
@@ -102,9 +103,13 @@ class SupervisedTrainingResult:
     runtime_effect: str
     dependency_status: dict[str, Any]
     artifact_path: str | None = None
+    validation_method: str = "chronological_80_20_observe_only"
+    promotion_eligible: bool = False
+    promotion_metrics: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
-        return asdict(self)
+        data = asdict(self)
+        return data
 
 
 @dataclass(frozen=True)
@@ -196,6 +201,69 @@ def _accuracy(y_true: list[int], y_pred: list[int]) -> float | None:
     return round(sum(1 for actual, pred in zip(y_true, y_pred) if actual == pred) / len(y_true), 4)
 
 
+def _safe_div(numerator: float, denominator: float) -> float | None:
+    if denominator == 0:
+        return None
+    return numerator / denominator
+
+
+def _promotion_metric_shell(
+    y_true: list[int],
+    y_pred: list[int],
+    *,
+    probabilities: list[float] | None = None,
+) -> dict[str, Any]:
+    """Return trading-relevant metrics, even when some require later reports.
+
+    The training scaffold can compute classification/calibration basics. Metrics
+    that require replay, fills, MFE/MAE, slippage, or regime grouping are
+    intentionally left as None so promotion governance cannot confuse a trained
+    scaffold with complete lifecycle evidence.
+    """
+    actual = [1 if int(value) > 0 else 0 for value in y_true]
+    pred = [1 if int(value) > 0 else 0 for value in y_pred]
+    tp = sum(1 for a, p in zip(actual, pred) if a == 1 and p == 1)
+    tn = sum(1 for a, p in zip(actual, pred) if a == 0 and p == 0)
+    fp = sum(1 for a, p in zip(actual, pred) if a == 0 and p == 1)
+    fn = sum(1 for a, p in zip(actual, pred) if a == 1 and p == 0)
+    probabilities = probabilities or [float(value) for value in pred]
+    brier = None
+    if actual and len(probabilities) == len(actual):
+        brier = sum((prob - a) ** 2 for prob, a in zip(probabilities, actual)) / len(actual)
+    expected_value = None
+    if actual:
+        # Simple proxy: correct approvals/rejections +1, false positives -2,
+        # false negatives -1. Real EV must come from replay/fill reports.
+        expected_value = (tp + tn - (2 * fp) - fn) / len(actual)
+    metrics = {
+        "expected_value_per_decision": round(expected_value, 6)
+        if expected_value is not None
+        else None,
+        "false_positive_cost": fp,
+        "false_negative_opportunity_cost": fn,
+        "avoid_loser_precision": round(_safe_div(tn, tn + fn), 6)
+        if _safe_div(tn, tn + fn) is not None
+        else None,
+        "avoid_loser_recall": round(_safe_div(tn, tn + fp), 6)
+        if _safe_div(tn, tn + fp) is not None
+        else None,
+        "brier_score": round(brier, 6) if brier is not None else None,
+        "calibration_error": None,
+        "profit_factor": None,
+        "max_drawdown_impact": None,
+        "average_mfe_delta": None,
+        "average_mae_delta": None,
+        "slippage_adjusted_decision_delta": None,
+        "capture_ratio_improvement": None,
+        "regime_specific_performance": None,
+        "symbol_specific_stability": None,
+        "time_of_day_stability": None,
+    }
+    for key in REQUIRED_PROMOTION_METRICS:
+        metrics.setdefault(key, None)
+    return metrics
+
+
 def _positive_rate(labels: list[int]) -> float | None:
     if not labels:
         return None
@@ -253,6 +321,8 @@ def _model_row(
     reason: str,
     artifact_path: str | None = None,
     baseline_positive_rate: float | None = None,
+    validation_method: str = "chronological_80_20_observe_only",
+    promotion_metrics: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     return {
         "provider": provider,
@@ -262,6 +332,9 @@ def _model_row(
         "reason": reason,
         "artifact_path": artifact_path,
         "runtime_effect": "observe_only_no_live_authority",
+        "validation_method": validation_method,
+        "promotion_eligible": False,
+        "promotion_metrics": promotion_metrics or {},
     }
 
 
@@ -327,6 +400,14 @@ def train_supervised_prediction_model(
             model.fit(x_train, y_train)
             predictions = model.predict(x_test) if x_test else []
             accuracy = accuracy_score(y_test, predictions) if y_test else None
+            promotion_metrics = (
+                _promotion_metric_shell(
+                    y_test,
+                    [int(value) for value in predictions],
+                )
+                if y_test
+                else {}
+            )
             written_artifact = None
             if artifact_path:
                 try:
@@ -340,6 +421,9 @@ def train_supervised_prediction_model(
                         "sample_size": sample_size,
                         "baseline_positive_rate": _positive_rate(labels),
                         "accuracy": round(float(accuracy), 4) if accuracy is not None else None,
+                        "validation_method": "chronological_80_20_observe_only",
+                        "promotion_eligible": False,
+                        "promotion_metrics": promotion_metrics,
                         "generated_at": _now(),
                         "runtime_effect": "observe_only_no_live_authority",
                     }
@@ -363,6 +447,9 @@ def train_supervised_prediction_model(
                 runtime_effect="observe_only_no_live_authority",
                 dependency_status=deps,
                 artifact_path=written_artifact,
+                validation_method="chronological_80_20_observe_only",
+                promotion_eligible=False,
+                promotion_metrics=promotion_metrics,
             )
         except Exception as exc:
             provider = "sklearn_random_forest_failed"
@@ -374,11 +461,8 @@ def train_supervised_prediction_model(
     split = max(1, int(sample_size * 0.8))
     baseline_pred = _majority_label(labels[:split])
     test = labels[split:]
-    accuracy = (
-        sum(1 for item in test if item == baseline_pred) / len(test)
-        if test
-        else None
-    )
+    accuracy = sum(1 for item in test if item == baseline_pred) / len(test) if test else None
+    baseline_preds = [baseline_pred] * len(test)
     return SupervisedTrainingResult(
         version=SUPERVISED_MODEL_VERSION,
         provider=provider,
@@ -392,6 +476,9 @@ def train_supervised_prediction_model(
         runtime_effect="observe_only_no_live_authority",
         dependency_status=deps,
         artifact_path=None,
+        validation_method="chronological_80_20_observe_only",
+        promotion_eligible=False,
+        promotion_metrics=_promotion_metric_shell(test, baseline_preds) if test else {},
     )
 
 
@@ -416,7 +503,7 @@ def train_quant_model_suite(
     positive_rate = _positive_rate(labels)
     notes = [
         "suite is observe-only and cannot approve, size, block, or execute trades",
-        "chronological split is used; no random shuffling",
+        "chronological split is used for scaffold comparison only; promotion requires purged walk-forward validation",
     ]
     models: list[dict[str, Any]] = []
 
@@ -450,6 +537,7 @@ def train_quant_model_suite(
             accuracy=_accuracy(y_test, [baseline_pred] * len(y_test)),
             baseline_positive_rate=positive_rate,
             reason="baseline predicts the training-window majority class",
+            promotion_metrics=_promotion_metric_shell(y_test, [baseline_pred] * len(y_test)),
         )
     )
 
@@ -488,6 +576,7 @@ def train_quant_model_suite(
                     baseline_positive_rate=positive_rate,
                     reason="trained sklearn RandomForestClassifier",
                     artifact_path=artifact_path,
+                    promotion_metrics=_promotion_metric_shell(y_test, preds),
                 )
             )
         except Exception as exc:
@@ -548,6 +637,7 @@ def train_quant_model_suite(
                     baseline_positive_rate=positive_rate,
                     reason="trained XGBClassifier",
                     artifact_path=artifact_path,
+                    promotion_metrics=_promotion_metric_shell(y_test, preds),
                 )
             )
         except Exception as exc:
@@ -601,6 +691,8 @@ def train_quant_model_suite(
                     "sample_size": sample_size,
                     "generated_at": _now(),
                     "runtime_effect": "observe_only_no_live_authority",
+                    "validation_method": "chronological_80_20_observe_only",
+                    "promotion_eligible": False,
                 }
                 joblib.dump({"model": model, "metadata": metadata}, path)
                 atomic_write_json(path.with_suffix(path.suffix + ".metadata.json"), metadata)
@@ -616,6 +708,7 @@ def train_quant_model_suite(
                         f"{ASYMMETRIC_XGBOOST_FALSE_POSITIVE_PENALTY:g}x false-positive penalty"
                     ),
                     artifact_path=artifact_path,
+                    promotion_metrics=_promotion_metric_shell(y_test_binary, preds),
                 )
             )
         except Exception as exc:

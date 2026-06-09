@@ -136,7 +136,7 @@ def test_model_promotion_evidence_writes_artifacts_without_live_promotion_claim(
             base_dir / "ops" / "model_promotion_evidence" / "operator_approval.json"
         ).exists()
 
-    assert payload["artifact_count"] == 5
+    assert payload["artifact_count"] == 12
     assert payload["ready_for_live_promotion"] is False
     assert operator_approval_exists
 

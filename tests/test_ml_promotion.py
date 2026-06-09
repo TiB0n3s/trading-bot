@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Tests for conservative ML promotion gate."""
+# ruff: noqa: E402
 
 from __future__ import annotations
 
@@ -62,6 +63,19 @@ def test_directional_validation_allows_candidate_metadata():
     assert assessment.runtime_effect == "metadata_only_no_live_authority"
 
 
+def test_simple_split_validation_blocks_promotion_gate():
+    report = _validation(avg=0.31)
+    report["validation_method"] = "chronological_80_20_observe_only"
+    assessment = assess_candidate_promotion(
+        readiness_report=_readiness(),
+        validation_report=report,
+        requested_status="candidate",
+    )
+
+    assert assessment.allowed is False
+    assert "validation:simple_split_not_promotion_eligible" in assessment.blockers
+
+
 def test_promotion_beyond_warn_only_requires_explicit_operator_approval():
     assessment = assess_candidate_promotion(
         readiness_report=_readiness(),
@@ -106,14 +120,20 @@ def test_model_staleness_guard_requires_fallback_for_old_artifact():
         artifact.write_bytes(b"model")
         registry_path = root / "registry.json"
         old = (datetime.now(timezone.utc) - timedelta(days=10)).isoformat()
-        registry_path.write_text(json.dumps({
-            "models": [{
-                "model_id": "candidate_v1",
-                "artifact_path": str(artifact),
-                "created_at": old,
-                "updated_at": old,
-            }]
-        }))
+        registry_path.write_text(
+            json.dumps(
+                {
+                    "models": [
+                        {
+                            "model_id": "candidate_v1",
+                            "artifact_path": str(artifact),
+                            "created_at": old,
+                            "updated_at": old,
+                        }
+                    ]
+                }
+            )
+        )
         old_ts = (datetime.now(timezone.utc) - timedelta(days=10)).timestamp()
         artifact.touch()
         os.utime(artifact, (old_ts, old_ts))
@@ -142,29 +162,33 @@ def test_prune_model_artifacts_preserves_candidate_and_diagnostics():
         os.utime(old_delete, (old_ts, old_ts))
         os.utime(old_candidate, (old_ts, old_ts))
         registry_path = root / "registry.json"
-        registry_path.write_text(json.dumps({
-            "version": 1,
-            "models": [
+        registry_path.write_text(
+            json.dumps(
                 {
-                    "model_id": "delete-me",
-                    "status": "retired",
-                    "artifact_path": str(old_delete),
-                    "created_at": "2026-01-01T00:00:00+00:00",
-                },
-                {
-                    "model_id": "candidate",
-                    "status": "candidate",
-                    "artifact_path": str(old_candidate),
-                    "created_at": "2026-01-02T00:00:00+00:00",
-                },
-                {
-                    "model_id": "fallback",
-                    "status": "retired",
-                    "artifact_path": str(recent_fallback),
-                    "created_at": "2026-06-01T00:00:00+00:00",
-                },
-            ],
-        }))
+                    "version": 1,
+                    "models": [
+                        {
+                            "model_id": "delete-me",
+                            "status": "retired",
+                            "artifact_path": str(old_delete),
+                            "created_at": "2026-01-01T00:00:00+00:00",
+                        },
+                        {
+                            "model_id": "candidate",
+                            "status": "candidate",
+                            "artifact_path": str(old_candidate),
+                            "created_at": "2026-01-02T00:00:00+00:00",
+                        },
+                        {
+                            "model_id": "fallback",
+                            "status": "retired",
+                            "artifact_path": str(recent_fallback),
+                            "created_at": "2026-06-01T00:00:00+00:00",
+                        },
+                    ],
+                }
+            )
+        )
 
         report = prune_model_artifacts(
             registry_path=registry_path,
@@ -184,6 +208,7 @@ def main():
     tests = [
         test_readiness_blockers_prevent_candidate_registration,
         test_directional_validation_allows_candidate_metadata,
+        test_simple_split_validation_blocks_promotion_gate,
         test_promotion_beyond_warn_only_requires_explicit_operator_approval,
         test_register_candidate_model_writes_registry_metadata_only,
         test_model_staleness_guard_requires_fallback_for_old_artifact,

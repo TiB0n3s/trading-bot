@@ -7,14 +7,20 @@ from typing import Any, Callable
 
 from exceptions import ValidationError
 from rejection_categories import format_rejection_reason
+
 from services.observability import stage_timer
 from services.preflight_service import PreflightResult
-from services.signal_models import ExecutionResult, PipelineResult, SignalContext, SignalRuntimeState
+from services.signal_models import (
+    ExecutionResult,
+    PipelineResult,
+    SignalContext,
+    SignalRuntimeState,
+)
 
 
 @dataclass(frozen=True)
 class SignalPipelineDeps:
-    live_signal_processor: Any
+    decision_orchestrator: Any
     build_runtime_state: Callable[[SignalContext], SignalRuntimeState]
     build_context_runtime: Callable[[SignalRuntimeState], Any]
     evaluate_preflight: Callable[[SignalRuntimeState], PreflightResult]
@@ -81,16 +87,20 @@ class SignalPipeline:
                 )
             return PipelineResult(handled=True, context=context)
 
-        with stage_timer("live_signal_orchestration"):
-            result = self.deps.live_signal_processor.process(
+        with stage_timer("canonical_decision_orchestration"):
+            result = self.deps.decision_orchestrator.process(
                 context,
                 runtime_state,
                 context_runtime,
                 preflight_result,
             )
-            execution = result.execution if result and result.execution else ExecutionResult(
-                submitted=False,
-                status="handled_by_live_signal_processor",
+            execution = (
+                result.execution
+                if result and result.execution
+                else ExecutionResult(
+                    submitted=False,
+                    status="handled_by_canonical_decision_orchestrator",
+                )
             )
         self.deps.logger.info(
             "signal_pipeline_decision "

@@ -1,19 +1,20 @@
 #!/usr/bin/env python3
 """Unit tests for the deterministic signal pipeline seam."""
+# ruff: noqa: E402
 
 from __future__ import annotations
 
 import sys
-from pathlib import Path
 from datetime import datetime
+from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from services.signal_pipeline import SignalPipeline, SignalPipelineDeps
 from services.observability import metrics_snapshot, reset_metrics
 from services.preflight_service import PreflightResult
 from services.signal_models import SignalRuntimeState
+from services.signal_pipeline import SignalPipeline, SignalPipelineDeps
 
 
 def assert_equal(actual, expected, label):
@@ -59,6 +60,7 @@ class Recorder:
             )
         )
         from services.signal_models import ExecutionResult, PipelineResult
+
         return PipelineResult(
             handled=True,
             context=context,
@@ -105,17 +107,21 @@ class Recorder:
 def _pipeline(recorder=None, logger=None):
     recorder = recorder or Recorder()
     logger = logger or FakeLogger()
-    return SignalPipeline(
-        SignalPipelineDeps(
-            live_signal_processor=recorder,
-            build_runtime_state=recorder.build_runtime_state,
-            build_context_runtime=recorder.build_context_runtime,
-            evaluate_preflight=recorder.evaluate_preflight,
-            log_rejection=recorder.log_rejection,
-            mark_webhook_event_status=recorder.mark_webhook_event_status,
-            logger=logger,
-        )
-    ), recorder, logger
+    return (
+        SignalPipeline(
+            SignalPipelineDeps(
+                decision_orchestrator=recorder,
+                build_runtime_state=recorder.build_runtime_state,
+                build_context_runtime=recorder.build_context_runtime,
+                evaluate_preflight=recorder.evaluate_preflight,
+                log_rejection=recorder.log_rejection,
+                mark_webhook_event_status=recorder.mark_webhook_event_status,
+                logger=logger,
+            )
+        ),
+        recorder,
+        logger,
+    )
 
 
 def test_normalize_preserves_original_and_returns_typed_context():
@@ -147,7 +153,9 @@ def test_invalid_payload_is_rejected_before_live_signal_processor():
 def test_ghost_sell_is_rejected_before_live_signal_processor():
     pipeline, recorder, _ = _pipeline()
 
-    result = pipeline.run({"action": "sell", "symbol": "MSFT", "price": 405, "_dedupe_key": "sell-1"})
+    result = pipeline.run(
+        {"action": "sell", "symbol": "MSFT", "price": 405, "_dedupe_key": "sell-1"}
+    )
 
     assert_true(result.context is not None, "context returned")
     assert_equal(
@@ -161,7 +169,11 @@ def test_ghost_sell_is_rejected_before_live_signal_processor():
         ],
         "call order",
     )
-    assert_equal(recorder.calls[3][1][:4], ("MSFT", "sell", "ghost_sell", "no open Alpaca position"), "rejection")
+    assert_equal(
+        recorder.calls[3][1][:4],
+        ("MSFT", "sell", "ghost_sell", "no open Alpaca position"),
+        "rejection",
+    )
     assert_equal(recorder.calls[4][1][1], "rejected", "dedupe status")
 
 
@@ -180,10 +192,20 @@ def test_valid_signal_runs_live_signal_orchestration_stage_once():
     )
     assert_equal(recorder.calls[3][1]["symbol"], "AAPL", "live symbol normalized")
     assert_true("runtime_state" in recorder.calls[3][2], "runtime state passed to live processor")
-    assert_true("context_runtime" in recorder.calls[3][2], "context runtime passed to live processor")
-    assert_true("preflight_result" in recorder.calls[3][2], "preflight result passed to live processor")
+    assert_true(
+        "context_runtime" in recorder.calls[3][2], "context runtime passed to live processor"
+    )
+    assert_true(
+        "preflight_result" in recorder.calls[3][2], "preflight result passed to live processor"
+    )
     timing = metrics_snapshot()["pipeline_stage_timing"]
-    for stage in ("normalize", "preflight", "runtime_state", "context_runtime", "live_signal_orchestration"):
+    for stage in (
+        "normalize",
+        "preflight",
+        "runtime_state",
+        "context_runtime",
+        "canonical_decision_orchestration",
+    ):
         assert_true(stage in timing, f"{stage} timing recorded")
     for placeholder_stage in ("context_build", "approval", "sizing", "execution"):
         assert_true(

@@ -38,6 +38,15 @@ def test_architecture_surface_payload_counts_core_surfaces(tmp_path):
     _write(tmp_path / "worker.py", "print('worker')\n")
     _write(tmp_path / "services" / "approval_service.py", "print('service')\n")
     _write(tmp_path / "services" / "signal_pipeline.py", "print('pipeline')\n")
+    _write(tmp_path / "services" / "decision" / "orchestrator.py", "print('orchestrator')\n")
+    _write(
+        tmp_path / "services" / "signal_runtime_wiring.py",
+        "from services.decision import CanonicalDecisionOrchestrator\n",
+    )
+    _write(
+        tmp_path / "services" / "auto_buy_execution_service.py",
+        "def auto_buy_execution_authority():\n    return 'missing canonical decision trace'\n",
+    )
     _write(tmp_path / "services" / "ops_checks" / "runtime_checks.py", "print('check')\n")
     _write(tmp_path / "repositories" / "trades_repo.py", "print('repo')\n")
     _write(tmp_path / "ops" / "compatibility_deletion_plan.md", "# plan\n")
@@ -71,7 +80,7 @@ def test_architecture_surface_payload_counts_core_surfaces(tmp_path):
     assert payload["version"] == "architecture_surface_audit_v1"
     assert payload["runtime_effect"] == "diagnostic_only_no_runtime_change"
     assert metrics["root_python_files"]["current"] == 2
-    assert metrics["services_direct_modules"]["current"] == 2
+    assert metrics["services_direct_modules"]["current"] == 4
     assert metrics["services_ops_check_modules"]["current"] == 1
     assert metrics["repository_modules"]["current"] == 1
     assert payload["raw_env_files"] == 1
@@ -83,6 +92,7 @@ def test_architecture_surface_payload_counts_core_surfaces(tmp_path):
     assert payload["legacy_decision_v1"]["existing_surfaces_count"] == 1
     assert payload["legacy_decision_v1"]["missing_surfaces_count"] == 1
     assert payload["legacy_decision_v1"]["buckets"]["thin_adapter"] == 1
+    assert payload["legacy_decision_v1"]["ownership_status"]["ready"] is True
 
 
 def test_architecture_surface_payload_flags_missing_skeleton(tmp_path):

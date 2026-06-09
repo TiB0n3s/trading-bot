@@ -5,18 +5,25 @@
 from __future__ import annotations
 
 import sys
+from datetime import datetime
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from services.approval_service import evaluate_approval_decision
-from services.decision import DecisionEngine
+from services.decision import CanonicalDecisionOrchestrator, DecisionEngine
 from services.decision.adapters import auto_buy_candidate_from_raw, webhook_candidate_from_raw
 from services.decision.authority import AuthorityMatrix, normalize_authority_mode
 from services.decision.gates import build_intelligence_adjudication
 from services.decision.state import DecisionState
 from services.decision.trace import GateResult
+from services.signal_models import (
+    ExecutionResult,
+    PipelineResult,
+    SignalContext,
+    SignalRuntimeState,
+)
 from src.trading_bot.runtime.gate_engine import CallableGate, GateEngine
 
 
@@ -186,6 +193,65 @@ def test_decision_engine_stores_canonical_trace_directly():
         assert_true(expected in gate_ids, f"{expected} in full trace")
 
 
+def test_canonical_orchestrator_owns_live_signal_handoff():
+    class _CompatibilityProcessor:
+        def __init__(self):
+            self.calls = []
+
+        def process(self, context, runtime_state, context_runtime, preflight_result):
+            self.calls.append(
+                {
+                    "context": context,
+                    "runtime_state": runtime_state,
+                    "context_runtime": context_runtime,
+                    "preflight_result": preflight_result,
+                    "trace_present": bool(
+                        runtime_state.account_state.get("canonical_decision_trace")
+                    ),
+                }
+            )
+            return PipelineResult(
+                handled=True,
+                context=context,
+                execution=ExecutionResult(submitted=False, status="compatibility_delegate"),
+            )
+
+    processor = _CompatibilityProcessor()
+    runtime_state = SignalRuntimeState(
+        raw_signal={"symbol": "AAPL", "action": "buy", "price": 100.0},
+        symbol="AAPL",
+        action="buy",
+        received_at=datetime.now(),
+        account_state=_strong_account_state(),
+    )
+    context = SignalContext(
+        raw_signal=runtime_state.raw_signal,
+        symbol="AAPL",
+        action="buy",
+        price=100.0,
+    )
+
+    result = CanonicalDecisionOrchestrator(processor).process(
+        context,
+        runtime_state,
+        context_runtime={"built": True},
+        preflight_result={"allowed": True},
+    )
+
+    assert_equal(result.execution.status, "compatibility_delegate", "delegate status")
+    assert_true(processor.calls[0]["trace_present"], "trace before delegate")
+    assert_equal(
+        runtime_state.account_state["canonical_orchestration_status"],
+        "handled",
+        "orchestration status",
+    )
+    assert_equal(
+        runtime_state.decision_context["canonical_orchestrator"]["status"],
+        "pre_trace_recorded",
+        "decision context status",
+    )
+
+
 def test_claude_cannot_approve_cash_buy_without_authority():
     account_state = _strong_account_state()
     result = evaluate_approval_decision(
@@ -267,6 +333,7 @@ def main():
         test_signal_candidates_normalize_webhook_and_auto_buy,
         test_intelligence_adjudicator_aggregates_model_surfaces,
         test_decision_engine_stores_canonical_trace_directly,
+        test_canonical_orchestrator_owns_live_signal_handoff,
         test_claude_cannot_approve_cash_buy_without_authority,
         test_approval_path_stores_canonical_trace_for_paper_authority,
     ]

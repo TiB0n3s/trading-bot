@@ -183,6 +183,28 @@ def _legacy_decision_manifest_status(base_dir: Path) -> dict[str, Any]:
                 "exists": exists,
             }
         )
+    orchestrator_path = base_dir / "services" / "decision" / "orchestrator.py"
+    signal_wiring_path = base_dir / "services" / "signal_runtime_wiring.py"
+    auto_buy_execution_path = base_dir / "services" / "auto_buy_execution_service.py"
+    signal_wiring_source = (
+        signal_wiring_path.read_text(errors="ignore") if signal_wiring_path.exists() else ""
+    )
+    auto_buy_execution_source = (
+        auto_buy_execution_path.read_text(errors="ignore")
+        if auto_buy_execution_path.exists()
+        else ""
+    )
+    ownership_status = {
+        "canonical_orchestrator_exists": orchestrator_path.exists(),
+        "signal_runtime_uses_canonical_orchestrator": (
+            "CanonicalDecisionOrchestrator" in signal_wiring_source
+        ),
+        "auto_buy_execution_requires_canonical_trace": (
+            "auto_buy_execution_authority" in auto_buy_execution_source
+            and "missing canonical decision trace" in auto_buy_execution_source
+        ),
+    }
+    ownership_status["ready"] = all(ownership_status.values())
     return {
         "exists": True,
         "path": manifest_path.relative_to(base_dir).as_posix(),
@@ -193,6 +215,7 @@ def _legacy_decision_manifest_status(base_dir: Path) -> dict[str, Any]:
         "existing_surfaces_count": sum(1 for row in surfaces if row["exists"]),
         "missing_surfaces_count": sum(1 for row in surfaces if not row["exists"]),
         "buckets": buckets,
+        "ownership_status": ownership_status,
         "surfaces": surfaces,
     }
 

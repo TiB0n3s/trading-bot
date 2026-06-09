@@ -6,8 +6,8 @@
     {
       "path": "services/signal_pipeline.py",
       "bucket": "thin_adapter",
-      "replacement": "services/decision/engine.py plus signal orchestration adapter",
-      "reason": "pipeline still owns compatibility orchestration into LiveSignalProcessor"
+      "replacement": "services/decision/orchestrator.py",
+      "reason": "pipeline now delegates runtime ownership to CanonicalDecisionOrchestrator; file remains as a thin transport/normalization adapter"
     },
     {
       "path": "services/preflight_service.py",
@@ -18,8 +18,8 @@
     {
       "path": "services/live_signal_processor.py",
       "bucket": "archive_after_clean_cycles",
-      "replacement": "services/decision/engine.py plus bounded execution adapter",
-      "reason": "live signal processor remains deployed orchestration owner; canonical traces now cover the full decision cascade but orchestration is not fully moved"
+      "replacement": "services/decision/orchestrator.py plus bounded execution adapter",
+      "reason": "live signal processor is now a compatibility delegate behind CanonicalDecisionOrchestrator; detailed legacy gates still need migration before archival"
     },
     {
       "path": "services/approval_service.py",
@@ -61,7 +61,7 @@
       "path": "scripts/auto_buy_manager.py",
       "bucket": "archive_after_clean_cycles",
       "replacement": "services/decision/adapters/auto_buy.py plus future auto-buy CLI",
-      "reason": "auto-buy now attaches canonical candidate/trace/allocation metadata and uses canonical allocated size, but cron/operator discovery and execution still live in the script"
+      "reason": "auto-buy now attaches canonical candidate/trace/allocation metadata and broker execution requires an approved canonical decision trace; cron/operator discovery still lives in the script"
     },
     {
       "path": "scripts/decision_engine.py",

@@ -11,10 +11,15 @@ import os
 from pathlib import Path
 from typing import Any
 
+from services.decision import CanonicalDecisionOrchestrator
 from services.live_signal_processor import (
     LiveSignalProcessor,
     LiveSignalProcessorDeps,
+)
+from services.live_signal_processor import (
     build_context_runtime as live_build_context_runtime,
+)
+from services.live_signal_processor import (
     build_runtime_state as live_build_runtime_state,
 )
 from services.persistent_lockout_service import PersistentLockoutService
@@ -45,19 +50,19 @@ def build_live_signal_processor(*, container: Any, runtime: Any) -> LiveSignalPr
         LiveSignalProcessorDeps(
             log=runtime.logger,
             log_rejection=(
-                lambda symbol, action, category, reason, price=None, account_state=None: runtime._trade_audit_recorder().record_rejection(
-                    symbol=symbol,
-                    action=action,
-                    category=category,
-                    reason=reason,
-                    price=price,
-                    account_state=account_state,
+                lambda symbol, action, category, reason, price=None, account_state=None: (
+                    runtime._trade_audit_recorder().record_rejection(
+                        symbol=symbol,
+                        action=action,
+                        category=category,
+                        reason=reason,
+                        price=price,
+                        account_state=account_state,
+                    )
                 )
             ),
             record_webhook_status=(
-                lambda **kwargs: runtime._trade_audit_recorder().record_webhook_status(
-                    **kwargs
-                )
+                lambda **kwargs: runtime._trade_audit_recorder().record_webhook_status(**kwargs)
             ),
             parse_stale_signal=runtime._is_signal_stale,
             is_cash_safe_mode=runtime.is_cash_safe_mode,
@@ -144,11 +149,13 @@ def build_live_signal_processor(*, container: Any, runtime: Any) -> LiveSignalPr
             make_client_order_id=runtime._make_client_order_id,
             place_order=container.broker_service.place_order,
             log_trade=(
-                lambda signal, decision, order, account_state=None: runtime._trade_audit_recorder().record_execution(
-                    signal=signal,
-                    decision=decision,
-                    order=order,
-                    account_state=account_state,
+                lambda signal, decision, order, account_state=None: (
+                    runtime._trade_audit_recorder().record_execution(
+                        signal=signal,
+                        decision=decision,
+                        order=order,
+                        account_state=account_state,
+                    )
                 )
             ),
             write_cooldown=runtime._write_cooldown,
@@ -161,9 +168,11 @@ def build_live_signal_processor(*, container: Any, runtime: Any) -> LiveSignalPr
 
 def build_signal_pipeline_deps(*, container: Any, runtime: Any) -> SignalPipelineDeps:
     return SignalPipelineDeps(
-        live_signal_processor=build_live_signal_processor(
-            container=container,
-            runtime=runtime,
+        decision_orchestrator=CanonicalDecisionOrchestrator(
+            compatibility_processor=build_live_signal_processor(
+                container=container,
+                runtime=runtime,
+            )
         ),
         build_runtime_state=(
             lambda signal_context: live_build_runtime_state(
@@ -181,20 +190,24 @@ def build_signal_pipeline_deps(*, container: Any, runtime: Any) -> SignalPipelin
         ),
         evaluate_preflight=runtime._evaluate_preflight,
         log_rejection=(
-            lambda symbol, action, category, reason, price=None, account_state=None: runtime._trade_audit_recorder().record_rejection(
-                symbol=symbol,
-                action=action,
-                category=category,
-                reason=reason,
-                price=price,
-                account_state=account_state,
+            lambda symbol, action, category, reason, price=None, account_state=None: (
+                runtime._trade_audit_recorder().record_rejection(
+                    symbol=symbol,
+                    action=action,
+                    category=category,
+                    reason=reason,
+                    price=price,
+                    account_state=account_state,
+                )
             )
         ),
         mark_webhook_event_status=(
-            lambda dedupe_key, status, **kwargs: runtime._trade_audit_recorder().record_webhook_status(
-                dedupe_key=dedupe_key,
-                status=status,
-                **kwargs,
+            lambda dedupe_key, status, **kwargs: (
+                runtime._trade_audit_recorder().record_webhook_status(
+                    dedupe_key=dedupe_key,
+                    status=status,
+                    **kwargs,
+                )
             )
         ),
         logger=runtime.logger,

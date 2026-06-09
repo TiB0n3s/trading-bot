@@ -84,6 +84,7 @@ def _insert_snapshot(
     live_buy_enabled=True,
     timestamp="2026-06-09T09:00:00-04:00",
 ) -> int:
+    _ensure_trades_table(db_path)
     auto_buy_repo.insert_candidate_and_snapshot(
         timestamp=timestamp,
         created_at="2026-06-09T09:00:01-04:00",
@@ -99,6 +100,55 @@ def _insert_snapshot(
             "SELECT id FROM auto_buy_decision_snapshots ORDER BY id DESC LIMIT 1"
         ).fetchone()
     return int(row["id"])
+
+
+def _ensure_trades_table(db_path: Path) -> None:
+    with auto_buy_repo.get_connection(db_path) as con:
+        con.execute(
+            """
+            CREATE TABLE IF NOT EXISTS trades (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                timestamp TEXT NOT NULL,
+                symbol TEXT,
+                action TEXT,
+                signal_price REAL,
+                approved INTEGER,
+                rejection_reason TEXT,
+                confidence TEXT,
+                position_size_pct REAL,
+                stop_loss_pct REAL,
+                take_profit_pct REAL,
+                order_id TEXT,
+                order_status TEXT,
+                qty INTEGER,
+                fill_price REAL,
+                market_bias TEXT,
+                risk_level TEXT,
+                entry_quality TEXT,
+                session_trend_label TEXT,
+                session_trend_score REAL,
+                session_return_pct REAL,
+                session_momentum_5m_pct REAL,
+                session_momentum_15m_pct REAL,
+                session_momentum_30m_pct REAL,
+                session_distance_from_vwap_pct REAL,
+                setup_label TEXT,
+                setup_policy_action TEXT,
+                setup_policy_reason TEXT,
+                prediction_score REAL,
+                prediction_decision TEXT,
+                prediction_reason TEXT,
+                ml_prediction_score REAL,
+                ml_prediction_bucket TEXT,
+                buy_opportunity_score REAL,
+                buy_opportunity_recommendation TEXT,
+                buy_opportunity_reason TEXT,
+                session_momentum_severity TEXT,
+                effective_size_cap_pct REAL,
+                dominant_limiter TEXT
+            )
+            """
+        )
 
 
 def _status(db_path: Path, row_id: int):
@@ -188,6 +238,24 @@ def test_successfully_routed_candidate_cannot_be_resubmitted():
         assert row["execution_status"] == ROUTED
         assert row["routed_order_id"] == "order-123"
         assert row["order_submitted"] == 1
+        with auto_buy_repo.get_connection(db_path) as con:
+            trade = con.execute(
+                """
+                SELECT symbol, action, order_id, order_status, qty,
+                       position_size_pct, stop_loss_pct, take_profit_pct,
+                       signal_price
+                FROM trades
+                WHERE order_id = ?
+                """,
+                ("order-123",),
+            ).fetchone()
+        assert trade["symbol"] == "AAPL"
+        assert trade["action"] == "buy"
+        assert trade["order_status"] == "filled"
+        assert trade["qty"] is None
+        assert trade["position_size_pct"] == 0.25
+        assert trade["stop_loss_pct"] == 1.0
+        assert trade["take_profit_pct"] == 2.0
 
 
 def test_older_strong_candidate_is_not_routed_when_latest_symbol_snapshot_is_skip():

@@ -193,6 +193,15 @@ class DiscoveryExecutionBridgeService:
                     order_id=order_id,
                     order=outcome.order,
                 )
+                self._record_routed_trade(
+                    candidate_id=candidate_id,
+                    symbol=symbol,
+                    candidate=candidate,
+                    order=outcome.order,
+                    position_size_pct=request.position_size_pct,
+                    stop_loss_pct=request.stop_loss_pct,
+                    take_profit_pct=request.take_profit_pct,
+                )
                 return DiscoveryBridgeResult(
                     candidate_id=candidate_id,
                     symbol=symbol,
@@ -303,6 +312,41 @@ class DiscoveryExecutionBridgeService:
             reason_code,
             reason_detail,
         )
+
+    def _record_routed_trade(
+        self,
+        *,
+        candidate_id: int,
+        symbol: str,
+        candidate: dict[str, Any],
+        order: dict[str, Any],
+        position_size_pct: float,
+        stop_loss_pct: float,
+        take_profit_pct: float,
+    ) -> None:
+        try:
+            wrote = self.repository.record_routed_buy_trade(
+                candidate=candidate,
+                order=order,
+                position_size_pct=position_size_pct,
+                stop_loss_pct=stop_loss_pct,
+                take_profit_pct=take_profit_pct,
+            )
+        except Exception as exc:
+            self.logger.error(
+                "discovery_execution_bridge_ledger_write_failed candidate_id=%s symbol=%s error=%s",
+                candidate_id,
+                symbol,
+                f"{type(exc).__name__}: {exc}",
+            )
+            return
+        if not wrote:
+            self.logger.info(
+                "discovery_execution_bridge_ledger_write_skipped "
+                "candidate_id=%s symbol=%s reason=duplicate_or_missing_order_id",
+                candidate_id,
+                symbol,
+            )
 
 
 def _order_identifier(order: dict[str, Any]) -> str | None:

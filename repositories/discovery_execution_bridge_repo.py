@@ -6,8 +6,11 @@ import json
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from db import DB_PATH, get_connection
+
+from repositories import auto_buy_repo
 
 PENDING = "PENDING"
 ROUTING = "ROUTING"
@@ -174,3 +177,77 @@ class DiscoveryExecutionBridgeRepository:
                 """,
                 (FAILED, _now_iso(), reason, reason, candidate_id),
             )
+
+    def record_routed_buy_trade(
+        self,
+        *,
+        candidate: dict[str, Any],
+        order: dict[str, Any],
+        position_size_pct: float,
+        stop_loss_pct: float,
+        take_profit_pct: float,
+    ) -> bool:
+        order_id = _order_identifier(order)
+        if not order_id or auto_buy_repo.trade_order_exists(order_id, self.db_path):
+            return False
+
+        raw_qty = order.get("qty")
+        try:
+            qty = int(float(raw_qty)) if raw_qty not in (None, "") else None
+        except (TypeError, ValueError):
+            qty = None
+
+        order_for_ledger = dict(order)
+        order_for_ledger["order_id"] = order_id
+        order_for_ledger.setdefault("status", order.get("status") or "submitted")
+        order_for_ledger.setdefault(
+            "current_price",
+            _order_signal_price(order_for_ledger, candidate, stop_loss_pct),
+        )
+        auto_buy_repo.insert_auto_buy_trade(
+            timestamp=datetime.now(ZoneInfo("America/New_York")).strftime("%Y-%m-%d %H:%M:%S"),
+            candidate=candidate,
+            order=order_for_ledger,
+            qty=qty,
+            position_size_pct=position_size_pct,
+            stop_loss_pct=stop_loss_pct,
+            take_profit_pct=take_profit_pct,
+            db_path=self.db_path,
+        )
+        return True
+
+
+def _order_identifier(order: dict[str, Any]) -> str | None:
+    for key in ("order_id", "id", "client_order_id"):
+        value = order.get(key)
+        if value:
+            return str(value)
+    return None
+
+
+def _order_signal_price(
+    order: dict[str, Any],
+    candidate: dict[str, Any],
+    stop_loss_pct: float,
+) -> float | None:
+    for value in (
+        order.get("current_price"),
+        candidate.get("signal_price"),
+        candidate.get("current_price"),
+        candidate.get("close"),
+        candidate.get("ask"),
+        candidate.get("bid"),
+    ):
+        try:
+            if value not in (None, ""):
+                return float(value)
+        except (TypeError, ValueError):
+            continue
+
+    stop_loss = order.get("stop_loss")
+    try:
+        if stop_loss not in (None, "") and stop_loss_pct < 100:
+            return round(float(stop_loss) / (1 - stop_loss_pct / 100), 4)
+    except (TypeError, ValueError, ZeroDivisionError):
+        return None
+    return None

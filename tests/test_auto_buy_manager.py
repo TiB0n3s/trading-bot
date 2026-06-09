@@ -612,8 +612,13 @@ def test_live_buy_requires_market_open_and_env_flag():
     assert_equal(order, None, "order")
     assert_equal(
         candidate["live_block_reason"],
-        "live not requested or AUTO_BUY_LIVE_BUYS is false",
+        "auto-buy is candidate discovery only; execution delegated to canonical signal path",
         "block reason",
+    )
+    assert_equal(
+        candidate["auto_buy_runtime_effect"],
+        "candidate_discovery_only_no_order_routing",
+        "runtime effect",
     )
 
 
@@ -638,12 +643,12 @@ def test_live_auto_buy_does_not_execute_tradingview_alert_symbols_by_default():
     assert_equal(order, None, "order")
     assert_equal(
         candidate["live_block_reason"],
-        "tradingview alert symbol requires webhook approval path",
+        "auto-buy is candidate discovery only; execution delegated to canonical signal path",
         "block reason",
     )
 
 
-def test_internal_all_mode_reaches_normal_auto_buy_gates_for_tradingview_symbols():
+def test_internal_all_mode_stays_candidate_only_for_tradingview_symbols():
     old_live = auto_buy_manager.AUTO_BUY_LIVE_BUYS
     old_allow = auto_buy_manager.AUTO_BUY_ALLOW_TRADINGVIEW_LIVE
     old_mode = auto_buy_manager.AUTO_BUY_SIGNAL_MODE
@@ -671,7 +676,11 @@ def test_internal_all_mode_reaches_normal_auto_buy_gates_for_tradingview_symbols
         auto_buy_manager.auto_buy_capacity_check = old_capacity
 
     assert_equal(order, None, "order")
-    assert_equal(candidate["live_block_reason"], "capacity stopped", "block reason")
+    assert_equal(
+        candidate["live_block_reason"],
+        "auto-buy is candidate discovery only; execution delegated to canonical signal path",
+        "block reason",
+    )
 
 
 def test_cash_safe_daily_symbol_cap_only_applies_in_cash_modes():
@@ -1204,7 +1213,7 @@ def main():
         test_early_session_buffer_skips_collection,
         test_live_buy_requires_market_open_and_env_flag,
         test_live_auto_buy_does_not_execute_tradingview_alert_symbols_by_default,
-        test_internal_all_mode_reaches_normal_auto_buy_gates_for_tradingview_symbols,
+        test_internal_all_mode_stays_candidate_only_for_tradingview_symbols,
         test_cash_safe_daily_symbol_cap_only_applies_in_cash_modes,
         test_auto_buy_capacity_blocks_when_active_position_cap_is_full,
         test_auto_buy_capacity_allows_replacement_when_flat_under_gross_cap,

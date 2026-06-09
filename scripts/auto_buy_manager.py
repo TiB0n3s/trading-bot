@@ -6,7 +6,8 @@ This is the buy-side sibling to the position momentum auto-sell workflow:
 - observe-only by default,
 - uses Alpaca-derived session momentum and live feature snapshots,
 - records candidate decisions for later comparison against TradingView alerts,
-- only submits paper buys when both --live and AUTO_BUY_LIVE_BUYS=true are set.
+- captures candidate-discovery rows only. Order routing is delegated to the
+  canonical signal path, not auto-buy.
 """
 
 from __future__ import annotations
@@ -79,10 +80,6 @@ from repositories.candidate_universe_repo import CandidateUniverseRepository
 from repositories.prediction_repo import PredictionRepository
 from risk.exposure import any_cluster_limit_hit, cluster_exposure
 from services.ai_momentum_pattern_service import deterministic_momentum_pattern
-from services.auto_buy_execution_service import (
-    AutoBuyExecutionService,
-    build_auto_buy_execution_request,
-)
 from services.decision import CapitalAllocator, DecisionEngine
 from services.decision.adapters import auto_buy_candidate_from_raw
 from services.intelligence.candidates.reference import candidate_reference_service
@@ -1588,69 +1585,13 @@ def maybe_execute_auto_buy(
     candidate: dict[str, Any], market_open: bool, live_requested: bool
 ) -> dict[str, Any] | None:
     candidate.update(attach_canonical_decision_metadata(candidate))
-    if not live_requested or not AUTO_BUY_LIVE_BUYS:
-        candidate["live_block_reason"] = "live not requested or AUTO_BUY_LIVE_BUYS is false"
-        return None
-    if not market_open:
-        candidate["live_block_reason"] = "market is closed"
-        return None
-    if candidate.get("decision") != "strong_buy_candidate":
-        candidate["live_block_reason"] = f"decision={candidate.get('decision')}"
-        return None
-    if (
-        candidate.get("signal_source") == "tradingview_alert"
-        and tradingview_webhook_required_for_execution()
-    ):
-        candidate["live_block_reason"] = "tradingview alert symbol requires webhook approval path"
-        return None
-
-    capacity_ok, capacity_reason = auto_buy_capacity_check()
-    candidate["auto_buy_capacity_reason"] = capacity_reason
-    if not capacity_ok:
-        candidate["live_block_reason"] = capacity_reason
-        return None
-
-    cooldown_active, cooldown_reason = recently_auto_bought(candidate["symbol"])
-    if cooldown_active:
-        candidate["live_block_reason"] = cooldown_reason
-        return None
-
-    risk_ok, risk_reason, risk_details = risk_cross_check(candidate["symbol"])
-    candidate["risk_cross_check_reason"] = risk_reason
-    candidate["risk_cross_check"] = risk_details
-    if not risk_ok:
-        candidate["live_block_reason"] = risk_reason
-        return None
-
-    from services.broker_service import broker_service
-
-    request = build_auto_buy_execution_request(
-        candidate=candidate,
-        default_position_size_pct=AUTO_BUY_POSITION_SIZE_PCT,
-        stop_loss_pct=AUTO_BUY_STOP_LOSS_PCT,
-        take_profit_pct=AUTO_BUY_TAKE_PROFIT_PCT,
-        client_order_id_factory=client_order_id,
+    candidate["live_block_reason"] = (
+        "auto-buy is candidate discovery only; execution delegated to canonical signal path"
     )
-    outcome = AutoBuyExecutionService(broker_service).execute(request)
-    order = outcome.order
-    candidate["auto_buy_execution_request"] = {
-        "symbol": request.symbol,
-        "position_size_pct": request.position_size_pct,
-        "stop_loss_pct": request.stop_loss_pct,
-        "take_profit_pct": request.take_profit_pct,
-        "risk_level": request.risk_level,
-        "client_order_id": request.client_order_id,
-    }
-    if not outcome.submitted:
-        candidate["broker_failure_reason"] = outcome.failure_reason
-        candidate["live_block_reason"] = outcome.live_block_reason
-    else:
-        try:
-            log_auto_buy_order(candidate, order)
-        except Exception as e:
-            candidate["auto_buy_trade_log_error"] = str(e)
-        write_app_buy_cooldown(candidate["symbol"])
-    return order
+    candidate["auto_buy_runtime_effect"] = "candidate_discovery_only_no_order_routing"
+    candidate["live_requested"] = bool(live_requested)
+    candidate["market_open"] = bool(market_open)
+    return None
 
 
 def symbols_for_scope(scope: str) -> list[str]:
@@ -1782,7 +1723,9 @@ def main() -> int:
     parser.add_argument("--scope", choices=("internal", "tradingview", "all"), default="internal")
     parser.add_argument("--json", action="store_true")
     parser.add_argument(
-        "--live", action="store_true", help="Submit paper buys only if AUTO_BUY_LIVE_BUYS=true"
+        "--live",
+        action="store_true",
+        help="Record live-requested candidate metadata; auto-buy does not route orders",
     )
     args = parser.parse_args()
 

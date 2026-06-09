@@ -8,11 +8,15 @@ or webhook status. Those side effects belong to the audit/persistence boundary.
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass, field
 from datetime import datetime
-import logging
 from typing import Any, Callable
 
+from services.decision.gates.live_risk import (
+    evaluate_execution_quality_live_gate,
+    evaluate_live_circuit_breaker,
+)
 
 
 @dataclass(frozen=True)
@@ -72,6 +76,40 @@ def execute_order(
             order_result=order_result,
         )
 
+    live_circuit = evaluate_live_circuit_breaker(
+        action=action,
+        account_state=account_state,
+    )
+    account_state.setdefault("live_order_gates", {})["live_circuit_breaker"] = (
+        live_circuit.to_dict()
+    )
+    if live_circuit.decision == "block" and live_circuit.enforced:
+        return ExecutionOutcome(
+            submitted=False,
+            status="rejected",
+            rejection_category="live_circuit_breaker",
+            rejection_reason=live_circuit.reason,
+            failure_reason=f"live_circuit_breaker: {live_circuit.reason}",
+            account_state_updates={"live_order_gates": account_state.get("live_order_gates") or {}},
+        )
+
+    execution_quality_gate = evaluate_execution_quality_live_gate(
+        action=action,
+        account_state=account_state,
+    )
+    account_state.setdefault("live_order_gates", {})["execution_quality"] = (
+        execution_quality_gate.to_dict()
+    )
+    if execution_quality_gate.decision == "block" and execution_quality_gate.enforced:
+        return ExecutionOutcome(
+            submitted=False,
+            status="rejected",
+            rejection_category="execution_quality",
+            rejection_reason=execution_quality_gate.reason,
+            failure_reason=f"execution_quality: {execution_quality_gate.reason}",
+            account_state_updates={"live_order_gates": account_state.get("live_order_gates") or {}},
+        )
+
     log.info(f"SECOND LOOK START: {symbol} {action.upper()}")
     ok, second_look_reason = pre_order_safety_check(
         symbol=symbol,
@@ -79,10 +117,7 @@ def execute_order(
         signal_price=signal_price,
         account_state=account_state,
     )
-    log.info(
-        f"SECOND LOOK RESULT: {symbol} {action.upper()} "
-        f"ok={ok} reason={second_look_reason}"
-    )
+    log.info(f"SECOND LOOK RESULT: {symbol} {action.upper()} ok={ok} reason={second_look_reason}")
 
     if not ok:
         return ExecutionOutcome(
@@ -118,10 +153,7 @@ def execute_order(
         log.info(f"One-bar confirmation hold passed for {symbol} BUY: {one_bar_reason}")
 
     client_order_id = make_client_order_id(symbol, action, signal)
-    log.info(
-        f"BROKER SUBMIT START: {symbol} {action.upper()} "
-        f"client_order_id={client_order_id}"
-    )
+    log.info(f"BROKER SUBMIT START: {symbol} {action.upper()} client_order_id={client_order_id}")
 
     order_result = place_order(
         symbol=symbol,
@@ -133,10 +165,7 @@ def execute_order(
         client_order_id=client_order_id,
     )
 
-    log.info(
-        f"BROKER SUBMIT RESULT: {symbol} {action.upper()} "
-        f"order_result={order_result}"
-    )
+    log.info(f"BROKER SUBMIT RESULT: {symbol} {action.upper()} order_result={order_result}")
 
     if not order_result:
         return ExecutionOutcome(
@@ -286,13 +315,12 @@ def execute_approved_order(
                         record_webhook_status(
                             dedupe_key=dedupe_key,
                             status="submit_failed",
-                            failure_reason=execution.failure_reason or "broker returned no order_result",
+                            failure_reason=execution.failure_reason
+                            or "broker returned no order_result",
                         )
 
         except Exception as exc:
-            log.exception(
-                f"APPROVED ORDER PATH CRASHED for {symbol} {action.upper()}: {exc}"
-            )
+            log.exception(f"APPROVED ORDER PATH CRASHED for {symbol} {action.upper()}: {exc}")
             rejection_adapter.reject_approval_decision(
                 deterministic_rejection(
                     category="order_path_exception",

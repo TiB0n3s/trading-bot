@@ -314,6 +314,7 @@ def evaluate_decision_policy(
             opp_decision == "block"
             or pred_decision == "block"
             or portfolio_action == "block"
+            or execution_action == "block"
             or transformer_decision == "block"
         ):
             decision = "block"
@@ -348,13 +349,13 @@ def evaluate_decision_policy(
                 float(portfolio_decision.get("size_multiplier") or 0.75),
             )
             reason = "portfolio duplicate risk; reduce size"
-        elif execution_action in {"block", "size_down"}:
+        elif execution_action == "size_down":
             decision = "size_down"
             size_multiplier = min(
                 0.75,
                 float(execution_quality.get("size_multiplier") or 0.75),
             )
-            reason = "execution quality cost/block-candidate; reduce size"
+            reason = "execution quality cost; reduce size"
         elif transformer_decision == "size_down":
             decision = "size_down"
             size_multiplier = min(

@@ -10,7 +10,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-import decision_policy
+import decision_policy  # noqa: E402
 
 
 def assert_equal(actual, expected, label):
@@ -172,7 +172,7 @@ def test_execution_quality_can_size_down_policy():
     )
 
 
-def test_execution_quality_block_candidate_sizes_down_not_block():
+def test_execution_quality_block_candidate_blocks_policy():
     original = decision_policy.contextual_memory_for_signal
     try:
         decision_policy.contextual_memory_for_signal = neutral_memory
@@ -197,8 +197,8 @@ def test_execution_quality_block_candidate_sizes_down_not_block():
     finally:
         decision_policy.contextual_memory_for_signal = original
 
-    assert_equal(result["decision"], "size_down", "execution block candidate decision")
-    assert_lte(result["size_multiplier"], 0.40, "execution block candidate size")
+    assert_equal(result["decision"], "block", "execution block candidate decision")
+    assert_equal(result["size_multiplier"], 0.0, "execution block candidate size")
     assert_true("execution quality says block candidate" in result["risks"], "risk reason")
 
 
@@ -510,8 +510,8 @@ if __name__ == "__main__":
     print("[OK] test_portfolio_duplicate_risk_can_size_down_policy")
     test_execution_quality_can_size_down_policy()
     print("[OK] test_execution_quality_can_size_down_policy")
-    test_execution_quality_block_candidate_sizes_down_not_block()
-    print("[OK] test_execution_quality_block_candidate_sizes_down_not_block")
+    test_execution_quality_block_candidate_blocks_policy()
+    print("[OK] test_execution_quality_block_candidate_blocks_policy")
     test_duplicate_portfolio_risk_blocks_even_with_strong_standalone_chart()
     print("[OK] test_duplicate_portfolio_risk_blocks_even_with_strong_standalone_chart")
     test_utility_estimate_cannot_block_or_size_by_itself()

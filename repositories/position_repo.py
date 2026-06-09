@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from db import DB_PATH, get_connection
+
 from repositories.trade_accounting import fill_bearing_order_condition
 
 
@@ -15,6 +16,7 @@ def entry_context_rows(symbol: str, db_path=DB_PATH):
             f"""
             SELECT
                 timestamp, symbol, action, qty, fill_price,
+                confidence, rejection_reason,
                 market_bias, market_bias_effective,
                 trend_direction, trend_strength,
                 momentum_direction, momentum_pct,

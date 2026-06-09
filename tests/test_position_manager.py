@@ -4,9 +4,11 @@ Focused tests for position-manager exit guards.
 Run:
   python3 tests/test_position_manager.py
 """
+# ruff: noqa: E402
 
-import sys
 import os
+import sys
+from datetime import datetime, timedelta
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -16,15 +18,18 @@ os.environ.setdefault("ALPACA_API_KEY", "test-key")
 os.environ.setdefault("ALPACA_SECRET_KEY", "test-secret")
 
 import position_manager
-
-from position_manager import continuation_exit_delay_reason
-from position_manager import exit_pattern_pressure_state
-from position_manager import is_strong_conviction_entry
-from position_manager import is_weak_entry_context
-from position_manager import normalize_exit_for_share_qty
-from position_manager import peak_aware_breakeven_floor
-from position_manager import planned_partial_sell_qty
-from position_manager import proactive_profit_capture_trigger
+from position_manager import (
+    continuation_exit_delay_reason,
+    exit_pattern_pressure_state,
+    is_auto_buy_entry,
+    is_high_confidence_auto_buy_entry,
+    is_strong_conviction_entry,
+    is_weak_entry_context,
+    normalize_exit_for_share_qty,
+    peak_aware_breakeven_floor,
+    planned_partial_sell_qty,
+    proactive_profit_capture_trigger,
+)
 
 
 def assert_true(value, label):
@@ -115,15 +120,11 @@ def test_strong_entry_peak_lock_tiers_keep_more_profit():
 
 def test_neutral_and_late_strength_entries_are_weak_context():
     assert_true(
-        is_weak_entry_context(
-            {"entry_setup_label": "above_vwap_neutral_continuation"}
-        ),
+        is_weak_entry_context({"entry_setup_label": "above_vwap_neutral_continuation"}),
         "neutral continuation weak",
     )
     assert_true(
-        is_weak_entry_context(
-            {"entry_setup_label": "late_strength_near_vwap_risk"}
-        ),
+        is_weak_entry_context({"entry_setup_label": "late_strength_near_vwap_risk"}),
         "late strength weak",
     )
 
@@ -139,6 +140,21 @@ def test_strong_conviction_requires_allow_or_boost_setup():
     assert_equal(is_strong_conviction_entry(entry_ctx), False, "neutral not strong")
     entry_ctx["entry_setup_policy_action"] = "allow"
     assert_equal(is_strong_conviction_entry(entry_ctx), True, "allow strong")
+
+
+def test_auto_buy_entry_detection_uses_confidence_metadata():
+    entry_ctx = {
+        "entry_confidence": "auto_buy_manager",
+        "entry_setup_label": "unclassified_transition",
+        "entry_ml_prediction_score": 68.2,
+    }
+
+    assert_equal(is_auto_buy_entry(entry_ctx), True, "auto buy entry")
+    assert_equal(
+        is_high_confidence_auto_buy_entry(entry_ctx),
+        True,
+        "high-confidence auto buy entry",
+    )
 
 
 def test_proactive_profit_capture_triggers_while_still_green():
@@ -249,13 +265,10 @@ def test_evaluate_position_uses_exit_pattern_pressure_for_partial_profit_capture
     old_fetch = position_manager.fetch_intraday_bars
     old_entry = position_manager.get_entry_context
     try:
-        position_manager.fetch_intraday_bars = lambda symbol, minutes=90: [
-            {"high": 101.0, "low": 100.8, "close": 100.9, "volume": 1000}
-            for _ in range(80)
-        ] + [
-            {"high": 100.6, "low": 100.2, "close": 100.3, "volume": 1000}
-            for _ in range(10)
-        ]
+        position_manager.fetch_intraday_bars = lambda symbol, minutes=90: (
+            [{"high": 101.0, "low": 100.8, "close": 100.9, "volume": 1000} for _ in range(80)]
+            + [{"high": 100.6, "low": 100.2, "close": 100.3, "volume": 1000} for _ in range(10)]
+        )
         position_manager.get_entry_context = lambda symbol: {
             "entry_setup_policy_action": "allow",
             "entry_ml_prediction_bucket": "mid_50_55",
@@ -287,6 +300,91 @@ def test_evaluate_position_uses_exit_pattern_pressure_for_partial_profit_capture
         any("exit_pattern_pressure" in reason for reason in decision["reasons"]),
         "exit pattern reason",
     )
+
+
+def test_fresh_auto_buy_min_hold_suppresses_soft_peak_lock():
+    class _Position:
+        symbol = "AVGO"
+        qty = 4
+        avg_entry_price = 100.0
+        current_price = 100.02
+        unrealized_pl = 0.08
+        unrealized_plpc = 0.0002
+
+    old_fetch = position_manager.fetch_intraday_bars
+    old_entry = position_manager.get_entry_context
+    try:
+        position_manager.fetch_intraday_bars = lambda symbol, minutes=90: (
+            [{"high": 100.8, "low": 100.1, "close": 100.5, "volume": 1000} for _ in range(70)]
+            + [{"high": 100.2, "low": 100.0, "close": 100.02, "volume": 1000} for _ in range(20)]
+        )
+        position_manager.get_entry_context = lambda symbol: {
+            "entry_timestamp": (datetime.now(position_manager.ET) - timedelta(minutes=2)).strftime(
+                "%Y-%m-%d %H:%M:%S"
+            ),
+            "entry_confidence": "auto_buy_manager",
+            "entry_setup_label": "unclassified_transition",
+            "entry_setup_policy_action": "allow",
+            "entry_ml_prediction_score": 68.2,
+            "entry_ml_prediction_bucket": "high_55_plus",
+            "entry_buy_opportunity_recommendation": "strong_buy_candidate",
+            "entry_buy_opportunity_score": 12,
+        }
+        decision = position_manager.evaluate_position(
+            _Position(),
+            {"AVGO": {"peak_pl_pct": 0.80, "peak_price": 100.80}},
+            session_momentum={"trend_label": "uptrend", "trend_score": 2},
+        )
+    finally:
+        position_manager.fetch_intraday_bars = old_fetch
+        position_manager.get_entry_context = old_entry
+
+    assert_equal(decision["action"], "hold", "action")
+    assert_equal(decision["auto_buy_min_hold"]["active"], True, "min-hold active")
+    assert_equal(decision["raw_weak_entry_context"], True, "raw weak context")
+    assert_equal(decision["weak_entry_context"], False, "high-confidence weak override")
+    assert_true(
+        any("suppressed sell_full" in reason for reason in decision["reasons"]),
+        "suppressed sell reason",
+    )
+
+
+def test_fresh_auto_buy_min_hold_does_not_suppress_severe_loss_exit():
+    class _Position:
+        symbol = "AVGO"
+        qty = 4
+        avg_entry_price = 100.0
+        current_price = 98.50
+        unrealized_pl = -6.0
+        unrealized_plpc = -0.015
+
+    old_fetch = position_manager.fetch_intraday_bars
+    old_entry = position_manager.get_entry_context
+    try:
+        position_manager.fetch_intraday_bars = lambda symbol, minutes=90: [
+            {"high": 100.1, "low": 98.5, "close": 98.5, "volume": 1000} for _ in range(90)
+        ]
+        position_manager.get_entry_context = lambda symbol: {
+            "entry_timestamp": (datetime.now(position_manager.ET) - timedelta(minutes=2)).strftime(
+                "%Y-%m-%d %H:%M:%S"
+            ),
+            "entry_confidence": "auto_buy_manager",
+            "entry_setup_policy_action": "allow",
+            "entry_ml_prediction_score": 68.2,
+            "entry_ml_prediction_bucket": "high_55_plus",
+        }
+        decision = position_manager.evaluate_position(
+            _Position(),
+            {"AVGO": {"peak_pl_pct": 0.0, "peak_price": 100.0}},
+            session_momentum={},
+        )
+    finally:
+        position_manager.fetch_intraday_bars = old_fetch
+        position_manager.get_entry_context = old_entry
+
+    assert_equal(decision["action"], "sell_full", "action")
+    assert_equal(decision["auto_buy_min_hold"]["severe_loss"], True, "severe loss")
+    assert_equal(decision["auto_buy_min_hold"]["active"], False, "min-hold inactive")
 
 
 def test_submit_partial_exit_waits_after_canceling_open_orders():
@@ -356,6 +454,7 @@ def main():
         test_strong_entry_peak_lock_tiers_keep_more_profit,
         test_neutral_and_late_strength_entries_are_weak_context,
         test_strong_conviction_requires_allow_or_boost_setup,
+        test_auto_buy_entry_detection_uses_confidence_metadata,
         test_proactive_profit_capture_triggers_while_still_green,
         test_proactive_profit_capture_triggers_faster_for_weak_entries,
         test_proactive_profit_capture_respects_retained_strength_room,
@@ -363,6 +462,8 @@ def main():
         test_exit_pattern_pressure_gives_retained_strength_extra_confirmation,
         test_exit_pattern_pressure_is_not_armed_before_profit_threshold,
         test_evaluate_position_uses_exit_pattern_pressure_for_partial_profit_capture,
+        test_fresh_auto_buy_min_hold_suppresses_soft_peak_lock,
+        test_fresh_auto_buy_min_hold_does_not_suppress_severe_loss_exit,
         test_submit_partial_exit_waits_after_canceling_open_orders,
         test_submit_partial_exit_returns_failure_instead_of_crashing_on_broker_error,
     ]

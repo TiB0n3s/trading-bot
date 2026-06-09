@@ -262,6 +262,21 @@ EXIT_PATTERN_WEAK_GIVEBACK_PCT = float(
     os.getenv("POSITION_MANAGER_EXIT_PATTERN_WEAK_GIVEBACK_PCT", "20")
 )
 
+# Auto-buy coordination:
+# The buy engine and exit engine run independently. A fresh auto-buy position
+# should not be immediately closed by soft profit locks before the entry thesis
+# has had time to play out. Severe loss/risk exits remain active.
+AUTO_BUY_MIN_HOLD_MINUTES = float(os.getenv("POSITION_MANAGER_AUTO_BUY_MIN_HOLD_MINUTES", "6"))
+AUTO_BUY_MIN_HOLD_HARD_LOSS_PCT = float(
+    os.getenv("POSITION_MANAGER_AUTO_BUY_MIN_HOLD_HARD_LOSS_PCT", "-0.75")
+)
+AUTO_BUY_STRONG_ENTRY_ML_MIN = float(
+    os.getenv("POSITION_MANAGER_AUTO_BUY_STRONG_ENTRY_ML_MIN", "55")
+)
+AUTO_BUY_STRONG_ENTRY_OPPORTUNITY_MIN = float(
+    os.getenv("POSITION_MANAGER_AUTO_BUY_STRONG_ENTRY_OPPORTUNITY_MIN", "8")
+)
+
 
 def now_utc():
     return datetime.now(timezone.utc)
@@ -312,6 +327,8 @@ def get_entry_context(symbol):
         return {
             "entry_timestamp": r["timestamp"],
             "entry_fill_price": r["fill_price"],
+            "entry_confidence": r["confidence"],
+            "entry_rejection_reason": r["rejection_reason"],
             "entry_market_bias": r["market_bias"],
             "entry_market_bias_effective": r["market_bias_effective"],
             "entry_trend": f"{r['trend_direction']}/{r['trend_strength']}",
@@ -367,6 +384,118 @@ def safe_float(value):
         return float(value)
     except (TypeError, ValueError):
         return None
+
+
+def parse_entry_timestamp(value):
+    if not value:
+        return None
+
+    if isinstance(value, datetime):
+        dt = value
+    else:
+        text = str(value).strip()
+        if not text:
+            return None
+        try:
+            dt = datetime.fromisoformat(text.replace("Z", "+00:00"))
+        except Exception:
+            dt = None
+            for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S"):
+                try:
+                    dt = datetime.strptime(text[:19], fmt)
+                    break
+                except Exception:
+                    continue
+            if dt is None:
+                return None
+
+    if dt.tzinfo is None:
+        return ET.localize(dt)
+    return dt.astimezone(ET)
+
+
+def entry_age_minutes(entry_ctx, now=None):
+    entry_ts = parse_entry_timestamp((entry_ctx or {}).get("entry_timestamp"))
+    if entry_ts is None:
+        return None
+
+    now = now or datetime.now(ET)
+    if now.tzinfo is None:
+        now = ET.localize(now)
+    else:
+        now = now.astimezone(ET)
+
+    return max(0.0, (now - entry_ts).total_seconds() / 60.0)
+
+
+def is_auto_buy_entry(entry_ctx):
+    if not entry_ctx:
+        return False
+
+    confidence = str(entry_ctx.get("entry_confidence") or "").lower()
+    reason = str(entry_ctx.get("entry_rejection_reason") or "").lower()
+    decision = str(entry_ctx.get("entry_prediction_decision") or "").lower()
+
+    return (
+        "auto_buy" in confidence
+        or "auto_buy" in reason
+        or "auto-buy" in reason
+        or decision == "auto_buy_manager"
+    )
+
+
+def is_high_confidence_auto_buy_entry(entry_ctx):
+    if not is_auto_buy_entry(entry_ctx):
+        return False
+
+    ml_score = safe_float(entry_ctx.get("entry_ml_prediction_score"))
+    opp_score = safe_float(entry_ctx.get("entry_buy_opportunity_score"))
+    ml_bucket = str(entry_ctx.get("entry_ml_prediction_bucket") or "").lower()
+    buy_rec = str(entry_ctx.get("entry_buy_opportunity_recommendation") or "").lower()
+    setup_action = str(entry_ctx.get("entry_setup_policy_action") or "").lower()
+
+    if ml_score is not None and ml_score >= AUTO_BUY_STRONG_ENTRY_ML_MIN:
+        return True
+    if opp_score is not None and opp_score >= AUTO_BUY_STRONG_ENTRY_OPPORTUNITY_MIN:
+        return True
+    if ml_bucket in ("high_55_plus", "mid_50_55"):
+        return True
+    if buy_rec == "strong_buy_candidate":
+        return True
+    return setup_action in ("allow", "boost")
+
+
+def auto_buy_min_hold_state(entry_ctx, current_pl_pct, now=None):
+    age = entry_age_minutes(entry_ctx, now=now)
+    auto_buy = is_auto_buy_entry(entry_ctx)
+    high_confidence = is_high_confidence_auto_buy_entry(entry_ctx)
+    severe_loss = current_pl_pct <= AUTO_BUY_MIN_HOLD_HARD_LOSS_PCT
+    active = (
+        AUTO_BUY_MIN_HOLD_MINUTES > 0
+        and auto_buy
+        and age is not None
+        and age < AUTO_BUY_MIN_HOLD_MINUTES
+        and not severe_loss
+    )
+
+    age_text = "unknown" if age is None else f"{age:.1f}m"
+    return {
+        "enabled": AUTO_BUY_MIN_HOLD_MINUTES > 0,
+        "active": active,
+        "auto_buy_entry": auto_buy,
+        "high_confidence_entry": high_confidence,
+        "entry_age_minutes": round(age, 2) if age is not None else None,
+        "min_hold_minutes": AUTO_BUY_MIN_HOLD_MINUTES,
+        "hard_loss_pct": AUTO_BUY_MIN_HOLD_HARD_LOSS_PCT,
+        "severe_loss": severe_loss,
+        "reason": (
+            f"auto_buy_min_hold: age={age_text} "
+            f"< {AUTO_BUY_MIN_HOLD_MINUTES:.1f}m; "
+            f"current_pl={current_pl_pct:.2f}% "
+            f"> hard_loss={AUTO_BUY_MIN_HOLD_HARD_LOSS_PCT:.2f}%; "
+            f"high_confidence={high_confidence}"
+        ),
+    }
 
 
 def high_gain_locked_profit_floor(peak_pl_pct):
@@ -872,6 +1001,9 @@ def is_bad_entry_containment(entry_ctx, peak_pl_pct):
     if not BAD_ENTRY_CONTAINMENT_ENABLED:
         return False, None
 
+    if is_high_confidence_auto_buy_entry(entry_ctx):
+        return False, None
+
     if not is_weak_entry_context(entry_ctx):
         return False, None
 
@@ -923,6 +1055,7 @@ def evaluate_position(position, state, session_momentum=None):
     current_pl_pct = peak["current_pl_pct"]
     giveback_pct = peak["giveback_pct"]
     peak_pl_pct = peak["peak_pl_pct"]
+    auto_buy_hold = auto_buy_min_hold_state(entry_ctx, current_pl_pct)
     retained_strength = retained_session_strength_state(session_momentum, current_pl_pct)
     locked_profit_floor = high_gain_locked_profit_floor(peak_pl_pct)
 
@@ -973,7 +1106,10 @@ def evaluate_position(position, state, session_momentum=None):
     # Full exit: breakeven/profit-lock protection.
     # If a position has already moved favorably enough, do not allow it to
     # round-trip back to breakeven/red, especially for weaker entry contexts.
-    weak_entry_context = is_weak_entry_context(entry_ctx)
+    raw_weak_entry_context = is_weak_entry_context(entry_ctx)
+    weak_entry_context = raw_weak_entry_context
+    if is_high_confidence_auto_buy_entry(entry_ctx):
+        weak_entry_context = False
 
     # Three-tier quality-split thresholds:
     #   strong_conviction: all signals aligned → most room (70% giveback, 1.0% min)
@@ -1175,6 +1311,18 @@ def evaluate_position(position, state, session_momentum=None):
                 + str(retained_strength.get("reason"))
             )
 
+    if auto_buy_hold.get("active") and action in ("sell_partial", "sell_full"):
+        original_action = action
+        original_severity = severity
+        action = "hold"
+        sell_fraction = 0.0
+        severity = "watch"
+        hard_full_exit = False
+        reasons.append(
+            f"{auto_buy_hold['reason']}; suppressed {original_action} "
+            f"(original_severity={original_severity}) during fresh auto-buy entry window"
+        )
+
     if not reasons:
         reasons.append("no exit trigger")
 
@@ -1204,6 +1352,9 @@ def evaluate_position(position, state, session_momentum=None):
         "session_momentum": session_momentum or {},
         "retained_session_strength": retained_strength,
         "exit_pattern_pressure": exit_pattern_pressure,
+        "auto_buy_min_hold": auto_buy_hold,
+        "weak_entry_context": weak_entry_context,
+        "raw_weak_entry_context": raw_weak_entry_context,
         "locked_profit_floor_pct": locked_profit_floor,
         "high_gain_lock_enabled": POSITION_MANAGER_HIGH_GAIN_LOCK_ENABLED,
         "session_trend_label": retained_strength.get("session_label"),

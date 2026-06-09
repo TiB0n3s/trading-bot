@@ -515,6 +515,128 @@ def test_paper_exploration_authority_does_not_run_in_cash_mode():
     assert_equal("paper_exploration_authority" in account_state, False, "no paper marker")
 
 
+def _historical_bar_strategy(**overrides):
+    strategy = {
+        "status": "paper_ready",
+        "master_confidence_score": 78.0,
+        "paper_recommendation": "paper_size_candidate",
+        "baseline_delta": 7.5,
+        "liquidity_stress_bucket": "normal",
+        "paper_position_size_pct": 1.4,
+    }
+    strategy.update(overrides)
+    return strategy
+
+
+def _historical_bar_meta_config(**overrides):
+    config = {
+        "enabled": True,
+        "min_veto_score": 65.0,
+        "min_approve_score": 65.0,
+        "min_size_increase_score": 75.0,
+        "min_baseline_delta": 0.0,
+        "max_position_size_pct": 1.5,
+        "can_veto": True,
+    }
+    config.update(overrides)
+    return {"historical_bar_meta_label_authority": config}
+
+
+def test_historical_bar_meta_label_authority_approves_low_confidence_paper_candidate():
+    account_state = {"historical_bar_paper_strategy": _historical_bar_strategy()}
+    result = evaluate_approval_decision(
+        signal={"symbol": "AAPL", "action": "buy"},
+        action="buy",
+        claude_account_state={},
+        evaluate_signal=lambda *_: {
+            "approved": False,
+            "confidence": "low",
+            "reason": "Layer 1 candidate is uncertain",
+            "position_size_pct": 1.0,
+        },
+        cash_safe_mode=False,
+        market_bias={},
+        account_state=account_state,
+        medium_confidence_override=lambda **_: (False, "no override"),
+        tape_exception_enabled=False,
+        execution_mode="paper",
+        ml_authority_config=_historical_bar_meta_config(),
+    )
+
+    assert_equal(result.approved, True, "approved")
+    assert_equal(result.source, "historical_bar_meta_label_authority", "source")
+    assert_equal(result.claude_payload["position_size_pct"], 1.4, "size")
+    assert_equal(
+        account_state["historical_bar_meta_label_authority"]["effect"],
+        "paper_approval",
+        "effect",
+    )
+
+
+def test_historical_bar_meta_label_authority_increases_size_for_approved_paper_candidate():
+    account_state = {"historical_bar_paper_strategy": _historical_bar_strategy()}
+    result = evaluate_approval_decision(
+        signal={"symbol": "AAPL", "action": "buy"},
+        action="buy",
+        claude_account_state={},
+        evaluate_signal=lambda *_: {
+            "approved": True,
+            "confidence": "high",
+            "reason": "Claude approves",
+            "position_size_pct": 1.0,
+        },
+        cash_safe_mode=False,
+        market_bias={},
+        account_state=account_state,
+        medium_confidence_override=lambda **_: (True, "ok"),
+        tape_exception_enabled=False,
+        execution_mode="paper",
+        ml_authority_config=_historical_bar_meta_config(),
+    )
+
+    assert_equal(result.approved, True, "approved")
+    assert_equal(result.source, "historical_bar_meta_label_authority", "source")
+    assert_equal(result.claude_payload["position_size_pct"], 1.4, "size")
+    assert_equal(
+        account_state["historical_bar_meta_label_authority"]["effect"],
+        "size_increase",
+        "effect",
+    )
+
+
+def test_historical_bar_meta_label_authority_vetoes_weak_approved_paper_candidate():
+    account_state = {
+        "historical_bar_paper_strategy": _historical_bar_strategy(
+            master_confidence_score=51.0,
+            paper_recommendation="paper_avoid",
+            paper_position_size_pct=0.0,
+        )
+    }
+    result = evaluate_approval_decision(
+        signal={"symbol": "AAPL", "action": "buy"},
+        action="buy",
+        claude_account_state={},
+        evaluate_signal=lambda *_: {
+            "approved": True,
+            "confidence": "high",
+            "reason": "Claude approves",
+            "position_size_pct": 1.0,
+        },
+        cash_safe_mode=False,
+        market_bias={},
+        account_state=account_state,
+        medium_confidence_override=lambda **_: (True, "ok"),
+        tape_exception_enabled=False,
+        execution_mode="paper",
+        ml_authority_config=_historical_bar_meta_config(),
+    )
+
+    assert_equal(result.approved, False, "approved")
+    assert_equal(result.source, "historical_bar_meta_label_authority", "source")
+    assert_equal(result.category, "historical_bar_meta_label_veto", "category")
+    assert_equal(result.claude_payload["position_size_pct"], 0, "size")
+
+
 def test_approval_service_separates_claude_parse_error_from_confidence_gate():
     result = evaluate_approval_decision(
         signal={"symbol": "AAPL", "action": "buy"},
@@ -798,6 +920,9 @@ def main():
         test_paper_learning_authority_can_override_claude_unapproved_soft_response,
         test_paper_exploration_authority_can_approve_and_increase_size,
         test_paper_exploration_authority_does_not_run_in_cash_mode,
+        test_historical_bar_meta_label_authority_approves_low_confidence_paper_candidate,
+        test_historical_bar_meta_label_authority_increases_size_for_approved_paper_candidate,
+        test_historical_bar_meta_label_authority_vetoes_weak_approved_paper_candidate,
         test_approval_service_separates_claude_parse_error_from_confidence_gate,
         test_approval_service_separates_claude_engine_error_from_confidence_gate,
         test_sizing_service_preserves_sell_default_size,

@@ -132,6 +132,30 @@ PAPER_EXPLORATION_MAX_POSITION_SIZE_PCT = _env_float(
     "PAPER_EXPLORATION_MAX_POSITION_SIZE_PCT",
     1.50,
 )
+HISTORICAL_BAR_META_LABEL_AUTHORITY_ENABLED = _env_bool(
+    "HISTORICAL_BAR_META_LABEL_AUTHORITY_ENABLED",
+    True,
+)
+HISTORICAL_BAR_META_LABEL_MIN_VETO_SCORE = _env_float(
+    "HISTORICAL_BAR_META_LABEL_MIN_VETO_SCORE",
+    65.0,
+)
+HISTORICAL_BAR_META_LABEL_MIN_APPROVE_SCORE = _env_float(
+    "HISTORICAL_BAR_META_LABEL_MIN_APPROVE_SCORE",
+    65.0,
+)
+HISTORICAL_BAR_META_LABEL_MIN_SIZE_INCREASE_SCORE = _env_float(
+    "HISTORICAL_BAR_META_LABEL_MIN_SIZE_INCREASE_SCORE",
+    75.0,
+)
+HISTORICAL_BAR_META_LABEL_MIN_BASELINE_DELTA = _env_float(
+    "HISTORICAL_BAR_META_LABEL_MIN_BASELINE_DELTA",
+    0.0,
+)
+HISTORICAL_BAR_META_LABEL_MAX_POSITION_SIZE_PCT = _env_float(
+    "HISTORICAL_BAR_META_LABEL_MAX_POSITION_SIZE_PCT",
+    1.50,
+)
 
 
 def is_cash_mode() -> bool:
@@ -258,6 +282,32 @@ def public_ml_authority_config() -> dict:
                 "claude_parse_or_engine_error",
                 "deterministic_signal_quality_block",
                 "session_momentum_hard_block",
+            ],
+        },
+        "historical_bar_meta_label_authority": {
+            "enabled": HISTORICAL_BAR_META_LABEL_AUTHORITY_ENABLED,
+            "execution_modes": ["paper", "dry_run"],
+            "min_veto_score": HISTORICAL_BAR_META_LABEL_MIN_VETO_SCORE,
+            "min_approve_score": HISTORICAL_BAR_META_LABEL_MIN_APPROVE_SCORE,
+            "min_size_increase_score": HISTORICAL_BAR_META_LABEL_MIN_SIZE_INCREASE_SCORE,
+            "min_baseline_delta": HISTORICAL_BAR_META_LABEL_MIN_BASELINE_DELTA,
+            "max_position_size_pct": HISTORICAL_BAR_META_LABEL_MAX_POSITION_SIZE_PCT,
+            "can_veto": True,
+            "can_approve_trades": True,
+            "can_increase_size": True,
+            "severe_liquidity_blocks": True,
+            "authority_scope": "paper_only_meta_label_after_hard_gates",
+            "layer_1_presenter": "incoming_buy_candidate_after_pre_claude_hard_gates",
+            "layer_2_vetoer": "historical_bar_paper_strategy.master_confidence_score",
+            "cannot_override": [
+                "cash_safe_or_cash_full_mode",
+                "stale_signal",
+                "liquidity_or_spread_failure",
+                "broker_or_account_constraints",
+                "macro_or_regime_hard_block",
+                "explicit_symbol_override",
+                "claude_parse_or_engine_error",
+                "execution_quality_block",
             ],
         },
         "default_authority_mode": "observe_only_compare",

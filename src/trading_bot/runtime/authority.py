@@ -60,6 +60,11 @@ DEFAULT_LAYER_AUTHORITY: dict[str, LayerAuthority] = {
         can_approve="paper_block",
         can_increase_size="paper_block",
     ),
+    "historical_bar_meta_label": LayerAuthority(
+        can_block="paper_block",
+        can_approve="paper_block",
+        can_increase_size="paper_block",
+    ),
     "claude": LayerAuthority(
         can_block="live_block",
         can_approve="paper_block",

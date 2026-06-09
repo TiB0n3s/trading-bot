@@ -29,6 +29,9 @@ from services.approval_models import (
     trend_confirmation_rejection,
 )
 from services.decision import DecisionEngine
+from services.historical_bar_meta_label_authority_service import (
+    evaluate_historical_bar_meta_label_authority,
+)
 from services.ml_authority_service import (
     _advisory_feature_size_cap,
     _float_or_none,
@@ -374,6 +377,104 @@ def _paper_exploration_authority_decision(
     }
 
 
+def _historical_bar_meta_label_authority_decision(
+    *,
+    signal: dict[str, Any],
+    action: str,
+    decision: dict[str, Any],
+    account_state: dict[str, Any],
+    execution_mode: str,
+    ml_authority_config: dict[str, Any] | None,
+) -> dict[str, Any]:
+    return evaluate_historical_bar_meta_label_authority(
+        symbol=signal.get("symbol") or account_state.get("symbol"),
+        action=action,
+        decision=decision,
+        account_state=account_state,
+        execution_mode=execution_mode,
+        config=(ml_authority_config or {}).get("historical_bar_meta_label_authority"),
+    )
+
+
+def _approval_from_historical_bar_meta_label(
+    *,
+    signal: dict[str, Any],
+    action: str,
+    decision: dict[str, Any],
+    account_state: dict[str, Any],
+    execution_mode: str,
+    ml_authority_config: dict[str, Any] | None,
+    raw_decision: dict[str, Any],
+    confidence: Any,
+) -> ApprovalDecision | None:
+    meta_label = _historical_bar_meta_label_authority_decision(
+        signal=signal,
+        action=action,
+        decision=decision,
+        account_state=account_state,
+        execution_mode=execution_mode,
+        ml_authority_config=ml_authority_config,
+    )
+    if not meta_label.get("allowed"):
+        return None
+
+    account_state["historical_bar_meta_label_authority"] = meta_label
+    effect = meta_label.get("effect")
+    adjusted = dict(decision)
+    adjusted["historical_bar_meta_label_authority"] = meta_label
+
+    if effect == "veto":
+        adjusted["approved"] = False
+        adjusted["confidence"] = "low"
+        adjusted["position_size_pct"] = 0
+        adjusted["reason"] = meta_label["reason"]
+        _store_decision_trace(
+            account_state=account_state,
+            decision=adjusted,
+            source="historical_bar_meta_label_authority",
+            execution_mode=execution_mode,
+        )
+        return ApprovalDecision(
+            approved=False,
+            source="historical_bar_meta_label_authority",
+            confidence="low",
+            reason=meta_label["reason"],
+            category="historical_bar_meta_label_veto",
+            claude_payload=adjusted,
+            metadata={
+                "raw_decision": raw_decision,
+                "historical_bar_meta_label_authority": meta_label,
+            },
+        )
+
+    if effect in {"paper_approval", "size_increase"}:
+        adjusted["approved"] = True
+        adjusted["confidence"] = "high" if effect == "size_increase" else "medium"
+        adjusted["position_size_pct"] = meta_label["position_size_pct"]
+        adjusted["reason"] = meta_label["reason"]
+        _store_decision_trace(
+            account_state=account_state,
+            decision=adjusted,
+            source="historical_bar_meta_label_authority",
+            execution_mode=execution_mode,
+            exploration=meta_label,
+        )
+        return ApprovalDecision(
+            approved=True,
+            source="historical_bar_meta_label_authority",
+            confidence=adjusted["confidence"],
+            reason=meta_label["reason"],
+            category=None,
+            claude_payload=adjusted,
+            metadata={
+                "raw_decision": raw_decision,
+                "historical_bar_meta_label_authority": meta_label,
+            },
+        )
+
+    return None
+
+
 def evaluate_approval_decision(
     *,
     signal: dict[str, Any],
@@ -432,6 +533,20 @@ def evaluate_approval_decision(
             claude_payload=decision,
             metadata={"raw_decision": raw_decision},
         )
+
+    if action == "buy":
+        meta_label_result = _approval_from_historical_bar_meta_label(
+            signal=signal,
+            action=action,
+            decision=decision,
+            account_state=account_state,
+            execution_mode=execution_mode,
+            ml_authority_config=ml_authority_config,
+            raw_decision=raw_decision,
+            confidence=confidence,
+        )
+        if meta_label_result is not None:
+            return meta_label_result
 
     if action == "buy" and confidence == "low":
         exploration = _paper_exploration_authority_decision(

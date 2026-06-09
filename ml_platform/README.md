@@ -19,6 +19,7 @@ python3 -m ml_platform.cli lifecycle-contract
 python3 -m ml_platform.cli feature-registry
 python3 -m ml_platform.cli label-hierarchy
 python3 -m ml_platform.cli serving-contract
+python3 -m ml_platform.cli promotion-metrics --start-date 2024-06-01 --end-date 2026-06-04
 python3 -m ml_platform.cli model-card-template --model-id similarity_v0
 python3 -m ml_platform.cli replay-decisions --start-date 2026-05-01 --end-date 2026-05-26 --candidate-model similarity_v0 --friction-bps 10
 python3 -m ml_platform.cli staged-readiness --start-date 2026-05-26 --end-date 2026-05-26 --candidate-model similarity_v0 --prediction-symbol AAPL
@@ -120,6 +121,14 @@ false-negative opportunity cost, avoid-loser precision/recall, Brier score,
 calibration error, profit factor, max drawdown, MFE/MAE delta,
 slippage-adjusted decision delta, capture ratio, and stability by regime,
 symbol, and time of day.
+
+`promotion-metrics` computes those values from lifecycle analysis rows plus
+read-only replay. It intentionally separates metric completeness from authority:
+complete metrics can support candidate registration evidence, but monitored
+paper authority additionally requires positive expected value, profit factor
+above threshold, acceptable calibration/Brier values, and measured stability. If
+that authority assessment fails, ML may still reduce size, block weak setups, or
+annotate context, but it may not approve new trades or increase size.
 
 `services.model_validation_governance_service` and
 `ml_platform.promotion` reject simple split validation for candidate

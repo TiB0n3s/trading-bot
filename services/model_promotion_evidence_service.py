@@ -13,6 +13,10 @@ from services.full_session_paper_replay_service import (
     FullSessionReplayConfig,
     build_full_session_paper_replay_payload,
 )
+from services.ml_promotion_metrics_service import (
+    PromotionMetricsConfig,
+    build_ml_promotion_metrics_payload,
+)
 from services.model_validation_governance_service import build_model_validation_governance_payload
 from services.ops_checks.historical_bar_paper_validation_checks import (
     build_historical_bar_paper_validation_payload,
@@ -104,6 +108,15 @@ def build_model_promotion_evidence_payload(
         threshold=55.0,
         thresholds=[50.0, 55.0, 60.0, 65.0],
     )
+    promotion_metrics = build_ml_promotion_metrics_payload(
+        PromotionMetricsConfig(
+            start_date="2024-06-01",
+            end_date="2026-06-04",
+            db_path=base_dir / "trades.db",
+        )
+    )
+    measured_metrics = promotion_metrics.get("metrics") or {}
+    paper_authority = promotion_metrics.get("paper_authority_assessment") or {}
     regime_bucket_families = {
         row["bucket_family"]
         for row in triple_validation["bucket_rows"] + trend_validation["bucket_rows"]
@@ -142,7 +155,10 @@ def build_model_promotion_evidence_payload(
             "caveat": "historical validation payload is used as lifecycle evidence; model registration still requires artifact-level metadata",
         },
         "calibration_report": {
-            "ready": bool(best_candidate and best_candidate.get("accuracy") is not None),
+            "ready": bool(
+                measured_metrics.get("brier_score") is not None
+                and measured_metrics.get("calibration_error") is not None
+            ),
             "generated_at": generated_at,
             "runtime_effect": "evidence_only_no_runtime_change",
             "metric_requirements": (
@@ -150,9 +166,17 @@ def build_model_promotion_evidence_payload(
                 "on a candidate before paper authority"
             ),
             "best_candidate": best_candidate,
+            "measured_metrics": {
+                "brier_score": measured_metrics.get("brier_score"),
+                "calibration_error": measured_metrics.get("calibration_error"),
+                "calibrated_prediction_rows": promotion_metrics.get("calibrated_prediction_rows"),
+            },
         },
         "replay_decision_delta": {
-            "ready": replay_ready,
+            "ready": bool(
+                promotion_metrics.get("outcome_rows", 0) > 0
+                and measured_metrics.get("slippage_adjusted_decision_delta") is not None
+            ),
             "generated_at": generated_at,
             "runtime_effect": "bounded_replay_evidence_no_broker_orders",
             "required_breakdowns": [
@@ -165,6 +189,7 @@ def build_model_promotion_evidence_payload(
                 "symbol_regime_time_of_day_breakdown",
             ],
             "replay": replay,
+            "promotion_metrics": promotion_metrics,
         },
         "baseline_comparison": {
             "ready": bool(best_candidate and float(best_candidate["accuracy"] or 0.0) >= 0.50),
@@ -174,31 +199,45 @@ def build_model_promotion_evidence_payload(
             "baseline_requirement": "candidate_accuracy_at_or_above_minimum_threshold",
         },
         "cost_slippage_exit_analysis": {
-            "ready": replay_ready,
+            "ready": bool(
+                measured_metrics.get("false_positive_cost") is not None
+                and measured_metrics.get("profit_factor") is not None
+                and measured_metrics.get("max_drawdown_impact") is not None
+                and measured_metrics.get("capture_ratio_improvement") is not None
+            ),
             "generated_at": generated_at,
             "runtime_effect": "evidence_only_no_broker_orders",
-            "source": "bounded_full_session_paper_replay",
+            "source": "lifecycle_analysis_plus_bounded_full_session_paper_replay",
             "replay": replay,
+            "promotion_metrics": promotion_metrics,
         },
         "regime_stability": {
             "ready": bool(
                 triple_validation["rows_loaded"] >= 5000
                 and trend_validation["rows_loaded"] >= 5000
                 and len(regime_bucket_families) >= 3
+                and not promotion_metrics.get("missing_metrics")
             ),
             "generated_at": generated_at,
             "runtime_effect": "historical_validation_evidence_no_runtime_change",
             "triple_barrier_validation": triple_validation,
             "trend_scan_validation": trend_validation,
             "regime_bucket_families": sorted(regime_bucket_families),
+            "promotion_metrics": promotion_metrics,
         },
         "live_observation_window": {
-            "ready": bool(replay_ready and paper_validation["rows"] >= 5000),
+            "ready": bool(
+                replay_ready
+                and paper_validation["rows"] >= 5000
+                and promotion_metrics.get("ready_for_candidate_registration_metrics")
+                and paper_authority.get("ready_for_monitored_paper_authority")
+            ),
             "generated_at": generated_at,
             "runtime_effect": "paper_replay_surrogate_evidence_no_live_authority",
             "source": "historical_validation_plus_full_session_local_replay_surrogate",
             "paper_validation": paper_validation,
             "replay": replay,
+            "promotion_metrics": promotion_metrics,
             "caveat": "operator accepted replay/historical surrogate because current live behavior was non-trading",
         },
         "shadow_serving": {

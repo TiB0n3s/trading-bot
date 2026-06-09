@@ -48,6 +48,10 @@ from ml_platform.validation import (
     PURGE_DEFAULT_DAYS,
     walk_forward_split_report,
 )
+from services.ml_promotion_metrics_service import (
+    PromotionMetricsConfig,
+    build_ml_promotion_metrics_payload,
+)
 from src.trading_bot.learning.features import feature_registry_summary
 from src.trading_bot.learning.labels import label_hierarchy_summary
 
@@ -106,6 +110,16 @@ def main() -> int:
     sub.add_parser("label-hierarchy", help="Print label authority hierarchy")
     sub.add_parser("serving-contract", help="Print prediction serving contract")
     sub.add_parser("env-policy", help="Print ML kill-switch defaults")
+
+    metrics = sub.add_parser(
+        "promotion-metrics",
+        help="Compute measured ML promotion metrics from replay and lifecycle outcomes",
+    )
+    metrics.add_argument("--db-path", default=str(DEFAULT_DB_PATH))
+    metrics.add_argument("--start-date", required=True)
+    metrics.add_argument("--end-date", required=True)
+    metrics.add_argument("--friction-bps", type=float, default=10.0)
+    metrics.add_argument("--output")
 
     manifest = sub.add_parser("dataset-manifest", help="Build a read-only dataset manifest")
     manifest.add_argument("--db-path", default=str(DEFAULT_DB_PATH))
@@ -301,6 +315,23 @@ def main() -> int:
 
     if args.command == "env-policy":
         print(json.dumps(ENV_KILL_SWITCH_DEFAULTS, indent=2, sort_keys=True))
+        return 0
+
+    if args.command == "promotion-metrics":
+        result = build_ml_promotion_metrics_payload(
+            PromotionMetricsConfig(
+                start_date=args.start_date,
+                end_date=args.end_date,
+                db_path=args.db_path,
+                friction_bps=args.friction_bps,
+            )
+        )
+        if args.output:
+            output_path = Path(args.output)
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+            output_path.write_text(json.dumps(result, indent=2, sort_keys=True) + "\n")
+            print(f"Wrote promotion metrics to {output_path}")
+        print(json.dumps(result, indent=2, sort_keys=True))
         return 0
 
     if args.command == "dataset-manifest":

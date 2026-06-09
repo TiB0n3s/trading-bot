@@ -193,6 +193,14 @@ or destabilize the webhook path if treated as routine cleanup.
      parity, purged walk-forward, calibration, replay decision delta, baseline
      comparison, cost/slippage/exit analysis, regime stability, live observation
      window, shadow serving, rollback/demotion, and operator approval.
+   - `ml_platform.cli promotion-metrics` computes all lifecycle-required
+     trading metrics from lifecycle rows and replay, including EV, FP/FN costs,
+     Brier/calibration, profit factor, drawdown, MFE/MAE, slippage-adjusted
+     delta, capture ratio, and regime/symbol/time-of-day stability.
+   - Metric completeness is not the same as authority. Monitored paper
+     authority is blocked when EV is non-positive, profit factor is below
+     threshold, calibration is weak, or stability coverage/scores are
+     insufficient. In that case ML remains risk-reduction only.
    - `model_validation_governance_service` reports candidate-registration
      blockers separately from observe-only readiness so research artifacts can
      exist without implying authority.

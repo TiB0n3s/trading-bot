@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
+from typing import Any
 
 from db import DB_PATH, get_connection
 
@@ -72,3 +74,69 @@ class ConceptDriftRepository:
 
     def bar_pattern_features_present(self) -> list[str]:
         return sorted(self.table_columns("bar_pattern_features"))
+
+    def ensure_drift_regime_archive_table(self) -> None:
+        with get_connection(self.db_path) as con:
+            con.execute(
+                """
+                CREATE TABLE IF NOT EXISTS drift_regime_archives (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    target_date TEXT NOT NULL,
+                    baseline_start TEXT,
+                    baseline_end TEXT,
+                    recent_start TEXT,
+                    recent_end TEXT,
+                    severe_psi_threshold REAL,
+                    max_psi REAL,
+                    severe_drift INTEGER NOT NULL,
+                    feature_distribution_json TEXT NOT NULL,
+                    report_json TEXT NOT NULL,
+                    source TEXT NOT NULL,
+                    generated_at TEXT NOT NULL
+                )
+                """
+            )
+            con.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_drift_regime_archives_target_date
+                ON drift_regime_archives(target_date)
+                """
+            )
+
+    def archive_drift_regime(self, report: dict[str, Any]) -> int:
+        self.ensure_drift_regime_archive_table()
+        with get_connection(self.db_path) as con:
+            cur = con.execute(
+                """
+                INSERT INTO drift_regime_archives (
+                    target_date,
+                    baseline_start,
+                    baseline_end,
+                    recent_start,
+                    recent_end,
+                    severe_psi_threshold,
+                    max_psi,
+                    severe_drift,
+                    feature_distribution_json,
+                    report_json,
+                    source,
+                    generated_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    report.get("target_date"),
+                    (report.get("baseline_window") or {}).get("start"),
+                    (report.get("baseline_window") or {}).get("end"),
+                    (report.get("recent_window") or {}).get("start"),
+                    (report.get("recent_window") or {}).get("end"),
+                    report.get("severe_psi_threshold"),
+                    report.get("max_psi"),
+                    1 if report.get("severe_drift") else 0,
+                    json.dumps(report.get("features") or [], sort_keys=True),
+                    json.dumps(report, sort_keys=True),
+                    "concept_drift_psi_guardrail",
+                    report.get("generated_at"),
+                ),
+            )
+            return int(cur.lastrowid)

@@ -572,6 +572,33 @@ MIGRATIONS: tuple[Migration, ...] = (
         description="Add first-class canonical gate trace JSON to decision_snapshots.",
         statements=("ALTER TABLE decision_snapshots ADD COLUMN gate_trace_json TEXT",),
     ),
+    Migration(
+        migration_id="20260609_024_drift_regime_archives",
+        description="Create drift regime archive table for severe PSI feature-distribution snapshots.",
+        statements=(
+            """
+            CREATE TABLE IF NOT EXISTS drift_regime_archives (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                target_date TEXT NOT NULL,
+                baseline_start TEXT,
+                baseline_end TEXT,
+                recent_start TEXT,
+                recent_end TEXT,
+                severe_psi_threshold REAL,
+                max_psi REAL,
+                severe_drift INTEGER NOT NULL,
+                feature_distribution_json TEXT NOT NULL,
+                report_json TEXT NOT NULL,
+                source TEXT NOT NULL,
+                generated_at TEXT NOT NULL
+            )
+            """,
+            """
+            CREATE INDEX IF NOT EXISTS idx_drift_regime_archives_target_date
+            ON drift_regime_archives(target_date)
+            """,
+        ),
+    ),
 )
 
 

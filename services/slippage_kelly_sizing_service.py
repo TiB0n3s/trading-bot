@@ -36,6 +36,7 @@ class SlippageKellyDecision:
     liquidity_stress_score: float | None
     liquidity_stress_bucket: str | None
     liquidity_stress_size_multiplier: float | None
+    pareto_frontier_selection: dict[str, Any] | None
     kelly_fraction: float | None
     fractional_kelly_pct: float | None
     cap_pct: float | None
@@ -143,6 +144,22 @@ def _trade_timeout_minutes(account_state: dict[str, Any]) -> float | None:
     return None
 
 
+def _mae_60m_risk_pct(account_state: dict[str, Any]) -> float | None:
+    candidates = [
+        account_state.get("expected_mae_60m_pct"),
+        account_state.get("max_adverse_60m_pct"),
+        _dict(account_state.get("decision_utility")).get("expected_mae_60m_pct"),
+        _dict(account_state.get("risk_forecast")).get("expected_mae_60m_pct"),
+        _dict(account_state.get("historical_bar_paper_strategy")).get("expected_mae_60m_pct"),
+        _dict(account_state.get("bar_pattern_features")).get("expected_mae_60m_pct"),
+    ]
+    for value in candidates:
+        parsed = _float(value)
+        if parsed is not None:
+            return abs(parsed)
+    return None
+
+
 def _quote_instability_multiplier(account_state: dict[str, Any]) -> tuple[float, str | None]:
     execution_quality = _dict(account_state.get("execution_quality"))
     telemetry = _dict(account_state.get("hardware_telemetry")) or _dict(
@@ -176,6 +193,62 @@ def _quote_instability_multiplier(account_state: dict[str, Any]) -> tuple[float,
     if stress >= 0.45:
         return 0.75, f"quote_instability_elevated={stress:.2f}"
     return 1.0, None
+
+
+def _pareto_frontier_selection(
+    *,
+    requested_size_pct: float,
+    kelly_cap_pct: float,
+    raw_risk_pct: float,
+    friction_ratio: float,
+    alpha_friction_ratio: float | None,
+    quote_multiplier: float,
+    account_state: dict[str, Any],
+) -> tuple[float, dict[str, Any]]:
+    enabled = _env_bool("SLIPPAGE_KELLY_PARETO_SELECTION_ENABLED", True)
+    mae_60m = _mae_60m_risk_pct(account_state)
+    mae_multiplier = 1.0
+    mae_cap_pct = requested_size_pct
+    if mae_60m is not None and raw_risk_pct > 0:
+        mae_pressure = mae_60m / raw_risk_pct
+        if mae_pressure >= 1.50:
+            mae_multiplier = 0.25
+        elif mae_pressure >= 1.00:
+            mae_multiplier = 0.50
+        elif mae_pressure >= 0.75:
+            mae_multiplier = 0.75
+        mae_cap_pct = requested_size_pct * mae_multiplier
+
+    turnover_pressure = alpha_friction_ratio if alpha_friction_ratio is not None else friction_ratio
+    turnover_multiplier = 1.0
+    if turnover_pressure >= 0.30:
+        turnover_multiplier = 0.35
+    elif turnover_pressure >= 0.20:
+        turnover_multiplier = 0.60
+    elif turnover_pressure >= 0.12:
+        turnover_multiplier = 0.80
+    turnover_multiplier = min(turnover_multiplier, quote_multiplier)
+    turnover_cap_pct = requested_size_pct * turnover_multiplier
+
+    objective_caps = {
+        "kelly_growth_cap_pct": round(kelly_cap_pct, 4),
+        "mae_conservation_cap_pct": round(mae_cap_pct, 4),
+        "turnover_cost_cap_pct": round(turnover_cap_pct, 4),
+    }
+    selected_cap = min(objective_caps.values()) if enabled else kelly_cap_pct
+    selected_objective = min(objective_caps, key=objective_caps.get)
+    return max(0.0, selected_cap), {
+        "enabled": enabled,
+        "runtime_effect": "size_cap_only_no_approval_authority",
+        "objectives": objective_caps,
+        "selected_objective": selected_objective if enabled else "kelly_growth_cap_pct",
+        "selected_cap_pct": round(selected_cap, 4) if enabled else round(kelly_cap_pct, 4),
+        "mae_60m_risk_pct": round(mae_60m, 4) if mae_60m is not None else None,
+        "mae_multiplier": round(mae_multiplier, 4),
+        "turnover_pressure": round(turnover_pressure, 4),
+        "turnover_multiplier": round(turnover_multiplier, 4),
+        "reason": "conservative Pareto edge selected across growth, MAE, and turnover objectives",
+    }
 
 
 def _liquidity_stress_from_state(account_state: dict[str, Any]) -> tuple[float | None, str | None]:
@@ -275,6 +348,7 @@ def _decision(
     liquidity_stress_score: float | None = None,
     liquidity_stress_bucket: str | None = None,
     liquidity_stress_size_multiplier: float | None = None,
+    pareto_frontier_selection: dict[str, Any] | None = None,
     kelly_fraction: float | None = None,
     fractional_kelly_pct: float | None = None,
     cap_pct: float | None = None,
@@ -314,6 +388,7 @@ def _decision(
             if liquidity_stress_size_multiplier is not None
             else None
         ),
+        pareto_frontier_selection=pareto_frontier_selection,
         kelly_fraction=round(kelly_fraction, 4) if kelly_fraction is not None else None,
         fractional_kelly_pct=(
             round(fractional_kelly_pct, 4) if fractional_kelly_pct is not None else None
@@ -400,6 +475,7 @@ def calculate_slippage_adjusted_kelly_cap(
             liquidity_stress_score=lsi_score,
             liquidity_stress_bucket=lsi_bucket,
             liquidity_stress_size_multiplier=lsi_multiplier,
+            pareto_frontier_selection=None,
             cap_pct=0.0,
         )
 
@@ -430,6 +506,7 @@ def calculate_slippage_adjusted_kelly_cap(
             liquidity_stress_score=lsi_score,
             liquidity_stress_bucket=lsi_bucket,
             liquidity_stress_size_multiplier=lsi_multiplier,
+            pareto_frontier_selection=None,
             cap_pct=0.0,
         )
     if friction_ratio > max_friction:
@@ -463,6 +540,17 @@ def calculate_slippage_adjusted_kelly_cap(
         cap_pct = max(0.0, cap_pct * lsi_multiplier)
     if quote_multiplier < 1.0:
         cap_pct = max(0.0, cap_pct * quote_multiplier)
+    pareto_cap_pct, pareto = _pareto_frontier_selection(
+        requested_size_pct=requested_size_pct,
+        kelly_cap_pct=cap_pct,
+        raw_risk_pct=raw_risk_pct,
+        friction_ratio=friction_ratio,
+        alpha_friction_ratio=alpha_friction_ratio,
+        quote_multiplier=quote_multiplier,
+        account_state=account_state,
+    )
+    if pareto.get("enabled"):
+        cap_pct = min(cap_pct, pareto_cap_pct)
     action_out = "cap" if cap_pct < requested_size_pct else "none"
     if lsi_multiplier <= 0:
         action_out = "zero"
@@ -471,6 +559,8 @@ def calculate_slippage_adjusted_kelly_cap(
         reason = f"slippage_adjusted_kelly_cap:{lsi_reason or 'liquidity_stress'}"
     elif quote_multiplier < 1.0:
         reason = f"slippage_adjusted_kelly_cap:{quote_reason or 'quote_instability'}"
+    elif pareto.get("enabled") and pareto.get("selected_objective") != "kelly_growth_cap_pct":
+        reason = f"slippage_adjusted_kelly_cap:pareto_{pareto['selected_objective']}"
     else:
         reason = (
             "slippage_adjusted_kelly_cap"
@@ -495,6 +585,7 @@ def calculate_slippage_adjusted_kelly_cap(
         liquidity_stress_score=lsi_score,
         liquidity_stress_bucket=lsi_bucket,
         liquidity_stress_size_multiplier=lsi_multiplier,
+        pareto_frontier_selection=pareto,
         kelly_fraction=kelly_fraction,
         fractional_kelly_pct=fractional_kelly_pct,
         cap_pct=cap_pct,

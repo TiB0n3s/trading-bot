@@ -207,6 +207,57 @@ def test_slippage_kelly_scales_down_for_quote_instability():
     assert "quote_instability" in unstable.reason
 
 
+def test_slippage_kelly_pareto_caps_high_mae_risk():
+    with _temporary_env(
+        SLIPPAGE_KELLY_SIZING_ENABLED="true",
+        SLIPPAGE_KELLY_MAX_FRICTION_RATIO="0.50",
+        SLIPPAGE_KELLY_PARETO_SELECTION_ENABLED="true",
+    ):
+        decision = calculate_slippage_adjusted_kelly_cap(
+            action="buy",
+            requested_size_pct=2.0,
+            account_state={
+                "prediction_gate": {"ml_prediction_score": 0.90},
+                "bar_pattern_features": {"atr_20_pct": 1.0},
+                "execution_quality": {"slippage_estimate_pct": 0.03},
+                "risk_forecast": {"expected_mae_60m_pct": 2.0},
+            },
+        )
+
+    data = decision.to_dict()
+    pareto = data["pareto_frontier_selection"]
+    assert pareto["enabled"] is True
+    assert pareto["selected_objective"] == "mae_conservation_cap_pct"
+    assert decision.cap_pct <= 1.0
+    assert "pareto" in decision.reason
+
+
+def test_slippage_kelly_pareto_caps_turnover_cost():
+    with _temporary_env(
+        SLIPPAGE_KELLY_SIZING_ENABLED="true",
+        SLIPPAGE_KELLY_MAX_FRICTION_RATIO="0.50",
+        SLIPPAGE_KELLY_PARETO_SELECTION_ENABLED="true",
+    ):
+        decision = calculate_slippage_adjusted_kelly_cap(
+            action="buy",
+            requested_size_pct=2.0,
+            account_state={
+                "prediction_gate": {"ml_prediction_score": 0.90},
+                "bar_pattern_features": {
+                    "atr_20_pct": 1.0,
+                    "triple_barrier_timeout_minutes": 15,
+                },
+                "execution_quality": {"slippage_estimate_pct": 0.13},
+            },
+        )
+
+    pareto = decision.pareto_frontier_selection
+    assert pareto is not None
+    assert pareto["selected_objective"] == "turnover_cost_cap_pct"
+    assert decision.cap_pct <= 1.6
+    assert "pareto" in decision.reason
+
+
 def main():
     tests = [
         test_slippage_kelly_caps_size_when_edge_is_positive_but_thinner,
@@ -216,6 +267,8 @@ def main():
         test_slippage_kelly_zeroes_for_toxic_vpin_even_with_high_conviction,
         test_slippage_kelly_zeroes_when_short_horizon_alpha_friction_is_too_high,
         test_slippage_kelly_scales_down_for_quote_instability,
+        test_slippage_kelly_pareto_caps_high_mae_risk,
+        test_slippage_kelly_pareto_caps_turnover_cost,
     ]
     for test in tests:
         test()

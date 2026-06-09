@@ -41,6 +41,7 @@ class ConceptDriftReport:
     action: str
     generated_at: str
     artifact_path: str | None = None
+    drift_regime_archive_id: int | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -159,6 +160,7 @@ class ConceptDriftService:
             if severe
             else "allow_counterfactual_veto_relaxation"
         )
+        archive_id = None
         report = ConceptDriftReport(
             report_version=CONCEPT_DRIFT_REPORT_VERSION,
             runtime_effect="paper_model_drift_guardrail",
@@ -172,7 +174,16 @@ class ConceptDriftService:
             action=action,
             generated_at=datetime.now(timezone.utc).isoformat(),
             artifact_path=str(artifact_path) if artifact_path else None,
+            drift_regime_archive_id=None,
         )
+        if severe and hasattr(self.repository, "archive_drift_regime"):
+            archive_id = self.repository.archive_drift_regime(report.to_dict())
+            report = ConceptDriftReport(
+                **{
+                    **report.to_dict(),
+                    "drift_regime_archive_id": archive_id,
+                }
+            )
         if artifact_path:
             ensure_ml_dirs()
             path = Path(artifact_path)

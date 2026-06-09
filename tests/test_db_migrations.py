@@ -11,7 +11,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from db_migrations import MIGRATIONS, apply_migration, status
+from db_migrations import MIGRATIONS, apply_migration, status  # noqa: E402
 
 
 def assert_true(value, label):
@@ -119,7 +119,9 @@ def test_webhook_event_status_migration_adds_columns():
             "client_order_id",
             "failure_reason",
         }
-        assert_true(expected <= table_columns(db_path, "webhook_events"), "webhook event status columns")
+        assert_true(
+            expected <= table_columns(db_path, "webhook_events"), "webhook event status columns"
+        )
 
 
 def test_trade_decision_context_migration_adds_columns():
@@ -170,7 +172,9 @@ def test_decision_snapshots_migration_creates_table():
             "env_profile_hash",
             "git_sha",
         }
-        assert_true(expected <= table_columns(db_path, "decision_snapshots"), "decision snapshot columns")
+        assert_true(
+            expected <= table_columns(db_path, "decision_snapshots"), "decision snapshot columns"
+        )
 
 
 def test_rejected_outcome_partial_reason_migration_adds_column():
@@ -192,7 +196,10 @@ def test_rejected_outcome_partial_reason_migration_adds_column():
 
         applied = apply_migration(MIGRATIONS[5], db_path)
         assert_equal(applied, True, "apply")
-        assert_true({"partial_reason"} <= table_columns(db_path, "rejected_signal_outcomes"), "partial reason column")
+        assert_true(
+            {"partial_reason"} <= table_columns(db_path, "rejected_signal_outcomes"),
+            "partial reason column",
+        )
 
 
 def test_strong_day_participation_migration_creates_table():
@@ -210,7 +217,10 @@ def test_strong_day_participation_migration_creates_table():
             "auto_buy_candidate_count",
             "raw_json",
         }
-        assert_true(expected <= table_columns(db_path, "strong_day_participation"), "strong day participation columns")
+        assert_true(
+            expected <= table_columns(db_path, "strong_day_participation"),
+            "strong day participation columns",
+        )
 
 
 def test_auto_buy_decision_snapshots_migration_creates_table():
@@ -229,7 +239,10 @@ def test_auto_buy_decision_snapshots_migration_creates_table():
             "candidate_json",
             "runtime_effect",
         }
-        assert_true(expected <= table_columns(db_path, "auto_buy_decision_snapshots"), "auto-buy snapshot columns")
+        assert_true(
+            expected <= table_columns(db_path, "auto_buy_decision_snapshots"),
+            "auto-buy snapshot columns",
+        )
 
 
 def test_historical_trend_context_migration_creates_table():
@@ -248,7 +261,10 @@ def test_historical_trend_context_migration_creates_table():
             "relative_strength_score",
             "raw_json",
         }
-        assert_true(expected <= table_columns(db_path, "historical_trend_context"), "historical trend columns")
+        assert_true(
+            expected <= table_columns(db_path, "historical_trend_context"),
+            "historical trend columns",
+        )
 
 
 def test_entry_intelligence_migration_adds_columns():
@@ -278,8 +294,13 @@ def test_entry_intelligence_migration_adds_columns():
             "extension_from_recent_base_pct",
             "prior_session_return_pct",
         }
-        assert_true(decision_expected <= table_columns(db_path, "decision_snapshots"), "entry decision columns")
-        assert_true(feature_expected <= table_columns(db_path, "feature_snapshots"), "entry feature columns")
+        assert_true(
+            decision_expected <= table_columns(db_path, "decision_snapshots"),
+            "entry decision columns",
+        )
+        assert_true(
+            feature_expected <= table_columns(db_path, "feature_snapshots"), "entry feature columns"
+        )
 
 
 def test_decision_snapshot_feature_parity_migration_adds_columns():
@@ -303,7 +324,10 @@ def test_decision_snapshot_feature_parity_migration_adds_columns():
             "prediction_sample_size",
             "feature_semantic_version",
         }
-        assert_true(expected <= table_columns(db_path, "decision_snapshots"), "feature parity decision columns")
+        assert_true(
+            expected <= table_columns(db_path, "decision_snapshots"),
+            "feature parity decision columns",
+        )
 
 
 def test_canonical_intelligence_migration_adds_columns():
@@ -326,7 +350,10 @@ def test_canonical_intelligence_migration_adds_columns():
             "canonical_intelligence_hash",
             "canonical_intelligence_json",
         }
-        assert_true(expected <= table_columns(db_path, "decision_snapshots"), "canonical intelligence columns")
+        assert_true(
+            expected <= table_columns(db_path, "decision_snapshots"),
+            "canonical intelligence columns",
+        )
 
 
 def test_canonical_exit_snapshot_migration_creates_table():
@@ -334,9 +361,7 @@ def test_canonical_exit_snapshot_migration_creates_table():
         db_path = Path(tmp) / "test.db"
 
         migration = next(
-            m
-            for m in MIGRATIONS
-            if m.migration_id == "20260531_018_canonical_exit_snapshots"
+            m for m in MIGRATIONS if m.migration_id == "20260531_018_canonical_exit_snapshots"
         )
         applied = apply_migration(migration, db_path)
         assert_equal(applied, True, "apply")
@@ -371,7 +396,9 @@ def test_canonical_exit_snapshot_migration_creates_table():
             "entry_canonical_intelligence_version",
             "entry_canonical_intelligence_hash",
         }
-        assert_true(expected <= table_columns(db_path, "exit_snapshots"), "canonical exit snapshot columns")
+        assert_true(
+            expected <= table_columns(db_path, "exit_snapshots"), "canonical exit snapshot columns"
+        )
 
 
 def test_exit_snapshot_lifecycle_links_migration_adds_columns():
@@ -409,9 +436,7 @@ def test_exit_snapshot_lifecycle_links_migration_adds_columns():
             )
 
         migration = next(
-            m
-            for m in MIGRATIONS
-            if m.migration_id == "20260531_019_exit_snapshot_lifecycle_links"
+            m for m in MIGRATIONS if m.migration_id == "20260531_019_exit_snapshot_lifecycle_links"
         )
         applied = apply_migration(migration, db_path)
         assert_equal(applied, True, "apply")
@@ -428,7 +453,9 @@ def test_exit_snapshot_lifecycle_links_migration_adds_columns():
             "entry_canonical_intelligence_version",
             "entry_canonical_intelligence_hash",
         }
-        assert_true(expected <= table_columns(db_path, "exit_snapshots"), "exit lifecycle link columns")
+        assert_true(
+            expected <= table_columns(db_path, "exit_snapshots"), "exit lifecycle link columns"
+        )
 
 
 def test_rejected_outcome_canonical_links_migration_adds_columns():
@@ -474,7 +501,10 @@ def test_rejected_outcome_canonical_links_migration_adds_columns():
             "canonical_intelligence_hash",
             "canonical_intelligence_json",
         }
-        assert_true(expected <= table_columns(db_path, "rejected_signal_outcomes"), "canonical rejected outcome columns")
+        assert_true(
+            expected <= table_columns(db_path, "rejected_signal_outcomes"),
+            "canonical rejected outcome columns",
+        )
 
 
 def test_long_horizon_session_momentum_migration_adds_columns():
@@ -485,9 +515,7 @@ def test_long_horizon_session_momentum_migration_adds_columns():
             con.execute("CREATE TABLE decision_snapshots (id INTEGER PRIMARY KEY)")
 
         migration = next(
-            m
-            for m in MIGRATIONS
-            if m.migration_id == "20260601_021_long_horizon_session_momentum"
+            m for m in MIGRATIONS if m.migration_id == "20260601_021_long_horizon_session_momentum"
         )
         applied = apply_migration(migration, db_path)
         assert_equal(applied, True, "apply")
@@ -509,6 +537,29 @@ def test_long_horizon_session_momentum_migration_adds_columns():
 
         applied_again = apply_migration(migration, db_path)
         assert_equal(applied_again, False, "second apply")
+
+
+def test_drift_regime_archives_migration_creates_table():
+    with tempfile.TemporaryDirectory() as tmp:
+        db_path = Path(tmp) / "test.db"
+        migration = next(
+            m for m in MIGRATIONS if m.migration_id == "20260609_024_drift_regime_archives"
+        )
+        applied = apply_migration(migration, db_path)
+        assert_equal(applied, True, "apply")
+
+        expected = {
+            "target_date",
+            "baseline_start",
+            "recent_start",
+            "max_psi",
+            "severe_drift",
+            "feature_distribution_json",
+            "report_json",
+        }
+        assert_true(
+            expected <= table_columns(db_path, "drift_regime_archives"), "drift archive columns"
+        )
 
 
 if __name__ == "__main__":
@@ -544,4 +595,6 @@ if __name__ == "__main__":
     print("[OK] test_rejected_outcome_canonical_links_migration_adds_columns")
     test_long_horizon_session_momentum_migration_adds_columns()
     print("[OK] test_long_horizon_session_momentum_migration_adds_columns")
-    print("\nAll 16 DB migration tests passed.")
+    test_drift_regime_archives_migration_creates_table()
+    print("[OK] test_drift_regime_archives_migration_creates_table")
+    print("\nAll 17 DB migration tests passed.")

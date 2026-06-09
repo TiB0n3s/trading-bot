@@ -1,0 +1,204 @@
+#!/usr/bin/env python3
+"""Runtime decision engine contract tests."""
+# ruff: noqa: E402
+
+from __future__ import annotations
+
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
+
+from services.approval_service import evaluate_approval_decision
+from src.trading_bot.intelligence.adjudicator import build_model_adjudication
+from src.trading_bot.runtime.authority import AuthorityMatrix, normalize_authority_mode
+from src.trading_bot.runtime.gate_engine import CallableGate, GateEngine
+from src.trading_bot.runtime.trace import DecisionState, GateResult
+from src.trading_bot.signals.candidates import candidate_from_auto_buy, candidate_from_webhook
+
+
+def assert_equal(actual, expected, label):
+    if actual != expected:
+        raise AssertionError(f"{label}: expected {expected!r}, got {actual!r}")
+
+
+def assert_true(value, label):
+    if not value:
+        raise AssertionError(f"{label}: expected truthy value, got {value!r}")
+
+
+def _strong_account_state() -> dict:
+    return {
+        "setup_quality": {
+            "recommendation": "buy",
+            "policy_action": "allow",
+            "score": 88,
+        },
+        "buy_opportunity": {
+            "buy_opportunity_recommendation": "strong_buy_candidate",
+            "buy_opportunity_score": 13,
+            "max_position_size_pct": 1.5,
+        },
+        "prediction_gate": {
+            "deterministic_signal_quality_decision": "pass",
+            "prediction_score": 72,
+            "prediction_sample_size": 5000,
+        },
+        "session_momentum_gate": {"severity": "pass"},
+        "execution_quality": {"decision": "allow"},
+    }
+
+
+def test_authority_matrix_standardizes_runtime_permissions():
+    matrix = AuthorityMatrix()
+    assert_equal(normalize_authority_mode("hard"), "live_block", "hard alias")
+    assert_equal(normalize_authority_mode("observe_only"), "observe", "observe alias")
+    assert_equal(matrix.can("paper_exploration", "approve", "paper"), True, "paper approve")
+    assert_equal(
+        matrix.can("paper_exploration", "increase_size", "cash_full"),
+        False,
+        "live size increase",
+    )
+    assert_equal(matrix.can("deterministic_risk", "block", "cash_full"), True, "risk block")
+
+
+def test_gate_engine_records_ordered_trace_and_caps():
+    trace = GateEngine(
+        [
+            CallableGate(
+                "model_score",
+                "intelligence",
+                lambda _state: GateResult(
+                    gate_id="model_score",
+                    layer="intelligence",
+                    decision="pass",
+                    reason="supportive",
+                ),
+            ),
+            CallableGate(
+                "liquidity_stress",
+                "risk",
+                lambda _state: GateResult(
+                    gate_id="liquidity_stress",
+                    layer="risk",
+                    decision="cap",
+                    authority="paper",
+                    enforced=True,
+                    reason="stress cap",
+                    size_cap_pct=0.5,
+                ),
+            ),
+        ]
+    ).run({"final_decision": "approved"})
+
+    payload = trace.to_dict()
+    assert_equal(payload["final_decision"], "approved", "final decision")
+    assert_equal(payload["dominant_limiter"], "liquidity_stress", "dominant limiter")
+    assert_equal(payload["active_caps"][0]["size_cap_pct"], 0.5, "size cap")
+    assert_equal(payload["gate_results"][0]["gate_id"], "model_score", "gate order")
+
+
+def test_decision_state_serializes_to_legacy_account_state():
+    state = DecisionState(
+        signal={"symbol": "AAPL", "action": "buy"},
+        setup={"score": 90},
+        prediction={"prediction_score": 70},
+        trace={"trace_version": "decision_trace_v1"},
+    )
+    legacy = state.to_legacy_account_state()
+    assert_equal(legacy["setup_quality"]["score"], 90, "setup bridge")
+    assert_equal(legacy["prediction_gate"]["prediction_score"], 70, "prediction bridge")
+    assert_equal(legacy["decision_trace"]["trace_version"], "decision_trace_v1", "trace bridge")
+
+
+def test_signal_candidates_normalize_webhook_and_auto_buy():
+    webhook = candidate_from_webhook({"symbol": "aapl", "action": "BUY", "price": "325.50"})
+    auto_buy = candidate_from_auto_buy(
+        {
+            "symbol": "msft",
+            "close": "412.25",
+            "candidate_id": "candidate-1",
+            "setup_score": 91,
+        }
+    )
+    assert_equal(webhook.symbol, "AAPL", "webhook symbol")
+    assert_equal(webhook.action, "buy", "webhook action")
+    assert_equal(webhook.to_legacy_signal()["price"], 325.5, "webhook price")
+    assert_equal(auto_buy.source, "auto_buy", "auto-buy source")
+    assert_equal(auto_buy.to_legacy_signal()["setup_score"], 91, "auto-buy features")
+
+
+def test_intelligence_adjudicator_aggregates_model_surfaces():
+    adjudication = build_model_adjudication(
+        account_state=_strong_account_state(),
+        intelligence_context={},
+    )
+    assert_equal(adjudication.direction, "support", "direction")
+    assert_equal(adjudication.confidence, "high", "confidence")
+    assert_equal(adjudication.recommended_effect, "approve", "effect")
+    assert_equal(adjudication.sample_size, 5000, "sample size")
+
+
+def test_approval_path_stores_canonical_trace_for_paper_authority():
+    account_state = _strong_account_state()
+    result = evaluate_approval_decision(
+        signal={"symbol": "AAPL", "action": "buy"},
+        action="buy",
+        claude_account_state={},
+        evaluate_signal=lambda *_: {
+            "approved": False,
+            "confidence": "medium",
+            "reason": "Claude cautious despite strong canonical evidence",
+            "position_size_pct": 1.0,
+        },
+        cash_safe_mode=False,
+        market_bias={},
+        account_state=account_state,
+        medium_confidence_override=lambda **_: (True, "test override"),
+        tape_exception_enabled=False,
+        execution_mode="paper",
+        ml_authority_config={
+            "paper_exploration_authority": {
+                "enabled": True,
+                "min_setup_score": 78,
+                "min_buy_opportunity_score": 10,
+                "min_prediction_score": 55,
+                "size_lift_multiplier": 1.25,
+                "max_position_size_pct": 1.5,
+            }
+        },
+    )
+
+    assert_equal(result.approved, True, "approved")
+    assert_equal(result.source, "paper_exploration_authority", "source")
+    assert_true(account_state.get("intelligence_adjudication"), "adjudication stored")
+    trace = account_state["canonical_decision_trace"]
+    assert_equal(trace["trace_version"], "decision_trace_v1", "trace version")
+    assert_equal(trace["final_decision"], "approved", "trace final")
+    gate_ids = [row["gate_id"] for row in trace["gate_results"]]
+    assert_equal(
+        gate_ids,
+        ["intelligence_adjudicator", "paper_exploration_authority", "claude_approval"],
+        "gate order",
+    )
+    assert_equal(trace["shadow"]["approval_source"], "paper_exploration_authority", "trace source")
+
+
+def main():
+    tests = [
+        test_authority_matrix_standardizes_runtime_permissions,
+        test_gate_engine_records_ordered_trace_and_caps,
+        test_decision_state_serializes_to_legacy_account_state,
+        test_signal_candidates_normalize_webhook_and_auto_buy,
+        test_intelligence_adjudicator_aggregates_model_surfaces,
+        test_approval_path_stores_canonical_trace_for_paper_authority,
+    ]
+    for test in tests:
+        test()
+        print(f"[OK] {test.__name__}")
+    print(f"\nAll {len(tests)} runtime decision engine contract tests passed.")
+
+
+if __name__ == "__main__":
+    main()

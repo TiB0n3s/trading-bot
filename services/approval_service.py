@@ -35,6 +35,10 @@ from services.ml_authority_service import (
     evaluate_ml_authority_outcome,
 )
 from services.signal_models import ApprovalResult, DecisionContext
+from src.trading_bot.intelligence.adjudicator import build_model_adjudication
+from src.trading_bot.runtime.authority import AuthorityMatrix
+from src.trading_bot.runtime.gate_engine import CallableGate, GateEngine
+from src.trading_bot.runtime.trace import GateResult
 
 __all__ = [
     "ApprovalDecision",
@@ -98,6 +102,108 @@ def normalize_claude_decision(
         )
         normalized["_consistency_guard_triggered"] = True
     return normalized
+
+
+def _authority_level(execution_mode: str) -> str:
+    return "paper" if execution_mode in {"paper", "dry_run"} else "live"
+
+
+def _store_decision_trace(
+    *,
+    account_state: dict[str, Any],
+    decision: dict[str, Any],
+    source: str,
+    execution_mode: str,
+    exploration: dict[str, Any] | None = None,
+) -> None:
+    adjudication = build_model_adjudication(
+        account_state=account_state,
+        intelligence_context=account_state.get("intelligence_context") or {},
+    )
+    account_state["intelligence_adjudication"] = adjudication.to_dict()
+    authority = AuthorityMatrix()
+
+    def adjudication_gate(_state: dict[str, Any]) -> GateResult:
+        effect = adjudication.recommended_effect
+        if effect == "block":
+            decision_value = "block"
+        elif effect == "size_down":
+            decision_value = "cap"
+        elif effect in {"approve", "increase_size"}:
+            decision_value = "pass"
+        else:
+            decision_value = "observe"
+        return GateResult(
+            gate_id="intelligence_adjudicator",
+            layer="intelligence",
+            decision=decision_value,
+            authority="none",
+            enforced=False,
+            reason=f"{adjudication.direction}/{adjudication.recommended_effect}",
+            inputs={
+                "setup_quality": account_state.get("setup_quality"),
+                "buy_opportunity": account_state.get("buy_opportunity"),
+                "prediction_gate": account_state.get("prediction_gate"),
+            },
+            outputs=adjudication.to_dict(),
+        )
+
+    def authority_gate(_state: dict[str, Any]) -> GateResult:
+        if exploration and exploration.get("allowed"):
+            action = "increase_size" if exploration.get("effect") == "size_increase" else "approve"
+            allowed = authority.can("paper_exploration", action, execution_mode)
+            return GateResult(
+                gate_id="paper_exploration_authority",
+                layer="authority",
+                decision="cap" if action == "increase_size" else "pass",
+                authority=_authority_level(execution_mode),
+                enforced=allowed,
+                reason=exploration.get("reason") or "paper exploration authority",
+                size_cap_pct=exploration.get("position_size_pct"),
+                inputs=authority.decision("paper_exploration", action, execution_mode),
+                outputs=exploration,
+            )
+        return GateResult(
+            gate_id="paper_exploration_authority",
+            layer="authority",
+            decision="observe",
+            authority="none",
+            enforced=False,
+            reason="no paper exploration authority change",
+            inputs=authority.decision("paper_exploration", "approve", execution_mode),
+        )
+
+    def claude_gate(_state: dict[str, Any]) -> GateResult:
+        approved = bool(decision.get("approved"))
+        return GateResult(
+            gate_id="claude_approval",
+            layer="approval",
+            decision="pass" if approved else "block",
+            authority=_authority_level(execution_mode),
+            enforced=source == "claude",
+            reason=str(decision.get("reason") or ""),
+            inputs={
+                "confidence": decision.get("confidence"),
+                "source": source,
+            },
+            outputs={"approved": approved},
+        )
+
+    trace = GateEngine(
+        [
+            CallableGate("intelligence_adjudicator", "intelligence", adjudication_gate),
+            CallableGate("paper_exploration_authority", "authority", authority_gate),
+            CallableGate("claude_approval", "approval", claude_gate),
+        ]
+    ).run({"final_decision": "approved" if bool(decision.get("approved")) else "rejected"})
+    trace.shadow = {
+        "claude_original_approved": bool(decision.get("approved")),
+        "approval_source": source,
+        "paper_exploration": exploration or {},
+    }
+    payload = trace.to_dict()
+    account_state["decision_trace"] = payload
+    account_state["canonical_decision_trace"] = payload
 
 
 def _claude_infrastructure_rejection(reason: str) -> tuple[str, str] | None:
@@ -216,6 +322,7 @@ def _paper_exploration_authority_decision(
             "allowed": False,
             "reason": "paper exploration authority disabled or not applicable",
         }
+    authority_matrix = AuthorityMatrix()
 
     setup_quality = account_state.get("setup_quality") or {}
     buy_opportunity = account_state.get("buy_opportunity") or {}
@@ -284,6 +391,16 @@ def _paper_exploration_authority_decision(
             "buy_opportunity_score": buy_score,
             "prediction_score": prediction_score,
         }
+    approve_authorized = authority_matrix.can("paper_exploration", "approve", execution_mode)
+    increase_authorized = authority_matrix.can(
+        "paper_exploration",
+        "increase_size",
+        execution_mode,
+    )
+    if not approve_authorized and not bool(decision.get("approved")):
+        return {"allowed": False, "reason": "authority_matrix_denied_paper_approval"}
+    if bool(decision.get("approved")) and not increase_authorized:
+        return {"allowed": False, "reason": "authority_matrix_denied_size_increase"}
 
     requested_size = _float_or_none(decision.get("position_size_pct"))
     if requested_size is None or requested_size <= 0:
@@ -342,6 +459,12 @@ def evaluate_approval_decision(
         infrastructure_rejection = _claude_infrastructure_rejection(reason)
         if infrastructure_rejection:
             category, summary = infrastructure_rejection
+            _store_decision_trace(
+                account_state=account_state,
+                decision=decision,
+                source=category,
+                execution_mode=execution_mode,
+            )
             return ApprovalDecision(
                 approved=False,
                 source=category,
@@ -356,6 +479,12 @@ def evaluate_approval_decision(
             )
 
     if action == "buy" and cash_safe_mode and confidence != "high":
+        _store_decision_trace(
+            account_state=account_state,
+            decision=decision,
+            source="confidence_gate",
+            execution_mode=execution_mode,
+        )
         return ApprovalDecision(
             approved=False,
             source="confidence_gate",
@@ -382,6 +511,13 @@ def evaluate_approval_decision(
             adjusted["reason"] = exploration["reason"]
             adjusted["paper_exploration_authority"] = exploration
             account_state["paper_exploration_authority"] = exploration
+            _store_decision_trace(
+                account_state=account_state,
+                decision=adjusted,
+                source="paper_exploration_authority",
+                execution_mode=execution_mode,
+                exploration=exploration,
+            )
             return ApprovalDecision(
                 approved=True,
                 source="paper_exploration_authority",
@@ -409,6 +545,12 @@ def evaluate_approval_decision(
             adjusted["reason"] = paper_override["reason"]
             adjusted["paper_learning_authority_override"] = paper_override
             account_state["paper_learning_authority_override"] = paper_override
+            _store_decision_trace(
+                account_state=account_state,
+                decision=adjusted,
+                source="paper_learning_authority",
+                execution_mode=execution_mode,
+            )
             return ApprovalDecision(
                 approved=True,
                 source="paper_learning_authority",
@@ -421,6 +563,12 @@ def evaluate_approval_decision(
                     "paper_learning_authority_override": paper_override,
                 },
             )
+        _store_decision_trace(
+            account_state=account_state,
+            decision=decision,
+            source="confidence_gate",
+            execution_mode=execution_mode,
+        )
         return ApprovalDecision(
             approved=False,
             source="confidence_gate",
@@ -464,6 +612,13 @@ def evaluate_approval_decision(
                     adjusted["reason"] = exploration["reason"]
                     adjusted["paper_exploration_authority"] = exploration
                     account_state["paper_exploration_authority"] = exploration
+                    _store_decision_trace(
+                        account_state=account_state,
+                        decision=adjusted,
+                        source="paper_exploration_authority",
+                        execution_mode=execution_mode,
+                        exploration=exploration,
+                    )
                     return ApprovalDecision(
                         approved=True,
                         source="paper_exploration_authority",
@@ -491,6 +646,12 @@ def evaluate_approval_decision(
                     adjusted["reason"] = paper_override["reason"]
                     adjusted["paper_learning_authority_override"] = paper_override
                     account_state["paper_learning_authority_override"] = paper_override
+                    _store_decision_trace(
+                        account_state=account_state,
+                        decision=adjusted,
+                        source="paper_learning_authority",
+                        execution_mode=execution_mode,
+                    )
                     return ApprovalDecision(
                         approved=True,
                         source="paper_learning_authority",
@@ -503,6 +664,12 @@ def evaluate_approval_decision(
                             "paper_learning_authority_override": paper_override,
                         },
                     )
+                _store_decision_trace(
+                    account_state=account_state,
+                    decision=decision,
+                    source="confidence_gate",
+                    execution_mode=execution_mode,
+                )
                 return ApprovalDecision(
                     approved=False,
                     source="confidence_gate",
@@ -551,6 +718,13 @@ def evaluate_approval_decision(
                 adjusted["reason"] = exploration["reason"]
                 adjusted["paper_exploration_authority"] = exploration
                 account_state["paper_exploration_authority"] = exploration
+                _store_decision_trace(
+                    account_state=account_state,
+                    decision=adjusted,
+                    source="paper_exploration_authority",
+                    execution_mode=execution_mode,
+                    exploration=exploration,
+                )
                 return ApprovalDecision(
                     approved=True,
                     source="paper_exploration_authority",
@@ -578,6 +752,12 @@ def evaluate_approval_decision(
                 adjusted["reason"] = paper_override["reason"]
                 adjusted["paper_learning_authority_override"] = paper_override
                 account_state["paper_learning_authority_override"] = paper_override
+                _store_decision_trace(
+                    account_state=account_state,
+                    decision=adjusted,
+                    source="paper_learning_authority",
+                    execution_mode=execution_mode,
+                )
                 return ApprovalDecision(
                     approved=True,
                     source="paper_learning_authority",
@@ -590,6 +770,12 @@ def evaluate_approval_decision(
                         "paper_learning_authority_override": paper_override,
                     },
                 )
+            _store_decision_trace(
+                account_state=account_state,
+                decision=decision,
+                source="confidence_gate",
+                execution_mode=execution_mode,
+            )
             return ApprovalDecision(
                 approved=False,
                 source="confidence_gate",
@@ -626,6 +812,13 @@ def evaluate_approval_decision(
             adjusted["reason"] = exploration["reason"]
             adjusted["paper_exploration_authority"] = exploration
             account_state["paper_exploration_authority"] = exploration
+            _store_decision_trace(
+                account_state=account_state,
+                decision=adjusted,
+                source="paper_exploration_authority",
+                execution_mode=execution_mode,
+                exploration=exploration,
+            )
             return ApprovalDecision(
                 approved=True,
                 source="paper_exploration_authority",
@@ -653,6 +846,12 @@ def evaluate_approval_decision(
             adjusted["reason"] = paper_override["reason"]
             adjusted["paper_learning_authority_override"] = paper_override
             account_state["paper_learning_authority_override"] = paper_override
+            _store_decision_trace(
+                account_state=account_state,
+                decision=adjusted,
+                source="paper_learning_authority",
+                execution_mode=execution_mode,
+            )
             return ApprovalDecision(
                 approved=True,
                 source="paper_learning_authority",
@@ -679,6 +878,13 @@ def evaluate_approval_decision(
             adjusted["position_size_pct"] = exploration["position_size_pct"]
             adjusted["paper_exploration_authority"] = exploration
             account_state["paper_exploration_authority"] = exploration
+            _store_decision_trace(
+                account_state=account_state,
+                decision=adjusted,
+                source="paper_exploration_authority",
+                execution_mode=execution_mode,
+                exploration=exploration,
+            )
             return ApprovalDecision(
                 approved=True,
                 source="paper_exploration_authority",
@@ -692,6 +898,12 @@ def evaluate_approval_decision(
                 },
             )
 
+    _store_decision_trace(
+        account_state=account_state,
+        decision=decision,
+        source="claude",
+        execution_mode=execution_mode,
+    )
     return ApprovalDecision(
         approved=bool(decision.get("approved")),
         source="claude",

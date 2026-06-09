@@ -132,6 +132,18 @@ annotate context. In paper/dry-run, the separate bounded exploration authority
 can approve or increase size when current deterministic evidence is strong
 enough and the configured caps allow it. Cash modes remain excluded.
 
+Runtime paper decisions are no longer routed as loose ad hoc overrides. The
+approval path now normalizes current setup, buy-opportunity, prediction,
+session, and execution evidence through
+`src.trading_bot.intelligence.adjudicator.build_model_adjudication`, evaluates
+ordered gates through `src.trading_bot.runtime.gate_engine.GateEngine`, and
+checks `src.trading_bot.runtime.authority.AuthorityMatrix` before paper-only
+approval or size-increase effects are enforced. Every evaluated approval branch
+stores `intelligence_adjudication`, `decision_trace`, and
+`canonical_decision_trace` in `account_state` for replay, audit, and
+after-close learning. This grants bounded paper authority only; cash/live modes
+still require deterministic approval evidence and promoted authority settings.
+
 Paper exploration authority is configured through:
 
 - `PAPER_EXPLORATION_AUTHORITY_ENABLED`

@@ -15,6 +15,11 @@ from services.decision.gates.prediction import build_prediction_gate
 from services.decision.gates.preflight import build_preflight_gate
 from services.decision.gates.session import build_session_gate
 from services.decision.gates.setup import build_setup_gate
+from services.decision.gates.signal_safety import (
+    evaluate_cash_safe_gate,
+    evaluate_stale_signal_gate,
+    evaluate_symbol_override_gate,
+)
 from services.decision.gates.sizing import build_sizing_gate
 from services.decision.gates.trend import build_trend_gate
 
@@ -32,6 +37,9 @@ __all__ = [
     "build_preflight_gate",
     "build_session_gate",
     "build_setup_gate",
+    "evaluate_cash_safe_gate",
+    "evaluate_stale_signal_gate",
+    "evaluate_symbol_override_gate",
     "build_sizing_gate",
     "build_trend_gate",
 ]

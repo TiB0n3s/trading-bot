@@ -150,6 +150,33 @@ def test_execution_quality_block_blocks_buy_before_order_routing():
     assert_equal(outcome.submitted, False, "submitted")
 
 
+def test_live_execution_quality_computes_toxic_vpin_block_before_order_routing():
+    outcome = execute_order(
+        symbol="AAPL",
+        action="buy",
+        signal={"symbol": "AAPL", "action": "buy"},
+        signal_price=100.0,
+        decision={"position_size_pct": 0.5},
+        account_state={
+            "signal_price": 100.0,
+            "bar_pattern_features": {"vpin_toxicity_20": 0.94},
+            "quote_snapshot": {"bid": 99.99, "ask": 100.01},
+        },
+        position_size_pct=0.5,
+        execution_mode="paper",
+        pre_order_safety_check=lambda **_: (_ for _ in ()).throw(AssertionError("unused")),
+        one_bar_confirmation_hold=lambda **_: (_ for _ in ()).throw(AssertionError("unused")),
+        make_client_order_id=lambda *_: "cid",
+        place_order=lambda **_: {"order_id": "should_not_submit"},
+        log=logging.getLogger("test_execution_service"),
+    )
+
+    assert_equal(outcome.status, "rejected", "status")
+    assert_equal(outcome.rejection_category, "execution_quality", "category")
+    assert "toxic_vpin" in outcome.rejection_reason
+    assert_equal(outcome.submitted, False, "submitted")
+
+
 def test_zero_final_buy_size_blocks_before_order_routing():
     calls = {"execute": 0, "log_trade": 0}
 
@@ -214,6 +241,7 @@ def main():
         test_dry_run_returns_order_without_submit,
         test_live_circuit_breaker_blocks_buy_before_second_look,
         test_execution_quality_block_blocks_buy_before_order_routing,
+        test_live_execution_quality_computes_toxic_vpin_block_before_order_routing,
         test_zero_final_buy_size_blocks_before_order_routing,
     ]
     for test in tests:

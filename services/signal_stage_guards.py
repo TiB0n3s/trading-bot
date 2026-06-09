@@ -11,6 +11,12 @@ from dataclasses import dataclass, field
 from typing import Any, Callable
 
 from services.approval_service import ApprovalDecision, deterministic_rejection
+from services.decision.gates.signal_safety import (
+    evaluate_cash_safe_gate,
+    evaluate_stale_signal_gate,
+    evaluate_symbol_override_gate,
+)
+from services.decision.trace import GateResult
 
 
 @dataclass(frozen=True)
@@ -24,27 +30,37 @@ class SignalStageDecision:
 SIGNAL_STAGE_CONTINUE = SignalStageDecision()
 
 
+def _decision_from_gate(gate: GateResult) -> SignalStageDecision:
+    if gate.decision != "block":
+        return SignalStageDecision(
+            account_state_updates=gate.outputs.get("account_state_updates") or {},
+            metadata=gate.outputs.get("metadata") or {},
+        )
+
+    category = gate.outputs.get("rejection_category") or gate.gate_id
+    metadata = gate.outputs.get("metadata") or {}
+    return SignalStageDecision(
+        rejected=True,
+        approval=deterministic_rejection(
+            category=category,
+            reason=gate.reason,
+            metadata=metadata or None,
+        ),
+        metadata=metadata,
+    )
+
+
 def check_stale_signal(
     *,
     raw_signal: dict[str, Any],
     parse_stale_signal: Callable[[dict[str, Any]], tuple[bool, float | None, str]],
 ) -> SignalStageDecision:
-    is_stale, age_seconds, stale_reason = parse_stale_signal(raw_signal)
-    if is_stale:
-        return SignalStageDecision(
-            rejected=True,
-            approval=deterministic_rejection(
-                category="stale_signal",
-                reason=stale_reason,
-                metadata={"age_seconds": age_seconds},
-            ),
-            metadata={"age_seconds": age_seconds},
+    return _decision_from_gate(
+        evaluate_stale_signal_gate(
+            raw_signal=raw_signal,
+            parse_stale_signal=parse_stale_signal,
         )
-
-    updates = {}
-    if age_seconds is not None:
-        updates["signal_age_seconds"] = round(age_seconds, 2)
-    return SignalStageDecision(account_state_updates=updates)
+    )
 
 
 def check_cash_safe_gates(
@@ -59,63 +75,19 @@ def check_cash_safe_gates(
     cash_safe_buys_today: Callable[[str], int],
     log: Any = None,
 ) -> SignalStageDecision:
-    if action != "buy" or not cash_safe_mode:
-        return SIGNAL_STAGE_CONTINUE
-
-    if symbol not in cash_safe_symbols:
-        reason = f"{symbol} not allowed in cash_safe symbols {sorted(cash_safe_symbols)}"
-        return SignalStageDecision(
-            rejected=True,
-            approval=deterministic_rejection(
-                category="cash_safe_symbol",
-                reason=reason,
-                metadata={"cash_safe_symbols": sorted(cash_safe_symbols)},
-            ),
+    return _decision_from_gate(
+        evaluate_cash_safe_gate(
+            symbol=symbol,
+            action=action,
+            account_state=account_state,
+            cash_safe_mode=cash_safe_mode,
+            cash_safe_symbols=cash_safe_symbols,
+            max_open_positions=max_open_positions,
+            max_new_buys_per_symbol_per_day=max_new_buys_per_symbol_per_day,
+            cash_safe_buys_today=cash_safe_buys_today,
+            log=log,
         )
-
-    open_count = account_state.get("open_position_count", 0)
-    if open_count >= max_open_positions:
-        reason = (
-            f"open_position_count={open_count} >= cash_safe max "
-            f"{max_open_positions}"
-        )
-        return SignalStageDecision(
-            rejected=True,
-            approval=deterministic_rejection(
-                category="cash_safe_position_limit",
-                reason=reason,
-                metadata={
-                    "open_position_count": open_count,
-                    "max_open_positions": max_open_positions,
-                },
-            ),
-        )
-
-    try:
-        buys_today = cash_safe_buys_today(symbol)
-    except Exception as exc:
-        if log:
-            log.error(f"Cash-safe daily buy check failed for {symbol}: {exc}")
-        buys_today = 999
-
-    if buys_today >= max_new_buys_per_symbol_per_day:
-        reason = (
-            f"buys_today={buys_today} >= cash_safe per-symbol daily max "
-            f"{max_new_buys_per_symbol_per_day}"
-        )
-        return SignalStageDecision(
-            rejected=True,
-            approval=deterministic_rejection(
-                category="cash_safe_daily_symbol_limit",
-                reason=reason,
-                metadata={
-                    "buys_today": buys_today,
-                    "max_buys_per_symbol": max_new_buys_per_symbol_per_day,
-                },
-            ),
-        )
-
-    return SIGNAL_STAGE_CONTINUE
+    )
 
 
 def apply_symbol_overrides(
@@ -124,15 +96,10 @@ def apply_symbol_overrides(
     action: str,
     symbol_override_block: Callable[[str, str], str | None],
 ) -> SignalStageDecision:
-    override_reason = symbol_override_block(symbol, action)
-    if not override_reason:
-        return SIGNAL_STAGE_CONTINUE
-
-    return SignalStageDecision(
-        rejected=True,
-        approval=deterministic_rejection(
-            category="symbol_override",
-            reason=override_reason,
-        ),
-        metadata={"override_reason": override_reason},
+    return _decision_from_gate(
+        evaluate_symbol_override_gate(
+            symbol=symbol,
+            action=action,
+            symbol_override_block=symbol_override_block,
+        )
     )

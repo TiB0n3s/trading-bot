@@ -64,7 +64,29 @@ def _spread_from_quote(quote: dict[str, Any]) -> float | None:
     return (ask - bid) / mid * 100.0
 
 
-def _gap_pct(action: str, signal_price: Any, quote: dict[str, Any], latest_price: Any) -> float | None:
+def _first_float(*values: Any) -> float | None:
+    for value in values:
+        parsed = _float(value)
+        if parsed is not None:
+            return parsed
+    return None
+
+
+def _microstructure_features(account_state: dict[str, Any]) -> dict[str, Any]:
+    features: dict[str, Any] = {}
+    for key in (
+        "bar_pattern_features",
+        "historical_bar_features",
+        "microstructure",
+        "volume_clock_vpin",
+    ):
+        features.update(_dict(account_state.get(key)))
+    return features
+
+
+def _gap_pct(
+    action: str, signal_price: Any, quote: dict[str, Any], latest_price: Any
+) -> float | None:
     signal = _float(signal_price)
     if signal is None or signal <= 0:
         return None
@@ -100,6 +122,7 @@ def estimate_execution_quality(
     second_look = _dict(account_state.get("second_look"))
     tape = _dict(account_state.get("tape"))
     momentum = _dict(account_state.get("momentum"))
+    microstructure = _microstructure_features(account_state)
     reasons: list[str] = []
 
     spread_pct = (
@@ -165,6 +188,47 @@ def estimate_execution_quality(
     if gap_pct is not None and gap_pct > 0:
         slippage_estimate_pct += min(0.25, gap_pct * 0.35)
 
+    vpin = _first_float(
+        microstructure.get("vpin_toxicity_20"),
+        microstructure.get("latest_vpin"),
+        microstructure.get("vpin"),
+        account_state.get("vpin_toxicity_20"),
+    )
+    cvd_corr = _first_float(
+        microstructure.get("cvd_price_corr_20"),
+        microstructure.get("cvd_price_corr"),
+        account_state.get("cvd_price_corr_20"),
+    )
+    cvd_divergence = str(
+        microstructure.get("cvd_divergence_label")
+        or account_state.get("cvd_divergence_label")
+        or ""
+    ).lower()
+
+    toxic_vpin = vpin is not None and vpin >= 0.92
+    elevated_vpin = vpin is not None and 0.75 <= vpin < 0.92
+    cvd_conflict = (
+        (action == "buy" and cvd_corr is not None and cvd_corr <= -0.40)
+        or (action == "sell" and cvd_corr is not None and cvd_corr >= 0.40)
+        or (
+            action == "buy"
+            and cvd_divergence in {"bearish_distribution", "bearish", "distribution"}
+        )
+        or (action == "sell" and cvd_divergence in {"bullish_absorption", "bullish", "absorption"})
+    )
+    if toxic_vpin:
+        slippage_estimate_pct += 0.50
+        reasons.append(f"toxic_vpin={vpin:.3f}")
+    elif elevated_vpin:
+        slippage_estimate_pct += 0.20
+        reasons.append(f"elevated_vpin={vpin:.3f}")
+    if cvd_conflict:
+        slippage_estimate_pct += 0.12
+        if cvd_corr is not None:
+            reasons.append(f"cvd_conflict_corr={cvd_corr:.3f}")
+        elif cvd_divergence:
+            reasons.append(f"cvd_conflict={cvd_divergence}")
+
     net_cost = round(spread_cost_pct + slippage_estimate_pct + float(fees_pct or 0.0), 4)
     forecast_edge = _float(
         forecast_edge_pct
@@ -174,9 +238,7 @@ def estimate_execution_quality(
         or (_dict(account_state.get("utility_estimate")).get("expected_value_pct"))
         or (_dict(account_state.get("decision_policy")).get("expected_value_pct"))
     )
-    net_edge_after_cost = (
-        round(forecast_edge - net_cost, 4) if forecast_edge is not None else None
-    )
+    net_edge_after_cost = round(forecast_edge - net_cost, 4) if forecast_edge is not None else None
     expected_fill_quality_score = _clamp(1.0 - net_cost / 1.5)
 
     sweep_risk = "low"
@@ -184,15 +246,27 @@ def estimate_execution_quality(
         sweep_risk = "medium"
     if quote_instability_score >= 0.70 or (spread_pct is not None and spread_pct >= 0.75):
         sweep_risk = "high"
+    if toxic_vpin:
+        sweep_risk = "high"
+    elif elevated_vpin and sweep_risk == "low":
+        sweep_risk = "medium"
 
     decision = "allow"
     size_multiplier = 1.0
     fill_quality = "good"
-    if net_cost >= 0.90 or sweep_risk == "high":
+    if toxic_vpin:
+        decision = "block"
+        size_multiplier = 0.0
+        fill_quality = "poor"
+    elif net_cost >= 0.90 or sweep_risk == "high":
         decision = "block"
         size_multiplier = 0.0
         fill_quality = "poor"
         reasons.append(f"net_execution_cost={net_cost:.3f}%")
+    elif elevated_vpin or cvd_conflict:
+        decision = "size_down"
+        size_multiplier = 0.50 if elevated_vpin and cvd_conflict else 0.75
+        fill_quality = "toxic_flow" if elevated_vpin else "flow_conflict"
     elif net_cost >= 0.35 or expected_fill_quality_score < 0.75:
         decision = "size_down"
         size_multiplier = 0.75 if net_cost < 0.60 else 0.50

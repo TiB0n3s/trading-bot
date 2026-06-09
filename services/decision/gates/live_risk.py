@@ -6,6 +6,7 @@ import os
 from typing import Any
 
 from services.decision.trace import GateResult
+from services.execution_quality_service import estimate_execution_quality
 
 DEFAULT_DAILY_LOSS_LIMIT_PCT = -3.0
 DEFAULT_MAX_DRAWDOWN_PCT = 3.0
@@ -130,7 +131,19 @@ def evaluate_execution_quality_live_gate(
     """Promote execution_quality.block into a final enforced live gate."""
     execution_quality = account_state.get("execution_quality")
     execution_quality = execution_quality if isinstance(execution_quality, dict) else {}
+    if not execution_quality:
+        estimate = estimate_execution_quality(
+            action=action,
+            signal_price=account_state.get("signal_price"),
+            account_state=account_state,
+        )
+        execution_quality = estimate.to_dict()
+        account_state["execution_quality"] = execution_quality
     decision = str(execution_quality.get("decision") or "").strip().lower()
+    reasons = execution_quality.get("reasons")
+    reason_text = execution_quality.get("reason")
+    if not reason_text and isinstance(reasons, list) and reasons:
+        reason_text = "; ".join(str(reason) for reason in reasons[:4])
     if str(action or "").strip().lower() == "buy" and decision == "block":
         return GateResult(
             gate_id="execution_quality",
@@ -138,10 +151,7 @@ def evaluate_execution_quality_live_gate(
             decision="block",
             authority="live",
             enforced=True,
-            reason=str(
-                execution_quality.get("reason")
-                or "execution_quality.block blocks buy order routing"
-            ),
+            reason=str(reason_text or "execution_quality.block blocks buy order routing"),
             inputs=execution_quality,
         )
 
@@ -151,6 +161,6 @@ def evaluate_execution_quality_live_gate(
         decision="pass" if decision in {"allow", "pass", ""} else "warn",
         authority="live",
         enforced=True,
-        reason=str(execution_quality.get("reason") or "execution quality live gate clear"),
+        reason=str(reason_text or "execution quality live gate clear"),
         inputs=execution_quality,
     )

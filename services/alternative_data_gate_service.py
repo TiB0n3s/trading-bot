@@ -52,6 +52,15 @@ def _first_float(*values: Any) -> float | None:
     return None
 
 
+def _z_score(value: Any, mean: Any, std: Any) -> float | None:
+    current = _float(value)
+    baseline = _float(mean)
+    sigma = _float(std)
+    if current is None or baseline is None or sigma is None or sigma <= 0:
+        return None
+    return (current - baseline) / sigma
+
+
 def _nested(account_state: dict[str, Any], *keys: str) -> dict[str, Any]:
     for key in keys:
         value = _dict(account_state.get(key))
@@ -83,6 +92,12 @@ def _text_sentiment(
         account_state.get("sentiment_score"),
     )
     anomaly = _first_float(text.get("anomaly_score"), text.get("unexpected_tone_score"))
+    entropy = _first_float(
+        text.get("text_entropy"),
+        text.get("sentiment_entropy"),
+        text.get("news_disagreement_entropy"),
+        account_state.get("text_entropy"),
+    )
     stress = 0.0
     reasons: list[str] = []
     action_l = str(action or "").lower()
@@ -99,12 +114,16 @@ def _text_sentiment(
     if anomaly is not None and anomaly >= 0.70:
         stress += _clamp(anomaly * 25.0)
         reasons.append(f"text_anomaly_score={anomaly:.3f}")
+    if entropy is not None and entropy >= 0.70:
+        stress += _clamp(entropy * 30.0)
+        reasons.append(f"text_entropy={entropy:.3f}")
     return (
         {
             "present": bool(text),
             "sentiment_score": score,
             "sentiment_velocity": velocity,
             "anomaly_score": anomaly,
+            "text_entropy": entropy,
         },
         _clamp(stress),
         reasons,
@@ -234,14 +253,37 @@ def _hardware_telemetry(account_state: dict[str, Any]) -> tuple[dict[str, Any], 
         telemetry.get("spread_expansion_rate"),
         telemetry.get("spread_expansion_pct"),
     )
+    latency_zscore = _first_float(
+        telemetry.get("api_latency_zscore"),
+        telemetry.get("latency_zscore"),
+        _z_score(
+            latency_ms,
+            telemetry.get("api_latency_mean_5m"),
+            telemetry.get("api_latency_std_5m"),
+        ),
+    )
+    fill_zscore = _first_float(
+        telemetry.get("fill_time_zscore"),
+        _z_score(
+            fill_ms,
+            telemetry.get("avg_fill_time_mean_5m"),
+            telemetry.get("avg_fill_time_std_5m"),
+        ),
+    )
     stress = 0.0
     reasons: list[str] = []
     if latency_ms is not None and latency_ms >= 750:
         stress += _clamp((latency_ms - 250.0) / 15.0)
         reasons.append(f"api_latency_ms={latency_ms:.0f}")
+    if latency_zscore is not None and latency_zscore >= 2.5:
+        stress += _clamp(latency_zscore * 18.0)
+        reasons.append(f"api_latency_zscore={latency_zscore:.2f}")
     if fill_ms is not None and fill_ms >= 1500:
         stress += _clamp((fill_ms - 500.0) / 40.0)
         reasons.append(f"avg_fill_time_ms={fill_ms:.0f}")
+    if fill_zscore is not None and fill_zscore >= 2.5:
+        stress += _clamp(fill_zscore * 15.0)
+        reasons.append(f"fill_time_zscore={fill_zscore:.2f}")
     if error_rate is not None and error_rate >= 0.03:
         stress += _clamp(error_rate * 600.0)
         reasons.append(f"api_error_rate={error_rate:.3f}")
@@ -252,7 +294,9 @@ def _hardware_telemetry(account_state: dict[str, Any]) -> tuple[dict[str, Any], 
         {
             "present": bool(telemetry),
             "api_latency_ms": latency_ms,
+            "api_latency_zscore": round(latency_zscore, 4) if latency_zscore is not None else None,
             "avg_fill_time_ms": fill_ms,
+            "fill_time_zscore": round(fill_zscore, 4) if fill_zscore is not None else None,
             "api_error_rate": error_rate,
             "spread_expansion_rate": spread_expansion,
         },

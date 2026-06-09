@@ -74,6 +74,53 @@ def _confidence_bucket(probability: float | None) -> str:
     return "veto"
 
 
+def _microstructure_alpha_features(account_state: dict[str, Any]) -> dict[str, Any]:
+    features = _dict(account_state.get("bar_pattern_features"))
+    context = _dict(account_state.get("microstructure_features"))
+    merged = {**features, **context}
+    variance_ratio = _float(
+        merged.get("variance_ratio_30m")
+        or merged.get("rolling_variance_ratio_30m")
+        or account_state.get("variance_ratio_30m")
+    )
+    vwap_distance = _float(
+        merged.get("distance_from_vwap_pct")
+        or merged.get("vwap_distance_pct")
+        or account_state.get("session_distance_from_vwap_pct")
+    )
+    vwap_std = _float(
+        merged.get("vwap_rolling_std_pct")
+        or merged.get("vwap_std_30m_pct")
+        or merged.get("rolling_vwap_std_pct")
+    )
+    vwap_band_zscore = _float(merged.get("vwap_band_zscore"))
+    if vwap_band_zscore is None and vwap_distance is not None and vwap_std and vwap_std > 0:
+        vwap_band_zscore = vwap_distance / vwap_std
+    trend_weight_modifier = 1.0
+    triple_barrier_weight_modifier = 1.0
+    regime_hint = "unknown"
+    if variance_ratio is not None:
+        if variance_ratio >= 1.10:
+            trend_weight_modifier = 1.20
+            triple_barrier_weight_modifier = 0.90
+            regime_hint = "trend_persistence"
+        elif variance_ratio <= 0.90:
+            trend_weight_modifier = 0.90
+            triple_barrier_weight_modifier = 1.15
+            regime_hint = "mean_reversion_random_walk"
+        else:
+            regime_hint = "near_random_walk"
+    exhaustion_risk = vwap_band_zscore is not None and abs(vwap_band_zscore) >= 2.0
+    return {
+        "variance_ratio_30m": round(variance_ratio, 6) if variance_ratio is not None else None,
+        "vwap_band_zscore": round(vwap_band_zscore, 6) if vwap_band_zscore is not None else None,
+        "trend_weight_modifier": round(trend_weight_modifier, 4),
+        "triple_barrier_weight_modifier": round(triple_barrier_weight_modifier, 4),
+        "regime_hint": regime_hint,
+        "vwap_exhaustion_risk": exhaustion_risk,
+    }
+
+
 def _regime_layer(account_state: dict[str, Any], action: str) -> dict[str, Any]:
     routing = _dict(account_state.get("regime_routing_decision"))
     if not routing:
@@ -130,18 +177,28 @@ def _expert_components(
     env: dict[str, str] | None,
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     experts: list[dict[str, Any]] = []
+    micro_alpha = _microstructure_alpha_features(account_state)
 
     strategy = _historical_strategy(symbol=symbol, action=action, account_state=account_state)
     historical_prob = _probability(strategy.get("master_confidence_score"))
     if historical_prob is not None:
+        model_weights = (
+            strategy.get("model_weights") if isinstance(strategy.get("model_weights"), list) else []
+        )
+        trend_weight = 0.45
+        if any(str(row.get("label_target")) == "trend_scan_label" for row in model_weights):
+            trend_weight *= float(micro_alpha["trend_weight_modifier"])
+        if any(str(row.get("label_target")) == "triple_barrier_label" for row in model_weights):
+            trend_weight *= float(micro_alpha["triple_barrier_weight_modifier"])
         experts.append(
             {
                 "expert": "historical_bar_ensemble",
                 "probability": round(historical_prob, 6),
-                "weight": 0.45,
+                "weight": round(trend_weight, 6),
                 "status": strategy.get("status"),
                 "recommendation": strategy.get("paper_recommendation"),
                 "source": "trend_scan_triple_barrier_weighted_ensemble",
+                "microstructure_alpha_features": micro_alpha,
             }
         )
 
@@ -210,6 +267,7 @@ def _expert_components(
         "confidence_bucket": _confidence_bucket(ensemble),
         "disagreement": round(disagreement, 6),
         "experts": experts,
+        "microstructure_alpha_features": micro_alpha,
         "reason": "weighted expert ensemble scored candidate",
     }
 
@@ -225,6 +283,18 @@ def _meta_label_layer(
     ensemble_probability: float | None,
 ) -> dict[str, Any]:
     config = _dict((ml_authority_config or {}).get("historical_bar_meta_label_authority"))
+    missed = _dict(account_state.get("missed_opportunity_relaxation"))
+    relaxation = _float(
+        missed.get("threshold_relaxation_pct")
+        or missed.get("master_confidence_threshold_relaxation_pct")
+        or account_state.get("missed_opportunity_threshold_relaxation_pct")
+    )
+    if relaxation is not None and relaxation > 0:
+        config = dict(config)
+        current_approve = _float(config.get("min_approve_score") or 65.0) or 65.0
+        current_veto = _float(config.get("min_veto_score") or 65.0) or 65.0
+        config["min_approve_score"] = max(0.0, current_approve - relaxation)
+        config["min_veto_score"] = max(0.0, current_veto - relaxation)
     outcome = evaluate_historical_bar_meta_label_authority(
         symbol=symbol,
         action=action,
@@ -245,6 +315,9 @@ def _meta_label_layer(
             "effect": effect,
             "success_probability": outcome.get("master_confidence_score"),
             "threshold": round(threshold, 4),
+            "missed_opportunity_relaxation_pct": round(relaxation, 4)
+            if relaxation is not None
+            else None,
             "authority": outcome,
             "reason": outcome.get("reason"),
         }
@@ -257,6 +330,9 @@ def _meta_label_layer(
             "effect": "ensemble_probability_veto",
             "success_probability": round(ensemble_probability, 6),
             "threshold": round(threshold, 4),
+            "missed_opportunity_relaxation_pct": round(relaxation, 4)
+            if relaxation is not None
+            else None,
             "authority": outcome,
             "reason": (
                 f"ensemble probability {ensemble_probability:.3f} below "
@@ -273,6 +349,9 @@ def _meta_label_layer(
         if ensemble_probability is not None
         else None,
         "threshold": round(threshold, 4),
+        "missed_opportunity_relaxation_pct": round(relaxation, 4)
+        if relaxation is not None
+        else None,
         "authority": outcome,
         "reason": outcome.get("reason") or "meta-label clear",
     }

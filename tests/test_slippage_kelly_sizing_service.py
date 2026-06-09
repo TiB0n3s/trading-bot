@@ -150,6 +150,63 @@ def test_slippage_kelly_zeroes_for_toxic_vpin_even_with_high_conviction():
     assert decision.liquidity_stress_size_multiplier == 0.0
 
 
+def test_slippage_kelly_zeroes_when_short_horizon_alpha_friction_is_too_high():
+    with _temporary_env(
+        SLIPPAGE_KELLY_SIZING_ENABLED="true",
+        SLIPPAGE_KELLY_MAX_FRICTION_RATIO="0.50",
+        SLIPPAGE_KELLY_MAX_ALPHA_FRICTION_RATIO="0.35",
+    ):
+        decision = calculate_slippage_adjusted_kelly_cap(
+            action="buy",
+            requested_size_pct=1.0,
+            account_state={
+                "prediction_gate": {"ml_prediction_score": 0.85},
+                "bar_pattern_features": {
+                    "atr_20_pct": 1.0,
+                    "triple_barrier_timeout_minutes": 5,
+                },
+                "execution_quality": {"slippage_estimate_pct": 0.18},
+            },
+        )
+
+    assert decision.action == "zero"
+    assert decision.cap_pct == 0.0
+    assert decision.reason == "alpha_friction_ratio_exceeds_0.35"
+    assert decision.alpha_friction_ratio is not None
+
+
+def test_slippage_kelly_scales_down_for_quote_instability():
+    with _temporary_env(
+        SLIPPAGE_KELLY_SIZING_ENABLED="true",
+        SLIPPAGE_KELLY_MAX_FRICTION_RATIO="0.50",
+    ):
+        stable = calculate_slippage_adjusted_kelly_cap(
+            action="buy",
+            requested_size_pct=1.0,
+            account_state={
+                "prediction_gate": {"ml_prediction_score": 0.90},
+                "bar_pattern_features": {"atr_20_pct": 1.0},
+                "execution_quality": {"slippage_estimate_pct": 0.03},
+            },
+        )
+        unstable = calculate_slippage_adjusted_kelly_cap(
+            action="buy",
+            requested_size_pct=1.0,
+            account_state={
+                "prediction_gate": {"ml_prediction_score": 0.90},
+                "bar_pattern_features": {"atr_20_pct": 1.0},
+                "execution_quality": {
+                    "slippage_estimate_pct": 0.03,
+                    "quote_instability_score": 0.70,
+                },
+            },
+        )
+
+    assert unstable.quote_instability_multiplier == 0.5
+    assert unstable.cap_pct < stable.cap_pct
+    assert "quote_instability" in unstable.reason
+
+
 def main():
     tests = [
         test_slippage_kelly_caps_size_when_edge_is_positive_but_thinner,
@@ -157,6 +214,8 @@ def main():
         test_slippage_kelly_missing_inputs_is_observational_no_cap,
         test_slippage_kelly_scales_down_for_elevated_liquidity_stress,
         test_slippage_kelly_zeroes_for_toxic_vpin_even_with_high_conviction,
+        test_slippage_kelly_zeroes_when_short_horizon_alpha_friction_is_too_high,
+        test_slippage_kelly_scales_down_for_quote_instability,
     ]
     for test in tests:
         test()

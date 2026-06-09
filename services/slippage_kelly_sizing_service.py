@@ -7,13 +7,12 @@ orders.
 
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
 import math
 import os
+from dataclasses import asdict, dataclass
 from typing import Any
 
 from services.policy_controls import policy_family_enabled
-
 
 SLIPPAGE_KELLY_VERSION = "slippage_adjusted_kelly_v1"
 SLIPPAGE_KELLY_RUNTIME_EFFECT = "size_cap_only_no_approval_authority"
@@ -32,6 +31,8 @@ class SlippageKellyDecision:
     adjusted_risk_reward_ratio: float | None
     predicted_slippage_pct: float | None
     friction_ratio: float | None
+    alpha_friction_ratio: float | None
+    quote_instability_multiplier: float | None
     liquidity_stress_score: float | None
     liquidity_stress_bucket: str | None
     liquidity_stress_size_multiplier: float | None
@@ -123,6 +124,58 @@ def _predicted_slippage_pct(account_state: dict[str, Any]) -> float | None:
         if slip is not None and slip >= 0:
             return slip
     return None
+
+
+def _trade_timeout_minutes(account_state: dict[str, Any]) -> float | None:
+    features = _dict(account_state.get("bar_pattern_features"))
+    candidates = [
+        features.get("triple_barrier_timeout_minutes"),
+        features.get("triple_barrier_time_out_minutes"),
+        features.get("triple_barrier_time_out_bars"),
+        features.get("triple_barrier_timeout_bars"),
+        account_state.get("triple_barrier_timeout_minutes"),
+        account_state.get("expected_holding_minutes"),
+    ]
+    for value in candidates:
+        parsed = _float(value)
+        if parsed is not None and parsed > 0:
+            return parsed
+    return None
+
+
+def _quote_instability_multiplier(account_state: dict[str, Any]) -> tuple[float, str | None]:
+    execution_quality = _dict(account_state.get("execution_quality"))
+    telemetry = _dict(account_state.get("hardware_telemetry")) or _dict(
+        account_state.get("execution_telemetry")
+    )
+    instability = _float(execution_quality.get("quote_instability_score"))
+    cancel_fill = _float(
+        execution_quality.get("cancel_fill_ratio")
+        or telemetry.get("cancel_fill_ratio")
+        or telemetry.get("top_of_book_cancel_fill_ratio")
+    )
+    quote_change_rate = _float(
+        execution_quality.get("quote_change_rate")
+        or telemetry.get("quote_change_rate")
+        or telemetry.get("top_of_book_quote_change_rate")
+    )
+    stress = max(
+        value
+        for value in (
+            instability,
+            cancel_fill,
+            quote_change_rate,
+            0.0,
+        )
+        if value is not None
+    )
+    if stress >= 0.85:
+        return 0.25, f"quote_instability_severe={stress:.2f}"
+    if stress >= 0.65:
+        return 0.50, f"quote_instability_high={stress:.2f}"
+    if stress >= 0.45:
+        return 0.75, f"quote_instability_elevated={stress:.2f}"
+    return 1.0, None
 
 
 def _liquidity_stress_from_state(account_state: dict[str, Any]) -> tuple[float | None, str | None]:
@@ -217,6 +270,8 @@ def _decision(
     adjusted_risk_reward_ratio: float | None = None,
     predicted_slippage_pct: float | None = None,
     friction_ratio: float | None = None,
+    alpha_friction_ratio: float | None = None,
+    quote_instability_multiplier: float | None = None,
     liquidity_stress_score: float | None = None,
     liquidity_stress_bucket: str | None = None,
     liquidity_stress_size_multiplier: float | None = None,
@@ -236,18 +291,22 @@ def _decision(
         ),
         adjusted_risk_pct=round(adjusted_risk_pct, 4) if adjusted_risk_pct is not None else None,
         adjusted_risk_reward_ratio=(
-            round(adjusted_risk_reward_ratio, 4)
-            if adjusted_risk_reward_ratio is not None
-            else None
+            round(adjusted_risk_reward_ratio, 4) if adjusted_risk_reward_ratio is not None else None
         ),
         predicted_slippage_pct=(
             round(predicted_slippage_pct, 4) if predicted_slippage_pct is not None else None
         ),
         friction_ratio=round(friction_ratio, 4) if friction_ratio is not None else None,
-        liquidity_stress_score=(
-            round(liquidity_stress_score, 4)
-            if liquidity_stress_score is not None
+        alpha_friction_ratio=(
+            round(alpha_friction_ratio, 4) if alpha_friction_ratio is not None else None
+        ),
+        quote_instability_multiplier=(
+            round(quote_instability_multiplier, 4)
+            if quote_instability_multiplier is not None
             else None
+        ),
+        liquidity_stress_score=(
+            round(liquidity_stress_score, 4) if liquidity_stress_score is not None else None
         ),
         liquidity_stress_bucket=liquidity_stress_bucket,
         liquidity_stress_size_multiplier=(
@@ -277,10 +336,7 @@ def calculate_slippage_adjusted_kelly_cap(
     execution-quality `slippage_estimate_pct` and `position_size_pct` contract.
     """
     action = (action or "").lower()
-    enabled = (
-        policy_family_enabled("sizing")
-        and _env_bool("SLIPPAGE_KELLY_SIZING_ENABLED", True)
-    )
+    enabled = policy_family_enabled("sizing") and _env_bool("SLIPPAGE_KELLY_SIZING_ENABLED", True)
     if not enabled:
         return _decision(enabled=False, action="none", reason="disabled")
     if action != "buy":
@@ -313,6 +369,7 @@ def calculate_slippage_adjusted_kelly_cap(
     risk_mult = _env_float("SLIPPAGE_KELLY_STOP_ATR_MULT", 1.5)
     slippage_turns = _env_float("SLIPPAGE_KELLY_ROUND_TRIP_MULT", 2.0)
     max_friction = _env_float("SLIPPAGE_KELLY_MAX_FRICTION_RATIO", 0.20)
+    max_alpha_friction = _env_float("SLIPPAGE_KELLY_MAX_ALPHA_FRICTION_RATIO", 0.35)
     fractional_mult = _env_float("SLIPPAGE_KELLY_FRACTION", 0.25)
     max_cap_pct = _env_float("SLIPPAGE_KELLY_MAX_CAP_PCT", requested_size_pct)
     lsi_score, lsi_bucket = _liquidity_stress_from_state(account_state)
@@ -348,6 +405,33 @@ def calculate_slippage_adjusted_kelly_cap(
 
     friction_ratio = round_trip_slip_pct / raw_reward_pct if raw_reward_pct > 0 else 1.0
     adjusted_r = adjusted_reward_pct / adjusted_risk_pct
+    timeout_minutes = _trade_timeout_minutes(account_state)
+    alpha_friction_ratio = None
+    if timeout_minutes is not None and timeout_minutes > 0:
+        # Shorter horizons have less time to amortize round-trip friction.
+        duration_adjustment = max(0.25, min(1.0, timeout_minutes / 15.0))
+        alpha_friction_ratio = friction_ratio / duration_adjustment
+    quote_multiplier, quote_reason = _quote_instability_multiplier(account_state)
+    if alpha_friction_ratio is not None and alpha_friction_ratio > max_alpha_friction:
+        return _decision(
+            enabled=True,
+            action="zero",
+            reason=f"alpha_friction_ratio_exceeds_{max_alpha_friction:.2f}",
+            model_prob=model_prob,
+            raw_reward_pct=raw_reward_pct,
+            raw_risk_pct=raw_risk_pct,
+            adjusted_reward_pct=adjusted_reward_pct,
+            adjusted_risk_pct=adjusted_risk_pct,
+            adjusted_risk_reward_ratio=adjusted_r,
+            predicted_slippage_pct=predicted_slippage_pct,
+            friction_ratio=friction_ratio,
+            alpha_friction_ratio=alpha_friction_ratio,
+            quote_instability_multiplier=quote_multiplier,
+            liquidity_stress_score=lsi_score,
+            liquidity_stress_bucket=lsi_bucket,
+            liquidity_stress_size_multiplier=lsi_multiplier,
+            cap_pct=0.0,
+        )
     if friction_ratio > max_friction:
         return _decision(
             enabled=True,
@@ -361,6 +445,8 @@ def calculate_slippage_adjusted_kelly_cap(
             adjusted_risk_reward_ratio=adjusted_r,
             predicted_slippage_pct=predicted_slippage_pct,
             friction_ratio=friction_ratio,
+            alpha_friction_ratio=alpha_friction_ratio,
+            quote_instability_multiplier=quote_multiplier,
             liquidity_stress_score=lsi_score,
             liquidity_stress_bucket=lsi_bucket,
             liquidity_stress_size_multiplier=lsi_multiplier,
@@ -375,12 +461,16 @@ def calculate_slippage_adjusted_kelly_cap(
     cap_pct = max(0.0, min(requested_size_pct, max_cap_pct, fractional_kelly_pct))
     if lsi_multiplier < 1.0:
         cap_pct = max(0.0, cap_pct * lsi_multiplier)
+    if quote_multiplier < 1.0:
+        cap_pct = max(0.0, cap_pct * quote_multiplier)
     action_out = "cap" if cap_pct < requested_size_pct else "none"
     if lsi_multiplier <= 0:
         action_out = "zero"
         reason = lsi_reason or "liquidity_stress_zero"
     elif lsi_multiplier < 1.0:
         reason = f"slippage_adjusted_kelly_cap:{lsi_reason or 'liquidity_stress'}"
+    elif quote_multiplier < 1.0:
+        reason = f"slippage_adjusted_kelly_cap:{quote_reason or 'quote_instability'}"
     else:
         reason = (
             "slippage_adjusted_kelly_cap"
@@ -400,6 +490,8 @@ def calculate_slippage_adjusted_kelly_cap(
         adjusted_risk_reward_ratio=adjusted_r,
         predicted_slippage_pct=predicted_slippage_pct,
         friction_ratio=friction_ratio,
+        alpha_friction_ratio=alpha_friction_ratio,
+        quote_instability_multiplier=quote_multiplier,
         liquidity_stress_score=lsi_score,
         liquidity_stress_bucket=lsi_bucket,
         liquidity_stress_size_multiplier=lsi_multiplier,

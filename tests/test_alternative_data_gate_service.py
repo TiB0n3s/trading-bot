@@ -61,11 +61,33 @@ def test_alternative_data_gate_vetoes_multi_category_stress():
     assert_equal(gate["size_modifier"], 0.0, "size modifier")
 
 
+def test_alternative_data_gate_uses_text_entropy_and_latency_zscore():
+    gate = evaluate_alternative_data_gate(
+        account_state={
+            "text_sentiment": {
+                "sentiment_score": 0.1,
+                "text_entropy": 0.82,
+            },
+            "hardware_telemetry": {
+                "api_latency_ms": 600,
+                "api_latency_mean_5m": 250,
+                "api_latency_std_5m": 100,
+            },
+        },
+        action="buy",
+    ).to_dict()
+
+    assert gate["decision"] in {"size_down", "veto"}
+    assert_equal(gate["hardware_telemetry"]["api_latency_zscore"], 3.5, "latency z")
+    assert_equal(gate["text_sentiment"]["text_entropy"], 0.82, "entropy")
+
+
 def main():
     tests = [
         test_alternative_data_gate_passes_when_no_inputs_present,
         test_alternative_data_gate_sizes_down_on_infrastructure_degradation,
         test_alternative_data_gate_vetoes_multi_category_stress,
+        test_alternative_data_gate_uses_text_entropy_and_latency_zscore,
     ]
     for test in tests:
         test()

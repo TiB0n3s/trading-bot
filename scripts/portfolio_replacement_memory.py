@@ -14,7 +14,7 @@ from policy_artifacts import policy_artifacts_enabled
 
 logger = logging.getLogger(__name__)
 
-BASE_DIR = Path(__file__).resolve().parent
+BASE_DIR = Path(__file__).resolve().parents[1]
 MEMORY_FILE = BASE_DIR / "portfolio_replacement_memory.json"
 
 _memory = {}

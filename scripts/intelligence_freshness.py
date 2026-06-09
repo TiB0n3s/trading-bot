@@ -18,7 +18,7 @@ from pathlib import Path
 
 import pytz
 
-BASE_DIR = Path(__file__).resolve().parent
+BASE_DIR = Path(__file__).resolve().parents[1]
 ET = pytz.timezone("America/New_York")
 
 FILES = {

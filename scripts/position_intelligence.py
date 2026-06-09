@@ -15,7 +15,7 @@ from pathlib import Path
 
 from bot_events import fetch_events
 
-BASE_DIR = Path(__file__).resolve().parent
+BASE_DIR = Path(__file__).resolve().parents[1]
 
 STRATEGY_MEMORY_FILE = BASE_DIR / "strategy_memory.json"
 PORTFOLIO_REPLACEMENT_FILE = BASE_DIR / "portfolio_replacement_memory.json"

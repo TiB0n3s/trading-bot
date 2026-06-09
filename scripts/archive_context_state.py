@@ -19,7 +19,7 @@ from typing import Any
 from policy_artifacts import POLICY_ARTIFACT_FILES
 from symbols_config import SYMBOL_UNIVERSE_VERSION
 
-BASE_DIR = Path(__file__).resolve().parent
+BASE_DIR = Path(__file__).resolve().parents[1]
 ARCHIVE_ROOT = BASE_DIR / "data_archive" / "point_in_time"
 RUNTIME_FILES = (
     "market_context.json",

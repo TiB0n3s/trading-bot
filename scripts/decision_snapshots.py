@@ -17,7 +17,7 @@ from services.decision_snapshot_service import (
     json_dumps,
 )
 
-BASE_DIR = Path(__file__).resolve().parent
+BASE_DIR = Path(__file__).resolve().parents[1]
 MARKET_CONTEXT_PATH = BASE_DIR / "market_context.json"
 
 _services: dict[str, Any] = {}

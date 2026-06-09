@@ -9,7 +9,7 @@ from pathlib import Path
 from bot_events import fetch_events
 from intelligence_freshness import get_intelligence_freshness
 
-BASE_DIR = Path(__file__).resolve().parent
+BASE_DIR = Path(__file__).resolve().parents[1]
 
 FILES = {
     "strategy_memory": BASE_DIR / "strategy_memory.json",

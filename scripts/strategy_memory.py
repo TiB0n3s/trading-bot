@@ -22,7 +22,7 @@ from setup_policy import (
 
 logger = logging.getLogger(__name__)
 
-BASE_DIR = Path(__file__).resolve().parent
+BASE_DIR = Path(__file__).resolve().parents[1]
 MEMORY_FILE = BASE_DIR / "strategy_memory.json"
 
 _strategy_memory = {}

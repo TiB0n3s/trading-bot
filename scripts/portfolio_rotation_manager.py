@@ -26,7 +26,7 @@ from intelligence_freshness import freshness_for_file
 from repositories import portfolio_rotation_repo
 from services.broker_service import broker_service
 
-BASE_DIR = Path(__file__).resolve().parent
+BASE_DIR = Path(__file__).resolve().parents[1]
 MEMORY_FILE = BASE_DIR / "portfolio_replacement_memory.json"
 ET = pytz.timezone("America/New_York")
 

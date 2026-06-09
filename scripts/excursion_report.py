@@ -28,7 +28,7 @@ from services.excursion_service import (
 )
 
 ET = pytz.timezone("America/New_York")
-BASE_DIR = Path(__file__).resolve().parent
+BASE_DIR = Path(__file__).resolve().parents[1]
 EXCURSION_MEMORY_FILE = BASE_DIR / "excursion_memory.json"
 
 

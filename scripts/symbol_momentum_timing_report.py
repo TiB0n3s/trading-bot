@@ -13,7 +13,7 @@ from policy_artifacts import atomic_write_json
 from services.symbol_momentum_timing_service import build_default_symbol_momentum_timing_service
 
 ET = pytz.timezone("America/New_York")
-BASE_DIR = Path(__file__).resolve().parent
+BASE_DIR = Path(__file__).resolve().parents[1]
 MEMORY_FILE = BASE_DIR / "symbol_momentum_timing_memory.json"
 
 

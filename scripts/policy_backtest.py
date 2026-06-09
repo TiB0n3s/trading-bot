@@ -21,7 +21,7 @@ from policy_artifacts import atomic_write_json
 
 from repositories.policy_backtest_repo import PolicyBacktestRepository
 
-BASE_DIR = Path(__file__).resolve().parent
+BASE_DIR = Path(__file__).resolve().parents[1]
 POLICY_BACKTEST_SUMMARY_FILE = BASE_DIR / "policy_backtest_summary.json"
 
 HARD_GATE_CATEGORIES = {

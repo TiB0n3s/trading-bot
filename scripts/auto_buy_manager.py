@@ -19,7 +19,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-BASE_DIR = Path(__file__).resolve().parent
+BASE_DIR = Path(__file__).resolve().parents[1]
 VENV_PYTHON = BASE_DIR / "venv" / "bin" / "python"
 ENV_FILE = Path("/etc/trading-bot.env")
 DB_PATH = BASE_DIR / "trades.db"

@@ -14,7 +14,7 @@ import urllib.request
 from collections import Counter
 from pathlib import Path
 
-BASE_DIR = Path(__file__).resolve().parent
+BASE_DIR = Path(__file__).resolve().parents[1]
 VENV_PYTHON = BASE_DIR / "venv" / "bin" / "python"
 ENV_FILE = Path("/etc/trading-bot.env")
 
@@ -52,10 +52,10 @@ def load_env_file(path=ENV_FILE):
 
 load_env_file()
 
-from db_migrations import status as migration_status
 from market_time import expected_market_context_date
 from strategy_constants import APPROVED_SYMBOLS
 
+from db_migrations import status as migration_status
 from services.broker_service import broker_service
 
 MARKET_CONTEXT = BASE_DIR / "market_context.json"

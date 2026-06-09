@@ -22,7 +22,7 @@ from trade_matcher import rebuild_matched_trades
 
 from repositories.reporting_repo import ReportingRepository
 
-BASE_DIR = Path(__file__).resolve().parent
+BASE_DIR = Path(__file__).resolve().parents[1]
 OUT_FILE = BASE_DIR / "strategy_memory.json"
 MEMORY_HISTORY_DIR = BASE_DIR / "strategy_memory_history"
 REPORT_MEMORY_FILES = {

@@ -28,7 +28,7 @@ from repositories import position_repo
 from services.broker_service import broker_service
 from services.position_market_data_service import position_market_data_service
 
-BASE_DIR = Path(__file__).resolve().parent
+BASE_DIR = Path(__file__).resolve().parents[1]
 STATE_FILE = BASE_DIR / "position_manager_state.json"
 ET = pytz.timezone("America/New_York")
 

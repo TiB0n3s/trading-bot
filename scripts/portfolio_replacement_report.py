@@ -25,7 +25,7 @@ from repositories.portfolio_rotation_repo import recent_buy_signals
 from services.broker_service import broker_service
 
 ET = pytz.timezone("America/New_York")
-BASE_DIR = Path(__file__).resolve().parent
+BASE_DIR = Path(__file__).resolve().parents[1]
 PORTFOLIO_REPLACEMENT_MEMORY_FILE = BASE_DIR / "portfolio_replacement_memory.json"
 
 

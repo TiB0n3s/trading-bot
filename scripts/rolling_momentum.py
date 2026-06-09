@@ -20,7 +20,7 @@ from services.rolling_momentum_service import (
     RollingMomentumService,
 )
 
-BASE_DIR = Path(__file__).resolve().parent
+BASE_DIR = Path(__file__).resolve().parents[1]
 OUTPUT_FILE = BASE_DIR / "rolling_momentum.json"
 
 _service = RollingMomentumService()

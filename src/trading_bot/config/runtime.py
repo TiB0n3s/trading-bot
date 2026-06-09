@@ -5,6 +5,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Callable
 
+from src.trading_bot.config.authority_modes import (
+    authority_mode_to_legacy_prediction_gate,
+    normalize_config_authority_mode,
+)
+
 EnvGet = Callable[[str, str | None], str | None]
 Warn = Callable[[str], None]
 
@@ -40,6 +45,7 @@ class RuntimeSettings:
     ENFORCE_SETUP_POLICY_BLOCKS: bool
     SIGNAL_TTL_SECONDS: int
     PREDICTION_GATE_MODE: str
+    PREDICTION_GATE_AUTHORITY_MODE: str
     PREDICTION_SOFT_AVOID_MIN_SAMPLE_SIZE: int
     INTRA_SESSION_TAPE_DEGRADATION_ENABLED: bool
     INTRA_SESSION_TAPE_DEGRADATION_START_HOUR_ET: int
@@ -67,9 +73,21 @@ def load_runtime_settings(
     warn: Warn,
 ) -> RuntimeSettings:
     """Load runtime settings while preserving current app.py defaults."""
-    prediction_gate_mode = _env_str(env_get, "PREDICTION_GATE_MODE", "warn").lower()
-    if prediction_gate_mode not in ("off", "warn", "soft", "hard"):
+    prediction_gate_authority_mode = normalize_config_authority_mode(
+        _env_str(env_get, "PREDICTION_GATE_MODE", "warn"),
+        default="warn",
+    )
+    prediction_gate_mode = authority_mode_to_legacy_prediction_gate(prediction_gate_authority_mode)
+    if prediction_gate_authority_mode not in (
+        "off",
+        "observe",
+        "warn",
+        "size_down",
+        "paper_block",
+        "live_block",
+    ):
         warn(f"Invalid PREDICTION_GATE_MODE={prediction_gate_mode!r}; defaulting to warn")
+        prediction_gate_authority_mode = "warn"
         prediction_gate_mode = "warn"
 
     strategy_engine_mode = _env_str(env_get, "STRATEGY_ENGINE_MODE", "observe").lower()
@@ -87,6 +105,7 @@ def load_runtime_settings(
         ENFORCE_SETUP_POLICY_BLOCKS=True,
         SIGNAL_TTL_SECONDS=_env_int(env_get, "SIGNAL_TTL_SECONDS", 300),
         PREDICTION_GATE_MODE=prediction_gate_mode,
+        PREDICTION_GATE_AUTHORITY_MODE=prediction_gate_authority_mode,
         PREDICTION_SOFT_AVOID_MIN_SAMPLE_SIZE=_env_int(
             env_get,
             "PREDICTION_SOFT_AVOID_MIN_SAMPLE_SIZE",

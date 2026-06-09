@@ -166,6 +166,54 @@ def test_decision_engine_stores_canonical_trace_directly():
         "approve",
         "stored adjudication",
     )
+    gate_ids = [row["gate_id"] for row in account_state["canonical_decision_trace"]["gate_results"]]
+    for expected in (
+        "preflight",
+        "cash_safe",
+        "macro",
+        "setup_policy",
+        "trend_confirmation",
+        "prediction",
+        "session_momentum",
+        "ml_authority",
+        "decision_policy",
+        "intelligence_adjudicator",
+        "paper_exploration_authority",
+        "final_sizing",
+        "execution_quality",
+        "claude_approval",
+    ):
+        assert_true(expected in gate_ids, f"{expected} in full trace")
+
+
+def test_claude_cannot_approve_cash_buy_without_authority():
+    account_state = _strong_account_state()
+    result = evaluate_approval_decision(
+        signal={"symbol": "AAPL", "action": "buy"},
+        action="buy",
+        claude_account_state={},
+        evaluate_signal=lambda *_: {
+            "approved": True,
+            "confidence": "high",
+            "reason": "Claude approved",
+            "position_size_pct": 1.0,
+        },
+        cash_safe_mode=False,
+        market_bias={},
+        account_state=account_state,
+        medium_confidence_override=lambda **_: (True, "test override"),
+        tape_exception_enabled=False,
+        execution_mode="cash_full",
+        ml_authority_config={},
+    )
+    assert_equal(result.approved, False, "approved")
+    assert_equal(result.source, "authority_matrix", "source")
+    assert_true("AuthorityMatrix denied claude approve authority" in result.reason, "reason")
+    assert_equal(
+        account_state["canonical_decision_trace"]["shadow"]["approval_source"],
+        "authority_matrix",
+        "trace source",
+    )
 
 
 def test_approval_path_stores_canonical_trace_for_paper_authority():
@@ -205,11 +253,9 @@ def test_approval_path_stores_canonical_trace_for_paper_authority():
     assert_equal(trace["trace_version"], "decision_trace_v1", "trace version")
     assert_equal(trace["final_decision"], "approved", "trace final")
     gate_ids = [row["gate_id"] for row in trace["gate_results"]]
-    assert_equal(
-        gate_ids,
-        ["intelligence_adjudicator", "paper_exploration_authority", "claude_approval"],
-        "gate order",
-    )
+    assert_true("intelligence_adjudicator" in gate_ids, "intelligence gate")
+    assert_true("paper_exploration_authority" in gate_ids, "authority gate")
+    assert_true("claude_approval" in gate_ids, "claude gate")
     assert_equal(trace["shadow"]["approval_source"], "paper_exploration_authority", "trace source")
 
 
@@ -221,6 +267,7 @@ def main():
         test_signal_candidates_normalize_webhook_and_auto_buy,
         test_intelligence_adjudicator_aggregates_model_surfaces,
         test_decision_engine_stores_canonical_trace_directly,
+        test_claude_cannot_approve_cash_buy_without_authority,
         test_approval_path_stores_canonical_trace_for_paper_authority,
     ]
     for test in tests:

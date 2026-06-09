@@ -4,16 +4,18 @@ Focused tests for internal auto-buy candidate scoring.
 Run:
   python3 tests/test_auto_buy_manager.py
 """
+# ruff: noqa: E402, I001
 
+import json
 import sys
 import sqlite3
 import tempfile
-import json
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
+from auto_buy_manager import attach_canonical_decision_metadata
 from auto_buy_manager import evaluate_auto_buy_candidate
 from auto_buy_manager import auto_buy_capacity_check
 from auto_buy_manager import log_auto_buy_order
@@ -544,7 +546,11 @@ def test_tradingview_symbols_need_higher_auto_buy_threshold():
 
     assert_equal(internal["decision"], "strong_buy_candidate", "internal decision")
     assert_equal(webhook_symbol["decision"], "watch", "webhook-symbol decision")
-    assert_equal(webhook_symbol["strong_buy_threshold"], auto_buy_manager.AUTO_BUY_MIN_SCORE + 4.0, "threshold")
+    assert_equal(
+        webhook_symbol["strong_buy_threshold"],
+        auto_buy_manager.AUTO_BUY_MIN_SCORE + 4.0,
+        "threshold",
+    )
     assert_equal(webhook_symbol["requires_tradingview_webhook"], True, "requires webhook")
 
 
@@ -604,7 +610,11 @@ def test_live_buy_requires_market_open_and_env_flag():
     order = maybe_execute_auto_buy(candidate, market_open=False, live_requested=False)
 
     assert_equal(order, None, "order")
-    assert_equal(candidate["live_block_reason"], "live not requested or AUTO_BUY_LIVE_BUYS is false", "block reason")
+    assert_equal(
+        candidate["live_block_reason"],
+        "live not requested or AUTO_BUY_LIVE_BUYS is false",
+        "block reason",
+    )
 
 
 def test_live_auto_buy_does_not_execute_tradingview_alert_symbols_by_default():
@@ -874,6 +884,35 @@ def test_log_auto_buy_order_writes_canonical_trade_row():
         assert_equal(row[10], "auto_buy_fixed_size", "auto-buy limiter")
 
 
+def test_auto_buy_candidate_attaches_canonical_decision_trace():
+    candidate = {
+        "symbol": "SOFI",
+        "decision": "strong_buy_candidate",
+        "score": 18,
+        "reason": "test reason",
+        "setup_score": 88,
+        "setup_label": "near_vwap",
+        "prediction_score": 72,
+        "session_momentum_severity": "pass",
+        "session_trend_label": "strong_uptrend",
+        "session_trend_score": 8,
+        "effective_size_cap_pct": 0.5,
+        "dominant_limiter": "auto_buy_fixed_size",
+    }
+    enriched = attach_canonical_decision_metadata(candidate)
+    assert_equal(enriched["canonical_signal_candidate"]["source"], "auto_buy", "source")
+    assert_equal(
+        enriched["canonical_decision_trace"]["trace_version"],
+        "decision_trace_v1",
+        "trace version",
+    )
+    gate_ids = [row["gate_id"] for row in enriched["canonical_decision_trace"]["gate_results"]]
+    if "intelligence_adjudicator" not in gate_ids:
+        raise AssertionError("missing intelligence gate in auto-buy trace")
+    if "final_sizing" not in gate_ids:
+        raise AssertionError("missing sizing gate in auto-buy trace")
+
+
 def test_log_candidate_mirrors_to_candidate_universe():
     class Quote:
         bid_price = 10.0
@@ -968,7 +1007,6 @@ def test_log_candidate_mirrors_to_candidate_universe():
             "rolling_momentum_json",
             "rolling source",
         )
-
 
 
 def test_bucking_fading_tape_does_not_hard_block():
@@ -1176,16 +1214,14 @@ def main():
         test_learned_tiebreaker_does_not_override_hard_blocks,
         test_learned_tiebreaker_can_override_soft_intelligence_blocks_in_paper_mode,
         test_log_auto_buy_order_writes_canonical_trade_row,
+        test_auto_buy_candidate_attaches_canonical_decision_trace,
         test_log_candidate_mirrors_to_candidate_universe,
     ]
 
     for test in tests:
         old_prediction_context = auto_buy_manager.auto_buy_prediction_context
         old_memory = auto_buy_manager.memory_for_signal
-        old_runtime = {
-            key: getattr(auto_buy_manager, key)
-            for key in AUTO_BUY_RUNTIME_DEFAULTS
-        }
+        old_runtime = {key: getattr(auto_buy_manager, key) for key in AUTO_BUY_RUNTIME_DEFAULTS}
         auto_buy_manager.auto_buy_prediction_context = lambda symbol: {
             "available": False,
             "ml_prediction_bucket": "unknown",

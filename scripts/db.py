@@ -375,6 +375,9 @@ def ensure_decision_snapshots_table(db_path: Path | str = DB_PATH) -> None:
     long_horizon_migration = next(
         m for m in MIGRATIONS if m.migration_id == "20260601_021_long_horizon_session_momentum"
     )
+    gate_trace_migration = next(
+        m for m in MIGRATIONS if m.migration_id == "20260609_023_decision_snapshot_gate_trace"
+    )
     ensure_migration_table(db_path)
     with get_connection(db_path) as con:
         table_exists = con.execute(
@@ -425,6 +428,13 @@ def ensure_decision_snapshots_table(db_path: Path | str = DB_PATH) -> None:
                     con.execute(statement)
                     existing_cols.add(column)
         for statement in long_horizon_migration.statements:
+            alter = statement.strip().split()
+            if len(alter) >= 6 and alter[2] == "decision_snapshots":
+                column = alter[5]
+                if column not in existing_cols:
+                    con.execute(statement)
+                    existing_cols.add(column)
+        for statement in gate_trace_migration.statements:
             alter = statement.strip().split()
             if len(alter) >= 6 and alter[2] == "decision_snapshots":
                 column = alter[5]

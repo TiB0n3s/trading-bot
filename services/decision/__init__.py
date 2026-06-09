@@ -5,6 +5,7 @@ candidate adapters. Legacy modules may still call into it while the larger
 signal orchestration files are reduced to compatibility wrappers.
 """
 
+from services.decision.capital_allocator import CapitalAllocation, CapitalAllocator
 from services.decision.engine import DecisionEngine, DecisionEvaluation
 
-__all__ = ["DecisionEngine", "DecisionEvaluation"]
+__all__ = ["CapitalAllocation", "CapitalAllocator", "DecisionEngine", "DecisionEvaluation"]

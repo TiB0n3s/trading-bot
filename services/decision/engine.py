@@ -5,7 +5,21 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from services.decision.gates.intelligence import build_intelligence_adjudication
+from services.decision.gates import (
+    build_cash_safe_gate,
+    build_claude_gate,
+    build_decision_policy_gate,
+    build_execution_gate,
+    build_intelligence_adjudication,
+    build_macro_gate,
+    build_ml_authority_gate,
+    build_prediction_gate,
+    build_preflight_gate,
+    build_session_gate,
+    build_setup_gate,
+    build_sizing_gate,
+    build_trend_gate,
+)
 from src.trading_bot.intelligence.adjudicator import ModelAdjudication
 from src.trading_bot.runtime.authority import AuthorityMatrix
 from src.trading_bot.runtime.gate_engine import CallableGate, GateEngine
@@ -109,25 +123,51 @@ class DecisionEngine:
             )
 
         def claude_gate(_state: dict[str, Any]) -> GateResult:
-            approved = bool(decision.get("approved"))
-            return GateResult(
-                gate_id="claude_approval",
-                layer="approval",
-                decision="pass" if approved else "block",
+            return build_claude_gate(
+                decision=decision,
+                source=source,
                 authority=_authority_level(execution_mode),
-                enforced=source == "claude",
-                reason=str(decision.get("reason") or ""),
-                inputs={
-                    "confidence": decision.get("confidence"),
-                    "source": source,
-                },
-                outputs={"approved": approved},
             )
 
         trace = GateEngine(
             [
+                CallableGate(
+                    "preflight", "preflight", lambda _state: build_preflight_gate(account_state)
+                ),
+                CallableGate(
+                    "cash_safe", "risk", lambda _state: build_cash_safe_gate(account_state)
+                ),
+                CallableGate("macro", "macro", lambda _state: build_macro_gate(account_state)),
+                CallableGate(
+                    "setup_policy", "setup", lambda _state: build_setup_gate(account_state)
+                ),
+                CallableGate(
+                    "trend_confirmation", "trend", lambda _state: build_trend_gate(account_state)
+                ),
+                CallableGate(
+                    "prediction", "prediction", lambda _state: build_prediction_gate(account_state)
+                ),
+                CallableGate(
+                    "session_momentum", "session", lambda _state: build_session_gate(account_state)
+                ),
+                CallableGate(
+                    "ml_authority", "ml", lambda _state: build_ml_authority_gate(account_state)
+                ),
+                CallableGate(
+                    "decision_policy",
+                    "policy",
+                    lambda _state: build_decision_policy_gate(account_state),
+                ),
                 CallableGate("intelligence_adjudicator", "intelligence", adjudication_gate),
                 CallableGate("paper_exploration_authority", "authority", authority_gate),
+                CallableGate(
+                    "final_sizing", "sizing", lambda _state: build_sizing_gate(account_state)
+                ),
+                CallableGate(
+                    "execution_quality",
+                    "execution",
+                    lambda _state: build_execution_gate(account_state),
+                ),
                 CallableGate("claude_approval", "approval", claude_gate),
             ]
         ).run({"final_decision": "approved" if bool(decision.get("approved")) else "rejected"})

@@ -70,6 +70,23 @@ reports, and tests are updated.
   `engine.py`, `state.py`, `trace.py`, `authority.py`, `gates/`, and
   `adapters/`. `services/approval_service.py` stores canonical adjudication and
   traces through `DecisionEngine` instead of building a parallel trace path.
+- Expanded: `services/decision/gates/` now has first-class trace adapters for
+  preflight, cash-safe, macro, setup, trend, prediction, session momentum, ML
+  authority, decision policy, intelligence, Claude, sizing, and execution.
+  `DecisionEngine` includes these gates in canonical traces using current
+  account-state evidence.
+- Expanded: Claude buy approvals now require `AuthorityMatrix` approval
+  authority. In cash/live modes, Claude can no longer be the sole approving
+  authority for buys.
+- Expanded: auto-buy candidates now attach canonical `SignalCandidate`,
+  `DecisionTrace`, `intelligence_adjudication`, and capital-allocation metadata;
+  submitted paper auto-buys use the canonical allocated size cap.
+- Expanded: trace-native replacement reports exist:
+  `decision_trace_report.py`, `gate_impact_report.py`,
+  `counterfactual_replay_report.py`, and `model_authority_report.py`.
+- Expanded: config authority vocabulary is normalized through
+  `src/trading_bot/config/authority_modes.py`, and startup validates a
+  fail-fast runtime safety profile before background runtime tasks run.
 - Started: `legacy_architecture/decision_v1/manifest.json` classifies legacy
   decision/orchestration surfaces as `thin_adapter`,
   `archive_after_clean_cycles`, or `manual_tool`, with explicit replacement

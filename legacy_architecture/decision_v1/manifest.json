@@ -19,13 +19,13 @@
       "path": "services/live_signal_processor.py",
       "bucket": "archive_after_clean_cycles",
       "replacement": "services/decision/engine.py plus bounded execution adapter",
-      "reason": "live signal processor remains deployed orchestration owner"
+      "reason": "live signal processor remains deployed orchestration owner; canonical traces now cover the full decision cascade but orchestration is not fully moved"
     },
     {
       "path": "services/approval_service.py",
       "bucket": "thin_adapter",
       "replacement": "services/decision/gates/* and services/decision/engine.py",
-      "reason": "approval runtime now stores traces through DecisionEngine, but gate families still live here"
+      "reason": "approval runtime stores traces through DecisionEngine and Claude approval is authority-matrix bounded; detailed legacy gate functions still live here"
     },
     {
       "path": "services/context_builder.py",
@@ -61,7 +61,7 @@
       "path": "scripts/auto_buy_manager.py",
       "bucket": "archive_after_clean_cycles",
       "replacement": "services/decision/adapters/auto_buy.py plus future auto-buy CLI",
-      "reason": "auto-buy is still a cron/operator entrypoint and is not yet a thin adapter"
+      "reason": "auto-buy now attaches canonical candidate/trace/allocation metadata and uses canonical allocated size, but cron/operator discovery and execution still live in the script"
     },
     {
       "path": "scripts/decision_engine.py",
@@ -79,7 +79,7 @@
       "path": "scripts/replay_report.py",
       "bucket": "manual_tool",
       "replacement": "scripts/decision_trace_report.py or ml_platform.cli replay",
-      "reason": "old replay reports should eventually consume DecisionTrace"
+      "reason": "trace-native decision/gate/counterfactual/model-authority reports now exist; old replay remains manual until callers migrate"
     },
     {
       "path": "scripts/train_supervised_predictions.py",

@@ -10,14 +10,14 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from symbols_config import SYMBOL_UNIVERSE_VERSION
+
+from repositories.decision_snapshot_repo import DecisionSnapshotRepository
 from services.canonical_intelligence_service import (
     CANONICAL_INTELLIGENCE_VERSION,
     build_canonical_intelligence_snapshot,
     canonical_json,
 )
-from repositories.decision_snapshot_repo import DecisionSnapshotRepository
-from symbols_config import SYMBOL_UNIVERSE_VERSION
-
 
 ENV_PROFILE_KEYS = (
     "EXECUTION_MODE",
@@ -82,6 +82,13 @@ DECISION_SNAPSHOT_FEATURE_SEMANTIC_VERSION = "decision_snapshot_features_v4"
 
 def json_dumps(value: Any) -> str:
     return json.dumps(value or {}, sort_keys=True, default=str)
+
+
+def gate_trace_payload(account_state: dict[str, Any]) -> dict[str, Any]:
+    trace = (
+        account_state.get("canonical_decision_trace") or account_state.get("decision_trace") or {}
+    )
+    return trace if isinstance(trace, dict) else {}
 
 
 def file_sha256(path: Path) -> str | None:
@@ -176,9 +183,7 @@ class DecisionSnapshotService:
         final_decision = (
             "approved"
             if approved
-            else decision.get("decision")
-            or decision.get("status")
-            or "rejected"
+            else decision.get("decision") or decision.get("status") or "rejected"
         )
 
         market_context_metadata = self.market_context_metadata()
@@ -259,6 +264,7 @@ class DecisionSnapshotService:
             "decision_json": json_dumps(decision),
             "order_json": json_dumps(order),
             "account_state_json": json_dumps(account_state),
+            "gate_trace_json": json_dumps(gate_trace_payload(account_state)),
             **market_context_metadata,
         }
         for field in SNAPSHOT_CONTEXT_FIELDS:

@@ -567,6 +567,11 @@ MIGRATIONS: tuple[Migration, ...] = (
             """,
         ),
     ),
+    Migration(
+        migration_id="20260609_023_decision_snapshot_gate_trace",
+        description="Add first-class canonical gate trace JSON to decision_snapshots.",
+        statements=("ALTER TABLE decision_snapshots ADD COLUMN gate_trace_json TEXT",),
+    ),
 )
 
 

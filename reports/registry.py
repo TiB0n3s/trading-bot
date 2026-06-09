@@ -90,21 +90,41 @@ def _run_prediction_validation(request: ReportRequest) -> bool:
 REPORT_COMMANDS: Mapping[str, ReportCommand] = {
     "alignment": ScriptReportCommand("alignment", "market_alignment_report", _no_date),
     "adaptive": ScriptReportCommand("adaptive", "adaptive_confirmation_report", _no_date),
-    "adaptive_impact": ScriptReportCommand("adaptive_impact", "adaptive_impact_report", _date_positional),
-    "strategy_intelligence": ScriptReportCommand("strategy_intelligence", "strategy_intelligence_report", _date_positional),
+    "adaptive_impact": ScriptReportCommand(
+        "adaptive_impact", "adaptive_impact_report", _date_positional
+    ),
+    "strategy_intelligence": ScriptReportCommand(
+        "strategy_intelligence", "strategy_intelligence_report", _date_positional
+    ),
     "blocked": ScriptReportCommand("blocked", "blocked_signal_outcome_report", _date_flag),
     "filters": ScriptReportCommand("filters", "filter_report", _filter_args),
     "drawdown": ScriptReportCommand("drawdown", "drawdown_report", _date_positional),
-    "event-attribution": ScriptReportCommand("event-attribution", "event_attribution_report", _date_flag),
+    "event-attribution": ScriptReportCommand(
+        "event-attribution", "event_attribution_report", _date_flag
+    ),
     "intelligence": ScriptReportCommand("intelligence", "intelligence_context_report", _date_flag),
     "context": ScriptReportCommand("context", "context_trade_join_report", _date_flag),
     "learning": ScriptReportCommand("learning", "intelligence_learning_report", _date_flag),
     "predictions": ScriptReportCommand("predictions", "intelligence_prediction_report", _date_flag),
-    "signal-lessons": ScriptReportCommand("signal-lessons", "signal_timing_lesson_report", _date_flag),
+    "signal-lessons": ScriptReportCommand(
+        "signal-lessons", "signal_timing_lesson_report", _date_flag
+    ),
     "trends": ScriptReportCommand("trends", "trend_context_report", _date_flag),
-    "prediction-validation": FunctionReportCommand("prediction-validation", _run_prediction_validation),
+    "prediction-validation": FunctionReportCommand(
+        "prediction-validation", _run_prediction_validation
+    ),
     "auto-buy-outcomes": FunctionReportCommand("auto-buy-outcomes", _run_auto_buy_outcomes),
-    "strong-days": ScriptReportCommand("strong-days", "strong_day_participation_report", _strong_day_args),
+    "strong-days": ScriptReportCommand(
+        "strong-days", "strong_day_participation_report", _strong_day_args
+    ),
+    "decision-trace": ScriptReportCommand("decision-trace", "decision_trace_report", _date_flag),
+    "gate-impact": ScriptReportCommand("gate-impact", "gate_impact_report", _date_flag),
+    "counterfactual-replay": ScriptReportCommand(
+        "counterfactual-replay",
+        "counterfactual_replay_report",
+        _date_flag,
+    ),
+    "model-authority": ScriptReportCommand("model-authority", "model_authority_report", _date_flag),
 }
 
 

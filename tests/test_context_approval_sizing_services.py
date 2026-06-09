@@ -509,9 +509,9 @@ def test_paper_exploration_authority_does_not_run_in_cash_mode():
         },
     )
 
-    assert_equal(result.approved, True, "approved")
-    assert_equal(result.source, "claude", "source")
-    assert_equal(result.claude_payload["position_size_pct"], 1.0, "unchanged size")
+    assert_equal(result.approved, False, "approved")
+    assert_equal(result.source, "authority_matrix", "source")
+    assert_equal(result.category, "authority_matrix", "category")
     assert_equal("paper_exploration_authority" in account_state, False, "no paper marker")
 
 

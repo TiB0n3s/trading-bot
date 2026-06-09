@@ -17,6 +17,13 @@ from services.config_audit_service import (  # noqa: E402
     build_config_audit_payload,
     discover_env_var_references,
 )
+from services.runtime_safety_profile_service import (  # noqa: E402
+    validate_runtime_safety_profile,
+)
+from src.trading_bot.config.authority_modes import (  # noqa: E402
+    authority_mode_to_legacy_prediction_gate,
+    normalize_config_authority_mode,
+)
 
 
 def test_discover_env_var_references_finds_literal_and_sensitive_keys(tmp_path):
@@ -65,6 +72,12 @@ def test_build_config_audit_payload_flags_unsafe_runtime_settings(tmp_path):
     assert "EXECUTION_MODE=cash_full requires explicit operator review" in payload["warnings"]
     assert "ML_AUTHORITY_MODE=live_block requires current promotion evidence" in payload["warnings"]
     assert "Transformer authority enabled without TRANSFORMER_MODEL_ID" in payload["warnings"]
+    assert payload["runtime_safety_profile"]["ready"] is False
+    assert payload["runtime_safety_profile"]["safety_profile_hash"]
+    assert (
+        "cash execution mode requires LIVE_TRADING_ENABLED=true"
+        in payload["runtime_safety_profile"]["warnings"]
+    )
 
 
 def test_build_config_audit_payload_allows_safe_paper_defaults(tmp_path):
@@ -80,6 +93,29 @@ def test_build_config_audit_payload_allows_safe_paper_defaults(tmp_path):
 
     assert payload["warnings"] == []
     assert payload["ready"] is True
+    assert payload["runtime_safety_profile"]["ready"] is True
+
+
+def test_authority_mode_normalization_maps_legacy_gate_terms():
+    assert normalize_config_authority_mode("hard") == "live_block"
+    assert normalize_config_authority_mode("soft") == "size_down"
+    assert normalize_config_authority_mode("observe_only") == "observe"
+    assert authority_mode_to_legacy_prediction_gate("live_block") == "hard"
+    assert authority_mode_to_legacy_prediction_gate("size_down") == "soft"
+
+
+def test_runtime_safety_profile_fail_fast_blocks_unsafe_live_config():
+    env = {
+        "EXECUTION_MODE": "cash_full",
+        "LIVE_TRADING_ENABLED": "false",
+        "ML_AUTHORITY_MODE": "live_block",
+    }
+    try:
+        validate_runtime_safety_profile(env)
+    except RuntimeError as exc:
+        assert "unsafe runtime safety profile" in str(exc)
+    else:
+        raise AssertionError("unsafe runtime safety profile did not fail fast")
 
 
 if __name__ == "__main__":
@@ -87,6 +123,8 @@ if __name__ == "__main__":
         test_discover_env_var_references_finds_literal_and_sensitive_keys,
         test_build_config_audit_payload_flags_unsafe_runtime_settings,
         test_build_config_audit_payload_allows_safe_paper_defaults,
+        test_authority_mode_normalization_maps_legacy_gate_terms,
+        test_runtime_safety_profile_fail_fast_blocks_unsafe_live_config,
     ]
     for test in tests:
         if test.__code__.co_argcount:

@@ -79,6 +79,8 @@ from repositories.candidate_universe_repo import CandidateUniverseRepository
 from repositories.prediction_repo import PredictionRepository
 from risk.exposure import any_cluster_limit_hit, cluster_exposure
 from services.ai_momentum_pattern_service import deterministic_momentum_pattern
+from services.decision import CapitalAllocator, DecisionEngine
+from services.decision.adapters import auto_buy_candidate_from_raw
 from services.intelligence.candidates.reference import candidate_reference_service
 from services.intelligence.candidates.universe import CandidateUniverseService
 from services.intraday_trade_feedback_service import (
@@ -1371,12 +1373,82 @@ def enrich_candidate_with_reference_snapshot(candidate: dict[str, Any]) -> dict[
     return enriched
 
 
+def attach_canonical_decision_metadata(candidate: dict[str, Any]) -> dict[str, Any]:
+    """Attach canonical candidate and decision trace metadata for learning/replay."""
+    canonical = auto_buy_candidate_from_raw(candidate)
+    approved = candidate.get("decision") == "strong_buy_candidate"
+    allocation = CapitalAllocator(max_risk_pct=2.0).allocate(
+        requested_size_pct=candidate.get("effective_size_cap_pct") or AUTO_BUY_POSITION_SIZE_PCT,
+        confidence="auto_buy_manager" if approved else "low",
+        liquidity_stress=candidate.get("liquidity_stress") or candidate.get("lsi_status"),
+    )
+    account_state = {
+        "setup_quality": {
+            "score": candidate.get("setup_score"),
+            "recommendation": candidate.get("setup_label"),
+            "policy_action": candidate.get("setup_policy_action"),
+            "reason": candidate.get("setup_policy_reason"),
+        },
+        "buy_opportunity": {
+            "buy_opportunity_score": candidate.get("score"),
+            "buy_opportunity_recommendation": candidate.get("decision"),
+            "reason": candidate.get("reason") or candidate.get("hard_block_reason"),
+            "max_position_size_pct": candidate.get("effective_size_cap_pct"),
+        },
+        "prediction_gate": {
+            "prediction_score": candidate.get("prediction_score")
+            or candidate.get("ml_prediction_score"),
+            "sample_size": candidate.get("ml_prediction_sample_size"),
+            "decision": candidate.get("prediction_decision"),
+            "reason": candidate.get("prediction_reason"),
+        },
+        "session_momentum_gate": {
+            "severity": candidate.get("session_momentum_severity"),
+            "trend_label": candidate.get("session_trend_label"),
+            "trend_score": candidate.get("session_trend_score"),
+            "reason": candidate.get("session_momentum_reason"),
+        },
+        "execution_quality": {
+            "decision": "allow" if approved else "observe",
+            "reason": candidate.get("live_block_reason") or "auto-buy candidate scoring",
+        },
+        "sizing": {
+            "decision": "cap",
+            "size_cap_pct": allocation.allocated_size_pct,
+            "dominant_limiter": candidate.get("dominant_limiter") or "capital_allocator",
+            "capital_allocation": allocation.to_dict(),
+        },
+    }
+    decision = {
+        "approved": approved,
+        "confidence": "auto_buy_manager",
+        "reason": candidate.get("reason") or candidate.get("hard_block_reason") or "",
+        "position_size_pct": allocation.allocated_size_pct,
+    }
+    evaluation = DecisionEngine().store_to_account_state(
+        account_state=account_state,
+        decision=decision,
+        source="auto_buy",
+        execution_mode=os.getenv("EXECUTION_MODE", "paper").strip().lower(),
+    )
+    enriched = dict(candidate)
+    enriched["canonical_signal_candidate"] = canonical.to_dict()
+    enriched["intelligence_adjudication"] = evaluation.adjudication.to_dict()
+    enriched["capital_allocation"] = allocation.to_dict()
+    enriched["effective_size_cap_pct"] = allocation.allocated_size_pct
+    enriched["decision_trace"] = evaluation.trace.to_dict()
+    enriched["canonical_decision_trace"] = enriched["decision_trace"]
+    enriched["decision_engine_runtime_effect"] = "canonical_auto_buy_trace_and_authority_metadata"
+    return enriched
+
+
 def log_candidate(
     candidate: dict[str, Any], live_buy_enabled: bool, order: dict[str, Any] | None = None
 ) -> None:
     order = order or {}
     timestamp = now_et().isoformat()
     candidate = enrich_candidate_with_reference_snapshot(candidate)
+    candidate = attach_canonical_decision_metadata(candidate)
     auto_buy_repo.init_tables(DB_PATH)
     auto_buy_repo.insert_candidate_and_snapshot(
         timestamp=timestamp,
@@ -1511,6 +1583,7 @@ def enrich_auto_buy_trade_context(candidate: dict[str, Any]) -> None:
 def maybe_execute_auto_buy(
     candidate: dict[str, Any], market_open: bool, live_requested: bool
 ) -> dict[str, Any] | None:
+    candidate.update(attach_canonical_decision_metadata(candidate))
     if not live_requested or not AUTO_BUY_LIVE_BUYS:
         candidate["live_block_reason"] = "live not requested or AUTO_BUY_LIVE_BUYS is false"
         return None
@@ -1550,7 +1623,7 @@ def maybe_execute_auto_buy(
     order = broker_service.place_order(
         symbol=candidate["symbol"],
         action="buy",
-        position_size_pct=AUTO_BUY_POSITION_SIZE_PCT,
+        position_size_pct=candidate.get("effective_size_cap_pct") or AUTO_BUY_POSITION_SIZE_PCT,
         stop_loss_pct=AUTO_BUY_STOP_LOSS_PCT,
         take_profit_pct=AUTO_BUY_TAKE_PROFIT_PCT,
         risk_level=candidate.get("risk_level"),

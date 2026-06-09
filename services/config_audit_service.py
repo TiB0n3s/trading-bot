@@ -22,6 +22,10 @@ from config import (
     load_risk_config,
     load_signal_config,
 )
+from services.runtime_safety_profile_service import (
+    build_runtime_safety_profile,
+    runtime_safety_warnings,
+)
 
 CONFIG_AUDIT_VERSION = "config_audit_v1"
 CONFIG_AUDIT_RUNTIME_EFFECT = "diagnostic_only_no_runtime_config_change"
@@ -191,6 +195,9 @@ def build_config_audit_payload(
     ]
     inventory = discover_env_var_references(base_dir)
     warnings = _runtime_warnings(env)
+    safety_profile = build_runtime_safety_profile(env)
+    safety_profile_payload = safety_profile.to_dict()
+    safety_profile_warnings = runtime_safety_warnings(safety_profile)
     return {
         "version": CONFIG_AUDIT_VERSION,
         "runtime_effect": CONFIG_AUDIT_RUNTIME_EFFECT,
@@ -206,5 +213,10 @@ def build_config_audit_payload(
             "non_literal_call_files": inventory["non_literal_call_files"][:12],
         },
         "warnings": warnings,
+        "runtime_safety_profile": {
+            **safety_profile_payload,
+            "warnings": safety_profile_warnings,
+            "ready": not safety_profile_warnings,
+        },
         "ready": not warnings and all(item.status == "ok" for item in factories),
     }

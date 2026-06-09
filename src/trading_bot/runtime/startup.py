@@ -6,9 +6,11 @@ from types import ModuleType
 from typing import Any
 
 from prediction_cache import start_prediction_cache_loader
-from repositories import context_repo
-from services.startup_service import StartupDeps, StartupService
 from session_momentum import init_session_momentum_table
+
+from repositories import context_repo
+from services.runtime_safety_profile_service import validate_runtime_safety_profile
+from services.startup_service import StartupDeps, StartupService
 
 
 def build_runtime_startup_service(
@@ -50,6 +52,9 @@ def run_runtime_startup_tasks(
     app_container: Any | None = None,
 ) -> None:
     """Run startup tasks and update the runtime compatibility flag."""
+    safety_profile = validate_runtime_safety_profile(dict(runtime_module.os.environ))
+    runtime_module.RUNTIME_SAFETY_PROFILE = safety_profile
+    runtime_module.RUNTIME_SAFETY_PROFILE_HASH = safety_profile.get("safety_profile_hash")
     build_runtime_startup_service(
         runtime_module,
         app_container=app_container,

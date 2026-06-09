@@ -1,15 +1,17 @@
-import sys
+# ruff: noqa: E402
+
 import json
+import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
+from services.canonical_intelligence_service import CANONICAL_INTELLIGENCE_VERSION
 from services.decision_snapshot_service import (
     DECISION_SNAPSHOT_FEATURE_SEMANTIC_VERSION,
     DecisionSnapshotService,
 )
-from services.canonical_intelligence_service import CANONICAL_INTELLIGENCE_VERSION
 
 
 class FakeRepository:
@@ -70,6 +72,11 @@ def _record_snapshot(tmp_path, *, prediction_gate):
                 "buy_opportunity_score": 65,
                 "buy_opportunity_recommendation": "buy_candidate",
             },
+            "canonical_decision_trace": {
+                "trace_version": "decision_trace_v1",
+                "final_decision": "approved",
+                "gate_results": [{"gate_id": "prediction", "decision": "pass"}],
+            },
             "intelligence_context": {
                 "summary": {
                     "support_count": 2,
@@ -127,6 +134,9 @@ def test_record_decision_snapshot_builds_expected_row(tmp_path):
     assert row["market_context_date"] == "2026-05-30"
     assert row["market_context_hash"]
     assert row["raw_signal_json"] == '{"symbol": "AAPL"}'
+    gate_trace = json.loads(row["gate_trace_json"])
+    assert gate_trace["trace_version"] == "decision_trace_v1"
+    assert gate_trace["gate_results"][0]["gate_id"] == "prediction"
 
 
 def test_prediction_feature_fallback_uses_ml_when_present(tmp_path):

@@ -87,3 +87,31 @@ class DecisionSnapshotRepository:
                 (target_date,),
             ).fetchone()
         return int(row["n"] or 0) if row else 0
+
+    def list_trace_rows(self, target_date: str, limit: int = 500) -> list[dict[str, Any]]:
+        if not Path(self.db_path).exists() or not self.table_exists("decision_snapshots"):
+            return []
+        with get_connection(self.db_path) as con:
+            columns = {
+                row["name"]
+                for row in con.execute("PRAGMA table_info(decision_snapshots)").fetchall()
+            }
+            gate_trace_expr = (
+                "gate_trace_json" if "gate_trace_json" in columns else "NULL AS gate_trace_json"
+            )
+            try:
+                rows = con.execute(
+                    f"""
+                    SELECT id, decision_time, symbol, action, final_decision,
+                           rejection_reason, {gate_trace_expr}, account_state_json
+                      FROM decision_snapshots
+                     WHERE substr(decision_time, 1, 10) = ?
+                       AND account_state_json IS NOT NULL
+                     ORDER BY decision_time DESC
+                     LIMIT ?
+                    """,
+                    (target_date, int(limit)),
+                ).fetchall()
+            except Exception:
+                return []
+        return [dict(row) for row in rows]

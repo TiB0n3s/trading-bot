@@ -119,6 +119,31 @@ def _store_decision_trace(
     )
 
 
+def _authority_denied_decision(
+    *,
+    decision: dict[str, Any],
+    source: str,
+    execution_mode: str,
+) -> dict[str, Any] | None:
+    approved = bool(decision.get("approved"))
+    if not approved:
+        return None
+    matrix = AuthorityMatrix()
+    if matrix.can(source, "approve", execution_mode):
+        return None
+    return {
+        "approved": False,
+        "confidence": decision.get("confidence"),
+        "reason": (
+            f"AuthorityMatrix denied {source} approve authority in execution_mode={execution_mode}"
+        ),
+        "position_size_pct": 0,
+        "stop_loss_pct": decision.get("stop_loss_pct", 0),
+        "take_profit_pct": decision.get("take_profit_pct", 0),
+        "authority_denied": matrix.decision(source, "approve", execution_mode),
+    }
+
+
 def _claude_infrastructure_rejection(reason: str) -> tuple[str, str] | None:
     reason_text = str(reason or "").strip()
     reason_lower = reason_text.lower()
@@ -810,6 +835,35 @@ def evaluate_approval_decision(
                     "paper_exploration_authority": exploration,
                 },
             )
+
+    authority_denied = (
+        _authority_denied_decision(
+            decision=decision,
+            source="claude",
+            execution_mode=execution_mode,
+        )
+        if action == "buy"
+        else None
+    )
+    if authority_denied:
+        _store_decision_trace(
+            account_state=account_state,
+            decision=authority_denied,
+            source="authority_matrix",
+            execution_mode=execution_mode,
+        )
+        return ApprovalDecision(
+            approved=False,
+            source="authority_matrix",
+            confidence=confidence,
+            reason=authority_denied["reason"],
+            category="authority_matrix",
+            claude_payload=authority_denied,
+            metadata={
+                "raw_decision": raw_decision,
+                "authority_denied": authority_denied["authority_denied"],
+            },
+        )
 
     _store_decision_trace(
         account_state=account_state,

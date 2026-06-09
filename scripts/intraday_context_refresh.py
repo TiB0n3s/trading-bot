@@ -28,7 +28,8 @@ from symbols_config import APPROVED_SYMBOLS_LIST
 from market_intelligence.market_brief_builder import build_market_brief, write_market_context
 
 SCRIPT_DIR = Path(__file__).resolve().parent
-OUTPUT_FILE = SCRIPT_DIR / "market_context.json"
+BASE_DIR = SCRIPT_DIR.parent
+OUTPUT_FILE = BASE_DIR / "market_context.json"
 ENV_FILE = Path("/etc/trading-bot.env")
 
 logging.basicConfig(

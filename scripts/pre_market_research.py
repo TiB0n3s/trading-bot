@@ -40,7 +40,8 @@ from pathlib import Path
 from symbols_config import APPROVED_SYMBOLS_LIST
 
 SCRIPT_DIR = Path(__file__).resolve().parent
-OUTPUT_FILE = SCRIPT_DIR / "market_context.json"
+BASE_DIR = SCRIPT_DIR.parent
+OUTPUT_FILE = BASE_DIR / "market_context.json"
 ENV_FILE = Path("/etc/trading-bot.env")
 
 SYMBOLS = APPROVED_SYMBOLS_LIST

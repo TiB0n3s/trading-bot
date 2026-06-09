@@ -36,7 +36,8 @@ from market_intelligence.raw_research_template import build_template
 from market_intelligence.research_output import raw_research_summary
 
 SCRIPT_DIR = Path(__file__).resolve().parent
-OUTPUT_FILE = SCRIPT_DIR / "market_context.json"
+BASE_DIR = SCRIPT_DIR.parent
+OUTPUT_FILE = BASE_DIR / "market_context.json"
 
 PRE_MARKET_ALPACA_SYMBOL_SLEEP_SECONDS = float(
     os.getenv("PRE_MARKET_ALPACA_SYMBOL_SLEEP_SECONDS", "0.35")
@@ -875,7 +876,7 @@ def should_write_live(build_output):
 
     requested = Path(build_output)
     if not requested.is_absolute():
-        requested = SCRIPT_DIR / requested
+        requested = BASE_DIR / requested
 
     return requested.resolve() == OUTPUT_FILE.resolve()
 
@@ -1120,7 +1121,7 @@ def main():
     if args.build_output:
         built_path = Path(args.build_output)
         if not built_path.is_absolute():
-            built_path = SCRIPT_DIR / built_path
+            built_path = BASE_DIR / built_path
         built_path.parent.mkdir(parents=True, exist_ok=True)
         write_market_context(brief, built_path)
         logger.info(f"Wrote built data-only market context {built_path}")

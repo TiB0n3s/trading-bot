@@ -30,12 +30,10 @@ class DiscoveryExecutionBridgeRepository:
         max_candidates: int,
         target_date: str | None,
         min_candidate_timestamp: str | None,
-        recent_route_cutoff: str | None,
     ) -> list[dict[str, Any]]:
         timestamp_filter = ""
         latest_timestamp_filter = ""
         fresh_filter = ""
-        recent_route_filter = ""
         params: list[Any] = [min_score]
         if target_date:
             timestamp_filter = "AND substr(snap.candidate_timestamp, 1, 10) = ?"
@@ -45,17 +43,6 @@ class DiscoveryExecutionBridgeRepository:
         if min_candidate_timestamp:
             fresh_filter = "AND snap.candidate_timestamp >= ?"
             params.append(min_candidate_timestamp)
-        if recent_route_cutoff:
-            recent_route_filter = """
-                  AND NOT EXISTS (
-                      SELECT 1
-                      FROM auto_buy_decision_snapshots routed
-                      WHERE routed.symbol = snap.symbol
-                        AND routed.execution_status = ?
-                        AND routed.candidate_timestamp >= ?
-                  )
-            """
-            params.extend([ROUTED, recent_route_cutoff])
         params.append(max_candidates)
 
         with get_connection(self.db_path) as con:
@@ -77,7 +64,6 @@ class DiscoveryExecutionBridgeRepository:
                   )
                   {timestamp_filter}
                   {fresh_filter}
-                  {recent_route_filter}
                 ORDER BY score DESC, id ASC
                 LIMIT ?
                 """,
@@ -98,6 +84,27 @@ class DiscoveryExecutionBridgeRepository:
                 )
             con.commit()
         return [dict(row) for row in rows]
+
+    def latest_recent_routed_candidate(
+        self,
+        *,
+        symbol: str,
+        recent_route_cutoff: str,
+    ) -> dict[str, Any] | None:
+        with get_connection(self.db_path) as con:
+            row = con.execute(
+                """
+                SELECT id, candidate_timestamp, routed_order_id, order_id
+                FROM auto_buy_decision_snapshots
+                WHERE symbol = ?
+                  AND execution_status = ?
+                  AND candidate_timestamp >= ?
+                ORDER BY candidate_timestamp DESC, id DESC
+                LIMIT 1
+                """,
+                (symbol, ROUTED, recent_route_cutoff),
+            ).fetchone()
+        return dict(row) if row else None
 
     def mark_routed(
         self,

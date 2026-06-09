@@ -38,6 +38,14 @@ class FakeBroker:
         return self.open_orders
 
 
+class FakeLogger:
+    def __init__(self):
+        self.info_calls = []
+
+    def info(self, message, *args):
+        self.info_calls.append((message, args))
+
+
 def _approved_trace():
     return {
         "trace_version": "decision_trace_v1",
@@ -101,7 +109,7 @@ def _status(db_path: Path, row_id: int):
         ).fetchone()
 
 
-def _service(db_path: Path, broker: FakeBroker, min_score=13.0):
+def _service(db_path: Path, broker: FakeBroker, min_score=13.0, logger=None):
     return DiscoveryExecutionBridgeService(
         db_path=db_path,
         broker=broker,
@@ -116,6 +124,7 @@ def _service(db_path: Path, broker: FakeBroker, min_score=13.0):
             max_candidate_age_seconds=999999,
             symbol_cooldown_minutes=45,
         ),
+        logger=logger,
     )
 
 
@@ -238,9 +247,11 @@ def test_recent_routed_symbol_cooldown_blocks_reentry():
 
         row = _status(db_path, second_id)
         assert len(first) == 1
-        assert second == []
+        assert len(second) == 1
+        assert second[0].status == FAILED
+        assert "symbol cooldown active" in second[0].reason
         assert len(broker.calls) == 1
-        assert row["execution_status"] == PENDING
+        assert row["execution_status"] == FAILED
 
 
 def test_existing_open_position_blocks_bridge_route():
@@ -249,15 +260,56 @@ def test_existing_open_position_blocks_bridge_route():
         auto_buy_repo.init_tables(db_path)
         row_id = _insert_snapshot(db_path, _candidate(score=20.0, trace=_approved_trace()))
         broker = FakeBroker(position={"qty": "1"})
+        logger = FakeLogger()
 
-        results = _service(db_path, broker).route_eligible_candidates()
+        results = _service(db_path, broker, logger=logger).route_eligible_candidates()
 
         row = _status(db_path, row_id)
         assert len(results) == 1
         assert results[0].status == FAILED
         assert "existing open position" in results[0].reason
         assert broker.calls == []
+        assert logger.info_calls
+        assert logger.info_calls[0][1][0] == row_id
         assert row["execution_status"] == FAILED
+
+
+def test_symbol_cooldown_drop_logs_candidate_tracking_id():
+    with tempfile.TemporaryDirectory() as tmpdir:
+        db_path = Path(tmpdir) / "trades.db"
+        auto_buy_repo.init_tables(db_path)
+        logger = FakeLogger()
+        broker = FakeBroker(order={"id": "order-1", "status": "filled"})
+        service = _service(db_path, broker, logger=logger)
+        service.config = DiscoveryBridgeConfig(
+            min_score=13.0,
+            max_candidates_per_run=3,
+            default_position_size_pct=0.5,
+            stop_loss_pct=1.0,
+            take_profit_pct=2.0,
+            execution_mode="paper",
+            target_date="2026-06-09",
+            max_candidate_age_seconds=999999,
+            symbol_cooldown_minutes=10000,
+        )
+        _insert_snapshot(
+            db_path,
+            _candidate(symbol="BURL", score=20.0, trace=_approved_trace()),
+            timestamp="2026-06-09T14:00:00-04:00",
+        )
+        service.route_eligible_candidates()
+        second_id = _insert_snapshot(
+            db_path,
+            _candidate(symbol="BURL", score=21.0, trace=_approved_trace()),
+            timestamp="2026-06-09T14:02:00-04:00",
+        )
+
+        service.route_eligible_candidates()
+
+        assert logger.info_calls
+        assert logger.info_calls[-1][1][0] == second_id
+        assert logger.info_calls[-1][1][1] == "BURL"
+        assert "symbol cooldown active" in logger.info_calls[-1][1][2]
 
 
 def main() -> None:
@@ -268,6 +320,7 @@ def main() -> None:
         test_older_strong_candidate_is_not_routed_when_latest_symbol_snapshot_is_skip,
         test_recent_routed_symbol_cooldown_blocks_reentry,
         test_existing_open_position_blocks_bridge_route,
+        test_symbol_cooldown_drop_logs_candidate_tracking_id,
     ]
     for test in tests:
         test()

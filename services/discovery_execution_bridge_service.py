@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 from dataclasses import dataclass
 from datetime import datetime, timedelta
@@ -87,10 +88,12 @@ class DiscoveryExecutionBridgeService:
         config: DiscoveryBridgeConfig | None = None,
         db_path: Path | str | None = None,
         repository: DiscoveryExecutionBridgeRepository | None = None,
+        logger: logging.Logger | None = None,
     ):
         self.broker = broker
         self.config = config or DiscoveryBridgeConfig()
         self.repository = repository or DiscoveryExecutionBridgeRepository(db_path=db_path)
+        self.logger = logger or logging.getLogger(__name__)
 
     def route_eligible_candidates(self) -> list[DiscoveryBridgeResult]:
         if not _paper_only_mode(self.config.execution_mode):
@@ -113,9 +116,6 @@ class DiscoveryExecutionBridgeService:
             min_candidate_timestamp=_et_cutoff_iso(
                 timedelta(seconds=self.config.max_candidate_age_seconds)
             ),
-            recent_route_cutoff=_et_cutoff_iso(
-                timedelta(minutes=self.config.symbol_cooldown_minutes)
-            ),
         )
         results: list[DiscoveryBridgeResult] = []
         for row in claimed:
@@ -130,9 +130,20 @@ class DiscoveryExecutionBridgeService:
             candidate = json.loads(row.get("candidate_json") or "{}")
             if not isinstance(candidate, dict):
                 raise ValueError("candidate_json is not an object")
+            cooldown_block = self._symbol_cooldown_block_reason(symbol)
+            if cooldown_block:
+                self.repository.mark_failed(candidate_id=candidate_id, reason=cooldown_block)
+                self._log_drop(candidate_id=candidate_id, symbol=symbol, reason=cooldown_block)
+                return DiscoveryBridgeResult(
+                    candidate_id=candidate_id,
+                    symbol=symbol,
+                    status=FAILED,
+                    reason=cooldown_block,
+                )
             live_block = self._broker_state_block_reason(symbol)
             if live_block:
                 self.repository.mark_failed(candidate_id=candidate_id, reason=live_block)
+                self._log_drop(candidate_id=candidate_id, symbol=symbol, reason=live_block)
                 return DiscoveryBridgeResult(
                     candidate_id=candidate_id,
                     symbol=symbol,
@@ -183,6 +194,23 @@ class DiscoveryExecutionBridgeService:
                 reason=reason,
             )
 
+    def _symbol_cooldown_block_reason(self, symbol: str) -> str | None:
+        if self.config.symbol_cooldown_minutes <= 0:
+            return None
+        recent_route_cutoff = _et_cutoff_iso(timedelta(minutes=self.config.symbol_cooldown_minutes))
+        recent = self.repository.latest_recent_routed_candidate(
+            symbol=symbol,
+            recent_route_cutoff=recent_route_cutoff,
+        )
+        if not recent:
+            return None
+        order_id = recent.get("routed_order_id") or recent.get("order_id") or "-"
+        return (
+            "bridge blocked: symbol cooldown active "
+            f"for {symbol}; prior_candidate_id={recent.get('id')} "
+            f"prior_order_id={order_id} prior_timestamp={recent.get('candidate_timestamp')}"
+        )
+
     def _broker_state_block_reason(self, symbol: str) -> str | None:
         position_getter = getattr(self.broker, "get_position", None)
         if callable(position_getter):
@@ -205,6 +233,14 @@ class DiscoveryExecutionBridgeService:
                 return f"bridge blocked: existing open order for {symbol}"
 
         return None
+
+    def _log_drop(self, *, candidate_id: int, symbol: str, reason: str) -> None:
+        self.logger.info(
+            "discovery_execution_bridge_drop candidate_id=%s symbol=%s reason=%s",
+            candidate_id,
+            symbol,
+            reason,
+        )
 
 
 def _order_identifier(order: dict[str, Any]) -> str | None:

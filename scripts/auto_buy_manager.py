@@ -79,6 +79,10 @@ from repositories.candidate_universe_repo import CandidateUniverseRepository
 from repositories.prediction_repo import PredictionRepository
 from risk.exposure import any_cluster_limit_hit, cluster_exposure
 from services.ai_momentum_pattern_service import deterministic_momentum_pattern
+from services.auto_buy_execution_service import (
+    AutoBuyExecutionService,
+    build_auto_buy_execution_request,
+)
 from services.decision import CapitalAllocator, DecisionEngine
 from services.decision.adapters import auto_buy_candidate_from_raw
 from services.intelligence.candidates.reference import candidate_reference_service
@@ -1620,21 +1624,26 @@ def maybe_execute_auto_buy(
 
     from services.broker_service import broker_service
 
-    order = broker_service.place_order(
-        symbol=candidate["symbol"],
-        action="buy",
-        position_size_pct=candidate.get("effective_size_cap_pct") or AUTO_BUY_POSITION_SIZE_PCT,
+    request = build_auto_buy_execution_request(
+        candidate=candidate,
+        default_position_size_pct=AUTO_BUY_POSITION_SIZE_PCT,
         stop_loss_pct=AUTO_BUY_STOP_LOSS_PCT,
         take_profit_pct=AUTO_BUY_TAKE_PROFIT_PCT,
-        risk_level=candidate.get("risk_level"),
-        client_order_id=client_order_id(candidate["symbol"]),
+        client_order_id_factory=client_order_id,
     )
-    if not order:
-        failure_reason = broker_service.last_order_failure_reason()
-        candidate["broker_failure_reason"] = failure_reason
-        candidate["live_block_reason"] = "broker returned no order" + (
-            f": {failure_reason}" if failure_reason else ": unknown"
-        )
+    outcome = AutoBuyExecutionService(broker_service).execute(request)
+    order = outcome.order
+    candidate["auto_buy_execution_request"] = {
+        "symbol": request.symbol,
+        "position_size_pct": request.position_size_pct,
+        "stop_loss_pct": request.stop_loss_pct,
+        "take_profit_pct": request.take_profit_pct,
+        "risk_level": request.risk_level,
+        "client_order_id": request.client_order_id,
+    }
+    if not outcome.submitted:
+        candidate["broker_failure_reason"] = outcome.failure_reason
+        candidate["live_block_reason"] = outcome.live_block_reason
     else:
         try:
             log_auto_buy_order(candidate, order)

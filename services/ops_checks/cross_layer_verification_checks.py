@@ -60,6 +60,23 @@ def run_cross_layer_verification_report(target_date: str, *, base_dir: Path) -> 
     print(f"  scaled_down_rate      : {_fmt(handshake['marginal_scaled_down_rate'])}")
     print(f"  avg_size_ratio        : {_fmt(handshake['avg_marginal_size_ratio'])}")
 
+    translation = payload["marginal_risk_translation"]
+    print()
+    print("Marginal risk translation")
+    print(f"  status                : {translation['status']}")
+    print(f"  rows                  : {translation['rows']}")
+    print(f"  corr(score,size)      : {_fmt(translation['correlation'])}")
+    print(f"  avg_allocation_mult   : {_fmt(translation['avg_allocation_multiplier'])}")
+    print(f"  near_max_alloc_rate   : {_fmt(translation['near_max_allocation_rate'])}")
+
+    anomaly = payload["cross_layer_anomaly"]
+    print()
+    print("Level 0 / Level 2 anomaly scan")
+    print(f"  status                : {anomaly['status']}")
+    print(f"  stable_low_l2_rows    : {anomaly['stable_level0_low_level2_rows']}")
+    print(f"  affected_symbols      : {anomaly['stable_level0_low_level2_symbols']}")
+    print(f"  avg_low_l2_score      : {_fmt(anomaly['avg_low_level2_score'])}")
+
     warnings = payload["warnings"]
     if warnings:
         print()

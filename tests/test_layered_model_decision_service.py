@@ -291,6 +291,42 @@ def test_layered_model_decision_uses_counterfactual_unvetoer_artifact():
     assert_equal(payload["level_2_meta_label"]["effect"], "paper_approval", "effect")
 
 
+def test_layered_model_decision_vetoes_multi_horizon_medium_decay():
+    state = _account_state(
+        historical_bar_paper_strategy={
+            "status": "paper_ready",
+            "master_confidence_score": 69.0,
+            "paper_recommendation": "paper_trade_candidate",
+            "baseline_delta": 2.0,
+            "liquidity_stress_bucket": "normal",
+            "paper_position_size_pct": 1.1,
+        },
+        prediction_gate={"ml_prediction_score": 68.0},
+        transformer_authority={"probability": 0.68, "decision": "allow"},
+        multi_horizon_path={
+            "provider": "tft_scaffold",
+            "t5": {"probability": 0.72, "expected_return_pct": 0.18},
+            "t15": {"probability": 0.66, "expected_return_pct": 0.09},
+            "t60": {"probability": 0.38, "expected_return_pct": -0.28},
+        },
+    )
+    payload = build_layered_model_decision(
+        symbol="AAPL",
+        action="buy",
+        decision={"approved": False, "position_size_pct": 1.0},
+        account_state=state,
+        execution_mode="paper",
+        ml_authority_config=_meta_config(),
+        env={"TRANSFORMER_AUTHORITY_ENABLED": "false"},
+    ).to_dict()
+
+    path = payload["level_1_expert_ensemble"]["multi_horizon_path"]
+    assert_equal(path["status"], "scored", "path status")
+    assert_equal(path["medium_term_decay_risk"], True, "decay risk")
+    assert_equal(payload["level_2_meta_label"]["effect"], "multi_horizon_decay_veto", "effect")
+    assert_equal(payload["final_instruction"], "veto", "final")
+
+
 def main():
     tests = [
         test_layered_model_decision_approves_and_sizes_strong_stack,
@@ -299,6 +335,7 @@ def main():
         test_layered_model_decision_alternative_data_veto_overrides_strong_experts,
         test_layered_model_decision_records_missed_opportunity_relaxation,
         test_layered_model_decision_uses_counterfactual_unvetoer_artifact,
+        test_layered_model_decision_vetoes_multi_horizon_medium_decay,
     ]
     for test in tests:
         test()

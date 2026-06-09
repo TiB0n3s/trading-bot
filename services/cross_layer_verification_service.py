@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from statistics import mean
@@ -22,6 +23,8 @@ class CrossLayerVerificationPayload:
     summary: dict[str, Any]
     drift_relaxation_symmetry: dict[str, Any]
     veto_to_sizing_handshake: dict[str, Any]
+    marginal_risk_translation: dict[str, Any]
+    cross_layer_anomaly: dict[str, Any]
     examples: list[dict[str, Any]]
     warnings: list[str]
 
@@ -64,6 +67,33 @@ def _rate(count: int, total: int) -> float | None:
     if total <= 0:
         return None
     return round(count / total, 4)
+
+
+def _pearson(xs: list[float], ys: list[float]) -> float | None:
+    if len(xs) < 2 or len(xs) != len(ys):
+        return None
+    mean_x = mean(xs)
+    mean_y = mean(ys)
+    numerator = sum((x - mean_x) * (y - mean_y) for x, y in zip(xs, ys))
+    den_x = math.sqrt(sum((x - mean_x) ** 2 for x in xs))
+    den_y = math.sqrt(sum((y - mean_y) ** 2 for y in ys))
+    if den_x <= 0 or den_y <= 0:
+        return None
+    return round(numerator / (den_x * den_y), 4)
+
+
+def _stable_level0(regime: dict[str, Any], alt_gate: dict[str, Any]) -> bool:
+    if str(alt_gate.get("decision") or "pass") == "veto":
+        return False
+    if regime.get("allow_new_longs") is False:
+        return False
+    size_modifier = _num(regime.get("size_modifier"))
+    if size_modifier is not None and size_modifier < 0.90:
+        return False
+    label = str(regime.get("regime_label") or "").lower()
+    if any(token in label for token in ("high", "crash", "panic", "bear", "volatile")):
+        return False
+    return True
 
 
 def _layered_payload(row: dict[str, Any]) -> dict[str, Any]:
@@ -112,9 +142,17 @@ def build_cross_layer_verification_payload(
     marginal_approvals = 0
     marginal_scaled_down = 0
     marginal_size_ratios: list[float] = []
+    marginal_scores: list[float] = []
+    marginal_allocation_multipliers: list[float] = []
+    marginal_max_size_rows = 0
+    stable_low_confidence_rows = 0
+    stable_low_confidence_symbols: set[str] = set()
+    stable_low_confidence_scores: list[float] = []
     examples: list[dict[str, Any]] = []
 
     for row, layered in layered_rows:
+        regime = _load_json(layered.get("level_0_regime"))
+        alt_gate = _load_json(layered.get("level_0_alternative_gates"))
         meta = _load_json(layered.get("level_2_meta_label"))
         sizing = _load_json(layered.get("level_3_sizing"))
         final_instruction = str(layered.get("final_instruction") or "")
@@ -149,6 +187,13 @@ def build_cross_layer_verification_payload(
         requested_size = _num(sizing.get("requested_size_pct"))
         regime_adjusted = _num(sizing.get("regime_adjusted_size_pct"))
         denominator = regime_adjusted if regime_adjusted and regime_adjusted > 0 else requested_size
+        if score is not None and 0.65 <= score <= 0.70 and final_size is not None:
+            if denominator and denominator > 0:
+                allocation_multiplier = final_size / denominator
+                marginal_scores.append(score)
+                marginal_allocation_multipliers.append(allocation_multiplier)
+                if allocation_multiplier >= 0.95:
+                    marginal_max_size_rows += 1
         if (
             final_instruction in {"paper_approval", "pass", "size_increase"}
             and margin is not None
@@ -173,6 +218,11 @@ def build_cross_layer_verification_payload(
                     "final_instruction": final_instruction,
                 }
             )
+        if score is not None and score < 0.50 and _stable_level0(regime, alt_gate):
+            stable_low_confidence_rows += 1
+            if row.get("symbol"):
+                stable_low_confidence_symbols.add(str(row["symbol"]).upper())
+            stable_low_confidence_scores.append(score)
 
     severe_drift = bool(drift.get("severe_drift"))
     veto_rate = _rate(veto_rows, len(layered_rows))
@@ -191,6 +241,22 @@ def build_cross_layer_verification_payload(
         warnings.append("counterfactual relaxation is active despite severe drift artifact")
     if marginal_approvals and marginal_scaled_down == 0:
         warnings.append("marginal Level-2 approvals did not show Level-3 size-down evidence")
+    marginal_corr = _pearson(marginal_scores, marginal_allocation_multipliers)
+    if len(marginal_scores) >= 3 and marginal_corr is not None and marginal_corr < 0.25:
+        warnings.append(
+            "weak marginal confidence-to-allocation correlation; Level-3 may not be translating Level-2 risk"
+        )
+    if len(marginal_scores) >= 3 and marginal_max_size_rows / len(marginal_scores) > 0.50:
+        warnings.append("most marginal-confidence rows still received near-maximum allocation")
+    anomaly_status = "not_enough_evidence"
+    if layered_rows:
+        if stable_low_confidence_rows >= 3 and len(stable_low_confidence_symbols) >= 3:
+            anomaly_status = "stable_level0_low_level2_confidence_cluster"
+            warnings.append(
+                "Level 0 appears stable while Level 2 confidence dropped across multiple symbols"
+            )
+        else:
+            anomaly_status = "no_stable_level0_level2_divergence"
 
     drift_symmetry_status = "not_enough_layered_evidence"
     if layered_rows:
@@ -241,6 +307,30 @@ def build_cross_layer_verification_payload(
             if marginal_size_ratios
             else None,
             "margin_definition": "0 <= success_probability - threshold <= 0.02",
+        },
+        marginal_risk_translation={
+            "status": (
+                "correlation_available"
+                if marginal_corr is not None
+                else "not_enough_marginal_confidence_rows"
+            ),
+            "band": "0.65 <= success_probability <= 0.70",
+            "rows": len(marginal_scores),
+            "correlation": marginal_corr,
+            "avg_allocation_multiplier": round(mean(marginal_allocation_multipliers), 4)
+            if marginal_allocation_multipliers
+            else None,
+            "near_max_allocation_rows": marginal_max_size_rows,
+            "near_max_allocation_rate": _rate(marginal_max_size_rows, len(marginal_scores)),
+        },
+        cross_layer_anomaly={
+            "status": anomaly_status,
+            "stable_level0_low_level2_rows": stable_low_confidence_rows,
+            "stable_level0_low_level2_symbols": len(stable_low_confidence_symbols),
+            "avg_low_level2_score": round(mean(stable_low_confidence_scores), 4)
+            if stable_low_confidence_scores
+            else None,
+            "definition": "stable Level 0 plus Level 2 success_probability < 0.50 across >=3 symbols",
         },
         examples=examples[:20],
         warnings=warnings,

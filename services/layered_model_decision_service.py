@@ -124,6 +124,88 @@ def _microstructure_alpha_features(account_state: dict[str, Any]) -> dict[str, A
     }
 
 
+def _horizon_probability(payload: dict[str, Any], horizon: str) -> float | None:
+    horizon_payload = _dict(payload.get(horizon))
+    return (
+        _probability(horizon_payload.get("probability"))
+        or _probability(horizon_payload.get("p_favorable"))
+        or _probability(payload.get(f"p_favorable_{horizon}"))
+        or _probability(payload.get(f"probability_{horizon}"))
+    )
+
+
+def _horizon_return(payload: dict[str, Any], horizon: str) -> float | None:
+    horizon_payload = _dict(payload.get(horizon))
+    return (
+        _float(horizon_payload.get("expected_return_pct"))
+        or _float(horizon_payload.get("forecast_return_pct"))
+        or _float(payload.get(f"expected_return_pct_{horizon}"))
+        or _float(payload.get(f"forecast_return_pct_{horizon}"))
+    )
+
+
+def _multi_horizon_path_features(account_state: dict[str, Any]) -> dict[str, Any]:
+    """Normalize optional TFT/Mamba-style horizon forecasts for Layer 2."""
+    payload = (
+        _dict(account_state.get("multi_horizon_path"))
+        or _dict(account_state.get("multi_horizon_forecast"))
+        or _dict(account_state.get("tft_multi_horizon_forecast"))
+    )
+    if not payload:
+        return {
+            "status": "missing_context_neutral",
+            "provider": "not_available",
+            "trend_velocity": None,
+            "medium_term_decay_risk": False,
+            "reason": "no multi-horizon path forecast supplied",
+        }
+
+    p5 = _horizon_probability(payload, "t5")
+    p15 = _horizon_probability(payload, "t15")
+    p60 = _horizon_probability(payload, "t60")
+    r5 = _horizon_return(payload, "t5")
+    r15 = _horizon_return(payload, "t15")
+    r60 = _horizon_return(payload, "t60")
+
+    trend_velocity = None
+    if p5 is not None and p60 is not None:
+        trend_velocity = p60 - p5
+    elif r5 is not None and r60 is not None:
+        trend_velocity = r60 - r5
+
+    short_positive = bool(
+        (p5 is not None and p5 >= 0.60)
+        or (r5 is not None and r5 > 0)
+        or (p15 is not None and p15 >= 0.60)
+        or (r15 is not None and r15 > 0)
+    )
+    medium_decays = bool(
+        short_positive
+        and (
+            (p60 is not None and p60 <= 0.45)
+            or (r60 is not None and r60 < 0)
+            or (trend_velocity is not None and trend_velocity <= -0.20)
+        )
+    )
+    return {
+        "status": "scored",
+        "provider": payload.get("provider") or "account_state_multi_horizon",
+        "p_favorable_t5": round(p5, 6) if p5 is not None else None,
+        "p_favorable_t15": round(p15, 6) if p15 is not None else None,
+        "p_favorable_t60": round(p60, 6) if p60 is not None else None,
+        "expected_return_pct_t5": round(r5, 6) if r5 is not None else None,
+        "expected_return_pct_t15": round(r15, 6) if r15 is not None else None,
+        "expected_return_pct_t60": round(r60, 6) if r60 is not None else None,
+        "trend_velocity": round(trend_velocity, 6) if trend_velocity is not None else None,
+        "medium_term_decay_risk": medium_decays,
+        "reason": (
+            "short horizon positive while medium horizon decays"
+            if medium_decays
+            else "multi-horizon path is not decaying against the trade"
+        ),
+    }
+
+
 def _regime_layer(account_state: dict[str, Any], action: str) -> dict[str, Any]:
     routing = _dict(account_state.get("regime_routing_decision"))
     if not routing:
@@ -181,6 +263,7 @@ def _expert_components(
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     experts: list[dict[str, Any]] = []
     micro_alpha = _microstructure_alpha_features(account_state)
+    multi_horizon = _multi_horizon_path_features(account_state)
 
     strategy = _historical_strategy(symbol=symbol, action=action, account_state=account_state)
     historical_prob = _probability(strategy.get("master_confidence_score"))
@@ -271,6 +354,7 @@ def _expert_components(
         "disagreement": round(disagreement, 6),
         "experts": experts,
         "microstructure_alpha_features": micro_alpha,
+        "multi_horizon_path": multi_horizon,
         "reason": "weighted expert ensemble scored candidate",
     }
 
@@ -284,6 +368,7 @@ def _meta_label_layer(
     execution_mode: str,
     ml_authority_config: dict[str, Any] | None,
     ensemble_probability: float | None,
+    level_1_ensemble: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     config = _dict((ml_authority_config or {}).get("historical_bar_meta_label_authority"))
     missed = _dict(account_state.get("missed_opportunity_relaxation"))
@@ -323,6 +408,29 @@ def _meta_label_layer(
         config=config,
     )
     threshold = _probability(config.get("min_approve_score") or 65.0) or 0.65
+    multi_horizon = _dict(_dict(level_1_ensemble).get("multi_horizon_path"))
+    if (
+        str(action or "").lower() == "buy"
+        and multi_horizon.get("medium_term_decay_risk")
+        and ensemble_probability is not None
+        and ensemble_probability < max(0.75, threshold + 0.05)
+    ):
+        return {
+            "level": 2,
+            "name": "meta_labeler",
+            "status": "active",
+            "instruction": "veto",
+            "effect": "multi_horizon_decay_veto",
+            "success_probability": round(ensemble_probability, 6),
+            "threshold": round(threshold, 4),
+            "missed_opportunity_relaxation_pct": round(relaxation, 4)
+            if relaxation is not None
+            else None,
+            "counterfactual_veto_relaxation": counterfactual,
+            "multi_horizon_path": multi_horizon,
+            "authority": outcome,
+            "reason": "Level 1 multi-horizon path shows medium-term decay against buy candidate",
+        }
     if outcome.get("allowed"):
         effect = str(outcome.get("effect") or "none")
         instruction = "veto" if effect == "veto" else "pass"
@@ -338,6 +446,7 @@ def _meta_label_layer(
             if relaxation is not None
             else None,
             "counterfactual_veto_relaxation": counterfactual,
+            "multi_horizon_path": multi_horizon,
             "authority": outcome,
             "reason": outcome.get("reason"),
         }
@@ -354,6 +463,7 @@ def _meta_label_layer(
             if relaxation is not None
             else None,
             "counterfactual_veto_relaxation": counterfactual,
+            "multi_horizon_path": multi_horizon,
             "authority": outcome,
             "reason": (
                 f"ensemble probability {ensemble_probability:.3f} below "
@@ -374,6 +484,7 @@ def _meta_label_layer(
         if relaxation is not None
         else None,
         "counterfactual_veto_relaxation": counterfactual,
+        "multi_horizon_path": multi_horizon,
         "authority": outcome,
         "reason": outcome.get("reason") or "meta-label clear",
     }
@@ -465,6 +576,7 @@ def build_layered_model_decision(
         execution_mode=execution_mode,
         ml_authority_config=ml_authority_config,
         ensemble_probability=ensemble_probability,
+        level_1_ensemble=ensemble,
     )
     sizing = _sizing_layer(
         action=action_l,

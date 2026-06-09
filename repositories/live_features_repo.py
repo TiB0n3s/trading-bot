@@ -200,6 +200,23 @@ class LiveFeaturesRepository:
 
         return [row["action"] for row in rows]
 
+    def latest_snapshot(self, symbol: str) -> dict[str, Any] | None:
+        if not self.table_exists("feature_snapshots"):
+            return None
+        with get_connection(self.db_path) as con:
+            row = con.execute(
+                """
+                SELECT *
+                FROM feature_snapshots
+                WHERE symbol = ?
+                  AND last_price IS NOT NULL
+                ORDER BY timestamp DESC, id DESC
+                LIMIT 1
+                """,
+                (symbol.upper(),),
+            ).fetchone()
+        return dict(row) if row else None
+
     def insert_snapshot(self, snapshot: dict[str, Any]) -> None:
         with get_connection(self.db_path) as con:
             con.execute(

@@ -13,7 +13,10 @@ Purpose:
 This does not place, cancel, or modify orders.
 """
 
+# ruff: noqa: E402, I001
+
 import argparse
+import os
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -22,11 +25,31 @@ from bot_events import log_event
 from policy_artifacts import atomic_write_json
 
 from repositories.portfolio_rotation_repo import recent_buy_signals
-from services.broker_service import broker_service
 
 ET = pytz.timezone("America/New_York")
 BASE_DIR = Path(__file__).resolve().parents[1]
+ENV_FILE = Path("/etc/trading-bot.env")
 PORTFOLIO_REPLACEMENT_MEMORY_FILE = BASE_DIR / "portfolio_replacement_memory.json"
+
+
+def load_env_file(path: Path = ENV_FILE) -> bool:
+    if not path.exists():
+        return False
+    for raw_line in path.read_text().splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        key = key.strip()
+        value = value.strip().strip('"').strip("'")
+        if key and key not in os.environ:
+            os.environ[key] = value
+    return True
+
+
+load_env_file()
+
+from services.broker_service import broker_service  # noqa: E402
 
 
 STRONG_BUY_RECS = {"strong_buy_candidate", "buy_candidate"}
@@ -138,9 +161,19 @@ def score_signal(row, held_symbols):
 
     pred_decision = row["prediction_decision"]
     pred_score = to_float(row["prediction_score"], None)
-    if pred_decision == "pass":
+    live_feedback_status = row["live_feedback_status"]
+    live_feedback_adverse = live_feedback_status in {"block", "penalty"}
+    ml_evidence_agrees = (
+        pred_decision == "pass"
+        and rec in {"strong_buy_candidate", "buy_candidate"}
+        and not live_feedback_adverse
+    )
+    if ml_evidence_agrees:
         score += 8
-        reasons.append("prediction_pass")
+        reasons.append("ml_prediction_live_feedback_agree")
+    elif pred_decision == "pass" and live_feedback_adverse:
+        score -= 12
+        reasons.append(f"ml_prediction_live_feedback_conflict={live_feedback_status}")
     elif pred_decision == "watch":
         score -= 4
         reasons.append("prediction_watch")
@@ -148,7 +181,7 @@ def score_signal(row, held_symbols):
         score -= 25
         reasons.append("prediction_block")
 
-    if pred_score is not None:
+    if pred_score is not None and ml_evidence_agrees:
         score += max(-8, min(8, pred_score - 5))
 
     momentum_direction = row["momentum_direction"]
@@ -289,6 +322,7 @@ def build_replacement_memory(positions, weakest, best, candidates, minutes):
                 "setup_policy_action": item.get("setup_policy_action"),
                 "prediction_score": item.get("prediction_score"),
                 "prediction_decision": item.get("prediction_decision"),
+                "live_feedback_status": item.get("live_feedback_status"),
                 "market_bias_effective": item.get("market_bias_effective"),
                 "reasons": item.get("reasons") or [],
             }
@@ -309,6 +343,7 @@ def build_replacement_memory(positions, weakest, best, candidates, minutes):
                 "setup_policy_action": item.get("setup_policy_action"),
                 "prediction_score": item.get("prediction_score"),
                 "prediction_decision": item.get("prediction_decision"),
+                "live_feedback_status": item.get("live_feedback_status"),
             }
         )
 
@@ -415,6 +450,7 @@ def main():
                 "setup_policy_action": r["setup_policy_action"],
                 "prediction_score": r["prediction_score"],
                 "prediction_decision": r["prediction_decision"],
+                "live_feedback_status": r["live_feedback_status"],
                 "market_bias_effective": r["market_bias_effective"] or r["market_bias"],
                 "reasons": reasons,
             }

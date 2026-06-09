@@ -9,18 +9,18 @@ from pathlib import Path
 from typing import Any, Callable
 
 import pytz
-
 from feature_engine import compute_feature_snapshot
 from macro_risk import get_macro_risk
 from market_time import market_session
 from prior_session_context import prior_session_context
-from repositories.live_features_repo import LiveFeaturesRepository
 from rolling_context import rolling_symbol_context
-from services.market_data_service import market_data_service
-from services.timescale_tick_writer_service import write_ticks_sync
 from setup_engine import classify_feature_snapshot as classify_setup
 from strategy_constants import SYMBOL_MARKET_ALIGNMENT
 from symbols_config import APPROVED_SYMBOLS
+
+from repositories.live_features_repo import LiveFeaturesRepository
+from services.market_data_service import market_data_service
+from services.timescale_tick_writer_service import write_ticks_sync
 
 ET = pytz.timezone("America/New_York")
 
@@ -76,6 +76,24 @@ class LiveFeaturesService:
             snapshot["is_stale"] = 1
             snapshot["staleness_reason"] = "missing_snapshot_timestamp"
         return snapshot
+
+    def build_degraded_snapshot(self, symbol: str, reason: str) -> dict[str, Any] | None:
+        """Reuse the latest valid snapshot as explicit stale context for thin feeds."""
+        latest = self.repository.latest_snapshot(symbol)
+        if not latest:
+            return None
+
+        generated_at = datetime.now(ET).isoformat()
+        previous_ts = latest.get("timestamp")
+        latest["timestamp"] = generated_at
+        latest["feature_generated_at"] = generated_at
+        latest["feature_available_at"] = generated_at
+        latest["source"] = "live_features_degraded_fallback"
+        latest["is_stale"] = 1
+        latest["staleness_reason"] = f"thin_feed_reused_previous_snapshot:{reason}"
+        latest["feature_age_seconds"] = None
+        latest["previous_snapshot_timestamp"] = previous_ts
+        return latest
 
     def load_market_context(self) -> dict[str, Any]:
         if not self.market_context_file.exists():
@@ -179,9 +197,7 @@ class LiveFeaturesService:
                 f"{symbol}: only {len(closes)} {timeframe} bars from {window_minutes}m lookback; retrying wider window"
             )
 
-        raise RuntimeError(
-            f"Not enough {timeframe} bars for {symbol} even after widened lookback"
-        )
+        raise RuntimeError(f"Not enough {timeframe} bars for {symbol} even after widened lookback")
 
     def build_snapshot(self, symbol: str) -> dict[str, Any]:
         symbol = symbol.upper().strip()
@@ -191,12 +207,8 @@ class LiveFeaturesService:
         session = self.market_session_provider()
         benchmark_symbol = self.benchmark_for(symbol)
 
-        closes, volumes, timeframe, bar_count = self.get_bar_series(
-            symbol, session=session
-        )
-        benchmark_closes, _, _, _ = self.get_bar_series(
-            benchmark_symbol, session=session
-        )
+        closes, volumes, timeframe, bar_count = self.get_bar_series(symbol, session=session)
+        benchmark_closes, _, _, _ = self.get_bar_series(benchmark_symbol, session=session)
 
         ctx = self.load_market_context()
         symbol_ctx = (ctx.get("symbols") or {}).get(symbol) or {}
@@ -295,6 +307,18 @@ class LiveFeaturesService:
         for symbol in sorted(self.approved_symbols):
             try:
                 snapshot = self.build_snapshot(symbol)
+            except RuntimeError as e:
+                snapshot = self.build_degraded_snapshot(symbol, str(e))
+                if snapshot is None:
+                    failed += 1
+                    self.logger.error(f"{symbol}: snapshot failed: {e}")
+                    continue
+
+                self.logger.warning(
+                    "%s: using degraded stale feature snapshot because live bars were unavailable: %s",
+                    symbol,
+                    e,
+                )
 
                 if stdout:
                     print(json.dumps(snapshot, sort_keys=True))
@@ -303,14 +327,21 @@ class LiveFeaturesService:
                     self.insert_snapshot(snapshot)
 
                 success += 1
-                self.logger.info(f"{symbol}: snapshot collected")
+                self.logger.info(f"{symbol}: degraded snapshot collected")
             except Exception as e:
                 failed += 1
                 self.logger.error(f"{symbol}: snapshot failed: {e}")
+            else:
+                if stdout:
+                    print(json.dumps(snapshot, sort_keys=True))
 
-        self.logger.info(
-            f"feature snapshot collection complete: success={success} failed={failed}"
-        )
+                if write:
+                    self.insert_snapshot(snapshot)
+
+                success += 1
+                self.logger.info(f"{symbol}: snapshot collected")
+
+        self.logger.info(f"feature snapshot collection complete: success={success} failed={failed}")
         return success, failed
 
 

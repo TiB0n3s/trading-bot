@@ -5,8 +5,10 @@ from __future__ import annotations
 import json
 import os
 from dataclasses import dataclass
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from repositories.discovery_execution_bridge_repo import DiscoveryExecutionBridgeRepository
 from services.auto_buy_execution_service import (
@@ -31,6 +33,8 @@ class DiscoveryBridgeConfig:
     take_profit_pct: float = 2.00
     execution_mode: str = "paper"
     target_date: str | None = None
+    max_candidate_age_seconds: int = 180
+    symbol_cooldown_minutes: int = 45
 
 
 @dataclass(frozen=True)
@@ -56,11 +60,21 @@ def bridge_config_from_env(*, target_date: str | None = None) -> DiscoveryBridge
         take_profit_pct=float(os.getenv("AUTO_BUY_TAKE_PROFIT_PCT", "2.00")),
         execution_mode=os.getenv("EXECUTION_MODE", "paper"),
         target_date=target_date,
+        max_candidate_age_seconds=int(
+            os.getenv("DISCOVERY_EXECUTION_BRIDGE_MAX_AGE_SECONDS", "180")
+        ),
+        symbol_cooldown_minutes=int(
+            os.getenv("DISCOVERY_EXECUTION_BRIDGE_SYMBOL_COOLDOWN_MINUTES", "45")
+        ),
     )
 
 
 def _paper_only_mode(execution_mode: str) -> bool:
     return str(execution_mode or "").strip().lower() in {"paper", "dry_run"}
+
+
+def _et_cutoff_iso(delta: timedelta) -> str:
+    return (datetime.now(ZoneInfo("America/New_York")) - delta).isoformat()
 
 
 class DiscoveryExecutionBridgeService:
@@ -96,6 +110,12 @@ class DiscoveryExecutionBridgeService:
             min_score=self.config.min_score,
             max_candidates=self.config.max_candidates_per_run,
             target_date=self.config.target_date,
+            min_candidate_timestamp=_et_cutoff_iso(
+                timedelta(seconds=self.config.max_candidate_age_seconds)
+            ),
+            recent_route_cutoff=_et_cutoff_iso(
+                timedelta(minutes=self.config.symbol_cooldown_minutes)
+            ),
         )
         results: list[DiscoveryBridgeResult] = []
         for row in claimed:
@@ -110,6 +130,15 @@ class DiscoveryExecutionBridgeService:
             candidate = json.loads(row.get("candidate_json") or "{}")
             if not isinstance(candidate, dict):
                 raise ValueError("candidate_json is not an object")
+            live_block = self._broker_state_block_reason(symbol)
+            if live_block:
+                self.repository.mark_failed(candidate_id=candidate_id, reason=live_block)
+                return DiscoveryBridgeResult(
+                    candidate_id=candidate_id,
+                    symbol=symbol,
+                    status=FAILED,
+                    reason=live_block,
+                )
 
             request = build_auto_buy_execution_request(
                 candidate=candidate,
@@ -154,6 +183,29 @@ class DiscoveryExecutionBridgeService:
                 reason=reason,
             )
 
+    def _broker_state_block_reason(self, symbol: str) -> str | None:
+        position_getter = getattr(self.broker, "get_position", None)
+        if callable(position_getter):
+            try:
+                position = position_getter(symbol)
+            except Exception as exc:
+                return f"bridge blocked: broker position check failed: {type(exc).__name__}: {exc}"
+            if _position_has_qty(position):
+                return f"bridge blocked: existing open position for {symbol}"
+
+        order_lister = getattr(self.broker, "list_open_orders", None)
+        if callable(order_lister):
+            try:
+                open_orders = order_lister(symbol)
+            except Exception as exc:
+                return (
+                    f"bridge blocked: broker open-order check failed: {type(exc).__name__}: {exc}"
+                )
+            if open_orders:
+                return f"bridge blocked: existing open order for {symbol}"
+
+        return None
+
 
 def _order_identifier(order: dict[str, Any]) -> str | None:
     for key in ("order_id", "id", "client_order_id"):
@@ -161,3 +213,16 @@ def _order_identifier(order: dict[str, Any]) -> str | None:
         if value:
             return str(value)
     return None
+
+
+def _position_has_qty(position: Any) -> bool:
+    if position is None:
+        return False
+    if isinstance(position, dict):
+        qty = position.get("qty") or position.get("quantity")
+    else:
+        qty = getattr(position, "qty", None) or getattr(position, "quantity", None)
+    try:
+        return abs(float(qty)) > 0
+    except (TypeError, ValueError):
+        return bool(position)

@@ -29,25 +29,55 @@ class DiscoveryExecutionBridgeRepository:
         min_score: float,
         max_candidates: int,
         target_date: str | None,
+        min_candidate_timestamp: str | None,
+        recent_route_cutoff: str | None,
     ) -> list[dict[str, Any]]:
         timestamp_filter = ""
-        params: list[Any] = [min_score, max_candidates]
+        latest_timestamp_filter = ""
+        fresh_filter = ""
+        recent_route_filter = ""
+        params: list[Any] = [min_score]
         if target_date:
-            timestamp_filter = "AND substr(candidate_timestamp, 1, 10) = ?"
-            params.insert(1, target_date)
+            timestamp_filter = "AND substr(snap.candidate_timestamp, 1, 10) = ?"
+            latest_timestamp_filter = "AND substr(latest.candidate_timestamp, 1, 10) = ?"
+            params.append(target_date)
+            params.append(target_date)
+        if min_candidate_timestamp:
+            fresh_filter = "AND snap.candidate_timestamp >= ?"
+            params.append(min_candidate_timestamp)
+        if recent_route_cutoff:
+            recent_route_filter = """
+                  AND NOT EXISTS (
+                      SELECT 1
+                      FROM auto_buy_decision_snapshots routed
+                      WHERE routed.symbol = snap.symbol
+                        AND routed.execution_status = ?
+                        AND routed.candidate_timestamp >= ?
+                  )
+            """
+            params.extend([ROUTED, recent_route_cutoff])
+        params.append(max_candidates)
 
         with get_connection(self.db_path) as con:
             con.execute("BEGIN IMMEDIATE")
             rows = con.execute(
                 f"""
-                SELECT id, candidate_timestamp, symbol, score, candidate_json
-                FROM auto_buy_decision_snapshots
-                WHERE COALESCE(execution_status, ?) = ?
-                  AND decision = 'strong_buy_candidate'
-                  AND COALESCE(live_buy_enabled, 0) = 1
-                  AND COALESCE(order_submitted, 0) = 0
-                  AND score >= ?
+                SELECT snap.id, snap.candidate_timestamp, snap.symbol, snap.score, snap.candidate_json
+                FROM auto_buy_decision_snapshots snap
+                WHERE COALESCE(snap.execution_status, ?) = ?
+                  AND snap.decision = 'strong_buy_candidate'
+                  AND COALESCE(snap.live_buy_enabled, 0) = 1
+                  AND COALESCE(snap.order_submitted, 0) = 0
+                  AND snap.score >= ?
+                  AND snap.id = (
+                      SELECT MAX(latest.id)
+                      FROM auto_buy_decision_snapshots latest
+                      WHERE latest.symbol = snap.symbol
+                        {latest_timestamp_filter}
+                  )
                   {timestamp_filter}
+                  {fresh_filter}
+                  {recent_route_filter}
                 ORDER BY score DESC, id ASC
                 LIMIT ?
                 """,

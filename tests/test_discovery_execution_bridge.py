@@ -18,8 +18,10 @@ from services.discovery_execution_bridge_service import (
 
 
 class FakeBroker:
-    def __init__(self, order=None):
+    def __init__(self, order=None, position=None, open_orders=None):
         self.order = order or {"id": "order-1", "status": "submitted"}
+        self.position = position
+        self.open_orders = open_orders or []
         self.calls = []
 
     def place_order(self, **kwargs):
@@ -28,6 +30,12 @@ class FakeBroker:
 
     def last_order_failure_reason(self):
         return None
+
+    def get_position(self, symbol):
+        return self.position
+
+    def list_open_orders(self, symbol=None):
+        return self.open_orders
 
 
 def _approved_trace():
@@ -57,9 +65,15 @@ def _candidate(symbol="AAPL", score=20.0, trace=None):
     return candidate
 
 
-def _insert_snapshot(db_path: Path, candidate: dict, *, live_buy_enabled=True) -> int:
+def _insert_snapshot(
+    db_path: Path,
+    candidate: dict,
+    *,
+    live_buy_enabled=True,
+    timestamp="2026-06-09T09:00:00-04:00",
+) -> int:
     auto_buy_repo.insert_candidate_and_snapshot(
-        timestamp="2026-06-09T09:00:00-04:00",
+        timestamp=timestamp,
         created_at="2026-06-09T09:00:01-04:00",
         candidate=candidate,
         live_buy_enabled=live_buy_enabled,
@@ -99,6 +113,8 @@ def _service(db_path: Path, broker: FakeBroker, min_score=13.0):
             take_profit_pct=2.0,
             execution_mode="paper",
             target_date="2026-06-09",
+            max_candidate_age_seconds=999999,
+            symbol_cooldown_minutes=45,
         ),
     )
 
@@ -160,11 +176,98 @@ def test_successfully_routed_candidate_cannot_be_resubmitted():
         assert row["order_submitted"] == 1
 
 
+def test_older_strong_candidate_is_not_routed_when_latest_symbol_snapshot_is_skip():
+    with tempfile.TemporaryDirectory() as tmpdir:
+        db_path = Path(tmpdir) / "trades.db"
+        auto_buy_repo.init_tables(db_path)
+        old_id = _insert_snapshot(
+            db_path,
+            _candidate(symbol="RTX", score=24.0, trace=_approved_trace()),
+            timestamp="2026-06-09T14:00:00-04:00",
+        )
+        _insert_snapshot(
+            db_path,
+            {
+                "symbol": "RTX",
+                "decision": "skip",
+                "score": -5.0,
+                "canonical_decision_trace": {"final_decision": "rejected"},
+            },
+            timestamp="2026-06-09T14:01:00-04:00",
+        )
+        broker = FakeBroker()
+
+        results = _service(db_path, broker).route_eligible_candidates()
+
+        row = _status(db_path, old_id)
+        assert results == []
+        assert broker.calls == []
+        assert row["execution_status"] == PENDING
+
+
+def test_recent_routed_symbol_cooldown_blocks_reentry():
+    with tempfile.TemporaryDirectory() as tmpdir:
+        db_path = Path(tmpdir) / "trades.db"
+        auto_buy_repo.init_tables(db_path)
+        broker = FakeBroker(order={"id": "order-1", "status": "filled"})
+        service = _service(db_path, broker)
+        service.config = DiscoveryBridgeConfig(
+            min_score=13.0,
+            max_candidates_per_run=3,
+            default_position_size_pct=0.5,
+            stop_loss_pct=1.0,
+            take_profit_pct=2.0,
+            execution_mode="paper",
+            target_date="2026-06-09",
+            max_candidate_age_seconds=999999,
+            symbol_cooldown_minutes=10000,
+        )
+        _insert_snapshot(
+            db_path,
+            _candidate(symbol="BURL", score=20.0, trace=_approved_trace()),
+            timestamp="2026-06-09T14:00:00-04:00",
+        )
+        first = service.route_eligible_candidates()
+        second_id = _insert_snapshot(
+            db_path,
+            _candidate(symbol="BURL", score=21.0, trace=_approved_trace()),
+            timestamp="2026-06-09T14:02:00-04:00",
+        )
+
+        second = service.route_eligible_candidates()
+
+        row = _status(db_path, second_id)
+        assert len(first) == 1
+        assert second == []
+        assert len(broker.calls) == 1
+        assert row["execution_status"] == PENDING
+
+
+def test_existing_open_position_blocks_bridge_route():
+    with tempfile.TemporaryDirectory() as tmpdir:
+        db_path = Path(tmpdir) / "trades.db"
+        auto_buy_repo.init_tables(db_path)
+        row_id = _insert_snapshot(db_path, _candidate(score=20.0, trace=_approved_trace()))
+        broker = FakeBroker(position={"qty": "1"})
+
+        results = _service(db_path, broker).route_eligible_candidates()
+
+        row = _status(db_path, row_id)
+        assert len(results) == 1
+        assert results[0].status == FAILED
+        assert "existing open position" in results[0].reason
+        assert broker.calls == []
+        assert row["execution_status"] == FAILED
+
+
 def main() -> None:
     tests = [
         test_low_score_candidate_remains_pending_and_is_not_routed,
         test_strong_candidate_without_canonical_trace_is_failed_without_routing,
         test_successfully_routed_candidate_cannot_be_resubmitted,
+        test_older_strong_candidate_is_not_routed_when_latest_symbol_snapshot_is_skip,
+        test_recent_routed_symbol_cooldown_blocks_reentry,
+        test_existing_open_position_blocks_bridge_route,
     ]
     for test in tests:
         test()

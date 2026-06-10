@@ -66,6 +66,7 @@ def test_moved_fill_stream_script_bootstraps_repo_import_paths():
 
     assert 'ROOT / "scripts"' in source
     assert 'ROOT / "src"' in source
+    assert 'logging.FileHandler(ROOT / "fill_stream.log")' in source
     assert "from services.container import ApplicationContainer" in source
     assert "from services.fill_stream_service import FillStreamService" in source
 

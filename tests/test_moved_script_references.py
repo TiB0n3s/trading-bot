@@ -42,6 +42,13 @@ def test_run_tests_child_env_exposes_repo_and_scripts_paths():
 
     assert paths[0] == str(ROOT)
     assert paths[1] == str(ROOT / "scripts")
+    assert paths[2] == str(ROOT / "src")
+
+
+def test_fast_safety_runner_exposes_src_path_for_raw_local_execution():
+    safety_runner = (ROOT / "run_safety_checks.py").read_text()
+
+    assert 'str(ROOT / "src")' in safety_runner
 
 
 def test_container_and_systemd_references_use_scripts_paths():
@@ -60,6 +67,7 @@ def test_repo_safety_scripts_cover_active_source_dirs():
         "api",
         "config",
         "dashboards",
+        "ml",
         "ml_platform",
         "ops",
         "pipeline",
@@ -71,8 +79,18 @@ def test_repo_safety_scripts_cover_active_source_dirs():
     )
 
     for directory in expected_dirs:
-        assert f"\n  {directory}\n" in safe_repo_check
         assert f"\n  {directory} \\\n" in source_snapshot
+
+    source_dirs = tuple(directory for directory in expected_dirs if directory != "ml")
+    for directory in source_dirs:
+        assert f"\n  {directory}\n" in safe_repo_check
+
+
+def test_ci_uses_pinned_dev_requirements():
+    ci = (ROOT / ".github" / "workflows" / "ci.yml").read_text()
+
+    assert "python -m pip install -r requirements-dev.txt" in ci
+    assert "python -m pip install pytest ruff" not in ci
 
 
 def main():
@@ -80,8 +98,10 @@ def main():
         test_run_tests_resolves_repo_root_after_move,
         test_run_tests_listed_files_exist_from_repo_root,
         test_run_tests_child_env_exposes_repo_and_scripts_paths,
+        test_fast_safety_runner_exposes_src_path_for_raw_local_execution,
         test_container_and_systemd_references_use_scripts_paths,
         test_repo_safety_scripts_cover_active_source_dirs,
+        test_ci_uses_pinned_dev_requirements,
     ]
     for test in tests:
         test()

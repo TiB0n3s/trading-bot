@@ -48,7 +48,7 @@ def load_env_file(path=ENV_FILE):
 
 
 def child_test_env():
-    paths = [str(ROOT), str(ROOT / "scripts")]
+    paths = [str(ROOT), str(ROOT / "scripts"), str(ROOT / "src")]
     existing = os.environ.get("PYTHONPATH", "")
     if existing:
         paths.append(existing)

@@ -57,6 +57,7 @@ tar \
   execution \
   legacy_architecture \
   market_intelligence \
+  ml \
   ml_platform \
   ops \
   pipeline \

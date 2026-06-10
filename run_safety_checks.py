@@ -64,7 +64,7 @@ def reexec_under_venv_if_available() -> None:
 def main() -> int:
     reexec_under_venv_if_available()
     env = os.environ.copy()
-    pythonpath_parts = [str(ROOT / "scripts"), str(ROOT)]
+    pythonpath_parts = [str(ROOT / "scripts"), str(ROOT), str(ROOT / "src")]
     if env.get("PYTHONPATH"):
         pythonpath_parts.append(env["PYTHONPATH"])
     env["PYTHONPATH"] = os.pathsep.join(pythonpath_parts)

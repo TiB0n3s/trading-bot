@@ -23,13 +23,14 @@ import xml.etree.ElementTree as ET
 from datetime import datetime
 from email.utils import parsedate_to_datetime
 
-from market_intelligence.source_reliability import classify_source, normalize_source_name
 from symbols_config import (
     APPROVED_SYMBOLS,
     APPROVED_SYMBOLS_LIST,
     CONTEXT_ONLY_SYMBOL_CONFIG,
     EVENT_CONTEXT_SYMBOLS,
 )
+
+from market_intelligence.source_reliability import classify_source, normalize_source_name
 
 logger = logging.getLogger(__name__)
 
@@ -110,86 +111,169 @@ EVENT_KEYWORDS = [
     (
         "product_launch",
         [
-            "launch", "launches", "launched", "unveils", "unveiled",
-            "introduces", "introduced", "new product", "new device",
-            "iphone", "ipad", "mac", "vision pro", "model", "release",
+            "launch",
+            "launches",
+            "launched",
+            "unveils",
+            "unveiled",
+            "introduces",
+            "introduced",
+            "new product",
+            "new device",
+            "iphone",
+            "ipad",
+            "mac",
+            "vision pro",
+            "model",
+            "release",
         ],
     ),
     (
         "earnings",
         [
-            "earnings", "quarterly results", "q1", "q2", "q3", "q4",
-            "revenue", "profit", "eps", "beat estimates", "misses estimates",
+            "earnings",
+            "quarterly results",
+            "q1",
+            "q2",
+            "q3",
+            "q4",
+            "revenue",
+            "profit",
+            "eps",
+            "beat estimates",
+            "misses estimates",
         ],
     ),
     (
         "guidance",
         [
-            "guidance", "forecast", "outlook", "raises outlook", "cuts outlook",
-            "raises forecast", "cuts forecast", "warns", "warning",
+            "guidance",
+            "forecast",
+            "outlook",
+            "raises outlook",
+            "cuts outlook",
+            "raises forecast",
+            "cuts forecast",
+            "warns",
+            "warning",
         ],
     ),
     (
         "analyst_action",
         [
-            "upgrade", "downgrade", "price target", "initiates coverage",
-            "maintains buy", "maintains sell", "overweight", "underweight",
+            "upgrade",
+            "downgrade",
+            "price target",
+            "initiates coverage",
+            "maintains buy",
+            "maintains sell",
+            "overweight",
+            "underweight",
         ],
     ),
     (
         "supply_chain",
         [
-            "supply chain", "supplier", "suppliers", "shortage", "materials",
-            "rare earth", "lithium", "chip supply", "semiconductor supply",
-            "factory", "production halt", "export control", "tariff",
+            "supply chain",
+            "supplier",
+            "suppliers",
+            "shortage",
+            "materials",
+            "rare earth",
+            "lithium",
+            "chip supply",
+            "semiconductor supply",
+            "factory",
+            "production halt",
+            "export control",
+            "tariff",
         ],
     ),
     (
         "supplier_signal",
         [
-            "supplier", "suppliers", "supply agreement", "supplier agreement",
-            "component", "components", "vendor", "manufacturing partner",
-            "foundry", "contract manufacturer", "production partner",
+            "supplier",
+            "suppliers",
+            "supply agreement",
+            "supplier agreement",
+            "component",
+            "components",
+            "vendor",
+            "manufacturing partner",
+            "foundry",
+            "contract manufacturer",
+            "production partner",
         ],
     ),
     (
         "customer_contract",
         [
-            "contract", "customer", "customers", "purchase agreement",
-            "selected by", "awarded", "wins order", "large order",
-            "backlog", "booking", "bookings",
+            "contract",
+            "customer",
+            "customers",
+            "purchase agreement",
+            "selected by",
+            "awarded",
+            "wins order",
+            "large order",
+            "backlog",
+            "booking",
+            "bookings",
         ],
     ),
     (
         "strategic_partnership",
         [
-            "partnership", "partners with", "joint venture",
-            "strategic collaboration", "strategic investment",
+            "partnership",
+            "partners with",
+            "joint venture",
+            "strategic collaboration",
+            "strategic investment",
             "distribution agreement",
         ],
     ),
     (
         "leadership_personnel",
         [
-            "ceo", "cfo", "chief executive", "chief financial",
-            "resigns", "resignation", "steps down", "appointed",
-            "names new", "hires",
+            "ceo",
+            "cfo",
+            "chief executive",
+            "chief financial",
+            "resigns",
+            "resignation",
+            "steps down",
+            "appointed",
+            "names new",
+            "hires",
         ],
     ),
     (
         "mna_deal_chatter",
         [
-            "acquisition", "acquires", "merger", "takeover", "buyout",
-            "deal talks", "explores sale", "strategic alternatives",
-            "private equity", "stake sale", "backdoor deal",
+            "acquisition",
+            "acquires",
+            "merger",
+            "takeover",
+            "buyout",
+            "deal talks",
+            "explores sale",
+            "strategic alternatives",
+            "private equity",
+            "stake sale",
+            "backdoor deal",
         ],
     ),
     (
         "insider_transaction",
         [
-            "insider buying", "insider bought", "insider purchase",
-            "insider selling", "insider sold", "insider sale",
-            "director bought", "director sold",
+            "insider buying",
+            "insider bought",
+            "insider purchase",
+            "insider selling",
+            "insider sold",
+            "insider sale",
+            "director bought",
+            "director sold",
         ],
     ),
     (
@@ -211,44 +295,84 @@ EVENT_KEYWORDS = [
             "lawmakers bought",
             "lawmakers sold",
             "quiver quantitative",
+            "crypto daily",
+            "cryptodaily",
         ],
     ),
     (
         "regulatory",
         [
-            "regulator", "regulatory", "antitrust", "lawsuit", "sues",
-            "probe", "investigation", "doj", "ftc", "sec", "eu", "fine",
-            "ban", "sanction",
+            "regulator",
+            "regulatory",
+            "antitrust",
+            "lawsuit",
+            "sues",
+            "probe",
+            "investigation",
+            "doj",
+            "ftc",
+            "sec",
+            "eu",
+            "fine",
+            "ban",
+            "sanction",
         ],
     ),
     (
         "competitive_threat",
         [
-            "competition", "competitor", "rival", "pricing pressure",
-            "market share", "discounts", "price cuts", "threat",
+            "competition",
+            "competitor",
+            "rival",
+            "pricing pressure",
+            "market share",
+            "discounts",
+            "price cuts",
+            "threat",
         ],
     ),
     (
         "ai_infrastructure_demand",
         [
-            "ai demand", "artificial intelligence", "data center", "datacenter",
-            "gpu", "accelerator", "ai infrastructure", "cloud capex",
+            "ai demand",
+            "artificial intelligence",
+            "data center",
+            "datacenter",
+            "gpu",
+            "accelerator",
+            "ai infrastructure",
+            "cloud capex",
             "capital spending",
         ],
     ),
     (
         "macro_geopolitical",
         [
-            "fed", "inflation", "rates", "treasury yields", "war",
-            "geopolitical", "china", "taiwan", "opec", "oil prices",
-            "tariffs", "trade tensions",
+            "fed",
+            "inflation",
+            "rates",
+            "treasury yields",
+            "war",
+            "geopolitical",
+            "china",
+            "taiwan",
+            "opec",
+            "oil prices",
+            "tariffs",
+            "trade tensions",
         ],
     ),
     (
         "industry_demand",
         [
-            "demand", "sales growth", "orders", "bookings", "shipments",
-            "backlog", "consumer appetite", "strong sales",
+            "demand",
+            "sales growth",
+            "orders",
+            "bookings",
+            "shipments",
+            "backlog",
+            "consumer appetite",
+            "strong sales",
         ],
     ),
 ]
@@ -282,12 +406,14 @@ def classify_event_type(text: str) -> tuple[str, str | None]:
     for event_type, keywords in EVENT_KEYWORDS:
         hits = [kw for kw in keywords if kw in lowered]
         if hits:
-            scores.append((
-                len(hits),
-                -EVENT_TYPE_PRIORITY.get(event_type, 100),
-                event_type,
-                hits[0],
-            ))
+            scores.append(
+                (
+                    len(hits),
+                    -EVENT_TYPE_PRIORITY.get(event_type, 100),
+                    event_type,
+                    hits[0],
+                )
+            )
 
     if not scores:
         return "industry_demand", "headline_watch"
@@ -307,7 +433,13 @@ def infer_time_horizon(event_type: str) -> str:
         "strategic_partnership",
     ):
         return "weeks_to_quarters"
-    if event_type in ("earnings", "guidance", "analyst_action", "leadership_personnel", "insider_transaction"):
+    if event_type in (
+        "earnings",
+        "guidance",
+        "analyst_action",
+        "leadership_personnel",
+        "insider_transaction",
+    ):
         return "days_to_weeks"
     if event_type in ("congressional_trade_disclosure",):
         return "delayed_disclosure_context"
@@ -322,13 +454,19 @@ def rss_urls_for_symbol(symbol: str) -> list[tuple[str, str]]:
     base_query = f'("{name}" OR "{symbol}") stock when:1d'
     peripheral_query = (
         f'("{name}" OR "{symbol}") '
-        '(supplier OR customer OR contract OR partnership OR acquisition OR merger '
+        "(supplier OR customer OR contract OR partnership OR acquisition OR merger "
         'OR CEO OR CFO OR insider OR "STOCK Act" OR "congressional trading" '
         'OR "periodic transaction report") stock when:3d'
     )
     return [
-        ("company_direct", f"https://news.google.com/rss/search?q={urllib.parse.quote_plus(base_query)}&hl=en-US&gl=US&ceid=US:en"),
-        ("company_peripheral", f"https://news.google.com/rss/search?q={urllib.parse.quote_plus(peripheral_query)}&hl=en-US&gl=US&ceid=US:en"),
+        (
+            "company_direct",
+            f"https://news.google.com/rss/search?q={urllib.parse.quote_plus(base_query)}&hl=en-US&gl=US&ceid=US:en",
+        ),
+        (
+            "company_peripheral",
+            f"https://news.google.com/rss/search?q={urllib.parse.quote_plus(peripheral_query)}&hl=en-US&gl=US&ceid=US:en",
+        ),
     ]
 
 
@@ -363,12 +501,14 @@ def fetch_rss_items(url: str, timeout: int = 12) -> list[dict]:
             except Exception:
                 published_at = pub_date_raw
 
-        items.append({
-            "title": title,
-            "link": link,
-            "description": description,
-            "published_at": published_at,
-        })
+        items.append(
+            {
+                "title": title,
+                "link": link,
+                "description": description,
+                "published_at": published_at,
+            }
+        )
 
     return items
 
@@ -398,7 +538,9 @@ def _context_symbol_metadata(symbol: str) -> dict:
     }
 
 
-def event_from_item(market_date: str, symbol: str, item: dict, search_scope: str = "company_direct") -> dict:
+def event_from_item(
+    market_date: str, symbol: str, item: dict, search_scope: str = "company_direct"
+) -> dict:
     title = item.get("title") or ""
     desc = item.get("description") or ""
     text = f"{title}. {desc}".strip()

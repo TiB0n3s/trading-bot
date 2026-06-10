@@ -9,7 +9,6 @@ from __future__ import annotations
 
 from urllib.parse import urlparse
 
-
 SOURCE_POLICY_VERSION = "trusted_sources_v1"
 
 OFFICIAL_SOURCES = {
@@ -61,6 +60,7 @@ DEEP_ANALYSIS_SOURCES = {
     "s&p global",
     "the economist",
     "bloomberg opinion",
+    "crypto daily",
 }
 
 MEDIUM_CONFIDENCE_SOURCES = {
@@ -109,6 +109,7 @@ SOURCE_ALIASES = {
     "bls.gov": "bureau of labor statistics",
     "morningstar.com": "morningstar",
     "spglobal.com": "s&p global market intelligence",
+    "cryptodaily.co.uk": "crypto daily",
 }
 
 DOMAIN_SOURCE_HINTS = {
@@ -122,6 +123,7 @@ DOMAIN_SOURCE_HINTS = {
     "apnews.com": "associated press",
     "morningstar.com": "morningstar",
     "spglobal.com": "s&p global market intelligence",
+    "cryptodaily.co.uk": "crypto daily",
     "sec.gov": "sec edgar",
     "disclosures-clerk.house.gov": "house clerk financial disclosure reports",
     "efdsearch.senate.gov": "senate public disclosure",

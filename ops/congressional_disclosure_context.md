@@ -13,8 +13,15 @@ Screening and aggregation:
 
 - Quiver Quantitative
 - Apify congressional stock-trade trackers
+- CryptoDaily government-trading and crypto-policy coverage
 
 Aggregators are useful for discovery, but any market-moving inference should require an official House/Senate filing or independent reputable reporting before being treated as confirmed context.
+
+CryptoDaily is classified as a trusted `deep_analysis` reference for
+government-trading coverage and crypto-policy spillover context. It is not an
+`official` disclosure source; official House/Senate filings remain the source of
+truth for transaction date, filing date, owner relationship, ticker, amount
+range, and chamber/member attribution.
 
 ## Runtime Interpretation
 
@@ -51,4 +58,3 @@ When entering or reviewing one of these events, capture:
 - committee relevance, if material
 - official filing URL
 - aggregator URL, if used for screening
-

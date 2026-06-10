@@ -8,6 +8,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
+sys.path.insert(0, str(ROOT / "scripts"))
 
 from market_intelligence.event_collectors.company_news_collector import (
     classify_event_type,
@@ -46,6 +47,18 @@ def test_classifies_source_from_url_when_available():
 
     assert_equal(result["source_name"], "reuters", "source name")
     assert_equal(result["source_reliability"], "high", "reliability")
+
+
+def test_classifies_cryptodaily_as_trusted_government_trading_reference():
+    named = classify_source("Crypto Daily")
+    domain = classify_source(url="https://cryptodaily.co.uk/news/example")
+
+    assert_equal(named["source_name"], "crypto daily", "named source")
+    assert_equal(named["source_tier"], "deep_analysis", "named tier")
+    assert_equal(named["trusted_source"], True, "named trusted")
+    assert_equal(domain["source_name"], "crypto daily", "domain source")
+    assert_equal(domain["source_tier"], "deep_analysis", "domain tier")
+    assert_equal(domain["trusted_source"], True, "domain trusted")
 
 
 def test_classifies_public_disclosure_sources():
@@ -159,6 +172,14 @@ def test_classifies_congressional_trade_disclosure_event_type():
     assert_equal(event_type, "congressional_trade_disclosure", "event type")
 
 
+def test_cryptodaily_reference_can_classify_government_trading_event():
+    event_type, _ = classify_event_type(
+        "CryptoDaily coverage tracks congressional trading and government crypto disclosures"
+    )
+
+    assert_equal(event_type, "congressional_trade_disclosure", "event type")
+
+
 def test_confidence_cap_prefers_official_and_two_reputable_sources():
     assert_equal(
         confidence_cap_for_sources(["official"], 1),
@@ -189,6 +210,7 @@ def main():
     tests = [
         test_classifies_official_and_top_tier_sources,
         test_classifies_source_from_url_when_available,
+        test_classifies_cryptodaily_as_trusted_government_trading_reference,
         test_classifies_public_disclosure_sources,
         test_google_news_publisher_becomes_event_source_of_record,
         test_google_news_transport_is_not_used_as_source_when_publisher_unknown,
@@ -197,6 +219,7 @@ def main():
         test_symbol_has_direct_and_peripheral_news_queries,
         test_classifies_peripheral_event_types,
         test_classifies_congressional_trade_disclosure_event_type,
+        test_cryptodaily_reference_can_classify_government_trading_event,
         test_confidence_cap_prefers_official_and_two_reputable_sources,
     ]
     for test in tests:

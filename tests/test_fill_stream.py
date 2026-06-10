@@ -1,4 +1,5 @@
 import asyncio
+import os
 import sqlite3
 import sys
 import tempfile
@@ -8,7 +9,11 @@ from types import SimpleNamespace
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from services.fill_stream_service import FillEventHandler
+from services.fill_stream_service import (
+    DEFAULT_HEARTBEAT_SECONDS,
+    FillEventHandler,
+    _fill_stream_heartbeat_seconds,
+)
 
 from repositories import fill_repo
 
@@ -265,6 +270,21 @@ def test_unmatched_buy_fill_inserts_synthetic_ledger_row(tmp_path, monkeypatch):
     ]
 
 
+def test_fill_stream_heartbeat_env_parser_falls_back_on_invalid_value(tmp_path, monkeypatch):
+    original = os.environ.get("FILL_STREAM_HEARTBEAT_SECONDS")
+    try:
+        os.environ["FILL_STREAM_HEARTBEAT_SECONDS"] = "not-an-int"
+        assert _fill_stream_heartbeat_seconds() == DEFAULT_HEARTBEAT_SECONDS
+
+        os.environ["FILL_STREAM_HEARTBEAT_SECONDS"] = "60"
+        assert _fill_stream_heartbeat_seconds() == 60
+    finally:
+        if original is None:
+            os.environ.pop("FILL_STREAM_HEARTBEAT_SECONDS", None)
+        else:
+            os.environ["FILL_STREAM_HEARTBEAT_SECONDS"] = original
+
+
 def run_with_temp_db(test_func):
     with tempfile.TemporaryDirectory() as tmp:
         monkeypatch = SimpleMonkeyPatch()
@@ -281,6 +301,7 @@ if __name__ == "__main__":
         test_trade_order_exists_checks_order_id,
         test_update_db_refreshes_cumulative_filled_qty,
         test_unmatched_buy_fill_inserts_synthetic_ledger_row,
+        test_fill_stream_heartbeat_env_parser_falls_back_on_invalid_value,
     ]
     for test in tests:
         run_with_temp_db(test)

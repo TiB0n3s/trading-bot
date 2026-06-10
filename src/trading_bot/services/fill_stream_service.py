@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import os
+import threading
 import time
 
 from alpaca_trade_api.stream import Stream
@@ -13,6 +14,7 @@ from repositories import fill_repo
 
 PAPER_BASE_URL = "https://paper-api.alpaca.markets"
 RECONNECT_DELAY = 30
+DEFAULT_HEARTBEAT_SECONDS = 300
 
 
 class FillEventHandler:
@@ -209,6 +211,7 @@ class FillStreamService:
         secret_key: str | None = None,
         base_url: str | None = None,
         reconnect_delay: int = RECONNECT_DELAY,
+        heartbeat_seconds: int | None = None,
     ):
         self.handler = handler
         self.logger = logger or logging.getLogger(__name__)
@@ -219,6 +222,10 @@ class FillStreamService:
         )
         self.base_url = base_url or get_alpaca_base_url()
         self.reconnect_delay = reconnect_delay
+        self.heartbeat_seconds = (
+            heartbeat_seconds if heartbeat_seconds is not None else _fill_stream_heartbeat_seconds()
+        )
+        self._heartbeat_started = False
 
     @classmethod
     def from_container(cls, container) -> "FillStreamService":
@@ -240,12 +247,32 @@ class FillStreamService:
         self.logger.info("Trade update stream connected - listening for fills")
         stream.run()
 
+    def start_heartbeat(self) -> None:
+        if self._heartbeat_started or self.heartbeat_seconds <= 0:
+            return
+        self._heartbeat_started = True
+
+        def _heartbeat_loop() -> None:
+            while True:
+                time.sleep(self.heartbeat_seconds)
+                self.logger.info(
+                    "Fill stream heartbeat: process_alive=true base_url=%s",
+                    self.base_url,
+                )
+
+        threading.Thread(
+            target=_heartbeat_loop,
+            name="fill-stream-heartbeat",
+            daemon=True,
+        ).start()
+
     def run(self) -> None:
         if not self.api_key or not self.secret_key:
             self.logger.error("ALPACA_API_KEY or ALPACA_SECRET_KEY not set - exiting")
             raise SystemExit(1)
 
         self.handler.init_storage()
+        self.start_heartbeat()
 
         while True:
             try:
@@ -264,3 +291,11 @@ class FillStreamService:
                     self.reconnect_delay,
                 )
             time.sleep(self.reconnect_delay)
+
+
+def _fill_stream_heartbeat_seconds() -> int:
+    raw = os.environ.get("FILL_STREAM_HEARTBEAT_SECONDS", str(DEFAULT_HEARTBEAT_SECONDS))
+    try:
+        return int(raw)
+    except (TypeError, ValueError):
+        return DEFAULT_HEARTBEAT_SECONDS

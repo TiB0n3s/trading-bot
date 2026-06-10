@@ -614,6 +614,14 @@ MIGRATIONS: tuple[Migration, ...] = (
             """,
         ),
     ),
+    Migration(
+        migration_id="20260610_026_feature_snapshot_bar_contract",
+        description="Record the canonical 1-minute bar contract used by live feature snapshots.",
+        statements=(
+            "ALTER TABLE feature_snapshots ADD COLUMN bar_contract_version TEXT",
+            "ALTER TABLE feature_snapshots ADD COLUMN bar_required_fields TEXT",
+        ),
+    ),
 )
 
 

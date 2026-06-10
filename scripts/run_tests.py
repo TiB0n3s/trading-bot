@@ -197,6 +197,7 @@ TESTS = [
     "tests/test_momentum_service.py",
     "tests/test_live_features_cli.py",
     "tests/test_live_features_service.py",
+    "tests/test_live_label_bar_contract.py",
     "tests/test_pre_market_research_service.py",
     "tests/test_prior_session_context_service.py",
     "tests/test_session_momentum_service.py",

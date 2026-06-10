@@ -6,6 +6,7 @@ import pandas as pd
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
+sys.path.insert(0, str(ROOT / "scripts"))
 
 from services.live_features_service import LiveFeaturesService  # noqa: E402
 
@@ -74,7 +75,18 @@ def _feature_snapshot_builder(**kwargs):
 
 def _service(tmp_path):
     (tmp_path / "market_context.json").write_text('{"symbols": {"AAPL": {"bias": "buy"}}}')
-    rows = [{"symbol": "AAPL", "close": 100 + i, "volume": 1000 + i} for i in range(20)]
+    rows = [
+        {
+            "symbol": "AAPL",
+            "open": 99 + i,
+            "high": 101 + i,
+            "low": 98 + i,
+            "close": 100 + i,
+            "volume": 1000 + i,
+            "vwap": 100.25 + i,
+        }
+        for i in range(20)
+    ]
     repo = FakeRepository()
     service = LiveFeaturesService(
         repository=repo,
@@ -102,6 +114,8 @@ def test_build_snapshot_uses_market_data_repository_context_and_setup(tmp_path):
     assert snapshot["bar_timeframe"] == "1Min"
     assert snapshot["bar_count"] == 20
     assert snapshot["bar_feed_used"] == "iex"
+    assert snapshot["bar_contract_version"] == "canonical_1min_ohlcv_vwap_v1"
+    assert "open,high,low,close,volume,vwap" in snapshot["bar_required_fields"]
     assert snapshot["macro_regime"] == "risk_on"
     assert snapshot["market_bias"] == "buy"
     assert snapshot["trend_direction"] == "bullish"
@@ -134,7 +148,18 @@ def test_collect_all_symbols_reuses_latest_snapshot_as_stale_when_feed_is_thin(t
         "staleness_reason": None,
     }
     service.market_data = FakeMarketData(
-        [{"symbol": "SPY", "close": 100 + i, "volume": 1000 + i} for i in range(20)],
+        [
+            {
+                "symbol": "SPY",
+                "open": 99 + i,
+                "high": 101 + i,
+                "low": 98 + i,
+                "close": 100 + i,
+                "volume": 1000 + i,
+                "vwap": 100.25 + i,
+            }
+            for i in range(20)
+        ],
         fail_symbols={"AAPL"},
     )
     service.approved_symbols = {"AAPL"}

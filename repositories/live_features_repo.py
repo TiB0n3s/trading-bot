@@ -250,6 +250,8 @@ class LiveFeaturesRepository:
                     staleness_reason,
                     bar_timeframe,
                     bar_count,
+                    bar_contract_version,
+                    bar_required_fields,
                     setup_label,
                     setup_recommendation,
                     setup_score,
@@ -259,7 +261,7 @@ class LiveFeaturesRepository:
                     volume_surge_ratio,
                     extension_from_recent_base_pct,
                     prior_session_return_pct
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     snapshot.get("timestamp"),
@@ -290,6 +292,8 @@ class LiveFeaturesRepository:
                     snapshot.get("staleness_reason"),
                     snapshot.get("bar_timeframe"),
                     snapshot.get("bar_count"),
+                    snapshot.get("bar_contract_version"),
+                    snapshot.get("bar_required_fields"),
                     snapshot.get("setup_label"),
                     snapshot.get("setup_recommendation"),
                     snapshot.get("setup_score"),

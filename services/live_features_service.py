@@ -19,6 +19,13 @@ from strategy_constants import SYMBOL_MARKET_ALIGNMENT
 from symbols_config import APPROVED_SYMBOLS
 
 from repositories.live_features_repo import LiveFeaturesRepository
+from services.canonical_bar_contract import (
+    CANONICAL_BAR_ADJUSTMENT,
+    CANONICAL_BAR_CONTRACT_VERSION,
+    CANONICAL_BAR_REQUIRED_FIELDS,
+    CANONICAL_BAR_TIMEFRAME,
+    dataframe_to_canonical_bar_rows,
+)
 from services.market_data_service import market_data_service
 from services.timescale_tick_writer_service import write_ticks_sync
 
@@ -154,8 +161,8 @@ class LiveFeaturesService:
 
         end = datetime.now(ET)
 
-        timeframe = "1Min" if session == "open" else "5Min"
-        lookbacks = (90, 180, 360) if timeframe == "1Min" else (300, 600, 1200)
+        timeframe = CANONICAL_BAR_TIMEFRAME
+        lookbacks = (90, 180, 360)
 
         for window_minutes in lookbacks:
             start = end - timedelta(minutes=window_minutes)
@@ -164,19 +171,22 @@ class LiveFeaturesService:
                 timeframe,
                 start=start.isoformat(),
                 end=end.isoformat(),
-                adjustment="raw",
+                adjustment=CANONICAL_BAR_ADJUSTMENT,
             )
             feed_used = self.market_data.get_feed_used(symbol) or "unknown"
-            bars = barset.df
-
-            if bars is None or bars.empty:
-                continue
-
-            if "symbol" in bars.columns:
-                bars = bars[bars["symbol"] == symbol]
-
-            closes = [float(x) for x in bars["close"].tolist()]
-            volumes = [float(x) for x in bars["volume"].tolist()]
+            rows = dataframe_to_canonical_bar_rows(
+                barset.df,
+                symbol=symbol,
+                feed=feed_used,
+                adjusted=False,
+            )
+            rows = [
+                row
+                for row in rows
+                if all(row.get(field) is not None for field in CANONICAL_BAR_REQUIRED_FIELDS)
+            ]
+            closes = [float(row["close"]) for row in rows]
+            volumes = [float(row["volume"]) for row in rows]
 
             if len(closes) >= min_bars_needed:
                 result = (
@@ -232,6 +242,8 @@ class LiveFeaturesService:
         snapshot["bar_timeframe"] = timeframe
         snapshot["bar_count"] = bar_count
         snapshot["bar_feed_used"] = self._bar_feed_used.get((symbol, session), "sip")
+        snapshot["bar_contract_version"] = CANONICAL_BAR_CONTRACT_VERSION
+        snapshot["bar_required_fields"] = ",".join(CANONICAL_BAR_REQUIRED_FIELDS)
 
         if len(closes) >= 5:
             returns = []

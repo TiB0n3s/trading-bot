@@ -10,8 +10,12 @@ from datetime import datetime
 from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parents[1]
+SCRIPTS_DIR = Path(__file__).resolve().parent
 VENV_PYTHON = BASE_DIR / "venv" / "bin" / "python"
 ENV_FILE = Path("/etc/trading-bot.env")
+
+if str(SCRIPTS_DIR) not in sys.path:
+    sys.path.insert(0, str(SCRIPTS_DIR))
 
 
 def reexec_under_venv_if_available() -> None:

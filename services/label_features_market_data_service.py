@@ -5,6 +5,11 @@ from __future__ import annotations
 from datetime import timedelta
 from typing import Any
 
+from services.canonical_bar_contract import (
+    CANONICAL_BAR_ADJUSTMENT,
+    CANONICAL_BAR_TIMEFRAME,
+    dataframe_to_canonical_bar_rows,
+)
 from services.market_data_service import market_data_service
 
 
@@ -17,30 +22,18 @@ class LabelFeaturesMarketDataService:
 
         bars = self.market_data.get_barset_with_fallback(
             symbol,
-            "1Min",
+            CANONICAL_BAR_TIMEFRAME,
             start=snapshot_dt.isoformat(),
             end=end_dt.isoformat(),
-            adjustment="raw",
-            feed="iex",
-        ).df
-
-        if bars is None or bars.empty:
-            return []
-
-        if "symbol" in bars.columns:
-            bars = bars[bars["symbol"] == symbol]
-
-        rows = []
-        for idx, row in bars.iterrows():
-            rows.append(
-                {
-                    "timestamp": idx.isoformat() if hasattr(idx, "isoformat") else str(idx),
-                    "close": float(row["close"]),
-                    "high": float(row["high"]),
-                    "low": float(row["low"]),
-                }
-            )
-        return rows
+            adjustment=CANONICAL_BAR_ADJUSTMENT,
+        )
+        feed_used = self.market_data.get_feed_used(symbol) or None
+        return dataframe_to_canonical_bar_rows(
+            bars.df,
+            symbol=symbol,
+            feed=feed_used,
+            adjusted=False,
+        )
 
 
 label_features_market_data_service = LabelFeaturesMarketDataService()

@@ -34,7 +34,8 @@ As of the latest roadmap work:
 - `ml_platform` remains a staged, ahead-of-live research lane with read-only readiness, replay, governance, manifest, and retraining reports.
 - `ml/models/similarity_v0/` remains a research-only metadata placeholder, while optional supervised and HMM artifacts can be trained under `ml/models/` for offline review only.
 - Research export support now includes DuckDB and Parquet/PyArrow so daily review datasets can be exported without changing live trading behavior.
-- `pipeline/after_close_learning.py` runs the recurring after-close quant learning loop: outcome completion, candidate/rejected forward backfill, report-memory refresh, DuckDB/PyArrow research export, pattern/feature/post-trade/readiness reports, paper-learning authority outcome audit, guarded retraining, policy artifact registration, and point-in-time archival. `run_after_close_learning.sh` is now a scheduler wrapper only.
+- `pipeline/after_close_learning.py` runs the recurring after-close quant learning loop: trade matching, rejected-signal outcome completion, automated learning-evidence repair, report-memory refresh, DuckDB/PyArrow research export, pattern/feature/post-trade/readiness reports, paper-learning authority outcome audit, guarded retraining, policy artifact registration, and point-in-time archival. `run_after_close_learning.sh` is now a scheduler wrapper only.
+- `pipeline/learning_backfill_repair.py` is the automated post-session repair step for learning evidence. It loops candidate-universe forward-outcome backfill in bounded chunks until coverage reaches the configured target, then repairs approved matched exits that are missing canonical exit snapshots. It is analysis-only and cannot approve, size, or route orders.
 - `pipeline/post_session_review.py` owns post-session diagnostics and learning-evidence review with explicit warn-only report semantics, so ordinary review warnings no longer make the scheduled wrapper look like a hard runtime failure.
 - Optional TimescaleDB storage can mirror compact live feature ticks into `stock_ticks` when `TIMESCALE_DB_URI` is configured. This storage path has no trade authority.
 - Auto-buy paper execution can run from internal Alpaca-bar candidates across the approved universe when `AUTO_BUY_SIGNAL_MODE=internal_all` and `AUTO_BUY_LIVE_BUYS=true`. Candidate capture stores scored/taken/not-taken rows for learning and counterfactual review.
@@ -890,6 +891,18 @@ observe-only
 → warn-only
 → soft modifier
 → possible hard gate much later
+
+Current learning-readiness posture:
+
+- Runtime job health, candidate forward-outcome coverage, and approved exit
+  linkage are expected to be repaired by the after-close pipeline.
+- Candidate forward-outcome coverage target is at least 95% in
+  `pipeline.learning_backfill_repair`; learning readiness only requires 80%.
+- Missing calibration buckets during early paper collection are not a plumbing
+  failure. They remain a promotion blocker until enough realized lifecycle
+  outcomes exist.
+- Authority promotion still requires sufficient integrated outcomes, calibration
+  evidence, and explicit operator review.
 
 ## ML Platform and Staged Integration
 

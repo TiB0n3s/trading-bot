@@ -451,11 +451,18 @@ python3 policy_artifacts.py rollback
 ```
 
 `pipeline/after_close_learning.py` registers the completed artifact set and
-marks it known-good after all learning steps finish. `run_after_close_learning.sh`
-only loads environment, logs start/failure/finish bot events, and delegates to
-the pipeline under the cron/job-runner lock. Rollback restores the known-good
-snapshot with temp-file replacement. Dataset manifests include current artifact
-hashes, the registry hash, and the known-good artifact set id.
+marks it known-good after all learning steps finish. The pipeline also runs
+`pipeline.learning_backfill_repair` before downstream learning reports. That
+repair step repeatedly backfills candidate-universe forward outcomes in bounded
+chunks until the configured coverage target is reached, then repairs approved
+matched exits that are missing canonical exit snapshots. It is analysis-only and
+cannot approve, size, or route orders.
+
+`run_after_close_learning.sh` only loads environment, logs
+start/failure/finish bot events, and delegates to the pipeline under the
+cron/job-runner lock. Rollback restores the known-good snapshot with temp-file
+replacement. Dataset manifests include current artifact hashes, the registry
+hash, and the known-good artifact set id.
 
 
 ## Point-In-Time Context Archive
@@ -532,6 +539,15 @@ population, action-adjusted MFE/MAE signs, and near-close partial attribution.
 Near-close rows should be `partial` with
 `partial_reason = near_close_no_60m_window`, not silently treated as complete
 labels.
+
+If learning readiness reports candidate coverage or approved-exit linkage gaps,
+the first recovery path is now:
+
+```bash
+cd ~/trading-bot
+PYTHONPATH=.:scripts ./venv/bin/python -m pipeline.learning_backfill_repair --date YYYY-MM-DD
+PYTHONPATH=.:scripts ./venv/bin/python ops_check.py learning-readiness YYYY-MM-DD
+```
 
 ## Local Artifact Cleanup
 

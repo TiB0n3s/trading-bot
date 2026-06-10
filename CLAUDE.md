@@ -68,13 +68,18 @@ Recent completed roadmap items:
   new coverage floor is reached. It skips repeated training for the same
   fingerprint and cannot promote or alter live authority.
 - `pipeline/after_close_learning.py` is the recurring after-close quant
-  learning loop. It completes rejected/candidate/exit outcomes, refreshes
-  report-memory artifacts, writes DuckDB/PyArrow research exports, runs
-  pattern/feature/post-trade/readiness reports, audits paper-learning authority
-  outcomes, runs guarded retraining/model comparison, registers policy
-  artifacts, and archives point-in-time state. `run_after_close_learning.sh`
+  learning loop. It completes trade matching, rejected outcomes, automated
+  learning-evidence repair, report-memory artifacts, DuckDB/PyArrow research
+  exports, pattern/feature/post-trade/readiness reports, paper-learning
+  authority outcome audits, guarded retraining/model comparison, policy
+  artifact registration, and point-in-time archival. `run_after_close_learning.sh`
   invokes it under the existing cron `job_runner.py` lock/ledger path and
   should remain a scheduler wrapper only.
+- `pipeline.learning_backfill_repair` is the automated learning-evidence repair
+  step. It loops candidate-universe forward-outcome backfill in bounded chunks
+  until the configured coverage target is reached, then repairs approved
+  matched exits missing canonical exit snapshots. It is analysis-only and
+  cannot approve, size, or route orders.
 - `pipeline/post_session_review.py` owns post-session review sequencing. It
   keeps review/report warnings warn-only so `run_post_session_review.sh` does
   not look like a failed runtime job when diagnostics are simply reporting
@@ -279,8 +284,10 @@ Recent completed roadmap items:
 Current roadmap posture:
 
 ```text
-Validate setup health and SIP->IEX fallback on a clean session.
-Verify conviction-stack persistence and cap attribution.
+Runtime/job health, candidate forward-outcome coverage, and approved-exit
+linkage are expected to be repaired by the after-close pipeline.
+Continue baseline paper collection until calibration buckets have enough
+realized lifecycle outcomes.
 Tune one policy at a time from measured paper-session evidence.
 ```
 
@@ -375,6 +382,10 @@ observe-only
 → warn-only
 → soft modifier
 → possible live gate later
+
+Do not treat clean learning-readiness plumbing as promotion evidence by itself.
+Authority promotion still requires enough integrated outcomes, calibrated
+buckets, and explicit operator review.
 
 ## Typed Config Layer
 

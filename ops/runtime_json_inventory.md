@@ -15,7 +15,7 @@ not write duplicate runtime JSON files under `scripts/`.
 | `missed_opportunity_memory.json` | Missed-opportunity learning memory | `scripts/missed_opportunity_report.py` |
 | `excursion_memory.json` | MFE/MAE excursion learning memory | `scripts/excursion_report.py` |
 | `policy_backtest_summary.json` | Policy backtest summary used by policy artifacts and reports | `scripts/policy_backtest.py` |
-| `symbol_momentum_timing_memory.json` | Per-symbol momentum timing memory | `scripts/symbol_momentum_timing_report.py` |
+| `symbol_momentum_timing_memory.json` | Generated per-symbol momentum timing memory; local runtime artifact ignored by git | `scripts/symbol_momentum_timing_report.py` |
 | `symbol_overrides.json` | Operator symbol disable/override configuration | operator-edited root file |
 | `manual_strategy_overrides.json` | Operator strategy override configuration | operator-edited root file |
 

@@ -123,12 +123,18 @@ or destabilize the webhook path if treated as routine cleanup.
    - After-close learning should produce retraining-readiness evidence and
      candidate artifacts, not automatically alter runtime policy.
    - `pipeline/after_close_learning.py` is the recurring after-close learning
-     automation layer. It runs outcome completion, report-memory refresh,
-     research export, pattern-learning inputs, feature attribution,
-     post-trade learning, learning readiness, paper-learning authority outcome
-     audit, guarded retraining/model comparison, policy artifact registration,
-     and point-in-time archive under the existing `run_after_close_learning.sh`
+     automation layer. It runs trade matching, rejected-outcome completion,
+     automated learning-evidence repair, report-memory refresh, research
+     export, pattern-learning inputs, feature attribution, post-trade learning,
+     learning readiness, paper-learning authority outcome audit, guarded
+     retraining/model comparison, policy artifact registration, and
+     point-in-time archive under the existing `run_after_close_learning.sh`
      cron path.
+   - `pipeline.learning_backfill_repair` is the automated learning-evidence
+     repair step. It repeatedly runs candidate-universe forward-outcome
+     backfill in bounded chunks until the configured coverage target is reached
+     or no eligible rows remain, then repairs approved matched exits missing
+     canonical exit snapshots. It is analysis-only and has no order authority.
 5. Existing after-close policy artifacts:
    - `strategy_memory.json`, `portfolio_replacement_memory.json`,
      `excursion_memory.json`, `missed_opportunity_memory.json`, and
@@ -645,6 +651,9 @@ Goal: bring the pre-existing after-close learning artifacts under governance.
 Problem:
 
 - `pipeline/after_close_learning.py` writes memory artifacts nightly.
+- `pipeline.learning_backfill_repair` runs before downstream learning reports,
+  so candidate forward-outcome and approved-exit snapshot coverage should not
+  require routine manual backfill.
 - `strategy_memory.py`, `portfolio_replacement_memory.py`,
   `decision_policy.py`, and `decision_context.py` load these artifacts in the
   live runtime path.
@@ -1146,10 +1155,15 @@ Critical blockers before real training:
    staged, but replay selection logic is not yet implemented.
 6. Continue symbol-universe versioning and review remaining candidates:
    F, HBAN, KEY, KHC, CRM, PDD, HPQ, BBY, DLTR, GPS, AEO, BKE.
-7. Sequencing note: `pipeline/after_close_learning.py` now completes
-   rejected/candidate forward outcomes before downstream learning reports, so
+7. Sequencing note: `pipeline/after_close_learning.py` now completes rejected
+   outcomes, runs automated candidate forward-outcome repair, and repairs
+   approved matched exit snapshots before downstream learning reports, so
    after-close learning is not waiting on `run_post_session_review.sh` for its
    outcome inputs.
+8. Current promotion posture: runtime health, candidate forward-outcome
+   coverage, and approved-exit linkage are plumbing checks. They are expected
+   to be repaired automatically after close. Calibration and promotion remain
+   gated by realized lifecycle sample size and explicit operator review.
 
 The biggest missing concept is auditability of what the bot knew at decision
 time. Without that, training, evaluation, and promotion can look sophisticated

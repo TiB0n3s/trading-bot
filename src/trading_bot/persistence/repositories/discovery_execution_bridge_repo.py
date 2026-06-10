@@ -178,6 +178,23 @@ class DiscoveryExecutionBridgeRepository:
                 (FAILED, _now_iso(), reason, reason, candidate_id),
             )
 
+    def mark_retryable(self, *, candidate_id: int, reason: str) -> None:
+        with get_connection(self.db_path) as con:
+            con.execute(
+                """
+                UPDATE auto_buy_decision_snapshots
+                SET execution_status = ?,
+                    execution_completed_at = ?,
+                    execution_error = ?,
+                    order_submitted = 0,
+                    routed_order_id = NULL,
+                    order_id = NULL,
+                    order_status = NULL
+                WHERE id = ?
+                """,
+                (PENDING, _now_iso(), reason, candidate_id),
+            )
+
     def record_routed_buy_trade(
         self,
         *,

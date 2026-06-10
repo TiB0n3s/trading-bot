@@ -31,6 +31,7 @@ REASON_CODE_POSITION_CHECK_FAILED = "position_check_failed"
 REASON_CODE_OPEN_ORDER_CHECK_FAILED = "open_order_check_failed"
 REASON_CODE_MISSING_CANONICAL_TRACE = "missing_canonical_trace"
 REASON_CODE_BROKER_REJECTED_ORDER = "broker_rejected_order"
+REASON_CODE_BROKER_TRANSIENT_FAILURE = "broker_transient_failure"
 REASON_CODE_CANDIDATE_DECODE_FAILED = "candidate_decode_failed"
 REASON_CODE_ALLOCATION_ROUNDS_TO_ZERO = "allocation_rounds_to_zero"
 
@@ -238,6 +239,21 @@ class DiscoveryExecutionBridgeService:
 
             reason = outcome.live_block_reason or outcome.failure_reason or "order not submitted"
             reason_code = _reason_code_for_order_failure(reason)
+            if _is_transient_broker_failure(reason):
+                self.repository.mark_retryable(candidate_id=candidate_id, reason=reason)
+                self._log_drop(
+                    candidate_id=candidate_id,
+                    symbol=symbol,
+                    reason_code=REASON_CODE_BROKER_TRANSIENT_FAILURE,
+                    reason_detail=reason,
+                )
+                return DiscoveryBridgeResult(
+                    candidate_id=candidate_id,
+                    symbol=symbol,
+                    status=PENDING,
+                    reason=reason,
+                    reason_code=REASON_CODE_BROKER_TRANSIENT_FAILURE,
+                )
             self.repository.mark_failed(candidate_id=candidate_id, reason=reason)
             self._log_drop(
                 candidate_id=candidate_id,
@@ -431,6 +447,27 @@ def _reason_code_for_order_failure(reason: str | None) -> str:
     if "missing canonical decision trace" in normalized:
         return REASON_CODE_MISSING_CANONICAL_TRACE
     return REASON_CODE_BROKER_REJECTED_ORDER
+
+
+def _is_transient_broker_failure(reason: str | None) -> bool:
+    normalized = str(reason or "").strip().lower()
+    return any(
+        token in normalized
+        for token in (
+            "too many requests",
+            "rate limit",
+            "rate-limit",
+            "429",
+            "temporarily unavailable",
+            "timeout",
+            "timed out",
+            "connection reset",
+            "connection aborted",
+            "service unavailable",
+            "bad gateway",
+            "gateway timeout",
+        )
+    )
 
 
 def _float_candidate_value(candidate: dict[str, Any], keys: tuple[str, ...]) -> float | None:

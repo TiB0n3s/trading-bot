@@ -16,6 +16,7 @@ from services.discovery_execution_bridge_service import (
     FAILED,
     PENDING,
     REASON_CODE_ALLOCATION_ROUNDS_TO_ZERO,
+    REASON_CODE_BROKER_TRANSIENT_FAILURE,
     REASON_CODE_COOLDOWN_ACTIVE,
     REASON_CODE_MISSING_CANONICAL_TRACE,
     REASON_CODE_OPEN_ORDER_EXISTS,
@@ -27,12 +28,21 @@ from services.discovery_execution_bridge_service import (
 
 from repositories import auto_buy_repo
 
+_DEFAULT_ORDER = object()
+
 
 class FakeBroker:
-    def __init__(self, order=None, position=None, open_orders=None):
-        self.order = order or {"id": "order-1", "status": "submitted"}
+    def __init__(
+        self,
+        order=_DEFAULT_ORDER,
+        position=None,
+        open_orders=None,
+        failure_reason=None,
+    ):
+        self.order = {"id": "order-1", "status": "submitted"} if order is _DEFAULT_ORDER else order
         self.position = position
         self.open_orders = open_orders or []
+        self.failure_reason = failure_reason
         self.calls = []
 
     def place_order(self, **kwargs):
@@ -40,7 +50,7 @@ class FakeBroker:
         return self.order
 
     def last_order_failure_reason(self):
-        return None
+        return self.failure_reason
 
     def get_position(self, symbol):
         return self.position
@@ -441,6 +451,27 @@ def test_full_share_allocation_rounding_blocks_before_broker_route():
         assert logger.info_calls[-1][1][2] == REASON_CODE_ALLOCATION_ROUNDS_TO_ZERO
 
 
+def test_transient_broker_submit_failure_returns_candidate_to_pending():
+    with tempfile.TemporaryDirectory() as tmpdir:
+        db_path = Path(tmpdir) / "trades.db"
+        auto_buy_repo.init_tables(db_path)
+        row_id = _insert_snapshot(db_path, _candidate(score=20.0, trace=_approved_trace()))
+        broker = FakeBroker(order=None, failure_reason="broker_submit_failed:too many requests.")
+        logger = FakeLogger()
+
+        results = _service(db_path, broker, logger=logger).route_eligible_candidates()
+
+        row = _status(db_path, row_id)
+        assert len(results) == 1
+        assert results[0].status == PENDING
+        assert results[0].reason_code == REASON_CODE_BROKER_TRANSIENT_FAILURE
+        assert "too many requests" in results[0].reason
+        assert row["execution_status"] == PENDING
+        assert row["order_submitted"] == 0
+        assert "too many requests" in row["execution_error"]
+        assert logger.info_calls[-1][1][2] == REASON_CODE_BROKER_TRANSIENT_FAILURE
+
+
 def main() -> None:
     tests = [
         test_low_score_candidate_remains_pending_and_is_not_routed,
@@ -452,6 +483,7 @@ def main() -> None:
         test_existing_open_order_blocks_bridge_route_with_reason_code,
         test_symbol_cooldown_drop_logs_candidate_tracking_id,
         test_full_share_allocation_rounding_blocks_before_broker_route,
+        test_transient_broker_submit_failure_returns_candidate_to_pending,
     ]
     for test in tests:
         test()

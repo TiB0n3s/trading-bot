@@ -165,7 +165,7 @@ def _build_steps(target_date: str) -> list[Step]:
         Step(
             name="counterfactual_veto_relaxation",
             module="pipeline.counterfactual_veto_relaxation",
-            argv=["--date", target_date],
+            argv=["--date", target_date, "--lookback-days", "5", "--limit", "500"],
             critical=False,
             description="train guarded paper-only false-negative veto-relaxation model from rejected outcomes",
         ),

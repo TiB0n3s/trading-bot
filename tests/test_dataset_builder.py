@@ -12,6 +12,7 @@ Coverage:
   7. Date range filter                  (1 test)
   Total: 21 tests
 """
+
 from __future__ import annotations
 
 import json
@@ -22,22 +23,23 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
+sys.path.insert(0, str(ROOT / "scripts"))
 
+from symbols_config import SYMBOL_UNIVERSE_VERSION
+
+from ml_platform.config import FEATURE_VERSION
 from ml_platform.dataset_builder import (
-    FIXED_HORIZON_TARGETS,
     LABEL_VERSION,
     QUERY_VERSION,
     DatasetBuildConfig,
     build_training_dataset,
     validate_pit_contract,
 )
-from ml_platform.config import FEATURE_VERSION
-from symbols_config import SYMBOL_UNIVERSE_VERSION
-
 
 # ---------------------------------------------------------------------------
 # Assertion helpers
 # ---------------------------------------------------------------------------
+
 
 def assert_equal(actual, expected, label=""):
     if actual != expected:
@@ -176,8 +178,16 @@ def _create_tables(con: sqlite3.Connection) -> None:
         con.execute(ddl)
 
 
-def _insert_fs(con, *, ts, symbol, is_stale=0, staleness_reason=None,
-               feature_available_at=None, last_price=100.0):
+def _insert_fs(
+    con,
+    *,
+    ts,
+    symbol,
+    is_stale=0,
+    staleness_reason=None,
+    feature_available_at=None,
+    last_price=100.0,
+):
     """Insert one feature_snapshots row; return its rowid."""
     fa = feature_available_at or ts
     cur = con.execute(
@@ -205,9 +215,14 @@ def _insert_ls(con, *, snapshot_id, complete=True, outcome_label="win"):
         """,
         (
             snapshot_id,
-            101.0, 102.0, 103.0 if complete else None,
-            0.5,   1.0,   1.5 if complete else None,
-            1.8,  -0.3,
+            101.0,
+            102.0,
+            103.0 if complete else None,
+            0.5,
+            1.0,
+            1.5 if complete else None,
+            1.8,
+            -0.3,
             outcome_label,
         ),
     )
@@ -270,6 +285,7 @@ def _make_archive(base_dir: Path, date_str: str, archived_at: str) -> str:
 # 1. PIT contract validation
 # ---------------------------------------------------------------------------
 
+
 def test_pit_contract_table_missing():
     with tempfile.TemporaryDirectory() as tmp:
         db_path = Path(tmp) / "test.db"
@@ -292,7 +308,9 @@ def test_pit_contract_missing_audit_columns():
     assert_false(result["ok"], "ok must be False when audit columns absent")
     assert_in("feature_available_at", result["missing_feature_audit_fields"], "missing field")
     assert_in("is_stale", result["missing_feature_audit_fields"], "missing is_stale")
-    assert_in("staleness_reason", result["missing_feature_audit_fields"], "missing staleness_reason")
+    assert_in(
+        "staleness_reason", result["missing_feature_audit_fields"], "missing staleness_reason"
+    )
 
 
 def test_pit_contract_clean_rows_accepted():
@@ -313,8 +331,13 @@ def test_pit_contract_counts_stale_rows():
         with sqlite3.connect(db_path) as con:
             con.execute(_FS_DDL)
             _insert_fs(con, ts="2026-05-26T10:00:00", symbol="AAPL", is_stale=0)
-            _insert_fs(con, ts="2026-05-26T10:01:00", symbol="NVDA", is_stale=1,
-                       staleness_reason="feature_available_at > signal_time")
+            _insert_fs(
+                con,
+                ts="2026-05-26T10:01:00",
+                symbol="NVDA",
+                is_stale=1,
+                staleness_reason="feature_available_at > signal_time",
+            )
         result = validate_pit_contract(db_path)
     assert_true(result["ok"], "ok — audit columns present")
     assert_equal(result["stale_feature_snapshot_count"], 1, "stale_feature_snapshot_count")
@@ -324,6 +347,7 @@ def test_pit_contract_counts_stale_rows():
 # 2. Row filtering
 # ---------------------------------------------------------------------------
 
+
 def _filter_fixture(tmp_dir: Path) -> Path:
     """Seed: 1 complete, 1 partial_near_close, 1 unlabeled row."""
     db_path = tmp_dir / "test.db"
@@ -331,9 +355,9 @@ def _filter_fixture(tmp_dir: Path) -> Path:
         _create_tables(con)
         # Row 1 — complete
         ts1 = "2026-05-26T10:00:00"
-        sid1 = _insert_fs(con, ts=ts1, symbol="AAPL")
+        sid1 = _insert_fs(con, ts=ts1, symbol="NOC")
         _insert_ls(con, snapshot_id=sid1, complete=True, outcome_label="win")
-        _insert_bar_pattern(con, ts=ts1, symbol="AAPL")
+        _insert_bar_pattern(con, ts=ts1, symbol="NOC")
         # Row 2 — partial_near_close (ret_fwd_30m NULL)
         sid2 = _insert_fs(con, ts="2026-05-26T10:30:00", symbol="NVDA")
         _insert_ls(con, snapshot_id=sid2, complete=False, outcome_label=None)
@@ -345,12 +369,10 @@ def _filter_fixture(tmp_dir: Path) -> Path:
 def test_complete_only_excludes_non_complete_rows():
     with tempfile.TemporaryDirectory() as tmp:
         db_path = _filter_fixture(Path(tmp))
-        cfg = DatasetBuildConfig(
-            start_date="2026-05-26", end_date="2026-05-26", db_path=db_path
-        )
+        cfg = DatasetBuildConfig(start_date="2026-05-26", end_date="2026-05-26", db_path=db_path)
         result = build_training_dataset(cfg)
     symbols_out = {r["symbol"] for r in result.rows}
-    assert_equal(symbols_out, {"AAPL"}, "only complete row exported")
+    assert_equal(symbols_out, {"NOC"}, "only complete row exported")
     row = result.rows[0]
     assert_equal(row["candle_body_pct"], 0.6, "candle body exported")
     assert_equal(row["cvd_price_corr_20"], 0.44, "CVD correlation exported")
@@ -361,14 +383,23 @@ def test_complete_only_excludes_non_complete_rows():
         "efi_pvt_orderflow_math_bar_pattern_v3",
         "bar pattern version exported",
     )
+    assert_true(row["spacex_value_chain_in_scope"], "SpaceX value-chain scope exported")
+    assert_equal(
+        row["spacex_value_chain_authority_tier"],
+        "approved_internal_bar_paper_learning",
+        "SpaceX value-chain authority tier exported",
+    )
+    assert_equal(
+        row["spacex_value_chain_relationship_weight"],
+        0.74,
+        "SpaceX relationship weight exported",
+    )
 
 
 def test_complete_only_exclusion_reason_counts():
     with tempfile.TemporaryDirectory() as tmp:
         db_path = _filter_fixture(Path(tmp))
-        cfg = DatasetBuildConfig(
-            start_date="2026-05-26", end_date="2026-05-26", db_path=db_path
-        )
+        cfg = DatasetBuildConfig(start_date="2026-05-26", end_date="2026-05-26", db_path=db_path)
         result = build_training_dataset(cfg)
     counts = result.excluded_reason_counts
     assert_equal(counts.get("partial_near_close", 0), 1, "partial_near_close count")
@@ -380,7 +411,9 @@ def test_include_incomplete_keeps_all_rows():
     with tempfile.TemporaryDirectory() as tmp:
         db_path = _filter_fixture(Path(tmp))
         cfg = DatasetBuildConfig(
-            start_date="2026-05-26", end_date="2026-05-26", db_path=db_path,
+            start_date="2026-05-26",
+            end_date="2026-05-26",
+            db_path=db_path,
             include_incomplete_labels=True,
         )
         result = build_training_dataset(cfg)
@@ -392,12 +425,15 @@ def test_export_row_count_invariant():
         db_path = _filter_fixture(Path(tmp))
         for include in (False, True):
             cfg = DatasetBuildConfig(
-                start_date="2026-05-26", end_date="2026-05-26", db_path=db_path,
+                start_date="2026-05-26",
+                end_date="2026-05-26",
+                db_path=db_path,
                 include_incomplete_labels=include,
             )
             result = build_training_dataset(cfg)
             assert_equal(
-                result.export_row_count, len(result.rows),
+                result.export_row_count,
+                len(result.rows),
                 f"export_row_count == len(rows) [include_incomplete={include}]",
             )
 
@@ -407,15 +443,26 @@ def test_export_row_count_invariant():
 # ---------------------------------------------------------------------------
 
 _REQUIRED_MANIFEST_FIELDS = [
-    "dataset_id", "created_at", "source_db_hash",
-    "query_version", "label_version", "feature_version",
-    "row_count", "symbol_count", "date_range",
-    "excluded_rows_reason_counts", "git_sha",
-    "override_state_hash", "override_tracking_status",
+    "dataset_id",
+    "created_at",
+    "source_db_hash",
+    "query_version",
+    "label_version",
+    "feature_version",
+    "row_count",
+    "symbol_count",
+    "date_range",
+    "excluded_rows_reason_counts",
+    "git_sha",
+    "override_state_hash",
+    "override_tracking_status",
     # Fields added by build_training_dataset
-    "export_row_count", "source_row_count",
-    "safe_training_targets", "pit_contract_ok",
+    "export_row_count",
+    "source_row_count",
+    "safe_training_targets",
+    "pit_contract_ok",
     "symbol_universe_version",
+    "reference_feature_contract",
 ]
 
 _VALID_OVERRIDE_STATUSES = {
@@ -427,9 +474,7 @@ _VALID_OVERRIDE_STATUSES = {
 
 def _manifest_fixture(tmp_dir: Path) -> tuple[Path, object]:
     db_path = _filter_fixture(tmp_dir)
-    cfg = DatasetBuildConfig(
-        start_date="2026-05-26", end_date="2026-05-26", db_path=db_path
-    )
+    cfg = DatasetBuildConfig(start_date="2026-05-26", end_date="2026-05-26", db_path=db_path)
     return db_path, build_training_dataset(cfg)
 
 
@@ -447,8 +492,11 @@ def test_manifest_required_fields_present():
 def test_manifest_export_row_count_matches_rows():
     with tempfile.TemporaryDirectory() as tmp:
         _, result = _manifest_fixture(Path(tmp))
-    assert_equal(result.manifest["export_row_count"], len(result.rows),
-                 "manifest.export_row_count == len(result.rows)")
+    assert_equal(
+        result.manifest["export_row_count"],
+        len(result.rows),
+        "manifest.export_row_count == len(result.rows)",
+    )
 
 
 def test_manifest_version_constants():
@@ -462,8 +510,11 @@ def test_manifest_version_constants():
 def test_manifest_symbol_universe_version():
     with tempfile.TemporaryDirectory() as tmp:
         _, result = _manifest_fixture(Path(tmp))
-    assert_equal(result.manifest["symbol_universe_version"], SYMBOL_UNIVERSE_VERSION,
-                 "symbol_universe_version matches symbols_config constant")
+    assert_equal(
+        result.manifest["symbol_universe_version"],
+        SYMBOL_UNIVERSE_VERSION,
+        "symbol_universe_version matches symbols_config constant",
+    )
 
 
 def test_manifest_override_tracking_status_never_unknown():
@@ -471,13 +522,17 @@ def test_manifest_override_tracking_status_never_unknown():
         _, result = _manifest_fixture(Path(tmp))
     status = result.manifest.get("override_tracking_status")
     assert_true(status, "override_tracking_status must be non-empty")
-    assert_in(status, _VALID_OVERRIDE_STATUSES,
-              f"override_tracking_status is a known valid value (got {status!r})")
+    assert_in(
+        status,
+        _VALID_OVERRIDE_STATUSES,
+        f"override_tracking_status is a known valid value (got {status!r})",
+    )
 
 
 # ---------------------------------------------------------------------------
 # 4. PIT archive injection
 # ---------------------------------------------------------------------------
+
 
 def _pit_db(tmp_dir: Path) -> Path:
     """Seed rows spanning three dates for archive injection tests."""
@@ -485,9 +540,9 @@ def _pit_db(tmp_dir: Path) -> Path:
     with sqlite3.connect(db_path) as con:
         _create_tables(con)
         for ts, sym in [
-            ("2026-05-26T10:00:00", "AAPL"),   # exact archive
-            ("2026-05-27T10:00:00", "NVDA"),   # fallback from prior day
-            ("2026-05-28T10:00:00", "TSLA"),   # no archive
+            ("2026-05-26T10:00:00", "AAPL"),  # exact archive
+            ("2026-05-27T10:00:00", "NVDA"),  # fallback from prior day
+            ("2026-05-28T10:00:00", "TSLA"),  # no archive
         ]:
             sid = _insert_fs(con, ts=ts, symbol=sym)
             _insert_ls(con, snapshot_id=sid, complete=True, outcome_label="win")
@@ -499,9 +554,7 @@ def test_pit_injection_exact_archive():
         tmp_path = Path(tmp)
         db_path = _pit_db(tmp_path)
         _make_archive(tmp_path, "2026-05-26", "2026-05-26T08:00:00Z")
-        cfg = DatasetBuildConfig(
-            start_date="2026-05-26", end_date="2026-05-26", db_path=db_path
-        )
+        cfg = DatasetBuildConfig(start_date="2026-05-26", end_date="2026-05-26", db_path=db_path)
         result = build_training_dataset(cfg)
     assert_equal(len(result.rows), 1, "one complete row")
     row = result.rows[0]
@@ -514,9 +567,7 @@ def test_pit_injection_missing_archive():
         tmp_path = Path(tmp)
         db_path = _pit_db(tmp_path)
         # No archive created for 2026-05-28 and no prior dates either
-        cfg = DatasetBuildConfig(
-            start_date="2026-05-28", end_date="2026-05-28", db_path=db_path
-        )
+        cfg = DatasetBuildConfig(start_date="2026-05-28", end_date="2026-05-28", db_path=db_path)
         result = build_training_dataset(cfg)
     assert_equal(len(result.rows), 1, "one complete row")
     row = result.rows[0]
@@ -530,30 +581,29 @@ def test_pit_injection_fallback_archive():
         db_path = _pit_db(tmp_path)
         # Archive only for 2026-05-26; 2026-05-27 should fall back to it
         _make_archive(tmp_path, "2026-05-26", "2026-05-26T08:00:00Z")
-        cfg = DatasetBuildConfig(
-            start_date="2026-05-27", end_date="2026-05-27", db_path=db_path
-        )
+        cfg = DatasetBuildConfig(start_date="2026-05-27", end_date="2026-05-27", db_path=db_path)
         result = build_training_dataset(cfg)
     assert_equal(len(result.rows), 1, "one complete row")
     row = result.rows[0]
-    assert_true(row["pit_archive_id"] is not None,
-                "pit_archive_id set even for fallback")
-    assert_equal(row["pit_coverage_status"], "prior_date_fallback",
-                 "pit_coverage_status=prior_date_fallback")
+    assert_true(row["pit_archive_id"] is not None, "pit_archive_id set even for fallback")
+    assert_equal(
+        row["pit_coverage_status"], "prior_date_fallback", "pit_coverage_status=prior_date_fallback"
+    )
 
 
 # ---------------------------------------------------------------------------
 # 5. Label / result aggregates
 # ---------------------------------------------------------------------------
 
+
 def _aggregate_fixture(tmp_dir: Path) -> Path:
     """Seed: 2 AAPL wins + 1 AAPL loss + 1 NVDA win (all complete); 1 TSLA unlabeled."""
     db_path = tmp_dir / "test.db"
     with sqlite3.connect(db_path) as con:
         _create_tables(con)
-        for i, (sym, label) in enumerate([
-            ("AAPL", "win"), ("AAPL", "win"), ("AAPL", "loss"), ("NVDA", "win")
-        ]):
+        for i, (sym, label) in enumerate(
+            [("AAPL", "win"), ("AAPL", "win"), ("AAPL", "loss"), ("NVDA", "win")]
+        ):
             ts = f"2026-05-26T{10 + i:02d}:00:00"
             sid = _insert_fs(con, ts=ts, symbol=sym)
             _insert_ls(con, snapshot_id=sid, complete=True, outcome_label=label)
@@ -565,9 +615,7 @@ def _aggregate_fixture(tmp_dir: Path) -> Path:
 def test_labeled_rows_count():
     with tempfile.TemporaryDirectory() as tmp:
         db_path = _aggregate_fixture(Path(tmp))
-        cfg = DatasetBuildConfig(
-            start_date="2026-05-26", end_date="2026-05-26", db_path=db_path
-        )
+        cfg = DatasetBuildConfig(start_date="2026-05-26", end_date="2026-05-26", db_path=db_path)
         result = build_training_dataset(cfg)
     # Only complete rows are exported by default; all 4 complete rows have outcome_label
     assert_equal(result.labeled_rows, 4, "labeled_rows counts rows with outcome_label")
@@ -576,9 +624,7 @@ def test_labeled_rows_count():
 def test_symbols_set_matches_exported_rows():
     with tempfile.TemporaryDirectory() as tmp:
         db_path = _aggregate_fixture(Path(tmp))
-        cfg = DatasetBuildConfig(
-            start_date="2026-05-26", end_date="2026-05-26", db_path=db_path
-        )
+        cfg = DatasetBuildConfig(start_date="2026-05-26", end_date="2026-05-26", db_path=db_path)
         result = build_training_dataset(cfg)
     expected_symbols = {r["symbol"] for r in result.rows}
     assert_equal(result.symbols, expected_symbols, "result.symbols == exported row symbols")
@@ -587,29 +633,28 @@ def test_symbols_set_matches_exported_rows():
 def test_source_row_count_includes_all_label_statuses():
     with tempfile.TemporaryDirectory() as tmp:
         db_path = _aggregate_fixture(Path(tmp))
-        cfg = DatasetBuildConfig(
-            start_date="2026-05-26", end_date="2026-05-26", db_path=db_path
-        )
+        cfg = DatasetBuildConfig(start_date="2026-05-26", end_date="2026-05-26", db_path=db_path)
         result = build_training_dataset(cfg)
     # 4 complete + 1 unlabeled = 5 source rows; only 4 exported in default mode
     assert_equal(result.source_row_count, 5, "source_row_count includes unlabeled rows")
     assert_equal(result.export_row_count, 4, "export_row_count is complete-only")
-    assert_true(result.source_row_count > result.export_row_count,
-                "source count > export count when unlabeled rows exist")
+    assert_true(
+        result.source_row_count > result.export_row_count,
+        "source count > export count when unlabeled rows exist",
+    )
 
 
 # ---------------------------------------------------------------------------
 # 6. Empty result handling
 # ---------------------------------------------------------------------------
 
+
 def test_empty_date_range_never_raises():
     with tempfile.TemporaryDirectory() as tmp:
         db_path = Path(tmp) / "test.db"
         with sqlite3.connect(db_path) as con:
             _create_tables(con)
-        cfg = DatasetBuildConfig(
-            start_date="2026-01-01", end_date="2026-01-31", db_path=db_path
-        )
+        cfg = DatasetBuildConfig(start_date="2026-01-01", end_date="2026-01-31", db_path=db_path)
         result = build_training_dataset(cfg)
     assert_equal(result.rows, [], "rows is empty list")
     assert_equal(result.export_row_count, 0, "export_row_count is 0")
@@ -623,6 +668,7 @@ def test_empty_date_range_never_raises():
 # ---------------------------------------------------------------------------
 # 7. Date range filter
 # ---------------------------------------------------------------------------
+
 
 def test_date_range_excludes_out_of_range_rows():
     with tempfile.TemporaryDirectory() as tmp:
@@ -638,9 +684,7 @@ def test_date_range_excludes_out_of_range_rows():
             # Row after range
             sid3 = _insert_fs(con, ts="2026-05-28T10:00:00", symbol="TSLA")
             _insert_ls(con, snapshot_id=sid3, complete=True, outcome_label="win")
-        cfg = DatasetBuildConfig(
-            start_date="2026-05-26", end_date="2026-05-26", db_path=db_path
-        )
+        cfg = DatasetBuildConfig(start_date="2026-05-26", end_date="2026-05-26", db_path=db_path)
         result = build_training_dataset(cfg)
     assert_equal(len(result.rows), 1, "only in-range row returned")
     assert_equal(result.rows[0]["symbol"], "AAPL", "in-range symbol")
@@ -649,6 +693,7 @@ def test_date_range_excludes_out_of_range_rows():
 # ---------------------------------------------------------------------------
 # Main runner
 # ---------------------------------------------------------------------------
+
 
 def main():
     tests = [

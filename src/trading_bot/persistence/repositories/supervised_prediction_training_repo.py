@@ -8,12 +8,26 @@ from typing import Any
 
 from db import DB_PATH
 from services.bar_pattern_feature_service import BAR_PATTERN_FEATURE_VERSION
+from services.spacex_value_chain_service import build_spacex_value_chain_feature
 
 SNAPSHOT_JOIN_FEATURE_VERSION_ALIASES = (
     BAR_PATTERN_FEATURE_VERSION,
     "v4",
     "efi_pvt_orderflow_math_bar_pattern_v3",
 )
+
+
+def _attach_reference_features(row: dict[str, Any]) -> dict[str, Any]:
+    feature = build_spacex_value_chain_feature(symbol=str(row.get("symbol") or ""))
+    shock = feature.get("lead_lag_shock") or {}
+    enriched = dict(row)
+    enriched["spacex_value_chain_in_scope"] = bool(feature.get("in_value_chain"))
+    enriched["spacex_value_chain_authority_tier"] = feature.get("authority_tier")
+    enriched["spacex_value_chain_relationship_type"] = feature.get("relationship_type")
+    enriched["spacex_value_chain_relationship_weight"] = feature.get("relationship_weight")
+    enriched["spacex_value_chain_information_shock_score"] = shock.get("information_shock_score")
+    enriched["spacex_value_chain_liquidity_siphon_ratio"] = feature.get("liquidity_siphon_ratio")
+    return enriched
 
 
 def fetch_training_rows(
@@ -162,4 +176,4 @@ def fetch_training_rows(
             """,
             params,
         ).fetchall()
-    return [dict(row) for row in rows]
+    return [_attach_reference_features(dict(row)) for row in rows]

@@ -20,16 +20,23 @@ Typical use:
 
 from __future__ import annotations
 
+import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from ml_platform.config import DEFAULT_DB_PATH, FEATURE_VERSION
-from ml_platform.governance import build_dataset_manifest
-from ml_platform.pit_context import get_archive_root, pit_coverage_for_range
-from repositories.training_data_repo import TrainingDataRepository
-from symbols_config import SYMBOL_UNIVERSE_VERSION
+ROOT_DIR = Path(__file__).resolve().parents[1]
+SCRIPTS_DIR = ROOT_DIR / "scripts"
+if str(SCRIPTS_DIR) not in sys.path:
+    sys.path.insert(0, str(SCRIPTS_DIR))
 
+from repositories.training_data_repo import TrainingDataRepository  # noqa: E402
+from services.spacex_value_chain_service import build_spacex_value_chain_feature  # noqa: E402
+from symbols_config import SYMBOL_UNIVERSE_VERSION  # noqa: E402
+
+from ml_platform.config import DEFAULT_DB_PATH, FEATURE_VERSION  # noqa: E402
+from ml_platform.governance import build_dataset_manifest  # noqa: E402
+from ml_platform.pit_context import get_archive_root, pit_coverage_for_range  # noqa: E402
 
 QUERY_VERSION = "ml_dataset_builder_v1"
 LABEL_VERSION = "label_taxonomy_v1"
@@ -172,6 +179,13 @@ ROW_COLUMNS = [
     # PIT archive coverage — injected per row from point_in_time archives
     "pit_archive_id",
     "pit_coverage_status",
+    # Deterministic context/reference features
+    "spacex_value_chain_in_scope",
+    "spacex_value_chain_authority_tier",
+    "spacex_value_chain_relationship_type",
+    "spacex_value_chain_relationship_weight",
+    "spacex_value_chain_information_shock_score",
+    "spacex_value_chain_liquidity_siphon_ratio",
 ]
 
 # Fields that must be present in feature_snapshots for a PIT-clean export.
@@ -189,8 +203,8 @@ _REQUIRED_PIT_AUDIT_FIELDS = (
 class DatasetBuildConfig:
     """Parameters controlling a training dataset build."""
 
-    start_date: str                  # YYYY-MM-DD inclusive
-    end_date: str                    # YYYY-MM-DD inclusive
+    start_date: str  # YYYY-MM-DD inclusive
+    end_date: str  # YYYY-MM-DD inclusive
     db_path: Path | None = None
     include_incomplete_labels: bool = False
     max_source_rows: int | None = None
@@ -212,18 +226,17 @@ class DatasetBuildResult:
     start_date: str
     end_date: str
     excluded_reason_counts: dict[str, int]
-    pit_contract: dict[str, Any]    # feature snapshot audit contract
-    pit_coverage: dict[str, Any]    # archive coverage summary for date range
-    manifest: dict[str, Any]        # governance manifest (DatasetManifest.to_dict() + export fields)
+    pit_contract: dict[str, Any]  # feature snapshot audit contract
+    pit_coverage: dict[str, Any]  # archive coverage summary for date range
+    manifest: dict[str, Any]  # governance manifest (DatasetManifest.to_dict() + export fields)
     label_horizon_statuses: list[str]
-    safe_training_targets: list[str] = field(
-        default_factory=lambda: list(FIXED_HORIZON_TARGETS)
-    )
+    safe_training_targets: list[str] = field(default_factory=lambda: list(FIXED_HORIZON_TARGETS))
 
 
 # ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
+
 
 def _fetch_raw_rows(
     db_path: Path,
@@ -280,9 +293,36 @@ def _inject_pit_archive(
     return result
 
 
+def _inject_reference_features(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Attach deterministic reference/context features to training rows.
+
+    These features are based only on the checked-in symbol universe and
+    point-in-time safe row metadata. They do not look forward and do not grant
+    authority to context-only symbols.
+    """
+    result: list[dict[str, Any]] = []
+    for row in rows:
+        enriched = dict(row)
+        feature = build_spacex_value_chain_feature(symbol=str(enriched.get("symbol") or ""))
+        shock = feature.get("lead_lag_shock") or {}
+        enriched["spacex_value_chain_in_scope"] = bool(feature.get("in_value_chain"))
+        enriched["spacex_value_chain_authority_tier"] = feature.get("authority_tier")
+        enriched["spacex_value_chain_relationship_type"] = feature.get("relationship_type")
+        enriched["spacex_value_chain_relationship_weight"] = feature.get("relationship_weight")
+        enriched["spacex_value_chain_information_shock_score"] = shock.get(
+            "information_shock_score"
+        )
+        enriched["spacex_value_chain_liquidity_siphon_ratio"] = feature.get(
+            "liquidity_siphon_ratio"
+        )
+        result.append(enriched)
+    return result
+
+
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
+
 
 def validate_pit_contract(db_path: Path | None = None) -> dict[str, Any]:
     """Check whether feature_snapshots satisfies the PIT audit field contract.
@@ -339,8 +379,7 @@ def build_training_dataset(config: DatasetBuildConfig) -> DatasetBuildResult:
         export_sqlite_rows = raw_rows
     else:
         export_sqlite_rows = [
-            r for r in raw_rows
-            if (r["label_horizon_status"] or "unlabeled") == "complete"
+            r for r in raw_rows if (r["label_horizon_status"] or "unlabeled") == "complete"
         ]
 
     pit_coverage = pit_coverage_for_range(
@@ -349,7 +388,7 @@ def build_training_dataset(config: DatasetBuildConfig) -> DatasetBuildResult:
         archive_root=archive_root,
     )
 
-    rows = _inject_pit_archive(export_sqlite_rows, pit_coverage)
+    rows = _inject_reference_features(_inject_pit_archive(export_sqlite_rows, pit_coverage))
 
     if config.build_manifest:
         manifest = build_dataset_manifest(
@@ -405,12 +444,14 @@ def build_training_dataset(config: DatasetBuildConfig) -> DatasetBuildResult:
     manifest["future_fixed_horizon_targets_pending_schema"] = FUTURE_FIXED_HORIZON_TARGETS
     manifest["bar_pattern_feature_target_version"] = BAR_PATTERN_FEATURE_TARGET_VERSION
     manifest["advanced_alpha_feature_version"] = ADVANCED_ALPHA_FEATURE_VERSION
+    manifest["reference_feature_contract"] = {
+        "spacex_value_chain_graph": "deterministic_symbol_universe_features_no_trade_authority",
+        "source": "services.spacex_value_chain_service",
+    }
     manifest["triple_barrier_target_included"] = True
     manifest["trend_scan_target_included"] = True
     manifest["pit_contract_ok"] = pit_contract.get("ok", False)
-    manifest["stale_feature_snapshot_count"] = pit_contract.get(
-        "stale_feature_snapshot_count", 0
-    )
+    manifest["stale_feature_snapshot_count"] = pit_contract.get("stale_feature_snapshot_count", 0)
     manifest["symbol_universe_version"] = SYMBOL_UNIVERSE_VERSION
 
     labeled_rows = sum(1 for r in rows if r.get("outcome_label") is not None)

@@ -96,7 +96,7 @@ def _build_db(path: Path) -> None:
                     ret_1m, ret_5m, ret_15m, range_pos_15m,
                     distance_from_vwap, volume_ratio_5m,
                     relative_strength_5m, spread_pct, setup_score
-                ) VALUES (?, 'AAPL', ?, ?, 1, 2, 3, 0.5, 1, 1.2, 0.3, 0.01, 70)
+                ) VALUES (?, 'NOC', ?, ?, 1, 2, 3, 0.5, 1, 1.2, 0.3, 0.01, 70)
                 """,
                 (idx, f"2026-06-03T0{idx}:00:08+00:00", available_at),
             )
@@ -128,7 +128,7 @@ def _build_db(path: Path) -> None:
                     triple_barrier_bars_to_event, triple_barrier_profit_pct,
                     triple_barrier_stop_pct
                 ) VALUES (
-                    'AAPL', ?, '1m',
+                    'NOC', ?, '1m',
                     0.6, 0.8, 1.2,
                     0.3,
                     1200, 1200, 3600, 0.42,
@@ -166,6 +166,9 @@ def test_fetch_training_rows_respects_feature_available_at_cutoff():
     assert rows[0]["rsi_14"] == 64.0
     assert rows[0]["trend_scan_label"] == 1
     assert rows[0]["triple_barrier_label"] == 1
+    assert rows[0]["spacex_value_chain_in_scope"] is True
+    assert rows[0]["spacex_value_chain_authority_tier"] == "approved_internal_bar_paper_learning"
+    assert rows[0]["spacex_value_chain_relationship_weight"] == 0.74
 
 
 if __name__ == "__main__":

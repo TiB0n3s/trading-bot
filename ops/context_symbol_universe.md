@@ -54,3 +54,13 @@ Requesting a context-only symbol without `--include-context-symbols` fails inten
 - `linked_symbols` must reference approved symbols only.
 - Promotion from context-only to tradable requires adding the symbol to `SYMBOL_CONFIG` through normal risk review.
 
+## SpaceX Catalyst Cohort
+
+The SpaceX catalyst cohort is explicitly tiered:
+
+- Approved internal-bar/paper-learning symbols: `NOC`, `LHX`, `HON`, `TDY`
+- Context-only symbols: `SPCX`, `IRDM`, `ASTS`, `GSAT`, `RDW`, `PL`, `BKSY`, `SPIR`, `BA`
+
+`SPCX` is a catalyst placeholder, not trade authority. Smaller or more speculative
+space names remain context-only until liquidity, spread, slippage, and learning
+evidence justify an explicit promotion review.

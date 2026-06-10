@@ -10,8 +10,34 @@ This is the single source of truth for:
 - shared symbol lists used by research/parser/decision prompts
 """
 
-SYMBOL_UNIVERSE_VERSION = "approved_universe_2026_05_26_internal_bar_expansion_v1"
-CONTEXT_SYMBOL_UNIVERSE_VERSION = "context_only_universe_2026_06_02_v1"
+SYMBOL_UNIVERSE_VERSION = "approved_universe_2026_06_10_spacex_catalyst_v1"
+CONTEXT_SYMBOL_UNIVERSE_VERSION = "context_only_universe_2026_06_10_spacex_catalyst_v1"
+
+SPACEX_CATALYST_APPROVED_SYMBOLS_LIST = [
+    "NOC",
+    "LHX",
+    "HON",
+    "TDY",
+]
+
+SPACEX_CATALYST_CONTEXT_ONLY_SYMBOLS_LIST = [
+    "SPCX",
+    "IRDM",
+    "ASTS",
+    "GSAT",
+    "RDW",
+    "PL",
+    "BKSY",
+    "SPIR",
+    "BA",
+]
+
+SPACEX_CATALYST_SYMBOLS_LIST = (
+    SPACEX_CATALYST_APPROVED_SYMBOLS_LIST + SPACEX_CATALYST_CONTEXT_ONLY_SYMBOLS_LIST
+)
+SPACEX_CATALYST_APPROVED_SYMBOLS = set(SPACEX_CATALYST_APPROVED_SYMBOLS_LIST)
+SPACEX_CATALYST_CONTEXT_ONLY_SYMBOLS = set(SPACEX_CATALYST_CONTEXT_ONLY_SYMBOLS_LIST)
+SPACEX_CATALYST_SYMBOLS = set(SPACEX_CATALYST_SYMBOLS_LIST)
 
 INTERNAL_BAR_ONLY_SYMBOLS_LIST = [
     "AMZN",
@@ -33,6 +59,10 @@ INTERNAL_BAR_ONLY_SYMBOLS_LIST = [
     "OKTA",
     "BURL",
     "ASML",  # $1600+ share price; affordability gate always blocks at current account size
+    "NOC",
+    "LHX",
+    "HON",
+    "TDY",
 ]
 
 INTERNAL_BAR_ONLY_SYMBOLS = set(INTERNAL_BAR_ONLY_SYMBOLS_LIST)
@@ -122,6 +152,30 @@ SYMBOL_CONFIG = {
     "MDB": {"price_range": (100, 600), "clusters": ["software_infra"]},
     "OKTA": {"price_range": (50, 220), "clusters": ["software_infra", "cybersecurity"]},
     "BURL": {"price_range": (150, 450), "clusters": ["consumer"]},
+    # SpaceX-adjacent catalyst cohort — June 2026.
+    # These are the initial liquid, higher-quality names approved for internal
+    # bar/paper learning. Smaller space names remain context-only below until
+    # liquidity and slippage evidence is sufficient for review.
+    "NOC": {
+        "price_range": (350, 900),
+        "clusters": ["defense", "aerospace", "spacex_catalyst"],
+        "max_spread_pct": 1.25,
+    },
+    "LHX": {
+        "price_range": (150, 450),
+        "clusters": ["defense", "aerospace", "spacex_catalyst"],
+        "max_spread_pct": 1.25,
+    },
+    "HON": {
+        "price_range": (120, 350),
+        "clusters": ["industrials", "aerospace", "spacex_catalyst"],
+        "max_spread_pct": 1.0,
+    },
+    "TDY": {
+        "price_range": (250, 900),
+        "clusters": ["industrials", "aerospace", "spacex_catalyst"],
+        "max_spread_pct": 1.5,
+    },
 }
 
 APPROVED_SYMBOLS_LIST = list(SYMBOL_CONFIG.keys())
@@ -213,6 +267,71 @@ CONTEXT_ONLY_SYMBOL_CONFIG = {
         "relationship_type": "biotech_peer",
         "linked_symbols": ["VRTX", "MRNA", "CRSP", "LLY"],
         "themes": ["healthcare", "biotech"],
+    },
+    # SpaceX catalyst context. These symbols enrich approved aerospace/defense
+    # names but do not become trade candidates from event context alone.
+    "SPCX": {
+        "name": "SpaceX potential public ticker placeholder",
+        "relationship_type": "spacex_primary_catalyst_placeholder",
+        "linked_symbols": ["NOC", "LHX", "HON", "TDY", "RKLB", "LMT", "RTX", "HWM"],
+        "themes": ["space", "ipo_watch", "aerospace", "defense"],
+        "authority_note": "context_only_until_public_listing_and_operator_review",
+    },
+    "IRDM": {
+        "name": "Iridium Communications",
+        "relationship_type": "space_communications_peer",
+        "linked_symbols": ["NOC", "LHX", "HON", "TDY", "RKLB"],
+        "themes": ["space", "satellite_communications", "aerospace"],
+        "authority_note": "context_only_until_liquidity_and_slippage_review",
+    },
+    "ASTS": {
+        "name": "AST SpaceMobile",
+        "relationship_type": "space_communications_peer",
+        "linked_symbols": ["NOC", "LHX", "HON", "TDY", "RKLB"],
+        "themes": ["space", "satellite_communications", "speculative_space"],
+        "authority_note": "context_only_until_liquidity_and_slippage_review",
+    },
+    "GSAT": {
+        "name": "Globalstar",
+        "relationship_type": "space_communications_peer",
+        "linked_symbols": ["NOC", "LHX", "HON", "TDY", "RKLB"],
+        "themes": ["space", "satellite_communications", "speculative_space"],
+        "authority_note": "context_only_until_liquidity_and_slippage_review",
+    },
+    "RDW": {
+        "name": "Redwire",
+        "relationship_type": "space_infrastructure_peer",
+        "linked_symbols": ["NOC", "LHX", "HON", "TDY", "RKLB"],
+        "themes": ["space", "space_infrastructure", "speculative_space"],
+        "authority_note": "context_only_until_liquidity_and_slippage_review",
+    },
+    "PL": {
+        "name": "Planet Labs",
+        "relationship_type": "space_data_peer",
+        "linked_symbols": ["NOC", "LHX", "HON", "TDY", "RKLB"],
+        "themes": ["space", "earth_observation", "space_data"],
+        "authority_note": "context_only_until_liquidity_and_slippage_review",
+    },
+    "BKSY": {
+        "name": "BlackSky Technology",
+        "relationship_type": "space_data_peer",
+        "linked_symbols": ["NOC", "LHX", "HON", "TDY", "RKLB"],
+        "themes": ["space", "earth_observation", "space_data", "speculative_space"],
+        "authority_note": "context_only_until_liquidity_and_slippage_review",
+    },
+    "SPIR": {
+        "name": "Spire Global",
+        "relationship_type": "space_data_peer",
+        "linked_symbols": ["NOC", "LHX", "HON", "TDY", "RKLB"],
+        "themes": ["space", "space_data", "satellite_communications", "speculative_space"],
+        "authority_note": "context_only_until_liquidity_and_slippage_review",
+    },
+    "BA": {
+        "name": "Boeing",
+        "relationship_type": "aerospace_prime_peer",
+        "linked_symbols": ["NOC", "LHX", "HON", "TDY", "GE", "HWM", "LMT", "RTX"],
+        "themes": ["aerospace", "defense", "space"],
+        "authority_note": "context_only_for_spacex_catalyst_until_explicit_promotion_review",
     },
 }
 

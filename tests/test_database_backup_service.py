@@ -13,7 +13,9 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from ops.database_backup_service import DatabaseBackupService  # noqa: E402
-from services.ops_checks.database_backup_checks import run_database_backup_report  # noqa: E402
+from trading_bot.ops_checks.commands.database_backup_checks import (
+    run_database_backup_report,  # noqa: E402
+)
 
 
 def _build_db(path: Path, *, table_name: str = "sample") -> None:

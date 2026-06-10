@@ -9,7 +9,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from services.ops_checks.external_symbol_discovery_checks import (
+from trading_bot.ops_checks.commands.external_symbol_discovery_checks import (
     EXTERNAL_SYMBOL_DISCOVERY_VERSION,
     build_external_symbol_discovery_payload,
     run_external_symbol_discovery,

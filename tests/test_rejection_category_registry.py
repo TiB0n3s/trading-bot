@@ -12,12 +12,11 @@ sys.path.insert(0, str(ROOT))
 
 from services.rejection_categories import ALL_REJECTION_CATEGORIES
 
-
 EMITTER_FILES = [
-    ROOT / "app.py",
-    ROOT / "services" / "preflight_service.py",
-    ROOT / "services" / "execution_service.py",
-    ROOT / "services" / "approval_service.py",
+    ROOT / "src" / "trading_bot" / "web" / "runtime_compat.py",
+    ROOT / "src" / "trading_bot" / "services" / "preflight_service.py",
+    ROOT / "src" / "trading_bot" / "services" / "execution_service.py",
+    ROOT / "src" / "trading_bot" / "signals" / "approval" / "service.py",
 ]
 
 

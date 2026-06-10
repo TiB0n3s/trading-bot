@@ -9,25 +9,25 @@ errors. It defaults to dry-run and never changes live trading authority.
 from __future__ import annotations
 
 import argparse
-from datetime import date
 import json
 import os
-from pathlib import Path
 import re
 import subprocess
 import sys
+from datetime import date
+from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 if str(BASE_DIR) not in sys.path:
     sys.path.insert(0, str(BASE_DIR))
 
-from services.ops_checks.historical_bar_progress_checks import (  # noqa: E402
+from symbols_config import APPROVED_SYMBOLS_LIST  # noqa: E402
+
+from trading_bot.ops_checks.commands.historical_bar_progress_checks import (  # noqa: E402
     DEFAULT_MANIFEST_DIR,
     _cache_symbol_progress,
     _load_manifests,
 )
-from symbols_config import APPROVED_SYMBOLS_LIST  # noqa: E402
-
 
 RETRY_PLAN_VERSION = "historical_bar_retry_plan_v1"
 ERROR_SYMBOL_RE = re.compile(r"\b([A-Z]{1,5})\s+\d{4}-\d{2}-\d{2}\.\.\d{4}-\d{2}-\d{2}:")
@@ -81,9 +81,7 @@ def build_retry_plan(
     )
     manifests = _load_manifests(base_dir / DEFAULT_MANIFEST_DIR, limit=manifest_limit)
     recent_errors = [
-        str(error)
-        for manifest in manifests
-        for error in (manifest.get("errors") or [])
+        str(error) for manifest in manifests for error in (manifest.get("errors") or [])
     ]
     failed_symbols = _error_symbols(recent_errors)
 
@@ -115,26 +113,30 @@ def build_retry_plan(
             reason_list.append("recent_manifest_error")
 
     selected = ordered[: max(1, max_symbols)]
-    command = [
-        sys.executable,
-        str(base_dir / "pipeline" / "historical_bar_backfill.py"),
-        "--start-date",
-        start_date,
-        "--end-date",
-        end_date,
-        "--symbol",
-        ",".join(selected),
-        "--chunk-days",
-        "30",
-        "--skip-existing-cache",
-        "--rebuild-patterns-for-existing-cache",
-        "--request-sleep-seconds",
-        "13",
-        "--retry-attempts",
-        "3",
-        "--retry-sleep-seconds",
-        "20",
-    ] if selected else []
+    command = (
+        [
+            sys.executable,
+            str(base_dir / "pipeline" / "historical_bar_backfill.py"),
+            "--start-date",
+            start_date,
+            "--end-date",
+            end_date,
+            "--symbol",
+            ",".join(selected),
+            "--chunk-days",
+            "30",
+            "--skip-existing-cache",
+            "--rebuild-patterns-for-existing-cache",
+            "--request-sleep-seconds",
+            "13",
+            "--retry-attempts",
+            "3",
+            "--retry-sleep-seconds",
+            "20",
+        ]
+        if selected
+        else []
+    )
 
     return {
         "report_version": RETRY_PLAN_VERSION,

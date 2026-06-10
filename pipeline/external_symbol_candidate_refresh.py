@@ -28,7 +28,8 @@ from services.intelligence.candidates.external_symbols import (  # noqa: E402
     DEFAULT_STATE_PATH,
     ExternalSymbolCandidateService,
 )
-from services.ops_checks.external_symbol_discovery_checks import (  # noqa: E402
+
+from trading_bot.ops_checks.commands.external_symbol_discovery_checks import (  # noqa: E402
     build_external_symbol_discovery_payload,
 )
 

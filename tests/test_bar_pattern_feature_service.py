@@ -19,7 +19,10 @@ from services.bar_pattern_feature_service import (  # noqa: E402
     BAR_PATTERN_RUNTIME_EFFECT,
     BarPatternFeatureService,
 )
-from services.ops_checks.bar_pattern_checks import run_bar_pattern_backfill  # noqa: E402
+
+from trading_bot.ops_checks.commands.bar_pattern_checks import (
+    run_bar_pattern_backfill,  # noqa: E402
+)
 
 
 def _fixture_bars() -> list[dict[str, float | str]]:
@@ -136,10 +139,7 @@ def test_bar_pattern_repository_persists_and_summarizes(tmp_path: Path):
     assert summary["cvd_divergences"]
     assert summary["rows_with_order_flow"] > 0
     assert summary["rows_with_fractional_memory"] > 0
-    assert any(
-        row["opportunity_action"] == "buy_candidate"
-        for row in summary["opportunities"]
-    )
+    assert any(row["opportunity_action"] == "buy_candidate" for row in summary["opportunities"])
 
 
 def test_bar_pattern_service_preserves_source_feed_adjustment_and_trade_count():

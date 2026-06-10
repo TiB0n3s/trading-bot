@@ -13,7 +13,9 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from services.ops_checks.historical_bar_coverage_checks import run_historical_bar_coverage  # noqa: E402
+from trading_bot.ops_checks.commands.historical_bar_coverage_checks import (
+    run_historical_bar_coverage,  # noqa: E402
+)
 
 
 def _build_db(
@@ -24,7 +26,8 @@ def _build_db(
     include_raw_contract: bool = False,
 ) -> None:
     with sqlite3.connect(path) as con:
-        raw_contract_columns = """
+        raw_contract_columns = (
+            """
                 open REAL,
                 high REAL,
                 low REAL,
@@ -37,7 +40,10 @@ def _build_db(
                 macd REAL,
                 macd_signal REAL,
                 rsi_14 REAL,
-        """ if include_raw_contract else ""
+        """
+            if include_raw_contract
+            else ""
+        )
         con.execute(
             f"""
             CREATE TABLE IF NOT EXISTS bar_pattern_features (

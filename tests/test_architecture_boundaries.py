@@ -87,6 +87,7 @@ APPROVED_DB_BOUNDARIES = {
 }
 APPROVED_DB_BOUNDARY_PREFIXES = {
     "repositories/",
+    "src/trading_bot/persistence/repositories/",
     "migrations/",
 }
 
@@ -104,6 +105,10 @@ APPROVED_BROKER_BOUNDARIES = {
     "services/container.py",
     "services/fill_stream_service.py",
     "services/market_data_service.py",
+    "src/trading_bot/services/broker_service.py",
+    "src/trading_bot/services/container.py",
+    "src/trading_bot/services/fill_stream_service.py",
+    "src/trading_bot/services/market_data_service.py",
 }
 
 TEMPORARY_BROKER_ACCESS_ALLOWLIST = set()
@@ -125,6 +130,21 @@ APPROVED_MARKET_DATA_BOUNDARIES = {
     "services/excursion_service.py",
     "services/missed_opportunity_service.py",
     "services/strong_day_participation_service.py",
+    "src/trading_bot/services/market_data_service.py",
+    "src/trading_bot/services/market_data_parity_service.py",
+    "src/trading_bot/services/execution_adapters.py",
+    "src/trading_bot/services/intelligence/candidates/reference.py",
+    "src/trading_bot/services/momentum_service.py",
+    "src/trading_bot/services/pre_market_research_service.py",
+    "src/trading_bot/services/live_features_service.py",
+    "src/trading_bot/services/label_features_market_data_service.py",
+    "src/trading_bot/services/position_market_data_service.py",
+    "src/trading_bot/services/rejected_signal_outcome_market_data_service.py",
+    "src/trading_bot/services/rolling_momentum_service.py",
+    "src/trading_bot/services/session_momentum_service.py",
+    "src/trading_bot/services/excursion_service.py",
+    "src/trading_bot/services/missed_opportunity_service.py",
+    "src/trading_bot/services/strong_day_participation_service.py",
 }
 
 TEMPORARY_MARKET_DATA_ALLOWLIST_REASONS: dict[str, str] = {}
@@ -321,7 +341,7 @@ def test_policies_cannot_import_runtime_services():
 
 
 def test_live_signal_processor_cannot_import_flask():
-    imports = _imports(ROOT / "services/live_signal_processor.py")
+    imports = _imports(ROOT / "src" / "trading_bot" / "signals" / "live" / "processor.py")
     assert_true("flask" not in imports, "live signal processor Flask boundary")
 
 

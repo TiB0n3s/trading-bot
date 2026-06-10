@@ -14,7 +14,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from services.ops_checks.historical_bar_progress_checks import (  # noqa: E402
+from trading_bot.ops_checks.commands.historical_bar_progress_checks import (  # noqa: E402
     run_historical_bar_progress,
 )
 
@@ -51,13 +51,7 @@ def _build_db(path: Path) -> None:
 
 
 def _write_manifest(base_dir: Path) -> None:
-    manifest_dir = (
-        base_dir
-        / "data"
-        / "historical_bars"
-        / "polygon_1min"
-        / "backfill_manifests"
-    )
+    manifest_dir = base_dir / "data" / "historical_bars" / "polygon_1min" / "backfill_manifests"
     manifest_dir.mkdir(parents=True, exist_ok=True)
     payload = {
         "attempted_chunks": 2,

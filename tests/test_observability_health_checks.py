@@ -11,10 +11,13 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from ops.database_backup_service import DatabaseBackupService  # noqa: E402
 from repositories.job_runs_repo import JobRunsRepository  # noqa: E402
 from services.job_runs_service import JobRunsService  # noqa: E402
-from services.ops_checks.observability_health_checks import run_observability_health  # noqa: E402
+
+from ops.database_backup_service import DatabaseBackupService  # noqa: E402
+from trading_bot.ops_checks.commands.observability_health_checks import (
+    run_observability_health,  # noqa: E402
+)
 
 
 def _build_db(path: Path) -> None:

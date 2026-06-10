@@ -14,7 +14,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from services.ops_checks.historical_bar_readiness_checks import (  # noqa: E402
+from trading_bot.ops_checks.commands.historical_bar_readiness_checks import (  # noqa: E402
     run_historical_bar_readiness,
 )
 
@@ -106,13 +106,7 @@ def _write_cache_chunk(base_dir: Path, symbol: str, start: str, end: str) -> Non
 
 
 def _write_manifest(base_dir: Path, *, errors=None, stamp: str = "20260102T120000Z") -> None:
-    manifest_dir = (
-        base_dir
-        / "data"
-        / "historical_bars"
-        / "polygon_1min"
-        / "backfill_manifests"
-    )
+    manifest_dir = base_dir / "data" / "historical_bars" / "polygon_1min" / "backfill_manifests"
     manifest_dir.mkdir(parents=True, exist_ok=True)
     (manifest_dir / f"historical_bar_backfill_{stamp}.json").write_text(
         json.dumps(
@@ -195,7 +189,7 @@ def test_historical_bar_readiness_allows_clean_latest_manifest_with_old_errors()
                 base_dir=base_dir,
                 start_date="2026-01-01",
                 end_date="2026-01-03",
-                min_days= 2,
+                min_days=2,
                 min_symbols=1,
                 include_db_quality=False,
                 limit=5,

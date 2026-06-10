@@ -12,7 +12,8 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from services.bar_pattern_feature_service import BAR_PATTERN_FEATURE_VERSION  # noqa: E402
-from services.ops_checks.historical_bar_validation_checks import (  # noqa: E402
+
+from trading_bot.ops_checks.commands.historical_bar_validation_checks import (  # noqa: E402
     build_historical_bar_validation_payload,
 )
 

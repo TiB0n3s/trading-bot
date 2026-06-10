@@ -511,8 +511,14 @@ def test_education_context_can_inform_decision_context_without_authority():
 def test_runtime_education_context_does_not_import_education_repository_or_table():
     runtime_files = [
         ROOT / "scripts" / "decision_context.py",
-        ROOT / "services" / "context_builder.py",
-        ROOT / "services" / "intelligence" / "education" / "decision_context.py",
+        ROOT / "src" / "trading_bot" / "signals" / "context" / "builder.py",
+        ROOT
+        / "src"
+        / "trading_bot"
+        / "services"
+        / "intelligence"
+        / "education"
+        / "decision_context.py",
     ]
     combined = "\n".join(path.read_text() for path in runtime_files)
 

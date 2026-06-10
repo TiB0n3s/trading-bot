@@ -11,7 +11,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from services.ops_checks.secrets_hygiene_checks import (  # noqa: E402
+from trading_bot.ops_checks.commands.secrets_hygiene_checks import (  # noqa: E402
     build_secrets_hygiene_payload,
 )
 

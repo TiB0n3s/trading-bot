@@ -6,21 +6,20 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
-from pathlib import Path
 import subprocess
 import sys
 from datetime import datetime, timezone
+from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 if str(BASE_DIR) not in sys.path:
     sys.path.insert(0, str(BASE_DIR))
 
-from services.ops_checks.historical_bar_progress_checks import (  # noqa: E402
+from trading_bot.ops_checks.commands.historical_bar_progress_checks import (  # noqa: E402
     DEFAULT_MANIFEST_DIR,
     _cache_symbol_progress,
     _load_manifests,
 )
-
 
 DEFAULT_STATE_PATH = Path("runtime_state/historical_bar_training_hook_state.json")
 
@@ -178,7 +177,9 @@ def main() -> int:
         {
             "report_version": "historical_bar_training_hook_state_v1",
             "last_status": "trained" if exit_code == 0 else "training_failed",
-            "last_trained_coverage_hash": coverage_hash if exit_code == 0 else state.get("last_trained_coverage_hash"),
+            "last_trained_coverage_hash": coverage_hash
+            if exit_code == 0
+            else state.get("last_trained_coverage_hash"),
             "last_readiness": payload.get("readiness"),
             "last_retrain_exit_code": exit_code,
             "updated_at": _now(),

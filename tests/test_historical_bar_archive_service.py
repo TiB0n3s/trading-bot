@@ -16,7 +16,8 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from services.historical_bar_archive_service import HistoricalBarArchiveService  # noqa: E402
-from services.ops_checks.historical_bar_archive_checks import (  # noqa: E402
+
+from trading_bot.ops_checks.commands.historical_bar_archive_checks import (  # noqa: E402
     run_historical_bar_archive,
 )
 

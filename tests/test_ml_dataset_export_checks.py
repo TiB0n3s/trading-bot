@@ -16,7 +16,9 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from services.ops_checks.ml_dataset_checks import run_ml_dataset_export_check  # noqa: E402
+from trading_bot.ops_checks.commands.ml_dataset_checks import (
+    run_ml_dataset_export_check,  # noqa: E402
+)
 
 _DATASET_BUILDER_TEST_PATH = ROOT / "tests" / "test_dataset_builder.py"
 _spec = importlib.util.spec_from_file_location(

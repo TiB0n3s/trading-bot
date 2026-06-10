@@ -13,7 +13,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from services.ops_checks.live_bar_pattern_capture_checks import (
+from trading_bot.ops_checks.commands.live_bar_pattern_capture_checks import (
     run_live_bar_pattern_capture_report,
 )
 

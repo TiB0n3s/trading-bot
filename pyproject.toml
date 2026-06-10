@@ -128,7 +128,16 @@ ignore = [
 "app.py" = ["E402"]  # compatibility path setup precedes legacy imports during migration
 "ops_check.py" = ["E402"]  # compatibility path setup precedes legacy imports during migration
 "src/trading_bot/ops_checks/cli.py" = ["E402"]  # compatibility path setup precedes legacy imports
+"src/trading_bot/ops_checks/legacy_cli.py" = ["E402", "F821"]  # dynamic lazy handlers are bound from string refs
+"src/trading_bot/web/runtime_compat.py" = ["E402"]  # compatibility path setup precedes legacy imports
+"src/trading_bot/positions/manager.py" = ["E402"]  # moved legacy script keeps path setup before imports
+"src/trading_bot/signals/auto_buy/manager.py" = ["E402"]  # moved legacy script loads env/path context before imports
+"src/trading_bot/services/*.py" = ["E402", "F821", "F841"]  # packaged legacy services include runtime-bound globals during migration
+"src/trading_bot/services/**/*.py" = ["E402", "F821", "F841"]  # packaged legacy service subpackages during migration
+"repositories/__init__.py" = ["E402"]  # namespace shim adjusts scripts path before aliasing
+"services/__init__.py" = ["E402"]  # namespace shim adjusts scripts path before aliasing
 "scripts/*.py" = ["E402"]  # legacy scripts load env/path context before some imports
+"tests/*.py" = ["E402"]  # tests expose raw repo/script paths before imports for uninstalled execution
 
 [tool.mypy]
 ignore_missing_imports = true

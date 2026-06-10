@@ -11,30 +11,36 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from services.ops_checks.conviction_checks import (
+from trading_bot.ops_checks.commands.advisory_authority_checks import run_advisory_authority_report
+from trading_bot.ops_checks.commands.auto_buy_checks import run_auto_buy_health
+from trading_bot.ops_checks.commands.context_freshness_checks import run_context_freshness
+from trading_bot.ops_checks.commands.conviction_checks import (
     run_buy_opportunity_report,
     run_claude_context_audit,
     run_conviction_stack_report,
 )
-from services.ops_checks.auto_buy_checks import run_auto_buy_health
-from services.ops_checks.advisory_authority_checks import run_advisory_authority_report
-from services.ops_checks.feature_attribution_checks import run_feature_attribution_report
-from services.ops_checks.post_trade_learning_checks import run_post_trade_learning_report
-from services.ops_checks.rollout_contract_checks import run_rollout_contract_report
-from services.ops_checks.excursion_checks import (
+from trading_bot.ops_checks.commands.event_context_validation_checks import (
+    run_event_context_validation,
+)
+from trading_bot.ops_checks.commands.event_source_checks import run_event_source_coverage
+from trading_bot.ops_checks.commands.excursion_checks import (
     run_peak_bucket_report,
     run_winner_became_loser,
 )
-from services.ops_checks.paper_learning_authority_checks import (
+from trading_bot.ops_checks.commands.feature_attribution_checks import (
+    run_feature_attribution_report,
+)
+from trading_bot.ops_checks.commands.log_ledger_checks import run_log_ledger_consistency
+from trading_bot.ops_checks.commands.paper_learning_authority_checks import (
     run_paper_learning_authority_report,
 )
-from services.ops_checks.setup_breakdown import run_setup_breakdown
-from services.ops_checks.context_freshness_checks import run_context_freshness
-from services.ops_checks.event_source_checks import run_event_source_coverage
-from services.ops_checks.event_context_validation_checks import run_event_context_validation
-from services.ops_checks.log_ledger_checks import run_log_ledger_consistency
-from services.ops_checks.portfolio_risk_checks import run_portfolio_risk_report
-from services.ops_checks.runtime_checks import run_runtime_health
+from trading_bot.ops_checks.commands.portfolio_risk_checks import run_portfolio_risk_report
+from trading_bot.ops_checks.commands.post_trade_learning_checks import (
+    run_post_trade_learning_report,
+)
+from trading_bot.ops_checks.commands.rollout_contract_checks import run_rollout_contract_report
+from trading_bot.ops_checks.commands.runtime_checks import run_runtime_health
+from trading_bot.ops_checks.commands.setup_breakdown import run_setup_breakdown
 
 
 def test_ops_checks_return_false_when_db_missing(tmp_path):
@@ -85,9 +91,46 @@ def test_event_source_coverage_reports_reliability_mix(tmp_path):
             """
         )
         rows = [
-            ("2026-05-30", "AAPL", "filing", "high", "SEC", "https://sec.gov/x", {"source_tier": "official", "trusted_source": True, "search_scope": "company_direct"}),
-            ("2026-05-30", "MSFT", "news", "medium", "Reuters", "https://reuters.com/x", {"source_tier": "confirmed_financial_news", "trusted_source": True, "search_scope": "company_direct"}),
-            ("2026-05-30", "NVDA", "supplier", "low", "Yahoo Finance", "https://finance.yahoo.com/x", {"source_tier": "medium_confidence", "trusted_source": False, "search_scope": "company_peripheral", "peripheral_context": True}),
+            (
+                "2026-05-30",
+                "AAPL",
+                "filing",
+                "high",
+                "SEC",
+                "https://sec.gov/x",
+                {
+                    "source_tier": "official",
+                    "trusted_source": True,
+                    "search_scope": "company_direct",
+                },
+            ),
+            (
+                "2026-05-30",
+                "MSFT",
+                "news",
+                "medium",
+                "Reuters",
+                "https://reuters.com/x",
+                {
+                    "source_tier": "confirmed_financial_news",
+                    "trusted_source": True,
+                    "search_scope": "company_direct",
+                },
+            ),
+            (
+                "2026-05-30",
+                "NVDA",
+                "supplier",
+                "low",
+                "Yahoo Finance",
+                "https://finance.yahoo.com/x",
+                {
+                    "source_tier": "medium_confidence",
+                    "trusted_source": False,
+                    "search_scope": "company_peripheral",
+                    "peripheral_context": True,
+                },
+            ),
         ]
         con.executemany(
             """
@@ -221,9 +264,7 @@ def _canonical_lifecycle_json(
                 "label": setup,
                 "structure_state": structure,
             },
-            "advisory_authority_state": {
-                "utility_estimate": {"utility_decision": utility}
-            },
+            "advisory_authority_state": {"utility_estimate": {"utility_decision": utility}},
         }
     )
 
@@ -323,17 +364,23 @@ def test_feature_attribution_and_post_trade_learning_reports_use_lifecycle_rows(
 
     buf = io.StringIO()
     with redirect_stdout(buf):
-        assert run_feature_attribution_report(
-            "2026-05-30",
-            base_dir=tmp_path,
-            min_sample_size=1,
-        ) is True
+        assert (
+            run_feature_attribution_report(
+                "2026-05-30",
+                base_dir=tmp_path,
+                min_sample_size=1,
+            )
+            is True
+        )
         assert run_post_trade_learning_report("2026-05-30", base_dir=tmp_path) is True
-        assert run_rollout_contract_report(
-            "2026-05-30",
-            base_dir=tmp_path,
-            min_sample_size=1,
-        ) is True
+        assert (
+            run_rollout_contract_report(
+                "2026-05-30",
+                base_dir=tmp_path,
+                min_sample_size=1,
+            )
+            is True
+        )
 
     out = buf.getvalue()
     assert "Feature Attribution Report" in out

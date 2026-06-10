@@ -60,6 +60,16 @@ def test_container_and_systemd_references_use_scripts_paths():
     assert "/trading-bot/live_bar_stream.py" not in live_bar_unit
 
 
+def test_moved_fill_stream_script_bootstraps_repo_import_paths():
+    script = ROOT / "scripts" / "fill_stream.py"
+    source = script.read_text()
+
+    assert 'ROOT / "scripts"' in source
+    assert 'ROOT / "src"' in source
+    assert "from services.container import ApplicationContainer" in source
+    assert "from services.fill_stream_service import FillStreamService" in source
+
+
 def test_repo_safety_scripts_cover_active_source_dirs():
     safe_repo_check = (ROOT / "safe_repo_check.sh").read_text()
     source_snapshot = (ROOT / "source_snapshot.sh").read_text()
@@ -100,6 +110,7 @@ def main():
         test_run_tests_child_env_exposes_repo_and_scripts_paths,
         test_fast_safety_runner_exposes_src_path_for_raw_local_execution,
         test_container_and_systemd_references_use_scripts_paths,
+        test_moved_fill_stream_script_bootstraps_repo_import_paths,
         test_repo_safety_scripts_cover_active_source_dirs,
         test_ci_uses_pinned_dev_requirements,
     ]

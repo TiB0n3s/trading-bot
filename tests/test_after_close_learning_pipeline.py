@@ -11,7 +11,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from pipeline import after_close_learning
+from pipeline import after_close_learning  # noqa: E402
 
 
 def test_after_close_learning_dry_run_lists_recurring_quant_steps():
@@ -32,7 +32,8 @@ def test_after_close_learning_dry_run_lists_recurring_quant_steps():
     out = buf.getvalue()
     assert code == 0
     assert "After-close quant learning pipeline" in out
-    assert "candidate_outcome_backfill" in out
+    assert "learning_backfill_repair" in out
+    assert "pipeline.learning_backfill_repair" in out
     assert "excursion_memory" in out
     assert "missed_opportunity_memory" in out
     assert "symbol_momentum_timing_memory" in out

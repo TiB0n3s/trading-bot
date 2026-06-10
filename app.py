@@ -235,6 +235,22 @@ broker_service = container.broker_service
 market_data_service = container.market_data_service
 tape_service = container.tape_service
 
+
+def _build_signal_pipeline():
+    """Compatibility hook for legacy characterization tests and manual probes."""
+    return container.build_signal_pipeline(runtime=sys.modules[__name__])
+
+
+def _has_open_position_db(symbol):
+    return trades_repo.has_open_position(str(symbol or "").strip().upper())
+
+
+def _assert_position_exists_for_preflight(symbol):
+    if _has_open_position_db(symbol):
+        return
+    raise RuntimeError("no DB-confirmed open position")
+
+
 DB_PATH = Path(__file__).parent / "trades.db"
 _START_TIME = datetime.now(timezone.utc)
 _runtime_settings = load_runtime_settings(
@@ -1030,7 +1046,7 @@ def _evaluate_preflight(runtime_state: SignalRuntimeState):
         PreflightDeps(
             now_et=now_et,
             is_market_hours=is_market_hours,
-            assert_position_exists=broker_service.assert_position_exists,
+            assert_position_exists=_assert_position_exists_for_preflight,
             get_position=broker_service.get_position,
             read_cooldown=_read_cooldown,
             read_recent_sell=_read_recent_sell,

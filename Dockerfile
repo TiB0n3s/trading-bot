@@ -24,4 +24,4 @@ FROM runtime AS research
 COPY requirements-research.txt ./
 RUN pip install --no-cache-dir -r requirements-research.txt
 
-CMD ["python", "run_tests.py"]
+CMD ["python", "scripts/run_tests.py"]

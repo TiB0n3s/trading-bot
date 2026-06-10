@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from db import DB_PATH, get_connection
+
 from repositories.trade_accounting import fill_bearing_order_condition
 
 
@@ -31,7 +32,9 @@ class ReportingRepository:
             return {row["name"] for row in con.execute(f"PRAGMA table_info({table})").fetchall()}
 
     def auto_buy_candidate_rows(self, target_date: str) -> list[Any]:
-        if not self.table_exists("auto_buy_candidates") or not self.table_exists("feature_snapshots"):
+        if not self.table_exists("auto_buy_candidates") or not self.table_exists(
+            "feature_snapshots"
+        ):
             return []
         with get_connection(self.db_path) as con:
             return con.execute(
@@ -44,7 +47,9 @@ class ReportingRepository:
                 (target_date,),
             ).fetchall()
 
-    def feature_price_at_or_before(self, symbol: str, timestamp: str) -> tuple[float | None, str | None]:
+    def feature_price_at_or_before(
+        self, symbol: str, timestamp: str
+    ) -> tuple[float | None, str | None]:
         with get_connection(self.db_path) as con:
             row = con.execute(
                 """
@@ -242,6 +247,8 @@ class ReportingRepository:
             ).fetchall()
 
     def daily_realized_pnl_rows(self, target_date: str) -> list[Any]:
+        if not self.table_exists("trades"):
+            return []
         fill_bearing = fill_bearing_order_condition()
         with get_connection(self.db_path) as con:
             return con.execute(
@@ -401,7 +408,7 @@ class ReportingRepository:
                 f"""
                 SELECT *
                 FROM historical_signal_experience
-                WHERE {' AND '.join(where)}
+                WHERE {" AND ".join(where)}
                 ORDER BY market_date, symbol, action, timestamp, id
                 """,
                 params,

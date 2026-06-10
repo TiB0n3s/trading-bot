@@ -167,12 +167,13 @@ def build_live_signal_processor(*, container: Any, runtime: Any) -> LiveSignalPr
 
 
 def build_signal_pipeline_deps(*, container: Any, runtime: Any) -> SignalPipelineDeps:
+    live_signal_processor = build_live_signal_processor(
+        container=container,
+        runtime=runtime,
+    )
     return SignalPipelineDeps(
         decision_orchestrator=CanonicalDecisionOrchestrator(
-            compatibility_processor=build_live_signal_processor(
-                container=container,
-                runtime=runtime,
-            )
+            compatibility_processor=live_signal_processor,
         ),
         build_runtime_state=(
             lambda signal_context: live_build_runtime_state(
@@ -211,4 +212,5 @@ def build_signal_pipeline_deps(*, container: Any, runtime: Any) -> SignalPipelin
             )
         ),
         logger=runtime.logger,
+        live_signal_processor=live_signal_processor,
     )

@@ -171,6 +171,21 @@ class LifecycleAnalysisRepository:
             )
             matched_join = ""
             if can_join_matched:
+                matched_realized_return_pct = (
+                    "MAX(realized_pnl_pct) AS matched_realized_return_pct"
+                    if "realized_pnl_pct" in matched_cols
+                    else "NULL AS matched_realized_return_pct"
+                )
+                matched_mfe_pct = (
+                    "MAX(mfe_pct) AS matched_mfe_pct"
+                    if "mfe_pct" in matched_cols
+                    else "NULL AS matched_mfe_pct"
+                )
+                matched_capture_ratio = (
+                    "MAX(capture_ratio) AS matched_capture_ratio"
+                    if "capture_ratio" in matched_cols
+                    else "NULL AS matched_capture_ratio"
+                )
                 matched_join = """
                 LEFT JOIN (
                     SELECT
@@ -180,14 +195,18 @@ class LifecycleAnalysisRepository:
                         MAX(exit_timestamp) AS matched_exit_timestamp,
                         SUM(COALESCE(realized_pnl, 0)) AS matched_realized_pnl,
                         MAX(exit_order_id) AS matched_exit_order_id,
-                        MAX(realized_pnl_pct) AS matched_realized_return_pct,
-                        MAX(mfe_pct) AS matched_mfe_pct,
-                        MAX(capture_ratio) AS matched_capture_ratio
+                        {matched_realized_return_pct},
+                        {matched_mfe_pct},
+                        {matched_capture_ratio}
                     FROM matched_trades
                     WHERE entry_order_id IS NOT NULL
                     GROUP BY entry_order_id
                 ) mt ON mt.entry_order_id = t.order_id
-                """
+                """.format(
+                    matched_realized_return_pct=matched_realized_return_pct,
+                    matched_mfe_pct=matched_mfe_pct,
+                    matched_capture_ratio=matched_capture_ratio,
+                )
             matched_select = """
                 {matched_trade_id},
                 {matched_exit_count},

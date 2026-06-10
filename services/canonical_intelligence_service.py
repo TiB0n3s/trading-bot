@@ -2,16 +2,15 @@
 
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
-from datetime import datetime, timezone
 import hashlib
 import json
+from dataclasses import asdict, dataclass
+from datetime import datetime, timezone
 from typing import Any
 
-from services.analytics_method_service import build_analytics_method_state
 from services.ai_momentum_pattern_service import AI_MOMENTUM_PATTERN_VERSION
+from services.analytics_method_service import build_analytics_method_state
 from services.confidence_calibration_service import build_calibrated_confidence
-
 
 CANONICAL_INTELLIGENCE_VERSION = "canonical_intelligence_v1"
 CANONICAL_INTELLIGENCE_REQUIRED_SECTIONS = (
@@ -31,7 +30,7 @@ CANONICAL_INTELLIGENCE_REQUIRED_SECTIONS = (
     "freshness_sec",
     "confidence",
 )
-CANONICAL_INTELLIGENCE_MAX_JSON_BYTES = 19_456
+CANONICAL_INTELLIGENCE_MAX_JSON_BYTES = 24_576
 
 
 def _normalize(value: Any) -> Any:
@@ -75,7 +74,9 @@ def canonical_json_size_bytes(snapshot: "CanonicalIntelligenceSnapshot") -> int:
     return len(canonical_json(snapshot).encode("utf-8"))
 
 
-def validate_canonical_snapshot_contract(snapshot: "CanonicalIntelligenceSnapshot") -> dict[str, Any]:
+def validate_canonical_snapshot_contract(
+    snapshot: "CanonicalIntelligenceSnapshot",
+) -> dict[str, Any]:
     data = snapshot.to_dict()
     missing_sections = [
         section
@@ -211,19 +212,11 @@ def build_canonical_intelligence_snapshot(
         "inferred_regime_label": regime_observation.get("regime_label"),
         "inferred_regime_confidence": regime_observation.get("confidence"),
         "inferred_regime_stable": regime_observation.get("stable"),
-        "inferred_regime_source": regime_observation_context.get(
-            "regime_observation_source"
-        ),
+        "inferred_regime_source": regime_observation_context.get("regime_observation_source"),
         "regime_model_slot": regime_routing_decision.get("active_model_slot"),
-        "regime_sub_model_strategy": regime_routing_decision.get(
-            "sub_model_strategy"
-        ),
-        "regime_routing_size_modifier": regime_routing_decision.get(
-            "size_modifier"
-        ),
-        "regime_routing_allow_new_longs": regime_routing_decision.get(
-            "allow_new_longs"
-        ),
+        "regime_sub_model_strategy": regime_routing_decision.get("sub_model_strategy"),
+        "regime_routing_size_modifier": regime_routing_decision.get("size_modifier"),
+        "regime_routing_allow_new_longs": regime_routing_decision.get("allow_new_longs"),
         "market_regime": market_regime.get("composite_regime"),
         "trend_regime": market_regime.get("trend_regime"),
         "volatility_regime": market_regime.get("volatility_regime"),
@@ -243,27 +236,19 @@ def build_canonical_intelligence_snapshot(
         "breakout_quality": market_microstructure.get("breakout_quality"),
         "reversion_risk": market_microstructure.get("reversion_risk"),
         "microstructure_score": market_microstructure.get("microstructure_score"),
-        "microstructure_expectancy_modifier": market_microstructure.get(
-            "expectancy_modifier"
-        ),
+        "microstructure_expectancy_modifier": market_microstructure.get("expectancy_modifier"),
         "participation_state": market_participation.get("participation_state"),
         "sector_relative_strength_state": market_participation.get(
             "sector_relative_strength_state"
         ),
         "peer_confirmation_state": market_participation.get("peer_confirmation_state"),
         "breadth_state": market_participation.get("breadth_state"),
-        "index_participation_state": market_participation.get(
-            "index_participation_state"
-        ),
+        "index_participation_state": market_participation.get("index_participation_state"),
         "leader_laggard_state": market_participation.get("leader_laggard_state"),
         "relative_volume_state": market_participation.get("relative_volume_state"),
-        "participation_confirmation_score": market_participation.get(
-            "confirmation_score"
-        ),
+        "participation_confirmation_score": market_participation.get("confirmation_score"),
         "isolated_move_risk": market_participation.get("isolated_move_risk"),
-        "participation_expectancy_modifier": market_participation.get(
-            "expectancy_modifier"
-        ),
+        "participation_expectancy_modifier": market_participation.get("expectancy_modifier"),
         "volatility_stretch_state": volatility_normalization.get("stretch_state"),
         "entry_distance_atr": volatility_normalization.get("entry_distance_atr"),
         "move_zscore": volatility_normalization.get("move_zscore"),
@@ -271,17 +256,11 @@ def build_canonical_intelligence_snapshot(
         "gap_percentile": volatility_normalization.get("gap_percentile"),
         "spread_atr_pct": volatility_normalization.get("spread_atr_pct"),
         "stop_excursion_ratio": volatility_normalization.get("stop_excursion_ratio"),
-        "volatility_normalized_regime": volatility_normalization.get(
-            "volatility_regime"
-        ),
+        "volatility_normalized_regime": volatility_normalization.get("volatility_regime"),
         "volatility_chase_risk": volatility_normalization.get("chase_risk"),
         "stop_quality": volatility_normalization.get("stop_quality"),
-        "volatility_adjusted_score": volatility_normalization.get(
-            "volatility_adjusted_score"
-        ),
-        "volatility_expectancy_modifier": volatility_normalization.get(
-            "expectancy_modifier"
-        ),
+        "volatility_adjusted_score": volatility_normalization.get("volatility_adjusted_score"),
+        "volatility_expectancy_modifier": volatility_normalization.get("expectancy_modifier"),
         "downside_state": downside_asymmetry.get("downside_state"),
         "gap_down_vulnerability": downside_asymmetry.get("gap_down_vulnerability"),
         "catalyst_risk": downside_asymmetry.get("catalyst_risk"),
@@ -291,9 +270,7 @@ def build_canonical_intelligence_snapshot(
         "historical_mae_state": downside_asymmetry.get("historical_mae_state"),
         "failure_signature": downside_asymmetry.get("failure_signature"),
         "downside_score": downside_asymmetry.get("downside_score"),
-        "expected_adverse_modifier": downside_asymmetry.get(
-            "expected_adverse_modifier"
-        ),
+        "expected_adverse_modifier": downside_asymmetry.get("expected_adverse_modifier"),
         "exit_pressure_state": exit_decision_quality.get("exit_pressure_state"),
         "exit_quality_score": exit_decision_quality.get("exit_quality_score"),
         "exit_recommended_action": exit_decision_quality.get("recommended_action"),
@@ -372,9 +349,7 @@ def build_canonical_intelligence_snapshot(
         "structure_state": setup_structure.get("structure_state"),
         "base_quality": setup_structure.get("base_quality"),
         "failed_breakout_risk": setup_structure.get("failed_breakout_risk"),
-        "compression_expansion_state": setup_structure.get(
-            "compression_expansion_state"
-        ),
+        "compression_expansion_state": setup_structure.get("compression_expansion_state"),
         "htf_location_state": setup_structure.get("htf_location_state"),
         "anchored_vwap_state": setup_structure.get("anchored_vwap_state"),
         "gap_context_state": setup_structure.get("gap_context_state"),
@@ -477,9 +452,7 @@ def build_canonical_intelligence_snapshot(
         "market_context_confidence": context.get("market_bias"),
     }
     policy_artifact_ref = (
-        account_state.get("policy_artifacts")
-        or account_state.get("policy_artifact_status")
-        or {}
+        account_state.get("policy_artifacts") or account_state.get("policy_artifact_status") or {}
     )
     calibrated_confidence = (
         account_state.get("calibrated_confidence")
@@ -492,12 +465,8 @@ def build_canonical_intelligence_snapshot(
         "raw_confidence_labels": confidence,
         "calibrated_confidence": calibrated_confidence,
         "primary_source": calibrated_confidence.get("primary_source"),
-        "primary_predicted_win_rate": calibrated_confidence.get(
-            "primary_predicted_win_rate"
-        ),
-        "primary_realized_win_rate": calibrated_confidence.get(
-            "primary_realized_win_rate"
-        ),
+        "primary_predicted_win_rate": calibrated_confidence.get("primary_predicted_win_rate"),
+        "primary_realized_win_rate": calibrated_confidence.get("primary_realized_win_rate"),
         "confidence_quality": calibrated_confidence.get("confidence_quality"),
     }
     analytics_state = build_analytics_method_state(
@@ -514,17 +483,12 @@ def build_canonical_intelligence_snapshot(
     prediction_layer = ai_pattern.get("prediction_layer") or {}
     pattern_state = {
         "version": ai_pattern.get("version") or AI_MOMENTUM_PATTERN_VERSION,
-        "runtime_effect": (
-            ai_pattern.get("runtime_effect")
-            or "observe_only_no_live_authority"
-        ),
+        "runtime_effect": (ai_pattern.get("runtime_effect") or "observe_only_no_live_authority"),
         "pattern_label": ai_pattern.get("pattern_label"),
         "directional_bias": ai_pattern.get("directional_bias"),
         "failure_mode": ai_pattern.get("failure_mode"),
         "expected_horizon": ai_pattern.get("expected_horizon"),
-        "favorable_move_probability": ai_pattern.get(
-            "favorable_move_probability"
-        ),
+        "favorable_move_probability": ai_pattern.get("favorable_move_probability"),
         "expected_mfe_pct": ai_pattern.get("expected_mfe_pct"),
         "expected_mae_pct": ai_pattern.get("expected_mae_pct"),
         "confidence": ai_pattern.get("confidence"),
@@ -533,9 +497,7 @@ def build_canonical_intelligence_snapshot(
         "historical_status": ai_pattern.get("historical_status"),
         "prediction_status": prediction_layer.get("status"),
         "historical_bar_model_status": historical_bar_model.get("status"),
-        "historical_bar_ready_label_count": historical_bar_model.get(
-            "ready_label_count"
-        ),
+        "historical_bar_ready_label_count": historical_bar_model.get("ready_label_count"),
         "historical_bar_label_targets": historical_bar_model.get("label_targets") or [],
         "historical_bar_runtime_effect": (
             historical_bar_model.get("runtime_effect")
@@ -544,12 +506,8 @@ def build_canonical_intelligence_snapshot(
         "historical_bar_master_confidence_score": historical_bar_paper.get(
             "master_confidence_score"
         ),
-        "historical_bar_confidence_bucket": historical_bar_paper.get(
-            "confidence_bucket"
-        ),
-        "historical_bar_paper_recommendation": historical_bar_paper.get(
-            "paper_recommendation"
-        ),
+        "historical_bar_confidence_bucket": historical_bar_paper.get("confidence_bucket"),
+        "historical_bar_paper_recommendation": historical_bar_paper.get("paper_recommendation"),
         "historical_bar_paper_position_size_pct": historical_bar_paper.get(
             "paper_position_size_pct"
         ),

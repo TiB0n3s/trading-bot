@@ -27,6 +27,7 @@ class SignalPipelineDeps:
     log_rejection: Callable[..., None]
     mark_webhook_event_status: Callable[..., None]
     logger: object
+    live_signal_processor: Any | None = None
 
 
 class SignalPipeline:

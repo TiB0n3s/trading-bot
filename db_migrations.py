@@ -14,12 +14,20 @@ SCRIPTS_PATH = Path(__file__).resolve().parent / "scripts"
 if str(SCRIPTS_PATH) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_PATH))
 
-from scripts.db_migrations import MIGRATIONS, Migration, apply_migration, main, status  # noqa: E402
+from scripts.db_migrations import (  # noqa: E402
+    MIGRATIONS,
+    Migration,
+    apply_migration,
+    ensure_migration_table,
+    main,
+    status,
+)
 
 __all__ = [
     "MIGRATIONS",
     "Migration",
     "apply_migration",
+    "ensure_migration_table",
     "main",
     "status",
 ]

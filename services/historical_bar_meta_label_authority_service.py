@@ -42,13 +42,19 @@ def evaluate_historical_bar_meta_label_authority(
 
     matrix = AuthorityMatrix()
     strategy = _dict(account_state.get("historical_bar_paper_strategy"))
-    if not strategy:
+    if not strategy and cfg.get("lazy_build_strategy"):
         strategy = build_historical_bar_paper_strategy(
             symbol=symbol,
             action=action,
             account_state=account_state,
         ).to_dict()
         account_state["historical_bar_paper_strategy"] = strategy
+    if not strategy:
+        return {
+            "allowed": False,
+            "effect": "none",
+            "reason": "historical-bar meta-label not ready: missing historical_bar_paper_strategy",
+        }
 
     score = _float(strategy.get("master_confidence_score"))
     status = str(strategy.get("status") or "").lower()

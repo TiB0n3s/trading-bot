@@ -6,8 +6,8 @@ from datetime import datetime
 from typing import Any
 
 import pytz
-
 from db import DB_PATH, get_connection
+
 from repositories.trade_accounting import fill_bearing_order_condition
 
 
@@ -77,6 +77,11 @@ def cash_safe_buys_today(symbol: str, db_path=DB_PATH) -> int:
 def has_open_position(symbol: str, db_path=DB_PATH) -> bool:
     fill_bearing = fill_bearing_order_condition()
     with get_connection(db_path) as con:
+        table_exists = con.execute(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'trades'"
+        ).fetchone()
+        if table_exists is None:
+            return False
         row = con.execute(
             f"""
             SELECT SUM(CASE WHEN LOWER(action)='buy'  THEN COALESCE(qty, 0)

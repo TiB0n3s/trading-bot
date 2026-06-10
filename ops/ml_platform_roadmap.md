@@ -1106,7 +1106,7 @@ A model can only move from observe-only to paper-trading influence after it has:
     artifacts, and HMM regime experiments are reproducible without bloating the
     default runtime install.
 30. Done: wire candle-physics and triple-barrier pattern learning into the
-    ML/export surface. `live_bar_stream.py` can feed closed 1-minute bars into
+    ML/export surface. `scripts/live_bar_stream.py` can feed closed 1-minute bars into
     `session_momentum` and `bar_pattern_features`; `pipeline/historical_bar_archive.py`
     can backfill Polygon RTH bars; dataset exports and supervised training now
     expose candle body/wick ratios, ATR-normalized range, pressure vectors,

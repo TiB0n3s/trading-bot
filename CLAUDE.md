@@ -608,7 +608,7 @@ Managed by:
 
 sudo systemctl status fill-stream --no-pager
 
-live_bar_stream.py
+scripts/live_bar_stream.py
 
 Optional Alpaca `alpaca-py` 1-minute closed-bar listener.
 

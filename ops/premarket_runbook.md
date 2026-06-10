@@ -23,14 +23,14 @@ python3 -m py_compile \
   ops_check.py \
   bot_events.py \
   rejection_categories.py \
-  run_tests.py
+  scripts/run_tests.py
 
 Expected:
 
 No output.
 Exit code 0.
 3. Run targeted tests
-python3 run_tests.py
+python3 scripts/run_tests.py
 
 Expected:
 
@@ -39,7 +39,7 @@ all targeted tests pass
 
 Note:
 
-run_tests.py automatically re-execs under ./venv/bin/python when the project
+scripts/run_tests.py automatically re-execs under ./venv/bin/python when the project
 venv is present, so this command can be run from a plain shell or an activated
 venv.
 

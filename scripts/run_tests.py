@@ -3,7 +3,7 @@
 Run targeted trading-bot tests.
 
 Usage:
-  python3 run_tests.py
+  python3 scripts/run_tests.py
 """
 
 import os
@@ -11,7 +11,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent
+ROOT = Path(__file__).resolve().parents[1]
 ENV_FILE = Path("/etc/trading-bot.env")
 VENV_PYTHON = ROOT / "venv" / "bin" / "python"
 
@@ -47,12 +47,24 @@ def load_env_file(path=ENV_FILE):
     return True
 
 
+def child_test_env():
+    paths = [str(ROOT), str(ROOT / "scripts")]
+    existing = os.environ.get("PYTHONPATH", "")
+    if existing:
+        paths.append(existing)
+
+    env = os.environ.copy()
+    env["PYTHONPATH"] = os.pathsep.join(paths)
+    return env
+
+
 TESTS = [
     "tests/test_market_time.py",
     "tests/test_rejection_categories.py",
     "tests/test_rejection_category_registry.py",
     "tests/test_symbols_config.py",
     "tests/test_cron_contract.py",
+    "tests/test_moved_script_references.py",
     "tests/test_config_factories.py",
     "tests/test_auto_buy_manager.py",
     "tests/test_intraday_trade_feedback_service.py",
@@ -236,7 +248,7 @@ def main():
     for test in TESTS:
         print()
         print("──", test, "─" * max(0, 56 - len(test)))
-        result = subprocess.run([sys.executable, test], cwd=ROOT)
+        result = subprocess.run([sys.executable, test], cwd=ROOT, env=child_test_env())
         if result.returncode != 0:
             failures += 1
 

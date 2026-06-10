@@ -494,7 +494,7 @@ Broker boundary unit tests live in `tests/test_broker.py` and are included in
 the normal targeted test runner:
 
 ```bash
-python3 run_tests.py
+python3 scripts/run_tests.py
 ```
 
 The sell path cancels open bracket orders and polls Alpaca for cancellation

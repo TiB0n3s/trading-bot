@@ -6,10 +6,21 @@ cd "$SCRIPT_DIR"
 
 SOURCE_DIRS=(
   analytics_ext
+  api
+  config
+  dashboards
   data_layer
   execution
   market_intelligence
+  ml_platform
+  ops
+  pipeline
+  reports
+  repositories
   risk
+  scripts
+  services
+  src
   strategy
   tests
 )
@@ -73,7 +84,7 @@ echo
 echo "---- ignored runtime/cache summary ----"
 git status --ignored --short \
   | grep '^!!' \
-  | grep -E '(__pycache__|\.pyc|\.log|\.db|\.db-shm|\.db-wal|venv/|session_logs|strategy_memory|market_context\.json)' \
+  | grep -E '(__pycache__|\.pyc|\.log|\.db|\.db-shm|\.db-wal|venv/|session_logs|research_exports|data_archive|runtime_state|strategy_memory|market_context\.json)' \
   | sed -n '1,80p' \
   || true
 

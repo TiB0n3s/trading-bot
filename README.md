@@ -67,7 +67,7 @@ The pre-commit hook runs Ruff on staged Python files and then runs the fast
 trading safety harness. It intentionally does not run full-repo Ruff yet because
 the legacy tree still has existing lint debt; CI and local hooks focus on
 changed files plus core risk, authority, dependency-packaging, and architecture
-regressions. Full targeted tests remain available through `python3 run_tests.py`.
+regressions. Full targeted tests remain available through `python3 scripts/run_tests.py`.
 
 ---
 
@@ -160,7 +160,7 @@ pip install -U pip
 pip install -r requirements.txt
 pip install -r requirements-dev.txt
 pip install -e '.[dev]'
-python run_tests.py
+python scripts/run_tests.py
 ```
 
 `requirements.txt` delegates to `requirements-base.txt`, the slim runtime
@@ -362,7 +362,7 @@ Managed by systemd:
 sudo systemctl status fill-stream
 sudo systemctl restart fill-stream
 
-live_bar_stream.py
+scripts/live_bar_stream.py
 
 Optional Alpaca `alpaca-py` closed-bar listener.
 
@@ -381,9 +381,9 @@ It does not submit orders and does not bypass auto-buy, approval, sizing, or exe
 
 Usage:
 
-python3 live_bar_stream.py --symbol AAPL
-python3 live_bar_stream.py --symbol AAPL,MSFT,NVDA --feed iex
-python3 live_bar_stream.py --all --feed iex
+python3 scripts/live_bar_stream.py --symbol AAPL
+python3 scripts/live_bar_stream.py --symbol AAPL,MSFT,NVDA --feed iex
+python3 scripts/live_bar_stream.py --all --feed iex
 
 Use `--feed sip` only when the Alpaca account has paid consolidated data. IEX can be useful for paper learning, but its volume/VWAP can differ materially from Polygon/SIP history.
 

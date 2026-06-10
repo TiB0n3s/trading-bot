@@ -542,6 +542,153 @@ def _historical_bar_meta_config(**overrides):
     return {"historical_bar_meta_label_authority": config}
 
 
+def _layered_model_config(**overrides):
+    config = {"enabled": True}
+    config.update(overrides)
+    return {
+        **_historical_bar_meta_config(),
+        "layered_model_authority": config,
+    }
+
+
+def _layered_account_state(**overrides):
+    state = {
+        "historical_bar_paper_strategy": _historical_bar_strategy(),
+        "prediction_gate": {
+            "deterministic_signal_quality_decision": "pass",
+            "ml_prediction_score": 72.0,
+            "prediction_sample_size": 5000,
+        },
+        "transformer_authority": {
+            "enabled": True,
+            "decision": "allow",
+            "probability": 0.68,
+            "status": "paper_gate",
+        },
+        "regime_routing_decision": {
+            "regime_id": 0,
+            "regime_label": "quiet_bull",
+            "allow_new_longs": True,
+            "size_modifier": 1.0,
+        },
+        "bar_pattern_features": {
+            "atr_20_pct": 0.8,
+            "vpin_toxicity_20": 0.15,
+            "variance_ratio_30m": 1.18,
+            "distance_from_vwap_pct": 0.8,
+            "vwap_rolling_std_pct": 0.4,
+        },
+        "execution_quality": {
+            "decision": "allow",
+            "slippage_estimate_pct": 0.02,
+        },
+    }
+    state.update(overrides)
+    return state
+
+
+def test_layered_model_authority_approves_low_confidence_paper_candidate():
+    account_state = _layered_account_state()
+    result = evaluate_approval_decision(
+        signal={"symbol": "AAPL", "action": "buy"},
+        action="buy",
+        claude_account_state={},
+        evaluate_signal=lambda *_: {
+            "approved": False,
+            "confidence": "low",
+            "reason": "Claude did not approve the candidate",
+            "position_size_pct": 1.0,
+        },
+        cash_safe_mode=False,
+        market_bias={},
+        account_state=account_state,
+        medium_confidence_override=lambda **_: (False, "no override"),
+        tape_exception_enabled=False,
+        execution_mode="paper",
+        ml_authority_config=_layered_model_config(),
+    )
+
+    assert_equal(result.approved, True, "approved")
+    assert_equal(result.source, "layered_model_authority", "source")
+    assert_equal(result.claude_payload["position_size_pct"], 1.4, "size")
+    assert_equal(
+        account_state["layered_model_decision"]["final_instruction"],
+        "paper_approval",
+        "layered instruction",
+    )
+    assert_equal(
+        account_state["canonical_decision_trace"]["shadow"]["approval_source"],
+        "layered_model_authority",
+        "trace source",
+    )
+
+
+def test_layered_model_authority_vetoes_weak_paper_candidate():
+    account_state = _layered_account_state(
+        historical_bar_paper_strategy=_historical_bar_strategy(
+            master_confidence_score=51.0,
+            paper_recommendation="paper_avoid",
+            paper_position_size_pct=0.0,
+        ),
+        prediction_gate={"ml_prediction_score": 45.0},
+        transformer_authority={"probability": 0.45, "decision": "size_down"},
+    )
+    result = evaluate_approval_decision(
+        signal={"symbol": "AAPL", "action": "buy"},
+        action="buy",
+        claude_account_state={},
+        evaluate_signal=lambda *_: {
+            "approved": True,
+            "confidence": "high",
+            "reason": "Claude approves",
+            "position_size_pct": 1.0,
+        },
+        cash_safe_mode=False,
+        market_bias={},
+        account_state=account_state,
+        medium_confidence_override=lambda **_: (True, "ok"),
+        tape_exception_enabled=False,
+        execution_mode="paper",
+        ml_authority_config=_layered_model_config(),
+    )
+
+    assert_equal(result.approved, False, "approved")
+    assert_equal(result.source, "layered_model_authority", "source")
+    assert_equal(result.category, "layered_model_authority_veto", "category")
+    assert_equal(account_state["layered_model_decision"]["final_instruction"], "veto", "final")
+    assert_equal(
+        account_state["canonical_decision_trace"]["blocking_gate"],
+        "ml_authority",
+        "blocking gate",
+    )
+
+
+def test_layered_model_authority_cannot_approve_cash_mode():
+    account_state = _layered_account_state()
+    result = evaluate_approval_decision(
+        signal={"symbol": "AAPL", "action": "buy"},
+        action="buy",
+        claude_account_state={},
+        evaluate_signal=lambda *_: {
+            "approved": True,
+            "confidence": "high",
+            "reason": "Claude approves",
+            "position_size_pct": 1.0,
+        },
+        cash_safe_mode=False,
+        market_bias={},
+        account_state=account_state,
+        medium_confidence_override=lambda **_: (True, "ok"),
+        tape_exception_enabled=False,
+        execution_mode="cash_full",
+        ml_authority_config=_layered_model_config(),
+    )
+
+    assert_equal(result.approved, False, "approved")
+    assert_equal(result.source, "authority_matrix", "source")
+    assert_equal("layered_model_decision" in account_state, False, "no layered live authority")
+
+
 def test_historical_bar_meta_label_authority_approves_low_confidence_paper_candidate():
     account_state = {"historical_bar_paper_strategy": _historical_bar_strategy()}
     result = evaluate_approval_decision(
@@ -920,6 +1067,9 @@ def main():
         test_paper_learning_authority_can_override_claude_unapproved_soft_response,
         test_paper_exploration_authority_can_approve_and_increase_size,
         test_paper_exploration_authority_does_not_run_in_cash_mode,
+        test_layered_model_authority_approves_low_confidence_paper_candidate,
+        test_layered_model_authority_vetoes_weak_paper_candidate,
+        test_layered_model_authority_cannot_approve_cash_mode,
         test_historical_bar_meta_label_authority_approves_low_confidence_paper_candidate,
         test_historical_bar_meta_label_authority_increases_size_for_approved_paper_candidate,
         test_historical_bar_meta_label_authority_vetoes_weak_approved_paper_candidate,

@@ -31,6 +31,7 @@ from services.decision import DecisionEngine
 from services.historical_bar_meta_label_authority_service import (
     evaluate_historical_bar_meta_label_authority,
 )
+from services.layered_model_decision_service import build_layered_model_decision
 from services.ml_authority_service import (
     _advisory_feature_size_cap,
     _float_or_none,
@@ -397,6 +398,171 @@ def _historical_bar_meta_label_authority_decision(
     )
 
 
+def _layered_model_authority_decision(
+    *,
+    signal: dict[str, Any],
+    action: str,
+    decision: dict[str, Any],
+    account_state: dict[str, Any],
+    execution_mode: str,
+    ml_authority_config: dict[str, Any] | None,
+) -> dict[str, Any]:
+    config = (ml_authority_config or {}).get("layered_model_authority") or {}
+    if (
+        action != "buy"
+        or execution_mode not in {"paper", "dry_run"}
+        or not bool(config.get("enabled"))
+    ):
+        return {
+            "allowed": False,
+            "reason": "layered model authority disabled or not applicable",
+        }
+    payload = build_layered_model_decision(
+        symbol=signal.get("symbol") or account_state.get("symbol"),
+        action=action,
+        decision=decision,
+        account_state=account_state,
+        execution_mode=execution_mode,
+        ml_authority_config=ml_authority_config,
+    ).to_dict()
+    instruction = str(payload.get("final_instruction") or "").strip().lower()
+    authority_matrix = AuthorityMatrix()
+    if instruction == "veto":
+        if not authority_matrix.can("layered_model_authority", "block", execution_mode):
+            return {
+                "allowed": False,
+                "reason": "authority_matrix_denied_layered_model_veto",
+                "layered_model_decision": payload,
+            }
+        return {
+            "allowed": True,
+            "effect": "veto",
+            "reason": "; ".join(str(reason) for reason in (payload.get("reasons") or [])[:6])
+            or "layered model authority vetoed candidate",
+            "position_size_pct": 0.0,
+            "layered_model_decision": payload,
+            "authority_scope": "paper_only_level_0_to_3_model_authority_after_hard_gates",
+        }
+    if instruction in {"paper_approval", "size_increase"}:
+        action_name = "increase_size" if instruction == "size_increase" else "approve"
+        if not authority_matrix.can("layered_model_authority", action_name, execution_mode):
+            return {
+                "allowed": False,
+                "reason": f"authority_matrix_denied_layered_model_{action_name}",
+                "layered_model_decision": payload,
+            }
+        final_size = _float_or_none(payload.get("final_size_pct"))
+        if final_size is None or final_size <= 0:
+            return {
+                "allowed": False,
+                "reason": "layered model authority produced no positive final size",
+                "layered_model_decision": payload,
+            }
+        return {
+            "allowed": True,
+            "effect": instruction,
+            "reason": "; ".join(str(reason) for reason in (payload.get("reasons") or [])[:6])
+            or "layered model authority approved paper candidate",
+            "position_size_pct": final_size,
+            "layered_model_decision": payload,
+            "authority_scope": "paper_only_level_0_to_3_model_authority_after_hard_gates",
+        }
+    return {
+        "allowed": False,
+        "reason": f"layered model authority instruction={instruction or 'none'} is non-authoritative",
+        "layered_model_decision": payload,
+    }
+
+
+def _approval_from_layered_model_authority(
+    *,
+    signal: dict[str, Any],
+    action: str,
+    decision: dict[str, Any],
+    account_state: dict[str, Any],
+    execution_mode: str,
+    ml_authority_config: dict[str, Any] | None,
+    raw_decision: dict[str, Any],
+    confidence: Any,
+) -> ApprovalDecision | None:
+    layered = _layered_model_authority_decision(
+        signal=signal,
+        action=action,
+        decision=decision,
+        account_state=account_state,
+        execution_mode=execution_mode,
+        ml_authority_config=ml_authority_config,
+    )
+    payload = layered.get("layered_model_decision")
+    if isinstance(payload, dict):
+        account_state["layered_model_decision"] = payload
+        account_state["ml_authority"] = {
+            "decision": "block" if payload.get("final_instruction") == "veto" else "allow",
+            "reason": layered.get("reason"),
+            "source": "layered_model_authority",
+            "final_instruction": payload.get("final_instruction"),
+            "final_size_pct": payload.get("final_size_pct"),
+        }
+    if not layered.get("allowed"):
+        return None
+
+    effect = str(layered.get("effect") or "").strip().lower()
+    adjusted = dict(decision)
+    adjusted["layered_model_authority"] = layered
+    adjusted["layered_model_decision"] = payload
+
+    if effect == "veto":
+        adjusted["approved"] = False
+        adjusted["confidence"] = "low"
+        adjusted["position_size_pct"] = 0
+        adjusted["reason"] = layered["reason"]
+        _store_decision_trace(
+            account_state=account_state,
+            decision=adjusted,
+            source="layered_model_authority",
+            execution_mode=execution_mode,
+        )
+        return ApprovalDecision(
+            approved=False,
+            source="layered_model_authority",
+            confidence="low",
+            reason=layered["reason"],
+            category="layered_model_authority_veto",
+            claude_payload=adjusted,
+            metadata={
+                "raw_decision": raw_decision,
+                "layered_model_authority": layered,
+            },
+        )
+
+    if effect in {"paper_approval", "size_increase"}:
+        adjusted["approved"] = True
+        adjusted["confidence"] = "high" if effect == "size_increase" else "medium"
+        adjusted["position_size_pct"] = layered["position_size_pct"]
+        adjusted["reason"] = layered["reason"]
+        _store_decision_trace(
+            account_state=account_state,
+            decision=adjusted,
+            source="layered_model_authority",
+            execution_mode=execution_mode,
+            exploration=layered,
+        )
+        return ApprovalDecision(
+            approved=True,
+            source="layered_model_authority",
+            confidence=adjusted["confidence"],
+            reason=layered["reason"],
+            category=None,
+            claude_payload=adjusted,
+            metadata={
+                "raw_decision": raw_decision,
+                "layered_model_authority": layered,
+            },
+        )
+
+    return None
+
+
 def _approval_from_historical_bar_meta_label(
     *,
     signal: dict[str, Any],
@@ -536,6 +702,18 @@ def evaluate_approval_decision(
         )
 
     if action == "buy":
+        layered_result = _approval_from_layered_model_authority(
+            signal=signal,
+            action=action,
+            decision=decision,
+            account_state=account_state,
+            execution_mode=execution_mode,
+            ml_authority_config=ml_authority_config,
+            raw_decision=raw_decision,
+            confidence=confidence,
+        )
+        if layered_result is not None:
+            return layered_result
         meta_label_result = _approval_from_historical_bar_meta_label(
             signal=signal,
             action=action,

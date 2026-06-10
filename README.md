@@ -41,7 +41,7 @@ As of the latest roadmap work:
 - Auto-buy paper execution can run from internal Alpaca-bar candidates across the approved universe when `AUTO_BUY_SIGNAL_MODE=internal_all` and `AUTO_BUY_LIVE_BUYS=true`. Candidate capture stores scored/taken/not-taken rows for learning and counterfactual review.
 - Auto-buy scoring now distinguishes early constructive build opportunities from mature chase/extension states. Early build is a ranking/learning boost; mature/extreme chase is penalized or blocked so the bot is not simply buying peak momentum.
 - Paper auto-buy can apply a bounded strong-evidence promotion when a candidate is blocked only by setup conservatism, has score above threshold plus buffer, positive 15m/30m momentum, strong session/setup context, and non-weak ML evidence. This path is disabled by default outside paper/dry-run, records `paper_strong_evidence_*` audit fields, and cannot override weak ML, intraday losing-pattern feedback, extreme chase, stale data, broker/account, macro/regime, or cash-mode blockers.
-- Paper learning authority is enabled by default for paper/dry-run only. It can override Claude low-confidence soft rejections when canonical setup quality and buy-opportunity evidence are strong, and it caps the resulting paper size. Bounded paper exploration authority can also approve or increase size when setup quality, buy-opportunity score, prediction score, session context, and execution context all clear configured thresholds. These paper decisions now run through the canonical `AuthorityMatrix`, `IntelligenceAdjudicator`, and ordered `GateEngine`; each evaluated signal stores `intelligence_adjudication`, `decision_trace`, and `canonical_decision_trace` in `account_state`. It cannot override stale signals, broker/account constraints, cash-safe/cash-full mode, explicit symbol overrides, macro/regime hard blocks, or Claude infrastructure failures.
+- Paper learning authority is enabled by default for paper/dry-run only. It can override Claude low-confidence soft rejections when canonical setup quality and buy-opportunity evidence are strong, and it caps the resulting paper size. Bounded paper exploration authority can also approve or increase size when setup quality, buy-opportunity score, prediction score, session context, and execution context all clear configured thresholds. The primary ML/intelligence authority path is now `layered_model_authority`: it runs the Level 0 regime/alternative-data gates, Level 1 historical-bar/Transformer/supervised ensemble, Level 2 meta-label and counterfactual un-veto logic, and Level 3 slippage-adjusted Kelly sizing before it can veto, approve, or increase paper size. These paper decisions run through the canonical `AuthorityMatrix`, `IntelligenceAdjudicator`, and ordered `GateEngine`; each evaluated signal stores `layered_model_decision`, `intelligence_adjudication`, `decision_trace`, and `canonical_decision_trace` in `account_state`. It cannot override stale signals, broker/account constraints, cash-safe/cash-full mode, explicit symbol overrides, macro/regime hard blocks, execution-quality blocks, or Claude infrastructure failures.
 - Claude buy approval is now constrained by the canonical `AuthorityMatrix`: Claude can approve paper/dry-run buys, but cash/live buys require deterministic/promoted authority evidence rather than Claude alone. Denied approvals are recorded as `source=authority_matrix` with canonical trace metadata.
 - `DecisionEngine` now records a trace-native cascade for preflight, cash-safe, macro, setup, trend, prediction, session momentum, ML authority, decision policy, intelligence adjudication, paper authority, final sizing, execution quality, and Claude approval gates. Auto-buy candidates also attach canonical `SignalCandidate`, `DecisionTrace`, `intelligence_adjudication`, and capital-allocation metadata before logging/execution.
 - Trace-native operator reports are available through `decision_trace_report.py`, `gate_impact_report.py`, `counterfactual_replay_report.py`, and `model_authority_report.py`; the report registry exposes them as `decision-trace`, `gate-impact`, `counterfactual-replay`, and `model-authority`.
@@ -643,8 +643,11 @@ live decision policy without a separate approved authority path.
 `historical-bar-paper-strategy` combines ready historical-bar diagnostics,
 current bar-pattern features when available, a naive baseline comparison, and
 portfolio correlation friction into a paper-only master confidence score and
-paper sizing recommendation. It is intentionally non-authoritative and does not
-feed live sizing, blocking, approval, or order submission.
+paper sizing recommendation. By itself this report remains non-authoritative,
+but the broader `layered_model_authority` can consume it as the Level 1/Level 2
+model evidence for paper/dry-run approval, veto, and size-increase decisions
+after hard gates pass. It still has no cash-live authority and cannot submit
+orders directly.
 `historical-bar-paper-validation` compares the paper ensemble score against a
 naive RSI/SMA/close-location baseline on labeled historical bars, reporting hit
 rate delta, false-positive avoidance, and false-negative cost. `historical-bar-
@@ -877,12 +880,12 @@ Predictions are visible in /status.
 Predictions are reported by intelligence_prediction_report.py.
 Predictions are validated by prediction_validation_report.py.
 Weak ML buckets can apply explicit downside size caps when sample-size and
-setup-quality conditions are met.
-Predictions do not place orders.
-Predictions do not loosen gates.
-Predictions do not increase sizing.
-Hard prediction blocking remains disabled unless `PREDICTION_GATE_MODE=hard`
-is explicitly promoted after paper-session validation.
+setup-quality conditions are met. The layered model stack can also approve or
+increase paper/dry-run size when the Level 0-3 evidence clears configured
+thresholds. Predictions and model layers still do not place orders directly,
+do not loosen hard gates, and do not grant cash-live approval. Hard prediction
+blocking remains disabled unless `PREDICTION_GATE_MODE=hard` is explicitly
+promoted after paper-session validation.
 
 The correct roadmap path is:
 
@@ -906,8 +909,12 @@ Current learning-readiness posture:
 
 ## ML Platform and Staged Integration
 
-The ML platform is a research/audit layer. It is intentionally separate from
-live webhook, broker, order, and hard risk-control paths.
+The ML platform is now split between a research/audit lane and a bounded
+paper-authority lane. Research artifacts, diagnostics, retraining jobs, and
+candidate reports remain separate from live webhook, broker, order, and hard
+risk-control paths. In paper/dry-run mode only, `layered_model_authority` can
+use promoted in-process evidence to approve, veto, or increase size after hard
+deterministic gates pass.
 
 Current staged pieces:
 

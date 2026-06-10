@@ -156,6 +156,10 @@ HISTORICAL_BAR_META_LABEL_MAX_POSITION_SIZE_PCT = _env_float(
     "HISTORICAL_BAR_META_LABEL_MAX_POSITION_SIZE_PCT",
     1.50,
 )
+LAYERED_MODEL_AUTHORITY_ENABLED = _env_bool(
+    "LAYERED_MODEL_AUTHORITY_ENABLED",
+    True,
+)
 
 
 def is_cash_mode() -> bool:
@@ -299,6 +303,42 @@ def public_ml_authority_config() -> dict:
             "authority_scope": "paper_only_meta_label_after_hard_gates",
             "layer_1_presenter": "incoming_buy_candidate_after_pre_claude_hard_gates",
             "layer_2_vetoer": "historical_bar_paper_strategy.master_confidence_score",
+            "cannot_override": [
+                "cash_safe_or_cash_full_mode",
+                "stale_signal",
+                "liquidity_or_spread_failure",
+                "broker_or_account_constraints",
+                "macro_or_regime_hard_block",
+                "explicit_symbol_override",
+                "claude_parse_or_engine_error",
+                "execution_quality_block",
+            ],
+        },
+        "layered_model_authority": {
+            "enabled": LAYERED_MODEL_AUTHORITY_ENABLED,
+            "execution_modes": ["paper", "dry_run"],
+            "authority_scope": "paper_only_level_0_to_3_model_authority_after_hard_gates",
+            "can_veto": True,
+            "can_approve_trades": True,
+            "can_increase_size": True,
+            "level_0": [
+                "regime_routing_decision",
+                "alternative_data_gate",
+            ],
+            "level_1": [
+                "historical_bar_trend_scan_triple_barrier_ensemble",
+                "transformer_authority",
+                "supervised_prediction_gate",
+            ],
+            "level_2": [
+                "historical_bar_meta_label_authority",
+                "counterfactual_veto_relaxation",
+                "multi_horizon_decay_veto",
+            ],
+            "level_3": [
+                "slippage_adjusted_fractional_kelly",
+                "lsi_vpin_execution_friction",
+            ],
             "cannot_override": [
                 "cash_safe_or_cash_full_mode",
                 "stale_signal",

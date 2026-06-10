@@ -24,6 +24,7 @@ from services.signal_models import (
     SignalContext,
     SignalRuntimeState,
 )
+
 from src.trading_bot.runtime.gate_engine import CallableGate, GateEngine
 
 
@@ -226,6 +227,48 @@ def test_decision_engine_marks_execution_quality_block_as_enforced():
     )
 
 
+def test_decision_engine_marks_layered_model_veto_as_enforced_ml_authority():
+    account_state = _strong_account_state()
+    account_state["layered_model_decision"] = {
+        "version": "layered_model_decision_v1",
+        "runtime_effect": "paper_model_decision_context_no_order_submission",
+        "symbol": "AAPL",
+        "action": "buy",
+        "final_instruction": "veto",
+        "final_size_pct": 0.0,
+        "reasons": ["Level 2 meta-label veto"],
+        "level_0_regime": {"decision": "pass"},
+        "level_1_expert_ensemble": {"ensemble_probability": 0.41},
+        "level_2_meta_label": {"instruction": "veto", "effect": "ensemble_probability_veto"},
+        "level_3_sizing": {"final_size_pct": 0.0},
+    }
+
+    DecisionEngine().store_to_account_state(
+        account_state=account_state,
+        decision={
+            "approved": True,
+            "confidence": "high",
+            "reason": "canonical engine approved",
+            "position_size_pct": 1.0,
+        },
+        source="claude",
+        execution_mode="paper",
+    )
+
+    ml_gate = next(
+        row
+        for row in account_state["canonical_decision_trace"]["gate_results"]
+        if row["gate_id"] == "ml_authority"
+    )
+    assert_equal(ml_gate["decision"], "block", "ml gate decision")
+    assert_equal(ml_gate["enforced"], True, "ml gate enforced")
+    assert_equal(
+        account_state["canonical_decision_trace"]["blocking_gate"],
+        "ml_authority",
+        "blocking gate",
+    )
+
+
 def test_canonical_orchestrator_owns_live_signal_handoff():
     class _CompatibilityProcessor:
         def __init__(self):
@@ -367,6 +410,7 @@ def main():
         test_intelligence_adjudicator_aggregates_model_surfaces,
         test_decision_engine_stores_canonical_trace_directly,
         test_decision_engine_marks_execution_quality_block_as_enforced,
+        test_decision_engine_marks_layered_model_veto_as_enforced_ml_authority,
         test_canonical_orchestrator_owns_live_signal_handoff,
         test_claude_cannot_approve_cash_buy_without_authority,
         test_approval_path_stores_canonical_trace_for_paper_authority,

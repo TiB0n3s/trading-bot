@@ -65,6 +65,11 @@ DEFAULT_LAYER_AUTHORITY: dict[str, LayerAuthority] = {
         can_approve="paper_block",
         can_increase_size="paper_block",
     ),
+    "layered_model_authority": LayerAuthority(
+        can_block="paper_block",
+        can_approve="paper_block",
+        can_increase_size="paper_block",
+    ),
     "claude": LayerAuthority(
         can_block="live_block",
         can_approve="paper_block",

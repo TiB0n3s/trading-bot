@@ -394,6 +394,21 @@ def test_complete_only_excludes_non_complete_rows():
         0.74,
         "SpaceX relationship weight exported",
     )
+    assert_true(row["value_chain_eco_cluster_in_scope"], "eco-cluster scope exported")
+    assert_equal(
+        row["value_chain_eco_cluster_authority_tier"],
+        "approved_symbol_normal_risk_gates_required",
+        "eco-cluster authority tier exported",
+    )
+    assert_ge(
+        row["value_chain_eco_cluster_graph_degree"],
+        1,
+        "eco-cluster graph degree exported",
+    )
+    assert_true(
+        row["value_chain_eco_cluster_max_relationship_weight"] is not None,
+        "eco-cluster max relationship weight exported",
+    )
 
 
 def test_complete_only_exclusion_reason_counts():

@@ -9,6 +9,10 @@ from typing import Any
 from db import DB_PATH
 from services.bar_pattern_feature_service import BAR_PATTERN_FEATURE_VERSION
 from services.spacex_value_chain_service import build_spacex_value_chain_feature
+from services.value_chain_eco_cluster_service import (
+    build_value_chain_eco_cluster_feature,
+    build_value_chain_eco_cluster_graph,
+)
 
 SNAPSHOT_JOIN_FEATURE_VERSION_ALIASES = (
     BAR_PATTERN_FEATURE_VERSION,
@@ -17,9 +21,13 @@ SNAPSHOT_JOIN_FEATURE_VERSION_ALIASES = (
 )
 
 
-def _attach_reference_features(row: dict[str, Any]) -> dict[str, Any]:
+def _attach_reference_features(row: dict[str, Any], *, eco_graph=None) -> dict[str, Any]:
     feature = build_spacex_value_chain_feature(symbol=str(row.get("symbol") or ""))
     shock = feature.get("lead_lag_shock") or {}
+    eco_feature = build_value_chain_eco_cluster_feature(
+        symbol=str(row.get("symbol") or ""),
+        graph=eco_graph,
+    )
     enriched = dict(row)
     enriched["spacex_value_chain_in_scope"] = bool(feature.get("in_value_chain"))
     enriched["spacex_value_chain_authority_tier"] = feature.get("authority_tier")
@@ -27,6 +35,18 @@ def _attach_reference_features(row: dict[str, Any]) -> dict[str, Any]:
     enriched["spacex_value_chain_relationship_weight"] = feature.get("relationship_weight")
     enriched["spacex_value_chain_information_shock_score"] = shock.get("information_shock_score")
     enriched["spacex_value_chain_liquidity_siphon_ratio"] = feature.get("liquidity_siphon_ratio")
+    enriched["value_chain_eco_cluster_in_scope"] = bool(eco_feature.get("in_eco_cluster"))
+    enriched["value_chain_eco_cluster_authority_tier"] = eco_feature.get("authority_tier")
+    enriched["value_chain_eco_cluster_graph_degree"] = eco_feature.get("graph_degree")
+    enriched["value_chain_eco_cluster_max_relationship_weight"] = eco_feature.get(
+        "max_relationship_weight"
+    )
+    enriched["value_chain_eco_cluster_avg_relationship_weight"] = eco_feature.get(
+        "avg_relationship_weight"
+    )
+    enriched["value_chain_eco_cluster_linked_context_count"] = eco_feature.get(
+        "linked_context_count"
+    )
     return enriched
 
 
@@ -176,4 +196,5 @@ def fetch_training_rows(
             """,
             params,
         ).fetchall()
-    return [_attach_reference_features(dict(row)) for row in rows]
+    eco_graph = build_value_chain_eco_cluster_graph()
+    return [_attach_reference_features(dict(row), eco_graph=eco_graph) for row in rows]

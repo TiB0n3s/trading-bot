@@ -169,6 +169,12 @@ def test_fetch_training_rows_respects_feature_available_at_cutoff():
     assert rows[0]["spacex_value_chain_in_scope"] is True
     assert rows[0]["spacex_value_chain_authority_tier"] == "approved_internal_bar_paper_learning"
     assert rows[0]["spacex_value_chain_relationship_weight"] == 0.74
+    assert rows[0]["value_chain_eco_cluster_in_scope"] is True
+    assert rows[0]["value_chain_eco_cluster_authority_tier"] == (
+        "approved_symbol_normal_risk_gates_required"
+    )
+    assert rows[0]["value_chain_eco_cluster_graph_degree"] > 0
+    assert rows[0]["value_chain_eco_cluster_max_relationship_weight"] is not None
 
 
 if __name__ == "__main__":

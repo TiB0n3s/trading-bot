@@ -77,3 +77,28 @@ These graph features are eligible only as paper/context intelligence. They do
 not create standalone trade authority for context-only symbols, and normal
 execution, spread, slippage, affordability, and risk gates still apply to the
 approved symbols.
+
+## Value-Chain Eco-Cluster Graphs
+
+All approved and context-only symbols are represented in a deterministic
+value-chain eco-cluster graph exposed by
+`services.value_chain_eco_cluster_service`.
+
+The current graph source is deliberately static and point-in-time safe:
+
+- approved symbol cluster membership from `SYMBOL_CONFIG`
+- context-only `linked_symbols` relationships from `CONTEXT_ONLY_SYMBOL_CONFIG`
+- relationship categories and weights from checked-in metadata
+
+The graph produces ML/reference features for every symbol:
+
+- eco-cluster scope
+- authority tier
+- graph degree
+- maximum relationship weight
+- average relationship weight
+- linked context count
+
+Discovery remains a separate asynchronous layer. External NLP, filings, supply
+chain, or transcript scanners must write reviewed static metadata before
+pre-market filtering. They must not run inside the live execution loop.

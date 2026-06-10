@@ -54,6 +54,7 @@ def test_advanced_alpha_readiness_scores_integrated_bar_features():
     assert by_family["liquidity_stress_indicator"]["status"] == "partially_integrated"
     assert "lsi_feature_enabled" in by_family["liquidity_stress_indicator"]["failed"]
     assert by_family["spacex_value_chain_graph"]["status"] == "promotion_evidence_candidate"
+    assert by_family["value_chain_eco_cluster_graph"]["status"] == "promotion_evidence_candidate"
     assert data["summary"]["microstructure_coverage_rate"] == 85.0
 
 
@@ -73,6 +74,8 @@ def test_advanced_alpha_readiness_reports_external_feed_gaps():
     assert by_family["asymmetric_loss_model_comparison"].readiness_pct < 60
     assert by_family["spacex_value_chain_graph"].status == "partially_integrated"
     assert "outcome_linkage_ge_500" in by_family["spacex_value_chain_graph"].failed
+    assert by_family["value_chain_eco_cluster_graph"].status == "partially_integrated"
+    assert "outcome_linkage_ge_500" in by_family["value_chain_eco_cluster_graph"].failed
 
 
 def main():

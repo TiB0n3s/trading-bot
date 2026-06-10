@@ -15,6 +15,7 @@ from typing import Any
 from repositories.bar_pattern_feature_repo import BarPatternFeatureRepository
 from services.optional_dependency_service import optional_dependency_status
 from services.spacex_value_chain_service import build_spacex_value_chain_graph
+from services.value_chain_eco_cluster_service import build_value_chain_eco_cluster_graph
 
 ADVANCED_ALPHA_READINESS_VERSION = "advanced_alpha_readiness_v1"
 ADVANCED_ALPHA_RUNTIME_EFFECT = "readiness_only_no_live_authority"
@@ -161,6 +162,8 @@ def build_advanced_alpha_readiness_payload(
     options_feed = _env_true(env, "OPTIONS_FLOW_ENABLED") or bool(env.get("OPTIONS_DATA_API_KEY"))
     spacex_graph = build_spacex_value_chain_graph().to_dict()
     spacex_summary = spacex_graph["summary"]
+    eco_graph = build_value_chain_eco_cluster_graph().to_dict()
+    eco_summary = eco_graph["summary"]
 
     coverage_threshold_met = rows >= 500
     outcome_threshold_met = rows_with_forward >= 500
@@ -282,6 +285,33 @@ def build_advanced_alpha_readiness_payload(
             next_action=(
                 "Accumulate aligned catalyst/cohort returns and compare "
                 "information-shock scores against approved-symbol outcomes."
+            ),
+        ),
+        _item(
+            feature_family="value_chain_eco_cluster_graph",
+            checks={
+                "graph_metadata_available": bool(eco_summary.get("node_count")),
+                "approved_symbol_coverage_available": eco_summary.get("approved_symbol_count", 0)
+                > 0,
+                "context_only_relationships_available": eco_summary.get(
+                    "context_only_symbol_count", 0
+                )
+                > 0,
+                "adjacency_matrix_available": bool(eco_graph.get("adjacency_matrix")),
+                "quantitative_filter_contract_defined": True,
+                "outcome_linkage_ge_500": outcome_threshold_met,
+                "authority_leak_safe": True,
+            },
+            current_capability=(
+                "All approved symbols receive deterministic cluster graph "
+                "features from checked-in clusters and context-only linked "
+                "symbols. This is ML context only and cannot grant trade "
+                "authority."
+            ),
+            next_action=(
+                "Run pre-market historical correlation/cointegration filtering "
+                "on graph edges and persist validated edge scores for live "
+                "feature consumption."
             ),
         ),
         _item(

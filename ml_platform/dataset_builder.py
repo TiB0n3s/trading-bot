@@ -32,6 +32,10 @@ if str(SCRIPTS_DIR) not in sys.path:
 
 from repositories.training_data_repo import TrainingDataRepository  # noqa: E402
 from services.spacex_value_chain_service import build_spacex_value_chain_feature  # noqa: E402
+from services.value_chain_eco_cluster_service import (  # noqa: E402
+    build_value_chain_eco_cluster_feature,
+    build_value_chain_eco_cluster_graph,
+)
 from symbols_config import SYMBOL_UNIVERSE_VERSION  # noqa: E402
 
 from ml_platform.config import DEFAULT_DB_PATH, FEATURE_VERSION  # noqa: E402
@@ -186,6 +190,12 @@ ROW_COLUMNS = [
     "spacex_value_chain_relationship_weight",
     "spacex_value_chain_information_shock_score",
     "spacex_value_chain_liquidity_siphon_ratio",
+    "value_chain_eco_cluster_in_scope",
+    "value_chain_eco_cluster_authority_tier",
+    "value_chain_eco_cluster_graph_degree",
+    "value_chain_eco_cluster_max_relationship_weight",
+    "value_chain_eco_cluster_avg_relationship_weight",
+    "value_chain_eco_cluster_linked_context_count",
 ]
 
 # Fields that must be present in feature_snapshots for a PIT-clean export.
@@ -301,10 +311,15 @@ def _inject_reference_features(rows: list[dict[str, Any]]) -> list[dict[str, Any
     authority to context-only symbols.
     """
     result: list[dict[str, Any]] = []
+    eco_graph = build_value_chain_eco_cluster_graph()
     for row in rows:
         enriched = dict(row)
         feature = build_spacex_value_chain_feature(symbol=str(enriched.get("symbol") or ""))
         shock = feature.get("lead_lag_shock") or {}
+        eco_feature = build_value_chain_eco_cluster_feature(
+            symbol=str(enriched.get("symbol") or ""),
+            graph=eco_graph,
+        )
         enriched["spacex_value_chain_in_scope"] = bool(feature.get("in_value_chain"))
         enriched["spacex_value_chain_authority_tier"] = feature.get("authority_tier")
         enriched["spacex_value_chain_relationship_type"] = feature.get("relationship_type")
@@ -314,6 +329,18 @@ def _inject_reference_features(rows: list[dict[str, Any]]) -> list[dict[str, Any
         )
         enriched["spacex_value_chain_liquidity_siphon_ratio"] = feature.get(
             "liquidity_siphon_ratio"
+        )
+        enriched["value_chain_eco_cluster_in_scope"] = bool(eco_feature.get("in_eco_cluster"))
+        enriched["value_chain_eco_cluster_authority_tier"] = eco_feature.get("authority_tier")
+        enriched["value_chain_eco_cluster_graph_degree"] = eco_feature.get("graph_degree")
+        enriched["value_chain_eco_cluster_max_relationship_weight"] = eco_feature.get(
+            "max_relationship_weight"
+        )
+        enriched["value_chain_eco_cluster_avg_relationship_weight"] = eco_feature.get(
+            "avg_relationship_weight"
+        )
+        enriched["value_chain_eco_cluster_linked_context_count"] = eco_feature.get(
+            "linked_context_count"
         )
         result.append(enriched)
     return result
@@ -446,7 +473,9 @@ def build_training_dataset(config: DatasetBuildConfig) -> DatasetBuildResult:
     manifest["advanced_alpha_feature_version"] = ADVANCED_ALPHA_FEATURE_VERSION
     manifest["reference_feature_contract"] = {
         "spacex_value_chain_graph": "deterministic_symbol_universe_features_no_trade_authority",
+        "value_chain_eco_cluster_graph": "deterministic_all_symbol_cluster_and_context_graph_no_trade_authority",
         "source": "services.spacex_value_chain_service",
+        "eco_cluster_source": "services.value_chain_eco_cluster_service",
     }
     manifest["triple_barrier_target_included"] = True
     manifest["trend_scan_target_included"] = True

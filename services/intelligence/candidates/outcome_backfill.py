@@ -276,31 +276,37 @@ class CandidateOutcomeBackfillService:
         dry_run: bool = False,
         overwrite: bool = False,
     ) -> CandidateOutcomeBackfillResult:
-        rows = [dict(row) for row in self.repository.rows_for_date(target_date, symbol=symbol)]
+        all_rows = [dict(row) for row in self.repository.rows_for_date(target_date, symbol=symbol)]
+        selected_rows: list[dict[str, Any]] = []
+        skipped_existing_total = 0
+        for row in all_rows:
+            payload = _load_json(row.get("candidate_json"))
+            if candidate_has_forward_outcome(payload) and not overwrite:
+                skipped_existing_total += 1
+                continue
+            selected_rows.append(row)
+
         if limit is not None:
-            rows = rows[: max(0, int(limit))]
+            selected_rows = selected_rows[: max(0, int(limit))]
 
         bars_by_symbol: dict[str, list[dict[str, Any]]] = {}
-        coverage_before = summarize_candidate_outcome_coverage(rows)
-        projected_rows = [dict(row) for row in rows]
+        coverage_before = summarize_candidate_outcome_coverage(all_rows)
+        projected_rows = [dict(row) for row in all_rows]
         projected_by_id = {
             int(row["id"]): row for row in projected_rows if row.get("id") is not None
         }
         counts = {
             "eligible": 0,
             "updated": 0,
-            "skipped_existing": 0,
+            "skipped_existing": skipped_existing_total,
             "partial": 0,
             "no_bars": 0,
             "error": 0,
         }
         updates: list[tuple[int, dict[str, Any]]] = []
 
-        for row in rows:
+        for row in selected_rows:
             payload = _load_json(row.get("candidate_json"))
-            if candidate_has_forward_outcome(payload) and not overwrite:
-                counts["skipped_existing"] += 1
-                continue
             counts["eligible"] += 1
             try:
                 row_symbol = str(row["symbol"]).upper()
@@ -340,7 +346,7 @@ class CandidateOutcomeBackfillService:
             report_version=CANDIDATE_OUTCOME_BACKFILL_VERSION,
             runtime_effect=CANDIDATE_OUTCOME_RUNTIME_EFFECT,
             date=target_date,
-            rows=len(rows),
+            rows=len(all_rows),
             eligible=counts["eligible"],
             updated=counts["updated"],
             skipped_existing=counts["skipped_existing"],

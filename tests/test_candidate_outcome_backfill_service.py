@@ -33,6 +33,10 @@ class FakeRepository:
     def update_candidate_json(self, candidate_id, payload):
         self.updated[candidate_id] = payload
 
+    def update_candidate_json_many(self, updates):
+        for candidate_id, payload in updates:
+            self.update_candidate_json(candidate_id, payload)
+
 
 class FakeMarketData:
     def fetch_day_bars(self, *, symbol, start_dt, end_dt):
@@ -135,9 +139,51 @@ def test_backfill_skips_existing_unless_overwrite():
     assert repo.updated == {}
 
 
+def test_bounded_backfill_selects_next_missing_rows_after_existing_outcomes():
+    class MixedRepo(FakeRepository):
+        def rows_for_date(self, target_date, symbol=None):
+            return [
+                {
+                    "id": 1,
+                    "candidate_ts": f"{target_date}T10:00:00-04:00",
+                    "symbol": "AAPL",
+                    "action": "buy",
+                    "candidate_json": json.dumps({"forward_return_pct": 1.2}),
+                },
+                {
+                    "id": 2,
+                    "candidate_ts": f"{target_date}T10:05:00-04:00",
+                    "symbol": "AAPL",
+                    "action": "buy",
+                    "candidate_json": "{}",
+                },
+                {
+                    "id": 3,
+                    "candidate_ts": f"{target_date}T10:10:00-04:00",
+                    "symbol": "AAPL",
+                    "action": "buy",
+                    "candidate_json": "{}",
+                },
+            ]
+
+    repo = MixedRepo()
+    service = CandidateOutcomeBackfillService(repo, FakeMarketData())
+
+    result = service.backfill("2026-06-02", limit=1)
+
+    assert result.rows == 3
+    assert result.skipped_existing == 1
+    assert result.eligible == 1
+    assert result.updated == 1
+    assert sorted(repo.updated) == [2]
+    assert result.coverage_before["rows_with_forward_outcome"] == 1
+    assert result.projected_coverage_after["rows_with_forward_outcome"] == 2
+
+
 if __name__ == "__main__":
     test_compute_candidate_outcome_uses_first_bar_close_reference()
     test_compute_candidate_outcome_prefers_captured_reference_price()
     test_backfill_updates_candidate_json_with_forward_outcome()
     test_backfill_skips_existing_unless_overwrite()
+    test_bounded_backfill_selects_next_missing_rows_after_existing_outcomes()
     print("candidate outcome backfill service tests passed")

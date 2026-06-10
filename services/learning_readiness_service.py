@@ -290,7 +290,7 @@ def _stage(*, sessions: int, rows_with_outcome: int, blockers: list[str]) -> str
         "missing_lifecycle_rows",
         "missing_outcome_rows",
         "rejected_forward_outcome_coverage_below_80pct",
-        "approved_exit_link_rate_below_80pct",
+        "approved_exit_outcome_coverage_below_80pct",
     }
     if any(blocker in hard_blockers for blocker in blockers):
         return "data_plumbing"
@@ -353,6 +353,10 @@ def build_learning_readiness_payload(
 
     rejected_coverage = lifecycle_summary.get("rejected_counterfactual_coverage_rate")
     approved_exit_rate = lifecycle_summary.get("approved_exit_link_rate")
+    approved_matched_exit_rate = lifecycle_summary.get("approved_matched_exit_coverage_rate")
+    approved_exit_outcome_rate = (
+        approved_matched_exit_rate if approved_matched_exit_rate is not None else approved_exit_rate
+    )
     blockers: list[str] = []
     if not int(runtime.get("rows") or 0):
         blockers.append("missing_runtime_job_runs")
@@ -364,8 +368,8 @@ def build_learning_readiness_payload(
         blockers.append("missing_outcome_rows")
     if rejected_trade_backed and (rejected_coverage is None or rejected_coverage < 0.80):
         blockers.append("rejected_forward_outcome_coverage_below_80pct")
-    if approved_rows and (approved_exit_rate is None or approved_exit_rate < 0.80):
-        blockers.append("approved_exit_link_rate_below_80pct")
+    if approved_rows and (approved_exit_outcome_rate is None or approved_exit_outcome_rate < 0.80):
+        blockers.append("approved_exit_outcome_coverage_below_80pct")
     if candidate["rows"] == 0:
         blockers.append("missing_candidate_universe_rows")
     elif (
@@ -375,7 +379,8 @@ def build_learning_readiness_payload(
         blockers.append("candidate_forward_outcome_coverage_below_80pct")
     if int(pattern_summary.get("pattern_rows") or 0) == 0 and rows:
         blockers.append("missing_symbol_pattern_rows")
-    if int(calibration_summary.get("ready_bucket_count") or 0) == 0 and rows_with_outcome:
+    calibration_ready_buckets = int(calibration_summary.get("ready_bucket_count") or 0)
+    if calibration_ready_buckets == 0 and rows_with_outcome >= 100:
         blockers.append("no_ready_calibration_buckets")
     if rows_with_outcome and not progress["fully_integrated_outcome_rows"]:
         blockers.append("missing_fully_integrated_pattern_momentum_prediction_outcomes")
@@ -425,8 +430,18 @@ def build_learning_readiness_payload(
         next_actions.append(
             "backfill rejected_signal_outcomes before trusting counterfactual analysis"
         )
-    if "approved_exit_link_rate_below_80pct" in blockers:
-        next_actions.append("classify open positions versus missing exit snapshot linkage")
+    if "approved_exit_outcome_coverage_below_80pct" in blockers:
+        next_actions.append("classify open positions versus missing approved exit outcomes")
+    if (
+        approved_rows
+        and approved_exit_rate is not None
+        and approved_exit_rate < 0.80
+        and approved_exit_outcome_rate is not None
+        and approved_exit_outcome_rate >= 0.80
+    ):
+        next_actions.append(
+            "repair canonical exit snapshot capture; matched exits are available for learning"
+        )
     if "missing_candidate_universe_rows" in blockers:
         next_actions.append("verify candidate-universe capture is running with scope=all")
     if "candidate_forward_outcome_coverage_below_80pct" in blockers:
@@ -435,6 +450,10 @@ def build_learning_readiness_payload(
         )
     if "no_ready_calibration_buckets" in blockers:
         next_actions.append("collect more outcomes before using bucket calibration for promotion")
+    elif calibration_ready_buckets == 0 and rows_with_outcome:
+        next_actions.append(
+            "continue baseline collection before using bucket calibration for promotion"
+        )
     if "missing_fully_integrated_pattern_momentum_prediction_outcomes" in blockers:
         next_actions.append(
             "verify canonical rows include outcome + pattern + momentum + prediction fields"
@@ -454,6 +473,8 @@ def build_learning_readiness_payload(
             "rows": int(lifecycle_summary.get("rows") or 0),
             "approved_rows": approved_rows,
             "approved_exit_link_rate": approved_exit_rate,
+            "approved_matched_exit_coverage_rate": approved_matched_exit_rate,
+            "approved_exit_outcome_coverage_rate": approved_exit_outcome_rate,
             "rejected_trade_backed": rejected_trade_backed,
             "rejected_counterfactual_coverage_rate": rejected_coverage,
             "analysis_ready": bool(lifecycle_summary.get("analysis_ready")),

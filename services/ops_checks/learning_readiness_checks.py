@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from datetime import date, timedelta
 from pathlib import Path
 
 from repositories.candidate_universe_repo import CandidateUniverseRepository
@@ -46,6 +47,7 @@ def run_learning_readiness(
     report_title: str = "Learning Readiness",
 ) -> bool:
     end = end_date or start_date
+    runtime_health_end = (date.fromisoformat(end) + timedelta(days=1)).isoformat()
     print()
     print("=" * 72)
     print(f"  {report_title} — {start_date} to {end}")
@@ -66,7 +68,7 @@ def run_learning_readiness(
 
     runtime_trend = JobRunsService(JobRunsRepository(db_path)).trend_payload(
         start_date=start_date,
-        end_date=end,
+        end_date=runtime_health_end,
     )
     candidate_rows = [
         dict(row)

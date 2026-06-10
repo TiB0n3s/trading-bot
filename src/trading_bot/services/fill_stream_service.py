@@ -92,6 +92,48 @@ class FillEventHandler:
             self.logger.error(f"insert_synthetic_exit failed for {symbol} order={order_id}: {e}")
             return False
 
+    def insert_synthetic_buy_fill(
+        self,
+        order_id,
+        symbol,
+        status,
+        filled_qty,
+        fill_price,
+        parent_order_id=None,
+    ) -> bool:
+        """Insert synthetic trade row for unmatched buy fills.
+
+        A buy fill without a local trade row breaks cost basis and realized P&L.
+        This repair path is intentionally idempotent by order_id.
+        """
+        try:
+            inserted = self.repository.insert_synthetic_fill(
+                order_id=order_id,
+                symbol=symbol,
+                side="buy",
+                status=status,
+                filled_qty=filled_qty,
+                fill_price=fill_price,
+                parent_order_id=parent_order_id,
+            )
+            if not inserted:
+                self.logger.info(
+                    f"BUY FILL synthetic row skipped: order already recorded "
+                    f"{symbol} order={order_id}"
+                )
+                return True
+
+            self.logger.warning(
+                f"BUY FILL synthetic row inserted: {symbol} qty={filled_qty} "
+                f"fill_price={fill_price} order={order_id} parent={parent_order_id}"
+            )
+            return True
+        except Exception as e:
+            self.logger.error(
+                f"insert_synthetic_buy_fill failed for {symbol} order={order_id}: {e}"
+            )
+            return False
+
     async def trade_update_handler(self, data):
         try:
             event = data.event
@@ -139,10 +181,19 @@ class FillEventHandler:
                             f"and synthetic insert failed - fill_price={fill_price} status={status}"
                         )
                 else:
-                    self.logger.warning(
-                        f"Unmatched non-sell fill received for order {order_id} ({symbol}) "
-                        "- not inserting synthetic exit row"
+                    inserted = self.insert_synthetic_buy_fill(
+                        order_id=order_id,
+                        symbol=symbol,
+                        status=status,
+                        filled_qty=filled_qty,
+                        fill_price=fill_price,
+                        parent_order_id=parent_order_id,
                     )
+                    if not inserted:
+                        self.logger.warning(
+                            f"Unmatched buy fill received for order {order_id} ({symbol}) "
+                            f"but synthetic insert failed - fill_price={fill_price} status={status}"
+                        )
         except Exception as e:
             self.logger.error(f"Error in trade_update_handler: {e} | raw data: {data}")
 

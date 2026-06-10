@@ -1363,6 +1363,63 @@ def test_report_registry_marks_direct_function_reports(tmp_path):
     assert commands["filters"].legacy_argv_adapter is True
 
 
+def test_order_health_flags_bridge_routed_snapshot_without_trade_row(tmp_path):
+    with sqlite3.connect(tmp_path / "trades.db") as con:
+        con.execute(
+            """
+            CREATE TABLE trades (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                timestamp TEXT NOT NULL,
+                symbol TEXT,
+                action TEXT,
+                signal_price REAL,
+                approved INTEGER,
+                order_id TEXT,
+                order_status TEXT,
+                qty INTEGER,
+                fill_price REAL,
+                position_size_pct REAL,
+                stop_loss_pct REAL,
+                take_profit_pct REAL
+            )
+            """
+        )
+        con.execute(
+            """
+            CREATE TABLE auto_buy_decision_snapshots (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                candidate_timestamp TEXT NOT NULL,
+                symbol TEXT,
+                decision TEXT,
+                score REAL,
+                execution_status TEXT,
+                routed_order_id TEXT,
+                order_id TEXT,
+                order_status TEXT
+            )
+            """
+        )
+        con.execute(
+            """
+            INSERT INTO auto_buy_decision_snapshots (
+                candidate_timestamp, symbol, decision, score, execution_status,
+                routed_order_id, order_id, order_status
+            ) VALUES (
+                '2026-06-10T09:31:00-04:00', 'ASML', 'strong_buy_candidate',
+                22.0, 'ROUTED', 'bridge-order-1', 'bridge-order-1', 'filled'
+            )
+            """
+        )
+
+    code, out = _run_cli(tmp_path, "order-health", "2026-06-10")
+
+    assert code == 1
+    assert "Execution ledger reconciliation" in out
+    assert "bridge_routed_without_trade_rows        1" in out
+    assert "snapshot_id=1" in out
+    assert "[WARN] order health found issues" in out
+
+
 def main():
     tests = [
         test_feature_attribution_cli_missing_db_exits_cleanly,
@@ -1394,6 +1451,7 @@ def main():
         test_jobs_cli_reads_selected_base_dir_and_filters,
         test_report_command_dispatches_in_process_with_target_date,
         test_report_registry_marks_direct_function_reports,
+        test_order_health_flags_bridge_routed_snapshot_without_trade_row,
     ]
     for test in tests:
         with tempfile.TemporaryDirectory() as tmp:

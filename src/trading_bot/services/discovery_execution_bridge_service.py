@@ -32,6 +32,7 @@ REASON_CODE_OPEN_ORDER_CHECK_FAILED = "open_order_check_failed"
 REASON_CODE_MISSING_CANONICAL_TRACE = "missing_canonical_trace"
 REASON_CODE_BROKER_REJECTED_ORDER = "broker_rejected_order"
 REASON_CODE_CANDIDATE_DECODE_FAILED = "candidate_decode_failed"
+REASON_CODE_ALLOCATION_ROUNDS_TO_ZERO = "allocation_rounds_to_zero"
 
 
 @dataclass(frozen=True)
@@ -45,6 +46,8 @@ class DiscoveryBridgeConfig:
     target_date: str | None = None
     max_candidate_age_seconds: int = 180
     symbol_cooldown_minutes: int = 45
+    min_trade_qty: float = 1.0
+    allow_fractional_shares: bool = False
 
 
 @dataclass(frozen=True)
@@ -77,6 +80,13 @@ def bridge_config_from_env(*, target_date: str | None = None) -> DiscoveryBridge
         symbol_cooldown_minutes=int(
             os.getenv("DISCOVERY_EXECUTION_BRIDGE_SYMBOL_COOLDOWN_MINUTES", "45")
         ),
+        min_trade_qty=float(os.getenv("DISCOVERY_EXECUTION_BRIDGE_MIN_TRADE_QTY", "1")),
+        allow_fractional_shares=os.getenv(
+            "DISCOVERY_EXECUTION_BRIDGE_ALLOW_FRACTIONAL_SHARES", "false"
+        )
+        .strip()
+        .lower()
+        in {"1", "true", "yes", "on"},
     )
 
 
@@ -184,6 +194,23 @@ class DiscoveryExecutionBridgeService:
                     f"auto-bridge-{candidate_id}-{order_symbol}"
                 ),
             )
+            sizing_block = self._allocation_sizing_block(candidate, request.position_size_pct)
+            if sizing_block:
+                reason_code, reason = sizing_block
+                self.repository.mark_failed(candidate_id=candidate_id, reason=reason)
+                self._log_drop(
+                    candidate_id=candidate_id,
+                    symbol=symbol,
+                    reason_code=reason_code,
+                    reason_detail=reason,
+                )
+                return DiscoveryBridgeResult(
+                    candidate_id=candidate_id,
+                    symbol=symbol,
+                    status=FAILED,
+                    reason=reason,
+                    reason_code=reason_code,
+                )
             outcome = execute_auto_buy_order(request, self.broker)
             if outcome.submitted and outcome.order:
                 order_id = _order_identifier(outcome.order)
@@ -297,6 +324,35 @@ class DiscoveryExecutionBridgeService:
 
         return None
 
+    def _allocation_sizing_block(
+        self,
+        candidate: dict[str, Any],
+        position_size_pct: float,
+    ) -> tuple[str, str] | None:
+        if self.config.allow_fractional_shares or self.config.min_trade_qty <= 0:
+            return None
+
+        price = _candidate_price(candidate)
+        allocated_capital = _candidate_allocated_capital(candidate)
+        if allocated_capital is None:
+            equity = _candidate_account_equity(candidate)
+            if equity is not None and position_size_pct > 0:
+                allocated_capital = equity * (position_size_pct / 100.0)
+
+        if price is None or allocated_capital is None:
+            return None
+
+        estimated_qty = allocated_capital / price
+        if estimated_qty >= self.config.min_trade_qty:
+            return None
+
+        return REASON_CODE_ALLOCATION_ROUNDS_TO_ZERO, (
+            "bridge blocked: allocation rounds below minimum trade quantity "
+            f"estimated_qty={estimated_qty:.4f} min_qty={self.config.min_trade_qty:.4f} "
+            f"allocated_capital={allocated_capital:.2f} price={price:.4f} "
+            f"position_size_pct={position_size_pct:.4f}"
+        )
+
     def _log_drop(
         self,
         *,
@@ -375,3 +431,43 @@ def _reason_code_for_order_failure(reason: str | None) -> str:
     if "missing canonical decision trace" in normalized:
         return REASON_CODE_MISSING_CANONICAL_TRACE
     return REASON_CODE_BROKER_REJECTED_ORDER
+
+
+def _float_candidate_value(candidate: dict[str, Any], keys: tuple[str, ...]) -> float | None:
+    for key in keys:
+        value = candidate.get(key)
+        try:
+            if value not in (None, ""):
+                parsed = float(value)
+                if parsed > 0:
+                    return parsed
+        except (TypeError, ValueError):
+            continue
+    return None
+
+
+def _candidate_price(candidate: dict[str, Any]) -> float | None:
+    return _float_candidate_value(
+        candidate,
+        ("current_price", "signal_price", "close", "ask", "mid", "price"),
+    )
+
+
+def _candidate_allocated_capital(candidate: dict[str, Any]) -> float | None:
+    return _float_candidate_value(
+        candidate,
+        (
+            "allocated_capital",
+            "allocated_notional",
+            "risk_amount",
+            "target_notional",
+            "intended_notional",
+        ),
+    )
+
+
+def _candidate_account_equity(candidate: dict[str, Any]) -> float | None:
+    return _float_candidate_value(
+        candidate,
+        ("account_equity", "portfolio_value", "equity", "balance", "buying_power"),
+    )

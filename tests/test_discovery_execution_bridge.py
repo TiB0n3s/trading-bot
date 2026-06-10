@@ -4,13 +4,18 @@
 from __future__ import annotations
 
 import json
+import sys
 import tempfile
 from pathlib import Path
 
-from repositories import auto_buy_repo
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
+sys.path.insert(0, str(ROOT / "src" / "trading_bot"))
+
 from services.discovery_execution_bridge_service import (
     FAILED,
     PENDING,
+    REASON_CODE_ALLOCATION_ROUNDS_TO_ZERO,
     REASON_CODE_COOLDOWN_ACTIVE,
     REASON_CODE_MISSING_CANONICAL_TRACE,
     REASON_CODE_OPEN_ORDER_EXISTS,
@@ -19,6 +24,8 @@ from services.discovery_execution_bridge_service import (
     DiscoveryBridgeConfig,
     DiscoveryExecutionBridgeService,
 )
+
+from repositories import auto_buy_repo
 
 
 class FakeBroker:
@@ -410,6 +417,30 @@ def test_symbol_cooldown_drop_logs_candidate_tracking_id():
         assert "symbol cooldown active" in logger.info_calls[-1][1][3]
 
 
+def test_full_share_allocation_rounding_blocks_before_broker_route():
+    with tempfile.TemporaryDirectory() as tmpdir:
+        db_path = Path(tmpdir) / "trades.db"
+        auto_buy_repo.init_tables(db_path)
+        candidate = _candidate(symbol="ASML", score=22.0, trace=_approved_trace())
+        candidate["current_price"] = 980.0
+        candidate["account_equity"] = 50_000.0
+        candidate["effective_size_cap_pct"] = 0.25
+        row_id = _insert_snapshot(db_path, candidate)
+        broker = FakeBroker(order={"id": "order-should-not-route", "status": "filled"})
+        logger = FakeLogger()
+
+        results = _service(db_path, broker, logger=logger).route_eligible_candidates()
+
+        row = _status(db_path, row_id)
+        assert len(results) == 1
+        assert results[0].status == FAILED
+        assert results[0].reason_code == REASON_CODE_ALLOCATION_ROUNDS_TO_ZERO
+        assert "allocation rounds below minimum trade quantity" in results[0].reason
+        assert broker.calls == []
+        assert row["execution_status"] == FAILED
+        assert logger.info_calls[-1][1][2] == REASON_CODE_ALLOCATION_ROUNDS_TO_ZERO
+
+
 def main() -> None:
     tests = [
         test_low_score_candidate_remains_pending_and_is_not_routed,
@@ -420,6 +451,7 @@ def main() -> None:
         test_existing_open_position_blocks_bridge_route,
         test_existing_open_order_blocks_bridge_route_with_reason_code,
         test_symbol_cooldown_drop_logs_candidate_tracking_id,
+        test_full_share_allocation_rounding_blocks_before_broker_route,
     ]
     for test in tests:
         test()

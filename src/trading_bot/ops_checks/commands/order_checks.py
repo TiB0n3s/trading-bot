@@ -87,6 +87,46 @@ def run_order_health(target_date: str, *, base_dir: Path) -> bool:
     else:
         print("  external_alpaca_orders table missing")
 
+    print()
+    print("Execution ledger reconciliation")
+    bridge_gap_rows = fill_repo.bridge_routed_without_trade_rows(target_date, db_path=db_path)
+    filled_missing_rows = fill_repo.filled_trade_rows_missing_fill_fields(
+        target_date,
+        db_path=db_path,
+    )
+    sell_without_buy_rows = fill_repo.sell_rows_without_prior_buy_rows(
+        target_date,
+        db_path=db_path,
+    )
+    print(f"  bridge_routed_without_trade_rows {len(bridge_gap_rows):>8}")
+    print(f"  filled_rows_missing_fill_fields  {len(filled_missing_rows):>8}")
+    print(f"  sells_without_prior_local_buy     {len(sell_without_buy_rows):>8}")
+    if bridge_gap_rows:
+        ok = False
+        print("  Bridge ledger gaps")
+        for r in bridge_gap_rows[:10]:
+            print(
+                f"    snapshot_id={r['id']} {r['candidate_timestamp']} "
+                f"{r['symbol']} order_id={r['routed_order_id'] or r['order_id']} "
+                f"status={r['order_status'] or '-'}"
+            )
+    if filled_missing_rows:
+        ok = False
+        print("  Filled rows missing qty/fill_price")
+        for r in filled_missing_rows[:10]:
+            print(
+                f"    trade_id={r['id']} {r['timestamp']} {r['symbol']} {r['action']} "
+                f"order_id={r['order_id'] or '-'} status={r['order_status'] or '-'} "
+                f"qty={r['qty']} fill={r['fill_price']}"
+            )
+    if sell_without_buy_rows:
+        print("  Sells without prior local buy basis")
+        for r in sell_without_buy_rows[:10]:
+            print(
+                f"    trade_id={r['id']} {r['timestamp']} {r['symbol']} "
+                f"order_id={r['order_id'] or '-'} qty={r['qty']} fill={r['fill_price']}"
+            )
+
     if approved_rows and missing_order_id:
         ok = False
 

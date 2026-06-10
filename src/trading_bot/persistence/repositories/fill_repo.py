@@ -260,7 +260,7 @@ def trade_order_exists(order_id: str, db_path=DB_PATH) -> bool:
         return row is not None
 
 
-def insert_synthetic_exit(
+def insert_synthetic_fill(
     *,
     order_id: str,
     symbol: str,
@@ -272,6 +272,9 @@ def insert_synthetic_exit(
     db_path=DB_PATH,
 ) -> bool:
     action = "sell" if side == "sell" else "buy"
+    synthetic_source = (
+        "synthetic_bracket_exit" if action == "sell" else "synthetic_unmatched_buy_fill"
+    )
 
     if trade_order_exists(order_id, db_path=db_path):
         return False
@@ -291,9 +294,9 @@ def insert_synthetic_exit(
                 action,
                 fill_price,
                 1,
-                f"synthetic_bracket_exit: parent_order_id={parent_order_id}"
+                f"{synthetic_source}: parent_order_id={parent_order_id}"
                 if parent_order_id
-                else "synthetic_bracket_exit: parent unknown",
+                else f"{synthetic_source}: parent unknown",
                 "n/a",
                 0.0,
                 0.0,
@@ -305,3 +308,90 @@ def insert_synthetic_exit(
             ),
         )
         return True
+
+
+def insert_synthetic_exit(
+    *,
+    order_id: str,
+    symbol: str,
+    side: str,
+    status: str,
+    filled_qty: float | str | None,
+    fill_price: float | None,
+    parent_order_id: str | None = None,
+    db_path=DB_PATH,
+) -> bool:
+    return insert_synthetic_fill(
+        order_id=order_id,
+        symbol=symbol,
+        side=side,
+        status=status,
+        filled_qty=filled_qty,
+        fill_price=fill_price,
+        parent_order_id=parent_order_id,
+        db_path=db_path,
+    )
+
+
+def bridge_routed_without_trade_rows(target_date: str, db_path=DB_PATH) -> list[Any]:
+    if not table_exists("auto_buy_decision_snapshots", db_path=db_path):
+        return []
+    with get_connection(db_path) as con:
+        return con.execute(
+            """
+            SELECT snap.id, snap.candidate_timestamp, snap.symbol, snap.routed_order_id,
+                   snap.order_id, snap.order_status, snap.execution_status
+            FROM auto_buy_decision_snapshots snap
+            LEFT JOIN trades tr
+              ON tr.order_id = COALESCE(snap.routed_order_id, snap.order_id)
+            WHERE substr(snap.candidate_timestamp, 1, 10) = ?
+              AND snap.execution_status = 'ROUTED'
+              AND COALESCE(snap.routed_order_id, snap.order_id, '') != ''
+              AND tr.id IS NULL
+            ORDER BY snap.candidate_timestamp ASC, snap.id ASC
+            """,
+            (target_date,),
+        ).fetchall()
+
+
+def filled_trade_rows_missing_fill_fields(target_date: str, db_path=DB_PATH) -> list[Any]:
+    with get_connection(db_path) as con:
+        return con.execute(
+            """
+            SELECT id, timestamp, symbol, action, order_id, order_status, qty, fill_price
+            FROM trades
+            WHERE substr(timestamp, 1, 10) = ?
+              AND approved = 1
+              AND LOWER(COALESCE(order_status, '')) IN ('filled', 'partially_filled')
+              AND (qty IS NULL OR fill_price IS NULL)
+            ORDER BY timestamp ASC, id ASC
+            """,
+            (target_date,),
+        ).fetchall()
+
+
+def sell_rows_without_prior_buy_rows(target_date: str, db_path=DB_PATH) -> list[Any]:
+    with get_connection(db_path) as con:
+        return con.execute(
+            """
+            SELECT sell.id, sell.timestamp, sell.symbol, sell.order_id, sell.qty, sell.fill_price
+            FROM trades sell
+            WHERE substr(sell.timestamp, 1, 10) = ?
+              AND sell.approved = 1
+              AND LOWER(COALESCE(sell.action, '')) = 'sell'
+              AND sell.qty IS NOT NULL
+              AND sell.fill_price IS NOT NULL
+              AND NOT EXISTS (
+                  SELECT 1
+                  FROM trades buy
+                  WHERE buy.symbol = sell.symbol
+                    AND buy.approved = 1
+                    AND LOWER(COALESCE(buy.action, '')) = 'buy'
+                    AND buy.qty IS NOT NULL
+                    AND buy.fill_price IS NOT NULL
+                    AND buy.timestamp <= sell.timestamp
+              )
+            ORDER BY sell.timestamp ASC, sell.id ASC
+            """,
+            (target_date,),
+        ).fetchall()

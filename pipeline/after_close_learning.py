@@ -39,7 +39,7 @@ def _build_steps(target_date: str) -> list[Step]:
         Step(
             name="candidate_outcome_backfill",
             module="ops_check",
-            argv=["candidate-outcome-backfill", target_date],
+            argv=["candidate-outcome-backfill", target_date, "--limit", "1000"],
             critical=False,
             description="complete candidate-universe forward outcomes for missed-buy learning",
         ),

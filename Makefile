@@ -1,11 +1,13 @@
 PYTHON ?= ./venv/bin/python
 PIP ?= ./venv/bin/pip
+UV ?= uv
 DOCKER ?= docker
 DATE ?= $(shell date +%F)
 RUFF_TARGETS ?= run_safety_checks.py scripts/run_tests.py src/trading_bot/ops_checks/cli.py tests/test_auto_buy_manager.py tests/test_dependency_packaging_contract.py
 
 .PHONY: \
 	install-runtime install-dev install-research \
+	lock lock-check uv-sync-runtime uv-sync-dev uv-sync-research \
 	check lint-all audit test test-targeted test-safety test-xdist \
 	docker-runtime docker-research docker-dev-image \
 	ops job after-close premarket
@@ -23,6 +25,21 @@ install-research:
 	$(PIP) install -r requirements-base.txt
 	$(PIP) install -r requirements-research.txt
 	$(PIP) install --no-deps -e .
+
+lock:
+	$(UV) lock
+
+lock-check:
+	$(UV) lock --check
+
+uv-sync-runtime:
+	$(UV) sync --extra runtime
+
+uv-sync-dev:
+	$(UV) sync --extra runtime --extra dev
+
+uv-sync-research:
+	$(UV) sync --extra runtime --extra research
 
 check:
 	$(PYTHON) -m ruff check $(RUFF_TARGETS)

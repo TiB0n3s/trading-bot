@@ -13,8 +13,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from repositories.job_runs_repo import JobRunsRepository
-from services.job_runs_service import JobRunsService
+from repositories.job_runs_repo import JobRunsRepository  # noqa: E402
+from services.job_runs_service import JobRunsService  # noqa: E402
 
 
 def _rows(db_path: Path):
@@ -32,7 +32,7 @@ def test_job_runner_records_completed_run():
         result = subprocess.run(
             [
                 sys.executable,
-                str(ROOT / "job_runner.py"),
+                str(ROOT / "scripts" / "job_runner.py"),
                 "--job-name",
                 "unit_job",
                 "--lock-file",
@@ -73,7 +73,7 @@ def test_job_runner_infers_rows_and_warnings_from_log_output():
         result = subprocess.run(
             [
                 sys.executable,
-                str(ROOT / "job_runner.py"),
+                str(ROOT / "scripts" / "job_runner.py"),
                 "--job-name",
                 "row_job",
                 "--log-file",
@@ -106,7 +106,7 @@ def test_job_runner_infers_rows_from_common_runtime_log_patterns():
         result = subprocess.run(
             [
                 sys.executable,
-                str(ROOT / "job_runner.py"),
+                str(ROOT / "scripts" / "job_runner.py"),
                 "--job-name",
                 "poll_job",
                 "--log-file",
@@ -144,7 +144,7 @@ def test_job_runner_records_lock_skipped_run():
             result = subprocess.run(
                 [
                     sys.executable,
-                    str(ROOT / "job_runner.py"),
+                    str(ROOT / "scripts" / "job_runner.py"),
                     "--job-name",
                     "unit_job",
                     "--lock-file",
@@ -197,8 +197,7 @@ def test_service_records_artifact_hash():
         assert len(rows) == 1
         assert rows[0]["artifact_path"] == str(artifact)
         assert rows[0]["artifact_hash"] == (
-            "ba7816bf8f01cfea414140de5dae2223"
-            "b00361a396177a9cb410ff61f20015ad"
+            "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
         )
 
 
@@ -271,6 +270,45 @@ def test_service_marks_runtime_health_unclean_on_failed_job():
         assert payload.summary["clean"] is False
 
 
+def test_service_excludes_legacy_retry_jobs_from_runtime_health():
+    with tempfile.TemporaryDirectory() as tmp:
+        db_path = Path(tmp) / "jobs.db"
+        repo = JobRunsRepository(db_path)
+        repo.init_table()
+        repo.insert_run(
+            {
+                "job_name": "run_after_close_learning_retry_final",
+                "started_at": "2026-05-31T14:00:00+00:00",
+                "finished_at": "2026-05-31T14:00:02+00:00",
+                "duration_sec": 2.0,
+                "exit_code": 1,
+                "lock_acquired": True,
+                "command": "legacy retry",
+            }
+        )
+        repo.insert_run(
+            {
+                "job_name": "run_after_close_learning",
+                "started_at": "2026-05-31T14:05:00+00:00",
+                "finished_at": "2026-05-31T14:05:02+00:00",
+                "duration_sec": 2.0,
+                "exit_code": 0,
+                "lock_acquired": True,
+                "rows_written": 1,
+                "command": "scheduled",
+            }
+        )
+
+        svc = JobRunsService(repo)
+        payload = svc.health_payload(target_date="2026-05-31")
+        status_rows = svc.job_status_table()
+
+        assert payload.summary["total_runs"] == 1
+        assert payload.summary["failed"] == 0
+        assert payload.summary["clean"] is True
+        assert [row["job_name"] for row in status_rows] == ["run_after_close_learning"]
+
+
 def test_service_builds_runtime_health_trend_payload():
     with tempfile.TemporaryDirectory() as tmp:
         db_path = Path(tmp) / "jobs.db"
@@ -316,6 +354,48 @@ def test_service_builds_runtime_health_trend_payload():
         assert job["failures"] == 1
         assert job["zero_row_successes"] == 1
         assert job["rows_written"] == 4
+
+
+def test_service_runtime_health_uses_latest_job_state_for_recovered_failures():
+    with tempfile.TemporaryDirectory() as tmp:
+        db_path = Path(tmp) / "jobs.db"
+        repo = JobRunsRepository(db_path)
+        repo.init_table()
+        repo.insert_run(
+            {
+                "job_name": "after_close",
+                "started_at": "2026-05-31T14:00:00+00:00",
+                "finished_at": "2026-05-31T14:00:02+00:00",
+                "duration_sec": 2.0,
+                "exit_code": 1,
+                "lock_acquired": True,
+                "command": "failed",
+            }
+        )
+        repo.insert_run(
+            {
+                "job_name": "after_close",
+                "started_at": "2026-05-31T14:05:00+00:00",
+                "finished_at": "2026-05-31T14:05:03+00:00",
+                "duration_sec": 3.0,
+                "exit_code": 0,
+                "lock_acquired": True,
+                "rows_written": 1,
+                "command": "recovered",
+            }
+        )
+
+        svc = JobRunsService(repo)
+        health = svc.health_payload(target_date="2026-05-31")
+        trend = svc.trend_payload(start_date="2026-05-31", end_date="2026-05-31")
+
+        assert health.summary["total_runs"] == 1
+        assert health.summary["failed"] == 0
+        assert health.summary["clean"] is True
+        assert trend["rows"] == 2
+        assert trend["jobs"][0]["runs"] == 2
+        assert trend["jobs"][0]["failures"] == 0
+        assert trend["clean"] is True
 
 
 def test_service_builds_latest_job_status_table():
@@ -381,7 +461,9 @@ def main():
         test_service_records_artifact_hash,
         test_service_builds_runtime_health_payload,
         test_service_marks_runtime_health_unclean_on_failed_job,
+        test_service_excludes_legacy_retry_jobs_from_runtime_health,
         test_service_builds_runtime_health_trend_payload,
+        test_service_runtime_health_uses_latest_job_state_for_recovered_failures,
         test_service_builds_latest_job_status_table,
     ]
     for test in tests:

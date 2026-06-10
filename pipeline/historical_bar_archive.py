@@ -9,20 +9,23 @@ It does not place orders or alter live authority.
 from __future__ import annotations
 
 import argparse
-from dataclasses import asdict, is_dataclass
 import json
-from pathlib import Path
 import sys
+from dataclasses import asdict, is_dataclass
+from datetime import date, timedelta
+from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from market_time import expected_market_context_date  # noqa: E402
+from symbols_config import APPROVED_SYMBOLS_LIST  # noqa: E402
+
+from repositories.bar_pattern_feature_repo import BarPatternFeatureRepository  # noqa: E402
 from services.historical_bar_archive_service import (  # noqa: E402
     DEFAULT_HISTORICAL_BAR_DIR,
     HistoricalBarArchiveService,
 )
-from symbols_config import APPROVED_SYMBOLS_LIST  # noqa: E402
 
 
 def _parse_symbols(values: list[str] | None, all_symbols: bool) -> list[str]:
@@ -44,6 +47,29 @@ def _result_payload(result) -> dict:
     raise TypeError(f"Unsupported archive result type: {type(result)!r}")
 
 
+def _next_date(value: str) -> str:
+    return (date.fromisoformat(value) + timedelta(days=1)).isoformat()
+
+
+def _existing_pattern_rows(
+    *,
+    db_path: Path,
+    symbol: str,
+    start_date: str,
+    end_date: str,
+) -> int:
+    if not db_path.exists():
+        return 0
+    try:
+        return BarPatternFeatureRepository(db_path).count_existing_1m_rows(
+            symbol=symbol,
+            start_ts=start_date,
+            end_exclusive_ts=_next_date(end_date),
+        )
+    except Exception:
+        return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--date", help="Single date to archive, YYYY-MM-DD")
@@ -52,8 +78,20 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--symbol", action="append", help="Symbol or comma-separated symbols")
     parser.add_argument("--all", action="store_true", help="Archive all approved symbols")
     parser.add_argument("--cache-dir")
+    parser.add_argument("--db-path", default=str(ROOT / "trades.db"))
     parser.add_argument("--horizon-bars", type=int, default=20)
     parser.add_argument("--no-patterns", action="store_true")
+    parser.add_argument(
+        "--skip-existing-patterns",
+        action="store_true",
+        help="Treat existing same-day bar_pattern_features rows as success and avoid Polygon.",
+    )
+    parser.add_argument(
+        "--min-existing-pattern-rows",
+        type=int,
+        default=1,
+        help="Minimum existing 1m rows per symbol/date range required for --skip-existing-patterns.",
+    )
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args(argv)
 
@@ -70,18 +108,38 @@ def main(argv: list[str] | None = None) -> int:
     if not symbols:
         parser.error("Provide --symbol SYMBOL or --all")
 
-    service = HistoricalBarArchiveService()
+    service: HistoricalBarArchiveService | None = None
     cache_dir = Path(args.cache_dir) if args.cache_dir else ROOT / DEFAULT_HISTORICAL_BAR_DIR
+    db_path = Path(args.db_path)
     results = []
     rows_written = 0
     errors = []
+    skipped_existing_patterns = 0
     for symbol in symbols:
+        if args.skip_existing_patterns and not args.dry_run:
+            existing_rows = _existing_pattern_rows(
+                db_path=db_path,
+                symbol=symbol,
+                start_date=start_date,
+                end_date=end_date,
+            )
+            if existing_rows >= args.min_existing_pattern_rows:
+                skipped_existing_patterns += 1
+                print(
+                    "archive_skip "
+                    f"symbol={symbol} start={start_date} end={end_date} "
+                    f"reason=existing_pattern_rows rows={existing_rows}"
+                )
+                continue
         try:
+            if service is None:
+                service = HistoricalBarArchiveService()
             result = service.archive_polygon_1m_bars(
                 symbol=symbol,
                 start_date=start_date,
                 end_date=end_date,
                 cache_dir=cache_dir,
+                db_path=db_path,
                 build_patterns=not args.no_patterns,
                 horizon_bars=args.horizon_bars,
                 dry_run=args.dry_run,
@@ -109,12 +167,13 @@ def main(argv: list[str] | None = None) -> int:
         "end_date": end_date,
         "symbols": len(symbols),
         "successful_symbols": sum(1 for row in results if not row.get("errors")),
+        "skipped_existing_pattern_symbols": skipped_existing_patterns,
         "rows_written": rows_written,
         "errors": errors,
     }
     print(json.dumps(summary, sort_keys=True))
     print(f"rows_written: {rows_written}")
-    return 0 if results and not errors else 1
+    return 0 if (results or skipped_existing_patterns) and not errors else 1
 
 
 if __name__ == "__main__":

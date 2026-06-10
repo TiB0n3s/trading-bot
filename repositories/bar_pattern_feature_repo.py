@@ -33,6 +33,29 @@ class BarPatternFeatureRepository:
             for row in con.execute("PRAGMA table_info(bar_pattern_features)").fetchall()
         }
 
+    def count_existing_1m_rows(
+        self,
+        *,
+        symbol: str,
+        start_ts: str,
+        end_exclusive_ts: str,
+    ) -> int:
+        with get_connection(self.db_path) as con:
+            if not self._table_exists(con):
+                return 0
+            row = con.execute(
+                """
+                SELECT COUNT(*) AS rows
+                FROM bar_pattern_features
+                WHERE symbol = ?
+                  AND timeframe = '1m'
+                  AND bar_timestamp >= ?
+                  AND bar_timestamp < ?
+                """,
+                (symbol, start_ts, end_exclusive_ts),
+            ).fetchone()
+            return int(row["rows"] or 0) if row else 0
+
     def init_table(self) -> None:
         with get_connection(self.db_path) as con:
             con.execute(
@@ -651,7 +674,7 @@ class BarPatternFeatureRepository:
                     COUNT(DISTINCT symbol) AS symbols,
                     MIN(bar_timestamp) AS first_bar_timestamp,
                     MAX(bar_timestamp) AS latest_bar_timestamp,
-                    MAX({('created_at' if 'created_at' in columns else 'bar_timestamp')}) AS latest_created_at
+                    MAX({("created_at" if "created_at" in columns else "bar_timestamp")}) AS latest_created_at
                 FROM bar_pattern_features
                 WHERE {where}
                 """,
@@ -694,18 +717,18 @@ class BarPatternFeatureRepository:
                             symbol,
                             bar_timestamp,
                             timeframe,
-                            {select_col('bar_source', 'bar_source')},
-                            {select_col('bar_feed', 'bar_feed')},
+                            {select_col("bar_source", "bar_source")},
+                            {select_col("bar_feed", "bar_feed")},
                             feature_version,
                             runtime_effect,
-                            {select_col('created_at', 'created_at')},
-                            {select_col('close', 'close')},
-                            {select_col('volume', 'volume')},
-                            {select_col('vwap', 'vwap')},
-                            {select_col('vpin_toxicity_20', 'vpin_toxicity_20')},
-                            {select_col('cumulative_volume_delta', 'cumulative_volume_delta')},
-                            {select_col('trend_scan_label', 'trend_scan_label')},
-                            {select_col('triple_barrier_label', 'triple_barrier_label')},
+                            {select_col("created_at", "created_at")},
+                            {select_col("close", "close")},
+                            {select_col("volume", "volume")},
+                            {select_col("vwap", "vwap")},
+                            {select_col("vpin_toxicity_20", "vpin_toxicity_20")},
+                            {select_col("cumulative_volume_delta", "cumulative_volume_delta")},
+                            {select_col("trend_scan_label", "trend_scan_label")},
+                            {select_col("triple_barrier_label", "triple_barrier_label")},
                             ROW_NUMBER() OVER (
                                 PARTITION BY symbol
                                 ORDER BY bar_timestamp DESC, id DESC
@@ -771,12 +794,12 @@ class BarPatternFeatureRepository:
                     symbol,
                     bar_timestamp,
                     timeframe,
-                    {optional['open']} AS open,
-                    {optional['high']} AS high,
-                    {optional['low']} AS low,
-                    {optional['close']} AS close,
-                    {optional['volume']} AS volume,
-                    {optional['vwap']} AS vwap,
+                    {optional["open"]} AS open,
+                    {optional["high"]} AS high,
+                    {optional["low"]} AS low,
+                    {optional["close"]} AS close,
+                    {optional["volume"]} AS volume,
+                    {optional["vwap"]} AS vwap,
                     feature_version,
                     runtime_effect
                 FROM bar_pattern_features

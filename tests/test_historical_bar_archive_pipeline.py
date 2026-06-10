@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import sqlite3
 import sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -29,6 +30,11 @@ class FakeArchiveService:
                 "errors": [],
             }
         )
+
+
+class FailingArchiveService:
+    def __init__(self):
+        raise AssertionError("existing pattern rows should skip archive service construction")
 
 
 def test_historical_archive_pipeline_loops_symbols_and_reports_rows(monkeypatch=None):
@@ -78,9 +84,57 @@ def test_historical_archive_pipeline_uses_custom_cache_dir():
     assert str(FakeArchiveService.calls[0]["cache_dir"]) == "/tmp/polygon-bars"
 
 
+def test_historical_archive_pipeline_skips_existing_pattern_rows(tmp_path: Path):
+    db_path = tmp_path / "trades.db"
+    with sqlite3.connect(db_path) as con:
+        con.execute(
+            """
+            CREATE TABLE bar_pattern_features (
+                symbol TEXT NOT NULL,
+                bar_timestamp TEXT NOT NULL,
+                timeframe TEXT NOT NULL
+            )
+            """
+        )
+        con.executemany(
+            """
+            INSERT INTO bar_pattern_features(symbol, bar_timestamp, timeframe)
+            VALUES ('AAPL', ?, '1m')
+            """,
+            [(f"2026-06-03T09:{minute:02d}:00-04:00",) for minute in range(30)]
+            + [(f"2026-06-03T10:{minute:02d}:00-04:00",) for minute in range(30)],
+        )
+
+    original_service = archive_pipeline.HistoricalBarArchiveService
+    try:
+        archive_pipeline.HistoricalBarArchiveService = FailingArchiveService
+        code = archive_pipeline.main(
+            [
+                "--date",
+                "2026-06-03",
+                "--symbol",
+                "AAPL",
+                "--db-path",
+                str(db_path),
+                "--skip-existing-patterns",
+                "--min-existing-pattern-rows",
+                "50",
+            ]
+        )
+    finally:
+        archive_pipeline.HistoricalBarArchiveService = original_service
+
+    assert code == 0
+
+
 if __name__ == "__main__":
     test_historical_archive_pipeline_loops_symbols_and_reports_rows()
     test_historical_archive_pipeline_uses_custom_cache_dir()
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as tmp:
+        test_historical_archive_pipeline_skips_existing_pattern_rows(Path(tmp))
     print("[OK] test_historical_archive_pipeline_loops_symbols_and_reports_rows")
     print("[OK] test_historical_archive_pipeline_uses_custom_cache_dir")
-    print("\nAll 2 historical archive pipeline tests passed.")
+    print("[OK] test_historical_archive_pipeline_skips_existing_pattern_rows")
+    print("\nAll 3 historical archive pipeline tests passed.")

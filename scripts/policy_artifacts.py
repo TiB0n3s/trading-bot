@@ -347,21 +347,23 @@ def policy_artifact_status(base_dir: Path | str) -> dict[str, Any]:
 def main() -> int:
     import argparse
 
+    default_base_dir = str(Path(__file__).resolve().parents[1])
+
     parser = argparse.ArgumentParser()
     sub = parser.add_subparsers(dest="command", required=True)
 
     status_cmd = sub.add_parser("status")
-    status_cmd.add_argument("--base-dir", default=str(Path(__file__).resolve().parent))
+    status_cmd.add_argument("--base-dir", default=default_base_dir)
 
     reg = sub.add_parser("register")
-    reg.add_argument("--base-dir", default=str(Path(__file__).resolve().parent))
+    reg.add_argument("--base-dir", default=default_base_dir)
     reg.add_argument("--label", default="manual")
     reg.add_argument("--source", default="policy_artifacts.py")
     reg.add_argument("--runtime-effect", default="live_policy_context")
     reg.add_argument("--known-good", action="store_true")
 
     rb = sub.add_parser("rollback")
-    rb.add_argument("--base-dir", default=str(Path(__file__).resolve().parent))
+    rb.add_argument("--base-dir", default=default_base_dir)
     rb.add_argument("--artifact-set-id")
     rb.add_argument("--dry-run", action="store_true")
 

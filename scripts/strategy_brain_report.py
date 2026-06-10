@@ -26,7 +26,7 @@ import argparse
 import json
 from pathlib import Path
 
-BASE_DIR = Path(__file__).resolve().parent
+BASE_DIR = Path(__file__).resolve().parents[1]
 
 FILES = {
     "strategy_memory": BASE_DIR / "strategy_memory.json",

@@ -116,6 +116,7 @@ _LAZY_HANDLER_REFS = {
     "run_model_validation_governance_report": "trading_bot.ops_checks.commands.model_validation_governance_checks:run_model_validation_governance_report",
     "run_monday_readiness_check": "trading_bot.ops_checks.commands.monday_readiness_checks:run_monday_readiness_check",
     "run_observability_health": "trading_bot.ops_checks.commands.observability_health_checks:run_observability_health",
+    "run_operational_readiness": "trading_bot.ops_checks.commands.operational_readiness_checks:run_operational_readiness",
     "run_operator_intelligence_dashboard": "trading_bot.ops_checks.commands.operator_intelligence_dashboard_checks:run_operator_intelligence_dashboard",
     "run_order_health": "trading_bot.ops_checks.commands.order_checks:run_order_health",
     "run_packaged_entrypoint_validation_report": "trading_bot.ops_checks.commands.packaged_entrypoint_validation_checks:run_packaged_entrypoint_validation_report",
@@ -618,6 +619,19 @@ def runtime_health_trend(start_date, end_date):
 
 def observability_health(target_date):
     return run_observability_health(target_date, base_dir=BASE_DIR)
+
+
+def run_operational_readiness(target_date):
+    return _load_handler(
+        "trading_bot.ops_checks.commands.operational_readiness_checks:run_operational_readiness"
+    )(
+        target_date,
+        base_dir=BASE_DIR,
+        env_file=ENV_FILE,
+        max_backup_age_hours=_float_option("--max-backup-age-hours", 30.0),
+        max_wal_bytes=_int_option("--max-wal-bytes", 512 * 1024 * 1024),
+        require_job_ledger="--no-require-job-ledger" not in sys.argv,
+    )
 
 
 def context_freshness(target_date):

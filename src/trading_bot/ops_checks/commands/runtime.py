@@ -21,6 +21,7 @@ COMMAND_SPECS: dict[str, OpsCommandSpec] = {
         "runtime-health-trend", "runtime_health_trend", "target_date", "end_date"
     ),
     "observability-health": spec("observability-health"),
+    "operational-readiness": spec("operational-readiness", "run_operational_readiness"),
     "log-ledger-consistency": noarg("log-ledger-consistency"),
     "production-evidence": spec("production-evidence"),
     "database-backups": noarg("database-backups"),

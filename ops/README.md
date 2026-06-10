@@ -110,9 +110,12 @@ implemented. Verified SQLite backup manifests are also implemented through
 `pipeline/database_backup.py` and `ops_check.py database-backups`. Lightweight
 local observability is available through `ops_check.py observability-health`.
 Local secrets hygiene is available through `ops_check.py secrets-hygiene`.
-External observability/alerting, external secrets-manager evaluation, load
-testing, incident management, consolidated model validation governance, and a
-feature-flag inventory remain open roadmap items.
+`ops_check.py operational-readiness YYYY-MM-DD` now aggregates the deployment
+entrypoint, package import, config, secret-file permission, backup freshness,
+runtime job-ledger, SQLite WAL, and cron/systemd reference checks into one
+pre-market/post-deploy readiness gate. External observability/alerting and
+external secrets-manager adoption remain optional scaling items rather than
+current runtime dependencies.
 
 ## Observability
 
@@ -127,6 +130,43 @@ python3 ops_check.py database-backups
 `observability-health` consolidates the job-run ledger, verified database backup
 freshness, service watchdog warnings, and ML staleness-guard state. It is
 diagnostic-only and does not post external alerts.
+
+## Operational Readiness
+
+Use the aggregate readiness gate before market open, after deployment, or after
+large refactors:
+
+```bash
+python3 ops_check.py operational-readiness "$(date +%F)"
+```
+
+The report fails only on critical blockers: missing entrypoints, broken packaged
+imports, config factory failures, unsafe local env-file permissions, missing or
+stale verified DB backups, dirty runtime job ledger, missing `trades.db`, or
+stale cron/systemd references. Large SQLite WAL files and missing local env
+files are warnings unless they indicate an unsafe production configuration.
+
+Useful remediation commands:
+
+```bash
+# Fix stale fill-stream systemd references after root-script cleanup.
+sudo sed -i \
+  's#/home/tradingbot/trading-bot/fill_stream.py#/home/tradingbot/trading-bot/scripts/fill_stream.py#' \
+  /etc/systemd/system/fill-stream.service
+sudo systemctl daemon-reload
+sudo systemctl restart fill-stream
+
+# Create a fresh verified DB backup manifest off-hours.
+cd ~/trading-bot
+./venv/bin/python pipeline/database_backup.py
+./venv/bin/python ops_check.py database-backups
+```
+
+For non-strict diagnostics while a job ledger is still empty:
+
+```bash
+python3 ops_check.py operational-readiness "$(date +%F)" --no-require-job-ledger
+```
 
 ## Secrets Hygiene
 

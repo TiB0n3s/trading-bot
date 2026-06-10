@@ -56,6 +56,7 @@ audit:
 	$(PYTHON) ops_check.py packaged-entrypoints
 	$(PYTHON) ops_check.py database-backups
 	$(PYTHON) ops_check.py observability-health $(DATE)
+	$(PYTHON) ops_check.py operational-readiness $(DATE)
 	$(PYTHON) ops/deployment_reference_audit.py
 
 test:

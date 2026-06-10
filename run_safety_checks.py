@@ -38,6 +38,7 @@ SAFETY_TESTS = [
     "tests/test_secrets_hygiene_checks.py",
     "tests/test_database_backup_service.py",
     "tests/test_observability_health_checks.py",
+    "tests/test_operational_readiness_service.py",
     "tests/test_external_readiness_services.py",
     "tests/test_remaining_assessment_services.py",
     "tests/test_local_load_probe_service.py",

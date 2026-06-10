@@ -195,6 +195,31 @@ class OpsCheckIntelligenceQueriesMixin:
         where_sql: str,
         params: list[Any],
     ) -> list[sqlite3.Row]:
+        if not self.table_exists("historical_signal_outcomes"):
+            return self._fetchall(
+                f"""
+                SELECT
+                  {group_expr} AS bucket,
+                  COUNT(DISTINCT t.symbol || ':' || t.market_date) AS context_rows,
+                  0 AS signal_rows,
+                  0 AS matched_signals,
+                  0 AS winners,
+                  0 AS losers,
+                  NULL AS avg_signal_pnl,
+                  NULL AS total_signal_pnl,
+                  NULL AS avg_signal_pnl_pct,
+                  ROUND(AVG(t.trend_1d_pct), 2) AS avg_1d,
+                  ROUND(AVG(t.trend_5d_pct), 2) AS avg_5d,
+                  ROUND(AVG(t.trend_10d_pct), 2) AS avg_10d,
+                  ROUND(AVG(t.relative_strength_score), 1) AS avg_rs,
+                  ROUND(AVG(t.distance_from_sma_20_pct), 2) AS avg_dist20
+                FROM historical_trend_context t
+                WHERE {where_sql}
+                GROUP BY {group_expr}
+                ORDER BY context_rows DESC
+                """,
+                tuple(params),
+            )
         return self._fetchall(
             f"""
             SELECT

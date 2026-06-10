@@ -51,8 +51,7 @@ class ExitSnapshotRepository:
                 """
             )
             existing_cols = {
-                row["name"]
-                for row in con.execute("PRAGMA table_info(exit_snapshots)").fetchall()
+                row["name"] for row in con.execute("PRAGMA table_info(exit_snapshots)").fetchall()
             }
             addable = {
                 "decision_snapshot_id": "INTEGER",
@@ -104,6 +103,20 @@ class ExitSnapshotRepository:
                 [row[col] for col in columns],
             )
             return int(cur.lastrowid)
+
+    @staticmethod
+    def _table_exists(con: Any, table: str) -> bool:
+        row = con.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?",
+            (table,),
+        ).fetchone()
+        return row is not None
+
+    @classmethod
+    def _table_columns(cls, con: Any, table: str) -> set[str]:
+        if not cls._table_exists(con, table):
+            return set()
+        return {str(row["name"]) for row in con.execute(f"PRAGMA table_info({table})")}
 
     def approved_matched_exit_rows_missing_snapshots(
         self,
@@ -193,6 +206,111 @@ class ExitSnapshotRepository:
                 (symbol, limit),
             ).fetchall()
 
+    def approved_trade_rows_missing_snapshots(
+        self,
+        *,
+        start_date: str,
+        end_date: str | None = None,
+        limit: int | None = None,
+    ) -> list[dict[str, Any]]:
+        """Return approved BUY trade rows with matched exits but no exit snapshot.
+
+        This covers older/execution-bridge rows that were written to ``trades``
+        without a corresponding canonical decision snapshot.
+        """
+        self.init_table()
+        end_date = end_date or start_date
+        with get_connection(self.db_path) as con:
+            trade_cols = self._table_columns(con, "trades")
+            matched_cols = self._table_columns(con, "matched_trades")
+            exit_cols = self._table_columns(con, "exit_snapshots")
+            decision_cols = self._table_columns(con, "decision_snapshots")
+            required_trade = {
+                "id",
+                "timestamp",
+                "symbol",
+                "action",
+                "approved",
+                "order_id",
+            }
+            required_matched = {
+                "id",
+                "entry_order_id",
+                "exit_timestamp",
+            }
+            if not required_trade <= trade_cols or not required_matched <= matched_cols:
+                return []
+            if not {"entry_trade_id", "matched_trade_id"} <= exit_cols:
+                return []
+
+            decision_join = ""
+            decision_absent = "1 = 1"
+            if {"id", "trade_id"} <= decision_cols:
+                decision_join = "LEFT JOIN decision_snapshots ds ON ds.trade_id = t.id"
+                decision_absent = "ds.id IS NULL"
+
+            limit_sql = "LIMIT ?" if limit is not None else ""
+            params: list[Any] = [start_date, end_date]
+            if limit is not None:
+                params.append(max(0, int(limit)))
+
+            def matched_col(name: str, alias: str = "mt") -> str:
+                return f"{alias}.{name}" if name in matched_cols else "NULL"
+
+            rows = con.execute(
+                f"""
+                WITH latest_match AS (
+                    SELECT entry_order_id, MAX(id) AS matched_trade_id
+                    FROM matched_trades
+                    WHERE entry_order_id IS NOT NULL
+                    GROUP BY entry_order_id
+                )
+                SELECT
+                    NULL AS decision_snapshot_id,
+                    t.id AS trade_id,
+                    t.id AS entry_trade_id,
+                    t.timestamp AS decision_time,
+                    t.symbol AS symbol,
+                    t.order_id AS trade_order_id,
+                    {("t.qty" if "qty" in trade_cols else "NULL")} AS trade_qty,
+                    {("t.fill_price" if "fill_price" in trade_cols else "NULL")} AS trade_fill_price,
+                    mt.id AS matched_trade_id,
+                    {matched_col("exit_order_id")} AS matched_exit_order_id,
+                    mt.exit_timestamp AS exit_timestamp,
+                    {matched_col("exit_reason")} AS exit_reason,
+                    {matched_col("holding_minutes")} AS holding_minutes,
+                    {matched_col("qty")} AS exit_qty,
+                    {matched_col("entry_price")} AS matched_entry_price,
+                    {matched_col("exit_price")} AS exit_price,
+                    {matched_col("realized_pnl")} AS realized_pnl,
+                    {matched_col("realized_pnl_pct")} AS realized_return_pct,
+                    {matched_col("mfe_pct")} AS mfe_pct,
+                    {matched_col("capture_ratio")} AS capture_ratio,
+                    NULL AS canonical_intelligence_json,
+                    NULL AS entry_canonical_intelligence_version,
+                    NULL AS entry_canonical_intelligence_hash
+                FROM trades t
+                JOIN latest_match lm
+                  ON lm.entry_order_id = t.order_id
+                JOIN matched_trades mt
+                  ON mt.id = lm.matched_trade_id
+                {decision_join}
+                LEFT JOIN exit_snapshots es
+                  ON es.entry_trade_id = t.id
+                  OR es.matched_trade_id = mt.id
+                WHERE substr(t.timestamp, 1, 10) BETWEEN ? AND ?
+                  AND LOWER(COALESCE(t.action, '')) = 'buy'
+                  AND COALESCE(t.approved, 0) = 1
+                  AND mt.exit_timestamp IS NOT NULL
+                  AND es.id IS NULL
+                  AND {decision_absent}
+                ORDER BY t.timestamp ASC, t.id ASC
+                {limit_sql}
+                """,
+                params,
+            ).fetchall()
+            return [dict(row) for row in rows]
+
     def exit_intelligence_summary(
         self,
         *,
@@ -273,8 +391,6 @@ class ExitSnapshotRepository:
             "summary": dict(summary) if summary else {},
             "trigger_rows": [dict(row) for row in trigger_rows],
             "symbol_rows": [dict(row) for row in symbol_rows],
-            "matched_exit_total": int(matched_exit_total["rows"] or 0)
-            if matched_exit_total
-            else 0,
+            "matched_exit_total": int(matched_exit_total["rows"] or 0) if matched_exit_total else 0,
             "repairable_missing_exit_snapshots": len(repairable_missing),
         }

@@ -12,9 +12,9 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from repositories.exit_snapshot_repo import ExitSnapshotRepository
-from services.exit_snapshot_backfill_service import ExitSnapshotBackfillService
-from services.exit_snapshot_service import ExitSnapshotService
+from repositories.exit_snapshot_repo import ExitSnapshotRepository  # noqa: E402
+from services.exit_snapshot_backfill_service import ExitSnapshotBackfillService  # noqa: E402
+from services.exit_snapshot_service import ExitSnapshotService  # noqa: E402
 
 
 def _db_path() -> Path:
@@ -159,6 +159,111 @@ def test_backfill_approved_matched_exits_is_idempotent():
     assert rows[0]["entry_canonical_intelligence_hash"] == "a" * 64
 
 
+def test_backfill_repairs_trade_backed_exit_without_decision_snapshot():
+    db_path = _db_path()
+    with sqlite3.connect(db_path) as con:
+        con.execute(
+            """
+            CREATE TABLE decision_snapshots (
+                id INTEGER PRIMARY KEY,
+                decision_time TEXT,
+                trade_id INTEGER,
+                symbol TEXT,
+                action TEXT,
+                approved INTEGER
+            )
+            """
+        )
+        con.execute(
+            """
+            CREATE TABLE trades (
+                id INTEGER PRIMARY KEY,
+                timestamp TEXT,
+                symbol TEXT,
+                action TEXT,
+                approved INTEGER,
+                order_id TEXT,
+                qty REAL,
+                fill_price REAL
+            )
+            """
+        )
+        con.execute(
+            """
+            CREATE TABLE matched_trades (
+                id INTEGER PRIMARY KEY,
+                symbol TEXT,
+                entry_order_id TEXT,
+                exit_order_id TEXT,
+                entry_timestamp TEXT,
+                exit_timestamp TEXT,
+                holding_minutes REAL,
+                qty REAL,
+                entry_price REAL,
+                exit_price REAL,
+                realized_pnl REAL,
+                realized_pnl_pct REAL,
+                mfe_pct REAL,
+                capture_ratio REAL,
+                exit_reason TEXT
+            )
+            """
+        )
+        con.execute(
+            """
+            INSERT INTO trades (
+                id, timestamp, symbol, action, approved, order_id, qty, fill_price
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (10, "2026-06-09 09:40:00", "JPM", "buy", 1, "entry-10", 1, 315.0),
+        )
+        con.execute(
+            """
+            INSERT INTO matched_trades (
+                id, symbol, entry_order_id, exit_order_id, entry_timestamp,
+                exit_timestamp, holding_minutes, qty, entry_price, exit_price,
+                realized_pnl, realized_pnl_pct, mfe_pct, capture_ratio, exit_reason
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                20,
+                "JPM",
+                "entry-10",
+                "exit-10",
+                "2026-06-09 09:40:00",
+                "2026-06-09 09:42:00",
+                2,
+                1,
+                315.0,
+                315.5,
+                0.5,
+                0.16,
+                0.22,
+                0.73,
+                "peak_lock_floor",
+            ),
+        )
+
+    repo = ExitSnapshotRepository(db_path)
+    service = ExitSnapshotBackfillService(repo, ExitSnapshotService(repo))
+
+    first = service.backfill_approved_matched_exits(start_date="2026-06-09")
+    second = service.backfill_approved_matched_exits(start_date="2026-06-09")
+    rows = _rows(db_path)
+
+    assert first.scanned == 1
+    assert first.inserted == 1
+    assert second.scanned == 0
+    assert second.inserted == 0
+    assert len(rows) == 1
+    assert rows[0]["decision_snapshot_id"] is None
+    assert rows[0]["entry_trade_id"] == 10
+    assert rows[0]["matched_trade_id"] == 20
+    assert rows[0]["symbol"] == "JPM"
+    assert rows[0]["realized_return_pct"] == 0.16
+
+
 if __name__ == "__main__":
     test_backfill_approved_matched_exits_is_idempotent()
+    test_backfill_repairs_trade_backed_exit_without_decision_snapshot()
     print("[OK] test_backfill_approved_matched_exits_is_idempotent")

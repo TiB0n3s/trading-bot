@@ -9,17 +9,33 @@ on manual backfill commands after normal after-close jobs.
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
+from typing import Any
 
 BASE_DIR = Path(__file__).resolve().parent.parent
-if str(BASE_DIR) not in sys.path:
-    sys.path.insert(0, str(BASE_DIR))
+for path in (
+    BASE_DIR / "src" / "trading_bot",
+    BASE_DIR / "scripts",
+    BASE_DIR,
+):
+    path_str = str(path)
+    if path_str in sys.path:
+        sys.path.remove(path_str)
+    sys.path.insert(0, path_str)
 
 from repositories.candidate_universe_repo import CandidateUniverseRepository  # noqa: E402
+from repositories.decision_snapshot_repo import DecisionSnapshotRepository  # noqa: E402
 from repositories.exit_snapshot_repo import ExitSnapshotRepository  # noqa: E402
+from services.canonical_intelligence_service import (  # noqa: E402
+    CANONICAL_INTELLIGENCE_VERSION,
+    _decision_policy_outcome,
+    stable_canonical_hash,
+    stable_canonical_json,
+)
 from services.exit_snapshot_backfill_service import ExitSnapshotBackfillService  # noqa: E402
 from services.exit_snapshot_service import ExitSnapshotService  # noqa: E402
 from services.intelligence.candidates.outcome_backfill import (  # noqa: E402
@@ -34,12 +50,70 @@ class LearningBackfillRepairResult:
     candidate_updated: int
     candidate_errors: int
     candidate_coverage_rate: float | None
+    decision_policy_repaired: int
     exit_scanned: int
     exit_inserted: int
 
     @property
     def ok(self) -> bool:
         return self.candidate_errors == 0
+
+
+def _load_json(raw: Any) -> dict[str, Any]:
+    if isinstance(raw, dict):
+        return raw
+    if not raw:
+        return {}
+    try:
+        loaded = json.loads(str(raw))
+        return loaded if isinstance(loaded, dict) else {}
+    except Exception:
+        return {}
+
+
+def repair_decision_policy_learning_effects(
+    db_path: Path,
+    target_date: str,
+    *,
+    dry_run: bool = False,
+) -> int:
+    repository = DecisionSnapshotRepository(db_path)
+    rows = repository.list_canonical_repair_rows(target_date)
+
+    updates: list[tuple[str, str, str, int]] = []
+    for row in rows:
+        canonical = _load_json(row["canonical_intelligence_json"])
+        account_state = _load_json(row["account_state_json"])
+        advisory = (
+            canonical.get("advisory_authority_state", {})
+            .get("decision_policy_outcome", {})
+            .get("advisory_decision")
+        )
+        if str(advisory or "").strip():
+            continue
+        outcome = _decision_policy_outcome(account_state)
+        if not str(outcome.get("advisory_decision") or "").strip():
+            continue
+        advisory_state = canonical.setdefault("advisory_authority_state", {})
+        if not isinstance(advisory_state, dict):
+            advisory_state = {}
+            canonical["advisory_authority_state"] = advisory_state
+        advisory_state["decision_policy_outcome"] = outcome
+        canonical["version"] = canonical.get("version") or CANONICAL_INTELLIGENCE_VERSION
+        canonical_json = stable_canonical_json(canonical)
+        canonical_hash = stable_canonical_hash(canonical)
+        updates.append(
+            (
+                CANONICAL_INTELLIGENCE_VERSION,
+                canonical_hash,
+                canonical_json,
+                int(row["id"]),
+            )
+        )
+
+    if updates and not dry_run:
+        repository.update_canonical_intelligence_many(updates)
+    return len(updates)
 
 
 def run_learning_backfill_repair(
@@ -89,6 +163,11 @@ def run_learning_backfill_repair(
         start_date=target_date,
         dry_run=dry_run,
     )
+    decision_policy_repaired = repair_decision_policy_learning_effects(
+        db_path,
+        target_date,
+        dry_run=dry_run,
+    )
 
     return LearningBackfillRepairResult(
         target_date=target_date,
@@ -96,6 +175,7 @@ def run_learning_backfill_repair(
         candidate_updated=candidate_updated,
         candidate_errors=candidate_errors,
         candidate_coverage_rate=candidate_coverage_rate,
+        decision_policy_repaired=decision_policy_repaired,
         exit_scanned=exit_result.scanned,
         exit_inserted=exit_result.inserted,
     )
@@ -135,6 +215,7 @@ def main() -> int:
     print(f"candidate_updated           : {result.candidate_updated}")
     print(f"candidate_errors            : {result.candidate_errors}")
     print(f"candidate_coverage_rate     : {_pct(result.candidate_coverage_rate)}")
+    print(f"decision_policy_repaired    : {result.decision_policy_repaired}")
     print(f"exit_snapshot_scanned       : {result.exit_scanned}")
     print(f"exit_snapshot_inserted      : {result.exit_inserted}")
 

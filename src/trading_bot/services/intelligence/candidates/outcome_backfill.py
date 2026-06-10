@@ -259,7 +259,43 @@ class CandidateOutcomeBackfillService:
         self.repository = repository or CandidateUniverseRepository()
         self.market_data = market_data
 
+    def _fetch_local_feature_snapshot_bars(
+        self,
+        symbol: str,
+        target_date: str,
+    ) -> list[dict[str, Any]]:
+        db_path = getattr(self.repository, "db_path", None)
+        if not db_path:
+            return []
+        try:
+            fetch_local = getattr(self.repository, "feature_snapshot_price_bars", None)
+            if not callable(fetch_local):
+                return []
+            rows = fetch_local(symbol=symbol, target_date=target_date)
+        except Exception:
+            return []
+
+        bars: list[dict[str, Any]] = []
+        for row in rows:
+            price = _float(row["last_price"])
+            if price is None or price <= 0:
+                continue
+            bars.append(
+                {
+                    "timestamp": row["timestamp"],
+                    "open": price,
+                    "high": price,
+                    "low": price,
+                    "close": price,
+                    "source": "feature_snapshots_last_price",
+                }
+            )
+        return bars
+
     def _fetch_day_bars(self, symbol: str, target_date: str) -> list[dict[str, Any]]:
+        local_bars = self._fetch_local_feature_snapshot_bars(symbol, target_date)
+        if local_bars:
+            return local_bars
         return self.market_data.fetch_day_bars(
             symbol=symbol,
             start_dt=_market_open_for_date(target_date),
@@ -312,6 +348,10 @@ class CandidateOutcomeBackfillService:
                 if row_symbol not in bars_by_symbol:
                     bars_by_symbol[row_symbol] = self._fetch_day_bars(row_symbol, target_date)
                 outcome = compute_candidate_outcome(row, bars_by_symbol[row_symbol])
+                if bars_by_symbol[row_symbol] and bars_by_symbol[row_symbol][0].get("source"):
+                    outcome["candidate_outcome_price_path_source"] = bars_by_symbol[row_symbol][
+                        0
+                    ].get("source")
                 merged = dict(payload)
                 merged.update(outcome)
                 if not dry_run:
@@ -329,7 +369,18 @@ class CandidateOutcomeBackfillService:
                 elif status == "no_bars":
                     counts["no_bars"] += 1
                 counts["updated"] += 1
-            except Exception:
+            except Exception as exc:
+                if not dry_run:
+                    merged = dict(payload)
+                    merged.update(
+                        {
+                            "candidate_outcome_version": CANDIDATE_OUTCOME_BACKFILL_VERSION,
+                            "candidate_outcome_source": "candidate_outcome_backfill",
+                            "label_status": "error",
+                            "partial_reason": f"{type(exc).__name__}: {exc}",
+                        }
+                    )
+                    updates.append((int(row["id"]), merged))
                 counts["error"] += 1
 
         if updates:

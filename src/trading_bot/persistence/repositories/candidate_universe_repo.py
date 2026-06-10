@@ -171,3 +171,33 @@ class CandidateUniverseRepository:
                 """,
                 rows,
             )
+
+    def feature_snapshot_price_bars(
+        self,
+        *,
+        symbol: str,
+        target_date: str,
+    ) -> list[dict[str, Any]]:
+        with get_connection(self.db_path) as con:
+            table = con.execute(
+                """
+                SELECT 1
+                FROM sqlite_master
+                WHERE type = 'table' AND name = 'feature_snapshots'
+                """
+            ).fetchone()
+            if not table:
+                return []
+            rows = con.execute(
+                """
+                SELECT timestamp, last_price
+                FROM feature_snapshots
+                WHERE UPPER(symbol) = ?
+                  AND substr(timestamp, 1, 10) = ?
+                  AND last_price IS NOT NULL
+                  AND last_price > 0
+                ORDER BY timestamp ASC
+                """,
+                (str(symbol).upper(), target_date),
+            ).fetchall()
+        return [dict(row) for row in rows]

@@ -115,3 +115,37 @@ class DecisionSnapshotRepository:
             except Exception:
                 return []
         return [dict(row) for row in rows]
+
+    def list_canonical_repair_rows(self, target_date: str) -> list[dict[str, Any]]:
+        if not Path(self.db_path).exists() or not self.table_exists("decision_snapshots"):
+            return []
+        with get_connection(self.db_path) as con:
+            rows = con.execute(
+                """
+                SELECT id, canonical_intelligence_json, account_state_json
+                FROM decision_snapshots
+                WHERE substr(decision_time, 1, 10) = ?
+                ORDER BY decision_time ASC, id ASC
+                """,
+                (target_date,),
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def update_canonical_intelligence_many(
+        self,
+        updates: list[tuple[str, str, str, int]],
+    ) -> None:
+        if not updates:
+            return
+        self.ensure_table()
+        with get_connection(self.db_path) as con:
+            con.executemany(
+                """
+                UPDATE decision_snapshots
+                SET canonical_intelligence_version = ?,
+                    canonical_intelligence_hash = ?,
+                    canonical_intelligence_json = ?
+                WHERE id = ?
+                """,
+                updates,
+            )

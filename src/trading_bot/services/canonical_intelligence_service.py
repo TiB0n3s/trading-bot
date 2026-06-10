@@ -139,6 +139,76 @@ def _bucket_execution_spread(spread_pct: Any, net_cost_pct: Any) -> str:
     return "unknown"
 
 
+def _decision_policy_outcome(account_state: dict[str, Any]) -> dict[str, Any]:
+    explicit = account_state.get("decision_policy_outcome")
+    if isinstance(explicit, dict) and explicit:
+        return explicit
+
+    policy = account_state.get("decision_policy")
+    if isinstance(policy, dict) and policy:
+        decision = str(policy.get("decision") or "").strip().lower()
+        if decision:
+            return {
+                "advisory_decision": decision,
+                "authority_mode": (account_state.get("decision_policy_authority") or {}).get(
+                    "authority_mode"
+                ),
+                "enforced": False,
+                "effect_on_execution": "none",
+                "effect_on_size": "none",
+                "reason": policy.get("reason"),
+                "source": "decision_policy",
+            }
+
+    layered = account_state.get("layered_model_decision")
+    if not isinstance(layered, dict) or not layered:
+        return {}
+
+    level_2 = layered.get("level_2_meta_label") or {}
+    level_3 = layered.get("level_3_sizing") or {}
+    instruction = (
+        str(layered.get("final_instruction") or level_2.get("instruction") or "").strip().lower()
+    )
+    effect = str(level_2.get("effect") or "").strip().lower()
+    reason = level_2.get("reason") or layered.get("reasons")
+
+    advisory = ""
+    effect_on_execution = "none"
+    effect_on_size = "none"
+    if instruction in {"veto", "block", "reject"} or effect.endswith("_veto"):
+        advisory = "block"
+        effect_on_execution = "block"
+    else:
+        try:
+            final_size = float(layered.get("final_size_pct"))
+        except Exception:
+            final_size = None
+        try:
+            requested_size = float(level_3.get("requested_size_pct"))
+        except Exception:
+            requested_size = None
+        if final_size is not None and requested_size is not None and final_size < requested_size:
+            advisory = "size_down"
+            effect_on_size = "size_down"
+        elif instruction in {"allow", "approve", "route", "trade"}:
+            advisory = "allow"
+        elif layered.get("status") == "capture_failed":
+            return {}
+        else:
+            advisory = "allow"
+
+    return {
+        "advisory_decision": advisory,
+        "authority_mode": "layered_model_policy",
+        "enforced": False,
+        "effect_on_execution": effect_on_execution,
+        "effect_on_size": effect_on_size,
+        "reason": reason,
+        "source": "layered_model_decision",
+        "runtime_effect": layered.get("runtime_effect"),
+    }
+
+
 @dataclass(frozen=True)
 class CanonicalIntelligenceSnapshot:
     version: str
@@ -408,7 +478,7 @@ def build_canonical_intelligence_snapshot(
         "reason": opportunity.get("buy_opportunity_reason"),
     }
     advisory_authority_state = {
-        "decision_policy_outcome": account_state.get("decision_policy_outcome") or {},
+        "decision_policy_outcome": _decision_policy_outcome(account_state),
         "session_gate_outcome": account_state.get("session_gate_outcome") or {},
         "setup_quality_outcome": account_state.get("setup_quality_outcome") or {},
         "ml_outcome": account_state.get("ml_outcome") or {},

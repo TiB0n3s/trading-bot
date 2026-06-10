@@ -7,8 +7,11 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "src" / "trading_bot"))
+sys.path.insert(0, str(ROOT / "scripts"))
 sys.path.insert(0, str(ROOT))
 
+from db import get_connection  # noqa: E402
 from services.intelligence.candidates.outcome_backfill import (  # noqa: E402
     CandidateOutcomeBackfillService,
     compute_candidate_outcome,
@@ -180,10 +183,69 @@ def test_bounded_backfill_selects_next_missing_rows_after_existing_outcomes():
     assert result.projected_coverage_after["rows_with_forward_outcome"] == 2
 
 
+def test_backfill_prefers_local_feature_snapshot_price_path(tmp_path):
+    db_path = tmp_path / "trades.db"
+    with get_connection(db_path) as con:
+        con.execute(
+            """
+            CREATE TABLE feature_snapshots (
+                timestamp TEXT,
+                symbol TEXT,
+                last_price REAL
+            )
+            """
+        )
+        con.executemany(
+            "INSERT INTO feature_snapshots(timestamp, symbol, last_price) VALUES (?, ?, ?)",
+            [
+                ("2026-06-02T10:00:00-04:00", "AAPL", 100.0),
+                ("2026-06-02T10:30:00-04:00", "AAPL", 102.0),
+                ("2026-06-02T11:00:00-04:00", "AAPL", 103.0),
+            ],
+        )
+
+    class LocalRepo(FakeRepository):
+        def __init__(self):
+            super().__init__()
+            self.db_path = db_path
+
+        def feature_snapshot_price_bars(self, *, symbol, target_date):
+            with get_connection(self.db_path) as con:
+                rows = con.execute(
+                    """
+                    SELECT timestamp, last_price
+                    FROM feature_snapshots
+                    WHERE UPPER(symbol) = ? AND substr(timestamp, 1, 10) = ?
+                    ORDER BY timestamp ASC
+                    """,
+                    (symbol.upper(), target_date),
+                ).fetchall()
+            return [dict(row) for row in rows]
+
+    class FailingMarketData:
+        def fetch_day_bars(self, *, symbol, start_dt, end_dt):
+            raise AssertionError("external market data should not be called")
+
+    repo = LocalRepo()
+    service = CandidateOutcomeBackfillService(repo, FailingMarketData())
+
+    result = service.backfill("2026-06-02")
+
+    assert result.updated == 1
+    assert result.error == 0
+    updated = repo.updated[1]
+    assert updated["return_30m"] == 2.0
+    assert updated["return_60m"] == 3.0
+    assert updated["candidate_outcome_price_path_source"] == "feature_snapshots_last_price"
+
+
 if __name__ == "__main__":
     test_compute_candidate_outcome_uses_first_bar_close_reference()
     test_compute_candidate_outcome_prefers_captured_reference_price()
     test_backfill_updates_candidate_json_with_forward_outcome()
     test_backfill_skips_existing_unless_overwrite()
     test_bounded_backfill_selects_next_missing_rows_after_existing_outcomes()
+    import tempfile
+
+    test_backfill_prefers_local_feature_snapshot_price_path(Path(tempfile.mkdtemp()))
     print("candidate outcome backfill service tests passed")

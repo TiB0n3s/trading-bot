@@ -10,9 +10,9 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from services.canonical_intelligence_service import (
-    CANONICAL_INTELLIGENCE_VERSION,
     CANONICAL_INTELLIGENCE_MAX_JSON_BYTES,
     CANONICAL_INTELLIGENCE_REQUIRED_SECTIONS,
+    CANONICAL_INTELLIGENCE_VERSION,
     build_canonical_intelligence_snapshot,
     canonical_json_size_bytes,
     validate_canonical_snapshot_contract,
@@ -342,6 +342,34 @@ def _snapshot(**overrides):
     return build_canonical_intelligence_snapshot(**args)
 
 
+def test_canonical_snapshot_records_layered_model_policy_effect():
+    snapshot = build_canonical_intelligence_snapshot(
+        symbol="AAPL",
+        decision_ts="2026-06-10T14:30:00+00:00",
+        action="buy",
+        context={},
+        account_state={
+            "layered_model_decision": {
+                "version": "layered_model_decision_v1",
+                "runtime_effect": "paper_model_decision_context_no_order_submission",
+                "final_instruction": "veto",
+                "level_2_meta_label": {
+                    "instruction": "veto",
+                    "effect": "ensemble_probability_veto",
+                    "reason": "ensemble probability below threshold",
+                },
+            }
+        },
+        feature_semantic_version="decision_snapshot_features_v4",
+    )
+
+    outcome = snapshot.to_dict()["advisory_authority_state"]["decision_policy_outcome"]
+    assert outcome["advisory_decision"] == "block"
+    assert outcome["effect_on_execution"] == "block"
+    assert outcome["enforced"] is False
+    assert outcome["source"] == "layered_model_decision"
+
+
 def test_build_canonical_snapshot_collects_core_state_and_hashes():
     snapshot = _snapshot()
 
@@ -400,7 +428,9 @@ def test_build_canonical_snapshot_collects_core_state_and_hashes():
         "trend_scan_label",
         "triple_barrier_label",
     ]
-    assert data["pattern_state"]["historical_bar_runtime_effect"] == "observe_only_no_live_authority"
+    assert (
+        data["pattern_state"]["historical_bar_runtime_effect"] == "observe_only_no_live_authority"
+    )
     assert data["pattern_state"]["historical_bar_master_confidence_score"] == 72.5
     assert data["pattern_state"]["historical_bar_confidence_bucket"] == "medium"
     assert data["pattern_state"]["historical_bar_paper_recommendation"] == "paper_trade_candidate"
@@ -417,7 +447,9 @@ def test_build_canonical_snapshot_collects_core_state_and_hashes():
     assert data["setup_state"]["reward_risk_state"] == "favorable_rr"
     assert data["strategy_state"]["trader_brain_score"] == 81
     assert data["opportunity_state"]["recommendation"] == "buy_candidate"
-    assert data["advisory_authority_state"]["ml_outcome"]["authority_mode"] == "observe_only_compare"
+    assert (
+        data["advisory_authority_state"]["ml_outcome"]["authority_mode"] == "observe_only_compare"
+    )
     assert (
         data["advisory_authority_state"]["utility_estimate"]["utility_decision"]
         == "trade_candidate"
@@ -425,44 +457,27 @@ def test_build_canonical_snapshot_collects_core_state_and_hashes():
     assert data["advisory_authority_state"]["portfolio_decision"]["decision"] == "size_down"
     assert data["advisory_authority_state"]["execution_quality"]["decision"] == "size_down"
     assert data["advisory_authority_state"]["regime_observation"]["regime_label"] == "quiet_bull"
-    assert data["advisory_authority_state"]["regime_routing_decision"]["active_model_slot"] == "regime_0_model"
     assert (
-        data["advisory_authority_state"]["market_microstructure"]["session_phase"]
-        == "first_30m"
+        data["advisory_authority_state"]["regime_routing_decision"]["active_model_slot"]
+        == "regime_0_model"
     )
+    assert data["advisory_authority_state"]["market_microstructure"]["session_phase"] == "first_30m"
     assert (
-        data["advisory_authority_state"]["market_participation"][
-            "participation_state"
-        ]
+        data["advisory_authority_state"]["market_participation"]["participation_state"]
         == "confirmed"
     )
-    assert (
-        data["advisory_authority_state"]["volatility_normalization"]["chase_risk"]
-        == "elevated"
-    )
+    assert data["advisory_authority_state"]["volatility_normalization"]["chase_risk"] == "elevated"
     assert data["advisory_authority_state"]["downside_asymmetry"]["downside_score"] == 0.52
     assert (
-        data["advisory_authority_state"]["exit_decision_quality"][
-            "recommended_action"
-        ]
+        data["advisory_authority_state"]["exit_decision_quality"]["recommended_action"]
         == "tighten_or_partial"
     )
     rollout = data["advisory_authority_state"]["rollout_contract"]
     assert rollout["report_version"] == "rollout_contract_v1"
     assert rollout["assessments"][0]["feature_family"] == "execution_quality"
     assert rollout["assessments"][0]["status"] == "size_down_candidate"
-    assert (
-        data["advisory_authority_state"]["paper_learning_authority_outcome"][
-            "allowed"
-        ]
-        is True
-    )
-    assert (
-        data["advisory_authority_state"]["paper_learning_authority_outcome"][
-            "setup_score"
-        ]
-        == 82
-    )
+    assert data["advisory_authority_state"]["paper_learning_authority_outcome"]["allowed"] is True
+    assert data["advisory_authority_state"]["paper_learning_authority_outcome"]["setup_score"] == 82
     assert data["confidence"]["raw_confidence_labels"]["prediction_confidence"] == "medium"
     assert data["confidence"]["primary_source"] == "setup_quality"
     assert data["confidence"]["primary_realized_win_rate"] == 0.64
@@ -635,6 +650,7 @@ def test_canonical_snapshot_stays_below_size_limit():
 
 def main():
     tests = [
+        test_canonical_snapshot_records_layered_model_policy_effect,
         test_build_canonical_snapshot_collects_core_state_and_hashes,
         test_canonical_snapshot_contract_requires_sections_and_size_limit,
         test_canonical_hash_is_stable_for_dict_insertion_order,

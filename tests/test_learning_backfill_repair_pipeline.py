@@ -2,7 +2,14 @@
 
 from __future__ import annotations
 
+import sys
+from pathlib import Path
 from types import SimpleNamespace
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "src" / "trading_bot"))
+sys.path.insert(0, str(ROOT / "scripts"))
+sys.path.insert(0, str(ROOT))
 
 from pipeline import learning_backfill_repair as module
 
@@ -39,8 +46,10 @@ def test_learning_backfill_repair_loops_until_candidate_coverage_target():
     FakeCandidateService.instances = []
     original_candidate_service = module.CandidateOutcomeBackfillService
     original_exit_service = module.ExitSnapshotBackfillService
+    original_policy_repair = module.repair_decision_policy_learning_effects
     module.CandidateOutcomeBackfillService = FakeCandidateService
     module.ExitSnapshotBackfillService = FakeExitSnapshotBackfillService
+    module.repair_decision_policy_learning_effects = lambda *args, **kwargs: 3
 
     try:
         result = module.run_learning_backfill_repair(
@@ -52,11 +61,13 @@ def test_learning_backfill_repair_loops_until_candidate_coverage_target():
     finally:
         module.CandidateOutcomeBackfillService = original_candidate_service
         module.ExitSnapshotBackfillService = original_exit_service
+        module.repair_decision_policy_learning_effects = original_policy_repair
 
     assert result.ok is True
     assert result.candidate_passes == 2
     assert result.candidate_updated == 200
     assert result.candidate_coverage_rate == 1.0
+    assert result.decision_policy_repaired == 3
     assert result.exit_scanned == 2
     assert result.exit_inserted == 2
     assert FakeCandidateService.instances[0].calls == 2

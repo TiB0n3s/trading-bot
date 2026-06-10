@@ -64,3 +64,16 @@ The SpaceX catalyst cohort is explicitly tiered:
 `SPCX` is a catalyst placeholder, not trade authority. Smaller or more speculative
 space names remain context-only until liquidity, spread, slippage, and learning
 evidence justify an explicit promotion review.
+
+The SpaceX cohort also has a deterministic value-chain graph exposed by
+`services.spacex_value_chain_service`:
+
+- anchor node: `SPCX`
+- approved tradable proxies: `NOC`, `LHX`, `HON`, `TDY`
+- context-only satellites: `SPCX`, `IRDM`, `ASTS`, `GSAT`, `RDW`, `PL`, `BKSY`, `SPIR`, `BA`
+- feature outputs: relationship weight, lead-lag information shock score, and liquidity siphon ratio
+
+These graph features are eligible only as paper/context intelligence. They do
+not create standalone trade authority for context-only symbols, and normal
+execution, spread, slippage, affordability, and risk gates still apply to the
+approved symbols.

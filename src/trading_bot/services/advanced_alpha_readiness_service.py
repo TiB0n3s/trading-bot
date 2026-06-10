@@ -14,6 +14,7 @@ from typing import Any
 
 from repositories.bar_pattern_feature_repo import BarPatternFeatureRepository
 from services.optional_dependency_service import optional_dependency_status
+from services.spacex_value_chain_service import build_spacex_value_chain_graph
 
 ADVANCED_ALPHA_READINESS_VERSION = "advanced_alpha_readiness_v1"
 ADVANCED_ALPHA_RUNTIME_EFFECT = "readiness_only_no_live_authority"
@@ -158,6 +159,8 @@ def build_advanced_alpha_readiness_payload(
         env.get("ETF_LEAD_LAG_REFERENCE_SYMBOLS")
     )
     options_feed = _env_true(env, "OPTIONS_FLOW_ENABLED") or bool(env.get("OPTIONS_DATA_API_KEY"))
+    spacex_graph = build_spacex_value_chain_graph().to_dict()
+    spacex_summary = spacex_graph["summary"]
 
     coverage_threshold_met = rows >= 500
     outcome_threshold_met = rows_with_forward >= 500
@@ -257,6 +260,29 @@ def build_advanced_alpha_readiness_payload(
             },
             current_capability="Not populated; no ETF/component reference mapping is currently persisted.",
             next_action="Add sector/index reference symbol mapping, archive aligned reference bars, then export lead/lag return deltas.",
+        ),
+        _item(
+            feature_family="spacex_value_chain_graph",
+            checks={
+                "graph_metadata_available": bool(spacex_summary.get("node_count")),
+                "approved_symbol_tier_defined": bool(
+                    spacex_summary.get("approved_tradable_symbols")
+                ),
+                "context_only_tier_defined": bool(spacex_summary.get("context_only_symbols")),
+                "adjacency_matrix_available": bool(spacex_graph.get("adjacency_matrix")),
+                "lead_lag_feature_contract_defined": True,
+                "outcome_linkage_ge_500": outcome_threshold_met,
+                "authority_leak_safe": True,
+            },
+            current_capability=(
+                "SpaceX catalyst value-chain graph is available as context and "
+                "feature metadata. Context-only names cannot become standalone "
+                "trade candidates."
+            ),
+            next_action=(
+                "Accumulate aligned catalyst/cohort returns and compare "
+                "information-shock scores against approved-symbol outcomes."
+            ),
         ),
         _item(
             feature_family="options_skew_flow",

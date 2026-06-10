@@ -73,19 +73,17 @@ def main() -> int:
     print("=" * 72)
     print("runtime_effect=none")
 
-    failures = 0
-    for test_file in SAFETY_TESTS:
-        print()
-        print(f"-- {test_file} {'-' * max(0, 60 - len(test_file))}")
-        result = subprocess.run([sys.executable, test_file], cwd=ROOT, env=env)
-        if result.returncode != 0:
-            failures += 1
+    result = subprocess.run(
+        [sys.executable, "-m", "pytest", *SAFETY_TESTS],
+        cwd=ROOT,
+        env=env,
+    )
 
     print()
     print("=" * 72)
-    if failures:
-        print(f"[FAIL] {failures} safety test file(s) failed")
-        return 1
+    if result.returncode != 0:
+        print("[FAIL] safety test run failed")
+        return result.returncode
     print(f"[OK] all {len(SAFETY_TESTS)} safety test file(s) passed")
     return 0
 

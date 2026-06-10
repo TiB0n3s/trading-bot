@@ -244,20 +244,17 @@ def main():
     print("=" * 64)
     print(f"env_file_loaded={env_loaded}")
 
-    failures = 0
-
-    for test in TESTS:
-        print()
-        print("──", test, "─" * max(0, 56 - len(test)))
-        result = subprocess.run([sys.executable, test], cwd=ROOT, env=child_test_env())
-        if result.returncode != 0:
-            failures += 1
+    result = subprocess.run(
+        [sys.executable, "-m", "pytest", *TESTS],
+        cwd=ROOT,
+        env=child_test_env(),
+    )
 
     print()
     print("=" * 64)
-    if failures:
-        print(f"[FAIL] {failures} test file(s) failed")
-        return 1
+    if result.returncode != 0:
+        print("[FAIL] targeted test run failed")
+        return result.returncode
 
     print(f"[OK] all {len(TESTS)} test file(s) passed")
     return 0

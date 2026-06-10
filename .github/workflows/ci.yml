@@ -29,6 +29,30 @@ jobs:
           python -m pip install -r requirements-dev.txt
           python -m pip install --no-deps -e .
 
+      - name: Ruff lint touched safety surfaces
+        run: |
+          python -m ruff check \
+            run_safety_checks.py \
+            scripts/run_tests.py \
+            src/trading_bot/ops_checks/cli.py \
+            tests/test_auto_buy_manager.py \
+            tests/test_dependency_packaging_contract.py
+
+      - name: Ruff format touched safety surfaces
+        run: |
+          python -m ruff format --check \
+            run_safety_checks.py \
+            scripts/run_tests.py \
+            src/trading_bot/ops_checks/cli.py \
+            tests/test_auto_buy_manager.py \
+            tests/test_dependency_packaging_contract.py
+
+      - name: Repo-wide Ruff debt report
+        continue-on-error: true
+        run: |
+          python -m ruff check .
+          python -m ruff format --check .
+
       - name: Compile critical entry points
         run: |
           python -m py_compile \
@@ -44,3 +68,20 @@ jobs:
 
       - name: Run fast safety checks
         run: python run_safety_checks.py
+
+      - name: Config audit
+        run: python ops_check.py config-audit
+
+      - name: Packaged entrypoints audit
+        run: python ops_check.py packaged-entrypoints
+
+      - name: Deployment reference audit
+        run: python ops/deployment_reference_audit.py
+
+      - name: Architecture surface audit
+        continue-on-error: true
+        run: python ops_check.py architecture-surface
+
+      - name: Runtime dependency vulnerability audit
+        continue-on-error: true
+        run: python -m pip_audit -r requirements-base.txt

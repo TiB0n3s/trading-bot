@@ -91,7 +91,18 @@ dev = [
     "pip-audit==2.9.0",
     "pre-commit==4.4.0",
     "pytest==8.4.2",
+    "pytest-xdist==3.8.0",
     "ruff==0.15.15",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = [".", "scripts", "src"]
+addopts = "-q --strict-markers --durations=20"
+markers = [
+    "slow: long-running or integration-style tests",
+    "runtime: runtime safety tests",
+    "research: optional research dependency tests",
 ]
 
 [tool.setuptools]

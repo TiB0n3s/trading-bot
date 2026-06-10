@@ -131,10 +131,12 @@ Usage:
   python3 ops_check.py job fill_poller
 """
 
+import importlib
 import os
 import subprocess
 import sys
 from datetime import date
+from functools import lru_cache
 from pathlib import Path
 
 ROOT_DIR = Path(__file__).resolve().parents[3]
@@ -144,160 +146,289 @@ if SCRIPTS_DIR.exists():
     if scripts_path not in sys.path:
         sys.path.insert(0, scripts_path)
 
-from pipeline.trading_education_ingest import main as run_trading_education_ingest_cli
-from reports.registry import get_report_commands, run_report
-from services.ops_checks.active_learning_checks import run_active_learning_integration
-from services.ops_checks.advanced_alpha_model_comparison_checks import (
-    run_advanced_alpha_model_comparison,
-)
-from services.ops_checks.advanced_alpha_readiness_checks import (
-    run_advanced_alpha_readiness,
-)
-from services.ops_checks.advisory_authority_checks import run_advisory_authority_report
-from services.ops_checks.ai_intelligence_review_checks import run_ai_intelligence_review
-from services.ops_checks.architecture_surface_checks import run_architecture_surface_report
-from services.ops_checks.auto_buy_checks import run_auto_buy_health
-from services.ops_checks.bar_pattern_checks import run_bar_pattern_backfill
-from services.ops_checks.calibration_bucket_checks import run_calibration_buckets
-from services.ops_checks.candidate_outcome_backfill_checks import run_candidate_outcome_backfill
-from services.ops_checks.candidate_universe_checks import run_candidate_universe_report
-from services.ops_checks.config_audit_checks import run_config_audit_report
-from services.ops_checks.context_freshness_checks import (
-    run_context_freshness,
-    run_data_freshness_gate,
-)
-from services.ops_checks.conviction_checks import (
-    run_buy_opportunity_report,
-    run_claude_context_audit,
-    run_conviction_persistence_health,
-    run_conviction_stack_report,
-)
-from services.ops_checks.cross_asset_lead_lag_checks import (
-    run_cross_asset_lead_lag_map_report,
-)
-from services.ops_checks.cross_layer_verification_checks import (
-    run_cross_layer_verification_report,
-)
-from services.ops_checks.database_backup_checks import run_database_backup_report
-from services.ops_checks.dataset_checks import run_dataset_health
-from services.ops_checks.decision_quality_checks import run_decision_quality_review
-from services.ops_checks.event_context_validation_checks import run_event_context_validation
-from services.ops_checks.event_source_checks import run_event_source_coverage
-from services.ops_checks.excursion_checks import (
-    run_peak_bucket_report,
-    run_winner_became_loser,
-)
-from services.ops_checks.exit_intelligence_checks import run_exit_intelligence_summary
-from services.ops_checks.exit_snapshot_backfill_checks import run_exit_snapshot_backfill
-from services.ops_checks.external_observability_readiness_checks import (
-    run_external_observability_readiness_report,
-)
-from services.ops_checks.external_symbol_candidate_checks import run_external_symbol_candidates
-from services.ops_checks.external_symbol_discovery_checks import run_external_symbol_discovery
-from services.ops_checks.feature_attribution_checks import run_feature_attribution_report
-from services.ops_checks.feature_checks import run_feature_health, run_feature_watch
-from services.ops_checks.feature_flag_change_history_checks import (
-    run_feature_flag_change_history_report,
-)
-from services.ops_checks.feature_flag_inventory_checks import run_feature_flag_inventory_report
-from services.ops_checks.friction_heatmap_checks import run_friction_heatmap
-from services.ops_checks.full_session_paper_replay_checks import (
-    run_full_session_paper_replay_report,
-)
-from services.ops_checks.historical_bar_archive_checks import run_historical_bar_archive
-from services.ops_checks.historical_bar_coverage_checks import run_historical_bar_coverage
-from services.ops_checks.historical_bar_model_checks import (
-    run_historical_bar_model_readiness,
-)
-from services.ops_checks.historical_bar_paper_strategy_checks import (
-    run_historical_bar_paper_strategy_report,
-)
-from services.ops_checks.historical_bar_paper_validation_checks import (
-    run_historical_bar_paper_validation,
-    run_historical_bar_walk_forward,
-)
-from services.ops_checks.historical_bar_progress_checks import run_historical_bar_progress
-from services.ops_checks.historical_bar_readiness_checks import run_historical_bar_readiness
-from services.ops_checks.historical_bar_validation_checks import (
-    run_historical_bar_validation,
-)
-from services.ops_checks.incident_escalation_readiness_checks import (
-    run_incident_escalation_readiness_report,
-)
-from services.ops_checks.incident_workflow_checks import run_incident_workflow_report
-from services.ops_checks.intelligence_checks import run_intelligence_summary
-from services.ops_checks.learning_artifact_checks import run_learning_artifact_consumption
-from services.ops_checks.learning_readiness_checks import (
-    run_learning_effectiveness,
-    run_learning_readiness,
-)
-from services.ops_checks.lifecycle_checks import run_lifecycle_analysis
-from services.ops_checks.lifecycle_dashboard_checks import run_lifecycle_dashboard
-from services.ops_checks.live_bar_pattern_capture_checks import (
-    run_live_bar_pattern_capture_report,
-)
-from services.ops_checks.local_load_probe_checks import run_local_load_probe_report
-from services.ops_checks.log_ledger_checks import run_log_ledger_consistency
-from services.ops_checks.market_data_parity_checks import run_market_data_parity
-from services.ops_checks.missed_buy_review_checks import run_missed_buy_review
-from services.ops_checks.ml_dataset_checks import run_ml_dataset_export_check
-from services.ops_checks.model_promotion_evidence_checks import (
-    run_model_promotion_evidence_report,
-)
-from services.ops_checks.model_validation_governance_checks import (
-    run_model_validation_governance_report,
-)
-from services.ops_checks.monday_readiness_checks import run_monday_readiness_check
-from services.ops_checks.observability_health_checks import run_observability_health
-from services.ops_checks.operator_intelligence_dashboard_checks import (
-    run_operator_intelligence_dashboard,
-)
-from services.ops_checks.order_checks import run_order_health
-from services.ops_checks.packaged_entrypoint_validation_checks import (
-    run_packaged_entrypoint_validation_report,
-)
-from services.ops_checks.paper_learning_authority_checks import (
-    run_paper_learning_authority_report,
-)
-from services.ops_checks.paper_replay_load_probe_checks import run_paper_replay_load_probe_report
-from services.ops_checks.pattern_learning_inputs_checks import run_pattern_learning_inputs_report
-from services.ops_checks.point_in_time_archive_checks import run_point_in_time_archive
-from services.ops_checks.portfolio_risk_checks import run_portfolio_risk_report
-from services.ops_checks.post_trade_learning_checks import run_post_trade_learning_report
-from services.ops_checks.rejected_outcome_checks import run_rejected_outcomes_health
-from services.ops_checks.rejection_checks import run_rejection_summary
-from services.ops_checks.research_export_checks import run_research_export
-from services.ops_checks.resource_readiness_checks import run_resource_readiness
-from services.ops_checks.rollout_contract_checks import run_rollout_contract_report
-from services.ops_checks.runtime_checks import run_runtime_health, run_runtime_health_trend
-from services.ops_checks.secrets_hygiene_checks import run_secrets_hygiene_report
-from services.ops_checks.secrets_manager_readiness_checks import (
-    run_secrets_manager_readiness_report,
-)
-from services.ops_checks.setup_breakdown import run_setup_breakdown
-from services.ops_checks.shadow_prediction_checks import run_shadow_prediction_report
-from services.ops_checks.signal_source_checks import run_signal_source_readiness
-from services.ops_checks.snapshot_checks import run_decision_snapshot_health
-from services.ops_checks.sqlite_ownership_checks import run_sqlite_ownership_report
-from services.ops_checks.symbol_pattern_checks import run_symbol_pattern_outcomes
-from services.ops_checks.trading_education_checks import (
-    run_trading_education_coverage,
-    run_trading_education_health,
-    run_trading_education_review,
-)
-from services.ops_checks.transformer_authority_checks import (
-    run_transformer_authority_report,
-)
-from services.ops_checks.volatile_session_intelligence_checks import (
-    run_volatile_session_intelligence_report,
-)
-from services.ops_checks.volume_clock_vpin_checks import run_volume_clock_vpin_report
 from trading_bot.ops_checks.bundles import run_all_bundle, run_premarket_bundle
 from trading_bot.ops_checks.registry import OPS_COMMAND_SPECS, build_command_args
 from trading_bot.ops_checks.subprocess_commands import (
     build_legacy_subprocess_commands,
     script_path,
 )
+
+
+@lru_cache(maxsize=None)
+def _load_handler(handler_ref: str):
+    module_name, function_name = handler_ref.split(":", 1)
+    module = importlib.import_module(module_name)
+    return getattr(module, function_name)
+
+
+def _lazy_handler(handler_ref: str):
+    function_name = handler_ref.rsplit(":", 1)[1]
+
+    def _handler(*args, **kwargs):
+        return _load_handler(handler_ref)(*args, **kwargs)
+
+    _handler.__name__ = function_name
+    _handler.__qualname__ = function_name
+    return _handler
+
+
+_LAZY_HANDLER_REFS = {
+    "run_trading_education_ingest_cli": "pipeline.trading_education_ingest:main",
+    "get_report_commands": "reports.registry:get_report_commands",
+    "run_report": "reports.registry:run_report",
+    "run_active_learning_integration": "services.ops_checks.active_learning_checks:run_active_learning_integration",
+    "run_advanced_alpha_model_comparison": "services.ops_checks.advanced_alpha_model_comparison_checks:run_advanced_alpha_model_comparison",
+    "run_advanced_alpha_readiness": "services.ops_checks.advanced_alpha_readiness_checks:run_advanced_alpha_readiness",
+    "run_advisory_authority_report": "services.ops_checks.advisory_authority_checks:run_advisory_authority_report",
+    "run_ai_intelligence_review": "services.ops_checks.ai_intelligence_review_checks:run_ai_intelligence_review",
+    "run_architecture_surface_report": "services.ops_checks.architecture_surface_checks:run_architecture_surface_report",
+    "run_auto_buy_health": "services.ops_checks.auto_buy_checks:run_auto_buy_health",
+    "run_bar_pattern_backfill": "services.ops_checks.bar_pattern_checks:run_bar_pattern_backfill",
+    "run_calibration_buckets": "services.ops_checks.calibration_bucket_checks:run_calibration_buckets",
+    "run_candidate_outcome_backfill": "services.ops_checks.candidate_outcome_backfill_checks:run_candidate_outcome_backfill",
+    "run_candidate_universe_report": "services.ops_checks.candidate_universe_checks:run_candidate_universe_report",
+    "run_config_audit_report": "services.ops_checks.config_audit_checks:run_config_audit_report",
+    "run_context_freshness": "services.ops_checks.context_freshness_checks:run_context_freshness",
+    "run_data_freshness_gate": "services.ops_checks.context_freshness_checks:run_data_freshness_gate",
+    "run_buy_opportunity_report": "services.ops_checks.conviction_checks:run_buy_opportunity_report",
+    "run_claude_context_audit": "services.ops_checks.conviction_checks:run_claude_context_audit",
+    "run_conviction_persistence_health": "services.ops_checks.conviction_checks:run_conviction_persistence_health",
+    "run_conviction_stack_report": "services.ops_checks.conviction_checks:run_conviction_stack_report",
+    "run_cross_asset_lead_lag_map_report": "services.ops_checks.cross_asset_lead_lag_checks:run_cross_asset_lead_lag_map_report",
+    "run_cross_layer_verification_report": "services.ops_checks.cross_layer_verification_checks:run_cross_layer_verification_report",
+    "run_database_backup_report": "services.ops_checks.database_backup_checks:run_database_backup_report",
+    "run_dataset_health": "services.ops_checks.dataset_checks:run_dataset_health",
+    "run_decision_quality_review": "services.ops_checks.decision_quality_checks:run_decision_quality_review",
+    "run_event_context_validation": "services.ops_checks.event_context_validation_checks:run_event_context_validation",
+    "run_event_source_coverage": "services.ops_checks.event_source_checks:run_event_source_coverage",
+    "run_peak_bucket_report": "services.ops_checks.excursion_checks:run_peak_bucket_report",
+    "run_winner_became_loser": "services.ops_checks.excursion_checks:run_winner_became_loser",
+    "run_exit_intelligence_summary": "services.ops_checks.exit_intelligence_checks:run_exit_intelligence_summary",
+    "run_exit_snapshot_backfill": "services.ops_checks.exit_snapshot_backfill_checks:run_exit_snapshot_backfill",
+    "run_external_observability_readiness_report": "services.ops_checks.external_observability_readiness_checks:run_external_observability_readiness_report",
+    "run_external_symbol_candidates": "services.ops_checks.external_symbol_candidate_checks:run_external_symbol_candidates",
+    "run_external_symbol_discovery": "services.ops_checks.external_symbol_discovery_checks:run_external_symbol_discovery",
+    "run_feature_attribution_report": "services.ops_checks.feature_attribution_checks:run_feature_attribution_report",
+    "run_feature_health": "services.ops_checks.feature_checks:run_feature_health",
+    "run_feature_watch": "services.ops_checks.feature_checks:run_feature_watch",
+    "run_feature_flag_change_history_report": "services.ops_checks.feature_flag_change_history_checks:run_feature_flag_change_history_report",
+    "run_feature_flag_inventory_report": "services.ops_checks.feature_flag_inventory_checks:run_feature_flag_inventory_report",
+    "run_friction_heatmap": "services.ops_checks.friction_heatmap_checks:run_friction_heatmap",
+    "run_full_session_paper_replay_report": "services.ops_checks.full_session_paper_replay_checks:run_full_session_paper_replay_report",
+    "run_historical_bar_archive": "services.ops_checks.historical_bar_archive_checks:run_historical_bar_archive",
+    "run_historical_bar_coverage": "services.ops_checks.historical_bar_coverage_checks:run_historical_bar_coverage",
+    "run_historical_bar_model_readiness": "services.ops_checks.historical_bar_model_checks:run_historical_bar_model_readiness",
+    "run_historical_bar_paper_strategy_report": "services.ops_checks.historical_bar_paper_strategy_checks:run_historical_bar_paper_strategy_report",
+    "run_historical_bar_paper_validation": "services.ops_checks.historical_bar_paper_validation_checks:run_historical_bar_paper_validation",
+    "run_historical_bar_walk_forward": "services.ops_checks.historical_bar_paper_validation_checks:run_historical_bar_walk_forward",
+    "run_historical_bar_progress": "services.ops_checks.historical_bar_progress_checks:run_historical_bar_progress",
+    "run_historical_bar_readiness": "services.ops_checks.historical_bar_readiness_checks:run_historical_bar_readiness",
+    "run_historical_bar_validation": "services.ops_checks.historical_bar_validation_checks:run_historical_bar_validation",
+    "run_incident_escalation_readiness_report": "services.ops_checks.incident_escalation_readiness_checks:run_incident_escalation_readiness_report",
+    "run_incident_workflow_report": "services.ops_checks.incident_workflow_checks:run_incident_workflow_report",
+    "run_intelligence_summary": "services.ops_checks.intelligence_checks:run_intelligence_summary",
+    "run_learning_artifact_consumption": "services.ops_checks.learning_artifact_checks:run_learning_artifact_consumption",
+    "run_learning_effectiveness": "services.ops_checks.learning_readiness_checks:run_learning_effectiveness",
+    "run_learning_readiness": "services.ops_checks.learning_readiness_checks:run_learning_readiness",
+    "run_lifecycle_analysis": "services.ops_checks.lifecycle_checks:run_lifecycle_analysis",
+    "run_lifecycle_dashboard": "services.ops_checks.lifecycle_dashboard_checks:run_lifecycle_dashboard",
+    "run_live_bar_pattern_capture_report": "services.ops_checks.live_bar_pattern_capture_checks:run_live_bar_pattern_capture_report",
+    "run_local_load_probe_report": "services.ops_checks.local_load_probe_checks:run_local_load_probe_report",
+    "run_log_ledger_consistency": "services.ops_checks.log_ledger_checks:run_log_ledger_consistency",
+    "run_market_data_parity": "services.ops_checks.market_data_parity_checks:run_market_data_parity",
+    "run_missed_buy_review": "services.ops_checks.missed_buy_review_checks:run_missed_buy_review",
+    "run_ml_dataset_export_check": "services.ops_checks.ml_dataset_checks:run_ml_dataset_export_check",
+    "run_model_promotion_evidence_report": "services.ops_checks.model_promotion_evidence_checks:run_model_promotion_evidence_report",
+    "run_model_validation_governance_report": "services.ops_checks.model_validation_governance_checks:run_model_validation_governance_report",
+    "run_monday_readiness_check": "services.ops_checks.monday_readiness_checks:run_monday_readiness_check",
+    "run_observability_health": "services.ops_checks.observability_health_checks:run_observability_health",
+    "run_operator_intelligence_dashboard": "services.ops_checks.operator_intelligence_dashboard_checks:run_operator_intelligence_dashboard",
+    "run_order_health": "services.ops_checks.order_checks:run_order_health",
+    "run_packaged_entrypoint_validation_report": "services.ops_checks.packaged_entrypoint_validation_checks:run_packaged_entrypoint_validation_report",
+    "run_paper_learning_authority_report": "services.ops_checks.paper_learning_authority_checks:run_paper_learning_authority_report",
+    "run_paper_replay_load_probe_report": "services.ops_checks.paper_replay_load_probe_checks:run_paper_replay_load_probe_report",
+    "run_pattern_learning_inputs_report": "services.ops_checks.pattern_learning_inputs_checks:run_pattern_learning_inputs_report",
+    "run_point_in_time_archive": "services.ops_checks.point_in_time_archive_checks:run_point_in_time_archive",
+    "run_portfolio_risk_report": "services.ops_checks.portfolio_risk_checks:run_portfolio_risk_report",
+    "run_post_trade_learning_report": "services.ops_checks.post_trade_learning_checks:run_post_trade_learning_report",
+    "run_rejected_outcomes_health": "services.ops_checks.rejected_outcome_checks:run_rejected_outcomes_health",
+    "run_rejection_summary": "services.ops_checks.rejection_checks:run_rejection_summary",
+    "run_research_export": "services.ops_checks.research_export_checks:run_research_export",
+    "run_resource_readiness": "services.ops_checks.resource_readiness_checks:run_resource_readiness",
+    "run_rollout_contract_report": "services.ops_checks.rollout_contract_checks:run_rollout_contract_report",
+    "run_runtime_health": "services.ops_checks.runtime_checks:run_runtime_health",
+    "run_runtime_health_trend": "services.ops_checks.runtime_checks:run_runtime_health_trend",
+    "run_secrets_hygiene_report": "services.ops_checks.secrets_hygiene_checks:run_secrets_hygiene_report",
+    "run_secrets_manager_readiness_report": "services.ops_checks.secrets_manager_readiness_checks:run_secrets_manager_readiness_report",
+    "run_setup_breakdown": "services.ops_checks.setup_breakdown:run_setup_breakdown",
+    "run_shadow_prediction_report": "services.ops_checks.shadow_prediction_checks:run_shadow_prediction_report",
+    "run_signal_source_readiness": "services.ops_checks.signal_source_checks:run_signal_source_readiness",
+    "run_decision_snapshot_health": "services.ops_checks.snapshot_checks:run_decision_snapshot_health",
+    "run_sqlite_ownership_report": "services.ops_checks.sqlite_ownership_checks:run_sqlite_ownership_report",
+    "run_symbol_pattern_outcomes": "services.ops_checks.symbol_pattern_checks:run_symbol_pattern_outcomes",
+    "run_trading_education_coverage": "services.ops_checks.trading_education_checks:run_trading_education_coverage",
+    "run_trading_education_health": "services.ops_checks.trading_education_checks:run_trading_education_health",
+    "run_trading_education_review": "services.ops_checks.trading_education_checks:run_trading_education_review",
+    "run_transformer_authority_report": "services.ops_checks.transformer_authority_checks:run_transformer_authority_report",
+    "run_volatile_session_intelligence_report": "services.ops_checks.volatile_session_intelligence_checks:run_volatile_session_intelligence_report",
+    "run_volume_clock_vpin_report": "services.ops_checks.volume_clock_vpin_checks:run_volume_clock_vpin_report",
+}
+
+run_trading_education_ingest_cli = _lazy_handler(
+    _LAZY_HANDLER_REFS["run_trading_education_ingest_cli"]
+)
+get_report_commands = _lazy_handler(_LAZY_HANDLER_REFS["get_report_commands"])
+run_report = _lazy_handler(_LAZY_HANDLER_REFS["run_report"])
+run_active_learning_integration = _lazy_handler(
+    _LAZY_HANDLER_REFS["run_active_learning_integration"]
+)
+run_advanced_alpha_model_comparison = _lazy_handler(
+    _LAZY_HANDLER_REFS["run_advanced_alpha_model_comparison"]
+)
+run_advanced_alpha_readiness = _lazy_handler(_LAZY_HANDLER_REFS["run_advanced_alpha_readiness"])
+run_advisory_authority_report = _lazy_handler(_LAZY_HANDLER_REFS["run_advisory_authority_report"])
+run_ai_intelligence_review = _lazy_handler(_LAZY_HANDLER_REFS["run_ai_intelligence_review"])
+run_architecture_surface_report = _lazy_handler(
+    _LAZY_HANDLER_REFS["run_architecture_surface_report"]
+)
+run_auto_buy_health = _lazy_handler(_LAZY_HANDLER_REFS["run_auto_buy_health"])
+run_bar_pattern_backfill = _lazy_handler(_LAZY_HANDLER_REFS["run_bar_pattern_backfill"])
+run_calibration_buckets = _lazy_handler(_LAZY_HANDLER_REFS["run_calibration_buckets"])
+run_candidate_outcome_backfill = _lazy_handler(_LAZY_HANDLER_REFS["run_candidate_outcome_backfill"])
+run_candidate_universe_report = _lazy_handler(_LAZY_HANDLER_REFS["run_candidate_universe_report"])
+run_config_audit_report = _lazy_handler(_LAZY_HANDLER_REFS["run_config_audit_report"])
+run_context_freshness = _lazy_handler(_LAZY_HANDLER_REFS["run_context_freshness"])
+run_data_freshness_gate = _lazy_handler(_LAZY_HANDLER_REFS["run_data_freshness_gate"])
+run_buy_opportunity_report = _lazy_handler(_LAZY_HANDLER_REFS["run_buy_opportunity_report"])
+run_claude_context_audit = _lazy_handler(_LAZY_HANDLER_REFS["run_claude_context_audit"])
+run_conviction_persistence_health = _lazy_handler(
+    _LAZY_HANDLER_REFS["run_conviction_persistence_health"]
+)
+run_conviction_stack_report = _lazy_handler(_LAZY_HANDLER_REFS["run_conviction_stack_report"])
+run_cross_asset_lead_lag_map_report = _lazy_handler(
+    _LAZY_HANDLER_REFS["run_cross_asset_lead_lag_map_report"]
+)
+run_cross_layer_verification_report = _lazy_handler(
+    _LAZY_HANDLER_REFS["run_cross_layer_verification_report"]
+)
+run_database_backup_report = _lazy_handler(_LAZY_HANDLER_REFS["run_database_backup_report"])
+run_dataset_health = _lazy_handler(_LAZY_HANDLER_REFS["run_dataset_health"])
+run_decision_quality_review = _lazy_handler(_LAZY_HANDLER_REFS["run_decision_quality_review"])
+run_event_context_validation = _lazy_handler(_LAZY_HANDLER_REFS["run_event_context_validation"])
+run_event_source_coverage = _lazy_handler(_LAZY_HANDLER_REFS["run_event_source_coverage"])
+run_peak_bucket_report = _lazy_handler(_LAZY_HANDLER_REFS["run_peak_bucket_report"])
+run_winner_became_loser = _lazy_handler(_LAZY_HANDLER_REFS["run_winner_became_loser"])
+run_exit_intelligence_summary = _lazy_handler(_LAZY_HANDLER_REFS["run_exit_intelligence_summary"])
+run_exit_snapshot_backfill = _lazy_handler(_LAZY_HANDLER_REFS["run_exit_snapshot_backfill"])
+run_external_observability_readiness_report = _lazy_handler(
+    _LAZY_HANDLER_REFS["run_external_observability_readiness_report"]
+)
+run_external_symbol_candidates = _lazy_handler(_LAZY_HANDLER_REFS["run_external_symbol_candidates"])
+run_external_symbol_discovery = _lazy_handler(_LAZY_HANDLER_REFS["run_external_symbol_discovery"])
+run_feature_attribution_report = _lazy_handler(_LAZY_HANDLER_REFS["run_feature_attribution_report"])
+run_feature_health = _lazy_handler(_LAZY_HANDLER_REFS["run_feature_health"])
+run_feature_watch = _lazy_handler(_LAZY_HANDLER_REFS["run_feature_watch"])
+run_feature_flag_change_history_report = _lazy_handler(
+    _LAZY_HANDLER_REFS["run_feature_flag_change_history_report"]
+)
+run_feature_flag_inventory_report = _lazy_handler(
+    _LAZY_HANDLER_REFS["run_feature_flag_inventory_report"]
+)
+run_friction_heatmap = _lazy_handler(_LAZY_HANDLER_REFS["run_friction_heatmap"])
+run_full_session_paper_replay_report = _lazy_handler(
+    _LAZY_HANDLER_REFS["run_full_session_paper_replay_report"]
+)
+run_historical_bar_archive = _lazy_handler(_LAZY_HANDLER_REFS["run_historical_bar_archive"])
+run_historical_bar_coverage = _lazy_handler(_LAZY_HANDLER_REFS["run_historical_bar_coverage"])
+run_historical_bar_model_readiness = _lazy_handler(
+    _LAZY_HANDLER_REFS["run_historical_bar_model_readiness"]
+)
+run_historical_bar_paper_strategy_report = _lazy_handler(
+    _LAZY_HANDLER_REFS["run_historical_bar_paper_strategy_report"]
+)
+run_historical_bar_paper_validation = _lazy_handler(
+    _LAZY_HANDLER_REFS["run_historical_bar_paper_validation"]
+)
+run_historical_bar_walk_forward = _lazy_handler(
+    _LAZY_HANDLER_REFS["run_historical_bar_walk_forward"]
+)
+run_historical_bar_progress = _lazy_handler(_LAZY_HANDLER_REFS["run_historical_bar_progress"])
+run_historical_bar_readiness = _lazy_handler(_LAZY_HANDLER_REFS["run_historical_bar_readiness"])
+run_historical_bar_validation = _lazy_handler(_LAZY_HANDLER_REFS["run_historical_bar_validation"])
+run_incident_escalation_readiness_report = _lazy_handler(
+    _LAZY_HANDLER_REFS["run_incident_escalation_readiness_report"]
+)
+run_incident_workflow_report = _lazy_handler(_LAZY_HANDLER_REFS["run_incident_workflow_report"])
+run_intelligence_summary = _lazy_handler(_LAZY_HANDLER_REFS["run_intelligence_summary"])
+run_learning_artifact_consumption = _lazy_handler(
+    _LAZY_HANDLER_REFS["run_learning_artifact_consumption"]
+)
+run_learning_effectiveness = _lazy_handler(_LAZY_HANDLER_REFS["run_learning_effectiveness"])
+run_learning_readiness = _lazy_handler(_LAZY_HANDLER_REFS["run_learning_readiness"])
+run_lifecycle_analysis = _lazy_handler(_LAZY_HANDLER_REFS["run_lifecycle_analysis"])
+run_lifecycle_dashboard = _lazy_handler(_LAZY_HANDLER_REFS["run_lifecycle_dashboard"])
+run_live_bar_pattern_capture_report = _lazy_handler(
+    _LAZY_HANDLER_REFS["run_live_bar_pattern_capture_report"]
+)
+run_local_load_probe_report = _lazy_handler(_LAZY_HANDLER_REFS["run_local_load_probe_report"])
+run_log_ledger_consistency = _lazy_handler(_LAZY_HANDLER_REFS["run_log_ledger_consistency"])
+run_market_data_parity = _lazy_handler(_LAZY_HANDLER_REFS["run_market_data_parity"])
+run_missed_buy_review = _lazy_handler(_LAZY_HANDLER_REFS["run_missed_buy_review"])
+run_ml_dataset_export_check = _lazy_handler(_LAZY_HANDLER_REFS["run_ml_dataset_export_check"])
+run_model_promotion_evidence_report = _lazy_handler(
+    _LAZY_HANDLER_REFS["run_model_promotion_evidence_report"]
+)
+run_model_validation_governance_report = _lazy_handler(
+    _LAZY_HANDLER_REFS["run_model_validation_governance_report"]
+)
+run_monday_readiness_check = _lazy_handler(_LAZY_HANDLER_REFS["run_monday_readiness_check"])
+run_observability_health = _lazy_handler(_LAZY_HANDLER_REFS["run_observability_health"])
+run_operator_intelligence_dashboard = _lazy_handler(
+    _LAZY_HANDLER_REFS["run_operator_intelligence_dashboard"]
+)
+run_order_health = _lazy_handler(_LAZY_HANDLER_REFS["run_order_health"])
+run_packaged_entrypoint_validation_report = _lazy_handler(
+    _LAZY_HANDLER_REFS["run_packaged_entrypoint_validation_report"]
+)
+run_paper_learning_authority_report = _lazy_handler(
+    _LAZY_HANDLER_REFS["run_paper_learning_authority_report"]
+)
+run_paper_replay_load_probe_report = _lazy_handler(
+    _LAZY_HANDLER_REFS["run_paper_replay_load_probe_report"]
+)
+run_pattern_learning_inputs_report = _lazy_handler(
+    _LAZY_HANDLER_REFS["run_pattern_learning_inputs_report"]
+)
+run_point_in_time_archive = _lazy_handler(_LAZY_HANDLER_REFS["run_point_in_time_archive"])
+run_portfolio_risk_report = _lazy_handler(_LAZY_HANDLER_REFS["run_portfolio_risk_report"])
+run_post_trade_learning_report = _lazy_handler(_LAZY_HANDLER_REFS["run_post_trade_learning_report"])
+run_rejected_outcomes_health = _lazy_handler(_LAZY_HANDLER_REFS["run_rejected_outcomes_health"])
+run_rejection_summary = _lazy_handler(_LAZY_HANDLER_REFS["run_rejection_summary"])
+run_research_export = _lazy_handler(_LAZY_HANDLER_REFS["run_research_export"])
+run_resource_readiness = _lazy_handler(_LAZY_HANDLER_REFS["run_resource_readiness"])
+run_rollout_contract_report = _lazy_handler(_LAZY_HANDLER_REFS["run_rollout_contract_report"])
+run_runtime_health = _lazy_handler(_LAZY_HANDLER_REFS["run_runtime_health"])
+run_runtime_health_trend = _lazy_handler(_LAZY_HANDLER_REFS["run_runtime_health_trend"])
+run_secrets_hygiene_report = _lazy_handler(_LAZY_HANDLER_REFS["run_secrets_hygiene_report"])
+run_secrets_manager_readiness_report = _lazy_handler(
+    _LAZY_HANDLER_REFS["run_secrets_manager_readiness_report"]
+)
+run_setup_breakdown = _lazy_handler(_LAZY_HANDLER_REFS["run_setup_breakdown"])
+run_shadow_prediction_report = _lazy_handler(_LAZY_HANDLER_REFS["run_shadow_prediction_report"])
+run_signal_source_readiness = _lazy_handler(_LAZY_HANDLER_REFS["run_signal_source_readiness"])
+run_decision_snapshot_health = _lazy_handler(_LAZY_HANDLER_REFS["run_decision_snapshot_health"])
+run_sqlite_ownership_report = _lazy_handler(_LAZY_HANDLER_REFS["run_sqlite_ownership_report"])
+run_symbol_pattern_outcomes = _lazy_handler(_LAZY_HANDLER_REFS["run_symbol_pattern_outcomes"])
+run_trading_education_coverage = _lazy_handler(_LAZY_HANDLER_REFS["run_trading_education_coverage"])
+run_trading_education_health = _lazy_handler(_LAZY_HANDLER_REFS["run_trading_education_health"])
+run_trading_education_review = _lazy_handler(_LAZY_HANDLER_REFS["run_trading_education_review"])
+run_transformer_authority_report = _lazy_handler(
+    _LAZY_HANDLER_REFS["run_transformer_authority_report"]
+)
+run_volatile_session_intelligence_report = _lazy_handler(
+    _LAZY_HANDLER_REFS["run_volatile_session_intelligence_report"]
+)
+run_volume_clock_vpin_report = _lazy_handler(_LAZY_HANDLER_REFS["run_volume_clock_vpin_report"])
 
 BASE_DIR = ROOT_DIR
 SCRIPT_DIR = BASE_DIR / "scripts"
@@ -356,7 +487,31 @@ def _compat_env() -> dict[str, str]:
 # *_report.py scripts are handled in-process via the reports/ package instead.
 COMMANDS = build_legacy_subprocess_commands(SCRIPT_DIR)
 
-REPORT_COMMANDS = get_report_commands()
+
+class _LazyReportCommands:
+    def _commands(self):
+        return get_report_commands()
+
+    def __contains__(self, command: str) -> bool:
+        return command in self._commands()
+
+    def __getitem__(self, command: str):
+        return self._commands()[command]
+
+    def get(self, command: str, default=None):
+        return self._commands().get(command, default)
+
+    def keys(self):
+        return self._commands().keys()
+
+    def items(self):
+        return self._commands().items()
+
+    def values(self):
+        return self._commands().values()
+
+
+REPORT_COMMANDS = _LazyReportCommands()
 
 
 def _print_section(label: str) -> None:

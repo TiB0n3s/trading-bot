@@ -10,9 +10,14 @@ __pycache__
 venv
 .venv
 data
+backups
+data_archive
+research_exports
+session_logs
 ml/models
 runtime_state
 strategy_memory_history
+*.bak*
 *.db
 *.db-*
 *.sqlite
@@ -20,3 +25,4 @@ strategy_memory_history
 *.parquet
 *.csv
 *.joblib
+*.gz

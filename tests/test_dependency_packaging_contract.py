@@ -33,6 +33,7 @@ DEV_ONLY_PINS = {
     "pip-audit",
     "pre-commit",
     "pytest",
+    "pytest-xdist",
     "ruff",
 }
 

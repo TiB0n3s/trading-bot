@@ -42,6 +42,17 @@ def reset_auto_buy_runtime_defaults():
     auto_buy_manager._rolling_momentum_context_cache = None
 
 
+def setup_function(_):
+    reset_auto_buy_runtime_defaults()
+    auto_buy_manager.memory_for_signal = lambda symbol, context: {"available": False}
+    auto_buy_manager.auto_buy_prediction_context = lambda symbol: {
+        "available": True,
+        "ml_prediction_score": 58.0,
+        "ml_prediction_bucket": "high_55_plus",
+        "ml_prediction_sample_size": 100,
+    }
+
+
 def assert_equal(actual, expected, label):
     if actual != expected:
         raise AssertionError(f"{label}: expected {expected!r}, got {actual!r}")

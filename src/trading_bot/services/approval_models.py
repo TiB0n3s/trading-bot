@@ -56,6 +56,7 @@ class MLAuthorityOutcome:
     safety_check_passed: bool
     safety_blockers: list[str] = field(default_factory=list)
     size_cap_pct: float | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -78,6 +79,7 @@ class MLAuthorityOutcome:
             "safety_check_passed": self.safety_check_passed,
             "safety_blockers": list(self.safety_blockers),
             "size_cap_pct": self.size_cap_pct,
+            "metadata": dict(self.metadata),
         }
 
 

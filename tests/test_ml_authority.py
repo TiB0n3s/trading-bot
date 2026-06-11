@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import sys
+import tempfile
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -196,6 +197,44 @@ def test_stale_model_guard_disables_all_ml_authority_effects():
     assert "deterministic fallback" in outcome.reason
 
 
+def test_ml_authority_circuit_breaker_degrades_repeated_failures():
+    with tempfile.TemporaryDirectory() as tmp:
+        circuit_path = str(Path(tmp) / "ml_authority_circuit.json")
+        config = _config(
+            authority_mode="live_block",
+            max_age_seconds=3600,
+            circuit_breaker={
+                "enabled": True,
+                "threshold": 2,
+                "recovery_seconds": 600,
+                "path": circuit_path,
+                "open_mode": "observe_only_compare",
+            },
+        )
+        prediction = {
+            "prediction_generated_at": "2999-01-01T00:00:00+00:00",
+            "prediction_status": "failed",
+        }
+        first = evaluate_ml_authority_outcome(
+            prediction_gate=_gate(),
+            ml_prediction=prediction,
+            ml_authority_config=config,
+            execution_mode="cash_full",
+        )
+        second = evaluate_ml_authority_outcome(
+            prediction_gate=_gate(),
+            ml_prediction=prediction,
+            ml_authority_config=config,
+            execution_mode="cash_full",
+        )
+
+    assert first.metadata["circuit_breaker"]["state"] == "closed"
+    assert second.metadata["circuit_breaker"]["state"] == "open"
+    assert second.mode == "observe_only_compare"
+    assert second.enforced is False
+    assert "circuit open" in second.reason
+
+
 def main():
     tests = [
         test_observe_mode_records_negative_compare_without_enforcement,
@@ -206,6 +245,7 @@ def main():
         test_recency_uses_only_canonical_prediction_generated_at,
         test_recency_handles_naive_and_timezone_aware_canonical_timestamps,
         test_stale_model_guard_disables_all_ml_authority_effects,
+        test_ml_authority_circuit_breaker_degrades_repeated_failures,
     ]
     for test in tests:
         test()

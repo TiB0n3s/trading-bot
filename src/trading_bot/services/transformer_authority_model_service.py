@@ -61,6 +61,35 @@ def _safe_sigmoid(value: float) -> float:
     return z / (1.0 + z)
 
 
+def _risk_probability_from_forecast(
+    account_state: dict[str, Any],
+) -> tuple[float | None, str | None]:
+    containers = [
+        account_state.get("tft_multi_horizon_forecast"),
+        account_state.get("multi_horizon_forecast"),
+        account_state.get("transformer_forecast"),
+        account_state.get("transformer_authority_forecast"),
+    ]
+    keys = (
+        "high_risk_excursion_probability",
+        "risk_excursion_probability",
+        "downside_excursion_probability",
+        "probability_high_risk_excursion",
+        "t60_high_risk_probability",
+        "t60_liquidity_cliff_probability",
+    )
+    for container in containers:
+        if not isinstance(container, dict):
+            continue
+        for key in keys:
+            try:
+                if container.get(key) is not None:
+                    return float(container.get(key)), key
+            except Exception:
+                continue
+    return None, None
+
+
 def _model_by_id(registry: dict[str, Any], model_id: str) -> dict[str, Any] | None:
     for model in registry.get("models") or []:
         if str(model.get("model_id") or "") == model_id:
@@ -327,10 +356,23 @@ def evaluate_transformer_authority(
     block_threshold = float(env.get("TRANSFORMER_BLOCK_THRESHOLD", "0.35"))
     size_down_threshold = float(env.get("TRANSFORMER_SIZE_DOWN_THRESHOLD", "0.45"))
     support_threshold = float(env.get("TRANSFORMER_SUPPORT_THRESHOLD", "0.60"))
+    risk_excursion_threshold = float(env.get("TRANSFORMER_HIGH_RISK_EXCURSION_THRESHOLD", "0.70"))
+    risk_probability, risk_probability_source = _risk_probability_from_forecast(account_state)
     decision = "allow"
     size_multiplier = 1.0
     reason = "transformer authority allows"
-    if probability < block_threshold and mode in {"paper_gate", "live_candidate", "warn_only"}:
+    if (
+        risk_probability is not None
+        and risk_probability >= risk_excursion_threshold
+        and mode in {"paper_gate", "live_candidate", "warn_only"}
+    ):
+        decision = "block"
+        size_multiplier = 0.0
+        reason = (
+            "transformer high-risk excursion forecast "
+            f"{risk_probability:.3f} >= threshold {risk_excursion_threshold:.3f}"
+        )
+    elif probability < block_threshold and mode in {"paper_gate", "live_candidate", "warn_only"}:
         decision = "block"
         size_multiplier = 0.0
         reason = (
@@ -354,6 +396,11 @@ def evaluate_transformer_authority(
         "size_multiplier": size_multiplier,
         "reason": reason,
         "probability": round(probability, 6),
+        "risk_excursion_probability": (
+            round(risk_probability, 6) if risk_probability is not None else None
+        ),
+        "risk_excursion_probability_source": risk_probability_source,
+        "risk_excursion_threshold": risk_excursion_threshold,
         "score": score,
         "staleness_guard": guard,
     }

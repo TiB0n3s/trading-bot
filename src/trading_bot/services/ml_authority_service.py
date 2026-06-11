@@ -4,6 +4,10 @@ from datetime import datetime, timezone
 from typing import Any
 
 from services.approval_models import MLAuthorityOutcome
+from services.ml_authority_circuit_breaker_service import (
+    MLAuthorityCircuitBreaker,
+    circuit_config_from,
+)
 
 _ML_CONFIDENCE_RANK = {
     None: -1,
@@ -54,6 +58,45 @@ def _float_or_none(value: Any) -> float | None:
         return float(value)
     except Exception:
         return None
+
+
+def _prediction_health_failure_reason(
+    *,
+    ml_prediction: dict[str, Any],
+    age_seconds: float | None,
+    max_age_seconds: int,
+    model_fallback_required: bool,
+) -> str | None:
+    status_values = {
+        str(ml_prediction.get(key) or "").strip().lower()
+        for key in (
+            "status",
+            "prediction_status",
+            "model_status",
+            "health",
+            "cache_status",
+        )
+    }
+    failed_statuses = {
+        "failed",
+        "failure",
+        "error",
+        "errored",
+        "stale",
+        "missing",
+        "unavailable",
+        "fallback_required",
+    }
+    failed = sorted(value for value in status_values if value in failed_statuses)
+    if failed:
+        return f"prediction_status={failed[0]}"
+    if model_fallback_required:
+        return "model_staleness_guard=fallback_required"
+    if max_age_seconds > 0 and age_seconds is None:
+        return "prediction_freshness_timestamp_missing"
+    if max_age_seconds > 0 and age_seconds is not None and age_seconds > max_age_seconds:
+        return f"prediction_stale age={age_seconds:.1f}s max={max_age_seconds}s"
+    return None
 
 
 def _late_chase_entry_risk(
@@ -285,6 +328,7 @@ def evaluate_ml_authority_outcome(
     mode = str(config.get("authority_mode") or "observe_only_compare").strip().lower()
     if mode not in {"observe_only_compare", "size_down_only", "paper_block", "live_block"}:
         mode = "observe_only_compare"
+    requested_mode = mode
 
     advisory_decision = prediction_gate.get("ml_prediction_compare_decision")
     negative_decisions = set(config.get("negative_decisions") or ("avoid", "block", "caution"))
@@ -330,6 +374,58 @@ def evaluate_ml_authority_outcome(
             "model staleness guard requires deterministic fallback: "
             f"{model_guard.get('reason') or model_guard.get('status')}"
         )
+
+    circuit_metadata: dict[str, Any] = {
+        "enabled": False,
+        "state": "disabled",
+        "requested_mode": requested_mode,
+        "effective_mode": mode,
+    }
+    circuit_cfg = circuit_config_from(config)
+    if circuit_cfg.get("enabled"):
+        failure_reason = _prediction_health_failure_reason(
+            ml_prediction=ml_prediction or {},
+            age_seconds=age_seconds,
+            max_age_seconds=max_age_seconds,
+            model_fallback_required=model_fallback_required,
+        )
+        breaker = MLAuthorityCircuitBreaker(
+            path=circuit_cfg["path"],
+            threshold=int(circuit_cfg["threshold"]),
+            recovery_seconds=int(circuit_cfg["recovery_seconds"]),
+        )
+        circuit_state = breaker.record(
+            failure=bool(failure_reason),
+            reason=failure_reason,
+        )
+        circuit_metadata = {
+            "enabled": True,
+            "state": circuit_state.state,
+            "consecutive_failures": circuit_state.consecutive_failures,
+            "threshold": circuit_state.threshold,
+            "opened_at": circuit_state.opened_at,
+            "open_until": circuit_state.open_until,
+            "last_failure_reason": circuit_state.last_failure_reason,
+            "requested_mode": requested_mode,
+            "effective_mode": mode,
+            "open_mode": circuit_cfg["open_mode"],
+        }
+        if circuit_state.state == "open":
+            degraded_mode = str(circuit_cfg["open_mode"] or "observe_only_compare")
+            if degraded_mode not in {
+                "observe_only_compare",
+                "size_down_only",
+                "paper_block",
+                "live_block",
+            }:
+                degraded_mode = "observe_only_compare"
+            mode = degraded_mode
+            circuit_metadata["effective_mode"] = mode
+            safety_blockers.append(
+                "ML authority circuit open; "
+                f"degraded {requested_mode} to {mode}: "
+                f"{circuit_state.last_failure_reason or 'recent prediction failures'}"
+            )
     safety_check_passed = not safety_blockers
     recency_ok = max_age_seconds <= 0 or (
         age_seconds is not None and age_seconds <= max_age_seconds
@@ -406,4 +502,8 @@ def evaluate_ml_authority_outcome(
         safety_check_passed=safety_check_passed,
         safety_blockers=safety_blockers,
         size_cap_pct=size_cap_pct,
+        metadata={
+            "circuit_breaker": circuit_metadata,
+            "requested_mode": requested_mode,
+        },
     )

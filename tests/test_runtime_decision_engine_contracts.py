@@ -131,6 +131,32 @@ def test_gate_engine_enforced_block_overrides_approved_state():
     assert_equal(payload["final_decision"], "rejected", "blocking final decision")
 
 
+def test_gate_engine_accepts_legacy_src_gate_result_alias():
+    from src.trading_bot.runtime.gate_engine import CallableGate as LegacyCallableGate
+    from src.trading_bot.runtime.gate_engine import GateEngine as LegacyGateEngine
+    from src.trading_bot.runtime.trace import GateResult as LegacyGateResult
+
+    trace = LegacyGateEngine(
+        [
+            LegacyCallableGate(
+                "hard_block",
+                "risk",
+                lambda _state: LegacyGateResult(
+                    gate_id="hard_block",
+                    layer="risk",
+                    decision="block",
+                    authority="live",
+                    enforced=True,
+                ),
+            )
+        ]
+    ).run({"final_decision": "approved"})
+
+    payload = trace.to_dict()
+    assert_equal(payload["blocking_gate"], "hard_block", "legacy blocking gate")
+    assert_equal(payload["final_decision"], "rejected", "legacy blocking final decision")
+
+
 def test_decision_state_serializes_to_legacy_account_state():
     state = DecisionState(
         signal={"symbol": "AAPL", "action": "buy"},
@@ -427,6 +453,8 @@ def main():
     tests = [
         test_authority_matrix_standardizes_runtime_permissions,
         test_gate_engine_records_ordered_trace_and_caps,
+        test_gate_engine_enforced_block_overrides_approved_state,
+        test_gate_engine_accepts_legacy_src_gate_result_alias,
         test_decision_state_serializes_to_legacy_account_state,
         test_signal_candidates_normalize_webhook_and_auto_buy,
         test_intelligence_adjudicator_aggregates_model_surfaces,

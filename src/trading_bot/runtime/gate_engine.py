@@ -26,7 +26,7 @@ class CallableGate:
         started = perf_counter()
         result = self.fn(state)
         elapsed_ms = (perf_counter() - started) * 1000.0
-        if isinstance(result, GateResult):
+        if isinstance(result, GateResult) or callable(getattr(result, "to_dict", None)):
             return GateResult(
                 **{
                     **result.to_dict(),

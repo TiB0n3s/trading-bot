@@ -45,6 +45,12 @@ class FakeMarketData:
         return "iex"
 
 
+class FakeListMarketData(FakeMarketData):
+    def get_barset_with_fallback(self, symbol, timeframe, **kwargs):
+        self.calls.append((symbol, timeframe, kwargs))
+        return [SimpleNamespace(**row) for row in self.rows]
+
+
 def _setup_classifier(snapshot):
     return SimpleNamespace(
         setup_label="confirmed_near_vwap_recovery",
@@ -128,6 +134,30 @@ def test_build_snapshot_uses_market_data_repository_context_and_setup(tmp_path):
     assert snapshot["feature_available_at"]
 
 
+def test_build_snapshot_accepts_list_style_bar_response(tmp_path):
+    service, _repo = _service(tmp_path)
+    rows = [
+        {
+            "symbol": "AAPL",
+            "timestamp": f"2026-06-11T13:{i:02d}:00Z",
+            "open": 99 + i,
+            "high": 101 + i,
+            "low": 98 + i,
+            "close": 100 + i,
+            "volume": 1000 + i,
+            "vwap": 100.25 + i,
+        }
+        for i in range(20)
+    ]
+    service.market_data = FakeListMarketData(rows)
+
+    snapshot = service.build_snapshot("AAPL")
+
+    assert snapshot["symbol"] == "AAPL"
+    assert snapshot["bar_count"] == 20
+    assert snapshot["last_price"] == 119
+
+
 def test_insert_snapshot_delegates_to_repository(tmp_path):
     service, repo = _service(tmp_path)
 
@@ -179,6 +209,7 @@ def test_collect_all_symbols_reuses_latest_snapshot_as_stale_when_feed_is_thin(t
 if __name__ == "__main__":
     tests = [
         test_build_snapshot_uses_market_data_repository_context_and_setup,
+        test_build_snapshot_accepts_list_style_bar_response,
         test_insert_snapshot_delegates_to_repository,
         test_collect_all_symbols_reuses_latest_snapshot_as_stale_when_feed_is_thin,
     ]

@@ -11,6 +11,12 @@ import sys
 import time
 from pathlib import Path
 
+ROOT = Path(__file__).resolve().parents[1]
+for path in (ROOT, ROOT / "scripts", ROOT / "src"):
+    path_text = str(path)
+    if path_text not in sys.path:
+        sys.path.insert(0, path_text)
+
 from repositories.job_runs_repo import JobRunsRepository
 from services.job_runs_service import JobRunsService, _now_iso, build_default_job_runs_service
 

@@ -46,6 +46,26 @@ def _timestamp_text(value: Any) -> str:
     return value.isoformat() if hasattr(value, "isoformat") else str(value or "")
 
 
+def _iter_bar_rows(bars: Any) -> list[tuple[Any, Any]]:
+    if bars is None:
+        return []
+    if hasattr(bars, "empty") and bars.empty:
+        return []
+    if hasattr(bars, "iterrows"):
+        return list(bars.iterrows())
+    if isinstance(bars, dict):
+        iterable = bars.values()
+    else:
+        iterable = bars
+    try:
+        return [
+            (_row_value(row, "timestamp", "t", "time") or idx, row)
+            for idx, row in enumerate(iterable)
+        ]
+    except TypeError:
+        return []
+
+
 def dataframe_to_canonical_bar_rows(
     bars_df: Any,
     *,
@@ -60,15 +80,17 @@ def dataframe_to_canonical_bar_rows(
     capture and forward labeling should therefore request the same candle fields,
     even when a downstream consumer only needs close/high/low.
     """
-    if bars_df is None or getattr(bars_df, "empty", True):
+    bar_rows = _iter_bar_rows(bars_df)
+    if not bar_rows:
         return []
 
     symbol = str(symbol or "").strip().upper()
     if "symbol" in getattr(bars_df, "columns", []):
         bars_df = bars_df[bars_df["symbol"] == symbol]
+        bar_rows = _iter_bar_rows(bars_df)
 
     rows: list[dict[str, Any]] = []
-    for idx, row in bars_df.iterrows():
+    for idx, row in bar_rows:
         close = _float_or_none(_row_value(row, "close", "c"))
         vwap = _float_or_none(_row_value(row, "vwap", "vw", "VWAP"))
         rows.append(

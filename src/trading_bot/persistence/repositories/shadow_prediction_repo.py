@@ -214,3 +214,87 @@ class ShadowPredictionRepository:
                     (market_date,),
                 ).fetchall()
         return [dict(row) for row in rows]
+
+    def load_shadow_authority_comparison(
+        self,
+        *,
+        market_date: str,
+        shadow_approve_threshold: float = 55.0,
+        limit: int = 1000,
+    ) -> list[dict[str, Any]]:
+        """Compare latest shadow model posture with latest runtime decision per symbol."""
+        if not self.db_path.exists():
+            return []
+        with sqlite3.connect(f"file:{self.db_path}?mode=ro", uri=True) as con:
+            con.row_factory = sqlite3.Row
+            tables = {
+                row["name"]
+                for row in con.execute(
+                    "SELECT name FROM sqlite_master WHERE type='table'"
+                ).fetchall()
+            }
+            if "shadow_predictions" not in tables or "decision_snapshots" not in tables:
+                return []
+            decision_columns = {
+                row["name"] for row in con.execute("PRAGMA table_info(decision_snapshots)")
+            }
+            approved_expr = "ds.approved" if "approved" in decision_columns else "NULL"
+            final_expr = "ds.final_decision" if "final_decision" in decision_columns else "NULL"
+            action_filter = "AND lower(ds.action) = 'buy'" if "action" in decision_columns else ""
+            rows = con.execute(
+                f"""
+                WITH latest_shadow AS (
+                    SELECT
+                        sp.*,
+                        ROW_NUMBER() OVER (
+                            PARTITION BY sp.model_id, sp.symbol
+                            ORDER BY datetime(sp.prediction_time) DESC, sp.id DESC
+                        ) AS rn
+                    FROM shadow_predictions sp
+                    WHERE sp.market_date = ?
+                ),
+                latest_decision AS (
+                    SELECT
+                        ds.symbol,
+                        ds.decision_time,
+                        {approved_expr} AS approved,
+                        {final_expr} AS final_decision,
+                        ROW_NUMBER() OVER (
+                            PARTITION BY ds.symbol
+                            ORDER BY datetime(ds.decision_time) DESC, ds.id DESC
+                        ) AS rn
+                    FROM decision_snapshots ds
+                    WHERE substr(ds.decision_time, 1, 10) = ?
+                      {action_filter}
+                )
+                SELECT
+                    ls.market_date,
+                    ls.symbol,
+                    ls.model_id,
+                    ls.prediction_time,
+                    ls.prediction_score,
+                    ls.raw_prediction_score,
+                    CASE
+                        WHEN ls.prediction_score >= ? THEN 'approve'
+                        ELSE 'block'
+                    END AS shadow_decision,
+                    ld.decision_time AS runtime_decision_time,
+                    ld.approved AS runtime_approved,
+                    ld.final_decision AS runtime_final_decision,
+                    CASE
+                        WHEN ld.symbol IS NULL THEN NULL
+                        WHEN COALESCE(ld.approved, 0) = 1 THEN 'approve'
+                        WHEN lower(COALESCE(ld.final_decision, '')) IN ('approved', 'allow') THEN 'approve'
+                        ELSE 'block'
+                    END AS runtime_decision
+                FROM latest_shadow ls
+                LEFT JOIN latest_decision ld
+                  ON ld.symbol = ls.symbol
+                 AND ld.rn = 1
+                WHERE ls.rn = 1
+                ORDER BY ls.model_id, ls.prediction_score DESC, ls.symbol
+                LIMIT ?
+                """,
+                (market_date, market_date, float(shadow_approve_threshold), int(limit)),
+            ).fetchall()
+        return [dict(row) for row in rows]

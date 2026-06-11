@@ -64,12 +64,67 @@ def _int(value: Any) -> int:
         return 0
 
 
+def _symbol_gate_rows(
+    row: dict[str, Any],
+    *,
+    min_symbol_accuracy: float,
+    toxicity_block_threshold: float,
+    max_rows: int = 20,
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    raw = row.get("symbol_metrics") or row.get("per_symbol_metrics") or {}
+    if not isinstance(raw, dict) or not raw:
+        return [], {
+            "status": "insufficient_symbol_metrics",
+            "blocked_count": 0,
+            "allowed_count": 0,
+            "reason": "diagnostic does not expose per-symbol accuracy/toxicity metrics",
+        }
+    rows: list[dict[str, Any]] = []
+    for symbol, metrics in raw.items():
+        if not isinstance(metrics, dict):
+            continue
+        accuracy = _float(metrics.get("accuracy"))
+        toxicity = _float(
+            metrics.get("vpin_toxicity_20")
+            or metrics.get("vpin_toxicity")
+            or metrics.get("toxicity")
+        )
+        blockers: list[str] = []
+        if accuracy is None:
+            blockers.append("symbol_accuracy_missing")
+        elif accuracy < min_symbol_accuracy:
+            blockers.append(f"symbol_accuracy:{accuracy:.4f}<{min_symbol_accuracy:.4f}")
+        if toxicity is not None and toxicity >= toxicity_block_threshold:
+            blockers.append(f"vpin_toxicity:{toxicity:.4f}>={toxicity_block_threshold:.4f}")
+        rows.append(
+            {
+                "symbol": str(symbol).upper(),
+                "accuracy": round(accuracy, 4) if accuracy is not None else None,
+                "vpin_toxicity": round(toxicity, 4) if toxicity is not None else None,
+                "authority_status": "paper_gate_allowed" if not blockers else "blocked",
+                "blockers": blockers,
+            }
+        )
+    rows.sort(key=lambda item: (item["authority_status"], item["symbol"]))
+    blocked = [item for item in rows if item["authority_status"] == "blocked"]
+    allowed = [item for item in rows if item["authority_status"] != "blocked"]
+    return rows[:max_rows], {
+        "status": "measured",
+        "blocked_count": len(blocked),
+        "allowed_count": len(allowed),
+        "min_symbol_accuracy": min_symbol_accuracy,
+        "toxicity_block_threshold": toxicity_block_threshold,
+    }
+
+
 def _assess_label(
     row: dict[str, Any],
     *,
     min_rows: int,
     min_symbols: int,
     min_accuracy: float,
+    min_symbol_accuracy: float,
+    toxicity_block_threshold: float,
 ) -> dict[str, Any]:
     training = row.get("training") or {}
     rows_loaded = _int(row.get("rows_loaded"))
@@ -95,6 +150,11 @@ def _assess_label(
     total_labeled = sum(_int(value) for value in label_counts.values())
     positive_label_rate = round(positive_count / total_labeled, 4) if total_labeled else None
     negative_label_rate = round(negative_count / total_labeled, 4) if total_labeled else None
+    symbol_gates, symbol_gate_summary = _symbol_gate_rows(
+        row,
+        min_symbol_accuracy=min_symbol_accuracy,
+        toxicity_block_threshold=toxicity_block_threshold,
+    )
     return {
         "label_target": str(row.get("label_target") or "unknown"),
         "model_id": str(row.get("model_id") or "unknown"),
@@ -112,6 +172,8 @@ def _assess_label(
         "negative_label_rate": negative_label_rate,
         "failed_thresholds": failed,
         "artifact_registered_for_live_authority": False,
+        "symbol_gate_summary": symbol_gate_summary,
+        "symbol_gates": symbol_gates,
     }
 
 
@@ -121,6 +183,8 @@ def build_historical_bar_model_intelligence(
     min_rows: int = 5000,
     min_symbols: int = 20,
     min_accuracy: float = 0.50,
+    min_symbol_accuracy: float = 0.60,
+    toxicity_block_threshold: float = 0.70,
     max_labels: int = 4,
 ) -> dict[str, Any]:
     """Return compact observe-only model readiness evidence."""
@@ -133,6 +197,8 @@ def build_historical_bar_model_intelligence(
             min_rows=min_rows,
             min_symbols=min_symbols,
             min_accuracy=min_accuracy,
+            min_symbol_accuracy=min_symbol_accuracy,
+            toxicity_block_threshold=toxicity_block_threshold,
         )
         for row in latest.values()
     ]
@@ -168,6 +234,8 @@ def build_historical_bar_model_intelligence(
             "min_rows": min_rows,
             "min_symbols": min_symbols,
             "min_accuracy": min_accuracy,
+            "min_symbol_accuracy": min_symbol_accuracy,
+            "toxicity_block_threshold": toxicity_block_threshold,
         },
         "labels": labels[:max_labels],
         "guardrails": {

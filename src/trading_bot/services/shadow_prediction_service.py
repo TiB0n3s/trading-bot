@@ -14,6 +14,7 @@ from ml_platform.config import MODEL_REGISTRY_PATH
 from ml_platform.registry import load_registry
 
 SHADOW_REPORT_VERSION = "shadow_prediction_run_v1"
+SHADOW_HEALTH_REPORT_VERSION = "shadow_prediction_health_v1"
 SHADOW_CANDIDATE_STATUSES = ("candidate", "shadow", "observe_only")
 
 
@@ -179,4 +180,55 @@ class ShadowPredictionService:
             "artifact_path": selected.artifact_path,
             "feature_row_count": len(feature_rows),
             "rows_written": changed,
+        }
+
+    def health_report(
+        self,
+        *,
+        market_date: str,
+        shadow_approve_threshold: float = 55.0,
+        max_divergence_rate: float = 0.35,
+        min_comparable_rows: int = 10,
+        limit: int = 1000,
+    ) -> dict[str, Any]:
+        rows = self.repository.load_shadow_authority_comparison(
+            market_date=market_date,
+            shadow_approve_threshold=shadow_approve_threshold,
+            limit=limit,
+        )
+        comparable = [row for row in rows if row.get("runtime_decision") is not None]
+        divergences = [
+            row
+            for row in comparable
+            if str(row.get("shadow_decision")) != str(row.get("runtime_decision"))
+        ]
+        comparable_count = len(comparable)
+        divergence_rate = len(divergences) / comparable_count if comparable_count else None
+        agreement_rate = 1.0 - divergence_rate if divergence_rate is not None else None
+        alert = bool(
+            comparable_count >= int(min_comparable_rows)
+            and divergence_rate is not None
+            and divergence_rate > float(max_divergence_rate)
+        )
+        return {
+            "report_version": SHADOW_HEALTH_REPORT_VERSION,
+            "runtime_effect": "shadow_health_monitor_no_order_authority",
+            "market_date": market_date,
+            "status": "divergence_alert" if alert else "ok",
+            "rows": len(rows),
+            "comparable_rows": comparable_count,
+            "divergence_rows": len(divergences),
+            "divergence_rate": (round(divergence_rate, 6) if divergence_rate is not None else None),
+            "agreement_rate": round(agreement_rate, 6) if agreement_rate is not None else None,
+            "thresholds": {
+                "shadow_approve_threshold": shadow_approve_threshold,
+                "max_divergence_rate": max_divergence_rate,
+                "min_comparable_rows": min_comparable_rows,
+            },
+            "promotion_certified": bool(
+                comparable_count >= int(min_comparable_rows)
+                and divergence_rate is not None
+                and divergence_rate <= float(max_divergence_rate)
+            ),
+            "sample_divergences": divergences[:10],
         }

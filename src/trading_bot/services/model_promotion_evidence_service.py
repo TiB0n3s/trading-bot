@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from repositories.shadow_prediction_repo import ShadowPredictionRepository
 from services.full_session_paper_replay_service import (
     FullSessionReplayConfig,
     build_full_session_paper_replay_payload,
@@ -16,6 +17,7 @@ from services.ml_promotion_metrics_service import (
     build_ml_promotion_metrics_payload,
 )
 from services.model_validation_governance_service import build_model_validation_governance_payload
+from services.shadow_prediction_service import ShadowPredictionService
 
 from ml_platform.feature_parity_contract import parity_contract_summary
 from ml_platform.lifecycle import lifecycle_contract_summary
@@ -115,6 +117,14 @@ def build_model_promotion_evidence_payload(
             end_date="2026-06-04",
             db_path=base_dir / "trades.db",
         )
+    )
+    shadow_health_date = "2026-06-04"
+    shadow_health = ShadowPredictionService(
+        repository=ShadowPredictionRepository(base_dir / "trades.db")
+    ).health_report(
+        market_date=shadow_health_date,
+        min_comparable_rows=10,
+        max_divergence_rate=0.35,
     )
     measured_metrics = promotion_metrics.get("metrics") or {}
     paper_authority = promotion_metrics.get("paper_authority_assessment") or {}
@@ -242,7 +252,7 @@ def build_model_promotion_evidence_payload(
             "caveat": "operator accepted replay/historical surrogate because current live behavior was non-trading",
         },
         "shadow_serving": {
-            "ready": bool(best_candidate),
+            "ready": bool(best_candidate and shadow_health.get("promotion_certified")),
             "generated_at": generated_at,
             "runtime_effect": "serving_contract_only_no_runtime_enablement",
             "requirements": {
@@ -254,6 +264,10 @@ def build_model_promotion_evidence_payload(
                 "staleness_guard": True,
                 "model_version_audit": True,
             },
+            "shadow_health": shadow_health,
+            "blockers": []
+            if shadow_health.get("promotion_certified")
+            else [f"shadow_health:{shadow_health.get('status')}:{shadow_health_date}"],
         },
         "rollback_demotion": {
             "ready": True,

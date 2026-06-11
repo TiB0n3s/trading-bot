@@ -6,7 +6,7 @@ from pathlib import Path
 from statistics import mean
 
 from repositories.shadow_prediction_repo import ShadowPredictionRepository
-from services.shadow_prediction_service import SHADOW_REPORT_VERSION
+from services.shadow_prediction_service import SHADOW_REPORT_VERSION, ShadowPredictionService
 
 
 def _bucket(score) -> str:
@@ -40,7 +40,8 @@ def run_shadow_prediction_report(target_date: str, *, base_dir: Path) -> bool:
         print(f"[WARN] trades.db not found: {db_path}")
         return False
 
-    rows = ShadowPredictionRepository(db_path).load_shadow_prediction_outcomes(target_date)
+    repo = ShadowPredictionRepository(db_path)
+    rows = repo.load_shadow_prediction_outcomes(target_date)
     print(f"rows                   : {len(rows)}")
     if not rows:
         print("[WARN] no shadow prediction rows found")
@@ -93,11 +94,22 @@ def run_shadow_prediction_report(target_date: str, *, base_dir: Path) -> bool:
             f"outcomes={len(outcome_rows):>5} avg15={avg15_text:>9} avg30={avg30_text:>9}"
         )
 
+    health = ShadowPredictionService(repository=repo).health_report(market_date=target_date)
+    print()
+    print("Runtime divergence")
+    print(f"  health_version        : {health['report_version']}")
+    print(f"  status                : {health['status']}")
+    print(f"  comparable_rows       : {health['comparable_rows']}")
+    print(f"  divergence_rows       : {health['divergence_rows']}")
+    print(f"  divergence_rate       : {health['divergence_rate']}")
+    print(f"  agreement_rate        : {health['agreement_rate']}")
+    print(f"  promotion_certified   : {health['promotion_certified']}")
+
     if not with_outcomes:
         print()
         print("[WARN] shadow predictions exist but labeled forward outcomes are not available yet")
-        return False
+        return bool(health.get("comparable_rows"))
 
     print()
     print("[OK] shadow predictions are scoreable against labeled outcomes")
-    return True
+    return bool(health.get("status") != "divergence_alert")

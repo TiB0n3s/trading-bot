@@ -25,6 +25,7 @@ def _write_diag(
     generated_at: str,
     rows_loaded: int = 5900,
     symbol_count: int = 59,
+    symbol_metrics: dict | None = None,
 ) -> None:
     payload = {
         "report_version": "historical_bar_observe_training_v1",
@@ -42,6 +43,8 @@ def _write_diag(
             "provider": "sklearn_random_forest",
         },
     }
+    if symbol_metrics is not None:
+        payload["symbol_metrics"] = symbol_metrics
     path.write_text(json.dumps(payload), encoding="utf-8")
 
 
@@ -90,6 +93,9 @@ def test_historical_bar_model_intelligence_reports_observe_only_ready_labels():
     assert labels["triple_barrier_label"]["accuracy"] == 0.76
     assert labels["triple_barrier_label"]["positive_label_rate"] == 0.49
     assert labels["trend_scan_label"]["status"] == "observe_only_candidate_ready"
+    assert (
+        labels["trend_scan_label"]["symbol_gate_summary"]["status"] == "insufficient_symbol_metrics"
+    )
 
 
 def test_historical_bar_model_intelligence_marks_failed_thresholds():
@@ -119,8 +125,44 @@ def test_historical_bar_model_intelligence_marks_failed_thresholds():
     assert "accuracy:0.4200<0.5000" in label["failed_thresholds"]
 
 
+def test_historical_bar_model_intelligence_reports_symbol_level_gates():
+    with tempfile.TemporaryDirectory() as tmp:
+        candidate_dir = Path(tmp)
+        _write_diag(
+            candidate_dir / "historical_bar_triple_barrier_label_new.diagnostic.json",
+            label="triple_barrier_label",
+            accuracy=0.72,
+            generated_at="2026-06-07T00:00:00+00:00",
+            symbol_metrics={
+                "AAPL": {"accuracy": 0.71, "vpin_toxicity_20": 0.12},
+                "TSLA": {"accuracy": 0.52, "vpin_toxicity_20": 0.82},
+            },
+        )
+
+        payload = build_historical_bar_model_intelligence(
+            candidate_dir=candidate_dir,
+            min_rows=5000,
+            min_symbols=20,
+            min_accuracy=0.50,
+            min_symbol_accuracy=0.60,
+            toxicity_block_threshold=0.70,
+        )
+
+    label = payload["labels"][0]
+    summary = label["symbol_gate_summary"]
+    gates = {row["symbol"]: row for row in label["symbol_gates"]}
+    assert summary["status"] == "measured"
+    assert summary["allowed_count"] == 1
+    assert summary["blocked_count"] == 1
+    assert gates["AAPL"]["authority_status"] == "paper_gate_allowed"
+    assert gates["TSLA"]["authority_status"] == "blocked"
+    assert any("vpin_toxicity" in reason for reason in gates["TSLA"]["blockers"])
+
+
 if __name__ == "__main__":
     test_historical_bar_model_intelligence_reports_observe_only_ready_labels()
     print("[OK] test_historical_bar_model_intelligence_reports_observe_only_ready_labels")
     test_historical_bar_model_intelligence_marks_failed_thresholds()
     print("[OK] test_historical_bar_model_intelligence_marks_failed_thresholds")
+    test_historical_bar_model_intelligence_reports_symbol_level_gates()
+    print("[OK] test_historical_bar_model_intelligence_reports_symbol_level_gates")

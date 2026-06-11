@@ -115,10 +115,106 @@ def test_shadow_prediction_service_skips_when_no_candidate_exists():
     assert payload["rows_written"] == 0
 
 
+def test_shadow_prediction_health_reports_runtime_divergence():
+    with tempfile.TemporaryDirectory() as tmp:
+        db_path = Path(tmp) / "trades.db"
+        with sqlite3.connect(db_path) as con:
+            con.execute(
+                """
+                CREATE TABLE shadow_predictions (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    market_date TEXT,
+                    symbol TEXT,
+                    prediction_time TEXT,
+                    model_id TEXT,
+                    artifact_path TEXT,
+                    prediction_score REAL,
+                    raw_prediction_score REAL,
+                    feature_snapshot_id INTEGER,
+                    feature_available_at TEXT,
+                    generated_at TEXT,
+                    runtime_effect TEXT
+                )
+                """
+            )
+            con.execute(
+                """
+                CREATE TABLE decision_snapshots (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    decision_time TEXT,
+                    symbol TEXT,
+                    action TEXT,
+                    approved INTEGER,
+                    final_decision TEXT
+                )
+                """
+            )
+            con.executemany(
+                """
+                INSERT INTO shadow_predictions (
+                    market_date, symbol, prediction_time, model_id, artifact_path,
+                    prediction_score, raw_prediction_score, generated_at, runtime_effect
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                [
+                    (
+                        "2026-06-03",
+                        "AAPL",
+                        "2026-06-03T10:00:00+00:00",
+                        "candidate-1",
+                        "x",
+                        80.0,
+                        80.0,
+                        "2026-06-03T10:00:01+00:00",
+                        "shadow_only_no_live_authority",
+                    ),
+                    (
+                        "2026-06-03",
+                        "MSFT",
+                        "2026-06-03T10:00:00+00:00",
+                        "candidate-1",
+                        "x",
+                        20.0,
+                        20.0,
+                        "2026-06-03T10:00:01+00:00",
+                        "shadow_only_no_live_authority",
+                    ),
+                ],
+            )
+            con.executemany(
+                """
+                INSERT INTO decision_snapshots (
+                    decision_time, symbol, action, approved, final_decision
+                ) VALUES (?, ?, ?, ?, ?)
+                """,
+                [
+                    ("2026-06-03T10:01:00+00:00", "AAPL", "buy", 1, "approved"),
+                    ("2026-06-03T10:01:00+00:00", "MSFT", "buy", 1, "approved"),
+                ],
+            )
+
+        service = ShadowPredictionService(
+            repository=ShadowPredictionRepository(db_path),
+            registry_path=Path(tmp) / "registry.json",
+        )
+        payload = service.health_report(
+            market_date="2026-06-03",
+            min_comparable_rows=2,
+            max_divergence_rate=0.25,
+        )
+
+    assert payload["status"] == "divergence_alert"
+    assert payload["comparable_rows"] == 2
+    assert payload["divergence_rows"] == 1
+    assert payload["divergence_rate"] == 0.5
+    assert payload["promotion_certified"] is False
+
+
 if __name__ == "__main__":
     tests = [
         test_shadow_prediction_service_writes_clipped_observe_only_rows,
         test_shadow_prediction_service_skips_when_no_candidate_exists,
+        test_shadow_prediction_health_reports_runtime_divergence,
     ]
     for test in tests:
         test()

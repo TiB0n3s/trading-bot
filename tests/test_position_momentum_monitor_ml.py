@@ -14,10 +14,10 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "scripts"))
-
-import position_momentum_monitor as monitor
+sys.path.insert(0, str(ROOT / "src"))
 
 from repositories import position_momentum_repo
+from trading_bot.signals.auto_sell import manager as monitor
 
 
 class Position:

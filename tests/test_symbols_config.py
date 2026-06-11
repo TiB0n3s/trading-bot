@@ -13,6 +13,12 @@ sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "scripts"))
 
 from symbols_config import (
+    AI_INFRASTRUCTURE_APPROVED_SYMBOLS,
+    AI_INFRASTRUCTURE_APPROVED_SYMBOLS_LIST,
+    AI_INFRASTRUCTURE_CONTEXT_ONLY_SYMBOLS,
+    AI_INFRASTRUCTURE_CONTEXT_ONLY_SYMBOLS_LIST,
+    AI_INFRASTRUCTURE_SYMBOLS,
+    AI_INFRASTRUCTURE_SYMBOLS_LIST,
     APPROVED_SYMBOLS,
     CONTEXT_ONLY_SYMBOL_CONFIG,
     CONTEXT_ONLY_SYMBOLS,
@@ -55,6 +61,13 @@ EXPECTED_INTERNAL_ONLY = {
     "LHX",
     "HON",
     "TDY",
+    "INTC",
+    "CSCO",
+    "JNPR",
+    "MRVL",
+    "ANET",
+    "ETN",
+    "CEG",
 }
 
 
@@ -112,12 +125,63 @@ def test_spacex_catalyst_universe_has_explicit_authority_tiers():
         assert "context_only" in cfg["authority_note"]
 
 
+def test_ai_infrastructure_universe_has_explicit_authority_tiers():
+    expected_approved = {
+        "NVDA",
+        "AMD",
+        "INTC",
+        "AVGO",
+        "CSCO",
+        "JNPR",
+        "MRVL",
+        "ANET",
+        "VRT",
+        "ETN",
+        "GEV",
+        "CEG",
+    }
+    expected_context = {"IREN", "CIFR", "WULF", "CORZ", "NBIS", "CRWV", "OKLO", "SMR"}
+
+    assert set(AI_INFRASTRUCTURE_APPROVED_SYMBOLS_LIST) == expected_approved
+    assert AI_INFRASTRUCTURE_APPROVED_SYMBOLS == expected_approved
+    assert AI_INFRASTRUCTURE_APPROVED_SYMBOLS <= APPROVED_SYMBOLS
+
+    assert set(AI_INFRASTRUCTURE_CONTEXT_ONLY_SYMBOLS_LIST) == expected_context
+    assert AI_INFRASTRUCTURE_CONTEXT_ONLY_SYMBOLS == expected_context
+    assert AI_INFRASTRUCTURE_CONTEXT_ONLY_SYMBOLS <= CONTEXT_ONLY_SYMBOLS
+    assert AI_INFRASTRUCTURE_CONTEXT_ONLY_SYMBOLS.isdisjoint(APPROVED_SYMBOLS)
+
+    assert set(AI_INFRASTRUCTURE_SYMBOLS_LIST) == (
+        AI_INFRASTRUCTURE_APPROVED_SYMBOLS | AI_INFRASTRUCTURE_CONTEXT_ONLY_SYMBOLS
+    )
+    assert AI_INFRASTRUCTURE_SYMBOLS == (
+        AI_INFRASTRUCTURE_APPROVED_SYMBOLS | AI_INFRASTRUCTURE_CONTEXT_ONLY_SYMBOLS
+    )
+
+    for symbol in AI_INFRASTRUCTURE_CONTEXT_ONLY_SYMBOLS:
+        cfg = CONTEXT_ONLY_SYMBOL_CONFIG[symbol]
+        assert "authority_note" in cfg
+        assert "context_only" in cfg["authority_note"]
+        assert set(cfg["linked_symbols"]) <= APPROVED_SYMBOLS
+
+    assert CONTEXT_ONLY_SYMBOL_CONFIG["CIFR"]["authority_note"].startswith(
+        "context_only_normalized_from_user_cif"
+    )
+    assert CONTEXT_ONLY_SYMBOL_CONFIG["NBIS"]["authority_note"].startswith(
+        "context_only_normalized_from_user_nabis"
+    )
+    assert CONTEXT_ONLY_SYMBOL_CONFIG["CRWV"]["authority_note"].startswith(
+        "context_only_normalized_from_user_crw"
+    )
+
+
 def main():
     tests = [
         test_internal_bar_only_symbols_are_approved_but_not_tradingview,
         test_internal_bar_only_symbols_have_ranges_and_source_metadata,
         test_context_only_symbols_are_non_tradable_and_link_to_approved_symbols,
         test_spacex_catalyst_universe_has_explicit_authority_tiers,
+        test_ai_infrastructure_universe_has_explicit_authority_tiers,
     ]
 
     for test in tests:

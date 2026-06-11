@@ -78,6 +78,36 @@ not create standalone trade authority for context-only symbols, and normal
 execution, spread, slippage, affordability, and risk gates still apply to the
 approved symbols.
 
+## AI Infrastructure Dependency Cohort
+
+The AI infrastructure cohort captures the companies that the large AI
+semiconductor/platform names rely on: networking, switching, data-center power,
+utility capacity, AI cloud/HPC capacity, and advanced nuclear/power optionality.
+
+Approved internal-bar/paper-learning symbols:
+
+- Core AI semiconductors/platforms already in the universe: `NVDA`, `AMD`, `AVGO`
+- Added AI semiconductor/networking dependencies: `INTC`, `CSCO`, `JNPR`, `MRVL`, `ANET`
+- Data-center power/grid dependencies: `VRT`, `ETN`, `GEV`, `CEG`
+
+Context-only symbols:
+
+- AI compute / bitcoin-miner-to-HPC peers: `IREN`, `CIFR`, `WULF`, `CORZ`
+- AI cloud providers: `NBIS`, `CRWV`
+- Advanced nuclear / speculative power peers: `OKLO`, `SMR`
+
+Ticker normalizations from operator shorthand:
+
+- `Cif` -> `CIFR` / Cipher Digital
+- `Nabis` -> `NBIS` / Nebius Group
+- `CRW` -> `CRWV` / CoreWeave
+- `GE Verona` -> `GEV` / GE Vernova
+
+The speculative compute and nuclear names are context-only by default. They
+can influence linked approved symbols through event context and value-chain
+features, but they cannot become standalone trade candidates without explicit
+promotion into `SYMBOL_CONFIG` and normal liquidity/slippage review.
+
 ## Value-Chain Eco-Cluster Graphs
 
 All approved and context-only symbols are represented in a deterministic

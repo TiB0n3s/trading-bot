@@ -10,8 +10,8 @@ This is the single source of truth for:
 - shared symbol lists used by research/parser/decision prompts
 """
 
-SYMBOL_UNIVERSE_VERSION = "approved_universe_2026_06_10_spacex_catalyst_v1"
-CONTEXT_SYMBOL_UNIVERSE_VERSION = "context_only_universe_2026_06_10_spacex_catalyst_v1"
+SYMBOL_UNIVERSE_VERSION = "approved_universe_2026_06_11_ai_infra_dependencies_v1"
+CONTEXT_SYMBOL_UNIVERSE_VERSION = "context_only_universe_2026_06_11_ai_infra_dependencies_v1"
 
 SPACEX_CATALYST_APPROVED_SYMBOLS_LIST = [
     "NOC",
@@ -39,6 +39,39 @@ SPACEX_CATALYST_APPROVED_SYMBOLS = set(SPACEX_CATALYST_APPROVED_SYMBOLS_LIST)
 SPACEX_CATALYST_CONTEXT_ONLY_SYMBOLS = set(SPACEX_CATALYST_CONTEXT_ONLY_SYMBOLS_LIST)
 SPACEX_CATALYST_SYMBOLS = set(SPACEX_CATALYST_SYMBOLS_LIST)
 
+AI_INFRASTRUCTURE_APPROVED_SYMBOLS_LIST = [
+    "NVDA",
+    "AMD",
+    "INTC",
+    "AVGO",
+    "CSCO",
+    "JNPR",
+    "MRVL",
+    "ANET",
+    "VRT",
+    "ETN",
+    "GEV",
+    "CEG",
+]
+
+AI_INFRASTRUCTURE_CONTEXT_ONLY_SYMBOLS_LIST = [
+    "IREN",
+    "CIFR",
+    "WULF",
+    "CORZ",
+    "NBIS",
+    "CRWV",
+    "OKLO",
+    "SMR",
+]
+
+AI_INFRASTRUCTURE_SYMBOLS_LIST = (
+    AI_INFRASTRUCTURE_APPROVED_SYMBOLS_LIST + AI_INFRASTRUCTURE_CONTEXT_ONLY_SYMBOLS_LIST
+)
+AI_INFRASTRUCTURE_APPROVED_SYMBOLS = set(AI_INFRASTRUCTURE_APPROVED_SYMBOLS_LIST)
+AI_INFRASTRUCTURE_CONTEXT_ONLY_SYMBOLS = set(AI_INFRASTRUCTURE_CONTEXT_ONLY_SYMBOLS_LIST)
+AI_INFRASTRUCTURE_SYMBOLS = set(AI_INFRASTRUCTURE_SYMBOLS_LIST)
+
 INTERNAL_BAR_ONLY_SYMBOLS_LIST = [
     "AMZN",
     "JPM",
@@ -63,6 +96,13 @@ INTERNAL_BAR_ONLY_SYMBOLS_LIST = [
     "LHX",
     "HON",
     "TDY",
+    "INTC",
+    "CSCO",
+    "JNPR",
+    "MRVL",
+    "ANET",
+    "ETN",
+    "CEG",
 ]
 
 INTERNAL_BAR_ONLY_SYMBOLS = set(INTERNAL_BAR_ONLY_SYMBOLS_LIST)
@@ -175,6 +215,40 @@ SYMBOL_CONFIG = {
         "price_range": (250, 900),
         "clusters": ["industrials", "aerospace", "spacex_catalyst"],
         "max_spread_pct": 1.5,
+    },
+    # AI infrastructure dependency cohort — June 2026.
+    # Approved here means internal-bar/paper-learning eligible. It does not
+    # bypass normal signal, execution-quality, affordability, slippage, or risk
+    # gates. More speculative compute/power names stay context-only below.
+    "INTC": {
+        "price_range": (10, 80),
+        "clusters": ["semiconductors", "ai_infra"],
+        "volume_note": "iex_thin",
+    },
+    "CSCO": {
+        "price_range": (40, 120),
+        "clusters": ["networking", "ai_infra", "hardware_infra"],
+    },
+    "JNPR": {
+        "price_range": (25, 80),
+        "clusters": ["networking", "ai_infra", "hardware_infra"],
+    },
+    "MRVL": {
+        "price_range": (40, 180),
+        "clusters": ["semiconductors", "networking", "ai_infra"],
+        "volume_note": "iex_thin",
+    },
+    "ANET": {
+        "price_range": (60, 200),
+        "clusters": ["networking", "ai_infra", "hardware_infra"],
+    },
+    "ETN": {
+        "price_range": (200, 600),
+        "clusters": ["power_energy", "industrials", "ai_infra"],
+    },
+    "CEG": {
+        "price_range": (150, 500),
+        "clusters": ["power_energy", "utilities", "ai_infra"],
     },
 }
 
@@ -333,6 +407,65 @@ CONTEXT_ONLY_SYMBOL_CONFIG = {
         "themes": ["aerospace", "defense", "space"],
         "authority_note": "context_only_for_spacex_catalyst_until_explicit_promotion_review",
     },
+    # AI infrastructure dependency context. These symbols are collected only as
+    # spillover/context until liquidity, spread, slippage, and realized learning
+    # support explicit promotion into SYMBOL_CONFIG.
+    "IREN": {
+        "name": "IREN Limited",
+        "relationship_type": "ai_compute_power_peer",
+        "linked_symbols": ["NVDA", "AMD", "AVGO", "VRT", "ETN", "CEG"],
+        "themes": ["ai_infra", "data_center", "bitcoin_miner_to_ai_compute", "power_energy"],
+        "authority_note": "context_only_until_liquidity_slippage_and_ai_compute_revenue_review",
+    },
+    "CIFR": {
+        "name": "Cipher Digital",
+        "relationship_type": "ai_hpc_data_center_peer",
+        "linked_symbols": ["NVDA", "AMD", "AVGO", "VRT", "ETN", "CEG"],
+        "themes": ["ai_infra", "hpc", "data_center", "power_energy"],
+        "authority_note": "context_only_normalized_from_user_cif_until_promotion_review",
+    },
+    "WULF": {
+        "name": "TeraWulf",
+        "relationship_type": "ai_compute_power_peer",
+        "linked_symbols": ["NVDA", "AMD", "AVGO", "VRT", "ETN", "CEG"],
+        "themes": ["ai_infra", "data_center", "bitcoin_miner_to_ai_compute", "power_energy"],
+        "authority_note": "context_only_until_liquidity_slippage_and_ai_compute_revenue_review",
+    },
+    "CORZ": {
+        "name": "Core Scientific",
+        "relationship_type": "ai_hpc_data_center_peer",
+        "linked_symbols": ["NVDA", "AMD", "AVGO", "VRT", "ETN", "CEG"],
+        "themes": ["ai_infra", "hpc", "data_center", "power_energy"],
+        "authority_note": "context_only_until_liquidity_slippage_and_contract_quality_review",
+    },
+    "NBIS": {
+        "name": "Nebius Group",
+        "relationship_type": "ai_cloud_provider_peer",
+        "linked_symbols": ["NVDA", "AMD", "AVGO", "ORCL", "MSFT"],
+        "themes": ["ai_infra", "ai_cloud", "gpu_compute"],
+        "authority_note": "context_only_normalized_from_user_nabis_until_promotion_review",
+    },
+    "CRWV": {
+        "name": "CoreWeave",
+        "relationship_type": "ai_cloud_provider_peer",
+        "linked_symbols": ["NVDA", "AMD", "AVGO", "ORCL", "MSFT", "VRT"],
+        "themes": ["ai_infra", "ai_cloud", "gpu_compute", "data_center"],
+        "authority_note": "context_only_normalized_from_user_crw_until_promotion_review",
+    },
+    "OKLO": {
+        "name": "Oklo",
+        "relationship_type": "advanced_nuclear_power_peer",
+        "linked_symbols": ["CEG", "ETN", "VRT", "GEV"],
+        "themes": ["ai_infra", "power_energy", "advanced_nuclear", "speculative_power"],
+        "authority_note": "context_only_until_revenue_liquidity_and_regulatory_review",
+    },
+    "SMR": {
+        "name": "NuScale Power",
+        "relationship_type": "advanced_nuclear_power_peer",
+        "linked_symbols": ["CEG", "ETN", "VRT", "GEV"],
+        "themes": ["ai_infra", "power_energy", "advanced_nuclear", "speculative_power"],
+        "authority_note": "context_only_until_revenue_liquidity_and_regulatory_review",
+    },
 }
 
 CONTEXT_ONLY_SYMBOLS_LIST = list(CONTEXT_ONLY_SYMBOL_CONFIG.keys())
@@ -393,6 +526,7 @@ CLUSTER_EXPOSURE_LIMITS = {
     "software_infra": 8.0,
     "semiconductors": 10.0,
     "hardware_infra": 8.0,
+    "networking": 10.0,
     "financials": 8.0,
     "telecom": 8.0,
     "defensive": 8.0,
@@ -400,4 +534,5 @@ CLUSTER_EXPOSURE_LIMITS = {
     "consumer": 8.0,
     "consumer_growth": 8.0,
     "hedge": 8.0,
+    "utilities": 8.0,
 }

@@ -28,7 +28,6 @@ DAILY_SYMBOL_CONTEXT_COLUMNS = [
     "risk_multiplier",
     "max_new_positions",
     "block_new_buys",
-
     "bias",
     "confidence",
     "fundamental_score",
@@ -36,13 +35,11 @@ DAILY_SYMBOL_CONTEXT_COLUMNS = [
     "entry_quality",
     "avoid_type",
     "reason",
-
     "daily_pct",
     "intraday_pct",
     "momentum_30m_pct",
     "last_price",
     "bar_count_1m",
-
     "catalyst_score",
     "relative_strength_score",
     "sector_alignment",
@@ -50,7 +47,6 @@ DAILY_SYMBOL_CONTEXT_COLUMNS = [
     "liquidity_quality",
     "volume_context",
     "price_location",
-
     "business_quality_score",
     "growth_score",
     "debt_risk_score",
@@ -60,7 +56,6 @@ DAILY_SYMBOL_CONTEXT_COLUMNS = [
     "political_risk_score",
     "geopolitical_risk_score",
     "cultural_risk_score",
-
     "consumer_appetite_score",
     "revenue_impact_score",
     "profit_potential_score",
@@ -69,7 +64,6 @@ DAILY_SYMBOL_CONTEXT_COLUMNS = [
     "materials_risk_score",
     "competitive_risk_score",
     "execution_risk_score",
-
     "raw_json",
     "created_at",
     "updated_at",
@@ -122,13 +116,11 @@ def context_row_from_market_context(ctx: dict, symbol: str) -> dict:
         "market_date": ctx.get("market_date"),
         "symbol": symbol,
         "source": ctx.get("source"),
-
         "macro_sentiment": ctx.get("macro_sentiment"),
         "macro_regime": ctx.get("macro_regime"),
         "risk_multiplier": _num(ctx.get("risk_multiplier")),
         "max_new_positions": _int(ctx.get("max_new_positions")),
         "block_new_buys": _int(ctx.get("block_new_buys")),
-
         "bias": entry.get("bias"),
         "confidence": entry.get("confidence"),
         "fundamental_score": entry.get("fundamental_score"),
@@ -136,13 +128,13 @@ def context_row_from_market_context(ctx: dict, symbol: str) -> dict:
         "entry_quality": entry.get("entry_quality"),
         "avoid_type": entry.get("avoid_type"),
         "reason": entry.get("reason"),
-
         "daily_pct": _num(data_snapshot.get("daily_pct") or entry.get("daily_pct")),
         "intraday_pct": _num(data_snapshot.get("intraday_pct") or entry.get("intraday_pct")),
-        "momentum_30m_pct": _num(data_snapshot.get("momentum_30m_pct") or entry.get("momentum_30m_pct")),
+        "momentum_30m_pct": _num(
+            data_snapshot.get("momentum_30m_pct") or entry.get("momentum_30m_pct")
+        ),
         "last_price": _num(data_snapshot.get("last_price") or entry.get("last_price")),
         "bar_count_1m": _int(data_snapshot.get("bar_count_1m") or entry.get("bar_count_1m")),
-
         "catalyst_score": _num(entry.get("catalyst_score")),
         "relative_strength_score": _num(entry.get("relative_strength_score")),
         "sector_alignment": _text(entry.get("sector_alignment")),
@@ -150,7 +142,6 @@ def context_row_from_market_context(ctx: dict, symbol: str) -> dict:
         "liquidity_quality": _text(entry.get("liquidity_quality")),
         "volume_context": _text(entry.get("volume_context")),
         "price_location": _text(entry.get("price_location")),
-
         "business_quality_score": _num(entry.get("business_quality_score")),
         "growth_score": _num(entry.get("growth_score")),
         "debt_risk_score": _num(entry.get("debt_risk_score")),
@@ -160,7 +151,6 @@ def context_row_from_market_context(ctx: dict, symbol: str) -> dict:
         "political_risk_score": _num(entry.get("political_risk_score")),
         "geopolitical_risk_score": _num(entry.get("geopolitical_risk_score")),
         "cultural_risk_score": _num(entry.get("cultural_risk_score")),
-
         "consumer_appetite_score": _num(entry.get("consumer_appetite_score")),
         "revenue_impact_score": _num(entry.get("revenue_impact_score")),
         "profit_potential_score": _num(entry.get("profit_potential_score")),
@@ -169,7 +159,6 @@ def context_row_from_market_context(ctx: dict, symbol: str) -> dict:
         "materials_risk_score": _num(entry.get("materials_risk_score")),
         "competitive_risk_score": _num(entry.get("competitive_risk_score")),
         "execution_risk_score": _num(entry.get("execution_risk_score")),
-
         "raw_json": json.dumps(entry, sort_keys=True),
         "created_at": now,
         "updated_at": now,
@@ -253,9 +242,6 @@ def insert_daily_symbol_event(event: dict, db_path: Path | str = DB_PATH) -> int
     if missing:
         raise ValueError(f"event missing required fields: {missing}")
 
-    cols = list(row)
-    placeholders = ", ".join(["?"] * len(cols))
-
     return MarketIntelligenceRepository(db_path).insert_daily_symbol_event(row)
 
 
@@ -302,7 +288,9 @@ def aggregate_symbol_events(market_date: str, symbol: str, db_path: Path | str =
     Risk fields use max because one serious supply-chain/regulatory/execution
     risk is enough to matter.
     """
-    event_rows = MarketIntelligenceRepository(db_path).daily_symbol_events_for_context(market_date, symbol)
+    event_rows = MarketIntelligenceRepository(db_path).daily_symbol_events_for_context(
+        market_date, symbol
+    )
     events = []
     raw_by_event_id = {}
     target_symbol = symbol.upper()
@@ -315,10 +303,7 @@ def aggregate_symbol_events(market_date: str, symbol: str, db_path: Path | str =
             raw = {}
 
         row_symbol = str(row["symbol"] or "").upper()
-        linked_symbols = {
-            str(s).upper()
-            for s in (raw.get("linked_symbols") or [])
-        }
+        linked_symbols = {str(s).upper() for s in (raw.get("linked_symbols") or [])}
         if row_symbol == target_symbol or (
             raw.get("context_only") is True and target_symbol in linked_symbols
         ):
@@ -360,19 +345,29 @@ def aggregate_symbol_events(market_date: str, symbol: str, db_path: Path | str =
         out[field] = _max([e[field] for e in events])
 
     # Catalyst score balances upside and confidence against risk.
-    upside = _avg([
-        out.get("consumer_appetite_score"),
-        out.get("revenue_impact_score"),
-        out.get("profit_potential_score"),
-    ]) or 0
+    upside = (
+        _avg(
+            [
+                out.get("consumer_appetite_score"),
+                out.get("revenue_impact_score"),
+                out.get("profit_potential_score"),
+            ]
+        )
+        or 0
+    )
 
-    risk = _avg([
-        out.get("margin_risk_score"),
-        out.get("supply_chain_risk_score"),
-        out.get("materials_risk_score"),
-        out.get("competitive_risk_score"),
-        out.get("execution_risk_score"),
-    ]) or 0
+    risk = (
+        _avg(
+            [
+                out.get("margin_risk_score"),
+                out.get("supply_chain_risk_score"),
+                out.get("materials_risk_score"),
+                out.get("competitive_risk_score"),
+                out.get("execution_risk_score"),
+            ]
+        )
+        or 0
+    )
 
     out["catalyst_score"] = round(max(0, min(100, upside - (risk * 0.35) + 20)), 2)
 
@@ -397,50 +392,30 @@ def aggregate_symbol_events(market_date: str, symbol: str, db_path: Path | str =
             pass
 
     intent_directions = [
-        str(e.get("intent_direction"))
-        for e in raw_events
-        if e.get("intent_direction")
+        str(e.get("intent_direction")) for e in raw_events if e.get("intent_direction")
     ]
     intent_categories = [
-        str(e.get("intent_category"))
-        for e in raw_events
-        if e.get("intent_category")
+        str(e.get("intent_category")) for e in raw_events if e.get("intent_category")
     ]
-    intent_scopes = [
-        str(e.get("intent_scope"))
-        for e in raw_events
-        if e.get("intent_scope")
-    ]
+    intent_scopes = [str(e.get("intent_scope")) for e in raw_events if e.get("intent_scope")]
     confirmation_statuses = [
-        str(e.get("confirmation_status"))
-        for e in raw_events
-        if e.get("confirmation_status")
+        str(e.get("confirmation_status")) for e in raw_events if e.get("confirmation_status")
     ]
     ai_contexts = [
-        e.get("ai_event_context")
-        for e in raw_events
-        if isinstance(e.get("ai_event_context"), dict)
+        e.get("ai_event_context") for e in raw_events if isinstance(e.get("ai_event_context"), dict)
     ]
-    ai_summaries = [
-        str(ctx.get("summary"))
-        for ctx in ai_contexts
-        if ctx.get("summary")
-    ]
+    ai_summaries = [str(ctx.get("summary")) for ctx in ai_contexts if ctx.get("summary")]
     ai_market_alignment = [
-        str(ctx.get("market_alignment"))
-        for ctx in ai_contexts
-        if ctx.get("market_alignment")
+        str(ctx.get("market_alignment")) for ctx in ai_contexts if ctx.get("market_alignment")
     ]
-    ai_intents = [
-        str(ctx.get("intent"))
-        for ctx in ai_contexts
-        if ctx.get("intent")
+    ai_intents = [str(ctx.get("intent")) for ctx in ai_contexts if ctx.get("intent")]
+    ai_information_novelty = [
+        str(ctx.get("information_novelty")) for ctx in ai_contexts if ctx.get("information_novelty")
     ]
-    ai_providers = [
-        str(ctx.get("provider"))
-        for ctx in ai_contexts
-        if ctx.get("provider")
+    ai_positioning_effect = [
+        str(ctx.get("positioning_effect")) for ctx in ai_contexts if ctx.get("positioning_effect")
     ]
+    ai_providers = [str(ctx.get("provider")) for ctx in ai_contexts if ctx.get("provider")]
     missing_evidence = []
     for e in raw_events:
         missing = e.get("missing_evidence") or []
@@ -471,6 +446,8 @@ def aggregate_symbol_events(market_date: str, symbol: str, db_path: Path | str =
         "ai_providers": sorted(set(ai_providers)),
         "ai_intents": sorted(set(ai_intents)),
         "ai_market_alignment": sorted(set(ai_market_alignment)),
+        "ai_information_novelty": sorted(set(ai_information_novelty)),
+        "ai_positioning_effect": sorted(set(ai_positioning_effect)),
         "ai_summaries": ai_summaries[:5],
         "authority": "context_only_no_standalone_buy_authority",
     }
@@ -478,7 +455,9 @@ def aggregate_symbol_events(market_date: str, symbol: str, db_path: Path | str =
     return out
 
 
-def update_daily_context_from_events(market_date: str, symbol: str | None = None, db_path: Path | str = DB_PATH) -> dict:
+def update_daily_context_from_events(
+    market_date: str, symbol: str | None = None, db_path: Path | str = DB_PATH
+) -> dict:
     """Update daily_symbol_context rows with aggregate event scores.
 
     If symbol is None, update all symbols present in daily_symbol_context for

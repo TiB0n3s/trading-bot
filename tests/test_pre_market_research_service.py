@@ -20,7 +20,9 @@ from services.pre_market_research_service import (
 
 
 def _bar(close, high=None, low=None):
-    return SimpleNamespace(c=close, h=high if high is not None else close, l=low if low is not None else close)
+    return SimpleNamespace(
+        c=close, h=high if high is not None else close, l=low if low is not None else close
+    )
 
 
 def _pct_change(old, new):
@@ -300,6 +302,8 @@ def test_apply_event_enrichment_uses_multisource_confidence_text():
                 "intent_scopes": ["direct_company"],
                 "confirmation_statuses": ["reputable_reported"],
                 "missing_evidence": [],
+                "ai_information_novelty": ["new_fundamental_information"],
+                "ai_positioning_effect": ["constructive_expectation_reset"],
             },
         },
     )
@@ -311,6 +315,8 @@ def test_apply_event_enrichment_uses_multisource_confidence_text():
     assert context["confidence_cap"] == "two_independent_reputable_sources"
     assert context["intent_directions"] == ["constructive"]
     assert context["intent_categories"] == ["company_fundamental_update"]
+    assert context["ai_information_novelty"] == ["new_fundamental_information"]
+    assert context["ai_positioning_effect"] == ["constructive_expectation_reset"]
     assert "confidence_cap=two_independent_reputable_sources" in entry["reason"]
     assert "intent=constructive" in entry["reason"]
     assert "trusted_sources=2" in entry["key_catalysts"][0]
@@ -318,6 +324,7 @@ def test_apply_event_enrichment_uses_multisource_confidence_text():
 
 
 if __name__ == "__main__":
+
     def _repo_metadata_test():
         with tempfile.TemporaryDirectory() as tmp:
             test_repository_event_enrichment_includes_source_metadata(Path(tmp))

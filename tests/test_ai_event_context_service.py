@@ -15,6 +15,8 @@ from services.ai_event_context_service import (  # noqa: E402
     AIEventContextService,
     SelectiveAIEventContextService,
     deterministic_event_context,
+    infer_information_novelty,
+    infer_positioning_effect,
     should_use_semantic_event_provider,
 )
 
@@ -40,6 +42,8 @@ def test_deterministic_event_context_is_non_authoritative():
     assert result["runtime_effect"] == "context_only_no_live_authority"
     assert result["affected_symbols"] == ["NVDA", "AMD"]
     assert result["intent"] == "demand_or_revenue_signal"
+    assert result["information_novelty"] == "new_fundamental_information"
+    assert result["positioning_effect"] == "neutral_positioning_context"
 
 
 def test_provider_output_is_constrained_to_event_symbols_and_context_only():
@@ -49,6 +53,8 @@ def test_provider_output_is_constrained_to_event_symbols_and_context_only():
             "intent": "constructive",
             "affected_symbols": ["NVDA", "AMD", "TSLA"],
             "market_alignment": "constructive_watch",
+            "information_novelty": "new_fundamental_information",
+            "positioning_effect": "constructive_expectation_reset",
             "confidence": "high",
             "confirmation_status": "reputable_reported",
             "missing_evidence": [],
@@ -67,6 +73,8 @@ def test_provider_output_is_constrained_to_event_symbols_and_context_only():
     assert result["runtime_effect"] == "context_only_no_live_authority"
     assert result["affected_symbols"] == ["NVDA", "AMD"]
     assert "TSLA" not in result["affected_symbols"]
+    assert result["information_novelty"] == "new_fundamental_information"
+    assert result["positioning_effect"] == "constructive_expectation_reset"
     assert "ai_interpretation_context_only" in result["risk_notes"]
 
 
@@ -159,6 +167,52 @@ def test_selective_service_uses_semantic_provider_only_for_high_value_events():
     assert high["authority"] == AI_EVENT_CONTEXT_AUTHORITY
 
 
+def test_positioning_and_new_information_examples_for_broadcom_and_oracle():
+    broadcom = {
+        "symbol": "AVGO",
+        "event_type": "guidance",
+        "event_summary": (
+            "Broadcom raises AI revenue forecast after stronger hyperscaler "
+            "chip orders and backlog beat estimates"
+        ),
+        "source_tier": "confirmed_financial_news",
+        "expected_market_impact": "moderately_bullish",
+        "intent_direction": "constructive",
+        "confirmation_status": "reputable_reported",
+    }
+    oracle = {
+        "symbol": "ORCL",
+        "event_type": "earnings",
+        "event_summary": (
+            "Oracle cloud infrastructure bookings beat expectations and "
+            "management raises guidance on new AI customer demand"
+        ),
+        "source_tier": "confirmed_financial_news",
+        "expected_market_impact": "moderately_bullish",
+        "intent_direction": "constructive",
+        "confirmation_status": "reputable_reported",
+    }
+    recycled = {
+        "symbol": "AVGO",
+        "event_type": "industry_demand",
+        "event_summary": "Why shares could move as investors discuss AI demand speculation",
+        "source_tier": "unclassified",
+        "expected_market_impact": "neutral",
+        "intent_direction": "neutral_context",
+        "confirmation_status": "unconfirmed",
+    }
+
+    for event in (broadcom, oracle):
+        assert infer_information_novelty(event) == "new_fundamental_information"
+        assert infer_positioning_effect(event) == "constructive_expectation_reset"
+        context = deterministic_event_context(event)
+        assert context["information_novelty"] == "new_fundamental_information"
+        assert context["positioning_effect"] == "constructive_expectation_reset"
+
+    assert infer_information_novelty(recycled) == "unconfirmed_or_recycled_narrative"
+    assert infer_positioning_effect(recycled) == "neutral_positioning_context"
+
+
 def main():
     tests = [
         test_deterministic_event_context_is_non_authoritative,
@@ -166,6 +220,7 @@ def main():
         test_provider_error_falls_back_safely,
         test_semantic_event_provider_selection_requires_trusted_high_value_context,
         test_selective_service_uses_semantic_provider_only_for_high_value_events,
+        test_positioning_and_new_information_examples_for_broadcom_and_oracle,
     ]
     for test in tests:
         test()

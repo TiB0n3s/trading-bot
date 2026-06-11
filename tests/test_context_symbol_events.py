@@ -42,6 +42,8 @@ def test_context_only_event_aggregates_into_linked_approved_symbol(tmp_path):
                 "intent": "demand_or_revenue_signal",
                 "affected_symbols": ["NVDA", "AMD", "TSM"],
                 "market_alignment": "neutral_context",
+                "information_novelty": "new_fundamental_information",
+                "positioning_effect": "neutral_positioning_context",
                 "confirmation_status": "reputable_reported",
                 "missing_evidence": [],
                 "risk_notes": ["context-only"],
@@ -60,6 +62,8 @@ def test_context_only_event_aggregates_into_linked_approved_symbol(tmp_path):
     assert nvda["event_context"]["ai_interpretation_count"] == 1
     assert nvda["event_context"]["ai_providers"] == ["deterministic_fallback"]
     assert nvda["event_context"]["ai_market_alignment"] == ["neutral_context"]
+    assert nvda["event_context"]["ai_information_novelty"] == ["new_fundamental_information"]
+    assert nvda["event_context"]["ai_positioning_effect"] == ["neutral_positioning_context"]
     assert "demand_or_revenue_signal" in nvda["event_context"]["intent_categories"]
     assert aapl["has_events"] is False
 

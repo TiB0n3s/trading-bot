@@ -68,13 +68,19 @@ def build_ai_event_context_prompt(event: dict[str, Any]) -> str:
         "expected_market_impact": event.get("expected_market_impact"),
         "trade_relevance": event.get("trade_relevance"),
         "scoring_reason": event.get("scoring_reason"),
+        "information_novelty": event.get("information_novelty"),
+        "positioning_effect": event.get("positioning_effect"),
     }
     return (
         "Interpret this market event for context only. Do not make a trading "
         "recommendation. Do not infer bullish authority from delayed, rumor, "
         "unconfirmed, or context-only evidence. Return JSON only with keys: "
         "summary, intent, affected_symbols, market_alignment, confidence, "
-        "confirmation_status, missing_evidence, risk_notes.\n\n"
+        "confirmation_status, information_novelty, positioning_effect, "
+        "missing_evidence, risk_notes. Treat information_novelty as whether "
+        "the event adds new fundamental information versus recycled narrative. "
+        "Treat positioning_effect as whether the event can reset expectations, "
+        "confirm existing positioning, contradict positioning, or is neutral.\n\n"
         f"EVENT_JSON={json.dumps(compact, sort_keys=True)}"
     )
 
@@ -103,6 +109,164 @@ def _safe_str(value: Any, default: str = "unknown", max_len: int = 500) -> str:
     return text[:max_len]
 
 
+_NEW_INFORMATION_TERMS = {
+    "announce",
+    "announces",
+    "announced",
+    "award",
+    "awarded",
+    "backlog",
+    "beat",
+    "beats",
+    "booking",
+    "bookings",
+    "contract",
+    "customer",
+    "deal",
+    "forecast",
+    "guidance",
+    "launch",
+    "order",
+    "orders",
+    "partnership",
+    "reports",
+    "raises",
+    "raised",
+    "revenue forecast",
+    "selected",
+    "supply agreement",
+}
+_RECYCLED_NARRATIVE_TERMS = {
+    "could",
+    "may",
+    "might",
+    "reportedly",
+    "rumor",
+    "rumour",
+    "speculation",
+    "why shares",
+}
+_POSITIONING_RESET_UP_TERMS = {
+    "above estimates",
+    "ai demand",
+    "backlog",
+    "beat",
+    "beats",
+    "bookings",
+    "contract",
+    "forecast",
+    "guidance",
+    "hyperscaler",
+    "orders",
+    "raises",
+    "raised",
+    "strong demand",
+}
+_POSITIONING_RESET_DOWN_TERMS = {
+    "cut",
+    "cuts",
+    "delay",
+    "delayed",
+    "downgrade",
+    "miss",
+    "misses",
+    "probe",
+    "shortage",
+    "slowing",
+    "weak guidance",
+}
+
+
+def _contains_any(text: str, terms: set[str]) -> bool:
+    return any(term in text for term in terms)
+
+
+def infer_information_novelty(event: dict[str, Any]) -> str:
+    """Classify whether an event adds fresh information or repeats a narrative."""
+    explicit = _safe_str(event.get("information_novelty"), default="", max_len=80)
+    if explicit:
+        return explicit
+
+    text = " ".join(
+        str(event.get(key) or "")
+        for key in ("event_summary", "event_type", "event_subtype", "scoring_reason")
+    ).lower()
+    event_type = str(event.get("event_type") or "").strip().lower()
+    confirmation = str(event.get("confirmation_status") or "").strip().lower()
+
+    if event_type == "congressional_trade_disclosure":
+        return "delayed_positioning_disclosure"
+    if confirmation in {"unconfirmed", "needs_confirmation"} or _contains_any(
+        text, _RECYCLED_NARRATIVE_TERMS
+    ):
+        return "unconfirmed_or_recycled_narrative"
+    if event_type in {
+        "earnings",
+        "guidance",
+        "customer_contract",
+        "strategic_partnership",
+        "supplier_signal",
+        "regulatory",
+        "lawsuit",
+    }:
+        return "new_fundamental_information"
+    if _contains_any(text, _NEW_INFORMATION_TERMS):
+        return "new_fundamental_information"
+    return "contextual_information"
+
+
+def infer_positioning_effect(event: dict[str, Any]) -> str:
+    """Classify whether the event can alter current market expectations."""
+    explicit = _safe_str(event.get("positioning_effect"), default="", max_len=80)
+    if explicit:
+        return explicit
+
+    text = " ".join(
+        str(event.get(key) or "")
+        for key in (
+            "event_summary",
+            "event_type",
+            "event_subtype",
+            "intent_direction",
+            "expected_market_impact",
+            "scoring_reason",
+        )
+    ).lower()
+    novelty = infer_information_novelty(event)
+    impact = str(event.get("expected_market_impact") or "").strip().lower()
+    direction = str(event.get("intent_direction") or "").strip().lower()
+
+    if novelty in {"unconfirmed_or_recycled_narrative", "contextual_information"}:
+        if impact in {"strongly_bullish", "moderately_bullish"}:
+            return "positioning_confirmation_constructive"
+        if impact in {"strongly_bearish", "moderately_bearish"}:
+            return "positioning_confirmation_risk_negative"
+        return "neutral_positioning_context"
+    if (
+        _contains_any(text, _POSITIONING_RESET_UP_TERMS)
+        or impact
+        in {
+            "strongly_bullish",
+            "moderately_bullish",
+        }
+        or direction in {"constructive", "constructive_watch"}
+    ):
+        return "constructive_expectation_reset"
+    if (
+        _contains_any(text, _POSITIONING_RESET_DOWN_TERMS)
+        or impact
+        in {
+            "strongly_bearish",
+            "moderately_bearish",
+        }
+        or direction in {"risk_negative", "risk_watch"}
+    ):
+        return "risk_negative_expectation_reset"
+    if novelty == "delayed_positioning_disclosure":
+        return "delayed_positioning_context"
+    return "neutral_positioning_context"
+
+
 def deterministic_event_context(event: dict[str, Any]) -> dict[str, Any]:
     """Return a deterministic fallback interpretation."""
     linked_symbols = _as_list(event.get("linked_symbols"))
@@ -114,6 +278,8 @@ def deterministic_event_context(event: dict[str, Any]) -> dict[str, Any]:
     intent = _safe_str(event.get("intent_category"), default="context_signal")
     direction = _safe_str(event.get("intent_direction"), default="neutral_context")
     summary = _safe_str(event.get("event_summary"), default="No event summary available")
+    information_novelty = infer_information_novelty(event)
+    positioning_effect = infer_positioning_effect(event)
     if event.get("context_only") is True and linked_symbols:
         summary = (
             f"Context-only {symbol} event may inform linked symbols "
@@ -129,6 +295,8 @@ def deterministic_event_context(event: dict[str, Any]) -> dict[str, Any]:
         "intent": intent,
         "affected_symbols": affected,
         "market_alignment": direction,
+        "information_novelty": information_novelty,
+        "positioning_effect": positioning_effect,
         "confidence": "low"
         if source_tier in {"unclassified", "low_confidence", "unknown"}
         else "medium",
@@ -216,6 +384,12 @@ def normalize_ai_event_context(
         "intent": _safe_str(raw.get("intent") or fallback["intent"]),
         "affected_symbols": affected,
         "market_alignment": _safe_str(raw.get("market_alignment") or fallback["market_alignment"]),
+        "information_novelty": _safe_str(
+            raw.get("information_novelty") or fallback["information_novelty"]
+        ),
+        "positioning_effect": _safe_str(
+            raw.get("positioning_effect") or fallback["positioning_effect"]
+        ),
         "confidence": _safe_str(raw.get("confidence") or fallback["confidence"]),
         "confirmation_status": _safe_str(
             raw.get("confirmation_status") or fallback["confirmation_status"]

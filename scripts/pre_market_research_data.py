@@ -37,6 +37,13 @@ from market_intelligence.market_brief_builder import (
     summary_for_brief,
     write_market_context,
 )
+from market_intelligence.prime_brokerage_flows import (
+    DEFAULT_STATE_PATH as PB_DEFAULT_STATE_PATH,
+)
+from market_intelligence.prime_brokerage_flows import (
+    load_prime_brokerage_state,
+    prime_brokerage_context_for_symbol,
+)
 from market_intelligence.raw_research_template import build_template
 from market_intelligence.research_output import raw_research_summary
 
@@ -45,6 +52,9 @@ BASE_DIR = SCRIPT_DIR.parent
 OUTPUT_FILE = BASE_DIR / "market_context.json"
 COT_POSITIONING_STATE_FILE = Path(
     os.getenv("COT_POSITIONING_STATE_FILE", str(BASE_DIR / DEFAULT_STATE_PATH))
+)
+PRIME_BROKERAGE_STATE_FILE = Path(
+    os.getenv("PRIME_BROKERAGE_STATE_FILE", str(BASE_DIR / PB_DEFAULT_STATE_PATH))
 )
 
 PRE_MARKET_ALPACA_SYMBOL_SLEEP_SECONDS = float(
@@ -644,6 +654,29 @@ def update_performance_context(symbol_entry: dict) -> dict:
         if size_modifier is not None and size_modifier < 1.0:
             evidence.append(f"cot_size_modifier:{size_modifier:.2f}")
 
+    pb_context = symbol_entry.get("prime_brokerage_context") or {}
+    if isinstance(pb_context, dict):
+        regime = str(pb_context.get("pb_flow_regime") or "")
+        size_modifier = _perf_float(pb_context.get("pb_size_modifier"))
+        crowded_short = bool(pb_context.get("is_crowded_short"))
+        if regime == "institutional_degrossing":
+            score -= 12
+            evidence.append("pb_institutional_degrossing")
+        elif regime == "institutional_distribution_extreme":
+            score -= 10
+            evidence.append("pb_distribution_extreme")
+        elif regime == "institutional_distribution":
+            score -= 5
+            evidence.append("pb_distribution")
+        elif regime in {"institutional_accumulation", "institutional_accumulation_extreme"}:
+            score += 4
+            evidence.append(f"pb_accumulation:{regime}")
+        elif regime == "crowded_short_squeeze_watch" or crowded_short:
+            score += 3
+            evidence.append("pb_crowded_short_squeeze_watch")
+        if size_modifier is not None and size_modifier < 1.0:
+            evidence.append(f"pb_size_modifier:{size_modifier:.2f}")
+
     score = round(max(0.0, min(100.0, score)), 2)
     label = _performance_label(score)
     performance_confidence = _performance_confidence(score, len(evidence))
@@ -919,6 +952,25 @@ def load_cot_positioning_context() -> dict:
     return state
 
 
+def load_prime_brokerage_context() -> dict:
+    """Load external prime brokerage flow context for market-context enrichment."""
+    try:
+        state = load_prime_brokerage_state(PRIME_BROKERAGE_STATE_FILE, SYMBOL_CONFIG)
+    except Exception as e:
+        logger.warning(f"Prime brokerage context load failed: {e}")
+        return {
+            "available": False,
+            "reason": f"Prime brokerage context load failed: {e}",
+            "runtime_effect": "external_prime_brokerage_positioning_context_no_trade_authority",
+            "sectors": {},
+            "symbols": {},
+            "symbol_sector_map": {},
+        }
+    if not state.get("available"):
+        logger.info(state.get("reason") or "Prime brokerage context unavailable")
+    return state
+
+
 def apply_cot_positioning_context(symbol: str, symbol_entry: dict, cot_state: dict) -> None:
     """Attach COT macro-positioning context to one symbol entry.
 
@@ -961,6 +1013,55 @@ def apply_cot_positioning_context(symbol: str, symbol_entry: dict, cot_state: di
             f"{reason} COT positioning: {mapped_market} regime={regime}, "
             f"leveraged_index_52w={cot_index}, size_modifier={size_modifier}; "
             "weekly macro context only."
+        ).strip()
+
+
+def apply_prime_brokerage_context(symbol: str, symbol_entry: dict, pb_state: dict) -> None:
+    """Attach external prime-brokerage flow context to one symbol entry."""
+    context = prime_brokerage_context_for_symbol(symbol, pb_state)
+    if not context:
+        return
+
+    symbol_entry["prime_brokerage_context"] = context
+
+    regime = context.get("pb_flow_regime")
+    sector = context.get("mapped_pb_sector")
+    size_modifier = context.get("pb_size_modifier")
+    crowded_short = bool(context.get("is_crowded_short"))
+
+    risks = symbol_entry.setdefault("key_risks", [])
+    catalysts = symbol_entry.setdefault("key_catalysts", [])
+    evidence = symbol_entry.setdefault("performance_evidence", [])
+
+    if regime in {
+        "institutional_degrossing",
+        "institutional_distribution_extreme",
+        "institutional_distribution",
+    }:
+        note = (
+            f"Prime brokerage {sector} {regime}; "
+            f"external positioning size_modifier={size_modifier}."
+        )
+        if isinstance(risks, list) and note not in risks:
+            risks.append(note)
+    elif regime in {"institutional_accumulation", "institutional_accumulation_extreme"}:
+        note = f"Prime brokerage {sector} {regime}; institutional flow support."
+        if isinstance(catalysts, list) and note not in catalysts:
+            catalysts.append(note)
+
+    if crowded_short:
+        note = f"Prime brokerage {sector} crowded short; squeeze meta-label context."
+        if isinstance(catalysts, list) and note not in catalysts:
+            catalysts.append(note)
+
+    if isinstance(evidence, list):
+        evidence.append(f"prime_brokerage:{sector}:{regime}:size_modifier={size_modifier}")
+
+    reason = symbol_entry.get("reason") or ""
+    if "Prime brokerage positioning:" not in reason:
+        symbol_entry["reason"] = (
+            f"{reason} Prime brokerage positioning: sector={sector}, regime={regime}, "
+            f"size_modifier={size_modifier}; external flow context only."
         ).strip()
 
 
@@ -1132,12 +1233,18 @@ def main():
         symbols = symbols[:PRE_MARKET_ALPACA_MAX_SYMBOLS]
     event_enrichment = load_event_enrichment(today)
     cot_positioning_context = load_cot_positioning_context()
+    prime_brokerage_context = load_prime_brokerage_context()
 
     logger.info(f"Running no-Claude data research for {len(symbols)} symbols")
     logger.info(f"Loaded event enrichment for {len(event_enrichment)} symbols")
     logger.info(
         "Loaded COT positioning context for "
         f"{len(cot_positioning_context.get('markets') or {})} market(s)"
+    )
+    logger.info(
+        "Loaded prime brokerage context for "
+        f"{len(prime_brokerage_context.get('sectors') or {})} sector(s), "
+        f"{len(prime_brokerage_context.get('symbols') or {})} symbol(s)"
     )
 
     market_data = {}
@@ -1171,6 +1278,7 @@ def main():
     template["source_quality"] = "event_enriched" if event_enrichment else "data_only"
     template["event_enrichment_count"] = len(event_enrichment)
     template["cot_positioning_context"] = cot_positioning_context
+    template["prime_brokerage_context"] = prime_brokerage_context
 
     symbols_out = template.get("symbols", {})
 
@@ -1196,6 +1304,7 @@ def main():
             }
             apply_event_enrichment(symbols_out[sym], event_enrichment.get(sym) or {})
             apply_cot_positioning_context(sym, symbols_out[sym], cot_positioning_context)
+            apply_prime_brokerage_context(sym, symbols_out[sym], prime_brokerage_context)
             update_performance_context(symbols_out[sym])
         else:
             symbols_out[sym].update(
@@ -1210,6 +1319,7 @@ def main():
                 }
             )
             apply_cot_positioning_context(sym, symbols_out[sym], cot_positioning_context)
+            apply_prime_brokerage_context(sym, symbols_out[sym], prime_brokerage_context)
             update_performance_context(symbols_out[sym])
 
     template["symbols"] = symbols_out

@@ -87,6 +87,24 @@ This context is delayed weekly macro evidence only. It can inform ML features,
 meta-labeling, and size-down logic, but it cannot independently approve trades.
 See `ops/cot_positioning_context.md` for the timing and no-lookahead contract.
 
+## Prime Brokerage Flow Context
+
+Prime-brokerage / hedge-fund flow context is normalized into
+`runtime_state/prime_brokerage_flows.json` and consumed by pre-market/intraday
+market context refreshes as external sector/symbol positioning evidence.
+
+```bash
+cd ~/trading-bot
+./venv/bin/python scripts/prime_brokerage_flows_update.py \
+  --input data/prime_brokerage/latest_flows.json \
+  --output runtime_state/prime_brokerage_flows.json
+```
+
+This context can inform ML features, meta-labeling, crowded-short review, and
+size-down logic. It cannot independently approve trades or override risk gates.
+See `ops/prime_brokerage_flow_context.md` for the input and no-lookahead
+contract.
+
 ## Configuration Audit
 
 Use the config audit after changing `/etc/trading-bot.env`, adding new env

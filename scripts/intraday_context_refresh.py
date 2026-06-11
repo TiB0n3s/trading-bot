@@ -62,6 +62,7 @@ from pre_market_research_data import (  # noqa: E402
     PRE_MARKET_ALPACA_SYMBOL_SLEEP_SECONDS,
     apply_cot_positioning_context,
     apply_event_enrichment,
+    apply_prime_brokerage_context,
     build_index_state,
     build_sector_state,
     build_symbol_evidence,
@@ -71,6 +72,7 @@ from pre_market_research_data import (  # noqa: E402
     get_recent_bars,
     load_cot_positioning_context,
     load_event_enrichment,
+    load_prime_brokerage_context,
     safe_round,
 )
 
@@ -109,6 +111,7 @@ def _rebuild_symbols(
     market_data: dict,
     event_enrichment: dict,
     cot_positioning_context: dict,
+    prime_brokerage_context: dict,
     macro_sentiment: str,
     macro_regime: str,
     market_date: str,
@@ -133,6 +136,7 @@ def _rebuild_symbols(
         }
         apply_event_enrichment(entry, event_enrichment.get(sym) or {})
         apply_cot_positioning_context(sym, entry, cot_positioning_context)
+        apply_prime_brokerage_context(sym, entry, prime_brokerage_context)
         entry = enrich_with_session_context(sym, entry, market_date)
         symbols_out[sym] = entry
 
@@ -151,10 +155,16 @@ def rebuild_market_context(market_date: str) -> dict:
 
     event_enrichment = load_event_enrichment(market_date)
     cot_positioning_context = load_cot_positioning_context()
+    prime_brokerage_context = load_prime_brokerage_context()
     logger.info(f"Loaded event enrichment for {len(event_enrichment)} symbols")
     logger.info(
         "Loaded COT positioning context for "
         f"{len(cot_positioning_context.get('markets') or {})} market(s)"
+    )
+    logger.info(
+        "Loaded prime brokerage context for "
+        f"{len(prime_brokerage_context.get('sectors') or {})} sector(s), "
+        f"{len(prime_brokerage_context.get('symbols') or {})} symbol(s)"
     )
 
     logger.info(f"Fetching fresh Alpaca bars for {len(APPROVED_SYMBOLS_LIST)} symbols")
@@ -175,6 +185,7 @@ def rebuild_market_context(market_date: str) -> dict:
         market_data,
         event_enrichment,
         cot_positioning_context,
+        prime_brokerage_context,
         macro_sentiment,
         macro_regime,
         market_date,
@@ -195,6 +206,7 @@ def rebuild_market_context(market_date: str) -> dict:
     existing["source_quality"] = "event_enriched" if event_enrichment else "data_only"
     existing["event_enrichment_count"] = len(event_enrichment)
     existing["cot_positioning_context"] = cot_positioning_context
+    existing["prime_brokerage_context"] = prime_brokerage_context
 
     brief = build_market_brief(existing)
 

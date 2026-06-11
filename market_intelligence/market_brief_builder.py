@@ -201,6 +201,7 @@ def build_market_brief(
         "event_enrichment_count": raw.get("event_enrichment_count"),
         "intraday_refresh_at": raw.get("intraday_refresh_at"),
         "cot_positioning_context": raw.get("cot_positioning_context"),
+        "prime_brokerage_context": raw.get("prime_brokerage_context"),
         "symbols": merge_symbol_research(raw.get("symbols")),
         "source": source,
         "format": "rich_market_brief_v1",

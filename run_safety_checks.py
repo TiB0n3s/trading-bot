@@ -32,6 +32,7 @@ SAFETY_TESTS = [
     "tests/test_decision_snapshot_service.py",
     "tests/test_market_context_output_paths.py",
     "tests/test_cot_positioning.py",
+    "tests/test_prime_brokerage_flows.py",
     "tests/test_rolling_momentum_service.py",
     "tests/test_volume_clock_vpin_service.py",
     "tests/test_volatile_session_intelligence_service.py",

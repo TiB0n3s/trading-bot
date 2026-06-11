@@ -18,6 +18,7 @@ from repositories.candidate_universe_repo import CandidateUniverseRepository
 
 LEARNED_AUTO_BUY_TIEBREAKER_VERSION = "learned_auto_buy_tiebreaker_v1"
 LEARNED_AUTO_BUY_TIEBREAKER_RUNTIME_EFFECT = "paper_only_tiebreaker_authority"
+LEARNED_AUTO_BUY_TIEBREAKER_STATUSES = ("near_threshold", "taken")
 
 
 @dataclass(frozen=True)
@@ -162,8 +163,11 @@ class LearnedAutoBuyTiebreakerService:
     ):
         self.repository = repository or CandidateUniverseRepository()
         self.thresholds = thresholds or LearnedAutoBuyThresholds()
+        self._historical_rows_cache: dict[str, list[dict[str, Any]]] = {}
 
     def _historical_rows(self, target_date: str) -> list[dict[str, Any]]:
+        if target_date in self._historical_rows_cache:
+            return [dict(row) for row in self._historical_rows_cache[target_date]]
         try:
             end = date.fromisoformat(target_date) - timedelta(days=1)
             start = end - timedelta(days=max(1, self.thresholds.lookback_days - 1))
@@ -171,14 +175,22 @@ class LearnedAutoBuyTiebreakerService:
             return []
         if start > end:
             return []
-        return [
-            dict(row)
-            for row in self.repository.rows_between(
+        try:
+            raw_rows = self.repository.rows_between(
+                start.isoformat(),
+                end.isoformat(),
+                candidate_kind="entry",
+                candidate_statuses=LEARNED_AUTO_BUY_TIEBREAKER_STATUSES,
+            )
+        except TypeError:
+            raw_rows = self.repository.rows_between(
                 start.isoformat(),
                 end.isoformat(),
                 candidate_kind="entry",
             )
-        ]
+        rows = [dict(row) for row in raw_rows]
+        self._historical_rows_cache[target_date] = [dict(row) for row in rows]
+        return rows
 
     def decide(self, candidate: dict[str, Any], *, target_date: str) -> LearnedAutoBuyDecision:
         symbol = str(candidate.get("symbol") or "").upper()

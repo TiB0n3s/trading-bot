@@ -66,6 +66,18 @@ class CandidateUniverseRepository:
                 ON candidate_universe(candidate_kind, candidate_status)
                 """
             )
+            con.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_candidate_universe_date_kind_status
+                ON candidate_universe(substr(candidate_ts, 1, 10), candidate_kind, candidate_status)
+                """
+            )
+            con.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_candidate_universe_kind_status_date
+                ON candidate_universe(candidate_kind, candidate_status, substr(candidate_ts, 1, 10))
+                """
+            )
 
     def insert_candidate(self, row: dict[str, Any]) -> int:
         self.init_table()
@@ -115,6 +127,7 @@ class CandidateUniverseRepository:
         *,
         symbol: str | None = None,
         candidate_kind: str | None = None,
+        candidate_statuses: tuple[str, ...] | None = None,
     ) -> list[Any]:
         self.init_table()
         clauses = ["substr(candidate_ts, 1, 10) BETWEEN ? AND ?"]
@@ -125,6 +138,10 @@ class CandidateUniverseRepository:
         if candidate_kind:
             clauses.append("candidate_kind = ?")
             params.append(candidate_kind)
+        if candidate_statuses:
+            placeholders = ", ".join("?" for _ in candidate_statuses)
+            clauses.append(f"candidate_status IN ({placeholders})")
+            params.extend(candidate_statuses)
         with get_connection(self.db_path) as con:
             return con.execute(
                 f"""

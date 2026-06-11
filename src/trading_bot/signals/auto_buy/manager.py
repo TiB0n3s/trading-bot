@@ -16,6 +16,7 @@ import argparse
 import json
 import os
 import sys
+import time
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -247,6 +248,8 @@ _prediction_context_cache: dict[str, dict[str, Any]] = {}
 _learned_tiebreaker_cache: dict[tuple[str, str, str], dict[str, Any]] = {}
 _rolling_momentum_context_cache: dict[str, dict[str, Any]] | None = None
 _intraday_feedback_service: IntradayTradeFeedbackService | None = None
+_learned_tiebreaker_service: LearnedAutoBuyTiebreakerService | None = None
+_initialized_auto_buy_db_paths: set[str] = set()
 
 
 def intraday_feedback_service() -> IntradayTradeFeedbackService:
@@ -254,6 +257,24 @@ def intraday_feedback_service() -> IntradayTradeFeedbackService:
     if _intraday_feedback_service is None:
         _intraday_feedback_service = build_default_intraday_trade_feedback_service(DB_PATH)
     return _intraday_feedback_service
+
+
+def learned_auto_buy_tiebreaker_service() -> LearnedAutoBuyTiebreakerService:
+    global _learned_tiebreaker_service
+    if _learned_tiebreaker_service is None:
+        thresholds = LearnedAutoBuyThresholds(
+            min_sample_size=AUTO_BUY_LEARNED_TIEBREAKER_MIN_SAMPLE_SIZE,
+            min_win_rate=AUTO_BUY_LEARNED_TIEBREAKER_MIN_WIN_RATE,
+            min_avg_return_pct=AUTO_BUY_LEARNED_TIEBREAKER_MIN_AVG_RETURN_PCT,
+            min_avg_mfe_pct=AUTO_BUY_LEARNED_TIEBREAKER_MIN_AVG_MFE_PCT,
+            max_avg_mae_pct=AUTO_BUY_LEARNED_TIEBREAKER_MAX_AVG_MAE_PCT,
+            lookback_days=AUTO_BUY_LEARNED_TIEBREAKER_LOOKBACK_DAYS,
+        )
+        _learned_tiebreaker_service = LearnedAutoBuyTiebreakerService(
+            CandidateUniverseRepository(DB_PATH),
+            thresholds,
+        )
+    return _learned_tiebreaker_service
 
 
 def _to_float(value: Any, default: float | None = None) -> float | None:
@@ -405,18 +426,7 @@ def learned_auto_buy_tiebreaker_decision(candidate: dict[str, Any]) -> dict[str,
     )
     if cache_key in _learned_tiebreaker_cache:
         return dict(_learned_tiebreaker_cache[cache_key])
-    thresholds = LearnedAutoBuyThresholds(
-        min_sample_size=AUTO_BUY_LEARNED_TIEBREAKER_MIN_SAMPLE_SIZE,
-        min_win_rate=AUTO_BUY_LEARNED_TIEBREAKER_MIN_WIN_RATE,
-        min_avg_return_pct=AUTO_BUY_LEARNED_TIEBREAKER_MIN_AVG_RETURN_PCT,
-        min_avg_mfe_pct=AUTO_BUY_LEARNED_TIEBREAKER_MIN_AVG_MFE_PCT,
-        max_avg_mae_pct=AUTO_BUY_LEARNED_TIEBREAKER_MAX_AVG_MAE_PCT,
-        lookback_days=AUTO_BUY_LEARNED_TIEBREAKER_LOOKBACK_DAYS,
-    )
-    decision = LearnedAutoBuyTiebreakerService(
-        CandidateUniverseRepository(DB_PATH),
-        thresholds,
-    ).decide(candidate, target_date=target_date)
+    decision = learned_auto_buy_tiebreaker_service().decide(candidate, target_date=target_date)
     result = {
         "qualified": decision.qualified,
         "reason": decision.reason,
@@ -447,6 +457,15 @@ def should_collect_candidates(now=None) -> tuple[bool, str]:
 
 def init_auto_buy_table() -> None:
     auto_buy_repo.init_tables(DB_PATH)
+    _initialized_auto_buy_db_paths.add(str(DB_PATH))
+
+
+def ensure_auto_buy_tables_initialized() -> None:
+    db_key = str(DB_PATH)
+    if db_key in _initialized_auto_buy_db_paths:
+        return
+    auto_buy_repo.init_tables(DB_PATH)
+    _initialized_auto_buy_db_paths.add(db_key)
 
 
 def latest_session(symbol: str) -> dict[str, Any]:
@@ -767,6 +786,16 @@ def evaluate_auto_buy_candidate(
     held = held or set()
     symbol = symbol.upper()
 
+    def _timed(label: str, phase_started: float) -> float:
+        if AUTO_BUY_TIMING_LOG_ENABLED:
+            elapsed = time.monotonic() - phase_started
+            if elapsed >= 0.25:
+                print(
+                    f"[TIMING] auto_buy.evaluate.{label} symbol={symbol} elapsed={elapsed:.2f}s",
+                    flush=True,
+                )
+        return time.monotonic()
+
     if symbol in held:
         return {
             "symbol": symbol,
@@ -954,6 +983,7 @@ def evaluate_auto_buy_candidate(
         score -= 4
         reasons.append(f"mature_chase_extension:-4(session={session_return:.2f}%,vwap={vwap:.2f}%)")
 
+    phase_started = time.monotonic()
     strategy_memory = memory_for_signal(
         symbol,
         {
@@ -976,6 +1006,7 @@ def evaluate_auto_buy_candidate(
             },
         },
     )
+    phase_started = _timed("strategy_memory", phase_started)
     learned_min_setup_score = strategy_memory.get("min_setup_score")
     memory_rec = str(strategy_memory.get("recommendation") or "none").strip().lower()
     strategy_memory_caution_gate = False
@@ -1037,6 +1068,7 @@ def evaluate_auto_buy_candidate(
 
     volume_ratio = _to_float(feature.get("volume_ratio_5m"), 0) or 0
     prediction_context = auto_buy_prediction_context(symbol)
+    phase_started = _timed("prediction_context", phase_started)
     ml_score = _to_float(prediction_context.get("ml_prediction_score"))
     ml_sample = int(_to_float(prediction_context.get("ml_prediction_sample_size"), 0) or 0)
     ml_bucket = str(prediction_context.get("ml_prediction_bucket") or "").strip().lower()
@@ -1147,6 +1179,7 @@ def evaluate_auto_buy_candidate(
         feature=feature,
         context=context,
     )
+    phase_started = _timed("symbol_pattern", phase_started)
     intraday_feedback = {
         "status": "disabled",
         "runtime_effect": "disabled_no_intraday_feedback",
@@ -1169,6 +1202,7 @@ def evaluate_auto_buy_candidate(
             evidence=intraday_feedback_evidence,
             allow_authority=not is_cash_mode(),
         )
+        phase_started = _timed("intraday_feedback", phase_started)
         feedback_status = str(intraday_feedback.get("status") or "neutral")
         feedback_penalty = _to_float(intraday_feedback.get("score_penalty"), 0) or 0
         if feedback_penalty:
@@ -1280,6 +1314,7 @@ def evaluate_auto_buy_candidate(
                 **pattern,
             }
         )
+        phase_started = _timed("learned_tiebreaker", phase_started)
         learned_tiebreaker_reason = tiebreaker.get("reason")
         evidence = tiebreaker.get("evidence")
         learned_tiebreaker_evidence = evidence if isinstance(evidence, dict) else {}
@@ -1462,7 +1497,7 @@ def log_candidate(
     timestamp = now_et().isoformat()
     candidate = enrich_candidate_with_reference_snapshot(candidate)
     candidate = attach_canonical_decision_metadata(candidate)
-    auto_buy_repo.init_tables(DB_PATH)
+    ensure_auto_buy_tables_initialized()
     auto_buy_repo.insert_candidate_and_snapshot(
         timestamp=timestamp,
         created_at=now_et().isoformat(),
@@ -1627,6 +1662,12 @@ def symbols_for_scope(scope: str) -> list[str]:
 
 
 AUTO_BUY_MAX_SIGNALS_PER_SYMBOL = int(os.getenv("AUTO_BUY_MAX_SIGNALS_PER_SYMBOL", "2"))
+AUTO_BUY_TIMING_LOG_ENABLED = os.getenv("AUTO_BUY_TIMING_LOG_ENABLED", "true").lower() in (
+    "1",
+    "true",
+    "yes",
+    "on",
+)
 
 AUTO_BUY_BUCKING_TAPE_MIN_SESSION_RETURN_PCT = float(
     os.getenv("AUTO_BUY_BUCKING_TAPE_MIN_SESSION_RETURN_PCT", "2.0")
@@ -1646,15 +1687,29 @@ AUTO_BUY_BUCKING_TAPE_MIN_EARLY_SESSION_RETURN_PCT = float(
 
 
 def build_candidates(scope: str) -> list[dict[str, Any]]:
+    started = time.monotonic()
+
+    def _phase(label: str, phase_started: float) -> float:
+        if AUTO_BUY_TIMING_LOG_ENABLED:
+            elapsed = time.monotonic() - phase_started
+            if elapsed >= 0.25:
+                print(f"[TIMING] auto_buy.{label} elapsed={elapsed:.2f}s", flush=True)
+        return time.monotonic()
+
+    phase_started = time.monotonic()
     ctx = load_market_context()
+    phase_started = _phase("load_market_context", phase_started)
     symbols_ctx = ctx.get("symbols") or {}
     rolling_context = load_rolling_momentum_context()
+    phase_started = _phase("load_rolling_momentum_context", phase_started)
     intraday_feedback_evidence = (
         intraday_feedback_service().build_evidence(_today())
         if AUTO_BUY_INTRADAY_FEEDBACK_ENABLED
         else {}
     )
+    phase_started = _phase("load_intraday_feedback_evidence", phase_started)
     held = held_symbols()
+    phase_started = _phase("load_held_symbols", phase_started)
     candidates = []
 
     # Market-level session gate: if the broad market (QQQ/SPY) is fading or in
@@ -1662,17 +1717,49 @@ def build_candidates(scope: str) -> list[dict[str, Any]]:
     mkt_label, mkt_reason = market_session_label()
     market_suppressed = mkt_label in SUPPRESSED_LABELS
 
-    for symbol in symbols_for_scope(scope):
+    symbols = symbols_for_scope(scope)
+    phase_started = _phase("load_symbols_for_scope", phase_started)
+    for symbol in symbols:
+        symbol_started = time.monotonic()
+        session_started = time.monotonic()
+        session = latest_session(symbol)
+        if AUTO_BUY_TIMING_LOG_ENABLED:
+            session_elapsed = time.monotonic() - session_started
+            if session_elapsed >= 0.25:
+                print(
+                    f"[TIMING] auto_buy.latest_session symbol={symbol} "
+                    f"elapsed={session_elapsed:.2f}s",
+                    flush=True,
+                )
+        feature_started = time.monotonic()
+        feature = latest_feature(symbol)
+        if AUTO_BUY_TIMING_LOG_ENABLED:
+            feature_elapsed = time.monotonic() - feature_started
+            if feature_elapsed >= 0.25:
+                print(
+                    f"[TIMING] auto_buy.latest_feature symbol={symbol} "
+                    f"elapsed={feature_elapsed:.2f}s",
+                    flush=True,
+                )
+        evaluation_started = time.monotonic()
         candidate = evaluate_auto_buy_candidate(
             symbol=symbol,
-            session=latest_session(symbol),
-            feature=latest_feature(symbol),
+            session=session,
+            feature=feature,
             context=symbols_ctx.get(symbol) or {},
             rolling_context=rolling_context.get(symbol.upper()) or {},
             intraday_feedback_evidence=intraday_feedback_evidence,
             held=held,
             signal_source=SYMBOL_SIGNAL_SOURCE.get(symbol, "unknown"),
         )
+        if AUTO_BUY_TIMING_LOG_ENABLED:
+            evaluation_elapsed = time.monotonic() - evaluation_started
+            if evaluation_elapsed >= 0.25:
+                print(
+                    f"[TIMING] auto_buy.evaluate_candidate symbol={symbol} "
+                    f"elapsed={evaluation_elapsed:.2f}s",
+                    flush=True,
+                )
 
         # Downgrade strong_buy_candidate → watch when market session is suppressed.
         if market_suppressed and candidate.get("decision") == "strong_buy_candidate":
@@ -1696,8 +1783,22 @@ def build_candidates(scope: str) -> list[dict[str, Any]]:
                 ).lstrip("; ")
 
         candidates.append(candidate)
+        if AUTO_BUY_TIMING_LOG_ENABLED:
+            symbol_elapsed = time.monotonic() - symbol_started
+            if symbol_elapsed >= 1.0:
+                print(
+                    f"[TIMING] auto_buy.evaluate_symbol symbol={symbol} "
+                    f"elapsed={symbol_elapsed:.2f}s decision={candidate.get('decision')}",
+                    flush=True,
+                )
 
     candidates.sort(key=lambda item: item.get("score") or 0, reverse=True)
+    if AUTO_BUY_TIMING_LOG_ENABLED:
+        print(
+            f"[TIMING] auto_buy.build_candidates scope={scope} symbols={len(symbols)} "
+            f"elapsed={time.monotonic() - started:.2f}s",
+            flush=True,
+        )
     return candidates
 
 

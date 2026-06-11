@@ -54,6 +54,18 @@ def init_tables(db_path=DB_PATH) -> None:
         )
         con.execute(
             """
+            CREATE INDEX IF NOT EXISTS idx_auto_buy_candidates_date_submitted
+            ON auto_buy_candidates(substr(timestamp, 1, 10), order_submitted)
+            """
+        )
+        con.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_auto_buy_candidates_symbol_date_decision_submitted
+            ON auto_buy_candidates(symbol, substr(timestamp, 1, 10), decision, order_submitted)
+            """
+        )
+        con.execute(
+            """
             CREATE TABLE IF NOT EXISTS auto_buy_decision_snapshots (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 created_at TEXT NOT NULL,
@@ -86,6 +98,12 @@ def init_tables(db_path=DB_PATH) -> None:
             """
             CREATE INDEX IF NOT EXISTS idx_auto_buy_decision_snapshots_symbol_time
             ON auto_buy_decision_snapshots(symbol, candidate_timestamp)
+            """
+        )
+        con.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_auto_buy_decision_snapshots_date
+            ON auto_buy_decision_snapshots(substr(candidate_timestamp, 1, 10))
             """
         )
         con.execute(

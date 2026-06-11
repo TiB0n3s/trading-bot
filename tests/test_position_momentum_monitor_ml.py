@@ -9,6 +9,8 @@ Run:
 import sqlite3
 import sys
 import tempfile
+from contextlib import redirect_stdout
+from io import StringIO
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -16,7 +18,8 @@ sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "scripts"))
 sys.path.insert(0, str(ROOT / "src"))
 
-from repositories import position_momentum_repo
+from repositories import auto_sell_repo, position_momentum_repo
+from trading_bot.ops_checks.commands.auto_sell_checks import run_auto_sell_health
 from trading_bot.signals.auto_sell import manager as monitor
 
 
@@ -183,12 +186,154 @@ def test_position_momentum_repo_persists_layered_ml_evidence():
     assert_equal(row["layered_ml_json"], '{"ok": true}', "json")
 
 
+def test_auto_sell_repo_persists_learning_candidate_and_snapshot():
+    with tempfile.TemporaryDirectory() as tmp:
+        db_path = Path(tmp) / "trades.db"
+        auto_sell_repo.insert_candidate_and_snapshot(
+            timestamp="2026-06-11 12:00:00",
+            created_at="2026-06-11T12:00:01-05:00",
+            position=Position(symbol="AAPL", qty=4, unrealized_plpc=-0.012),
+            session={
+                "trend_label": "fading",
+                "trend_score": -3,
+                "session_return_pct": -0.4,
+                "momentum_5m_pct": -0.2,
+                "distance_from_vwap_pct": -0.6,
+            },
+            decision={
+                "symbol": "AAPL",
+                "action": "sell_candidate",
+                "severity": "layered_ml_exit",
+                "reason": "test auto-sell learning",
+                "sell_pressure_score": 8,
+                "sell_pressure_recommendation": "full_exit",
+                "sell_pressure_reason": "pressure test",
+                "layered_ml_available": True,
+                "layered_ml_final_instruction": "pass",
+                "layered_ml_master_confidence_score": 82.0,
+                "layered_ml_ensemble_probability_pct": 84.0,
+                "layered_ml_reason": "test layered",
+            },
+            auto_sell_enabled=True,
+            order={"order_id": "sell-1", "status": "submitted"},
+            candidate_json='{"layered_ml_available": true}',
+            order_json='{"order_id": "sell-1"}',
+            db_path=db_path,
+        )
+
+        actions = auto_sell_repo.candidate_action_rows("2026-06-11", db_path=db_path)
+        snapshots = auto_sell_repo.decision_snapshot_summary(
+            "2026-06-11",
+            db_path=db_path,
+        )
+        layered = auto_sell_repo.layered_ml_summary("2026-06-11", db_path=db_path)
+
+    assert_equal(actions[0]["action"], "sell_candidate", "action")
+    assert_equal(actions[0]["submitted"], 1, "submitted")
+    assert_equal(snapshots["n"], 1, "snapshot rows")
+    assert_equal(snapshots["submitted"], 1, "snapshot submitted")
+    assert_equal(snapshots["layered_rows"], 1, "snapshot layered")
+    assert_equal(layered[0]["instruction"], "pass", "layered instruction")
+    assert_equal(layered[0]["sell_candidates"], 1, "layered sell candidates")
+
+
+def test_log_position_momentum_check_emits_auto_sell_learning_snapshot():
+    captured = {}
+    old_insert_check = position_momentum_repo.insert_check
+    old_insert_auto_sell = auto_sell_repo.insert_candidate_and_snapshot
+
+    def fake_insert_check(**kwargs):
+        captured["position_check"] = kwargs
+
+    def fake_insert_auto_sell(**kwargs):
+        captured["auto_sell"] = kwargs
+
+    position_momentum_repo.insert_check = fake_insert_check
+    auto_sell_repo.insert_candidate_and_snapshot = fake_insert_auto_sell
+    try:
+        monitor.log_position_momentum_check(
+            position=Position(symbol="AAPL", qty=2),
+            session={"trend_label": "fading"},
+            decision={
+                "symbol": "AAPL",
+                "action": "sell_candidate",
+                "severity": "layered_ml_exit",
+                "reason": "test",
+                "layered_ml_available": True,
+                "layered_ml_final_instruction": "pass",
+                "layered_ml_master_confidence_score": 81.0,
+            },
+            auto_sell_enabled=True,
+            order={"order_id": "sell-2", "status": "submitted"},
+        )
+    finally:
+        position_momentum_repo.insert_check = old_insert_check
+        auto_sell_repo.insert_candidate_and_snapshot = old_insert_auto_sell
+
+    assert_equal(
+        captured["position_check"]["timestamp"],
+        captured["auto_sell"]["timestamp"],
+        "shared timestamp",
+    )
+    assert_equal(captured["auto_sell"]["position"].symbol, "AAPL", "symbol")
+    assert_equal(captured["auto_sell"]["auto_sell_enabled"], True, "enabled")
+    if '"layered_ml_available": true' not in captured["auto_sell"]["candidate_json"]:
+        raise AssertionError("auto-sell candidate snapshot did not include layered ML evidence")
+
+
+def test_auto_sell_health_report_reads_first_class_learning_tables():
+    with tempfile.TemporaryDirectory() as tmp:
+        base_dir = Path(tmp)
+        db_path = base_dir / "trades.db"
+        auto_sell_repo.insert_candidate_and_snapshot(
+            timestamp="2026-06-11 12:00:00",
+            created_at="2026-06-11T12:00:01-05:00",
+            position=Position(symbol="AAPL", qty=4, unrealized_plpc=-0.012),
+            session={"trend_label": "fading", "trend_score": -3},
+            decision={
+                "symbol": "AAPL",
+                "action": "sell_candidate",
+                "severity": "layered_ml_exit",
+                "reason": "test auto-sell learning",
+                "sell_pressure_score": 8,
+                "layered_ml_available": True,
+                "layered_ml_final_instruction": "pass",
+                "layered_ml_master_confidence_score": 82.0,
+                "layered_ml_ensemble_probability_pct": 84.0,
+                "layered_ml_reason": "test layered",
+            },
+            auto_sell_enabled=True,
+            order={"order_id": "sell-1", "status": "submitted"},
+            candidate_json='{"layered_ml_available": true}',
+            order_json='{"order_id": "sell-1"}',
+            db_path=db_path,
+        )
+
+        output = StringIO()
+        with redirect_stdout(output):
+            ok = run_auto_sell_health("2026-06-11", base_dir=base_dir)
+
+    text = output.getvalue()
+    assert_equal(ok, True, "auto-sell report status")
+    for expected in (
+        "Auto-Sell Candidates",
+        "Layered ML influence",
+        "Top auto-sell candidates",
+        "AAPL",
+    ):
+        if expected not in text:
+            raise AssertionError(f"missing expected report text: {expected}")
+
+
 def main():
     tests = [
         test_layered_ml_promotes_loss_watch_to_sell_candidate,
         test_layered_ml_downgrades_weak_nonprotective_sell_candidate,
         test_layered_ml_does_not_downgrade_protective_emergency_exit,
         test_position_momentum_repo_persists_layered_ml_evidence,
+        test_auto_sell_repo_persists_learning_candidate_and_snapshot,
+        test_log_position_momentum_check_emits_auto_sell_learning_snapshot,
+        test_auto_sell_health_report_reads_first_class_learning_tables,
     ]
     for test in tests:
         test()

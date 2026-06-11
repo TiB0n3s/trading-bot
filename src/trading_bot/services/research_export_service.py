@@ -65,6 +65,16 @@ DEFAULT_RESEARCH_DATASETS: tuple[ResearchDatasetSpec, ...] = (
         "auto_buy_candidates",
         ("timestamp", "created_at"),
     ),
+    ResearchDatasetSpec(
+        "auto_sell_candidates",
+        "auto_sell_candidates",
+        ("timestamp", "created_at"),
+    ),
+    ResearchDatasetSpec(
+        "auto_sell_decision_snapshots",
+        "auto_sell_decision_snapshots",
+        ("candidate_timestamp", "created_at"),
+    ),
 )
 
 

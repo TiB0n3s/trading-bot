@@ -151,6 +151,13 @@ def _build_steps(target_date: str) -> list[Step]:
             description="summarize expectancy by setup/regime/session/execution buckets",
         ),
         Step(
+            name="auto_sell_learning_health",
+            module="ops_check",
+            argv=["auto-sell", target_date],
+            critical=False,
+            description="summarize first-class auto-sell ML, pressure, and execution analytics",
+        ),
+        Step(
             name="learning_readiness",
             module="ops_check",
             argv=["learning-readiness", target_date],

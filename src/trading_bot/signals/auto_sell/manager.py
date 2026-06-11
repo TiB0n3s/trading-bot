@@ -31,7 +31,7 @@ from services.historical_bar_paper_strategy_service import build_historical_bar_
 from services.layered_model_decision_service import build_layered_model_decision
 from session_momentum import get_latest_session_momentum
 
-from repositories import position_momentum_repo
+from repositories import auto_sell_repo, position_momentum_repo
 
 logging.basicConfig(
     level=logging.INFO,
@@ -830,6 +830,7 @@ def maybe_promote_sell_pressure(decision: dict[str, Any], unrealized_plpc: float
 
 def init_position_momentum_table() -> None:
     position_momentum_repo.init_checks_table()
+    auto_sell_repo.init_tables()
 
 
 def log_position_momentum_check(
@@ -837,9 +838,10 @@ def log_position_momentum_check(
 ) -> None:
     session = session or {}
     order = order or {}
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
     position_momentum_repo.insert_check(
-        timestamp=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        timestamp=timestamp,
         symbol=getattr(position, "symbol", None),
         qty=_to_float(getattr(position, "qty", 0)),
         action=decision.get("action"),
@@ -871,6 +873,24 @@ def log_position_momentum_check(
             default=str,
         ),
     )
+    try:
+        auto_sell_repo.insert_candidate_and_snapshot(
+            timestamp=timestamp,
+            created_at=now_et().isoformat(),
+            position=position,
+            session=session,
+            decision=decision,
+            auto_sell_enabled=auto_sell_enabled,
+            order=order,
+            candidate_json=json.dumps(decision, sort_keys=True, default=str),
+            order_json=json.dumps(order, sort_keys=True, default=str),
+        )
+    except Exception as exc:
+        logger.warning(
+            "auto-sell analytics persistence failed for %s: %s",
+            getattr(position, "symbol", "unknown"),
+            exc,
+        )
 
 
 def build_client_order_id(symbol: str) -> str:

@@ -12,9 +12,13 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from ops.database_backup_service import DatabaseBackupService  # noqa: E402
+from ops.database_backup_service import (  # noqa: E402
+    DatabaseBackupService,
+    DatabaseRestoreDrillService,
+)
 from trading_bot.ops_checks.commands.database_backup_checks import (
     run_database_backup_report,  # noqa: E402
+    run_database_restore_drill,
 )
 
 
@@ -81,7 +85,32 @@ def test_database_backup_cli_writes_manifest_and_ops_report_reads_it():
         assert run_database_backup_report(base_dir=base_dir, max_age_hours=24.0) is True
 
 
+def test_database_restore_drill_verifies_latest_backup_manifest():
+    with tempfile.TemporaryDirectory() as tmp:
+        base_dir = Path(tmp) / "base"
+        backup_dir = base_dir / "backups" / "databases"
+        base_dir.mkdir()
+        _build_db(base_dir / "trades.db")
+
+        backup_service = DatabaseBackupService(base_dir=base_dir, backup_dir=backup_dir)
+        backup_manifest = backup_service.run(
+            db_names=["trades.db"],
+            timestamp="20260608T150000Z",
+        )
+        backup_service.write_manifest(backup_manifest)
+
+        drill_service = DatabaseRestoreDrillService(backup_dir=backup_dir)
+        restore_manifest = drill_service.run(restore_dir=backup_dir / "restore_test")
+
+        assert restore_manifest.ok
+        assert restore_manifest.verified_count == 1
+        assert restore_manifest.results[0].integrity_check == "ok"
+        assert Path(restore_manifest.results[0].restore_path).exists()
+        assert run_database_restore_drill(base_dir=base_dir) is True
+
+
 if __name__ == "__main__":
     test_database_backup_service_verifies_online_backup()
     test_database_backup_cli_writes_manifest_and_ops_report_reads_it()
+    test_database_restore_drill_verifies_latest_backup_manifest()
     print("database backup service tests passed")

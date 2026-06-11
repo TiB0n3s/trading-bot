@@ -7,6 +7,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from ops.database_backup_service import DatabaseRestoreDrillService
+
 
 def _load_latest_manifest(backup_dir: Path) -> tuple[Path | None, dict[str, Any] | None]:
     manifests = sorted(backup_dir.glob("database_backup_*.manifest.json"))
@@ -83,3 +85,52 @@ def run_database_backup_report(*, base_dir: Path, max_age_hours: float = 30.0) -
 
     print("[OK] latest database backup manifest is fresh and verified")
     return True
+
+
+def run_database_restore_drill(
+    *,
+    base_dir: Path,
+    backup_dir: Path | None = None,
+) -> bool:
+    backup_root = backup_dir or base_dir / "backups" / "databases"
+    service = DatabaseRestoreDrillService(backup_dir=backup_root)
+    restore_dir = (
+        backup_root
+        / "restore_drills"
+        / f"restore_{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}"
+    )
+    manifest = service.run(restore_dir=restore_dir)
+    manifest_path = service.write_manifest(manifest)
+
+    print()
+    print("=" * 72)
+    print("  Database Restore Drill")
+    print("=" * 72)
+    print(f"report_version          : {manifest.report_version}")
+    print(f"runtime_effect          : {manifest.runtime_effect}")
+    print(f"backup_dir              : {backup_root}")
+    print(f"backup_manifest         : {manifest.backup_manifest_path or '-'}")
+    print(f"restore_dir             : {manifest.restore_dir}")
+    print(f"drill_manifest          : {manifest_path}")
+    print(f"verified_count          : {manifest.verified_count}")
+    print(f"skipped_count           : {manifest.skipped_count}")
+    print(f"failed_count            : {manifest.failed_count}")
+
+    print()
+    print("Restored databases")
+    for row in manifest.results:
+        print(
+            f"  {row.name:<15} status={row.status:<8} "
+            f"integrity={row.integrity_check or '-':<8} "
+            f"tables={row.table_count if row.table_count is not None else '-':<4} "
+            f"backup={row.backup_path or '-'}"
+        )
+        if row.error:
+            print(f"    error={row.error}")
+
+    print()
+    if manifest.ok:
+        print("[OK] latest database backups restored and passed integrity checks")
+        return True
+    print("[FAIL] database restore drill did not verify any restorable backups")
+    return False

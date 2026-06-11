@@ -107,7 +107,15 @@ def _line_count(path: Path) -> int:
 
 
 def _top_python_files(base_dir: Path, *, limit: int = 12) -> list[dict[str, Any]]:
-    ignored_parts = {".git", "venv", "__pycache__", ".pytest_cache"}
+    ignored_parts = {
+        ".git",
+        ".mypy_cache",
+        ".pytest_cache",
+        ".ruff_cache",
+        "__pycache__",
+        "venv",
+        "venv-webull",
+    }
     rows: list[dict[str, Any]] = []
     for path in base_dir.rglob("*.py"):
         rel_parts = path.relative_to(base_dir).parts

@@ -106,10 +106,23 @@ def test_architecture_surface_payload_flags_missing_skeleton(tmp_path):
     assert payload["ready"] is False
 
 
+def test_architecture_surface_top_files_ignore_virtualenvs(tmp_path):
+    _write(tmp_path / "src" / "trading_bot" / "real_module.py", "print('ok')\n")
+    _write(tmp_path / "venv-webull" / "lib" / "site-packages" / "huge.py", "x = 1\n" * 2000)
+    _create_skeleton(tmp_path)
+
+    payload = build_architecture_surface_payload(base_dir=tmp_path)
+    top_paths = {row["path"] for row in payload["top_python_files"]}
+
+    assert "src/trading_bot/real_module.py" in top_paths
+    assert not any(path.startswith("venv-webull/") for path in top_paths)
+
+
 if __name__ == "__main__":
     tests = [
         test_architecture_surface_payload_counts_core_surfaces,
         test_architecture_surface_payload_flags_missing_skeleton,
+        test_architecture_surface_top_files_ignore_virtualenvs,
     ]
     for test in tests:
         import tempfile

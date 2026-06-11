@@ -189,6 +189,7 @@ Use the Python backup path instead of shell-only `sqlite3 .backup` commands:
 ```bash
 python3 pipeline/database_backup.py
 python3 ops_check.py database-backups
+python3 ops_check.py database-restore-drill
 ```
 
 The backup service uses SQLite's online backup API, stores verified copies under
@@ -197,6 +198,38 @@ each copied database. The default set is `trades.db`, `predictions.db`, and
 `jobs.db`; missing optional files are reported but do not fail the run if at
 least one database verifies. The tracked cron file schedules this weekly after
 Friday close.
+
+`database-restore-drill` re-opens the latest verified backup manifest, restores
+each verified database into `backups/databases/restore_drills/`, runs SQLite
+integrity/table-count checks against the restored copy, and writes a drill
+manifest. Run it off-hours for production-sized databases.
+
+## Paper Session Evidence
+
+Use the paper-session evidence report after or during a paper trading session to
+check whether ML/intelligence authority has enough canonical evidence for review:
+
+```bash
+python3 ops_check.py paper-session-evidence "$(date +%F)"
+```
+
+The report summarizes decision snapshots, auto-buy bridge rows, candidate
+forward-outcome coverage, rejected/realized outcomes, and whether canonical
+decision-policy learning effects are present. It is diagnostic-only; blockers
+mean the session should not be used for authority promotion yet.
+
+## Live Quote Quality
+
+Use live quote quality when market-data providers disagree or quote quality is
+suspect:
+
+```bash
+python3 ops_check.py live-quote-quality AAPL
+```
+
+The check compares currently configured Alpaca, Polygon, and Webull quote
+snapshots, counts usable providers, measures provider mid-price disagreement,
+and reports spread/provider errors without granting trading authority.
 
 ## Architecture Surface Cleanup
 

@@ -25,6 +25,7 @@ COMMAND_SPECS: dict[str, OpsCommandSpec] = {
     "log-ledger-consistency": noarg("log-ledger-consistency"),
     "production-evidence": spec("production-evidence"),
     "database-backups": noarg("database-backups"),
+    "database-restore-drill": noarg("database-restore-drill"),
     "local-load-probe": noarg("local-load-probe"),
     "paper-replay-load-probe": noarg("paper-replay-load-probe"),
     "full-session-paper-replay": noarg("full-session-paper-replay"),

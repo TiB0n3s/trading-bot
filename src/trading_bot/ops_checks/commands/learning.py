@@ -40,5 +40,6 @@ COMMAND_SPECS: dict[str, OpsCommandSpec] = {
     "claude-context-audit": spec("claude-context-audit"),
     "advisory-authority-report": spec("advisory-authority-report"),
     "paper-learning-authority": spec("paper-learning-authority"),
+    "paper-session-evidence": spec("paper-session-evidence"),
     "cross-layer-verification": spec("cross-layer-verification"),
 }

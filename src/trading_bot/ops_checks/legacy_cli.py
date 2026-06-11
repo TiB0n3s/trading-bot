@@ -71,6 +71,7 @@ _LAZY_HANDLER_REFS = {
     "run_cross_asset_lead_lag_map_report": "trading_bot.ops_checks.commands.cross_asset_lead_lag_checks:run_cross_asset_lead_lag_map_report",
     "run_cross_layer_verification_report": "trading_bot.ops_checks.commands.cross_layer_verification_checks:run_cross_layer_verification_report",
     "run_database_backup_report": "trading_bot.ops_checks.commands.database_backup_checks:run_database_backup_report",
+    "run_database_restore_drill": "trading_bot.ops_checks.commands.database_backup_checks:run_database_restore_drill",
     "run_dataset_health": "trading_bot.ops_checks.commands.dataset_checks:run_dataset_health",
     "run_decision_quality_review": "trading_bot.ops_checks.commands.decision_quality_checks:run_decision_quality_review",
     "run_event_context_validation": "trading_bot.ops_checks.commands.event_context_validation_checks:run_event_context_validation",
@@ -107,6 +108,7 @@ _LAZY_HANDLER_REFS = {
     "run_lifecycle_analysis": "trading_bot.ops_checks.commands.lifecycle_checks:run_lifecycle_analysis",
     "run_lifecycle_dashboard": "trading_bot.ops_checks.commands.lifecycle_dashboard_checks:run_lifecycle_dashboard",
     "run_live_bar_pattern_capture_report": "trading_bot.ops_checks.commands.live_bar_pattern_capture_checks:run_live_bar_pattern_capture_report",
+    "run_live_quote_quality": "trading_bot.ops_checks.commands.live_quote_quality_checks:run_live_quote_quality",
     "run_local_load_probe_report": "trading_bot.ops_checks.commands.local_load_probe_checks:run_local_load_probe_report",
     "run_log_ledger_consistency": "trading_bot.ops_checks.commands.log_ledger_checks:run_log_ledger_consistency",
     "run_market_data_parity": "trading_bot.ops_checks.commands.market_data_parity_checks:run_market_data_parity",
@@ -123,6 +125,7 @@ _LAZY_HANDLER_REFS = {
     "run_order_health": "trading_bot.ops_checks.commands.order_checks:run_order_health",
     "run_packaged_entrypoint_validation_report": "trading_bot.ops_checks.commands.packaged_entrypoint_validation_checks:run_packaged_entrypoint_validation_report",
     "run_paper_learning_authority_report": "trading_bot.ops_checks.commands.paper_learning_authority_checks:run_paper_learning_authority_report",
+    "run_paper_session_evidence": "trading_bot.ops_checks.commands.paper_session_evidence_checks:run_paper_session_evidence",
     "run_paper_replay_load_probe_report": "trading_bot.ops_checks.commands.paper_replay_load_probe_checks:run_paper_replay_load_probe_report",
     "run_pattern_learning_inputs_report": "trading_bot.ops_checks.commands.pattern_learning_inputs_checks:run_pattern_learning_inputs_report",
     "run_point_in_time_archive": "trading_bot.ops_checks.commands.point_in_time_archive_checks:run_point_in_time_archive",
@@ -1458,6 +1461,10 @@ def paper_learning_authority(target_date: str) -> bool:
     return run_paper_learning_authority_report(target_date, base_dir=BASE_DIR)
 
 
+def paper_session_evidence(target_date: str) -> bool:
+    return run_paper_session_evidence(target_date, base_dir=BASE_DIR)
+
+
 def cross_layer_verification(target_date: str) -> bool:
     return run_cross_layer_verification_report(target_date, base_dir=BASE_DIR)
 
@@ -1488,6 +1495,10 @@ def database_backups() -> bool:
         base_dir=BASE_DIR,
         max_age_hours=_float_option("--max-age-hours", 30.0),
     )
+
+
+def database_restore_drill() -> bool:
+    return run_database_restore_drill(base_dir=BASE_DIR)
 
 
 def jobs_status(job_name_filter: str | None = None) -> bool:

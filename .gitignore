@@ -56,6 +56,7 @@ data_archive/
 db_backups/
 db_recovery_*/
 db_corrupt_archive_*/
+backups/
 *.corrupt.*
 # Runtime logs
 signals.log

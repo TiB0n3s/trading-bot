@@ -100,6 +100,13 @@ def test_webull_readiness_reports_missing_configuration_without_secret_leakage()
     assert_true("WEBULL_API_KEY" in readiness["blockers"][0], "blocker key name")
 
 
+def test_webull_credentials_default_to_regular_session_entitlement():
+    service = WebullMarketDataService(client=FakeQuoteClient({}))
+
+    assert_equal(service.credentials.overnight_required, False, "overnight default")
+    assert_equal(service.credentials.extended_hours_required, False, "extended hours default")
+
+
 def test_webull_quote_client_normalizes_bid_ask_mid_and_spread():
     service = WebullMarketDataService(
         client=FakeQuoteClient(
@@ -134,6 +141,26 @@ def test_webull_quote_client_supports_batch_quote_shape():
     assert_equal(quote["ask"], 100.20, "ask")
 
 
+def test_webull_quote_client_supports_nasdaq_basic_depth_shape():
+    service = WebullMarketDataService(
+        client=FakeQuoteClient(
+            {
+                "symbol": "AAPL",
+                "bids": [{"price": "290.4000", "size": "1"}],
+                "asks": [{"price": "290.9900", "size": "4"}],
+                "quote_time": 1781136000243,
+            }
+        ),
+        credentials=WebullCredentials("key", "secret", "acct"),
+    )
+
+    quote = service.latest_quote_summary("AAPL")
+
+    assert_equal(quote["bid"], 290.4, "bid")
+    assert_equal(quote["ask"], 290.99, "ask")
+    assert_equal(quote["available"], True, "available")
+
+
 def test_webull_quote_client_supports_official_data_client_shape():
     client = FakeWebullDataClient()
     service = WebullMarketDataService(
@@ -145,7 +172,7 @@ def test_webull_quote_client_supports_official_data_client_shape():
 
     assert_equal(quote["bid"], 101.10, "bid")
     assert_equal(quote["ask"], 101.20, "ask")
-    assert_equal(client.market_data.calls, [("MSFT", "US_STOCK", 1, True)], "nested call")
+    assert_equal(client.market_data.calls, [("MSFT", "US_STOCK", 1, False)], "nested call")
 
 
 def test_provider_parity_includes_webull_when_service_is_injected():
@@ -209,8 +236,10 @@ def test_webull_sdk_logging_suppression_restores_global_logging_state():
 def main():
     tests = [
         test_webull_readiness_reports_missing_configuration_without_secret_leakage,
+        test_webull_credentials_default_to_regular_session_entitlement,
         test_webull_quote_client_normalizes_bid_ask_mid_and_spread,
         test_webull_quote_client_supports_batch_quote_shape,
+        test_webull_quote_client_supports_nasdaq_basic_depth_shape,
         test_webull_quote_client_supports_official_data_client_shape,
         test_provider_parity_includes_webull_when_service_is_injected,
         test_env_credentials_support_app_key_aliases,

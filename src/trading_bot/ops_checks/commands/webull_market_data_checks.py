@@ -41,6 +41,8 @@ def run_webull_readiness() -> bool:
     print(f"sdk_version             : {payload['sdk_version'] or '-'}")
     print(f"account_id_present      : {payload['account_id_present']}")
     print(f"region                  : {payload['region']}")
+    print(f"overnight_required      : {payload['overnight_required']}")
+    print(f"extended_hours_required : {payload['extended_hours_required']}")
     if payload["blockers"]:
         print()
         print("Blockers")

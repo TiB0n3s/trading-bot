@@ -19,12 +19,21 @@ WEBULL_MARKET_DATA_VERSION = "webull_market_data_v1"
 WEBULL_SDK_LOGGERS = ("webull",)
 
 
+def _env_bool(name: str, default: bool = False) -> bool:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() in {"1", "true", "yes", "on"}
+
+
 @dataclass(frozen=True)
 class WebullCredentials:
     api_key: str
     api_secret: str
     account_id: str
     region: str = "US"
+    overnight_required: bool = False
+    extended_hours_required: bool = False
 
     @property
     def configured(self) -> bool:
@@ -37,6 +46,8 @@ def webull_credentials_from_env() -> WebullCredentials:
         api_secret=os.getenv("WEBULL_API_SECRET", "") or os.getenv("WEBULL_APP_SECRET", ""),
         account_id=os.getenv("WEBULL_ACCOUNT_ID", ""),
         region=os.getenv("WEBULL_REGION", "US") or "US",
+        overnight_required=_env_bool("WEBULL_OVERNIGHT_REQUIRED", False),
+        extended_hours_required=_env_bool("WEBULL_EXTENDED_HOURS_REQUIRED", False),
     )
 
 
@@ -66,6 +77,8 @@ def webull_readiness(*, credentials: WebullCredentials | None = None) -> dict[st
         "sdk_version": sdk_version,
         "account_id_present": bool(credentials.account_id),
         "region": credentials.region,
+        "overnight_required": credentials.overnight_required,
+        "extended_hours_required": credentials.extended_hours_required,
         "status": "ready" if not blockers else "not_ready",
         "blockers": blockers,
     }
@@ -155,7 +168,7 @@ class WebullMarketDataService:
                     symbol,
                     "US_STOCK",
                     depth=1,
-                    overnight_required=True,
+                    overnight_required=self.credentials.overnight_required,
                 )
             return _response_payload(response)
 
@@ -165,8 +178,8 @@ class WebullMarketDataService:
                 response = nested_snapshot(
                     symbol,
                     "US_STOCK",
-                    extend_hour_required=True,
-                    overnight_required=True,
+                    extend_hour_required=self.credentials.extended_hours_required,
+                    overnight_required=self.credentials.overnight_required,
                 )
             return _response_payload(response)
 
@@ -193,6 +206,18 @@ def _float_or_none(value: Any) -> float | None:
         return float(value)
     except Exception:
         return None
+
+
+def _first_depth_price(raw_quote: Any, side: str) -> Any:
+    if not isinstance(raw_quote, dict):
+        return None
+    levels = raw_quote.get(side)
+    if not isinstance(levels, list) or not levels:
+        return None
+    first = levels[0]
+    if not isinstance(first, dict):
+        return None
+    return first.get("price")
 
 
 def _response_payload(response: Any) -> Any:
@@ -224,11 +249,16 @@ def _suppress_webull_sdk_logging():
 def _normalize_webull_quote(symbol: str, raw_quote: Any) -> dict[str, Any]:
     bid = _float_or_none(
         _get_first(raw_quote, ("bid", "bid_price", "bp", "bidPrice", "bid_price_1"))
+        or _first_depth_price(raw_quote, "bids")
     )
     ask = _float_or_none(
         _get_first(raw_quote, ("ask", "ask_price", "ap", "askPrice", "ask_price_1"))
+        or _first_depth_price(raw_quote, "asks")
     )
-    timestamp = _get_first(raw_quote, ("timestamp", "time", "t", "tradeTime", "quoteTime"))
+    timestamp = _get_first(
+        raw_quote,
+        ("timestamp", "time", "t", "tradeTime", "quoteTime", "quote_time"),
+    )
     spread = ask - bid if bid is not None and ask is not None else None
     mid = (bid + ask) / 2 if bid is not None and ask is not None else None
     spread_pct = spread / mid * 100 if spread is not None and mid else None

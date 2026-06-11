@@ -60,6 +60,7 @@ import time  # noqa: E402
 
 from pre_market_research_data import (  # noqa: E402
     PRE_MARKET_ALPACA_SYMBOL_SLEEP_SECONDS,
+    apply_cot_positioning_context,
     apply_event_enrichment,
     build_index_state,
     build_sector_state,
@@ -68,6 +69,7 @@ from pre_market_research_data import (  # noqa: E402
     classify_symbol,
     enrich_with_session_context,
     get_recent_bars,
+    load_cot_positioning_context,
     load_event_enrichment,
     safe_round,
 )
@@ -106,6 +108,7 @@ def _rebuild_symbols(
     existing_context: dict,
     market_data: dict,
     event_enrichment: dict,
+    cot_positioning_context: dict,
     macro_sentiment: str,
     macro_regime: str,
     market_date: str,
@@ -129,6 +132,7 @@ def _rebuild_symbols(
             "bar_count_1m": data.get("bar_count_1m", 0),
         }
         apply_event_enrichment(entry, event_enrichment.get(sym) or {})
+        apply_cot_positioning_context(sym, entry, cot_positioning_context)
         entry = enrich_with_session_context(sym, entry, market_date)
         symbols_out[sym] = entry
 
@@ -146,7 +150,12 @@ def rebuild_market_context(market_date: str) -> dict:
     existing = json.loads(OUTPUT_FILE.read_text())
 
     event_enrichment = load_event_enrichment(market_date)
+    cot_positioning_context = load_cot_positioning_context()
     logger.info(f"Loaded event enrichment for {len(event_enrichment)} symbols")
+    logger.info(
+        "Loaded COT positioning context for "
+        f"{len(cot_positioning_context.get('markets') or {})} market(s)"
+    )
 
     logger.info(f"Fetching fresh Alpaca bars for {len(APPROVED_SYMBOLS_LIST)} symbols")
     market_data = _fetch_market_data(APPROVED_SYMBOLS_LIST)
@@ -165,6 +174,7 @@ def rebuild_market_context(market_date: str) -> dict:
         existing,
         market_data,
         event_enrichment,
+        cot_positioning_context,
         macro_sentiment,
         macro_regime,
         market_date,
@@ -184,6 +194,7 @@ def rebuild_market_context(market_date: str) -> dict:
     existing["intraday_refresh_at"] = now_et_str
     existing["source_quality"] = "event_enriched" if event_enrichment else "data_only"
     existing["event_enrichment_count"] = len(event_enrichment)
+    existing["cot_positioning_context"] = cot_positioning_context
 
     brief = build_market_brief(existing)
 

@@ -24,8 +24,13 @@ from datetime import date, datetime
 from pathlib import Path
 
 from alerts import send_alert
-from symbols_config import APPROVED_SYMBOLS_LIST
+from symbols_config import APPROVED_SYMBOLS_LIST, SYMBOL_CONFIG
 
+from market_intelligence.cot_positioning import (
+    DEFAULT_STATE_PATH,
+    cot_context_for_symbol,
+    load_cot_state,
+)
 from market_intelligence.intelligence_store import ingest_market_context
 from market_intelligence.market_brief_builder import (
     build_market_brief,
@@ -38,6 +43,9 @@ from market_intelligence.research_output import raw_research_summary
 SCRIPT_DIR = Path(__file__).resolve().parent
 BASE_DIR = SCRIPT_DIR.parent
 OUTPUT_FILE = BASE_DIR / "market_context.json"
+COT_POSITIONING_STATE_FILE = Path(
+    os.getenv("COT_POSITIONING_STATE_FILE", str(BASE_DIR / DEFAULT_STATE_PATH))
+)
 
 PRE_MARKET_ALPACA_SYMBOL_SLEEP_SECONDS = float(
     os.getenv("PRE_MARKET_ALPACA_SYMBOL_SLEEP_SECONDS", "0.35")
@@ -621,6 +629,21 @@ def update_performance_context(symbol_entry: dict) -> dict:
             score -= 2
             evidence.append(f"event_confidence_cap:{confidence_cap}")
 
+    cot_context = symbol_entry.get("cot_positioning_context") or {}
+    if isinstance(cot_context, dict):
+        regime = str(cot_context.get("positioning_regime") or "")
+        size_modifier = _perf_float(cot_context.get("cot_size_modifier"))
+        if regime in {"leveraged_long_extreme", "leveraged_short_extreme"}:
+            score -= 8
+            evidence.append(f"cot_positioning_extreme:{regime}")
+        elif regime in {"leveraged_long_elevated", "leveraged_short_elevated"}:
+            score -= 4
+            evidence.append(f"cot_positioning_elevated:{regime}")
+        elif regime == "balanced":
+            evidence.append("cot_positioning_balanced")
+        if size_modifier is not None and size_modifier < 1.0:
+            evidence.append(f"cot_size_modifier:{size_modifier:.2f}")
+
     score = round(max(0.0, min(100.0, score)), 2)
     label = _performance_label(score)
     performance_confidence = _performance_confidence(score, len(evidence))
@@ -878,6 +901,69 @@ def apply_event_enrichment(symbol_entry: dict, enrichment: dict) -> None:
         ).strip()
 
 
+def load_cot_positioning_context() -> dict:
+    """Load weekly CFTC COT positioning context for market-context enrichment."""
+    try:
+        state = load_cot_state(COT_POSITIONING_STATE_FILE, SYMBOL_CONFIG)
+    except Exception as e:
+        logger.warning(f"COT positioning context load failed: {e}")
+        return {
+            "available": False,
+            "reason": f"COT positioning context load failed: {e}",
+            "runtime_effect": "weekly_macro_positioning_context_no_intraday_trade_authority",
+            "markets": {},
+            "symbol_map": {},
+        }
+    if not state.get("available"):
+        logger.info(state.get("reason") or "COT positioning context unavailable")
+    return state
+
+
+def apply_cot_positioning_context(symbol: str, symbol_entry: dict, cot_state: dict) -> None:
+    """Attach COT macro-positioning context to one symbol entry.
+
+    COT is weekly and delayed. The context can inform ML/meta-label/sizing
+    layers, but it must not become standalone BUY/SELL authority.
+    """
+    context = cot_context_for_symbol(symbol, cot_state)
+    if not context:
+        return
+
+    symbol_entry["cot_positioning_context"] = context
+
+    regime = context.get("positioning_regime")
+    cot_index = context.get("leveraged_funds_cot_index_52w")
+    mapped_market = context.get("mapped_cot_market")
+    size_modifier = context.get("cot_size_modifier")
+
+    risks = symbol_entry.setdefault("key_risks", [])
+    catalysts = symbol_entry.setdefault("key_catalysts", [])
+    evidence = symbol_entry.setdefault("performance_evidence", [])
+
+    if regime in {"leveraged_long_extreme", "leveraged_short_extreme"}:
+        note = (
+            f"CFTC COT {mapped_market} {regime} "
+            f"(leveraged_funds_cot_index_52w={cot_index}); macro size-down context."
+        )
+        if isinstance(risks, list) and note not in risks:
+            risks.append(note)
+    elif regime == "balanced":
+        note = f"CFTC COT {mapped_market} balanced; no macro positioning crowding flag."
+        if isinstance(catalysts, list) and note not in catalysts:
+            catalysts.append(note)
+
+    if isinstance(evidence, list):
+        evidence.append(f"cot_positioning:{mapped_market}:{regime}:size_modifier={size_modifier}")
+
+    reason = symbol_entry.get("reason") or ""
+    if "COT positioning:" not in reason:
+        symbol_entry["reason"] = (
+            f"{reason} COT positioning: {mapped_market} regime={regime}, "
+            f"leveraged_index_52w={cot_index}, size_modifier={size_modifier}; "
+            "weekly macro context only."
+        ).strip()
+
+
 def should_write_live(build_output):
     if not build_output:
         return True
@@ -1045,9 +1131,14 @@ def main():
     if PRE_MARKET_ALPACA_MAX_SYMBOLS > 0:
         symbols = symbols[:PRE_MARKET_ALPACA_MAX_SYMBOLS]
     event_enrichment = load_event_enrichment(today)
+    cot_positioning_context = load_cot_positioning_context()
 
     logger.info(f"Running no-Claude data research for {len(symbols)} symbols")
     logger.info(f"Loaded event enrichment for {len(event_enrichment)} symbols")
+    logger.info(
+        "Loaded COT positioning context for "
+        f"{len(cot_positioning_context.get('markets') or {})} market(s)"
+    )
 
     market_data = {}
     for i, sym in enumerate(symbols):
@@ -1079,6 +1170,7 @@ def main():
     template["data_only"] = len(event_enrichment) == 0
     template["source_quality"] = "event_enriched" if event_enrichment else "data_only"
     template["event_enrichment_count"] = len(event_enrichment)
+    template["cot_positioning_context"] = cot_positioning_context
 
     symbols_out = template.get("symbols", {})
 
@@ -1103,6 +1195,7 @@ def main():
                 "bar_count_1m": market_data[sym].get("bar_count_1m", 0),
             }
             apply_event_enrichment(symbols_out[sym], event_enrichment.get(sym) or {})
+            apply_cot_positioning_context(sym, symbols_out[sym], cot_positioning_context)
             update_performance_context(symbols_out[sym])
         else:
             symbols_out[sym].update(
@@ -1116,6 +1209,7 @@ def main():
                     "avoid_type": None,
                 }
             )
+            apply_cot_positioning_context(sym, symbols_out[sym], cot_positioning_context)
             update_performance_context(symbols_out[sym])
 
     template["symbols"] = symbols_out

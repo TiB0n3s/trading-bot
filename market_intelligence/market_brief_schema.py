@@ -12,7 +12,6 @@ from __future__ import annotations
 
 from typing import Any
 
-
 VALID_BIAS = {"buy", "avoid", "neutral"}
 VALID_CONFIDENCE = {"low", "medium", "high"}
 VALID_FUNDAMENTAL = {"strong_bullish", "bullish", "neutral", "bearish", "strong_bearish"}
@@ -31,8 +30,15 @@ VALID_ENTRY_QUALITY = {
     "poor",
 }
 VALID_AVOID_TYPE = {None, "soft", "hard"}
-VALID_MACRO_REGIME = {"risk_on", "normal", "caution", "mixed", "defensive", "risk_off", "capital_preservation"}
-
+VALID_MACRO_REGIME = {
+    "risk_on",
+    "normal",
+    "caution",
+    "mixed",
+    "defensive",
+    "risk_off",
+    "capital_preservation",
+}
 
 
 LEARNING_ENRICHMENT_FIELDS = (
@@ -45,7 +51,6 @@ LEARNING_ENRICHMENT_FIELDS = (
     "prior_session_prediction_score",
     "prior_session_trend_label",
     "prior_session_timing_score",
-
     "session_momentum_label",
     "session_momentum_score",
     "session_return_pct",
@@ -56,7 +61,6 @@ LEARNING_ENRICHMENT_FIELDS = (
     "session_momentum_reason",
     "session_momentum_upgrade",
     "session_momentum_upgrade_reason",
-
     "prediction_score",
     "prediction_confidence",
     "prediction_expected_pnl",
@@ -70,7 +74,6 @@ LEARNING_ENRICHMENT_FIELDS = (
     "prediction_trend_regime",
     "prediction_trend_confidence",
     "prediction_reason",
-
     "strategy_memory_trades",
     "strategy_memory_wins",
     "strategy_memory_losses",
@@ -78,12 +81,12 @@ LEARNING_ENRICHMENT_FIELDS = (
     "strategy_memory_pnl",
     "strategy_memory_expectancy",
     "strategy_memory_avg_pnl_pct",
-
     "performance_score",
     "performance_label",
     "performance_confidence",
     "performance_reason",
     "performance_evidence",
+    "cot_positioning_context",
 )
 
 
@@ -94,6 +97,7 @@ def learning_enrichment_fields(entry: dict[str, Any]) -> dict[str, Any]:
         if key in entry:
             out[key] = entry.get(key)
     return out
+
 
 def clamp_score(value: Any, default: int | None = None) -> int | None:
     try:
@@ -156,7 +160,6 @@ def normalize_symbol_entry(symbol: str, entry: dict[str, Any] | None) -> dict[st
         "risk_level": risk,
         "entry_quality": entry_quality,
         "avoid_type": avoid_type,
-
         # New richer research fields; observe-only for now
         "catalyst_score": clamp_score(entry.get("catalyst_score")),
         "relative_strength_score": clamp_score(entry.get("relative_strength_score")),
@@ -165,14 +168,21 @@ def normalize_symbol_entry(symbol: str, entry: dict[str, Any] | None) -> dict[st
         "liquidity_quality": normalize_string(entry.get("liquidity_quality")),
         "volume_context": normalize_string(entry.get("volume_context")),
         "price_location": normalize_string(entry.get("price_location")),
-        "key_catalysts": entry.get("key_catalysts") if isinstance(entry.get("key_catalysts"), list) else [],
+        "key_catalysts": entry.get("key_catalysts")
+        if isinstance(entry.get("key_catalysts"), list)
+        else [],
         "key_risks": entry.get("key_risks") if isinstance(entry.get("key_risks"), list) else [],
-        "support_levels": entry.get("support_levels") if isinstance(entry.get("support_levels"), list) else [],
-        "resistance_levels": entry.get("resistance_levels") if isinstance(entry.get("resistance_levels"), list) else [],
+        "support_levels": entry.get("support_levels")
+        if isinstance(entry.get("support_levels"), list)
+        else [],
+        "resistance_levels": entry.get("resistance_levels")
+        if isinstance(entry.get("resistance_levels"), list)
+        else [],
         "notes": normalize_string(entry.get("notes")),
-
         # Event-enrichment fields; observe-only metadata for reporting/scoring.
-        "event_context": entry.get("event_context") if isinstance(entry.get("event_context"), dict) else None,
+        "event_context": entry.get("event_context")
+        if isinstance(entry.get("event_context"), dict)
+        else None,
         "event_catalyst_score_raw": entry.get("event_catalyst_score_raw"),
         "consumer_appetite_score": entry.get("consumer_appetite_score"),
         "revenue_impact_score": entry.get("revenue_impact_score"),
@@ -182,7 +192,6 @@ def normalize_symbol_entry(symbol: str, entry: dict[str, Any] | None) -> dict[st
         "materials_risk_score": entry.get("materials_risk_score"),
         "competitive_risk_score": entry.get("competitive_risk_score"),
         "execution_risk_score": entry.get("execution_risk_score"),
-
         # Holistic performance context; observe-only metadata distinct from
         # conservative action confidence.
         "performance_score": entry.get("performance_score"),
@@ -194,13 +203,22 @@ def normalize_symbol_entry(symbol: str, entry: dict[str, Any] | None) -> dict[st
             if isinstance(entry.get("performance_evidence"), list)
             else []
         ),
+        # Weekly CFTC COT macro-positioning context. This is a context/size
+        # modifier only and never standalone trade authority.
+        "cot_positioning_context": (
+            entry.get("cot_positioning_context")
+            if isinstance(entry.get("cot_positioning_context"), dict)
+            else None
+        ),
     }
 
     normalized.update(learning_enrichment_fields(entry))
     return normalized
 
 
-def normalize_market_context(raw: dict[str, Any], approved_symbols: list[str] | set[str]) -> dict[str, Any]:
+def normalize_market_context(
+    raw: dict[str, Any], approved_symbols: list[str] | set[str]
+) -> dict[str, Any]:
     """Normalize a full market_context-style dict."""
     symbols_raw = raw.get("symbols") or {}
 
@@ -223,18 +241,24 @@ def normalize_market_context(raw: dict[str, Any], approved_symbols: list[str] | 
         "risk_multiplier": raw.get("risk_multiplier"),
         "max_new_positions": raw.get("max_new_positions"),
         "block_new_buys": raw.get("block_new_buys"),
-
         # New richer top-level sections
         "index_state": raw.get("index_state") if isinstance(raw.get("index_state"), dict) else {},
-        "sector_state": raw.get("sector_state") if isinstance(raw.get("sector_state"), dict) else {},
-        "macro_events": raw.get("macro_events") if isinstance(raw.get("macro_events"), list) else [],
-
+        "sector_state": raw.get("sector_state")
+        if isinstance(raw.get("sector_state"), dict)
+        else {},
+        "macro_events": raw.get("macro_events")
+        if isinstance(raw.get("macro_events"), list)
+        else [],
         # Context quality metadata.
         "data_only": raw.get("data_only"),
         "source_quality": raw.get("source_quality"),
         "event_enrichment_count": raw.get("event_enrichment_count"),
         "intraday_refresh_at": raw.get("intraday_refresh_at"),
-
+        "cot_positioning_context": (
+            raw.get("cot_positioning_context")
+            if isinstance(raw.get("cot_positioning_context"), dict)
+            else None
+        ),
         "symbols": symbols,
         "source": raw.get("source"),
         "format": raw.get("format"),
@@ -267,7 +291,8 @@ def schema_quality_summary(ctx: dict[str, Any]) -> dict[str, Any]:
     coverage = {}
     for field in rich_fields:
         coverage[field] = sum(
-            1 for entry in symbols.values()
+            1
+            for entry in symbols.values()
             if isinstance(entry, dict) and entry.get(field) not in (None, "", [])
         )
 

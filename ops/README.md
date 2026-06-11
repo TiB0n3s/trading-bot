@@ -70,6 +70,23 @@ snapshots are at least 35 minutes old, `labeled_setups` should begin increasing.
 An `eligible_35m_plus` backlog means label_features has snapshots old enough to
 label but has not labeled them yet.
 
+## CFTC COT Positioning Context
+
+Weekly CFTC Commitments of Traders context is normalized into
+`runtime_state/cot_positioning.json` and consumed by pre-market/intraday market
+context refreshes as macro positioning evidence.
+
+```bash
+cd ~/trading-bot
+./venv/bin/python scripts/cot_positioning_update.py \
+  --input data/cot/latest_financial_futures.json \
+  --output runtime_state/cot_positioning.json
+```
+
+This context is delayed weekly macro evidence only. It can inform ML features,
+meta-labeling, and size-down logic, but it cannot independently approve trades.
+See `ops/cot_positioning_context.md` for the timing and no-lookahead contract.
+
 ## Configuration Audit
 
 Use the config audit after changing `/etc/trading-bot.env`, adding new env

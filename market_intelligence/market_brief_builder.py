@@ -10,19 +10,18 @@ reject trades, or change live behavior.
 
 from __future__ import annotations
 
+import json
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-import json
 import pytz
-
 from symbols_config import APPROVED_SYMBOLS
+
 from market_intelligence.market_brief_schema import (
     normalize_market_context,
     schema_quality_summary,
 )
-
 
 ET = pytz.timezone("America/New_York")
 
@@ -183,17 +182,25 @@ def build_market_brief(
         "generated_at": raw.get("generated_at") or now_et_iso(),
         "macro_sentiment": raw.get("macro_sentiment") or "mixed",
         "macro_regime": raw.get("macro_regime") or "caution",
-        "macro_summary": raw.get("macro_summary") or "Auto-built default market brief; replace with full research.",
+        "macro_summary": raw.get("macro_summary")
+        or "Auto-built default market brief; replace with full research.",
         "risk_multiplier": raw.get("risk_multiplier", 0.75),
         "max_new_positions": raw.get("max_new_positions", 6),
         "block_new_buys": raw.get("block_new_buys", False),
-        "index_state": raw.get("index_state") if isinstance(raw.get("index_state"), dict) else default_index_state(),
-        "sector_state": raw.get("sector_state") if isinstance(raw.get("sector_state"), dict) else default_sector_state(),
-        "macro_events": raw.get("macro_events") if isinstance(raw.get("macro_events"), list) else [],
+        "index_state": raw.get("index_state")
+        if isinstance(raw.get("index_state"), dict)
+        else default_index_state(),
+        "sector_state": raw.get("sector_state")
+        if isinstance(raw.get("sector_state"), dict)
+        else default_sector_state(),
+        "macro_events": raw.get("macro_events")
+        if isinstance(raw.get("macro_events"), list)
+        else [],
         "data_only": raw.get("data_only"),
         "source_quality": raw.get("source_quality"),
         "event_enrichment_count": raw.get("event_enrichment_count"),
         "intraday_refresh_at": raw.get("intraday_refresh_at"),
+        "cot_positioning_context": raw.get("cot_positioning_context"),
         "symbols": merge_symbol_research(raw.get("symbols")),
         "source": source,
         "format": "rich_market_brief_v1",

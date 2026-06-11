@@ -218,6 +218,75 @@ def _strategy_memory_distribution_gate(account_state):
     return {"decision": "pass", "reason": health.get("reason") or "distribution stable"}
 
 
+def _confidence_calibration_gate(account_state):
+    calibrated = account_state.get("calibrated_confidence")
+    if not isinstance(calibrated, dict):
+        return {"decision": "pass", "reason": "calibrated confidence unavailable"}
+
+    candidates = []
+    primary_predicted = _to_float(calibrated.get("primary_predicted_win_rate"))
+    primary_realized = _to_float(calibrated.get("primary_realized_win_rate"))
+    primary_sample = _to_float(calibrated.get("primary_sample_size")) or 0
+    if primary_predicted is not None and primary_realized is not None:
+        candidates.append(
+            {
+                "source": calibrated.get("primary_source") or "primary",
+                "sample_size": primary_sample,
+                "calibration_error": abs(primary_predicted - primary_realized),
+            }
+        )
+    for source, payload in (calibrated.get("sources") or {}).items():
+        if not isinstance(payload, dict):
+            continue
+        error = _to_float(payload.get("calibration_error"))
+        sample = _to_float(payload.get("sample_size")) or 0
+        if error is None:
+            continue
+        candidates.append(
+            {
+                "source": source,
+                "sample_size": sample,
+                "calibration_error": error,
+            }
+        )
+
+    qualified = [row for row in candidates if row["sample_size"] >= 20]
+    if not qualified:
+        return {"decision": "pass", "reason": "no sampled calibration error"}
+    worst = max(qualified, key=lambda row: row["calibration_error"])
+    if worst["calibration_error"] >= 0.15:
+        return {
+            "decision": "size_down",
+            "reason": (
+                "confidence calibration drift: "
+                f"source={worst['source']} error={worst['calibration_error']:.3f} "
+                f"sample={int(worst['sample_size'])}"
+            ),
+            "evidence": {
+                "worst_source": worst["source"],
+                "calibration_error": round(worst["calibration_error"], 4),
+                "sample_size": int(worst["sample_size"]),
+                "size_multiplier": 0.65,
+            },
+        }
+    if worst["calibration_error"] >= 0.10:
+        return {
+            "decision": "caution",
+            "reason": (
+                "confidence calibration warning: "
+                f"source={worst['source']} error={worst['calibration_error']:.3f} "
+                f"sample={int(worst['sample_size'])}"
+            ),
+            "evidence": {
+                "worst_source": worst["source"],
+                "calibration_error": round(worst["calibration_error"], 4),
+                "sample_size": int(worst["sample_size"]),
+                "size_multiplier": 0.85,
+            },
+        }
+    return {"decision": "pass", "reason": "confidence calibration within tolerance"}
+
+
 def evaluate_decision_policy(
     symbol,
     action,
@@ -245,10 +314,11 @@ def evaluate_decision_policy(
             signal_price=account_state.get("signal_price"),
             account_state=account_state,
         ).to_dict()
-    account_state["calibrated_confidence"] = build_calibrated_confidence(
-        account_state=account_state,
-        context=intelligence_context,
-    ).to_dict()
+    if not isinstance(account_state.get("calibrated_confidence"), dict):
+        account_state["calibrated_confidence"] = build_calibrated_confidence(
+            account_state=account_state,
+            context=intelligence_context,
+        ).to_dict()
     account_state.setdefault("rollout_contract", telemetry_only_rollout_contract())
     utility_estimate = estimate_decision_utility(
         action=action,
@@ -360,6 +430,23 @@ def evaluate_decision_policy(
         risks.append(f"transformer authority sizes down: {transformer_authority.get('reason')}")
     elif transformer_decision == "allow" and transformer_probability is not None:
         supports.append("transformer authority supports/allows")
+
+    calibration_gate = _confidence_calibration_gate(account_state)
+    calibration_action = calibration_gate.get("decision")
+    if calibration_action == "size_down":
+        risks.append(calibration_gate["reason"])
+        evidence.append(
+            "confidence_calibration=size_down "
+            f"error={(calibration_gate.get('evidence') or {}).get('calibration_error')}"
+        )
+    elif calibration_action == "caution":
+        risks.append(calibration_gate["reason"])
+        evidence.append(
+            "confidence_calibration=caution "
+            f"error={(calibration_gate.get('evidence') or {}).get('calibration_error')}"
+        )
+    elif account_state.get("calibrated_confidence"):
+        supports.append("confidence calibration within tolerance")
 
     shadow_gate = _shadow_divergence_gate(account_state)
     shadow_action = shadow_gate.get("decision")
@@ -549,6 +636,13 @@ def evaluate_decision_policy(
                 float(transformer_authority.get("size_multiplier") or 0.75),
             )
             reason = "transformer authority requested reduced size"
+        elif calibration_action == "size_down":
+            decision = "size_down"
+            size_multiplier = min(
+                0.75,
+                float((calibration_gate.get("evidence") or {}).get("size_multiplier") or 0.75),
+            )
+            reason = "confidence calibration drift; reduce size"
         elif quant_action == "size_down":
             decision = "size_down"
             size_multiplier = 0.65
@@ -586,6 +680,7 @@ def evaluate_decision_policy(
         "portfolio_decision": portfolio_decision,
         "execution_quality": execution_quality,
         "transformer_authority": transformer_authority,
+        "confidence_calibration_gate": calibration_gate,
         "shadow_prediction_gate": shadow_gate,
         "quant_model_suite_gate": quant_gate,
         "historical_bar_regime_gate": historical_gate,

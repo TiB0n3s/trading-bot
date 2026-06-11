@@ -3,15 +3,17 @@
 
 from __future__ import annotations
 
-from argparse import Namespace
 import json
 import sqlite3
 import sys
 import tempfile
+from argparse import Namespace
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
+
+from services.retraining_kpi_trigger_service import evaluate_retraining_kpi_trigger
 
 from pipeline import retrain
 
@@ -54,11 +56,15 @@ def test_execute_retraining_skips_completed_target_date():
         marker_dir = artifact_dir / "retrain_runs"
         marker_dir.mkdir(parents=True)
         marker = marker_dir / "2026-06-03.json"
-        marker.write_text(json.dumps({
-            "status": "trained_without_registry_promotion",
-            "target_date": "2026-06-03",
-            "model_id": "existing",
-        }))
+        marker.write_text(
+            json.dumps(
+                {
+                    "status": "trained_without_registry_promotion",
+                    "target_date": "2026-06-03",
+                    "model_id": "existing",
+                }
+            )
+        )
         args = Namespace(
             artifact_dir=str(artifact_dir),
             target_date="2026-06-03",
@@ -83,9 +89,7 @@ def test_execute_retraining_writes_diagnostic_and_run_marker():
                 "valid_session_count": 3,
                 "retraining_recommended": True,
                 "warning": True,
-                "date_scores": [
-                    {"market_date": "2026-06-03", "correlation": -0.2}
-                ],
+                "date_scores": [{"market_date": "2026-06-03", "correlation": -0.2}],
             }
 
     class FakeDrift:
@@ -129,6 +133,10 @@ def test_execute_retraining_writes_diagnostic_and_run_marker():
                 threshold=0.0,
                 bad_session_limit=3,
                 min_pairs=3,
+                kpi_metrics_path=None,
+                min_kpi_win_rate=0.48,
+                min_kpi_sharpe_proxy=0.0,
+                max_kpi_drawdown_pct=-2.0,
                 force=False,
                 limit=40,
                 horizon="15m",
@@ -157,12 +165,31 @@ def test_execute_retraining_writes_diagnostic_and_run_marker():
         assert "python_version" in diagnostic
 
 
+def test_retraining_kpi_trigger_recommends_on_degraded_metrics():
+    result = evaluate_retraining_kpi_trigger(
+        metrics={
+            "win_rate": 0.32,
+            "sharpe_proxy": -0.2,
+            "max_drawdown_pct": -3.4,
+        },
+        min_win_rate=0.48,
+        min_sharpe_proxy=0.0,
+        max_drawdown_pct=-2.0,
+    )
+
+    assert result["retraining_recommended"] is True
+    assert "win_rate_below_threshold:0.3200<0.4800" in result["blockers"]
+    assert "sharpe_proxy_below_threshold:-0.2000<0.0000" in result["blockers"]
+    assert "drawdown_below_threshold:-3.4000<-2.0000" in result["blockers"]
+
+
 def main():
     tests = [
         test_retrain_lock_reports_busy_when_already_held,
         test_main_returns_timeout_status_without_live_authority,
         test_execute_retraining_skips_completed_target_date,
         test_execute_retraining_writes_diagnostic_and_run_marker,
+        test_retraining_kpi_trigger_recommends_on_degraded_metrics,
     ]
     for test in tests:
         test()

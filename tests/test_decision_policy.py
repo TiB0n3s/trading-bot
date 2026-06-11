@@ -262,7 +262,7 @@ def test_utility_estimate_cannot_block_or_size_by_itself():
     assert_equal(result["size_multiplier"], 1.0, "utility telemetry does not size")
 
 
-def test_calibrated_confidence_cannot_change_live_authority_by_itself():
+def test_calibrated_confidence_drift_can_size_down_buy_review():
     original = decision_policy.contextual_memory_for_signal
     try:
         decision_policy.contextual_memory_for_signal = neutral_memory
@@ -276,6 +276,8 @@ def test_calibrated_confidence_cannot_change_live_authority_by_itself():
             },
             account_state={
                 "calibrated_confidence": {
+                    "primary_source": "ml_prediction",
+                    "primary_predicted_win_rate": 0.85,
                     "primary_realized_win_rate": 0.05,
                     "primary_sample_size": 500,
                     "confidence_quality": "medium",
@@ -287,8 +289,13 @@ def test_calibrated_confidence_cannot_change_live_authority_by_itself():
     finally:
         decision_policy.contextual_memory_for_signal = original
 
-    assert_equal(result["decision"], "allow", "calibration telemetry is not authority")
-    assert_equal(result["size_multiplier"], 1.0, "calibration does not size")
+    assert_equal(result["decision"], "size_down", "calibration drift sizes down")
+    assert_equal(result["size_multiplier"], 0.65, "calibration drift size multiplier")
+    assert_equal(
+        result["confidence_calibration_gate"]["decision"],
+        "size_down",
+        "calibration gate",
+    )
 
 
 def test_canonical_snapshot_payload_cannot_change_decision_by_itself():
@@ -662,8 +669,8 @@ if __name__ == "__main__":
     print("[OK] test_duplicate_portfolio_risk_blocks_even_with_strong_standalone_chart")
     test_utility_estimate_cannot_block_or_size_by_itself()
     print("[OK] test_utility_estimate_cannot_block_or_size_by_itself")
-    test_calibrated_confidence_cannot_change_live_authority_by_itself()
-    print("[OK] test_calibrated_confidence_cannot_change_live_authority_by_itself")
+    test_calibrated_confidence_drift_can_size_down_buy_review()
+    print("[OK] test_calibrated_confidence_drift_can_size_down_buy_review")
     test_canonical_snapshot_payload_cannot_change_decision_by_itself()
     print("[OK] test_canonical_snapshot_payload_cannot_change_decision_by_itself")
     test_rollout_candidate_status_cannot_change_authority_by_itself()

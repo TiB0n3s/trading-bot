@@ -8,7 +8,6 @@ loads models into runtime or changes live trading authority.
 from __future__ import annotations
 
 import argparse
-from contextlib import contextmanager
 import fcntl
 import json
 import os
@@ -17,6 +16,7 @@ import resource
 import signal
 import subprocess
 import sys
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -25,18 +25,27 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 if str(BASE_DIR) not in sys.path:
     sys.path.insert(0, str(BASE_DIR))
 
-from ml_platform.config import DEFAULT_DB_PATH, FEATURE_VERSION, MODEL_ROOT
-from ml_platform.datasets import dataset_profile
-from ml_platform.governance import build_dataset_manifest
-from ml_platform.promotion import assess_candidate_promotion, register_candidate_model
-from ml_platform.readiness import retraining_readiness_report
-from ml_platform.registry import prune_model_artifacts
-from services.prediction_drift_service import build_default_prediction_drift_service
-from services.supervised_prediction_training_service import (
+from services.prediction_drift_service import (  # noqa: E402
+    build_default_prediction_drift_service,
+)
+from services.retraining_kpi_trigger_service import (  # noqa: E402
+    evaluate_retraining_kpi_trigger,
+)
+from services.supervised_prediction_training_service import (  # noqa: E402
     fetch_training_rows,
     train_quant_model_suite,
     train_supervised_prediction_model,
 )
+
+from ml_platform.config import DEFAULT_DB_PATH, FEATURE_VERSION, MODEL_ROOT  # noqa: E402
+from ml_platform.datasets import dataset_profile  # noqa: E402
+from ml_platform.governance import build_dataset_manifest  # noqa: E402
+from ml_platform.promotion import (  # noqa: E402
+    assess_candidate_promotion,
+    register_candidate_model,
+)
+from ml_platform.readiness import retraining_readiness_report  # noqa: E402
+from ml_platform.registry import prune_model_artifacts  # noqa: E402
 
 DEFAULT_LOCK_FILE = "/tmp/tradingbot_ml_retrain.lock"
 DEFAULT_MAX_RUNTIME_SECONDS = 1800
@@ -164,10 +173,9 @@ def _print_payload(payload: dict[str, Any], *, as_json: bool) -> None:
 def _execute_retraining(args: argparse.Namespace) -> int:
     artifact_dir = Path(args.artifact_dir)
     target_date = args.target_date or args.end_date
-    prediction_time_cutoff = (
-        getattr(args, "prediction_time_cutoff", None)
-        or _default_prediction_time_cutoff(target_date)
-    )
+    prediction_time_cutoff = getattr(
+        args, "prediction_time_cutoff", None
+    ) or _default_prediction_time_cutoff(target_date)
     marker_path = _run_marker_path(artifact_dir, target_date)
     marker = _completed_marker(marker_path)
     if marker and not args.rerun_completed:
@@ -194,6 +202,16 @@ def _execute_retraining(args: argparse.Namespace) -> int:
         bad_session_limit=args.bad_session_limit,
         min_pairs_per_session=args.min_pairs,
     ).to_dict()
+    kpi_trigger = evaluate_retraining_kpi_trigger(
+        metrics_path=args.kpi_metrics_path,
+        min_win_rate=args.min_kpi_win_rate,
+        min_sharpe_proxy=args.min_kpi_sharpe_proxy,
+        max_drawdown_pct=args.max_kpi_drawdown_pct,
+    )
+    if kpi_trigger.get("retraining_recommended"):
+        validation = dict(validation)
+        validation["retraining_recommended"] = True
+        validation["kpi_retraining_trigger"] = kpi_trigger
 
     if not args.force and not validation["retraining_recommended"]:
         payload = {
@@ -202,6 +220,7 @@ def _execute_retraining(args: argparse.Namespace) -> int:
             "status": "skipped",
             "reason": "prediction validation does not recommend retraining",
             "validation": validation,
+            "kpi_retraining_trigger": kpi_trigger,
         }
         _print_payload(payload, as_json=args.json)
         return 0
@@ -260,6 +279,7 @@ def _execute_retraining(args: argparse.Namespace) -> int:
         "report_version": "automated_retraining_metrics_v1",
         "resource_guard": resource_guard,
         "validation": validation,
+        "kpi_retraining_trigger": kpi_trigger,
         "training": training,
         "quant_model_suite": quant_suite,
         "readiness": readiness,
@@ -286,12 +306,8 @@ def _execute_retraining(args: argparse.Namespace) -> int:
         "training_sample_size": training.get("sample_size"),
         "training_provider": training.get("provider"),
         "training_accuracy": training.get("accuracy"),
-        "quant_suite_best_provider": (
-            (quant_suite.get("best_model") or {}).get("provider")
-        ),
-        "quant_suite_best_accuracy": (
-            (quant_suite.get("best_model") or {}).get("accuracy")
-        ),
+        "quant_suite_best_provider": ((quant_suite.get("best_model") or {}).get("provider")),
+        "quant_suite_best_accuracy": ((quant_suite.get("best_model") or {}).get("accuracy")),
         "quant_suite_model_count": len(quant_suite.get("models") or []),
         "python_version": sys.version,
         "platform": platform.platform(),
@@ -330,6 +346,7 @@ def _execute_retraining(args: argparse.Namespace) -> int:
         "diagnostic_path": str(diagnostic_path),
         "resource_guard": resource_guard,
         "validation": validation,
+        "kpi_retraining_trigger": kpi_trigger,
         "training": training,
         "quant_model_suite": quant_suite,
         "readiness": readiness,
@@ -374,6 +391,16 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--threshold", type=float, default=0.0)
     parser.add_argument("--bad-session-limit", type=int, default=3)
     parser.add_argument("--min-pairs", type=int, default=3)
+    parser.add_argument(
+        "--kpi-metrics-path",
+        help=(
+            "Optional JSON metrics artifact. If win rate, Sharpe proxy, or drawdown "
+            "breach thresholds, retraining is recommended even when correlation drift is clean."
+        ),
+    )
+    parser.add_argument("--min-kpi-win-rate", type=float, default=0.48)
+    parser.add_argument("--min-kpi-sharpe-proxy", type=float, default=0.0)
+    parser.add_argument("--max-kpi-drawdown-pct", type=float, default=-2.0)
     parser.add_argument("--trading-sessions-observed", type=int, default=0)
     parser.add_argument("--horizon", default="15m")
     parser.add_argument("--min-samples", type=int, default=40)

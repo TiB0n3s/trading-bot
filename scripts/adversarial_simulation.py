@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import random
 import sys
 from copy import deepcopy
 from datetime import datetime, timezone
@@ -94,6 +95,94 @@ def _evaluate(name: str, state: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _max_drawdown_pct(returns_pct: list[float]) -> float:
+    equity = 1.0
+    peak = 1.0
+    max_drawdown = 0.0
+    for item in returns_pct:
+        equity *= 1.0 + (item / 100.0)
+        peak = max(peak, equity)
+        if peak > 0:
+            max_drawdown = min(max_drawdown, (equity - peak) / peak * 100.0)
+    return round(max_drawdown, 6)
+
+
+def _noise_perturbation_check(symbol: str) -> dict[str, Any]:
+    rng = random.Random(42)
+    baseline = _evaluate("noise_baseline", _base_account_state(symbol))
+    baseline_size = float(baseline["final_size_pct"] or 0.0)
+    instructions = []
+    sizes = []
+    for idx in range(25):
+        state = deepcopy(_base_account_state(symbol))
+        state["historical_bar_paper_strategy"]["master_confidence_score"] += rng.uniform(-2.0, 2.0)
+        state["prediction_gate"]["ml_prediction_score"] += rng.uniform(-2.0, 2.0)
+        state["transformer_authority"]["probability"] += rng.uniform(-0.02, 0.02)
+        features = state["bar_pattern_features"]
+        features["vpin_toxicity_20"] += rng.uniform(-0.03, 0.03)
+        features["variance_ratio_30m"] += rng.uniform(-0.05, 0.05)
+        features["distance_from_vwap_pct"] += rng.uniform(-0.10, 0.10)
+        result = _evaluate(f"noise_perturbation_{idx}", state)
+        instructions.append(result["final_instruction"])
+        sizes.append(float(result["final_size_pct"] or 0.0))
+    veto_count = sum(1 for item in instructions if item == "veto")
+    max_size_delta = max((abs(size - baseline_size) for size in sizes), default=0.0)
+    passed = veto_count == 0 and max_size_delta <= 0.35
+    return {
+        "scenario": "noise_perturbation_calibration",
+        "final_instruction": "stable" if passed else "unstable",
+        "final_size_pct": round(sum(sizes) / len(sizes), 6) if sizes else 0.0,
+        "level_0_alternative_decision": "pass",
+        "level_2_effect": "noise_perturbation",
+        "level_3_reason": "small perturbations should not create discontinuous output",
+        "passed": passed,
+        "baseline_size_pct": baseline_size,
+        "sample_count": len(sizes),
+        "veto_count": veto_count,
+        "max_size_delta_pct": round(max_size_delta, 6),
+    }
+
+
+def _monte_carlo_sequence_check() -> dict[str, Any]:
+    realized_returns = [
+        0.42,
+        -0.14,
+        0.31,
+        0.18,
+        -0.21,
+        0.37,
+        0.24,
+        -0.10,
+        0.29,
+        0.16,
+        -0.18,
+        0.33,
+    ]
+    actual_drawdown = _max_drawdown_pct(realized_returns)
+    rng = random.Random(17)
+    shuffled_drawdowns = []
+    for _ in range(250):
+        sample = list(realized_returns)
+        rng.shuffle(sample)
+        shuffled_drawdowns.append(_max_drawdown_pct(sample))
+    sorted_drawdowns = sorted(shuffled_drawdowns)
+    p95_index = max(0, min(len(sorted_drawdowns) - 1, int(len(sorted_drawdowns) * 0.05)))
+    adverse_p95 = sorted_drawdowns[p95_index]
+    passed = actual_drawdown >= adverse_p95
+    return {
+        "scenario": "monte_carlo_sequence_risk",
+        "final_instruction": "stable" if passed else "sequence_risk_warning",
+        "final_size_pct": 0.0,
+        "level_0_alternative_decision": "not_applicable",
+        "level_2_effect": "monte_carlo_reshuffle",
+        "level_3_reason": "actual drawdown should not be worse than adverse reshuffle tail",
+        "passed": passed,
+        "actual_max_drawdown_pct": actual_drawdown,
+        "adverse_reshuffle_tail_pct": adverse_p95,
+        "shuffle_count": len(shuffled_drawdowns),
+    }
+
+
 def run_scenarios(symbol: str) -> dict[str, Any]:
     scenarios: list[dict[str, Any]] = []
 
@@ -123,6 +212,8 @@ def run_scenarios(symbol: str) -> dict[str, Any]:
         and decay_result["final_instruction"] == "veto"
     )
     scenarios.append(decay_result)
+    scenarios.append(_noise_perturbation_check(symbol))
+    scenarios.append(_monte_carlo_sequence_check())
 
     passed = all(bool(row["passed"]) for row in scenarios)
     return {

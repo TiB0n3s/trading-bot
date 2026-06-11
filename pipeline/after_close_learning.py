@@ -220,6 +220,13 @@ def _build_steps(target_date: str) -> list[Step]:
             description="compare paper ensemble scoring with naive baseline over labeled bars",
         ),
         Step(
+            name="adversarial_simulation",
+            module="scripts.adversarial_simulation",
+            argv=["--symbol", "SPY"],
+            critical=False,
+            description="red-team model stack with telemetry, decay, noise, and sequence-risk perturbations",
+        ),
+        Step(
             name="historical_bar_walk_forward",
             module="ops_check",
             argv=[

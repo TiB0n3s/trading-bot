@@ -20,6 +20,8 @@ def test_adversarial_simulation_scenarios_pass():
     assert scenarios["telemetry_spike_level0_override"]["level_0_alternative_decision"] == "veto"
     assert scenarios["telemetry_spike_level0_override"]["final_size_pct"] == 0.0
     assert scenarios["decay_trap_level2_veto"]["level_2_effect"] == "multi_horizon_decay_veto"
+    assert scenarios["noise_perturbation_calibration"]["veto_count"] == 0
+    assert scenarios["monte_carlo_sequence_risk"]["shuffle_count"] == 250
 
 
 def main():

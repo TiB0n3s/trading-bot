@@ -415,6 +415,16 @@ def aggregate_symbol_events(market_date: str, symbol: str, db_path: Path | str =
     ai_positioning_effect = [
         str(ctx.get("positioning_effect")) for ctx in ai_contexts if ctx.get("positioning_effect")
     ]
+    ai_earnings_positioning_context = [
+        str(ctx.get("earnings_positioning_context"))
+        for ctx in ai_contexts
+        if ctx.get("earnings_positioning_context")
+    ]
+    ai_earnings_information_surprise = [
+        str(ctx.get("earnings_information_surprise"))
+        for ctx in ai_contexts
+        if ctx.get("earnings_information_surprise")
+    ]
     ai_providers = [str(ctx.get("provider")) for ctx in ai_contexts if ctx.get("provider")]
     missing_evidence = []
     for e in raw_events:
@@ -448,6 +458,8 @@ def aggregate_symbol_events(market_date: str, symbol: str, db_path: Path | str =
         "ai_market_alignment": sorted(set(ai_market_alignment)),
         "ai_information_novelty": sorted(set(ai_information_novelty)),
         "ai_positioning_effect": sorted(set(ai_positioning_effect)),
+        "ai_earnings_positioning_context": sorted(set(ai_earnings_positioning_context)),
+        "ai_earnings_information_surprise": sorted(set(ai_earnings_information_surprise)),
         "ai_summaries": ai_summaries[:5],
         "authority": "context_only_no_standalone_buy_authority",
     }

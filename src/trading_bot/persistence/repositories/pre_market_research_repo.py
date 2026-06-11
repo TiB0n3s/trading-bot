@@ -190,6 +190,34 @@ class PreMarketResearchRepository:
                             and (event.get("ai_event_context") or {}).get("positioning_effect")
                         }
                     ),
+                    "ai_earnings_positioning_context": sorted(
+                        {
+                            str(
+                                (event.get("ai_event_context") or {}).get(
+                                    "earnings_positioning_context"
+                                )
+                            )
+                            for event in raw_events
+                            if isinstance(event.get("ai_event_context"), dict)
+                            and (event.get("ai_event_context") or {}).get(
+                                "earnings_positioning_context"
+                            )
+                        }
+                    ),
+                    "ai_earnings_information_surprise": sorted(
+                        {
+                            str(
+                                (event.get("ai_event_context") or {}).get(
+                                    "earnings_information_surprise"
+                                )
+                            )
+                            for event in raw_events
+                            if isinstance(event.get("ai_event_context"), dict)
+                            and (event.get("ai_event_context") or {}).get(
+                                "earnings_information_surprise"
+                            )
+                        }
+                    ),
                     "ai_summaries": [
                         str((event.get("ai_event_context") or {}).get("summary"))
                         for event in raw_events

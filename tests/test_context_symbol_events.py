@@ -44,6 +44,8 @@ def test_context_only_event_aggregates_into_linked_approved_symbol(tmp_path):
                 "market_alignment": "neutral_context",
                 "information_novelty": "new_fundamental_information",
                 "positioning_effect": "neutral_positioning_context",
+                "earnings_positioning_context": "not_earnings_specific",
+                "earnings_information_surprise": "not_earnings_specific",
                 "confirmation_status": "reputable_reported",
                 "missing_evidence": [],
                 "risk_notes": ["context-only"],
@@ -64,6 +66,8 @@ def test_context_only_event_aggregates_into_linked_approved_symbol(tmp_path):
     assert nvda["event_context"]["ai_market_alignment"] == ["neutral_context"]
     assert nvda["event_context"]["ai_information_novelty"] == ["new_fundamental_information"]
     assert nvda["event_context"]["ai_positioning_effect"] == ["neutral_positioning_context"]
+    assert nvda["event_context"]["ai_earnings_positioning_context"] == ["not_earnings_specific"]
+    assert nvda["event_context"]["ai_earnings_information_surprise"] == ["not_earnings_specific"]
     assert "demand_or_revenue_signal" in nvda["event_context"]["intent_categories"]
     assert aapl["has_events"] is False
 

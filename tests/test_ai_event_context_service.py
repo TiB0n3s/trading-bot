@@ -15,6 +15,8 @@ from services.ai_event_context_service import (  # noqa: E402
     AIEventContextService,
     SelectiveAIEventContextService,
     deterministic_event_context,
+    infer_earnings_information_surprise,
+    infer_earnings_positioning_context,
     infer_information_novelty,
     infer_positioning_effect,
     should_use_semantic_event_provider,
@@ -55,6 +57,8 @@ def test_provider_output_is_constrained_to_event_symbols_and_context_only():
             "market_alignment": "constructive_watch",
             "information_novelty": "new_fundamental_information",
             "positioning_effect": "constructive_expectation_reset",
+            "earnings_positioning_context": "positioning_not_observed",
+            "earnings_information_surprise": "positive_information_surprise",
             "confidence": "high",
             "confirmation_status": "reputable_reported",
             "missing_evidence": [],
@@ -75,6 +79,8 @@ def test_provider_output_is_constrained_to_event_symbols_and_context_only():
     assert "TSLA" not in result["affected_symbols"]
     assert result["information_novelty"] == "new_fundamental_information"
     assert result["positioning_effect"] == "constructive_expectation_reset"
+    assert result["earnings_positioning_context"] == "positioning_not_observed"
+    assert result["earnings_information_surprise"] == "positive_information_surprise"
     assert "ai_interpretation_context_only" in result["risk_notes"]
 
 
@@ -213,6 +219,55 @@ def test_positioning_and_new_information_examples_for_broadcom_and_oracle():
     assert infer_positioning_effect(recycled) == "neutral_positioning_context"
 
 
+def test_earnings_call_positioning_is_distinct_from_new_information():
+    crowded_long_good_news = {
+        "symbol": "ORCL",
+        "event_type": "earnings",
+        "event_summary": (
+            "Oracle earnings beat estimates and raises guidance, but high expectations "
+            "were already priced in, creating sell the news risk"
+        ),
+        "source_tier": "confirmed_financial_news",
+        "expected_market_impact": "moderately_bullish",
+        "intent_direction": "constructive",
+        "confirmation_status": "reputable_reported",
+    }
+    crowded_short_relief = {
+        "symbol": "AVGO",
+        "event_type": "earnings",
+        "event_summary": (
+            "Broadcom results were not as bad as feared after high short interest, "
+            "with management citing stronger AI demand in Q&A"
+        ),
+        "source_tier": "confirmed_financial_news",
+        "expected_market_impact": "moderately_bullish",
+        "intent_direction": "constructive",
+        "confirmation_status": "reputable_reported",
+    }
+
+    assert (
+        infer_earnings_positioning_context(crowded_long_good_news)
+        == "crowded_long_or_good_news_priced_in"
+    )
+    assert (
+        infer_earnings_information_surprise(crowded_long_good_news)
+        == "positive_information_surprise"
+    )
+
+    assert (
+        infer_earnings_positioning_context(crowded_short_relief)
+        == "crowded_short_or_bad_news_priced_in"
+    )
+    assert (
+        infer_earnings_information_surprise(crowded_short_relief) == "positive_information_surprise"
+    )
+
+    context = deterministic_event_context(crowded_long_good_news)
+    assert context["earnings_positioning_context"] == "crowded_long_or_good_news_priced_in"
+    assert context["earnings_information_surprise"] == "positive_information_surprise"
+    assert context["positioning_effect"] == "constructive_expectation_reset"
+
+
 def main():
     tests = [
         test_deterministic_event_context_is_non_authoritative,
@@ -221,6 +276,7 @@ def main():
         test_semantic_event_provider_selection_requires_trusted_high_value_context,
         test_selective_service_uses_semantic_provider_only_for_high_value_events,
         test_positioning_and_new_information_examples_for_broadcom_and_oracle,
+        test_earnings_call_positioning_is_distinct_from_new_information,
     ]
     for test in tests:
         test()

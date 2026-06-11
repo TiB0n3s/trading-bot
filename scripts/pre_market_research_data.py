@@ -816,6 +816,14 @@ def apply_event_enrichment(symbol_entry: dict, enrichment: dict) -> None:
         "ai_market_alignment": interpreted_context.get("ai_market_alignment") or [],
         "ai_information_novelty": interpreted_context.get("ai_information_novelty") or [],
         "ai_positioning_effect": interpreted_context.get("ai_positioning_effect") or [],
+        "ai_earnings_positioning_context": interpreted_context.get(
+            "ai_earnings_positioning_context"
+        )
+        or [],
+        "ai_earnings_information_surprise": interpreted_context.get(
+            "ai_earnings_information_surprise"
+        )
+        or [],
         "ai_summaries": interpreted_context.get("ai_summaries") or [],
         "event_intent_version": interpreted_context.get("event_intent_version"),
         **event_scores,

@@ -304,6 +304,8 @@ def test_apply_event_enrichment_uses_multisource_confidence_text():
                 "missing_evidence": [],
                 "ai_information_novelty": ["new_fundamental_information"],
                 "ai_positioning_effect": ["constructive_expectation_reset"],
+                "ai_earnings_positioning_context": ["positioning_not_observed"],
+                "ai_earnings_information_surprise": ["positive_information_surprise"],
             },
         },
     )
@@ -317,6 +319,8 @@ def test_apply_event_enrichment_uses_multisource_confidence_text():
     assert context["intent_categories"] == ["company_fundamental_update"]
     assert context["ai_information_novelty"] == ["new_fundamental_information"]
     assert context["ai_positioning_effect"] == ["constructive_expectation_reset"]
+    assert context["ai_earnings_positioning_context"] == ["positioning_not_observed"]
+    assert context["ai_earnings_information_surprise"] == ["positive_information_surprise"]
     assert "confidence_cap=two_independent_reputable_sources" in entry["reason"]
     assert "intent=constructive" in entry["reason"]
     assert "trusted_sources=2" in entry["key_catalysts"][0]

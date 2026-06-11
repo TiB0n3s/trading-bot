@@ -70,6 +70,8 @@ def build_ai_event_context_prompt(event: dict[str, Any]) -> str:
         "scoring_reason": event.get("scoring_reason"),
         "information_novelty": event.get("information_novelty"),
         "positioning_effect": event.get("positioning_effect"),
+        "earnings_positioning_context": event.get("earnings_positioning_context"),
+        "earnings_information_surprise": event.get("earnings_information_surprise"),
     }
     return (
         "Interpret this market event for context only. Do not make a trading "
@@ -77,10 +79,14 @@ def build_ai_event_context_prompt(event: dict[str, Any]) -> str:
         "unconfirmed, or context-only evidence. Return JSON only with keys: "
         "summary, intent, affected_symbols, market_alignment, confidence, "
         "confirmation_status, information_novelty, positioning_effect, "
+        "earnings_positioning_context, earnings_information_surprise, "
         "missing_evidence, risk_notes. Treat information_novelty as whether "
         "the event adds new fundamental information versus recycled narrative. "
         "Treat positioning_effect as whether the event can reset expectations, "
-        "confirm existing positioning, contradict positioning, or is neutral.\n\n"
+        "confirm existing positioning, contradict positioning, or is neutral. "
+        "For earnings calls, distinguish pre-call financial exposure and priced-in "
+        "expectations from the new call/report information that forces participants "
+        "to adjust commitments.\n\n"
         f"EVENT_JSON={json.dumps(compact, sort_keys=True)}"
     )
 
@@ -175,6 +181,46 @@ _POSITIONING_RESET_DOWN_TERMS = {
     "slowing",
     "weak guidance",
 }
+_CROWDED_LONG_TERMS = {
+    "already long",
+    "crowded long",
+    "priced in",
+    "sell the news",
+    "high expectations",
+    "optimistic positioning",
+    "buy the rumor",
+}
+_CROWDED_SHORT_TERMS = {
+    "crowded short",
+    "high short interest",
+    "heavily shorted",
+    "low expectations",
+    "not as bad as feared",
+    "short squeeze",
+}
+_EARNINGS_SURPRISE_UP_TERMS = {
+    "above expectations",
+    "beat expectations",
+    "beat estimates",
+    "beats expectations",
+    "beats estimates",
+    "not as bad as feared",
+    "raises guidance",
+    "raised guidance",
+    "strong q&a",
+    "unexpected demand",
+}
+_EARNINGS_SURPRISE_DOWN_TERMS = {
+    "below expectations",
+    "cut guidance",
+    "cuts guidance",
+    "missed expectations",
+    "missed estimates",
+    "misses expectations",
+    "misses estimates",
+    "weak q&a",
+    "unexpected margin pressure",
+}
 
 
 def _contains_any(text: str, terms: set[str]) -> bool:
@@ -267,6 +313,64 @@ def infer_positioning_effect(event: dict[str, Any]) -> str:
     return "neutral_positioning_context"
 
 
+def infer_earnings_positioning_context(event: dict[str, Any]) -> str:
+    """Classify pre-earnings exposure/expectation context when available."""
+    explicit = _safe_str(event.get("earnings_positioning_context"), default="", max_len=100)
+    if explicit:
+        return explicit
+
+    text = " ".join(
+        str(event.get(key) or "")
+        for key in (
+            "event_summary",
+            "event_type",
+            "event_subtype",
+            "scoring_reason",
+            "positioning_effect",
+        )
+    ).lower()
+    event_type = str(event.get("event_type") or "").strip().lower()
+    if event_type not in {"earnings", "guidance"} and not any(
+        term in text for term in ("earnings", "earnings call", "q&a", "guidance")
+    ):
+        return "not_earnings_specific"
+    if _contains_any(text, _CROWDED_LONG_TERMS):
+        return "crowded_long_or_good_news_priced_in"
+    if _contains_any(text, _CROWDED_SHORT_TERMS):
+        return "crowded_short_or_bad_news_priced_in"
+    return "positioning_not_observed"
+
+
+def infer_earnings_information_surprise(event: dict[str, Any]) -> str:
+    """Classify whether earnings/call details surprised expectations."""
+    explicit = _safe_str(event.get("earnings_information_surprise"), default="", max_len=100)
+    if explicit:
+        return explicit
+
+    text = " ".join(
+        str(event.get(key) or "")
+        for key in (
+            "event_summary",
+            "event_type",
+            "event_subtype",
+            "expected_market_impact",
+            "scoring_reason",
+        )
+    ).lower()
+    event_type = str(event.get("event_type") or "").strip().lower()
+    if event_type not in {"earnings", "guidance"} and not any(
+        term in text for term in ("earnings", "earnings call", "q&a", "guidance")
+    ):
+        return "not_earnings_specific"
+    if _contains_any(text, _EARNINGS_SURPRISE_UP_TERMS):
+        return "positive_information_surprise"
+    if _contains_any(text, _EARNINGS_SURPRISE_DOWN_TERMS):
+        return "negative_information_surprise"
+    if infer_information_novelty(event) == "new_fundamental_information":
+        return "new_information_direction_unclear"
+    return "no_clear_information_surprise"
+
+
 def deterministic_event_context(event: dict[str, Any]) -> dict[str, Any]:
     """Return a deterministic fallback interpretation."""
     linked_symbols = _as_list(event.get("linked_symbols"))
@@ -280,6 +384,8 @@ def deterministic_event_context(event: dict[str, Any]) -> dict[str, Any]:
     summary = _safe_str(event.get("event_summary"), default="No event summary available")
     information_novelty = infer_information_novelty(event)
     positioning_effect = infer_positioning_effect(event)
+    earnings_positioning_context = infer_earnings_positioning_context(event)
+    earnings_information_surprise = infer_earnings_information_surprise(event)
     if event.get("context_only") is True and linked_symbols:
         summary = (
             f"Context-only {symbol} event may inform linked symbols "
@@ -297,6 +403,8 @@ def deterministic_event_context(event: dict[str, Any]) -> dict[str, Any]:
         "market_alignment": direction,
         "information_novelty": information_novelty,
         "positioning_effect": positioning_effect,
+        "earnings_positioning_context": earnings_positioning_context,
+        "earnings_information_surprise": earnings_information_surprise,
         "confidence": "low"
         if source_tier in {"unclassified", "low_confidence", "unknown"}
         else "medium",
@@ -389,6 +497,12 @@ def normalize_ai_event_context(
         ),
         "positioning_effect": _safe_str(
             raw.get("positioning_effect") or fallback["positioning_effect"]
+        ),
+        "earnings_positioning_context": _safe_str(
+            raw.get("earnings_positioning_context") or fallback["earnings_positioning_context"]
+        ),
+        "earnings_information_surprise": _safe_str(
+            raw.get("earnings_information_surprise") or fallback["earnings_information_surprise"]
         ),
         "confidence": _safe_str(raw.get("confidence") or fallback["confidence"]),
         "confirmation_status": _safe_str(

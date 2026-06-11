@@ -456,6 +456,8 @@ def build_canonical_intelligence_snapshot(
         "ai_market_alignment": event_context.get("ai_market_alignment"),
         "ai_information_novelty": event_context.get("ai_information_novelty"),
         "ai_positioning_effect": event_context.get("ai_positioning_effect"),
+        "ai_earnings_positioning_context": event_context.get("ai_earnings_positioning_context"),
+        "ai_earnings_information_surprise": event_context.get("ai_earnings_information_surprise"),
         "ai_summaries": event_context.get("ai_summaries"),
         "event_intent_version": event_context.get("event_intent_version"),
         "catalyst_score": event_context.get("catalyst_score"),

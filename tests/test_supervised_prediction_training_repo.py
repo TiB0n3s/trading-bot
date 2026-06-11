@@ -64,8 +64,18 @@ def _build_db(path: Path) -> None:
                 fractional_diff_zscore_20 REAL,
                 ema_12 REAL,
                 ema_26 REAL,
+                ema_200 REAL,
+                price_vs_ema_200_pct REAL,
+                closes_above_ema_200_5 INTEGER,
+                closes_below_ema_200_5 INTEGER,
                 macd REAL,
                 macd_signal REAL,
+                macd_histogram REAL,
+                macd_histogram_pct REAL,
+                macd_bullish_cross INTEGER,
+                macd_bearish_cross INTEGER,
+                macd_bearish_divergence INTEGER,
+                ema200_macd_reversal_score REAL,
                 rsi_14 REAL,
                 webull_rsi_14 REAL,
                 webull_rsi_bearish_divergence INTEGER,
@@ -120,7 +130,11 @@ def _build_db(path: Path) -> None:
                     cumulative_volume_delta, cvd_price_corr_20,
                     vpin_toxicity_20, fractional_diff_close_045,
                     fractional_diff_zscore_20,
-                    ema_12, ema_26, macd, macd_signal, rsi_14,
+                    ema_12, ema_26, ema_200, price_vs_ema_200_pct,
+                    closes_above_ema_200_5, closes_below_ema_200_5,
+                    macd, macd_signal, macd_histogram, macd_histogram_pct,
+                    macd_bullish_cross, macd_bearish_cross,
+                    macd_bearish_divergence, ema200_macd_reversal_score, rsi_14,
                     webull_rsi_14, webull_rsi_bearish_divergence,
                     trend_scan_label,
                     trend_scan_tstat, trend_scan_bars, trend_scan_return_pct,
@@ -136,7 +150,11 @@ def _build_db(path: Path) -> None:
                     0.3,
                     1200, 1200, 3600, 0.42,
                     0.74, 12.3, 1.1,
-                    101.2, 100.9, 0.3, 0.25, 64.0,
+                    101.2, 100.9, 98.0, 3.2,
+                    1, 0,
+                    0.3, 0.25, 0.05, 0.04,
+                    1, 0,
+                    0, 78.0, 64.0,
                     63.5, 1,
                     1,
                     2.8, 8, 0.9,
@@ -166,7 +184,12 @@ def test_fetch_training_rows_respects_feature_available_at_cutoff():
     assert rows[0]["candle_body_pct"] == 0.6
     assert rows[0]["cvd_price_corr_20"] == 0.42
     assert rows[0]["ema_12"] == 101.2
+    assert rows[0]["ema_200"] == 98.0
+    assert rows[0]["price_vs_ema_200_pct"] == 3.2
     assert rows[0]["macd"] == 0.3
+    assert rows[0]["macd_histogram"] == 0.05
+    assert rows[0]["macd_bullish_cross"] == 1
+    assert rows[0]["ema200_macd_reversal_score"] == 78.0
     assert rows[0]["rsi_14"] == 64.0
     assert rows[0]["webull_rsi_14"] == 63.5
     assert rows[0]["webull_rsi_bearish_divergence"] == 1

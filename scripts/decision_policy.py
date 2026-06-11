@@ -200,6 +200,59 @@ def _historical_bar_regime_gate(symbol, account_state):
     return {"decision": "pass", "reason": "historical-bar symbol gate passed"}
 
 
+def _ema200_macd_reversal_gate(account_state):
+    features = (
+        account_state.get("bar_pattern_features")
+        or account_state.get("latest_bar_pattern_features")
+        or account_state.get("historical_bar_features")
+        or {}
+    )
+    if not isinstance(features, dict):
+        return {"decision": "pass", "reason": "EMA200/MACD features unavailable"}
+    signal = str(features.get("ema200_macd_reversal_signal") or "none")
+    price_vs_ema = _to_float(features.get("price_vs_ema_200_pct"))
+    macd = _to_float(features.get("macd"))
+    macd_signal = _to_float(features.get("macd_signal"))
+    bearish_divergence = int(_to_float(features.get("macd_bearish_divergence")) or 0)
+    closes_below = int(_to_float(features.get("closes_below_ema_200_5")) or 0)
+    if price_vs_ema is None and macd is None and macd_signal is None and signal == "none":
+        return {"decision": "pass", "reason": "EMA200/MACD fields unavailable"}
+    blockers = []
+    if price_vs_ema is not None and price_vs_ema < 0:
+        blockers.append(f"price_below_ema200:{price_vs_ema:.3f}")
+    if closes_below:
+        blockers.append("five_closes_below_ema200")
+    if macd is not None and macd_signal is not None and macd < macd_signal:
+        blockers.append("macd_below_signal")
+    if signal.startswith("short"):
+        blockers.append(f"short_reversal_signal:{signal}")
+    if bearish_divergence:
+        blockers.append("macd_bearish_divergence")
+    if blockers:
+        return {
+            "decision": "size_down",
+            "reason": "EMA200/MACD reversal gate caution: " + ", ".join(blockers[:4]),
+            "evidence": {
+                "ema200_macd_reversal_signal": signal,
+                "price_vs_ema_200_pct": price_vs_ema,
+                "macd": macd,
+                "macd_signal": macd_signal,
+                "macd_bearish_divergence": bearish_divergence,
+                "blockers": blockers,
+            },
+        }
+    return {
+        "decision": "pass",
+        "reason": f"EMA200/MACD setup not adverse: {signal}",
+        "evidence": {
+            "ema200_macd_reversal_signal": signal,
+            "price_vs_ema_200_pct": price_vs_ema,
+            "macd": macd,
+            "macd_signal": macd_signal,
+        },
+    }
+
+
 def _strategy_memory_distribution_gate(account_state):
     health = evaluate_strategy_memory_distribution_health(account_state=account_state)
     action = str(health.get("decision") or "pass").lower()
@@ -482,6 +535,14 @@ def evaluate_decision_policy(
     elif account_state.get("historical_bar_model_intelligence"):
         supports.append("historical-bar symbol gate passed")
 
+    ema200_macd_gate = _ema200_macd_reversal_gate(account_state)
+    ema200_macd_action = ema200_macd_gate.get("decision")
+    if ema200_macd_action == "size_down":
+        risks.append(ema200_macd_gate["reason"])
+        evidence.append("ema200_macd_reversal_gate=size_down")
+    elif (ema200_macd_gate.get("evidence") or {}).get("ema200_macd_reversal_signal"):
+        supports.append("EMA200/MACD reversal gate not adverse")
+
     distribution_gate = _strategy_memory_distribution_gate(account_state)
     distribution_action = distribution_gate.get("decision")
     account_state["strategy_memory_distribution_health"] = distribution_gate.get("evidence") or {}
@@ -651,6 +712,10 @@ def evaluate_decision_policy(
             decision = "size_down"
             size_multiplier = 0.60
             reason = "historical-bar regime/symbol gate requested reduced size"
+        elif ema200_macd_action == "size_down":
+            decision = "size_down"
+            size_multiplier = 0.65
+            reason = "EMA200/MACD reversal gate requested reduced size"
         elif distribution_action == "size_down":
             decision = "size_down"
             size_multiplier = min(
@@ -684,5 +749,6 @@ def evaluate_decision_policy(
         "shadow_prediction_gate": shadow_gate,
         "quant_model_suite_gate": quant_gate,
         "historical_bar_regime_gate": historical_gate,
+        "ema200_macd_reversal_gate": ema200_macd_gate,
         "strategy_memory_distribution_gate": distribution_gate,
     }

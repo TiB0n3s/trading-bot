@@ -64,6 +64,17 @@ def test_paper_strategy_builds_master_confidence_and_paper_size():
                 "slippage_estimate_pct": 0.02,
                 "liquidity_sweep_risk": 0.10,
                 "rsi_14": 48,
+                "ema_200": 100.0,
+                "price_vs_ema_200_pct": 1.2,
+                "macd": -0.12,
+                "macd_signal": -0.16,
+                "macd_histogram": 0.04,
+                "macd_histogram_pct": 0.03,
+                "macd_bullish_cross": 1,
+                "macd_bearish_cross": 0,
+                "macd_bearish_divergence": 0,
+                "ema200_macd_reversal_signal": "long_reversal",
+                "ema200_macd_reversal_score": 88,
                 "price_vs_sma_20_pct": -0.3,
                 "close_location": 0.72,
             },
@@ -85,6 +96,8 @@ def test_paper_strategy_builds_master_confidence_and_paper_size():
     assert result["baseline_delta"] is not None
     assert result["liquidity_stress_score"] is not None
     assert result["liquidity_stress_bucket"] in {"normal", "moderate"}
+    assert result["feature_snapshot"]["ema200_macd_reversal_signal"] == "long_reversal"
+    assert any("ema200_macd_reversal" in reason for reason in result["reasons"])
     assert result["guardrails"]["paper_only"] is True
     assert result["guardrails"]["can_block_live_trades"] is False
     assert result["guardrails"]["can_size_live_orders"] is False

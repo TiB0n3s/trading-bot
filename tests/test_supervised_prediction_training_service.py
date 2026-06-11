@@ -34,8 +34,18 @@ def _rows(n=60):
                 "setup_score": 60,
                 "ema_12": 100.5 + i * 0.01,
                 "ema_26": 100.1 + i * 0.01,
+                "ema_200": 98.0,
+                "price_vs_ema_200_pct": 2.1,
+                "closes_above_ema_200_5": 1,
+                "closes_below_ema_200_5": 0,
                 "macd": 0.4,
                 "macd_signal": 0.35,
+                "macd_histogram": 0.05,
+                "macd_histogram_pct": 0.04,
+                "macd_bullish_cross": 1 if i % 7 == 0 else 0,
+                "macd_bearish_cross": 0,
+                "macd_bearish_divergence": 0,
+                "ema200_macd_reversal_score": 78.0,
                 "rsi_14": 62.0,
                 "webull_rsi_14": 61.5,
                 "webull_rsi_bearish_divergence": 0,
@@ -87,7 +97,12 @@ def test_train_supervised_prediction_model_uses_baseline_without_required_deps()
     assert "artifact_path" in result
     assert "candle_body_pct" in result["feature_columns"]
     assert "ema_12" in result["feature_columns"]
+    assert "ema_200" in result["feature_columns"]
+    assert "price_vs_ema_200_pct" in result["feature_columns"]
     assert "macd" in result["feature_columns"]
+    assert "macd_histogram" in result["feature_columns"]
+    assert "macd_bullish_cross" in result["feature_columns"]
+    assert "ema200_macd_reversal_score" in result["feature_columns"]
     assert "rsi_14" in result["feature_columns"]
     assert "webull_rsi_14" in result["feature_columns"]
     assert "webull_rsi_bearish_divergence" in result["feature_columns"]

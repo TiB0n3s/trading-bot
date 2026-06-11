@@ -249,6 +249,120 @@ def _webull_rsi_bearish_divergence(
     return 1 if closes[idx] > prior_high_close and current_rsi < prior_high_rsi else 0
 
 
+def _all_above(values: list[float], reference: list[float], idx: int, window: int) -> int:
+    if idx + 1 < window:
+        return 0
+    start = idx + 1 - window
+    return 1 if all(values[pos] > reference[pos] for pos in range(start, idx + 1)) else 0
+
+
+def _all_below(values: list[float], reference: list[float], idx: int, window: int) -> int:
+    if idx + 1 < window:
+        return 0
+    start = idx + 1 - window
+    return 1 if all(values[pos] < reference[pos] for pos in range(start, idx + 1)) else 0
+
+
+def _crossed_above(
+    fast_values: list[float],
+    slow_values: list[float],
+    idx: int,
+) -> int:
+    if idx <= 0:
+        return 0
+    return (
+        1
+        if fast_values[idx - 1] <= slow_values[idx - 1] and fast_values[idx] > slow_values[idx]
+        else 0
+    )
+
+
+def _crossed_below(
+    fast_values: list[float],
+    slow_values: list[float],
+    idx: int,
+) -> int:
+    if idx <= 0:
+        return 0
+    return (
+        1
+        if fast_values[idx - 1] >= slow_values[idx - 1] and fast_values[idx] < slow_values[idx]
+        else 0
+    )
+
+
+def _macd_histogram_reversal(
+    histogram_pct: list[float],
+    idx: int,
+    *,
+    threshold_pct: float = 0.002,
+    lookback: int = 7,
+) -> str:
+    if idx <= 0:
+        return "none"
+    start = max(0, idx + 1 - lookback)
+    sample = histogram_pct[start : idx + 1]
+    if not sample:
+        return "none"
+    if min(sample) <= -abs(threshold_pct) and histogram_pct[idx] > histogram_pct[idx - 1]:
+        return "bullish_tightening"
+    if max(sample) >= abs(threshold_pct) and histogram_pct[idx] < histogram_pct[idx - 1]:
+        return "bearish_tightening"
+    return "none"
+
+
+def _macd_bearish_divergence(
+    closes: list[float],
+    macd_values: list[float],
+    idx: int,
+    *,
+    window: int = 20,
+) -> int:
+    if idx <= 0:
+        return 0
+    start = max(0, idx - window)
+    prior_pairs = [(closes[pos], macd_values[pos]) for pos in range(start, idx)]
+    if not prior_pairs:
+        return 0
+    prior_high_close, prior_high_macd = max(prior_pairs, key=lambda item: item[0])
+    return 1 if closes[idx] > prior_high_close and macd_values[idx] < prior_high_macd else 0
+
+
+def _ema200_macd_reversal_signal(
+    *,
+    close: float,
+    ema200: float,
+    closes_above_ema200_5: int,
+    closes_below_ema200_5: int,
+    macd: float,
+    macd_signal: float,
+    macd_bullish_cross: int,
+    macd_bearish_cross: int,
+    histogram_reversal: str,
+) -> tuple[str, float]:
+    score = 50.0
+    if close > ema200:
+        score += 8.0
+    elif close < ema200:
+        score -= 8.0
+    if closes_above_ema200_5:
+        score += 8.0
+    if closes_below_ema200_5:
+        score -= 8.0
+
+    long_cross = bool(macd_bullish_cross and macd < 0 and macd_signal < 0)
+    short_cross = bool(macd_bearish_cross and macd > 0 and macd_signal > 0)
+    if close > ema200 and closes_above_ema200_5 and long_cross:
+        return "long_reversal", _clamp(score + 26.0)
+    if close < ema200 and closes_below_ema200_5 and short_cross:
+        return "short_reversal", _clamp(score - 26.0)
+    if close > ema200 and histogram_reversal == "bullish_tightening":
+        return "long_early_reversal", _clamp(score + 14.0)
+    if close < ema200 and histogram_reversal == "bearish_tightening":
+        return "short_early_reversal", _clamp(score - 14.0)
+    return "none", _clamp(score)
+
+
 def _zscore(values: list[float]) -> float | None:
     if len(values) < 2:
         return None
@@ -830,10 +944,21 @@ class BarPatternFeatureService:
         efi_ema = _ema(efi_raw, 13)
         ema_12 = _ema(closes, 12)
         ema_26 = _ema(closes, 26)
+        ema_200 = _ema(closes, 200)
         macd_values = [fast - slow for fast, slow in zip(ema_12[-len(ema_26) :], ema_26)]
         macd_offset = len(closes) - len(macd_values)
         macd_signal_values = _ema(macd_values, 9)
         macd_signal_offset = len(closes) - len(macd_signal_values)
+        macd_series = [0.0] * macd_offset + macd_values
+        macd_signal_series = [0.0] * macd_signal_offset + macd_signal_values
+        macd_histogram_series = [
+            macd_value - signal_value
+            for macd_value, signal_value in zip(macd_series, macd_signal_series)
+        ]
+        macd_histogram_pct_series = [
+            (histogram / closes[pos] * 100.0) if closes[pos] else 0.0
+            for pos, histogram in enumerate(macd_histogram_series)
+        ]
 
         rows = []
         for idx in range(20, len(normalized)):
@@ -973,6 +1098,27 @@ class BarPatternFeatureService:
                 if 0 <= macd_signal_idx < len(macd_signal_values)
                 else None
             )
+            macd_value = macd if macd is not None else 0.0
+            macd_signal_value = macd_signal if macd_signal is not None else 0.0
+            macd_histogram = macd_histogram_series[idx]
+            macd_histogram_pct = macd_histogram_pct_series[idx]
+            macd_bullish_cross = _crossed_above(macd_series, macd_signal_series, idx)
+            macd_bearish_cross = _crossed_below(macd_series, macd_signal_series, idx)
+            macd_histogram_reversal = _macd_histogram_reversal(macd_histogram_pct_series, idx)
+            macd_bearish_divergence = _macd_bearish_divergence(closes, macd_series, idx)
+            closes_above_ema200_5 = _all_above(closes, ema_200, idx, 5)
+            closes_below_ema200_5 = _all_below(closes, ema_200, idx, 5)
+            ema200_macd_reversal_signal, ema200_macd_reversal_score = _ema200_macd_reversal_signal(
+                close=close,
+                ema200=ema_200[idx],
+                closes_above_ema200_5=closes_above_ema200_5,
+                closes_below_ema200_5=closes_below_ema200_5,
+                macd=macd_value,
+                macd_signal=macd_signal_value,
+                macd_bullish_cross=macd_bullish_cross,
+                macd_bearish_cross=macd_bearish_cross,
+                histogram_reversal=macd_histogram_reversal,
+            )
             interval_start_ts = (
                 normalized[idx].get("interval_start") or normalized[idx]["timestamp"]
             )
@@ -1049,8 +1195,20 @@ class BarPatternFeatureService:
                 "liquidity_sweep_risk": liquidity_sweep_risk,
                 "ema_12": ema_12[idx],
                 "ema_26": ema_26[idx],
+                "ema_200": ema_200[idx],
+                "price_vs_ema_200_pct": _pct_change(ema_200[idx], close),
+                "closes_above_ema_200_5": closes_above_ema200_5,
+                "closes_below_ema_200_5": closes_below_ema200_5,
                 "macd": macd,
                 "macd_signal": macd_signal,
+                "macd_histogram": macd_histogram,
+                "macd_histogram_pct": macd_histogram_pct,
+                "macd_bullish_cross": macd_bullish_cross,
+                "macd_bearish_cross": macd_bearish_cross,
+                "macd_histogram_reversal": macd_histogram_reversal,
+                "macd_bearish_divergence": macd_bearish_divergence,
+                "ema200_macd_reversal_signal": ema200_macd_reversal_signal,
+                "ema200_macd_reversal_score": ema200_macd_reversal_score,
                 "rsi_14": _rsi_at(closes, idx, 14),
                 "webull_rsi_14": webull_rsi_14,
                 "webull_rsi_zone": webull_rsi_zone,
@@ -1133,8 +1291,20 @@ class BarPatternFeatureService:
                     "liquidity_sweep_risk": _round(liquidity_sweep_risk),
                     "ema_12": _round(ema_12[idx]),
                     "ema_26": _round(ema_26[idx]),
+                    "ema_200": _round(ema_200[idx]),
+                    "price_vs_ema_200_pct": _round(_pct_change(ema_200[idx], close)),
+                    "closes_above_ema_200_5": closes_above_ema200_5,
+                    "closes_below_ema_200_5": closes_below_ema200_5,
                     "macd": _round(macd),
                     "macd_signal": _round(macd_signal),
+                    "macd_histogram": _round(macd_histogram),
+                    "macd_histogram_pct": _round(macd_histogram_pct),
+                    "macd_bullish_cross": macd_bullish_cross,
+                    "macd_bearish_cross": macd_bearish_cross,
+                    "macd_histogram_reversal": macd_histogram_reversal,
+                    "macd_bearish_divergence": macd_bearish_divergence,
+                    "ema200_macd_reversal_signal": ema200_macd_reversal_signal,
+                    "ema200_macd_reversal_score": _round(ema200_macd_reversal_score),
                     "rsi_14": _round(_rsi_at(closes, idx, 14)),
                     "webull_rsi_14": _round(webull_rsi_14),
                     "webull_rsi_zone": webull_rsi_zone,

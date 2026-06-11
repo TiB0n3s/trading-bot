@@ -134,6 +134,16 @@ def _score_current_features(
         candidates.append(70.0 - penalty)
         reasons.append(f"vpin_toxicity_20={vpin:.3f}")
 
+    reversal_score = _float(features.get("ema200_macd_reversal_score"))
+    reversal_signal = str(features.get("ema200_macd_reversal_signal") or "none")
+    if reversal_score is not None:
+        candidates.append(_clamp(reversal_score))
+        reasons.append(f"ema200_macd_reversal={reversal_signal}:{reversal_score:.1f}")
+
+    if int(_float(features.get("macd_bearish_divergence")) or 0):
+        candidates.append(35.0)
+        reasons.append("macd_bearish_divergence=1")
+
     context_momentum = _float(context.get("momentum_pct"))
     if context_momentum is not None:
         candidates.append(_clamp(50.0 + context_momentum * 10.0))
@@ -443,6 +453,17 @@ def build_historical_bar_paper_strategy(
             "vpin_toxicity_20",
             "cvd_price_corr_20",
             "rsi_14",
+            "ema_200",
+            "price_vs_ema_200_pct",
+            "macd",
+            "macd_signal",
+            "macd_histogram",
+            "macd_histogram_pct",
+            "macd_bullish_cross",
+            "macd_bearish_cross",
+            "macd_bearish_divergence",
+            "ema200_macd_reversal_signal",
+            "ema200_macd_reversal_score",
             "price_vs_sma_20_pct",
         )
         if features.get(key) is not None

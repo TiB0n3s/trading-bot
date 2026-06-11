@@ -167,8 +167,20 @@ class BarPatternFeatureRepository:
                     liquidity_sweep_risk REAL,
                     ema_12 REAL,
                     ema_26 REAL,
+                    ema_200 REAL,
+                    price_vs_ema_200_pct REAL,
+                    closes_above_ema_200_5 INTEGER,
+                    closes_below_ema_200_5 INTEGER,
                     macd REAL,
                     macd_signal REAL,
+                    macd_histogram REAL,
+                    macd_histogram_pct REAL,
+                    macd_bullish_cross INTEGER,
+                    macd_bearish_cross INTEGER,
+                    macd_histogram_reversal TEXT,
+                    macd_bearish_divergence INTEGER,
+                    ema200_macd_reversal_signal TEXT,
+                    ema200_macd_reversal_score REAL,
                     rsi_14 REAL,
                     webull_rsi_14 REAL,
                     webull_rsi_zone TEXT,
@@ -271,8 +283,20 @@ class BarPatternFeatureRepository:
             self._ensure_column(con, "liquidity_sweep_risk", "REAL")
             self._ensure_column(con, "ema_12", "REAL")
             self._ensure_column(con, "ema_26", "REAL")
+            self._ensure_column(con, "ema_200", "REAL")
+            self._ensure_column(con, "price_vs_ema_200_pct", "REAL")
+            self._ensure_column(con, "closes_above_ema_200_5", "INTEGER")
+            self._ensure_column(con, "closes_below_ema_200_5", "INTEGER")
             self._ensure_column(con, "macd", "REAL")
             self._ensure_column(con, "macd_signal", "REAL")
+            self._ensure_column(con, "macd_histogram", "REAL")
+            self._ensure_column(con, "macd_histogram_pct", "REAL")
+            self._ensure_column(con, "macd_bullish_cross", "INTEGER")
+            self._ensure_column(con, "macd_bearish_cross", "INTEGER")
+            self._ensure_column(con, "macd_histogram_reversal", "TEXT")
+            self._ensure_column(con, "macd_bearish_divergence", "INTEGER")
+            self._ensure_column(con, "ema200_macd_reversal_signal", "TEXT")
+            self._ensure_column(con, "ema200_macd_reversal_score", "REAL")
             self._ensure_column(con, "rsi_14", "REAL")
             self._ensure_column(con, "webull_rsi_14", "REAL")
             self._ensure_column(con, "webull_rsi_zone", "TEXT")
@@ -367,7 +391,12 @@ class BarPatternFeatureRepository:
                     session_phase, bid_price, ask_price, bid_ask_spread_pct,
                     slippage_estimate_pct, execution_cost_estimate_pct,
                     liquidity_zone_label, liquidity_sweep_risk, ema_12,
-                    ema_26, macd, macd_signal, rsi_14,
+                    ema_26, ema_200, price_vs_ema_200_pct,
+                    closes_above_ema_200_5, closes_below_ema_200_5,
+                    macd, macd_signal, macd_histogram, macd_histogram_pct,
+                    macd_bullish_cross, macd_bearish_cross,
+                    macd_histogram_reversal, macd_bearish_divergence,
+                    ema200_macd_reversal_signal, ema200_macd_reversal_score, rsi_14,
                     webull_rsi_14, webull_rsi_zone, webull_rsi_exit_signal,
                     webull_rsi_bearish_divergence,
                     efi, efi_ema_13, efi_slope_3, efi_zscore_20,
@@ -406,7 +435,12 @@ class BarPatternFeatureRepository:
                     :bid_price, :ask_price, :bid_ask_spread_pct,
                     :slippage_estimate_pct, :execution_cost_estimate_pct,
                     :liquidity_zone_label, :liquidity_sweep_risk, :ema_12,
-                    :ema_26, :macd, :macd_signal, :rsi_14,
+                    :ema_26, :ema_200, :price_vs_ema_200_pct,
+                    :closes_above_ema_200_5, :closes_below_ema_200_5,
+                    :macd, :macd_signal, :macd_histogram, :macd_histogram_pct,
+                    :macd_bullish_cross, :macd_bearish_cross,
+                    :macd_histogram_reversal, :macd_bearish_divergence,
+                    :ema200_macd_reversal_signal, :ema200_macd_reversal_score, :rsi_14,
                     :webull_rsi_14, :webull_rsi_zone, :webull_rsi_exit_signal,
                     :webull_rsi_bearish_divergence,
                     :efi, :efi_ema_13, :efi_slope_3, :efi_zscore_20,
@@ -470,8 +504,20 @@ class BarPatternFeatureRepository:
                     liquidity_sweep_risk = excluded.liquidity_sweep_risk,
                     ema_12 = excluded.ema_12,
                     ema_26 = excluded.ema_26,
+                    ema_200 = excluded.ema_200,
+                    price_vs_ema_200_pct = excluded.price_vs_ema_200_pct,
+                    closes_above_ema_200_5 = excluded.closes_above_ema_200_5,
+                    closes_below_ema_200_5 = excluded.closes_below_ema_200_5,
                     macd = excluded.macd,
                     macd_signal = excluded.macd_signal,
+                    macd_histogram = excluded.macd_histogram,
+                    macd_histogram_pct = excluded.macd_histogram_pct,
+                    macd_bullish_cross = excluded.macd_bullish_cross,
+                    macd_bearish_cross = excluded.macd_bearish_cross,
+                    macd_histogram_reversal = excluded.macd_histogram_reversal,
+                    macd_bearish_divergence = excluded.macd_bearish_divergence,
+                    ema200_macd_reversal_signal = excluded.ema200_macd_reversal_signal,
+                    ema200_macd_reversal_score = excluded.ema200_macd_reversal_score,
                     rsi_14 = excluded.rsi_14,
                     webull_rsi_14 = excluded.webull_rsi_14,
                     webull_rsi_zone = excluded.webull_rsi_zone,
@@ -591,6 +637,7 @@ class BarPatternFeatureRepository:
                     SUM(CASE
                         WHEN ema_12 IS NOT NULL
                          AND ema_26 IS NOT NULL
+                         AND ema_200 IS NOT NULL
                          AND macd IS NOT NULL
                          AND rsi_14 IS NOT NULL
                          AND webull_rsi_14 IS NOT NULL

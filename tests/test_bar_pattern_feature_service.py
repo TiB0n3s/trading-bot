@@ -89,8 +89,30 @@ def test_bar_pattern_service_builds_efi_pvt_forward_features():
     assert first["session_phase"] is not None
     assert first["ema_12"] is not None
     assert first["ema_26"] is not None
+    assert first["ema_200"] is not None
+    assert first["price_vs_ema_200_pct"] is not None
+    assert first["closes_above_ema_200_5"] in {0, 1}
+    assert first["closes_below_ema_200_5"] in {0, 1}
     assert first["macd"] is not None
     assert first["macd_signal"] is not None
+    assert first["macd_histogram"] is not None
+    assert first["macd_histogram_pct"] is not None
+    assert first["macd_bullish_cross"] in {0, 1}
+    assert first["macd_bearish_cross"] in {0, 1}
+    assert first["macd_histogram_reversal"] in {
+        "bullish_tightening",
+        "bearish_tightening",
+        "none",
+    }
+    assert first["macd_bearish_divergence"] in {0, 1}
+    assert first["ema200_macd_reversal_signal"] in {
+        "long_reversal",
+        "short_reversal",
+        "long_early_reversal",
+        "short_early_reversal",
+        "none",
+    }
+    assert first["ema200_macd_reversal_score"] is not None
     assert first["rsi_14"] is not None
     assert first["webull_rsi_14"] is not None
     assert first["webull_rsi_zone"] in {"overbought", "oversold", "neutral"}

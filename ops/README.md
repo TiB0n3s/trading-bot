@@ -347,7 +347,7 @@ Data contract:
 
 - Polygon backfill requests `adjusted=True` and filters to regular market hours.
 - Cached CSV chunks include OHLCV, VWAP, source, adjusted flag, and inclusive interval-start metadata.
-- Persisted `bar_pattern_features` rows include raw OHLCV/VWAP plus RSI/EMA/MACD, Webull-compatible Wilder RSI, candle-physics ratios, EFI/PVT, CVD/VPIN proxies, fractional-memory, triple-barrier, and trend-scan features.
+- Persisted `bar_pattern_features` rows include raw OHLCV/VWAP plus RSI/EMA/MACD, EMA200/MACD reversal setup fields, Webull-compatible Wilder RSI, candle-physics ratios, EFI/PVT, CVD/VPIN proxies, fractional-memory, triple-barrier, and trend-scan features.
 - Intra-bar timestamps for the exact open/high/low/close event sequence are not available from Polygon aggregate bars. Those require tick-level data and should be treated as a future archive layer.
 
 Tick-level entitlement probe:

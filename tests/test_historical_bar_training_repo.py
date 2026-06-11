@@ -33,7 +33,12 @@ def _build_db(path: Path) -> None:
                 volume REAL,
                 ema_12 REAL,
                 ema_26 REAL,
+                ema_200 REAL,
+                price_vs_ema_200_pct REAL,
                 macd REAL,
+                macd_histogram REAL,
+                macd_bullish_cross INTEGER,
+                ema200_macd_reversal_score REAL,
                 rsi_14 REAL,
                 triple_barrier_label INTEGER,
                 trend_scan_label INTEGER
@@ -43,7 +48,7 @@ def _build_db(path: Path) -> None:
         con.executemany(
             """
             INSERT INTO bar_pattern_features VALUES (
-                ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+                ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
             )
             """,
             [
@@ -59,7 +64,12 @@ def _build_db(path: Path) -> None:
                     1000,
                     100,
                     100,
+                    99,
+                    1.515,
                     0.1,
+                    0.03,
+                    1,
+                    76,
                     55,
                     1,
                     1,
@@ -76,7 +86,12 @@ def _build_db(path: Path) -> None:
                     1000,
                     101,
                     101,
+                    99,
+                    2.525,
                     0.2,
+                    0.04,
+                    0,
+                    72,
                     60,
                     -1,
                     -1,
@@ -93,7 +108,12 @@ def _build_db(path: Path) -> None:
                     1000,
                     102,
                     102,
+                    99,
+                    3.535,
                     0.3,
+                    0.05,
+                    0,
+                    60,
                     65,
                     1,
                     1,
@@ -110,7 +130,12 @@ def _build_db(path: Path) -> None:
                     1000,
                     200,
                     200,
+                    198,
+                    1.263,
                     0.1,
+                    0.02,
+                    1,
+                    74,
                     55,
                     1,
                     1,
@@ -136,6 +161,9 @@ def test_fetch_historical_bar_training_rows_filters_current_1m_labels():
         "v4",
     ]
     assert [row["triple_barrier_label"] for row in rows] == [1, -1]
+    assert rows[0]["ema_200"] == 99
+    assert rows[0]["macd_histogram"] == 0.03
+    assert rows[0]["ema200_macd_reversal_score"] == 76
     assert rows[0]["bar_timestamp"] < rows[1]["bar_timestamp"]
 
 

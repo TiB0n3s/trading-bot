@@ -72,6 +72,7 @@ load_env_file()
 
 from bot_events import log_event
 from market_time import ET, is_market_hours, now_et
+from repositories.bar_pattern_feature_repo import BarPatternFeatureRepository
 from repositories.candidate_universe_repo import CandidateUniverseRepository
 from repositories.prediction_repo import PredictionRepository
 from runtime_config import is_cash_mode
@@ -84,12 +85,17 @@ from services.discovery_execution_bridge_service import (
     bridge_config_from_env,
     bridge_enabled_from_env,
 )
+from services.historical_bar_model_intelligence_service import (
+    build_historical_bar_model_intelligence,
+)
+from services.historical_bar_paper_strategy_service import build_historical_bar_paper_strategy
 from services.intelligence.candidates.reference import candidate_reference_service
 from services.intelligence.candidates.universe import CandidateUniverseService
 from services.intraday_trade_feedback_service import (
     IntradayTradeFeedbackService,
     build_default_intraday_trade_feedback_service,
 )
+from services.layered_model_decision_service import build_layered_model_decision
 from services.learned_auto_buy_tiebreaker_service import (
     LearnedAutoBuyThresholds,
     LearnedAutoBuyTiebreakerService,
@@ -233,6 +239,37 @@ AUTO_BUY_PAPER_STRONG_EVIDENCE_MIN_ML_SCORE = float(
 AUTO_BUY_PAPER_STRONG_EVIDENCE_MIN_SESSION_SCORE = float(
     os.getenv("AUTO_BUY_PAPER_STRONG_EVIDENCE_MIN_SESSION_SCORE", "5.0")
 )
+AUTO_BUY_LAYERED_ML_ENABLED = os.getenv(
+    "AUTO_BUY_LAYERED_ML_ENABLED",
+    _paper_runtime_default("true", "false"),
+).strip().lower() in ("1", "true", "yes", "on")
+AUTO_BUY_LAYERED_ML_PROMOTION_ENABLED = os.getenv(
+    "AUTO_BUY_LAYERED_ML_PROMOTION_ENABLED",
+    _paper_runtime_default("true", "false"),
+).strip().lower() in ("1", "true", "yes", "on")
+AUTO_BUY_LAYERED_ML_VETO_HARD_BLOCK_ENABLED = os.getenv(
+    "AUTO_BUY_LAYERED_ML_VETO_HARD_BLOCK_ENABLED",
+    _paper_runtime_default("true", "false"),
+).strip().lower() in ("1", "true", "yes", "on")
+AUTO_BUY_LAYERED_ML_MIN_PROMOTION_CONFIDENCE = float(
+    os.getenv("AUTO_BUY_LAYERED_ML_MIN_PROMOTION_CONFIDENCE", "65.0")
+)
+AUTO_BUY_LAYERED_ML_MIN_VETO_CONFIDENCE = float(
+    os.getenv("AUTO_BUY_LAYERED_ML_MIN_VETO_CONFIDENCE", "55.0")
+)
+AUTO_BUY_LAYERED_ML_SCORE_BOOST = float(os.getenv("AUTO_BUY_LAYERED_ML_SCORE_BOOST", "3.0"))
+AUTO_BUY_LAYERED_ML_PASS_SCORE_BOOST = float(
+    os.getenv("AUTO_BUY_LAYERED_ML_PASS_SCORE_BOOST", "1.0")
+)
+AUTO_BUY_LAYERED_ML_WATCH_SCORE_PENALTY = float(
+    os.getenv("AUTO_BUY_LAYERED_ML_WATCH_SCORE_PENALTY", "2.0")
+)
+AUTO_BUY_LAYERED_ML_VETO_SCORE_PENALTY = float(
+    os.getenv("AUTO_BUY_LAYERED_ML_VETO_SCORE_PENALTY", "8.0")
+)
+AUTO_BUY_LAYERED_ML_MAX_THRESHOLD_GAP = float(
+    os.getenv("AUTO_BUY_LAYERED_ML_MAX_THRESHOLD_GAP", "6.0")
+)
 LEARNED_TIEBREAKER_SOFT_BLOCK_PREFIXES = (
     "bias_avoid",
     "setup_avoid",
@@ -249,6 +286,8 @@ _learned_tiebreaker_cache: dict[tuple[str, str, str], dict[str, Any]] = {}
 _rolling_momentum_context_cache: dict[str, dict[str, Any]] | None = None
 _intraday_feedback_service: IntradayTradeFeedbackService | None = None
 _learned_tiebreaker_service: LearnedAutoBuyTiebreakerService | None = None
+_bar_pattern_feature_repo: BarPatternFeatureRepository | None = None
+_historical_bar_intelligence_cache: dict[str, Any] | None = None
 _initialized_auto_buy_db_paths: set[str] = set()
 
 
@@ -257,6 +296,13 @@ def intraday_feedback_service() -> IntradayTradeFeedbackService:
     if _intraday_feedback_service is None:
         _intraday_feedback_service = build_default_intraday_trade_feedback_service(DB_PATH)
     return _intraday_feedback_service
+
+
+def bar_pattern_feature_repo() -> BarPatternFeatureRepository:
+    global _bar_pattern_feature_repo
+    if _bar_pattern_feature_repo is None:
+        _bar_pattern_feature_repo = BarPatternFeatureRepository(DB_PATH)
+    return _bar_pattern_feature_repo
 
 
 def learned_auto_buy_tiebreaker_service() -> LearnedAutoBuyTiebreakerService:
@@ -284,6 +330,168 @@ def _to_float(value: Any, default: float | None = None) -> float | None:
         return float(value)
     except (TypeError, ValueError):
         return default
+
+
+def _dict(value: Any) -> dict[str, Any]:
+    return value if isinstance(value, dict) else {}
+
+
+def _probability_pct(value: Any) -> float | None:
+    parsed = _to_float(value)
+    if parsed is None:
+        return None
+    return parsed * 100.0 if 0.0 <= parsed <= 1.0 else parsed
+
+
+def _historical_bar_intelligence() -> dict[str, Any]:
+    global _historical_bar_intelligence_cache
+    if _historical_bar_intelligence_cache is None:
+        _historical_bar_intelligence_cache = build_historical_bar_model_intelligence()
+    return _historical_bar_intelligence_cache
+
+
+def latest_bar_pattern_features(symbol: str, feature: dict[str, Any]) -> dict[str, Any]:
+    """Load the latest ML-trained bar-pattern row and merge live feature hints."""
+    row: dict[str, Any] = {}
+    for timeframe in ("1Min", "1m"):
+        try:
+            latest = bar_pattern_feature_repo().latest_for_symbol(symbol, timeframe=timeframe)
+        except Exception as exc:
+            return {
+                "symbol": symbol,
+                "status": "lookup_error",
+                "lookup_error": str(exc),
+                **_dict(feature),
+            }
+        if latest:
+            row = dict(latest)
+            break
+
+    feature_payload = _dict(feature)
+    merged = {**row, **feature_payload}
+    merged.setdefault("symbol", symbol)
+    if not row:
+        merged["status"] = "missing_latest_bar_pattern_row"
+    return merged
+
+
+def auto_buy_layered_ml_context(
+    *,
+    symbol: str,
+    session: dict[str, Any],
+    feature: dict[str, Any],
+    context: dict[str, Any],
+    prediction_context: dict[str, Any],
+    score: float,
+    strong_threshold: float | None = None,
+) -> dict[str, Any]:
+    """Build the Level 0-3 intelligence decision used to influence auto-buy."""
+    if not AUTO_BUY_LAYERED_ML_ENABLED:
+        return {
+            "enabled": False,
+            "available": False,
+            "runtime_effect": "disabled",
+            "reason": "AUTO_BUY_LAYERED_ML_ENABLED=false",
+        }
+
+    try:
+        bar_features = latest_bar_pattern_features(symbol, feature)
+        intelligence = _historical_bar_intelligence()
+        account_state = {
+            "symbol": symbol,
+            "action": "buy",
+            "position_size_pct": AUTO_BUY_POSITION_SIZE_PCT,
+            "bar_pattern_features": bar_features,
+            "microstructure_features": bar_features,
+            "historical_bar_model_intelligence": intelligence,
+            "prediction_gate": {
+                **prediction_context,
+                "prediction_score": prediction_context.get("ml_prediction_score"),
+                "prediction_decision": prediction_context.get("ml_prediction_bucket"),
+            },
+            "setup_quality": {
+                "score": feature.get("setup_score"),
+                "recommendation": feature.get("setup_recommendation"),
+                "label": feature.get("setup_label"),
+            },
+            "buy_opportunity": {
+                "buy_opportunity_score": score,
+                "buy_opportunity_recommendation": "auto_buy_candidate_scoring",
+                "threshold": strong_threshold,
+            },
+            "session_momentum_gate": {
+                "trend_label": session.get("trend_label"),
+                "trend_score": session.get("trend_score"),
+                "momentum_5m_pct": session.get("momentum_5m_pct"),
+                "momentum_15m_pct": session.get("momentum_15m_pct"),
+                "momentum_30m_pct": session.get("momentum_30m_pct"),
+                "session_return_pct": session.get("session_return_pct"),
+                "distance_from_vwap_pct": session.get("distance_from_vwap_pct"),
+            },
+            "market_context": context,
+            "decision_utility": {
+                "prob_favorable_move": prediction_context.get("ml_prediction_score"),
+            },
+        }
+        paper_strategy = build_historical_bar_paper_strategy(
+            symbol=symbol,
+            action="buy",
+            account_state=account_state,
+            historical_bar_intelligence=intelligence,
+            feature_repo=bar_pattern_feature_repo(),
+        ).to_dict()
+        account_state["historical_bar_paper_strategy"] = paper_strategy
+        layered = build_layered_model_decision(
+            symbol=symbol,
+            action="buy",
+            decision={
+                "approved": False,
+                "position_size_pct": AUTO_BUY_POSITION_SIZE_PCT,
+                "confidence": "auto_buy_candidate_scoring",
+            },
+            account_state=account_state,
+            execution_mode="paper" if not is_cash_mode() else "cash",
+            ml_authority_config={
+                "historical_bar_meta_label_authority": {
+                    "enabled": True,
+                    "lazy_build_strategy": False,
+                    "can_veto": True,
+                    "min_veto_score": AUTO_BUY_LAYERED_ML_MIN_VETO_CONFIDENCE,
+                    "min_approve_score": AUTO_BUY_LAYERED_ML_MIN_PROMOTION_CONFIDENCE,
+                    "min_size_increase_score": max(
+                        AUTO_BUY_LAYERED_ML_MIN_PROMOTION_CONFIDENCE + 10.0,
+                        75.0,
+                    ),
+                    "max_position_size_pct": AUTO_BUY_POSITION_SIZE_PCT,
+                    "severe_liquidity_blocks": True,
+                }
+            },
+        ).to_dict()
+        ensemble = _dict(layered.get("level_1_expert_ensemble"))
+        meta = _dict(layered.get("level_2_meta_label"))
+        return {
+            "enabled": True,
+            "available": True,
+            "runtime_effect": "paper_bounded_auto_buy_intelligence_authority",
+            "final_instruction": layered.get("final_instruction"),
+            "final_size_pct": layered.get("final_size_pct"),
+            "ensemble_probability_pct": _probability_pct(ensemble.get("ensemble_probability")),
+            "meta_label_effect": meta.get("effect"),
+            "meta_label_instruction": meta.get("instruction"),
+            "master_confidence_score": paper_strategy.get("master_confidence_score"),
+            "paper_recommendation": paper_strategy.get("paper_recommendation"),
+            "reason": "; ".join(str(item) for item in (layered.get("reasons") or [])[:4]),
+            "decision": layered,
+            "historical_bar_paper_strategy": paper_strategy,
+            "bar_pattern_features": bar_features,
+        }
+    except Exception as exc:
+        return {
+            "enabled": True,
+            "available": False,
+            "runtime_effect": "lookup_error_observe_only",
+            "reason": str(exc),
+        }
 
 
 def _today() -> str:
@@ -1220,8 +1428,6 @@ def evaluate_auto_buy_candidate(
                 f"{feedback_status}:{intraday_feedback.get('feedback_key')}"
             )
 
-    hard_block_reason = "; ".join(hard_block_reasons) if hard_block_reasons else None
-
     strong_threshold = AUTO_BUY_MIN_SCORE
     execution_signal_mode = (
         "internal_all" if internal_signal_execution_enabled() else "legacy_source_gate"
@@ -1234,6 +1440,60 @@ def evaluate_auto_buy_candidate(
         reasons.append(f"webhook_symbol_candidate_threshold:{strong_threshold:.1f}")
     elif signal_source == "tradingview_alert":
         reasons.append(f"internal_signal_execution:{execution_signal_mode}")
+
+    layered_ml = auto_buy_layered_ml_context(
+        symbol=symbol,
+        session=session,
+        feature=feature,
+        context=context,
+        prediction_context=prediction_context,
+        score=score,
+        strong_threshold=strong_threshold,
+    )
+    layered_ml_available = bool(layered_ml.get("available"))
+    layered_instruction = str(layered_ml.get("final_instruction") or "none").strip().lower()
+    layered_meta_effect = str(layered_ml.get("meta_label_effect") or "none").strip().lower()
+    layered_master_confidence = _to_float(layered_ml.get("master_confidence_score"))
+    layered_ensemble_pct = _to_float(layered_ml.get("ensemble_probability_pct"))
+    if layered_ml.get("enabled") and not layered_ml_available:
+        reasons.append(f"layered_ml:unavailable:{layered_ml.get('reason')}")
+    elif layered_ml_available:
+        if layered_instruction == "veto":
+            score -= AUTO_BUY_LAYERED_ML_VETO_SCORE_PENALTY
+            reasons.append(
+                "layered_ml_veto:"
+                f"{layered_meta_effect}:{AUTO_BUY_LAYERED_ML_VETO_SCORE_PENALTY:.1f}:"
+                f"{layered_ml.get('reason')}"
+            )
+            if AUTO_BUY_LAYERED_ML_VETO_HARD_BLOCK_ENABLED and not is_cash_mode():
+                hard_block_reasons.append(
+                    "layered_ml_veto:"
+                    f"{layered_meta_effect or layered_instruction}:"
+                    f"{layered_ml.get('reason')}"
+                )
+        elif layered_instruction in {"paper_approval", "size_increase"}:
+            score += AUTO_BUY_LAYERED_ML_SCORE_BOOST
+            reasons.append(
+                "layered_ml_approval:"
+                f"{layered_instruction}:+{AUTO_BUY_LAYERED_ML_SCORE_BOOST:.1f}:"
+                f"confidence={layered_master_confidence}"
+            )
+        elif layered_instruction == "pass":
+            score += AUTO_BUY_LAYERED_ML_PASS_SCORE_BOOST
+            reasons.append(
+                "layered_ml_pass:"
+                f"+{AUTO_BUY_LAYERED_ML_PASS_SCORE_BOOST:.1f}:"
+                f"ensemble={layered_ensemble_pct}"
+            )
+        elif layered_instruction == "watch":
+            score -= AUTO_BUY_LAYERED_ML_WATCH_SCORE_PENALTY
+            reasons.append(
+                "layered_ml_watch:"
+                f"-{AUTO_BUY_LAYERED_ML_WATCH_SCORE_PENALTY:.1f}:"
+                f"ensemble={layered_ensemble_pct}"
+            )
+
+    hard_block_reason = "; ".join(hard_block_reasons) if hard_block_reasons else None
 
     if hard_block_reasons:
         decision = "skip"
@@ -1286,6 +1546,36 @@ def evaluate_auto_buy_candidate(
             f"ml={ml_score_for_promotion:.2f}"
         )
         reasons.append(f"paper_strong_evidence_promoted:{paper_promotion_reason}")
+
+    layered_ml_promotion_applied = False
+    layered_ml_promotion_reason = None
+    layered_ml_threshold_gap = round(float(strong_threshold) - float(score), 4)
+    layered_ml_promotion_allowed = (
+        AUTO_BUY_LAYERED_ML_PROMOTION_ENABLED
+        and layered_ml_available
+        and not is_cash_mode()
+        and not requires_webhook
+        and not hard_block_reasons
+        and decision in {"watch", "skip"}
+        and score >= AUTO_BUY_WATCH_SCORE
+        and layered_ml_threshold_gap <= AUTO_BUY_LAYERED_ML_MAX_THRESHOLD_GAP
+        and layered_instruction in {"paper_approval", "size_increase"}
+        and (layered_master_confidence or 0.0) >= AUTO_BUY_LAYERED_ML_MIN_PROMOTION_CONFIDENCE
+        and (_to_float(layered_ml.get("final_size_pct"), 0) or 0) > 0
+        and str(intraday_feedback.get("status") or "neutral") not in {"block", "would_block"}
+    )
+    if layered_ml_promotion_allowed:
+        decision = "strong_buy_candidate"
+        severity = "high"
+        layered_ml_promotion_applied = True
+        layered_ml_promotion_reason = (
+            "layered_ml_paper_authority:"
+            f"instruction={layered_instruction};"
+            f"confidence={layered_master_confidence};"
+            f"ensemble={layered_ensemble_pct};"
+            f"gap={layered_ml_threshold_gap:.2f}"
+        )
+        reasons.append(f"layered_ml_promoted:{layered_ml_promotion_reason}")
 
     learned_tiebreaker_applied = False
     learned_tiebreaker_reason = None
@@ -1382,6 +1672,27 @@ def evaluate_auto_buy_candidate(
             if paper_promotion_applied
             else "observe_only_or_not_qualified"
         ),
+        "layered_ml_enabled": bool(AUTO_BUY_LAYERED_ML_ENABLED),
+        "layered_ml_available": bool(layered_ml_available),
+        "layered_ml_runtime_effect": layered_ml.get("runtime_effect"),
+        "layered_ml_final_instruction": layered_instruction,
+        "layered_ml_final_size_pct": layered_ml.get("final_size_pct"),
+        "layered_ml_ensemble_probability_pct": layered_ensemble_pct,
+        "layered_ml_meta_label_effect": layered_meta_effect,
+        "layered_ml_meta_label_instruction": layered_ml.get("meta_label_instruction"),
+        "layered_ml_master_confidence_score": layered_master_confidence,
+        "layered_ml_paper_recommendation": layered_ml.get("paper_recommendation"),
+        "layered_ml_reason": layered_ml.get("reason"),
+        "layered_ml_decision": layered_ml.get("decision") or {},
+        "layered_ml_historical_bar_paper_strategy": (
+            layered_ml.get("historical_bar_paper_strategy") or {}
+        ),
+        "layered_ml_bar_pattern_features": layered_ml.get("bar_pattern_features") or {},
+        "layered_ml_promotion_enabled": bool(AUTO_BUY_LAYERED_ML_PROMOTION_ENABLED),
+        "layered_ml_promotion_allowed": bool(layered_ml_promotion_allowed),
+        "layered_ml_promotion_applied": bool(layered_ml_promotion_applied),
+        "layered_ml_promotion_reason": layered_ml_promotion_reason,
+        "layered_ml_threshold_gap": layered_ml_threshold_gap,
         "learned_tiebreaker_enabled": bool(AUTO_BUY_LEARNED_TIEBREAKER_ENABLED),
         "learned_tiebreaker_allowed": bool(learned_tiebreaker_allowed),
         "learned_tiebreaker_applied": bool(learned_tiebreaker_applied),
@@ -1456,6 +1767,11 @@ def attach_canonical_decision_metadata(candidate: dict[str, Any]) -> dict[str, A
             "trend_score": candidate.get("session_trend_score"),
             "reason": candidate.get("session_momentum_reason"),
         },
+        "layered_model_decision": candidate.get("layered_ml_decision") or {},
+        "historical_bar_paper_strategy": (
+            candidate.get("layered_ml_historical_bar_paper_strategy") or {}
+        ),
+        "bar_pattern_features": candidate.get("layered_ml_bar_pattern_features") or {},
         "execution_quality": {
             "decision": "allow" if approved else "observe",
             "reason": candidate.get("live_block_reason") or "auto-buy candidate scoring",

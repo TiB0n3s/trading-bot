@@ -33,6 +33,9 @@ AUTO_BUY_RUNTIME_DEFAULTS = {
     "AUTO_BUY_WATCH_SETUP_STRONG_BUY_ENABLED": False,
     "AUTO_BUY_INTRADAY_FEEDBACK_ENABLED": False,
     "AUTO_BUY_PAPER_STRONG_EVIDENCE_PROMOTION_ENABLED": False,
+    "AUTO_BUY_LAYERED_ML_ENABLED": False,
+    "AUTO_BUY_LAYERED_ML_PROMOTION_ENABLED": False,
+    "AUTO_BUY_LAYERED_ML_VETO_HARD_BLOCK_ENABLED": False,
 }
 
 
@@ -40,6 +43,7 @@ def reset_auto_buy_runtime_defaults():
     for key, value in AUTO_BUY_RUNTIME_DEFAULTS.items():
         setattr(auto_buy_manager, key, value)
     auto_buy_manager._rolling_momentum_context_cache = None
+    auto_buy_manager._historical_bar_intelligence_cache = None
 
 
 def setup_function(_):
@@ -1202,6 +1206,107 @@ def test_learned_tiebreaker_can_override_soft_intelligence_blocks_in_paper_mode(
         raise AssertionError("missing original soft block reason")
 
 
+def test_layered_ml_can_promote_near_threshold_auto_buy_candidate_in_paper_mode():
+    old_context = auto_buy_manager.auto_buy_layered_ml_context
+    old_cash_mode = auto_buy_manager.is_cash_mode
+    old_enabled = auto_buy_manager.AUTO_BUY_LAYERED_ML_ENABLED
+    old_promotion = auto_buy_manager.AUTO_BUY_LAYERED_ML_PROMOTION_ENABLED
+    auto_buy_manager.is_cash_mode = lambda: False
+    auto_buy_manager.AUTO_BUY_LAYERED_ML_ENABLED = True
+    auto_buy_manager.AUTO_BUY_LAYERED_ML_PROMOTION_ENABLED = True
+    auto_buy_manager.auto_buy_layered_ml_context = lambda **kwargs: {
+        "enabled": True,
+        "available": True,
+        "runtime_effect": "paper_bounded_auto_buy_intelligence_authority",
+        "final_instruction": "paper_approval",
+        "final_size_pct": 0.5,
+        "ensemble_probability_pct": 72.0,
+        "meta_label_effect": "paper_approval",
+        "meta_label_instruction": "pass",
+        "master_confidence_score": 72.0,
+        "paper_recommendation": "paper_trade_candidate",
+        "reason": "test layered approval",
+        "decision": {"final_instruction": "paper_approval"},
+        "historical_bar_paper_strategy": {"master_confidence_score": 72.0},
+        "bar_pattern_features": {"symbol": "AMZN"},
+    }
+    try:
+        candidate = evaluate_auto_buy_candidate(
+            symbol="AMZN",
+            session={
+                "trend_label": "developing_uptrend",
+                "trend_score": 3,
+                "session_return_pct": 0.2,
+                "momentum_5m_pct": 0.0,
+                "momentum_15m_pct": 0.25,
+                "momentum_30m_pct": 0.0,
+                "distance_from_vwap_pct": 0.4,
+            },
+            feature={
+                **favorable_feature(),
+                "setup_recommendation": "watch",
+                "setup_score": 55,
+            },
+            context={"bias": "neutral", "entry_quality": "neutral", "risk_level": "medium"},
+            held=set(),
+        )
+    finally:
+        auto_buy_manager.auto_buy_layered_ml_context = old_context
+        auto_buy_manager.is_cash_mode = old_cash_mode
+        auto_buy_manager.AUTO_BUY_LAYERED_ML_ENABLED = old_enabled
+        auto_buy_manager.AUTO_BUY_LAYERED_ML_PROMOTION_ENABLED = old_promotion
+
+    assert_equal(candidate["decision"], "strong_buy_candidate", "decision")
+    assert_equal(candidate["layered_ml_promotion_applied"], True, "layered promotion")
+    assert_equal(candidate["layered_ml_final_instruction"], "paper_approval", "instruction")
+    if "layered_ml_promoted" not in candidate["reason"]:
+        raise AssertionError("missing layered ML promotion reason")
+
+
+def test_layered_ml_veto_blocks_otherwise_strong_auto_buy_candidate_in_paper_mode():
+    old_context = auto_buy_manager.auto_buy_layered_ml_context
+    old_cash_mode = auto_buy_manager.is_cash_mode
+    old_enabled = auto_buy_manager.AUTO_BUY_LAYERED_ML_ENABLED
+    old_veto = auto_buy_manager.AUTO_BUY_LAYERED_ML_VETO_HARD_BLOCK_ENABLED
+    auto_buy_manager.is_cash_mode = lambda: False
+    auto_buy_manager.AUTO_BUY_LAYERED_ML_ENABLED = True
+    auto_buy_manager.AUTO_BUY_LAYERED_ML_VETO_HARD_BLOCK_ENABLED = True
+    auto_buy_manager.auto_buy_layered_ml_context = lambda **kwargs: {
+        "enabled": True,
+        "available": True,
+        "runtime_effect": "paper_bounded_auto_buy_intelligence_authority",
+        "final_instruction": "veto",
+        "final_size_pct": 0.0,
+        "ensemble_probability_pct": 42.0,
+        "meta_label_effect": "ensemble_probability_veto",
+        "meta_label_instruction": "veto",
+        "master_confidence_score": 42.0,
+        "paper_recommendation": "paper_avoid",
+        "reason": "test layered veto",
+        "decision": {"final_instruction": "veto"},
+        "historical_bar_paper_strategy": {"master_confidence_score": 42.0},
+        "bar_pattern_features": {"symbol": "AMZN"},
+    }
+    try:
+        candidate = evaluate_auto_buy_candidate(
+            symbol="AMZN",
+            session=strong_session(),
+            feature=favorable_feature(),
+            context=buy_context(),
+            held=set(),
+        )
+    finally:
+        auto_buy_manager.auto_buy_layered_ml_context = old_context
+        auto_buy_manager.is_cash_mode = old_cash_mode
+        auto_buy_manager.AUTO_BUY_LAYERED_ML_ENABLED = old_enabled
+        auto_buy_manager.AUTO_BUY_LAYERED_ML_VETO_HARD_BLOCK_ENABLED = old_veto
+
+    assert_equal(candidate["decision"], "skip", "decision")
+    assert_equal(candidate["severity"], "blocked", "severity")
+    if "layered_ml_veto" not in str(candidate["hard_block_reason"]):
+        raise AssertionError("missing layered ML hard block reason")
+
+
 def main():
     tests = [
         test_strong_internal_candidate_scores_as_buy_candidate,
@@ -1233,6 +1338,8 @@ def main():
         test_learned_tiebreaker_can_promote_watch_candidate_in_paper_mode,
         test_learned_tiebreaker_does_not_override_hard_blocks,
         test_learned_tiebreaker_can_override_soft_intelligence_blocks_in_paper_mode,
+        test_layered_ml_can_promote_near_threshold_auto_buy_candidate_in_paper_mode,
+        test_layered_ml_veto_blocks_otherwise_strong_auto_buy_candidate_in_paper_mode,
         test_log_auto_buy_order_writes_canonical_trade_row,
         test_auto_buy_candidate_attaches_canonical_decision_trace,
         test_log_candidate_mirrors_to_candidate_universe,

@@ -52,6 +52,8 @@ class ExecutionResult:
     order: dict[str, Any] | None = None
     status: str | None = None
     reason: str | None = None
+    failure_reason: str | None = None
+    rejection_category: str | None = None
 
 
 @dataclass

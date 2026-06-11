@@ -223,10 +223,10 @@ def execute_approved_order(
     last_order: dict,
     last_sell: dict,
     log: logging.Logger,
-) -> bool:
+) -> ExecutionOutcome:
     """Run the approved/rejected post-Claude order path.
 
-    Returns True when the path rejected and the caller should stop.
+    Returns a normalized execution outcome for reporting/learning.
     """
     order_result = None
 
@@ -271,6 +271,15 @@ def execute_approved_order(
                     }
                 )
                 account_state["order_path_blocked"] = "slippage_kelly"
+                order_result = None
+                final_outcome = ExecutionOutcome(
+                    submitted=False,
+                    status="not_submitted",
+                    rejection_category="slippage_kelly",
+                    rejection_reason=reason,
+                    failure_reason=reason,
+                    account_state_updates={"order_path_blocked": "slippage_kelly"},
+                )
             else:
                 execution = execute_order_func(
                     symbol=symbol,
@@ -296,7 +305,7 @@ def execute_approved_order(
                     rejection_adapter.reject_approval_decision(
                         execution_rejection_decision(execution)
                     )
-                    return True
+                    return execution
 
                 if order_result:
                     if execution_mode == "dry_run":
@@ -318,6 +327,7 @@ def execute_approved_order(
                             failure_reason=execution.failure_reason
                             or "broker returned no order_result",
                         )
+                final_outcome = execution
 
         except Exception as exc:
             log.exception(f"APPROVED ORDER PATH CRASHED for {symbol} {action.upper()}: {exc}")
@@ -335,11 +345,23 @@ def execute_approved_order(
                     status="error",
                     failure_reason=f"order_path_exception: {exc}",
                 )
-            return True
+            return ExecutionOutcome(
+                submitted=False,
+                status="error",
+                rejection_category="order_path_exception",
+                rejection_reason=str(exc),
+                failure_reason=f"order_path_exception: {exc}",
+            )
 
     else:
         rejected_reason = decision.get("reason")
         log.info(f"REJECTED: {symbol} {action.upper()} - {rejected_reason}")
+        final_outcome = ExecutionOutcome(
+            submitted=False,
+            status="not_approved",
+            rejection_reason=rejected_reason,
+            failure_reason=rejected_reason,
+        )
 
     log_trade(signal, decision, order_result, account_state=account_state)
     if dedupe_key:
@@ -348,4 +370,4 @@ def execute_approved_order(
             status="processed",
         )
 
-    return False
+    return final_outcome

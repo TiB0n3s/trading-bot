@@ -217,7 +217,7 @@ Validate readiness and quote parity:
 ```bash
 python ops_check.py webull-readiness
 TRADING_BOT_SKIP_VENV_REEXEC=1 \
-  PYTHONPATH=/home/tradingbot/trading-bot/scripts:/home/tradingbot/trading-bot/src:/home/tradingbot/trading-bot \
+  PYTHONPATH=/home/tradingbot/trading-bot:/home/tradingbot/trading-bot/scripts:/home/tradingbot/trading-bot/src \
   ./venv-webull/bin/python ops_check.py webull-market-data-parity AAPL
 ```
 

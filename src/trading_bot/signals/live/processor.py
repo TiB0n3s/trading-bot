@@ -63,6 +63,7 @@ def build_context_runtime(
 class StageResult:
     rejected: bool = False
     response: object | None = None
+    execution: ExecutionResult | None = None
 
 
 @dataclass(frozen=True)
@@ -207,7 +208,7 @@ class LiveSignalProcessor:
             dedupe_key=dedupe_key,
         )
         if stale_result.rejected:
-            return self._result(context)
+            return self._result(context, status="rejected")
 
         circuit_result = self.check_regime_circuit_breaker(
             symbol=symbol,
@@ -217,7 +218,7 @@ class LiveSignalProcessor:
             dedupe_key=dedupe_key,
         )
         if circuit_result.rejected:
-            return self._result(context)
+            return self._result(context, status="rejected")
 
         setup_stage_result = self.apply_setup_stage(
             symbol=symbol,
@@ -228,7 +229,7 @@ class LiveSignalProcessor:
             setup_obs=setup_obs,
         )
         if setup_stage_result.rejected:
-            return self._result(context)
+            return self._result(context, status="rejected")
 
         cash_safe_result = self.check_cash_safe_gates(
             symbol=symbol,
@@ -238,7 +239,7 @@ class LiveSignalProcessor:
             dedupe_key=dedupe_key,
         )
         if cash_safe_result.rejected:
-            return self._result(context)
+            return self._result(context, status="rejected")
 
         symbol_override_result = self.check_symbol_override(
             symbol=symbol,
@@ -248,7 +249,7 @@ class LiveSignalProcessor:
             dedupe_key=dedupe_key,
         )
         if symbol_override_result.rejected:
-            return self._result(context)
+            return self._result(context, status="rejected")
 
         self.deps.update_trend_history(symbol, action)
 
@@ -270,7 +271,7 @@ class LiveSignalProcessor:
             existing_position=existing_position,
         )
         if sell_discipline_result.rejected:
-            return self._result(context)
+            return self._result(context, status="rejected")
 
         macro_risk = self.deps.hydrate_pre_macro_context(
             symbol=symbol,
@@ -290,7 +291,7 @@ class LiveSignalProcessor:
             rejection_adapter=rejection_adapter,
         )
         if macro_gate_result.rejected:
-            return self._result(context)
+            return self._result(context, status="rejected")
 
         trend_gate_result = self.run_trend_confirmation_gate(
             symbol=symbol,
@@ -302,7 +303,7 @@ class LiveSignalProcessor:
             rejection_adapter=rejection_adapter,
         )
         if trend_gate_result.rejected:
-            return self._result(context)
+            return self._result(context, status="rejected")
 
         bias_entry = self.deps.market_bias.get(symbol) or {}
         entry_sanity_result = self.run_entry_sanity_gates(
@@ -315,7 +316,7 @@ class LiveSignalProcessor:
             rejection_adapter=rejection_adapter,
         )
         if entry_sanity_result.rejected:
-            return self._result(context)
+            return self._result(context, status="rejected")
 
         self.deps.hydrate_session_context(context_runtime=context_runtime)
 
@@ -336,7 +337,7 @@ class LiveSignalProcessor:
                             "sell_continuation_check",
                             continuation_reason,
                         ):
-                            return self._result(context)
+                            return self._result(context, status="rejected")
             except Exception as exc:
                 self.deps.log.warning(
                     f"Sell continuation check failed for {symbol}; fail-open for SELL safety: {exc}"
@@ -357,7 +358,7 @@ class LiveSignalProcessor:
             rejection_adapter=rejection_adapter,
         )
         if prediction_gate_result.rejected:
-            return self._result(context)
+            return self._result(context, status="rejected")
 
         tape_degradation_result = self.run_intra_session_tape_degradation_gate(
             symbol=symbol,
@@ -367,7 +368,7 @@ class LiveSignalProcessor:
             rejection_adapter=rejection_adapter,
         )
         if tape_degradation_result.rejected:
-            return self._result(context)
+            return self._result(context, status="rejected")
 
         self.deps.hydrate_strategy_context(
             symbol=symbol,
@@ -386,7 +387,7 @@ class LiveSignalProcessor:
             rejection_adapter=rejection_adapter,
         )
         if final_gate_result.rejected:
-            return self._result(context)
+            return self._result(context, status="rejected")
         claude_account_state = final_gate_result.claude_account_state or dict(account_state)
 
         claude_result = self.run_claude_and_confidence(
@@ -399,7 +400,7 @@ class LiveSignalProcessor:
             rejection_adapter=rejection_adapter,
         )
         if claude_result.rejected:
-            return self._result(context)
+            return self._result(context, status="rejected")
         decision = dict(claude_result.decision or {})
         order_path_result = self.run_approved_order_path(
             data=data,
@@ -413,17 +414,24 @@ class LiveSignalProcessor:
             rejection_adapter=rejection_adapter,
         )
         if order_path_result.rejected:
-            return self._result(context)
+            return self._result(context, execution=order_path_result.execution)
 
-        return self._result(context)
+        return self._result(context, execution=order_path_result.execution)
 
-    def _result(self, context: SignalContext) -> PipelineResult:
+    def _result(
+        self,
+        context: SignalContext,
+        *,
+        status: str = "handled_by_live_signal_processor",
+        execution: ExecutionResult | None = None,
+    ) -> PipelineResult:
         return PipelineResult(
             handled=True,
             context=context,
-            execution=ExecutionResult(
+            execution=execution
+            or ExecutionResult(
                 submitted=False,
-                status="handled_by_live_signal_processor",
+                status=status,
             ),
         )
 
@@ -1077,7 +1085,7 @@ class LiveSignalProcessor:
         return ClaudeStageResult(decision=outcome.decision)
 
     def run_approved_order_path(self, **kwargs):
-        rejected = execute_approved_order(
+        outcome = execute_approved_order(
             signal=kwargs["data"],
             symbol=kwargs["symbol"],
             action=kwargs["action"],
@@ -1105,6 +1113,15 @@ class LiveSignalProcessor:
             last_sell=self.deps.last_sell,
             log=self.deps.log,
         )
-        if rejected:
-            return StageResult(rejected=True)
-        return StageResult()
+        execution = ExecutionResult(
+            submitted=bool(outcome.submitted),
+            order=outcome.order_result,
+            status=outcome.status,
+            reason=outcome.rejection_reason,
+            failure_reason=outcome.failure_reason,
+            rejection_category=outcome.rejection_category,
+        )
+        return StageResult(
+            rejected=outcome.status in {"rejected", "error"},
+            execution=execution,
+        )

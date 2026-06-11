@@ -187,7 +187,7 @@ def test_zero_final_buy_size_blocks_before_order_routing():
     decision = {"approved": True, "position_size_pct": 1.0}
     account_state = {"slippage_kelly_sizing": {"reason": "friction_ratio_exceeds_0.20"}}
 
-    stopped = execute_approved_order(
+    outcome = execute_approved_order(
         signal={"symbol": "AAPL", "action": "buy"},
         symbol="AAPL",
         action="buy",
@@ -226,7 +226,9 @@ def test_zero_final_buy_size_blocks_before_order_routing():
         log=logging.getLogger("test_execution_service"),
     )
 
-    assert_equal(stopped, False, "stopped")
+    assert_equal(outcome.status, "not_submitted", "status")
+    assert_equal(outcome.submitted, False, "submitted")
+    assert_equal(outcome.rejection_category, "slippage_kelly", "category")
     assert_equal(calls["execute"], 0, "execute calls")
     assert_equal(calls["log_trade"], 1, "log trade calls")
     assert_equal(decision["approved"], False, "approved")

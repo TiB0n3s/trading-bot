@@ -415,6 +415,47 @@ class IntradayTradeFeedbackService:
         )
         return "penalty" if penalty_qualified else "neutral"
 
+    @staticmethod
+    def _execution_friction_memory(matches: list[dict[str, Any]]) -> dict[str, Any]:
+        short_holds = []
+        for row in matches:
+            try:
+                hold = float(row.get("holding_minutes"))
+                pnl = float(row.get("realized_pnl_pct") or 0)
+            except (TypeError, ValueError):
+                continue
+            if hold <= 5.0:
+                short_holds.append((hold, pnl))
+        short_losses = [item for item in short_holds if item[1] <= 0]
+        loss_rate = len(short_losses) / len(short_holds) if short_holds else None
+        avg_pnl = sum(item[1] for item in short_holds) / len(short_holds) if short_holds else None
+        status = "insufficient_data"
+        decision = "pass"
+        size_multiplier = 1.0
+        if short_holds:
+            status = "stable"
+            if len(short_holds) >= 3 and loss_rate is not None and loss_rate >= 0.67:
+                status = "short_hold_friction_pressure"
+                decision = "size_down"
+                size_multiplier = 0.75
+        return {
+            "version": "execution_friction_memory_v1",
+            "runtime_effect": "paper_execution_friction_feedback_no_order_authority",
+            "status": status,
+            "decision": decision,
+            "size_multiplier": size_multiplier,
+            "short_hold_minutes_threshold": 5.0,
+            "short_hold_closed_trades": len(short_holds),
+            "short_hold_losses": len(short_losses),
+            "short_hold_loss_rate": round(loss_rate, 4) if loss_rate is not None else None,
+            "short_hold_avg_pnl_pct": round(avg_pnl, 4) if avg_pnl is not None else None,
+            "reason": (
+                "short-hold losses indicate execution/exit friction pressure"
+                if decision == "size_down"
+                else "short-hold execution friction below action threshold"
+            ),
+        }
+
     def performance_snapshot(
         self,
         target_date: str,
@@ -440,6 +481,7 @@ class IntradayTradeFeedbackService:
 
         pnls = [float(row.get("realized_pnl_pct") or 0) for row in same_day_matches]
         losses = [pnl for pnl in pnls if pnl <= 0]
+        execution_friction = self._execution_friction_memory(same_day_matches)
         status_counts: dict[str, int] = {"block": 0, "penalty": 0, "neutral": 0}
         for item in classified:
             status_counts[item["status"]] = status_counts.get(item["status"], 0) + 1
@@ -465,6 +507,7 @@ class IntradayTradeFeedbackService:
             "same_day_avg_pnl_pct": round(sum(pnls) / len(pnls), 4) if pnls else None,
             "same_day_min_pnl_pct": round(min(pnls), 4) if pnls else None,
             "same_day_max_pnl_pct": round(max(pnls), 4) if pnls else None,
+            "execution_friction_memory": execution_friction,
             "evidence_keys": len(evidence),
             "status_counts": status_counts,
             "top_feedback": classified[:10],

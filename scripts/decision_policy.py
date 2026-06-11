@@ -20,6 +20,9 @@ from services.execution_quality_service import estimate_execution_quality
 from services.market_regime_service import classify_market_regime
 from services.portfolio_decision_service import evaluate_portfolio_decision
 from services.rollout_contract_service import telemetry_only_rollout_contract
+from services.strategy_memory_distribution_health_service import (
+    evaluate_strategy_memory_distribution_health,
+)
 from services.transformer_authority_model_service import evaluate_transformer_authority
 from strategy_constants import DAILY_LOSS_LIMIT_PCT
 from strategy_memory import contextual_memory_for_signal
@@ -195,6 +198,24 @@ def _historical_bar_regime_gate(symbol, account_state):
             "evidence": matched,
         }
     return {"decision": "pass", "reason": "historical-bar symbol gate passed"}
+
+
+def _strategy_memory_distribution_gate(account_state):
+    health = evaluate_strategy_memory_distribution_health(account_state=account_state)
+    action = str(health.get("decision") or "pass").lower()
+    if action == "size_down":
+        return {
+            "decision": "size_down",
+            "reason": health.get("reason") or "strategy-memory distribution drift",
+            "evidence": health,
+        }
+    if action == "caution":
+        return {
+            "decision": "caution",
+            "reason": health.get("reason") or "strategy-memory distribution caution",
+            "evidence": health,
+        }
+    return {"decision": "pass", "reason": health.get("reason") or "distribution stable"}
 
 
 def evaluate_decision_policy(
@@ -374,6 +395,24 @@ def evaluate_decision_policy(
     elif account_state.get("historical_bar_model_intelligence"):
         supports.append("historical-bar symbol gate passed")
 
+    distribution_gate = _strategy_memory_distribution_gate(account_state)
+    distribution_action = distribution_gate.get("decision")
+    account_state["strategy_memory_distribution_health"] = distribution_gate.get("evidence") or {}
+    if distribution_action == "size_down":
+        risks.append(distribution_gate["reason"])
+        evidence.append(
+            "strategy_memory_distribution_health=size_down "
+            f"max_psi={account_state['strategy_memory_distribution_health'].get('max_psi')}"
+        )
+    elif distribution_action == "caution":
+        risks.append(distribution_gate["reason"])
+        evidence.append(
+            "strategy_memory_distribution_health=caution "
+            f"max_psi={account_state['strategy_memory_distribution_health'].get('max_psi')}"
+        )
+    elif account_state.get("strategy_memory_distribution_health"):
+        supports.append("strategy memory distribution health stable")
+
     session_gate = intelligence_context.get("session_momentum_gate") or {}
     if session_gate.get("would_block"):
         risks.append(f"session momentum gate would block: {session_gate.get('reason')}")
@@ -518,6 +557,13 @@ def evaluate_decision_policy(
             decision = "size_down"
             size_multiplier = 0.60
             reason = "historical-bar regime/symbol gate requested reduced size"
+        elif distribution_action == "size_down":
+            decision = "size_down"
+            size_multiplier = min(
+                0.75,
+                float((distribution_gate.get("evidence") or {}).get("size_multiplier") or 0.75),
+            )
+            reason = "strategy-memory distribution drift; reduce size"
         elif recommended_action == "caution" or len(risks) >= 2:
             decision = "size_down"
             size_multiplier = 0.75
@@ -543,4 +589,5 @@ def evaluate_decision_policy(
         "shadow_prediction_gate": shadow_gate,
         "quant_model_suite_gate": quant_gate,
         "historical_bar_regime_gate": historical_gate,
+        "strategy_memory_distribution_gate": distribution_gate,
     }

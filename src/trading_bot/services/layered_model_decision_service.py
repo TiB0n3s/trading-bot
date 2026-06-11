@@ -238,6 +238,46 @@ def _regime_layer(account_state: dict[str, Any], action: str) -> dict[str, Any]:
     }
 
 
+def _regime_model_weight_multipliers(account_state: dict[str, Any]) -> dict[str, Any]:
+    routing = (
+        _dict(account_state.get("regime_routing_decision"))
+        or _dict(account_state.get("regime_routing"))
+        or _dict(_dict(account_state.get("regime_observation")).get("regime_routing_decision"))
+    )
+    raw = (
+        _dict(account_state.get("regime_model_weight_multipliers"))
+        or _dict(account_state.get("strategy_memory_regime_weights"))
+        or _dict(routing.get("model_weight_multipliers"))
+        or _dict(routing.get("model_weights"))
+    )
+    multipliers: dict[str, float] = {}
+    for key, value in raw.items():
+        parsed = _float(value)
+        if parsed is None:
+            continue
+        multipliers[str(key)] = max(0.0, min(3.0, parsed))
+    return {
+        "source": "account_state" if multipliers else "default",
+        "regime_id": routing.get("regime_id"),
+        "regime_label": routing.get("regime_label"),
+        "active_model_slot": routing.get("active_model_slot"),
+        "multipliers": multipliers,
+    }
+
+
+def _apply_regime_weight(
+    base_weight: float,
+    *,
+    expert: str,
+    regime_weights: dict[str, Any],
+) -> tuple[float, float]:
+    multipliers = _dict(regime_weights.get("multipliers"))
+    multiplier = _float(multipliers.get(expert))
+    if multiplier is None:
+        multiplier = 1.0
+    return base_weight * multiplier, multiplier
+
+
 def _historical_strategy(
     *,
     symbol: str,
@@ -264,6 +304,7 @@ def _expert_components(
     experts: list[dict[str, Any]] = []
     micro_alpha = _microstructure_alpha_features(account_state)
     multi_horizon = _multi_horizon_path_features(account_state)
+    regime_weights = _regime_model_weight_multipliers(account_state)
 
     strategy = _historical_strategy(symbol=symbol, action=action, account_state=account_state)
     historical_prob = _probability(strategy.get("master_confidence_score"))
@@ -276,11 +317,17 @@ def _expert_components(
             trend_weight *= float(micro_alpha["trend_weight_modifier"])
         if any(str(row.get("label_target")) == "triple_barrier_label" for row in model_weights):
             trend_weight *= float(micro_alpha["triple_barrier_weight_modifier"])
+        trend_weight, regime_multiplier = _apply_regime_weight(
+            trend_weight,
+            expert="historical_bar_ensemble",
+            regime_weights=regime_weights,
+        )
         experts.append(
             {
                 "expert": "historical_bar_ensemble",
                 "probability": round(historical_prob, 6),
                 "weight": round(trend_weight, 6),
+                "regime_weight_multiplier": round(regime_multiplier, 6),
                 "status": strategy.get("status"),
                 "recommendation": strategy.get("paper_recommendation"),
                 "source": "trend_scan_triple_barrier_weighted_ensemble",
@@ -298,11 +345,17 @@ def _expert_components(
         )
     transformer_prob = _probability(transformer.get("probability"))
     if transformer_prob is not None:
+        weight, regime_multiplier = _apply_regime_weight(
+            0.25,
+            expert="transformer_authority",
+            regime_weights=regime_weights,
+        )
         experts.append(
             {
                 "expert": "transformer_authority",
                 "probability": round(transformer_prob, 6),
-                "weight": 0.25,
+                "weight": round(weight, 6),
+                "regime_weight_multiplier": round(regime_multiplier, 6),
                 "status": transformer.get("status") or transformer.get("decision"),
                 "recommendation": transformer.get("decision"),
                 "source": "torch_transformer_authority",
@@ -316,11 +369,17 @@ def _expert_components(
         or account_state.get("prediction_score")
     )
     if prediction_prob is not None:
+        weight, regime_multiplier = _apply_regime_weight(
+            0.30,
+            expert="supervised_prediction",
+            regime_weights=regime_weights,
+        )
         experts.append(
             {
                 "expert": "supervised_prediction",
                 "probability": round(prediction_prob, 6),
-                "weight": 0.30,
+                "weight": round(weight, 6),
+                "regime_weight_multiplier": round(regime_multiplier, 6),
                 "status": prediction_gate.get("prediction_decision")
                 or prediction_gate.get("deterministic_signal_quality_decision"),
                 "recommendation": prediction_gate.get("ml_prediction_compare_decision"),
@@ -355,6 +414,7 @@ def _expert_components(
         "experts": experts,
         "microstructure_alpha_features": micro_alpha,
         "multi_horizon_path": multi_horizon,
+        "regime_model_weight_multipliers": regime_weights,
         "reason": "weighted expert ensemble scored candidate",
     }
 

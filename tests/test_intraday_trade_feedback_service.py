@@ -365,6 +365,39 @@ def test_capture_intraday_performance_snapshot_persists_feedback_event():
     )
 
 
+def test_intraday_performance_snapshot_flags_short_hold_friction_pressure():
+    with tempfile.TemporaryDirectory() as tmp:
+        db_path = Path(tmp) / "trades.db"
+        with sqlite3.connect(db_path) as con:
+            _create_trades_table(con)
+            for idx, minute in enumerate((0, 10, 20), start=1):
+                _insert_trade(
+                    con,
+                    ts=f"2026-06-04 10:{minute:02d}:00",
+                    symbol="AAPL",
+                    action="buy",
+                    qty=1,
+                    price=100 + idx,
+                )
+                _insert_trade(
+                    con,
+                    ts=f"2026-06-04 10:{minute + 3:02d}:00",
+                    symbol="AAPL",
+                    action="sell",
+                    qty=1,
+                    price=99 + idx,
+                )
+
+        service = IntradayTradeFeedbackService(db_path=db_path)
+        snapshot = service.performance_snapshot("2026-06-04", phase="noon")
+
+    friction = snapshot["execution_friction_memory"]
+    assert friction["status"] == "short_hold_friction_pressure"
+    assert friction["decision"] == "size_down"
+    assert friction["short_hold_closed_trades"] == 3
+    assert friction["short_hold_loss_rate"] == 1.0
+
+
 def test_refresh_historical_outcome_feedback_persists_prior_sessions_for_active_evidence():
     with tempfile.TemporaryDirectory() as tmp:
         db_path = Path(tmp) / "trades.db"
@@ -411,5 +444,6 @@ if __name__ == "__main__":
     test_broad_setup_action_only_penalizes_not_blocks()
     test_intraday_performance_snapshot_summarizes_same_day_feedback()
     test_capture_intraday_performance_snapshot_persists_feedback_event()
+    test_intraday_performance_snapshot_flags_short_hold_friction_pressure()
     test_refresh_historical_outcome_feedback_persists_prior_sessions_for_active_evidence()
     print("intraday trade feedback service tests passed")

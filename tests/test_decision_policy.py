@@ -598,6 +598,45 @@ def test_historical_bar_symbol_gate_sizes_down_low_accuracy_symbol():
     assert_true("historical_bar_regime_gate" in result, "historical gate returned")
 
 
+def test_strategy_memory_distribution_drift_sizes_down_buy_review():
+    original = decision_policy.contextual_memory_for_signal
+    try:
+        decision_policy.contextual_memory_for_signal = neutral_memory
+        result = decision_policy.evaluate_decision_policy(
+            "AAPL",
+            "buy",
+            intelligence_context={
+                "summary": {"recommended_action": "allow"},
+                "opportunity_score": {"score": 90, "decision": "allow"},
+                "prediction": {"prediction_decision": "allow", "prediction_score": 80},
+            },
+            account_state={
+                "strategy_memory_distribution_health": {
+                    "version": "strategy_memory_distribution_health_v1",
+                    "decision": "size_down",
+                    "status": "distribution_drift",
+                    "size_multiplier": 0.5,
+                    "max_psi": 0.27,
+                    "max_psi_feature": "vpin_toxicity_20",
+                    "reason": "test PSI drift",
+                },
+                "portfolio_decision": {"decision": "allow"},
+                "execution_quality": {"decision": "allow"},
+                "transformer_authority": {"decision": "allow", "probability": 0.8},
+            },
+        )
+    finally:
+        decision_policy.contextual_memory_for_signal = original
+
+    assert_equal(result["decision"], "size_down", "decision")
+    assert_equal(result["size_multiplier"], 0.5, "distribution size multiplier")
+    assert_equal(
+        result["strategy_memory_distribution_gate"]["decision"],
+        "size_down",
+        "distribution gate",
+    )
+
+
 def test_decision_policy_module_does_not_import_order_execution():
     source = inspect.getsource(decision_policy)
 
@@ -643,6 +682,8 @@ if __name__ == "__main__":
     print("[OK] test_quant_suite_asymmetric_majority_blocks_buy_review")
     test_historical_bar_symbol_gate_sizes_down_low_accuracy_symbol()
     print("[OK] test_historical_bar_symbol_gate_sizes_down_low_accuracy_symbol")
+    test_strategy_memory_distribution_drift_sizes_down_buy_review()
+    print("[OK] test_strategy_memory_distribution_drift_sizes_down_buy_review")
     test_decision_policy_module_does_not_import_order_execution()
     print("[OK] test_decision_policy_module_does_not_import_order_execution")
-    print("\nAll 19 decision policy tests passed.")
+    print("\nAll 20 decision policy tests passed.")

@@ -327,6 +327,43 @@ def test_layered_model_decision_vetoes_multi_horizon_medium_decay():
     assert_equal(payload["final_instruction"], "veto", "final")
 
 
+def test_layered_model_decision_applies_regime_model_weight_multipliers():
+    state = _account_state(
+        regime_model_weight_multipliers={
+            "historical_bar_ensemble": 0.5,
+            "transformer_authority": 1.4,
+            "supervised_prediction": 1.0,
+        }
+    )
+    payload = build_layered_model_decision(
+        symbol="AAPL",
+        action="buy",
+        decision={"approved": False, "position_size_pct": 1.0},
+        account_state=state,
+        execution_mode="paper",
+        ml_authority_config=_meta_config(),
+        env={"TRANSFORMER_AUTHORITY_ENABLED": "false"},
+    ).to_dict()
+
+    ensemble = payload["level_1_expert_ensemble"]
+    experts = {row["expert"]: row for row in ensemble["experts"]}
+    assert_equal(
+        ensemble["regime_model_weight_multipliers"]["multipliers"]["historical_bar_ensemble"],
+        0.5,
+        "regime multiplier payload",
+    )
+    assert_equal(
+        experts["historical_bar_ensemble"]["regime_weight_multiplier"],
+        0.5,
+        "historical multiplier",
+    )
+    assert_equal(
+        experts["transformer_authority"]["regime_weight_multiplier"],
+        1.4,
+        "transformer multiplier",
+    )
+
+
 def main():
     tests = [
         test_layered_model_decision_approves_and_sizes_strong_stack,
@@ -336,6 +373,7 @@ def main():
         test_layered_model_decision_records_missed_opportunity_relaxation,
         test_layered_model_decision_uses_counterfactual_unvetoer_artifact,
         test_layered_model_decision_vetoes_multi_horizon_medium_decay,
+        test_layered_model_decision_applies_regime_model_weight_multipliers,
     ]
     for test in tests:
         test()

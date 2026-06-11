@@ -61,6 +61,16 @@ def test_normalize_quote_accepts_common_bid_ask_names():
     assert round(quote["spread_pct"], 4) == round(0.1 / 10.05 * 100, 4)
 
 
+def test_normalize_quote_rejects_zero_or_inverted_quotes():
+    zero_ask = normalize_quote("alpaca", {"bid_price": 276.16, "ask_price": 0.0})
+    inverted = normalize_quote("test", {"bid_price": 10.2, "ask_price": 10.1})
+
+    assert zero_ask["available"] is False
+    assert zero_ask["mid"] is None
+    assert zero_ask["spread_pct"] is None
+    assert inverted["available"] is False
+
+
 def test_latest_quote_parity_computes_deltas():
     service = MarketDataParityService(
         alpaca_market_data=FakeAlpaca(),
@@ -94,6 +104,7 @@ def test_daily_bar_parity_computes_field_diffs():
 def main():
     tests = [
         test_normalize_quote_accepts_common_bid_ask_names,
+        test_normalize_quote_rejects_zero_or_inverted_quotes,
         test_latest_quote_parity_computes_deltas,
         test_daily_bar_parity_computes_field_diffs,
     ]

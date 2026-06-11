@@ -33,8 +33,9 @@ def normalize_quote(provider: str, raw_quote: Any) -> dict[str, Any]:
     bid = _float_or_none(_get_first(raw_quote, ("bid", "bid_price", "bp", "bidprice")))
     ask = _float_or_none(_get_first(raw_quote, ("ask", "ask_price", "ap", "askprice")))
     timestamp = _get_first(raw_quote, ("timestamp", "t", "sip_timestamp", "participant_timestamp"))
-    spread = ask - bid if bid is not None and ask is not None else None
-    mid = (bid + ask) / 2 if bid is not None and ask is not None else None
+    available = bid is not None and ask is not None and bid > 0 and ask > 0 and ask >= bid
+    spread = ask - bid if available else None
+    mid = (bid + ask) / 2 if available else None
     spread_pct = spread / mid * 100 if spread is not None and mid else None
     return {
         "provider": provider,
@@ -44,7 +45,7 @@ def normalize_quote(provider: str, raw_quote: Any) -> dict[str, Any]:
         "spread": spread,
         "spread_pct": spread_pct,
         "timestamp": str(timestamp) if timestamp is not None else None,
-        "available": bid is not None and ask is not None,
+        "available": available,
     }
 
 

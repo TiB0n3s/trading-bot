@@ -4,7 +4,9 @@ Intraday market-context refresh.
 
 Two stages:
   Stage 1 — Collect fresh events via collect_and_score_events.py (max_per_symbol=1,
-             deduplication on, --apply-context).  Fast: ~30-50 s for 59 symbols.
+             deduplication on, hybrid AI interpretation, --apply-context).  Fast:
+             ~30-50 s for 59 symbols.  Prediction writes stay out of the
+             intraday path to avoid contending with live SQLite writers.
   Stage 2 — Re-classify every approved symbol against fresh Alpaca price data and
              the updated daily_symbol_context event scores, then atomically overwrite
              market_context.json so the bot's next signal pick-up uses fresh bias/risk.
@@ -80,6 +82,9 @@ def _collect_events(market_date: str) -> int:
         market_date,
         "--max-per-symbol",
         "1",
+        "--ai-interpret-events",
+        "--ai-event-provider",
+        "hybrid",
         "--apply-context",
     ]
     logger.info(f"Stage 1: collecting fresh events — {' '.join(cmd[2:])}")

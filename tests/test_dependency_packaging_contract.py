@@ -37,6 +37,9 @@ DEV_ONLY_PINS = {
     "pytest-xdist",
     "ruff",
 }
+RETIRED_RUNTIME_PINS = {
+    "alpaca-trade-api",
+}
 
 
 def _pinned_names(path: Path) -> set[str]:
@@ -63,6 +66,7 @@ def test_runtime_requirements_exclude_research_only_dependencies():
     base_names = _pinned_names(ROOT / "requirements-base.txt")
 
     assert RESEARCH_ONLY_PINS.isdisjoint(base_names)
+    assert RETIRED_RUNTIME_PINS.isdisjoint(base_names)
 
 
 def test_default_requirements_delegate_to_runtime_requirements():

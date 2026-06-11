@@ -7,7 +7,7 @@ import os
 import threading
 import time
 
-from alpaca_trade_api.stream import Stream
+from alpaca.trading.stream import TradingStream
 from runtime_config import get_alpaca_base_url
 
 from repositories import fill_repo
@@ -206,7 +206,7 @@ class FillStreamService:
         *,
         handler: FillEventHandler,
         logger: logging.Logger | None = None,
-        stream_cls=Stream,
+        stream_cls=TradingStream,
         api_key: str | None = None,
         secret_key: str | None = None,
         base_url: str | None = None,
@@ -237,11 +237,12 @@ class FillStreamService:
 
     def run_stream(self) -> None:
         self.logger.info(f"Starting Alpaca trade update stream: base_url={self.base_url}")
+        paper = self.base_url.rstrip("/") == PAPER_BASE_URL
         stream = self.stream_cls(
             self.api_key,
             self.secret_key,
-            base_url=self.base_url,
-            data_feed="iex",
+            paper=paper,
+            url_override=None if paper else self.base_url,
         )
         stream.subscribe_trade_updates(self.handler.trade_update_handler)
         self.logger.info("Trade update stream connected - listening for fills")

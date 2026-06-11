@@ -186,17 +186,19 @@ Docker and CI still use the
 requirements files as the operational install source.
 
 Webull is configured as a read-only diagnostic integration until parity and
-ledger evidence justify expanding authority. The official Webull SDK currently
-requires dependency versions that conflict with the Alpaca runtime stack
-(`urllib3>=2` versus `alpaca-trade-api` requiring `urllib3<2`), so do not
-install the Webull SDK into the main trading runtime venv. Use an isolated
-adapter venv when direct Webull API calls are needed:
+ledger evidence justify expanding authority. The Alpaca runtime now uses
+`alpaca-py` for broker REST compatibility and trade-update streaming; the
+legacy `alpaca-trade-api` package is no longer part of runtime requirements.
+Webull remains optional and should be validated through an isolated adapter venv
+until provider parity and account-device behavior are stable. The `runtime` and
+`webull` extras are marked conflicting for `uv` because Webull requires
+`protobuf<6` while the runtime stack currently pins `protobuf==7.35.0`:
 
 ```bash
 python3 -m venv venv-webull
 ./venv-webull/bin/pip install -U pip
 ./venv-webull/bin/pip install -e .
-./venv-webull/bin/pip install webull-openapi-python-sdk==2.0.10
+./venv-webull/bin/pip install alpaca-py==0.43.4 webull-openapi-python-sdk==2.0.10
 ```
 
 Store credentials outside git, normally in `/etc/trading-bot.env`:

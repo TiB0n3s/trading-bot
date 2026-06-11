@@ -27,6 +27,7 @@ def _project_python_files() -> list[Path]:
         ".git",
         "__pycache__",
         "venv",
+        "venv-webull",
         ".pytest_cache",
     }
     return sorted(

@@ -12,6 +12,7 @@ sys.path.insert(0, str(ROOT))
 from services.fill_stream_service import (
     DEFAULT_HEARTBEAT_SECONDS,
     FillEventHandler,
+    FillStreamService,
     _fill_stream_heartbeat_seconds,
 )
 
@@ -233,6 +234,25 @@ class FakeFillRepository:
         raise AssertionError("buy fill should use insert_synthetic_fill")
 
 
+class FakeTradingStream:
+    instances = []
+
+    def __init__(self, api_key, secret_key, paper=True, raw_data=False, url_override=None):
+        self.api_key = api_key
+        self.secret_key = secret_key
+        self.paper = paper
+        self.raw_data = raw_data
+        self.url_override = url_override
+        self.handler = None
+        FakeTradingStream.instances.append(self)
+
+    def subscribe_trade_updates(self, handler):
+        self.handler = handler
+
+    def run(self):
+        return None
+
+
 def test_unmatched_buy_fill_inserts_synthetic_ledger_row(tmp_path, monkeypatch):
     repo = FakeFillRepository()
     handler = FillEventHandler(
@@ -285,6 +305,34 @@ def test_fill_stream_heartbeat_env_parser_falls_back_on_invalid_value(tmp_path, 
             os.environ["FILL_STREAM_HEARTBEAT_SECONDS"] = original
 
 
+def test_fill_stream_uses_alpaca_py_trading_stream_constructor(tmp_path, monkeypatch):
+    FakeTradingStream.instances = []
+    handler = FillEventHandler(
+        repository=FakeFillRepository(),
+        logger=SimpleNamespace(
+            info=lambda *a, **k: None, warning=lambda *a, **k: None, error=lambda *a, **k: None
+        ),
+    )
+    service = FillStreamService(
+        handler=handler,
+        logger=SimpleNamespace(
+            info=lambda *a, **k: None, warning=lambda *a, **k: None, error=lambda *a, **k: None
+        ),
+        stream_cls=FakeTradingStream,
+        api_key="key",
+        secret_key="secret",
+        base_url="https://paper-api.alpaca.markets",
+    )
+
+    service.run_stream()
+
+    assert len(FakeTradingStream.instances) == 1
+    instance = FakeTradingStream.instances[0]
+    assert instance.paper is True
+    assert instance.url_override is None
+    assert instance.handler == handler.trade_update_handler
+
+
 def run_with_temp_db(test_func):
     with tempfile.TemporaryDirectory() as tmp:
         monkeypatch = SimpleMonkeyPatch()
@@ -302,6 +350,7 @@ if __name__ == "__main__":
         test_update_db_refreshes_cumulative_filled_qty,
         test_unmatched_buy_fill_inserts_synthetic_ledger_row,
         test_fill_stream_heartbeat_env_parser_falls_back_on_invalid_value,
+        test_fill_stream_uses_alpaca_py_trading_stream_constructor,
     ]
     for test in tests:
         run_with_temp_db(test)

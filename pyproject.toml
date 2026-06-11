@@ -9,7 +9,6 @@ runtime = [
     "aiohttp==3.13.5",
     "aiosignal==1.4.0",
     "alpaca-py==0.43.4",
-    "alpaca-trade-api==3.2.0",
     "annotated-types==0.7.0",
     "anthropic==0.101.0",
     "anyio==4.13.0",
@@ -58,7 +57,7 @@ runtime = [
     "sseclient-py==1.9.0",
     "typing_extensions==4.15.0",
     "typing-inspection==0.4.2",
-    "urllib3==1.26.20",
+    "urllib3==2.7.0",
     "websocket-client==1.9.0",
     "websockets==10.4",
     "Werkzeug==3.1.8",
@@ -96,6 +95,14 @@ dev = [
     "pytest==8.4.2",
     "pytest-xdist==3.8.0",
     "ruff==0.15.15",
+]
+
+[tool.uv]
+conflicts = [
+    [
+        { extra = "runtime" },
+        { extra = "webull" },
+    ],
 ]
 
 [tool.pytest.ini_options]

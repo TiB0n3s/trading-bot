@@ -42,7 +42,7 @@ def get_last_order_failure_reason() -> str | None:
 
 
 class _LazyAlpacaAPI:
-    """Defers Alpaca SDK import/construction until first broker use.
+    """Defers Alpaca SDK construction until first broker use.
 
     Callers continue to use ``from broker import api`` and ``api.xxx()``
     unchanged. Tests can replace ``broker.api`` with a mock before any
@@ -54,16 +54,16 @@ class _LazyAlpacaAPI:
     def _get(self) -> Any:
         if self._instance is None:
             try:
-                import alpaca_trade_api as tradeapi
+                from alpaca_py_broker_adapter import AlpacaPyBrokerAdapter
             except ModuleNotFoundError as exc:
                 raise BrokerError(
-                    "alpaca_trade_api is required for broker operations; "
-                    "install runtime dependencies or patch broker.api in tests"
+                    "alpaca-py is required for broker operations; install runtime "
+                    "dependencies or patch broker.api in tests"
                 ) from exc
-            self._instance = tradeapi.REST(
-                os.environ.get("ALPACA_API_KEY", ""),
-                os.environ.get("ALPACA_SECRET_KEY", ""),
-                get_alpaca_base_url(),
+            self._instance = AlpacaPyBrokerAdapter(
+                api_key=os.environ.get("ALPACA_API_KEY", ""),
+                secret_key=os.environ.get("ALPACA_SECRET_KEY", ""),
+                base_url=get_alpaca_base_url(),
             )
         return self._instance
 

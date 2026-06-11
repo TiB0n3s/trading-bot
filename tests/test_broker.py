@@ -9,6 +9,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
+sys.path.insert(0, str(ROOT / "scripts"))
 VENV_PYTHON = ROOT / "venv" / "bin" / "python"
 
 
@@ -51,7 +52,12 @@ class FakeApi:
         return Obj(price="100")
 
     def get_position(self, symbol):
-        return Obj(qty=str(self.position_qty), avg_entry_price="95", current_price="100", unrealized_pl="25")
+        return Obj(
+            qty=str(self.position_qty),
+            avg_entry_price="95",
+            current_price="100",
+            unrealized_pl="25",
+        )
 
     def list_orders(self, status, symbols):
         return self.open_orders

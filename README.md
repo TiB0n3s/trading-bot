@@ -1500,6 +1500,7 @@ Current major cron categories:
 */2 * * * *          fill_poller.py
 0 8 * * 1-5          pre_market_research_data.py
 5 8 * * 1-5          collect_and_score_events.py --apply-context --predict
+0 12 * * 1-5         intraday_learning.py --phase noon
 0 16 * * 1-5         daily_summary.py
 5 16 * * 5           daily_summary.py --week
 10 16 * * 1-5        trade_matcher.py
@@ -1518,6 +1519,21 @@ Write-heavy cron jobs should run through `job_runner.py`. The runner owns
 non-blocking lock acquisition, lock-busy logging, command output redirection,
 and durable `job_runs` ledger rows with start/end time, duration, exit code,
 lock state, optional row counts, warning counts, and artifact hashes.
+
+Intraday learning has two bounded feedback paths:
+
+- `pipeline/intraday_learning.py --phase noon` writes a noon performance
+  checkpoint to `reports/intraday_learning/` and persists a matching
+  `auto_buy_intraday_feedback` row. Later paper auto-buy scans consume that
+  feedback surface when deciding whether repeated losing patterns should be
+  penalized or blocked.
+- `fill_stream.py` records a post-fill learning checkpoint after fill events.
+  This updates same-day outcome feedback after trades close without running
+  heavy model retraining during market hours.
+
+Heavy model fitting and promotion remain post-session responsibilities. The
+intraday loop is limited to evidence capture, feedback penalties, and hard
+blocks for repeated losing patterns.
 
 Example:
 

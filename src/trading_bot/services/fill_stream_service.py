@@ -6,9 +6,11 @@ import logging
 import os
 import threading
 import time
+from datetime import datetime
 
 from alpaca.trading.stream import TradingStream
 from runtime_config import get_alpaca_base_url
+from services.intraday_trade_feedback_service import IntradayTradeFeedbackService
 
 from repositories import fill_repo
 
@@ -18,9 +20,16 @@ DEFAULT_HEARTBEAT_SECONDS = 300
 
 
 class FillEventHandler:
-    def __init__(self, *, repository=fill_repo, logger: logging.Logger | None = None):
+    def __init__(
+        self,
+        *,
+        repository=fill_repo,
+        logger: logging.Logger | None = None,
+        feedback_service: IntradayTradeFeedbackService | None = None,
+    ):
         self.repository = repository
         self.logger = logger or logging.getLogger(__name__)
+        self.feedback_service = feedback_service or IntradayTradeFeedbackService()
 
     def init_storage(self) -> None:
         self.repository.init_fill_events_table()
@@ -136,6 +145,35 @@ class FillEventHandler:
             )
             return False
 
+    def capture_post_fill_learning(self, *, symbol: str | None, side: str | None) -> None:
+        if os.getenv("INTRADAY_POST_FILL_LEARNING_ENABLED", "true").strip().lower() in {
+            "0",
+            "false",
+            "no",
+            "off",
+        }:
+            return
+        try:
+            target_date = datetime.now().strftime("%Y-%m-%d")
+            snapshot = self.feedback_service.capture_performance_snapshot(
+                target_date,
+                phase="post_fill",
+                trigger_symbol=symbol,
+                include_historical=True,
+            )
+            self.logger.info(
+                "Intraday learning updated after fill: symbol=%s side=%s status=%s "
+                "closed_trades=%s avg_pnl_pct=%s evidence_keys=%s",
+                symbol,
+                side,
+                snapshot.get("status"),
+                snapshot.get("same_day_closed_trades"),
+                snapshot.get("same_day_avg_pnl_pct"),
+                snapshot.get("evidence_keys"),
+            )
+        except Exception as exc:
+            self.logger.error("Post-fill intraday learning update failed for %s: %s", symbol, exc)
+
     async def trade_update_handler(self, data):
         try:
             event = data.event
@@ -164,6 +202,7 @@ class FillEventHandler:
                     f"FILL: {symbol} {side.upper()} {filled_qty} shares @ ${fill_price} "
                     f"| status={status} order={order_id}"
                 )
+                self.capture_post_fill_learning(symbol=symbol, side=side)
             else:
                 parent_order_id = order.get("parent_order_id")
 
@@ -182,6 +221,8 @@ class FillEventHandler:
                             f"Fill received for order {order_id} ({symbol}) but no matching row in trades.db "
                             f"and synthetic insert failed - fill_price={fill_price} status={status}"
                         )
+                    else:
+                        self.capture_post_fill_learning(symbol=symbol, side=side)
                 else:
                     inserted = self.insert_synthetic_buy_fill(
                         order_id=order_id,
@@ -196,6 +237,8 @@ class FillEventHandler:
                             f"Unmatched buy fill received for order {order_id} ({symbol}) "
                             f"but synthetic insert failed - fill_price={fill_price} status={status}"
                         )
+                    else:
+                        self.capture_post_fill_learning(symbol=symbol, side=side)
         except Exception as e:
             self.logger.error(f"Error in trade_update_handler: {e} | raw data: {data}")
 

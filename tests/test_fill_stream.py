@@ -234,6 +234,34 @@ class FakeFillRepository:
         raise AssertionError("buy fill should use insert_synthetic_fill")
 
 
+class FakeFeedbackService:
+    def __init__(self):
+        self.calls = []
+
+    def capture_performance_snapshot(
+        self,
+        target_date,
+        *,
+        phase,
+        trigger_symbol=None,
+        include_historical=True,
+    ):
+        self.calls.append(
+            {
+                "target_date": target_date,
+                "phase": phase,
+                "trigger_symbol": trigger_symbol,
+                "include_historical": include_historical,
+            }
+        )
+        return {
+            "status": "neutral",
+            "same_day_closed_trades": 0,
+            "same_day_avg_pnl_pct": None,
+            "evidence_keys": 0,
+        }
+
+
 class FakeTradingStream:
     instances = []
 
@@ -255,8 +283,10 @@ class FakeTradingStream:
 
 def test_unmatched_buy_fill_inserts_synthetic_ledger_row(tmp_path, monkeypatch):
     repo = FakeFillRepository()
+    feedback = FakeFeedbackService()
     handler = FillEventHandler(
         repository=repo,
+        feedback_service=feedback,
         logger=SimpleNamespace(
             info=lambda *a, **k: None, warning=lambda *a, **k: None, error=lambda *a, **k: None
         ),
@@ -288,6 +318,9 @@ def test_unmatched_buy_fill_inserts_synthetic_ledger_row(tmp_path, monkeypatch):
             "parent_order_id": None,
         }
     ]
+    assert feedback.calls
+    assert feedback.calls[0]["phase"] == "post_fill"
+    assert feedback.calls[0]["trigger_symbol"] == "ASML"
 
 
 def test_fill_stream_heartbeat_env_parser_falls_back_on_invalid_value(tmp_path, monkeypatch):
@@ -309,6 +342,7 @@ def test_fill_stream_uses_alpaca_py_trading_stream_constructor(tmp_path, monkeyp
     FakeTradingStream.instances = []
     handler = FillEventHandler(
         repository=FakeFillRepository(),
+        feedback_service=FakeFeedbackService(),
         logger=SimpleNamespace(
             info=lambda *a, **k: None, warning=lambda *a, **k: None, error=lambda *a, **k: None
         ),

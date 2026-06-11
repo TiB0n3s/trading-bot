@@ -284,9 +284,92 @@ def test_broad_setup_action_only_penalizes_not_blocks():
     assert decision["hard_block_reason"] is None
 
 
+def test_intraday_performance_snapshot_summarizes_same_day_feedback():
+    with tempfile.TemporaryDirectory() as tmp:
+        db_path = Path(tmp) / "trades.db"
+        with sqlite3.connect(db_path) as con:
+            _create_trades_table(con)
+            _insert_trade(
+                con,
+                ts="2026-06-04 10:00:00",
+                symbol="AAPL",
+                action="buy",
+                qty=1,
+                price=100,
+            )
+            _insert_trade(
+                con,
+                ts="2026-06-04 10:12:00",
+                symbol="AAPL",
+                action="sell",
+                qty=1,
+                price=99,
+            )
+
+        service = IntradayTradeFeedbackService(db_path=db_path)
+        snapshot = service.performance_snapshot("2026-06-04", phase="noon")
+
+    assert snapshot["version"] == "intraday_learning_snapshot_v1"
+    assert snapshot["phase"] == "noon"
+    assert snapshot["same_day_closed_trades"] == 1
+    assert snapshot["same_day_losses"] == 1
+    assert snapshot["same_day_avg_pnl_pct"] == -1.0
+    assert snapshot["evidence_keys"] > 0
+    assert snapshot["top_feedback"]
+
+
+def test_capture_intraday_performance_snapshot_persists_feedback_event():
+    with tempfile.TemporaryDirectory() as tmp:
+        db_path = Path(tmp) / "trades.db"
+        with sqlite3.connect(db_path) as con:
+            _create_trades_table(con)
+            _insert_trade(
+                con,
+                ts="2026-06-04 10:00:00",
+                symbol="AAPL",
+                action="buy",
+                qty=1,
+                price=100,
+            )
+            _insert_trade(
+                con,
+                ts="2026-06-04 10:12:00",
+                symbol="AAPL",
+                action="sell",
+                qty=1,
+                price=99,
+            )
+
+        service = IntradayTradeFeedbackService(db_path=db_path)
+        snapshot = service.capture_performance_snapshot(
+            "2026-06-04",
+            phase="noon",
+            trigger_symbol="AAPL",
+        )
+
+        with sqlite3.connect(db_path) as con:
+            row = con.execute(
+                """
+                SELECT target_date, symbol, feedback_key, status, runtime_effect
+                FROM auto_buy_intraday_feedback
+                """
+            ).fetchone()
+
+    assert snapshot["trigger_symbol"] == "AAPL"
+    assert row == (
+        "2026-06-04",
+        "AAPL",
+        "intraday_performance_snapshot:noon:ml=weak_below_45|setup_action=avoid",
+        "neutral",
+        "paper_intraday_learning_feedback",
+    )
+
+
 if __name__ == "__main__":
     test_intraday_feedback_blocks_repeated_losing_bucket()
     test_historical_feedback_blocks_repeated_losing_pattern_on_future_day()
     test_intraday_feedback_is_observe_only_without_authority()
     test_broad_setup_action_only_penalizes_not_blocks()
+    test_intraday_performance_snapshot_summarizes_same_day_feedback()
+    test_capture_intraday_performance_snapshot_persists_feedback_event()
     print("intraday trade feedback service tests passed")

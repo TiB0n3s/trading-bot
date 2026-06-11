@@ -7,14 +7,16 @@ mistakes from being forgotten after the session rolls over.
 
 from __future__ import annotations
 
+import json
 from collections import defaultdict, deque
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
 from repositories import auto_buy_repo
 
 INTRADAY_TRADE_FEEDBACK_VERSION = "intraday_trade_feedback_v2"
+INTRADAY_LEARNING_SNAPSHOT_VERSION = "intraday_learning_snapshot_v1"
 
 
 def _norm(value: Any, default: str = "unknown") -> str:
@@ -248,6 +250,140 @@ class IntradayTradeFeedbackService:
             }
         return evidence
 
+    def _classify_evidence_item(self, item: dict[str, Any]) -> str:
+        thresholds = self.thresholds
+        key = str(item.get("key") or "")
+
+        def _specificity(candidate_key: str) -> int:
+            if candidate_key.startswith("ml=") and "|setup_action=" in candidate_key:
+                return 4
+            if candidate_key.startswith("session=") and "|setup_action=" in candidate_key:
+                return 3
+            if candidate_key.startswith("setup_label="):
+                return 3
+            return 1
+
+        block_qualified = (
+            _specificity(key) >= 3
+            and item["trades"] >= thresholds.block_min_trades
+            and item["loss_rate"] >= thresholds.block_loss_rate
+            and item["avg_pnl_pct"] <= thresholds.block_avg_pnl_pct
+        )
+        if block_qualified:
+            return "block"
+        penalty_qualified = (
+            item["trades"] >= thresholds.penalty_min_trades
+            and item["loss_rate"] >= thresholds.penalty_loss_rate
+            and item["avg_pnl_pct"] <= thresholds.penalty_avg_pnl_pct
+        )
+        return "penalty" if penalty_qualified else "neutral"
+
+    def performance_snapshot(
+        self,
+        target_date: str,
+        *,
+        phase: str,
+        trigger_symbol: str | None = None,
+        include_historical: bool = True,
+    ) -> dict[str, Any]:
+        same_day_matches = self.same_day_matches(target_date)
+        evidence = self.build_evidence(target_date, include_historical=include_historical)
+        classified = []
+        for item in evidence.values():
+            classified.append({**item, "status": self._classify_evidence_item(item)})
+        classified.sort(
+            key=lambda item: (
+                {"block": 3, "penalty": 2, "neutral": 1}.get(item["status"], 0),
+                item.get("trades") or 0,
+                item.get("loss_rate") or 0,
+                -float(item.get("avg_pnl_pct") or 0),
+            ),
+            reverse=True,
+        )
+
+        pnls = [float(row.get("realized_pnl_pct") or 0) for row in same_day_matches]
+        losses = [pnl for pnl in pnls if pnl <= 0]
+        status_counts: dict[str, int] = {"block": 0, "penalty": 0, "neutral": 0}
+        for item in classified:
+            status_counts[item["status"]] = status_counts.get(item["status"], 0) + 1
+
+        worst_status = "neutral"
+        if status_counts.get("block"):
+            worst_status = "block"
+        elif status_counts.get("penalty"):
+            worst_status = "penalty"
+
+        return {
+            "version": INTRADAY_LEARNING_SNAPSHOT_VERSION,
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            "target_date": target_date,
+            "phase": phase,
+            "trigger_symbol": trigger_symbol.upper() if trigger_symbol else None,
+            "runtime_effect": "paper_intraday_learning_feedback",
+            "status": worst_status,
+            "same_day_closed_trades": len(same_day_matches),
+            "same_day_wins": len(pnls) - len(losses),
+            "same_day_losses": len(losses),
+            "same_day_win_rate": round((len(pnls) - len(losses)) / len(pnls), 4) if pnls else None,
+            "same_day_avg_pnl_pct": round(sum(pnls) / len(pnls), 4) if pnls else None,
+            "same_day_min_pnl_pct": round(min(pnls), 4) if pnls else None,
+            "same_day_max_pnl_pct": round(max(pnls), 4) if pnls else None,
+            "evidence_keys": len(evidence),
+            "status_counts": status_counts,
+            "top_feedback": classified[:10],
+        }
+
+    def capture_performance_snapshot(
+        self,
+        target_date: str,
+        *,
+        phase: str,
+        trigger_symbol: str | None = None,
+        include_historical: bool = True,
+    ) -> dict[str, Any]:
+        auto_buy_repo.init_tables(db_path=self.db_path or auto_buy_repo.DB_PATH)
+        snapshot = self.performance_snapshot(
+            target_date,
+            phase=phase,
+            trigger_symbol=trigger_symbol,
+            include_historical=include_historical,
+        )
+        status = str(snapshot.get("status") or "neutral")
+        top_feedback = snapshot.get("top_feedback") or []
+        feedback_key = f"intraday_performance_snapshot:{phase}"
+        if top_feedback:
+            feedback_key = f"{feedback_key}:{top_feedback[0].get('key') or 'unknown'}"
+        hard_block_reason = None
+        if status == "block" and top_feedback:
+            item = top_feedback[0]
+            hard_block_reason = (
+                "intraday_learning_snapshot:"
+                f"{item.get('key')}:loss_rate={item.get('loss_rate')}:"
+                f"avg_pnl={item.get('avg_pnl_pct')}%:trades={item.get('trades')}"
+            )
+
+        auto_buy_repo.insert_intraday_feedback_event(
+            created_at=str(snapshot["created_at"]),
+            target_date=target_date,
+            symbol=trigger_symbol.upper() if trigger_symbol else None,
+            feedback_key=feedback_key,
+            status=status,
+            score_penalty=self.thresholds.penalty_score if status in {"block", "penalty"} else 0.0,
+            hard_block_reason=hard_block_reason,
+            evidence_json=json.dumps(snapshot, sort_keys=True),
+            candidate_json=json.dumps(
+                {
+                    "phase": phase,
+                    "trigger_symbol": trigger_symbol.upper() if trigger_symbol else None,
+                    "source": "intraday_learning_snapshot",
+                },
+                sort_keys=True,
+            ),
+            runtime_effect="paper_intraday_learning_feedback",
+            db_path=self.db_path or auto_buy_repo.DB_PATH,
+        )
+        return snapshot
+
     def assess_candidate(
         self,
         *,
@@ -258,7 +394,6 @@ class IntradayTradeFeedbackService:
     ) -> dict[str, Any]:
         evidence = evidence if evidence is not None else self.build_evidence(target_date)
         matches = [evidence[key] for key in self._keys_for_candidate(candidate) if key in evidence]
-        thresholds = self.thresholds
 
         def _specificity(key: str) -> int:
             if key.startswith("ml=") and "|setup_action=" in key:
@@ -272,28 +407,11 @@ class IntradayTradeFeedbackService:
         def _can_block(key: str) -> bool:
             return _specificity(key) >= 3
 
-        def _classify(item: dict[str, Any]) -> str:
-            key = str(item.get("key") or "")
-            block_qualified = (
-                _can_block(key)
-                and item["trades"] >= thresholds.block_min_trades
-                and item["loss_rate"] >= thresholds.block_loss_rate
-                and item["avg_pnl_pct"] <= thresholds.block_avg_pnl_pct
-            )
-            if block_qualified:
-                return "block"
-            penalty_qualified = (
-                item["trades"] >= thresholds.penalty_min_trades
-                and item["loss_rate"] >= thresholds.penalty_loss_rate
-                and item["avg_pnl_pct"] <= thresholds.penalty_avg_pnl_pct
-            )
-            return "penalty" if penalty_qualified else "neutral"
-
         status_rank = {"block": 3, "penalty": 2, "neutral": 1}
         best = None
         best_status = "neutral"
         for item in matches:
-            item_status = _classify(item)
+            item_status = self._classify_evidence_item(item)
             item_rank = (
                 status_rank[item_status],
                 _specificity(str(item.get("key") or "")),
@@ -328,7 +446,7 @@ class IntradayTradeFeedbackService:
 
         if best_status == "block":
             base["status"] = "block" if allow_authority else "would_block"
-            base["score_penalty"] = thresholds.penalty_score
+            base["score_penalty"] = self.thresholds.penalty_score
             base["hard_block_reason"] = (
                 "intraday_pattern_feedback:"
                 f"{best['key']}:loss_rate={best['loss_rate']:.2f}:"
@@ -343,7 +461,7 @@ class IntradayTradeFeedbackService:
             )
         elif best_status == "penalty":
             base["status"] = "penalty" if allow_authority else "would_penalize"
-            base["score_penalty"] = thresholds.penalty_score
+            base["score_penalty"] = self.thresholds.penalty_score
             base["runtime_effect"] = (
                 "paper_intraday_pattern_penalty"
                 if allow_authority

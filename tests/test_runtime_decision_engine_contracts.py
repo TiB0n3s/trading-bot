@@ -109,6 +109,28 @@ def test_gate_engine_records_ordered_trace_and_caps():
     assert_equal(payload["gate_results"][0]["gate_id"], "model_score", "gate order")
 
 
+def test_gate_engine_enforced_block_overrides_approved_state():
+    trace = GateEngine(
+        [
+            CallableGate(
+                "hard_block",
+                "risk",
+                lambda _state: GateResult(
+                    gate_id="hard_block",
+                    layer="risk",
+                    decision="block",
+                    authority="live",
+                    enforced=True,
+                ),
+            )
+        ]
+    ).run({"final_decision": "approved"})
+
+    payload = trace.to_dict()
+    assert_equal(payload["blocking_gate"], "hard_block", "blocking gate")
+    assert_equal(payload["final_decision"], "rejected", "blocking final decision")
+
+
 def test_decision_state_serializes_to_legacy_account_state():
     state = DecisionState(
         signal={"symbol": "AAPL", "action": "buy"},

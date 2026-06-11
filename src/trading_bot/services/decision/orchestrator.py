@@ -11,13 +11,14 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from services.decision.engine import DecisionEngine
-from services.signal_models import (
+from trading_bot.services.signal_models import (
     ExecutionResult,
     PipelineResult,
     SignalContext,
     SignalRuntimeState,
 )
+
+from .engine import DecisionEngine
 
 
 def _execution_mode(runtime_state: SignalRuntimeState) -> str:

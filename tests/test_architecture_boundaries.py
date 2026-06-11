@@ -448,7 +448,7 @@ def test_reports_builders_and_ops_check_do_not_import_db_directly():
 def test_ops_checks_do_not_import_db_or_market_data_directly():
     violations = []
     banned_imports = {"db", "sqlite3", "broker", "alpaca_trade_api"}
-    for path in _python_files("services/ops_checks"):
+    for path in _python_files("src/trading_bot/ops_checks"):
         imports = _imports(path)
         calls = _calls(path)
         rel = path.relative_to(ROOT).as_posix()

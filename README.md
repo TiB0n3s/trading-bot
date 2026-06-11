@@ -107,7 +107,7 @@ Reports, intelligence, validation
 ```
 
 TradingView alerts are now one possible signal source, not the only source.
-When configured for paper-mode breadth, `auto_buy_manager.py --scope all --live`
+When configured for paper-mode breadth, `scripts/auto_buy_manager.py --scope all --live`
 can evaluate the full approved universe from internal bar/session/setup data and
 submit only candidates that pass the same capacity, cooldown, risk, and broker
 safety checks.
@@ -1216,7 +1216,7 @@ check.
 Rejected-signal counterfactual outcomes can be populated and checked with:
 
 ```bash
-python3 rejected_signal_outcome_builder.py --date YYYY-MM-DD
+python3 scripts/rejected_signal_outcome_builder.py --date YYYY-MM-DD
 python3 ops_check.py rejected-outcomes YYYY-MM-DD
 python3 ops_check.py decision-snapshots YYYY-MM-DD
 python3 ops_check.py lifecycle-analysis YYYY-MM-DD

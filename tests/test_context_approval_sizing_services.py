@@ -71,6 +71,38 @@ def test_context_builder_sanitizes_claude_context():
     )
 
 
+def test_context_builder_preserves_caller_claude_state():
+    account_state = {
+        "symbol": "AAPL",
+        "action": "buy",
+        "adaptive_buy_confirmation": {"required_buy_confirmations": 2, "reasons": ["test"]},
+    }
+    built = build_final_signal_context(
+        account_state=account_state,
+        trend_table={"AAPL": {}},
+        claude_account_state={
+            "decision_policy": {"decision": "allow"},
+            "prior_gate_context": {"source": "final_gate"},
+        },
+    )
+
+    assert_equal(
+        built.claude_account_state["market_context_summary"]["required_confirmations"],
+        2,
+        "built state preserved",
+    )
+    assert_equal(
+        built.claude_account_state["decision_policy"]["decision"],
+        "allow",
+        "caller state merged",
+    )
+    assert_equal(
+        built.claude_account_state["prior_gate_context"]["source"],
+        "final_gate",
+        "caller gate context merged",
+    )
+
+
 def test_initial_context_builder_hydrates_buy_context():
     account_state = {}
     state = SignalRuntimeState(

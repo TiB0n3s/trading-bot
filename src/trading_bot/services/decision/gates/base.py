@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from services.decision.trace import GateResult
+from ..trace import GateResult
 
 
 def evidence_gate(

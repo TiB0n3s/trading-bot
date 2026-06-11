@@ -1093,7 +1093,7 @@ checks feature availability/staleness audit fields before delegating to
 Rejected-signal counterfactual outcomes can be populated and checked with:
 
 ```bash
-python3 rejected_signal_outcome_builder.py --date YYYY-MM-DD
+python3 scripts/rejected_signal_outcome_builder.py --date YYYY-MM-DD
 python3 ops_check.py rejected-outcomes YYYY-MM-DD
 python3 ops_check.py decision-snapshots YYYY-MM-DD
 python3 auto_buy_outcome_report.py --date YYYY-MM-DD

@@ -5,8 +5,9 @@ from __future__ import annotations
 import os
 from typing import Any
 
-from services.decision.trace import GateResult
-from services.execution_quality_service import estimate_execution_quality
+from trading_bot.services.execution_quality_service import estimate_execution_quality
+
+from ..trace import GateResult
 
 DEFAULT_DAILY_LOSS_LIMIT_PCT = -3.0
 DEFAULT_MAX_DRAWDOWN_PCT = 3.0

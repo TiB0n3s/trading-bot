@@ -1,27 +1,27 @@
 """Decision gate facades."""
 
-from services.decision.gates.cash_safe import build_cash_safe_gate
-from services.decision.gates.claude import build_claude_gate
-from services.decision.gates.decision_policy import build_decision_policy_gate
-from services.decision.gates.execution import build_execution_gate
-from services.decision.gates.intelligence import build_intelligence_adjudication
-from services.decision.gates.live_risk import (
+from .cash_safe import build_cash_safe_gate
+from .claude import build_claude_gate
+from .decision_policy import build_decision_policy_gate
+from .execution import build_execution_gate
+from .intelligence import build_intelligence_adjudication
+from .live_risk import (
     evaluate_execution_quality_live_gate,
     evaluate_live_circuit_breaker,
 )
-from services.decision.gates.macro import build_macro_gate
-from services.decision.gates.ml_authority import build_ml_authority_gate
-from services.decision.gates.prediction import build_prediction_gate
-from services.decision.gates.preflight import build_preflight_gate
-from services.decision.gates.session import build_session_gate
-from services.decision.gates.setup import build_setup_gate
-from services.decision.gates.signal_safety import (
+from .macro import build_macro_gate
+from .ml_authority import build_ml_authority_gate
+from .prediction import build_prediction_gate
+from .preflight import build_preflight_gate
+from .session import build_session_gate
+from .setup import build_setup_gate
+from .signal_safety import (
     evaluate_cash_safe_gate,
     evaluate_stale_signal_gate,
     evaluate_symbol_override_gate,
 )
-from services.decision.gates.sizing import build_sizing_gate
-from services.decision.gates.trend import build_trend_gate
+from .sizing import build_sizing_gate
+from .trend import build_trend_gate
 
 __all__ = [
     "build_cash_safe_gate",

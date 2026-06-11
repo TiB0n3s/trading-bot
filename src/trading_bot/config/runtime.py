@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Callable
 
-from src.trading_bot.config.authority_modes import (
+from trading_bot.config.authority_modes import (
     authority_mode_to_legacy_prediction_gate,
     normalize_config_authority_mode,
 )

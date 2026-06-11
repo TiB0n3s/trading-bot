@@ -20,7 +20,7 @@ COPY . .
 RUN --mount=type=cache,target=/root/.cache/pip \
     pip install --no-deps .
 
-CMD ["gunicorn", "-w", "2", "-b", "0.0.0.0:5000", "app:app"]
+CMD ["gunicorn", "-w", "2", "-b", "0.0.0.0:5000", "wsgi:application"]
 
 
 FROM runtime AS research

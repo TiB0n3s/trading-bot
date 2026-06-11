@@ -11,7 +11,7 @@ import json
 from dataclasses import dataclass
 from typing import Any
 
-from src.trading_bot.config.authority_modes import normalize_config_authority_mode
+from trading_bot.config.authority_modes import normalize_config_authority_mode
 
 SAFETY_PROFILE_VERSION = "runtime_safety_profile_v1"
 

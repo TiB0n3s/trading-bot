@@ -2,7 +2,7 @@
 
 from typing import Any
 
-from src.trading_bot.intelligence.adjudicator import ModelAdjudication, build_model_adjudication
+from trading_bot.intelligence.adjudicator import ModelAdjudication, build_model_adjudication
 
 
 def build_intelligence_adjudication(

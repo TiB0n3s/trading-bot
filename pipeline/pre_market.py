@@ -32,15 +32,17 @@ from __future__ import annotations
 
 import argparse
 import sys
-from datetime import date
 from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parent.parent
-if str(BASE_DIR) not in sys.path:
-    sys.path.insert(0, str(BASE_DIR))
+for path in (BASE_DIR, BASE_DIR / "scripts", BASE_DIR / "src"):
+    path_text = str(path)
+    if path_text not in sys.path:
+        sys.path.insert(0, path_text)
 
-from market_time import expected_market_context_date
-from pipeline import Step, run_pipeline
+from market_time import expected_market_context_date  # noqa: E402
+
+from pipeline import Step, run_pipeline  # noqa: E402
 
 
 def _build_steps(target_date: str, *, dry_run: bool = False) -> list[Step]:
@@ -52,8 +54,10 @@ def _build_steps(target_date: str, *, dry_run: bool = False) -> list[Step]:
             name="research_data",
             module="pre_market_research_data",
             argv=[
-                "--raw-output", raw_output,
-                "--build-output", "market_context.json",
+                "--raw-output",
+                raw_output,
+                "--build-output",
+                "market_context.json",
                 "--ingest-context",
             ],
             critical=True,
@@ -70,13 +74,17 @@ def _build_steps(target_date: str, *, dry_run: bool = False) -> list[Step]:
             name="collect_events",
             module="collect_and_score_events",
             argv=[
-                "--date", target_date,
-                "--max-per-symbol", "2",
+                "--date",
+                target_date,
+                "--max-per-symbol",
+                "2",
                 "--apply-context",
                 "--predict",
                 "--ai-interpret-events",
-                "--ai-event-provider", "deterministic",
-                "--output", events_output,
+                "--ai-event-provider",
+                "deterministic",
+                "--output",
+                events_output,
             ],
             critical=True,
             description="collect news events, score, apply context, generate daily_symbol_predictions",
@@ -92,10 +100,14 @@ def _build_steps(target_date: str, *, dry_run: bool = False) -> list[Step]:
             name="validate_predictions",
             module="pipeline.validate_predictions",
             argv=[
-                "--date", target_date,
-                "--sessions", "5",
-                "--threshold", "0.0",
-                "--bad-session-limit", "3",
+                "--date",
+                target_date,
+                "--sessions",
+                "5",
+                "--threshold",
+                "0.0",
+                "--bad-session-limit",
+                "3",
             ],
             critical=False,
             description="warn if recent prediction_score correlation is flat or negative",

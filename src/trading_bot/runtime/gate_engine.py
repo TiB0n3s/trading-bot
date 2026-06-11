@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from time import perf_counter
 from typing import Any, Protocol
 
-from src.trading_bot.runtime.trace import DecisionTrace, GateResult
+from trading_bot.runtime.trace import DecisionTrace, GateResult
 
 
 class Gate(Protocol):
@@ -48,10 +48,10 @@ class GateEngine:
             if result.decision == "block" and result.enforced:
                 break
         final = state.get("final_decision")
-        if final:
-            trace.final_decision = str(final)
-        elif trace.blocking_gate:
+        if trace.blocking_gate:
             trace.final_decision = "rejected"
+        elif final:
+            trace.final_decision = str(final)
         else:
             trace.final_decision = "approved"
         return trace

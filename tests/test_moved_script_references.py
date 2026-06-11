@@ -4,6 +4,9 @@
 from __future__ import annotations
 
 import importlib.util
+import os
+import subprocess
+import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -55,6 +58,8 @@ def test_container_and_systemd_references_use_scripts_paths():
     dockerfile = (ROOT / "Dockerfile").read_text()
     live_bar_unit = (ROOT / "ops" / "live-bar-stream.service").read_text()
 
+    assert '"wsgi:application"' in dockerfile
+    assert '"app:app"' not in dockerfile
     assert '["python", "scripts/run_tests.py"]' in dockerfile
     assert "/trading-bot/scripts/live_bar_stream.py" in live_bar_unit
     assert "/trading-bot/live_bar_stream.py" not in live_bar_unit
@@ -110,6 +115,32 @@ def test_ops_check_allows_skipping_default_venv_reexec_for_adapter_venvs():
     assert "TRADING_BOT_SKIP_VENV_REEXEC" in source
 
 
+def test_named_package_imports_work_with_src_only_pythonpath():
+    env = dict(os.environ)
+    env["PYTHONPATH"] = str(ROOT / "src")
+    code = "\n".join(
+        [
+            "for mod in (",
+            "    'trading_bot.config.runtime',",
+            "    'trading_bot.runtime.gate_engine',",
+            "    'trading_bot.services.decision.engine',",
+            "    'trading_bot.services.runtime_safety_profile_service',",
+            "):",
+            "    __import__(mod)",
+        ]
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", code],
+        cwd="/tmp",
+        env=env,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr or result.stdout
+
+
 def main():
     tests = [
         test_run_tests_resolves_repo_root_after_move,
@@ -121,6 +152,7 @@ def main():
         test_repo_safety_scripts_cover_active_source_dirs,
         test_ci_uses_pinned_dev_requirements,
         test_ops_check_allows_skipping_default_venv_reexec_for_adapter_venvs,
+        test_named_package_imports_work_with_src_only_pythonpath,
     ]
     for test in tests:
         test()

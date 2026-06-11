@@ -241,7 +241,7 @@ python3 ops_check.py architecture-surface
 ```
 
 The report measures root Python file count, direct `services/` module count,
-`services/ops_checks/` module count, repository module count, oversized runtime
+`src/trading_bot/ops_checks/` module count, repository module count, oversized runtime
 decision files, raw env access, `src/trading_bot` package skeleton readiness,
 and whether `ops/compatibility_deletion_plan.md` exists.
 
@@ -393,7 +393,7 @@ Use these read-only reports during or after a session:
 cd ~/trading-bot
 python3 ops_check.py rejection-summary 2026-05-26
 python3 ops_check.py rejected-outcomes 2026-05-26
-python3 auto_buy_manager.py --scope all
+python3 scripts/auto_buy_manager.py --scope all
 python3 ops_check.py auto-buy 2026-05-26
 python3 auto_buy_outcome_report.py --date 2026-05-26
 python3 strong_day_participation_report.py --date 2026-05-26 --write-db
@@ -405,13 +405,13 @@ python3 ops_check.py order-health 2026-05-26
 python3 ops_check.py config-audit
 python3 ops_check.py trading-education-health
 python3 ops_check.py trading-education-ingest --max-pages 6 --no-follow
-python3 prediction_cache.py preload --date 2026-05-26
+python3 scripts/prediction_cache.py preload --date 2026-05-26
 ```
 
 `rejection-summary` groups rejected trade rows by reason/category, symbol, and
 recent context. `rejected-outcomes` checks counterfactual forward-return
-coverage for rejected signals after `rejected_signal_outcome_builder.py` runs.
-`auto_buy_manager.py` scores Alpaca-bar-derived buy candidates across the full
+coverage for rejected signals after `scripts/rejected_signal_outcome_builder.py` runs.
+`scripts/auto_buy_manager.py` scores Alpaca-bar-derived buy candidates across the full
 approved universe so scored-but-not-taken opportunities are persisted for later
 counterfactual review. Live paper buys require both `--live` and
 `AUTO_BUY_LIVE_BUYS=true`, and are constrained by
@@ -420,7 +420,7 @@ counterfactual review. Live paper buys require both `--live` and
 `AUTO_BUY_MAX_ACTIVE_POSITIONS` limits concurrent auto-buy exposure, while
 `AUTO_BUY_MAX_DAILY_ORDERS` is a gross daily circuit cap so early exits can be
 replaced while still limiting churn. The cron remains Central-time localized, but
-`auto_buy_manager.py` skips closed-market runs and the first
+`scripts/auto_buy_manager.py` skips closed-market runs and the first
 `AUTO_BUY_SESSION_BUFFER_MINUTES` of the regular session before writing
 candidate rows. Before any live paper buy it also cross-checks shared app
 cooldowns, recent-sell churn state, the app per-symbol daily buy count, and
@@ -461,7 +461,7 @@ feature-snapshot returns, score buckets, and the TradingView signal baseline.
 strong-session participation rows so `prediction_validation_report.py` and
 `intelligence_prediction_report.py` can compare predictions against symbols
 that were strong even if they had no TradingView alert.
-`auto_buy_manager.py` writes `auto_buy_decision_snapshots` for candidate
+`scripts/auto_buy_manager.py` writes `auto_buy_decision_snapshots` for candidate
 decisions, live block reasons, risk cross-checks, and submitted order metadata
 so the internal buy path has its own audit trail beside the main webhook
 decision snapshots.
@@ -495,7 +495,7 @@ python3 ops_check.py trading-education-review
 
 Manual snapshots are marked `manual_snapshot`; low-confidence or short
 extractions are stored as `needs_review`.
-`prediction_cache.py preload` verifies that `daily_symbol_predictions` can be
+`scripts/prediction_cache.py preload` verifies that `daily_symbol_predictions` can be
 loaded into the TTL cache before the session. The Flask app also starts its own
 background cache refresher so webhook handling reads predictions from memory,
 not SQLite. `prediction_validation_report.py` reports deterministic-gate versus
@@ -599,7 +599,7 @@ The second tracked migration creates `rejected_signal_outcomes`, the canonical
 target table for counterfactual labels on rejected signals. Populate it with:
 
 ```bash
-python3 rejected_signal_outcome_builder.py --date YYYY-MM-DD
+python3 scripts/rejected_signal_outcome_builder.py --date YYYY-MM-DD
 python3 ops_check.py rejected-outcomes YYYY-MM-DD
 ```
 

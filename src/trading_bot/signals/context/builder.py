@@ -1313,7 +1313,10 @@ def build_final_signal_context(
     account_state["execution_quality"] = execution_quality
     opportunity = account_state.get("buy_opportunity") or {}
     intelligence_context = intelligence_context or account_state.get("intelligence_context") or {}
-    claude_account_state = build_claude_account_state(account_state)
+    built_claude_account_state = build_claude_account_state(account_state)
+    if claude_account_state:
+        built_claude_account_state.update(claude_account_state)
+    claude_account_state = built_claude_account_state
 
     decision_context = {
         "setup": setup,

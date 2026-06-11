@@ -242,7 +242,7 @@ def build_architecture_surface_payload(*, base_dir: Path) -> dict[str, Any]:
         ),
         SurfaceMetric(
             "services_ops_check_modules",
-            _count_files(base_dir / "services" / "ops_checks"),
+            _count_files(base_dir / "src" / "trading_bot" / "ops_checks"),
             COUNT_TARGETS["services_ops_check_modules"],
         ),
         SurfaceMetric(

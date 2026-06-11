@@ -47,7 +47,10 @@ def test_architecture_surface_payload_counts_core_surfaces(tmp_path):
         tmp_path / "services" / "auto_buy_execution_service.py",
         "def auto_buy_execution_authority():\n    return 'missing canonical decision trace'\n",
     )
-    _write(tmp_path / "services" / "ops_checks" / "runtime_checks.py", "print('check')\n")
+    _write(
+        tmp_path / "src" / "trading_bot" / "ops_checks" / "runtime_checks.py",
+        "print('check')\n",
+    )
     _write(tmp_path / "repositories" / "trades_repo.py", "print('repo')\n")
     _write(tmp_path / "ops" / "compatibility_deletion_plan.md", "# plan\n")
     _write(
@@ -81,7 +84,7 @@ def test_architecture_surface_payload_counts_core_surfaces(tmp_path):
     assert payload["runtime_effect"] == "diagnostic_only_no_runtime_change"
     assert metrics["root_python_files"]["current"] == 2
     assert metrics["services_direct_modules"]["current"] == 4
-    assert metrics["services_ops_check_modules"]["current"] == 1
+    assert metrics["services_ops_check_modules"]["current"] == 2
     assert metrics["repository_modules"]["current"] == 1
     assert payload["raw_env_files"] == 1
     assert payload["raw_env_keys"] == 1

@@ -98,8 +98,6 @@ def load_env_if_needed():
     logger.info(f"Loaded env from {ENV_FILE}")
 
 
-load_env_if_needed()
-
 from services.pre_market_research_service import (  # noqa: E402
     PreMarketResearchConfig,
     build_default_pre_market_research_service,
@@ -1018,6 +1016,8 @@ def enrich_with_session_context(symbol: str, classification: dict, market_date: 
 
 
 def main():
+    load_env_if_needed()
+
     parser = argparse.ArgumentParser()
     parser.add_argument("--date", help="Market date YYYY-MM-DD, default today")
     parser.add_argument("--raw-output", help="Optional raw research output path")

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from src.trading_bot.runtime.authority import AUTHORITY_VOCABULARY, normalize_authority_mode
+from trading_bot.runtime.authority import AUTHORITY_VOCABULARY, normalize_authority_mode
 
 LEGACY_GATE_ALIASES = {
     "block": "live_block",

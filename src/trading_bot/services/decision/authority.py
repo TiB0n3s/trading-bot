@@ -1,6 +1,6 @@
 """Decision authority facade."""
 
-from src.trading_bot.runtime.authority import (
+from trading_bot.runtime.authority import (
     AUTHORITY_VOCABULARY,
     DEFAULT_LAYER_AUTHORITY,
     AuthorityMatrix,

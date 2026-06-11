@@ -5,7 +5,12 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from services.decision.gates import (
+from trading_bot.intelligence.adjudicator import ModelAdjudication
+from trading_bot.runtime.authority import AuthorityMatrix
+from trading_bot.runtime.gate_engine import CallableGate, GateEngine
+from trading_bot.runtime.trace import DecisionTrace, GateResult
+
+from .gates import (
     build_cash_safe_gate,
     build_claude_gate,
     build_decision_policy_gate,
@@ -20,11 +25,6 @@ from services.decision.gates import (
     build_sizing_gate,
     build_trend_gate,
 )
-
-from src.trading_bot.intelligence.adjudicator import ModelAdjudication
-from src.trading_bot.runtime.authority import AuthorityMatrix
-from src.trading_bot.runtime.gate_engine import CallableGate, GateEngine
-from src.trading_bot.runtime.trace import DecisionTrace, GateResult
 
 
 def _authority_level(execution_mode: str) -> str:

@@ -2,8 +2,8 @@
 
 from typing import Any
 
-from services.decision.gates.base import evidence_gate
-from services.decision.trace import GateResult
+from ..trace import GateResult
+from .base import evidence_gate
 
 
 def build_preflight_gate(account_state: dict[str, Any]) -> GateResult:

@@ -2,7 +2,7 @@
 
 from typing import Any
 
-from services.decision.trace import GateResult
+from ..trace import GateResult
 
 
 def build_claude_gate(

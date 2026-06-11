@@ -34,7 +34,13 @@ def init_checks_table(db_path=DB_PATH) -> None:
                 order_id TEXT,
                 sell_pressure_score REAL,
                 sell_pressure_recommendation TEXT,
-                sell_pressure_reason TEXT
+                sell_pressure_reason TEXT,
+                layered_ml_available INTEGER DEFAULT 0,
+                layered_ml_final_instruction TEXT,
+                layered_ml_master_confidence_score REAL,
+                layered_ml_ensemble_probability_pct REAL,
+                layered_ml_reason TEXT,
+                layered_ml_json TEXT
             )
             """
         )
@@ -47,6 +53,12 @@ def init_checks_table(db_path=DB_PATH) -> None:
             ("sell_pressure_score", "REAL"),
             ("sell_pressure_recommendation", "TEXT"),
             ("sell_pressure_reason", "TEXT"),
+            ("layered_ml_available", "INTEGER DEFAULT 0"),
+            ("layered_ml_final_instruction", "TEXT"),
+            ("layered_ml_master_confidence_score", "REAL"),
+            ("layered_ml_ensemble_probability_pct", "REAL"),
+            ("layered_ml_reason", "TEXT"),
+            ("layered_ml_json", "TEXT"),
         ):
             if col_name not in existing_cols:
                 con.execute(
@@ -71,6 +83,12 @@ def insert_check(
     sell_pressure_score: Any,
     sell_pressure_recommendation: str | None,
     sell_pressure_reason: str | None,
+    layered_ml_available: bool = False,
+    layered_ml_final_instruction: str | None = None,
+    layered_ml_master_confidence_score: Any = None,
+    layered_ml_ensemble_probability_pct: Any = None,
+    layered_ml_reason: str | None = None,
+    layered_ml_json: str | None = None,
     db_path=DB_PATH,
 ) -> None:
     with get_connection(db_path) as con:
@@ -97,8 +115,14 @@ def insert_check(
                 order_id,
                 sell_pressure_score,
                 sell_pressure_recommendation,
-                sell_pressure_reason
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                sell_pressure_reason,
+                layered_ml_available,
+                layered_ml_final_instruction,
+                layered_ml_master_confidence_score,
+                layered_ml_ensemble_probability_pct,
+                layered_ml_reason,
+                layered_ml_json
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 timestamp,
@@ -122,6 +146,12 @@ def insert_check(
                 sell_pressure_score,
                 sell_pressure_recommendation,
                 sell_pressure_reason,
+                1 if layered_ml_available else 0,
+                layered_ml_final_instruction,
+                layered_ml_master_confidence_score,
+                layered_ml_ensemble_probability_pct,
+                layered_ml_reason,
+                layered_ml_json,
             ),
         )
 

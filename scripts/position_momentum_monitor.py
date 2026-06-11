@@ -14,6 +14,7 @@ Usage:
 
 from __future__ import annotations
 
+import json
 import logging
 import math
 import os
@@ -21,10 +22,16 @@ from datetime import datetime
 from typing import Any
 
 from market_time import is_market_hours, now_et
+from repositories.bar_pattern_feature_repo import BarPatternFeatureRepository
+from services.broker_service import broker_service
+from services.historical_bar_model_intelligence_service import (
+    build_historical_bar_model_intelligence,
+)
+from services.historical_bar_paper_strategy_service import build_historical_bar_paper_strategy
+from services.layered_model_decision_service import build_layered_model_decision
 from session_momentum import get_latest_session_momentum
 
 from repositories import position_momentum_repo
-from services.broker_service import broker_service
 
 logging.basicConfig(
     level=logging.INFO,
@@ -54,6 +61,35 @@ POSITION_MOMENTUM_SELL_CANDIDATES_ONLY = _env_bool("POSITION_MOMENTUM_SELL_CANDI
 POSITION_MOMENTUM_USE_SELL_PRESSURE = _env_bool("POSITION_MOMENTUM_USE_SELL_PRESSURE", False)
 
 
+def _paper_runtime_default(paper_value: str, live_value: str) -> str:
+    mode = os.getenv("EXECUTION_MODE", "paper").strip().lower()
+    return paper_value if mode in {"paper", "dry_run"} else live_value
+
+
+POSITION_MOMENTUM_LAYERED_ML_ENABLED = _env_bool(
+    "POSITION_MOMENTUM_LAYERED_ML_ENABLED",
+    _paper_runtime_default("true", "false").lower() == "true",
+)
+POSITION_MOMENTUM_LAYERED_ML_MIN_EXIT_CONFIDENCE = float(
+    os.getenv("POSITION_MOMENTUM_LAYERED_ML_MIN_EXIT_CONFIDENCE", "70.0")
+)
+POSITION_MOMENTUM_LAYERED_ML_STRONG_EXIT_CONFIDENCE = float(
+    os.getenv("POSITION_MOMENTUM_LAYERED_ML_STRONG_EXIT_CONFIDENCE", "78.0")
+)
+POSITION_MOMENTUM_LAYERED_ML_MAX_LOSS_PCT = float(
+    os.getenv("POSITION_MOMENTUM_LAYERED_ML_MAX_LOSS_PCT", "-0.75")
+)
+POSITION_MOMENTUM_LAYERED_ML_MIN_SELL_PRESSURE = float(
+    os.getenv("POSITION_MOMENTUM_LAYERED_ML_MIN_SELL_PRESSURE", "5.0")
+)
+POSITION_MOMENTUM_LAYERED_ML_LOW_CONFIDENCE = float(
+    os.getenv("POSITION_MOMENTUM_LAYERED_ML_LOW_CONFIDENCE", "45.0")
+)
+
+_bar_pattern_feature_repo: BarPatternFeatureRepository | None = None
+_historical_bar_intelligence_cache: dict[str, Any] | None = None
+
+
 def build_api():
     """Return the shared broker service for account/order access."""
     return broker_service
@@ -66,6 +102,54 @@ def _to_float(value: Any, default: float = 0.0) -> float:
         return float(value)
     except (TypeError, ValueError):
         return default
+
+
+def _dict(value: Any) -> dict[str, Any]:
+    return value if isinstance(value, dict) else {}
+
+
+def _probability_pct(value: Any) -> float | None:
+    parsed = _to_float(value, None)
+    if parsed is None:
+        return None
+    return parsed * 100.0 if 0.0 <= parsed <= 1.0 else parsed
+
+
+def bar_pattern_feature_repo() -> BarPatternFeatureRepository:
+    global _bar_pattern_feature_repo
+    if _bar_pattern_feature_repo is None:
+        _bar_pattern_feature_repo = BarPatternFeatureRepository()
+    return _bar_pattern_feature_repo
+
+
+def historical_bar_intelligence() -> dict[str, Any]:
+    global _historical_bar_intelligence_cache
+    if _historical_bar_intelligence_cache is None:
+        _historical_bar_intelligence_cache = build_historical_bar_model_intelligence()
+    return _historical_bar_intelligence_cache
+
+
+def latest_bar_pattern_features(symbol: str, session: dict[str, Any] | None) -> dict[str, Any]:
+    row: dict[str, Any] = {}
+    for timeframe in ("1Min", "1m"):
+        try:
+            latest = bar_pattern_feature_repo().latest_for_symbol(symbol, timeframe=timeframe)
+        except Exception as exc:
+            return {"symbol": symbol, "status": "lookup_error", "lookup_error": str(exc)}
+        if latest:
+            row = dict(latest)
+            break
+    merged = {**row}
+    merged.setdefault("symbol", symbol)
+    if session:
+        merged.setdefault("distance_from_vwap_pct", session.get("distance_from_vwap_pct"))
+        merged.setdefault("session_return_pct", session.get("session_return_pct"))
+        merged.setdefault("momentum_5m_pct", session.get("momentum_5m_pct"))
+        merged.setdefault("momentum_15m_pct", session.get("momentum_15m_pct"))
+        merged.setdefault("momentum_30m_pct", session.get("momentum_30m_pct"))
+    if not row:
+        merged["status"] = "missing_latest_bar_pattern_row"
+    return merged
 
 
 def _is_fresh(row: dict[str, Any] | None, max_age_minutes: int = MAX_MOMENTUM_AGE_MINUTES) -> bool:
@@ -221,6 +305,189 @@ def evaluate_sell_pressure(
         "giveback_plpc": round(giveback, 4),
         "negative_windows": negative_windows,
     }
+
+
+def build_position_layered_ml_context(
+    *,
+    symbol: str,
+    session: dict[str, Any] | None,
+    decision: dict[str, Any],
+    unrealized_plpc: float,
+) -> dict[str, Any]:
+    if not POSITION_MOMENTUM_LAYERED_ML_ENABLED:
+        return {
+            "enabled": False,
+            "available": False,
+            "runtime_effect": "disabled",
+            "reason": "POSITION_MOMENTUM_LAYERED_ML_ENABLED=false",
+        }
+
+    try:
+        session = session or {}
+        bar_features = latest_bar_pattern_features(symbol, session)
+        intelligence = historical_bar_intelligence()
+        account_state = {
+            "symbol": symbol,
+            "action": "sell",
+            "position_size_pct": 1.0,
+            "bar_pattern_features": bar_features,
+            "microstructure_features": bar_features,
+            "historical_bar_model_intelligence": intelligence,
+            "buy_opportunity": {
+                "buy_opportunity_score": decision.get("score"),
+                "buy_opportunity_recommendation": decision.get("action"),
+                "reason": decision.get("reason"),
+            },
+            "session_momentum_gate": {
+                "trend_label": session.get("trend_label"),
+                "trend_score": session.get("trend_score"),
+                "momentum_5m_pct": session.get("momentum_5m_pct"),
+                "momentum_15m_pct": session.get("momentum_15m_pct"),
+                "momentum_30m_pct": session.get("momentum_30m_pct"),
+                "session_return_pct": session.get("session_return_pct"),
+                "distance_from_vwap_pct": session.get("distance_from_vwap_pct"),
+            },
+            "position_state": {
+                "unrealized_plpc": unrealized_plpc,
+                "sell_pressure_score": decision.get("sell_pressure_score"),
+                "sell_pressure_recommendation": decision.get("sell_pressure_recommendation"),
+            },
+            "decision_utility": {
+                "prob_favorable_move": None,
+            },
+        }
+        paper_strategy = build_historical_bar_paper_strategy(
+            symbol=symbol,
+            action="sell",
+            account_state=account_state,
+            historical_bar_intelligence=intelligence,
+            feature_repo=bar_pattern_feature_repo(),
+        ).to_dict()
+        account_state["historical_bar_paper_strategy"] = paper_strategy
+        layered = build_layered_model_decision(
+            symbol=symbol,
+            action="sell",
+            decision={
+                "approved": decision.get("action") == "sell_candidate",
+                "position_size_pct": 1.0,
+                "confidence": "position_momentum_monitor",
+            },
+            account_state=account_state,
+            execution_mode="paper",
+        ).to_dict()
+        ensemble = _dict(layered.get("level_1_expert_ensemble"))
+        return {
+            "enabled": True,
+            "available": True,
+            "runtime_effect": "paper_bounded_position_momentum_intelligence_authority",
+            "final_instruction": layered.get("final_instruction"),
+            "final_size_pct": layered.get("final_size_pct"),
+            "ensemble_probability_pct": _probability_pct(ensemble.get("ensemble_probability")),
+            "master_confidence_score": paper_strategy.get("master_confidence_score"),
+            "paper_recommendation": paper_strategy.get("paper_recommendation"),
+            "reason": "; ".join(str(item) for item in (layered.get("reasons") or [])[:4]),
+            "decision": layered,
+            "historical_bar_paper_strategy": paper_strategy,
+            "bar_pattern_features": bar_features,
+        }
+    except Exception as exc:
+        return {
+            "enabled": True,
+            "available": False,
+            "runtime_effect": "lookup_error_observe_only",
+            "reason": str(exc),
+        }
+
+
+def apply_layered_ml_to_sell_decision(
+    *,
+    position: Any,
+    session: dict[str, Any] | None,
+    decision: dict[str, Any],
+) -> dict[str, Any]:
+    symbol = getattr(position, "symbol", "UNKNOWN")
+    unrealized_plpc = _to_float(getattr(position, "unrealized_plpc", 0)) * 100
+    layered = build_position_layered_ml_context(
+        symbol=symbol,
+        session=session,
+        decision=decision,
+        unrealized_plpc=unrealized_plpc,
+    )
+    enriched = dict(decision)
+    master = _to_float(layered.get("master_confidence_score"), None)
+    ensemble = _to_float(layered.get("ensemble_probability_pct"), None)
+    sell_pressure = _to_float(enriched.get("sell_pressure_score"), 0)
+    protective_severity = enriched.get("severity") in {
+        "emergency_loss",
+        "hard_negative",
+        "failed_continuation",
+        "profit_protection",
+    }
+
+    enriched.update(
+        {
+            "layered_ml_enabled": bool(POSITION_MOMENTUM_LAYERED_ML_ENABLED),
+            "layered_ml_available": bool(layered.get("available")),
+            "layered_ml_runtime_effect": layered.get("runtime_effect"),
+            "layered_ml_final_instruction": layered.get("final_instruction"),
+            "layered_ml_final_size_pct": layered.get("final_size_pct"),
+            "layered_ml_ensemble_probability_pct": ensemble,
+            "layered_ml_master_confidence_score": master,
+            "layered_ml_paper_recommendation": layered.get("paper_recommendation"),
+            "layered_ml_reason": layered.get("reason"),
+            "layered_ml_decision": layered.get("decision") or {},
+            "layered_ml_historical_bar_paper_strategy": (
+                layered.get("historical_bar_paper_strategy") or {}
+            ),
+            "layered_ml_bar_pattern_features": layered.get("bar_pattern_features") or {},
+        }
+    )
+
+    if not layered.get("enabled") or not layered.get("available"):
+        if layered.get("enabled"):
+            enriched["reason"] = (
+                f"{enriched.get('reason')}; layered_ml_unavailable={layered.get('reason')}"
+            )
+        return enriched
+
+    confidence = max(value for value in (master, ensemble, 0.0) if value is not None)
+    if (
+        enriched.get("action") in {"hold", "watch"}
+        and confidence >= POSITION_MOMENTUM_LAYERED_ML_STRONG_EXIT_CONFIDENCE
+        and (
+            unrealized_plpc <= POSITION_MOMENTUM_LAYERED_ML_MAX_LOSS_PCT
+            or sell_pressure >= POSITION_MOMENTUM_LAYERED_ML_MIN_SELL_PRESSURE
+        )
+    ):
+        original_action = enriched.get("action")
+        enriched["action"] = "sell_candidate"
+        enriched["severity"] = "layered_ml_exit"
+        enriched["reason"] = (
+            f"layered ML promoted {original_action} to sell_candidate: "
+            f"confidence={confidence:.2f}; unrealized_plpc={unrealized_plpc:.2f}%; "
+            f"sell_pressure={sell_pressure:.1f}; original_reason={decision.get('reason')}"
+        )
+        return enriched
+
+    if (
+        enriched.get("action") == "sell_candidate"
+        and not protective_severity
+        and confidence <= POSITION_MOMENTUM_LAYERED_ML_LOW_CONFIDENCE
+    ):
+        enriched["action"] = "watch"
+        enriched["severity"] = "layered_ml_exit_caution"
+        enriched["reason"] = (
+            f"layered ML downgraded weak non-protective sell_candidate to watch: "
+            f"confidence={confidence:.2f}; original_reason={decision.get('reason')}"
+        )
+        return enriched
+
+    if enriched.get("action") == "sell_candidate":
+        enriched["reason"] = (
+            f"{enriched.get('reason')}; layered_ml_exit_context="
+            f"confidence={confidence:.2f},recommendation={layered.get('paper_recommendation')}"
+        )
+    return enriched
 
 
 def evaluate_position_momentum(position: Any, session: dict[str, Any] | None) -> dict[str, Any]:
@@ -587,6 +854,22 @@ def log_position_momentum_check(
         sell_pressure_score=decision.get("sell_pressure_score"),
         sell_pressure_recommendation=decision.get("sell_pressure_recommendation"),
         sell_pressure_reason=decision.get("sell_pressure_reason"),
+        layered_ml_available=bool(decision.get("layered_ml_available")),
+        layered_ml_final_instruction=decision.get("layered_ml_final_instruction"),
+        layered_ml_master_confidence_score=decision.get("layered_ml_master_confidence_score"),
+        layered_ml_ensemble_probability_pct=decision.get("layered_ml_ensemble_probability_pct"),
+        layered_ml_reason=decision.get("layered_ml_reason"),
+        layered_ml_json=json.dumps(
+            {
+                "layered_ml_decision": decision.get("layered_ml_decision") or {},
+                "historical_bar_paper_strategy": (
+                    decision.get("layered_ml_historical_bar_paper_strategy") or {}
+                ),
+                "bar_pattern_features": decision.get("layered_ml_bar_pattern_features") or {},
+            },
+            sort_keys=True,
+            default=str,
+        ),
     )
 
 
@@ -716,6 +999,17 @@ def maybe_execute_auto_sell(position, decision, market_open: bool) -> dict[str, 
         os.getenv("POSITION_MOMENTUM_FAILED_HIGH_RUN_LOSS_PCT", "-0.60")
     )
 
+    layered_ml_exit = (
+        severity == "layered_ml_exit"
+        and unrealized_plpc <= POSITION_MOMENTUM_LAYERED_ML_MAX_LOSS_PCT
+        and (
+            _to_float(decision.get("layered_ml_master_confidence_score"), 0)
+            >= POSITION_MOMENTUM_LAYERED_ML_STRONG_EXIT_CONFIDENCE
+            or _to_float(decision.get("layered_ml_ensemble_probability_pct"), 0)
+            >= POSITION_MOMENTUM_LAYERED_ML_STRONG_EXIT_CONFIDENCE
+        )
+    )
+
     hard_risk_exit = (
         severity == "hard_negative"
         and unrealized_plpc <= hard_exit_max_loss_pct
@@ -728,6 +1022,7 @@ def maybe_execute_auto_sell(position, decision, market_open: bool) -> dict[str, 
         or hard_risk_exit
         or severe_breakdown_exit
         or failed_continuation_exit
+        or layered_ml_exit
     ):
         logger.warning(
             f"POSITION MOMENTUM AUTO-SELL blocked for {symbol}: "
@@ -737,7 +1032,8 @@ def maybe_execute_auto_sell(position, decision, market_open: bool) -> dict[str, 
             f"hard_risk_exit={hard_risk_exit}, "
             f"emergency_loss_exit={emergency_loss_exit}, "
             f"severe_breakdown_exit={severe_breakdown_exit}, "
-            f"failed_continuation_exit={failed_continuation_exit} | {decision.get('reason')}"
+            f"failed_continuation_exit={failed_continuation_exit}, "
+            f"layered_ml_exit={layered_ml_exit} | {decision.get('reason')}"
         )
         return None
 
@@ -749,7 +1045,8 @@ def maybe_execute_auto_sell(position, decision, market_open: bool) -> dict[str, 
         f"hard_risk_exit={hard_risk_exit}, "
         f"emergency_loss_exit={emergency_loss_exit}, "
         f"severe_breakdown_exit={severe_breakdown_exit}, "
-        f"failed_continuation_exit={failed_continuation_exit}"
+        f"failed_continuation_exit={failed_continuation_exit}, "
+        f"layered_ml_exit={layered_ml_exit}"
     )
 
     client_order_id = build_client_order_id(symbol)
@@ -869,6 +1166,11 @@ def main() -> int:
         decision = maybe_promote_sell_pressure(
             decision,
             _to_float(getattr(position, "unrealized_plpc", 0)) * 100,
+        )
+        decision = apply_layered_ml_to_sell_decision(
+            position=position,
+            session=session,
+            decision=decision,
         )
         order = maybe_execute_auto_sell(position, decision, market_open)
         rows.append((position, session, decision))

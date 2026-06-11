@@ -108,6 +108,37 @@ can influence linked approved symbols through event context and value-chain
 features, but they cannot become standalone trade candidates without explicit
 promotion into `SYMBOL_CONFIG` and normal liquidity/slippage review.
 
+## Critical Materials, Space Autonomy, And Robotics Expansion
+
+The broader AI dependency map also includes upstream materials, autonomous
+systems, robotics, and space-infrastructure names that may act as leading
+context for the AI infrastructure theme.
+
+Approved internal-bar/paper-learning symbols:
+
+- Critical materials: `MP`, `FCX`, `ALB`
+- Space/defense autonomy: `RKLB`, `KTOS`, `AVAV`
+- Automation/robotics software and systems: `PATH`, `SYM`
+
+Context-only symbols:
+
+- Domestic rare earth / uranium context: `USAR`, `UUUU`, `UEC`
+- Space-infrastructure context already in the SpaceX cohort: `ASTS`
+- Lunar and autonomous systems context: `LUNR`, `ONDS`
+- Aerospace controls microcap context: `SVT`
+
+Ticker normalizations from operator shorthand:
+
+- `USA Rare Earth` -> `USAR`
+- `Ueu` is ambiguous; both `UUUU` / Energy Fuels and `UEC` / Uranium Energy are
+  retained as context-only until the intended ticker is confirmed.
+- `Symbiotic` -> `SYM` / Symbotic
+- `Servotronics` -> `SVT`
+
+The critical-materials and robotics additions are still subject to ordinary
+bar coverage, liquidity, execution-quality, affordability, and model-learning
+gates. Context-only names cannot create standalone trade authority.
+
 ## Value-Chain Eco-Cluster Graphs
 
 All approved and context-only symbols are represented in a deterministic

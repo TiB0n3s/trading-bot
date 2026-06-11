@@ -13,6 +13,12 @@ sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "scripts"))
 
 from symbols_config import (
+    AI_DEPENDENCY_EXPANSION_APPROVED_SYMBOLS,
+    AI_DEPENDENCY_EXPANSION_APPROVED_SYMBOLS_LIST,
+    AI_DEPENDENCY_EXPANSION_CONTEXT_ONLY_SYMBOLS,
+    AI_DEPENDENCY_EXPANSION_CONTEXT_ONLY_SYMBOLS_LIST,
+    AI_DEPENDENCY_EXPANSION_SYMBOLS,
+    AI_DEPENDENCY_EXPANSION_SYMBOLS_LIST,
     AI_INFRASTRUCTURE_APPROVED_SYMBOLS,
     AI_INFRASTRUCTURE_APPROVED_SYMBOLS_LIST,
     AI_INFRASTRUCTURE_CONTEXT_ONLY_SYMBOLS,
@@ -68,6 +74,13 @@ EXPECTED_INTERNAL_ONLY = {
     "ANET",
     "ETN",
     "CEG",
+    "MP",
+    "FCX",
+    "ALB",
+    "KTOS",
+    "AVAV",
+    "PATH",
+    "SYM",
 }
 
 
@@ -175,6 +188,42 @@ def test_ai_infrastructure_universe_has_explicit_authority_tiers():
     )
 
 
+def test_ai_dependency_expansion_has_explicit_authority_tiers():
+    expected_approved = {"MP", "FCX", "ALB", "RKLB", "KTOS", "AVAV", "PATH", "SYM"}
+    expected_context = {"USAR", "UUUU", "UEC", "ASTS", "LUNR", "ONDS", "SVT"}
+
+    assert set(AI_DEPENDENCY_EXPANSION_APPROVED_SYMBOLS_LIST) == expected_approved
+    assert AI_DEPENDENCY_EXPANSION_APPROVED_SYMBOLS == expected_approved
+    assert AI_DEPENDENCY_EXPANSION_APPROVED_SYMBOLS <= APPROVED_SYMBOLS
+
+    assert set(AI_DEPENDENCY_EXPANSION_CONTEXT_ONLY_SYMBOLS_LIST) == expected_context
+    assert AI_DEPENDENCY_EXPANSION_CONTEXT_ONLY_SYMBOLS == expected_context
+    assert AI_DEPENDENCY_EXPANSION_CONTEXT_ONLY_SYMBOLS <= CONTEXT_ONLY_SYMBOLS
+    assert AI_DEPENDENCY_EXPANSION_CONTEXT_ONLY_SYMBOLS.isdisjoint(APPROVED_SYMBOLS)
+
+    assert set(AI_DEPENDENCY_EXPANSION_SYMBOLS_LIST) == (
+        AI_DEPENDENCY_EXPANSION_APPROVED_SYMBOLS | AI_DEPENDENCY_EXPANSION_CONTEXT_ONLY_SYMBOLS
+    )
+    assert AI_DEPENDENCY_EXPANSION_SYMBOLS == (
+        AI_DEPENDENCY_EXPANSION_APPROVED_SYMBOLS | AI_DEPENDENCY_EXPANSION_CONTEXT_ONLY_SYMBOLS
+    )
+
+    for symbol in AI_DEPENDENCY_EXPANSION_CONTEXT_ONLY_SYMBOLS:
+        cfg = CONTEXT_ONLY_SYMBOL_CONFIG[symbol]
+        assert "authority_note" in cfg
+        assert "context_only" in cfg["authority_note"]
+        assert set(cfg["linked_symbols"]) <= APPROVED_SYMBOLS
+
+    assert CONTEXT_ONLY_SYMBOL_CONFIG["USAR"]["name"] == "USA Rare Earth"
+    assert CONTEXT_ONLY_SYMBOL_CONFIG["UUUU"]["authority_note"].startswith(
+        "context_only_normalized_from_user_ueu"
+    )
+    assert CONTEXT_ONLY_SYMBOL_CONFIG["UEC"]["authority_note"].startswith(
+        "context_only_added_for_ueu_ambiguity"
+    )
+    assert CONTEXT_ONLY_SYMBOL_CONFIG["SVT"]["name"] == "Servotronics"
+
+
 def main():
     tests = [
         test_internal_bar_only_symbols_are_approved_but_not_tradingview,
@@ -182,6 +231,7 @@ def main():
         test_context_only_symbols_are_non_tradable_and_link_to_approved_symbols,
         test_spacex_catalyst_universe_has_explicit_authority_tiers,
         test_ai_infrastructure_universe_has_explicit_authority_tiers,
+        test_ai_dependency_expansion_has_explicit_authority_tiers,
     ]
 
     for test in tests:

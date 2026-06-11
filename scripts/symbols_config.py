@@ -10,8 +10,8 @@ This is the single source of truth for:
 - shared symbol lists used by research/parser/decision prompts
 """
 
-SYMBOL_UNIVERSE_VERSION = "approved_universe_2026_06_11_ai_infra_dependencies_v1"
-CONTEXT_SYMBOL_UNIVERSE_VERSION = "context_only_universe_2026_06_11_ai_infra_dependencies_v1"
+SYMBOL_UNIVERSE_VERSION = "approved_universe_2026_06_11_ai_dependency_expansion_v2"
+CONTEXT_SYMBOL_UNIVERSE_VERSION = "context_only_universe_2026_06_11_ai_dependency_expansion_v2"
 
 SPACEX_CATALYST_APPROVED_SYMBOLS_LIST = [
     "NOC",
@@ -72,6 +72,37 @@ AI_INFRASTRUCTURE_APPROVED_SYMBOLS = set(AI_INFRASTRUCTURE_APPROVED_SYMBOLS_LIST
 AI_INFRASTRUCTURE_CONTEXT_ONLY_SYMBOLS = set(AI_INFRASTRUCTURE_CONTEXT_ONLY_SYMBOLS_LIST)
 AI_INFRASTRUCTURE_SYMBOLS = set(AI_INFRASTRUCTURE_SYMBOLS_LIST)
 
+AI_DEPENDENCY_EXPANSION_APPROVED_SYMBOLS_LIST = [
+    "MP",
+    "FCX",
+    "ALB",
+    "RKLB",
+    "KTOS",
+    "AVAV",
+    "PATH",
+    "SYM",
+]
+
+AI_DEPENDENCY_EXPANSION_CONTEXT_ONLY_SYMBOLS_LIST = [
+    "USAR",
+    "UUUU",
+    "UEC",
+    "ASTS",
+    "LUNR",
+    "ONDS",
+    "SVT",
+]
+
+AI_DEPENDENCY_EXPANSION_SYMBOLS_LIST = (
+    AI_DEPENDENCY_EXPANSION_APPROVED_SYMBOLS_LIST
+    + AI_DEPENDENCY_EXPANSION_CONTEXT_ONLY_SYMBOLS_LIST
+)
+AI_DEPENDENCY_EXPANSION_APPROVED_SYMBOLS = set(AI_DEPENDENCY_EXPANSION_APPROVED_SYMBOLS_LIST)
+AI_DEPENDENCY_EXPANSION_CONTEXT_ONLY_SYMBOLS = set(
+    AI_DEPENDENCY_EXPANSION_CONTEXT_ONLY_SYMBOLS_LIST
+)
+AI_DEPENDENCY_EXPANSION_SYMBOLS = set(AI_DEPENDENCY_EXPANSION_SYMBOLS_LIST)
+
 INTERNAL_BAR_ONLY_SYMBOLS_LIST = [
     "AMZN",
     "JPM",
@@ -103,6 +134,13 @@ INTERNAL_BAR_ONLY_SYMBOLS_LIST = [
     "ANET",
     "ETN",
     "CEG",
+    "MP",
+    "FCX",
+    "ALB",
+    "KTOS",
+    "AVAV",
+    "PATH",
+    "SYM",
 ]
 
 INTERNAL_BAR_ONLY_SYMBOLS = set(INTERNAL_BAR_ONLY_SYMBOLS_LIST)
@@ -249,6 +287,38 @@ SYMBOL_CONFIG = {
     "CEG": {
         "price_range": (150, 500),
         "clusters": ["power_energy", "utilities", "ai_infra"],
+    },
+    # Critical materials / autonomy / robotics expansion — June 2026.
+    "MP": {
+        "price_range": (15, 120),
+        "clusters": ["critical_materials", "rare_earths", "defense", "ai_infra"],
+    },
+    "FCX": {
+        "price_range": (25, 100),
+        "clusters": ["critical_materials", "copper", "power_energy", "ai_infra"],
+    },
+    "ALB": {
+        "price_range": (40, 180),
+        "clusters": ["critical_materials", "lithium", "power_energy", "ai_infra"],
+    },
+    "KTOS": {
+        "price_range": (20, 120),
+        "clusters": ["defense", "aerospace", "autonomy", "space"],
+    },
+    "AVAV": {
+        "price_range": (100, 450),
+        "clusters": ["defense", "aerospace", "autonomy", "robotics"],
+        "max_spread_pct": 1.5,
+    },
+    "PATH": {
+        "price_range": (8, 50),
+        "clusters": ["software_infra", "automation", "robotics"],
+        "volume_note": "iex_thin",
+    },
+    "SYM": {
+        "price_range": (20, 120),
+        "clusters": ["automation", "robotics", "ai_infra"],
+        "max_spread_pct": 1.5,
     },
 }
 
@@ -466,6 +536,49 @@ CONTEXT_ONLY_SYMBOL_CONFIG = {
         "themes": ["ai_infra", "power_energy", "advanced_nuclear", "speculative_power"],
         "authority_note": "context_only_until_revenue_liquidity_and_regulatory_review",
     },
+    # Critical materials, autonomy, and robotics context expansion.
+    "USAR": {
+        "name": "USA Rare Earth",
+        "relationship_type": "domestic_rare_earth_peer",
+        "linked_symbols": ["MP", "FCX", "ALB", "KTOS", "AVAV"],
+        "themes": ["critical_materials", "rare_earths", "defense", "robotics"],
+        "authority_note": "context_only_until_liquidity_slippage_and_post_listing_history_review",
+    },
+    "UUUU": {
+        "name": "Energy Fuels",
+        "relationship_type": "uranium_rare_earth_peer",
+        "linked_symbols": ["MP", "FCX", "ALB", "CEG", "ETN"],
+        "themes": ["critical_materials", "rare_earths", "uranium", "power_energy"],
+        "authority_note": "context_only_normalized_from_user_ueu_candidate_until_review",
+    },
+    "UEC": {
+        "name": "Uranium Energy",
+        "relationship_type": "uranium_power_peer",
+        "linked_symbols": ["CEG", "ETN", "GEV", "MP"],
+        "themes": ["critical_materials", "uranium", "power_energy"],
+        "authority_note": "context_only_added_for_ueu_ambiguity_until_operator_confirms_ticker",
+    },
+    "LUNR": {
+        "name": "Intuitive Machines",
+        "relationship_type": "space_infrastructure_peer",
+        "linked_symbols": ["RKLB", "KTOS", "NOC", "LHX", "HON"],
+        "themes": ["space", "space_infrastructure", "lunar", "speculative_space"],
+        "authority_note": "context_only_until_liquidity_slippage_and_contract_quality_review",
+    },
+    "ONDS": {
+        "name": "Ondas Holdings",
+        "relationship_type": "autonomous_systems_peer",
+        "linked_symbols": ["KTOS", "AVAV", "RKLB", "LHX"],
+        "themes": ["autonomy", "drones", "communications", "speculative_defense"],
+        "authority_note": "context_only_until_liquidity_slippage_and_revenue_quality_review",
+    },
+    "SVT": {
+        "name": "Servotronics",
+        "relationship_type": "aerospace_controls_peer",
+        "linked_symbols": ["KTOS", "AVAV", "HWM", "GE", "HON"],
+        "themes": ["aerospace", "defense", "controls", "microcap"],
+        "authority_note": "context_only_normalized_from_servotronics_until_liquidity_review",
+    },
 }
 
 CONTEXT_ONLY_SYMBOLS_LIST = list(CONTEXT_ONLY_SYMBOL_CONFIG.keys())
@@ -535,4 +648,12 @@ CLUSTER_EXPOSURE_LIMITS = {
     "consumer_growth": 8.0,
     "hedge": 8.0,
     "utilities": 8.0,
+    "critical_materials": 8.0,
+    "rare_earths": 6.0,
+    "copper": 6.0,
+    "lithium": 6.0,
+    "autonomy": 8.0,
+    "robotics": 8.0,
+    "automation": 8.0,
+    "space": 8.0,
 }

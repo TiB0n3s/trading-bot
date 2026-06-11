@@ -40,9 +40,26 @@ def safe_round(value, digits=3):
 
 def as_et(dt):
     """Convert Alpaca bar timestamp to timezone-aware Eastern time."""
+    if isinstance(dt, str):
+        dt = datetime.fromisoformat(dt.replace("Z", "+00:00"))
     if dt.tzinfo is None:
         dt = dt.replace(tzinfo=timezone.utc)
     return dt.astimezone(ET)
+
+
+def _bar_value(bar: Any, *names: str, default: Any = None) -> Any:
+    for name in names:
+        if hasattr(bar, name):
+            return getattr(bar, name)
+    if isinstance(bar, dict):
+        for name in names:
+            if name in bar:
+                return bar[name]
+    return default
+
+
+def _bar_timestamp(bar: Any) -> Any:
+    return _bar_value(bar, "t", "timestamp", "time", default=None)
 
 
 def session_bucket(ts_et):
@@ -224,17 +241,20 @@ class RollingMomentumService:
 
         out = []
         for b in bars:
-            ts = as_et(b.t)
+            raw_ts = _bar_timestamp(b)
+            if raw_ts is None:
+                raise AttributeError("bar object has no timestamp/t field")
+            ts = as_et(raw_ts)
             out.append(
                 {
                     "ts": ts,
                     "date": ts.date().isoformat(),
                     "bucket": session_bucket(ts),
-                    "open": float(b.o),
-                    "high": float(b.h),
-                    "low": float(b.l),
-                    "close": float(b.c),
-                    "volume": float(getattr(b, "v", 0) or 0),
+                    "open": float(_bar_value(b, "o", "open", default=0) or 0),
+                    "high": float(_bar_value(b, "h", "high", default=0) or 0),
+                    "low": float(_bar_value(b, "l", "low", default=0) or 0),
+                    "close": float(_bar_value(b, "c", "close", default=0) or 0),
+                    "volume": float(_bar_value(b, "v", "volume", default=0) or 0),
                 }
             )
 

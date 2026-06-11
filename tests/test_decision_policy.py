@@ -491,6 +491,113 @@ def test_promoted_transformer_authority_can_size_down_buy_review():
     assert_equal(result["size_multiplier"], 0.65, "transformer size multiplier applied")
 
 
+def test_shadow_divergence_gate_blocks_buy_review():
+    original = decision_policy.contextual_memory_for_signal
+    try:
+        decision_policy.contextual_memory_for_signal = neutral_memory
+        result = decision_policy.evaluate_decision_policy(
+            "AAPL",
+            "buy",
+            intelligence_context={
+                "summary": {"recommended_action": "allow"},
+                "opportunity_score": {"score": 90, "decision": "allow"},
+                "prediction": {"prediction_decision": "allow", "prediction_score": 80},
+            },
+            account_state={
+                "shadow_prediction_health": {
+                    "status": "divergence_alert",
+                    "divergence_rate": 0.5,
+                    "comparable_rows": 12,
+                    "thresholds": {"max_divergence_rate": 0.35},
+                },
+                "portfolio_decision": {"decision": "allow"},
+                "execution_quality": {"decision": "allow"},
+                "transformer_authority": {"decision": "allow", "probability": 0.8},
+            },
+        )
+    finally:
+        decision_policy.contextual_memory_for_signal = original
+
+    assert_equal(result["decision"], "block", "shadow divergence blocks")
+    assert_equal(result["size_multiplier"], 0.0, "shadow divergence zeroes size")
+    assert_true("shadow_prediction_gate" in result, "shadow gate returned")
+
+
+def test_quant_suite_asymmetric_majority_blocks_buy_review():
+    original = decision_policy.contextual_memory_for_signal
+    try:
+        decision_policy.contextual_memory_for_signal = neutral_memory
+        result = decision_policy.evaluate_decision_policy(
+            "AAPL",
+            "buy",
+            intelligence_context={
+                "summary": {"recommended_action": "allow"},
+                "opportunity_score": {"score": 90, "decision": "allow"},
+                "prediction": {"prediction_decision": "allow", "prediction_score": 80},
+            },
+            account_state={
+                "quant_model_suite": {
+                    "models": [
+                        {
+                            "provider": "xgboost_asymmetric_false_positive",
+                            "decision": "avoid",
+                        },
+                        {"provider": "random_forest", "decision": "block"},
+                        {"provider": "baseline", "decision": "allow"},
+                    ]
+                },
+                "portfolio_decision": {"decision": "allow"},
+                "execution_quality": {"decision": "allow"},
+                "transformer_authority": {"decision": "allow", "probability": 0.8},
+            },
+        )
+    finally:
+        decision_policy.contextual_memory_for_signal = original
+
+    assert_equal(result["decision"], "block", "quant asymmetric majority blocks")
+    assert_true("quant_model_suite_gate" in result, "quant gate returned")
+
+
+def test_historical_bar_symbol_gate_sizes_down_low_accuracy_symbol():
+    original = decision_policy.contextual_memory_for_signal
+    try:
+        decision_policy.contextual_memory_for_signal = neutral_memory
+        result = decision_policy.evaluate_decision_policy(
+            "AAPL",
+            "buy",
+            intelligence_context={
+                "summary": {"recommended_action": "allow"},
+                "opportunity_score": {"score": 90, "decision": "allow"},
+                "prediction": {"prediction_decision": "allow", "prediction_score": 80},
+            },
+            account_state={
+                "historical_bar_model_intelligence": {
+                    "labels": [
+                        {
+                            "label_target": "triple_barrier_label",
+                            "symbol_gates": [
+                                {
+                                    "symbol": "AAPL",
+                                    "authority_status": "blocked",
+                                    "blockers": ["symbol_accuracy:0.5500<0.6000"],
+                                }
+                            ],
+                        }
+                    ]
+                },
+                "portfolio_decision": {"decision": "allow"},
+                "execution_quality": {"decision": "allow"},
+                "transformer_authority": {"decision": "allow", "probability": 0.8},
+            },
+        )
+    finally:
+        decision_policy.contextual_memory_for_signal = original
+
+    assert_equal(result["decision"], "size_down", "historical bar symbol gate sizes down")
+    assert_equal(result["size_multiplier"], 0.6, "historical bar size multiplier")
+    assert_true("historical_bar_regime_gate" in result, "historical gate returned")
+
+
 def test_decision_policy_module_does_not_import_order_execution():
     source = inspect.getsource(decision_policy)
 
@@ -530,6 +637,12 @@ if __name__ == "__main__":
     print("[OK] test_promoted_transformer_authority_can_block_buy_review")
     test_promoted_transformer_authority_can_size_down_buy_review()
     print("[OK] test_promoted_transformer_authority_can_size_down_buy_review")
+    test_shadow_divergence_gate_blocks_buy_review()
+    print("[OK] test_shadow_divergence_gate_blocks_buy_review")
+    test_quant_suite_asymmetric_majority_blocks_buy_review()
+    print("[OK] test_quant_suite_asymmetric_majority_blocks_buy_review")
+    test_historical_bar_symbol_gate_sizes_down_low_accuracy_symbol()
+    print("[OK] test_historical_bar_symbol_gate_sizes_down_low_accuracy_symbol")
     test_decision_policy_module_does_not_import_order_execution()
     print("[OK] test_decision_policy_module_does_not_import_order_execution")
-    print("\nAll 16 decision policy tests passed.")
+    print("\nAll 19 decision policy tests passed.")

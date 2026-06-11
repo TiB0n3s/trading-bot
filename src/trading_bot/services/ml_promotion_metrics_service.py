@@ -21,6 +21,9 @@ MIN_PROFIT_FACTOR_FOR_PAPER_AUTHORITY = 1.05
 MAX_BRIER_FOR_PAPER_AUTHORITY = 0.25
 MAX_CALIBRATION_ERROR_FOR_PAPER_AUTHORITY = 0.20
 MIN_STABILITY_SCORE_FOR_PAPER_AUTHORITY = 0.40
+MIN_OUTCOME_ROWS_FOR_PAPER_AUTHORITY = 30
+MIN_SHARPE_LIKE_FOR_PAPER_AUTHORITY = 1.0
+MAX_DRAWDOWN_IMPACT_FOR_PAPER_AUTHORITY = -5.0
 
 
 @dataclass(frozen=True)
@@ -152,6 +155,15 @@ def _max_drawdown(outcomes: list[float]) -> float | None:
     return round(max_dd, 6)
 
 
+def _sharpe_like(outcomes: list[float]) -> float | None:
+    if len(outcomes) < 2:
+        return None
+    volatility = pstdev(outcomes)
+    if volatility <= 0:
+        return None
+    return round(mean(outcomes) / volatility, 6)
+
+
 def _stability_score(
     rows: list[dict[str, Any]],
     group_key: str,
@@ -271,6 +283,7 @@ def build_ml_promotion_metrics_payload(config: PromotionMetricsConfig) -> dict[s
         "calibration_error": calibration_error,
         "profit_factor": _profit_factor(outcomes),
         "max_drawdown_impact": _max_drawdown(outcomes),
+        "sharpe_like_score": _sharpe_like(outcomes),
         "average_mfe_delta": _mean(mfe_values),
         "average_mae_delta": _mean(mae_values),
         "slippage_adjusted_decision_delta": _float(replay.get("net_simulated_delta_pct")),
@@ -294,6 +307,10 @@ def build_ml_promotion_metrics_payload(config: PromotionMetricsConfig) -> dict[s
     measured = [key for key in REQUIRED_PROMOTION_METRICS if _metric_ready(key)]
     authority_blockers: list[str] = []
     ev = _float(metrics.get("expected_value_per_decision"))
+    if len(outcome_rows) < MIN_OUTCOME_ROWS_FOR_PAPER_AUTHORITY:
+        authority_blockers.append(
+            f"outcome_rows_below_threshold:{len(outcome_rows)}<{MIN_OUTCOME_ROWS_FOR_PAPER_AUTHORITY}"
+        )
     if ev is None or ev <= MIN_EXPECTED_VALUE_FOR_PAPER_AUTHORITY:
         authority_blockers.append("expected_value_not_positive")
     profit_factor = _float(metrics.get("profit_factor"))
@@ -305,6 +322,12 @@ def build_ml_promotion_metrics_payload(config: PromotionMetricsConfig) -> dict[s
     calibration = _float(metrics.get("calibration_error"))
     if calibration is None or calibration > MAX_CALIBRATION_ERROR_FOR_PAPER_AUTHORITY:
         authority_blockers.append("calibration_error_above_threshold")
+    sharpe_like = _float(metrics.get("sharpe_like_score"))
+    if sharpe_like is None or sharpe_like < MIN_SHARPE_LIKE_FOR_PAPER_AUTHORITY:
+        authority_blockers.append("sharpe_like_score_below_threshold")
+    max_drawdown = _float(metrics.get("max_drawdown_impact"))
+    if max_drawdown is None or max_drawdown < MAX_DRAWDOWN_IMPACT_FOR_PAPER_AUTHORITY:
+        authority_blockers.append("max_drawdown_impact_below_threshold")
     for key in (
         "regime_specific_performance",
         "symbol_specific_stability",
@@ -349,6 +372,9 @@ def build_ml_promotion_metrics_payload(config: PromotionMetricsConfig) -> dict[s
                 "max_brier_score": MAX_BRIER_FOR_PAPER_AUTHORITY,
                 "max_calibration_error": MAX_CALIBRATION_ERROR_FOR_PAPER_AUTHORITY,
                 "min_stability_score": MIN_STABILITY_SCORE_FOR_PAPER_AUTHORITY,
+                "min_outcome_rows": MIN_OUTCOME_ROWS_FOR_PAPER_AUTHORITY,
+                "min_sharpe_like_score": MIN_SHARPE_LIKE_FOR_PAPER_AUTHORITY,
+                "max_drawdown_impact_floor": MAX_DRAWDOWN_IMPACT_FOR_PAPER_AUTHORITY,
             },
             "allowed_runtime_effect_when_blocked": (
                 "ML may reduce size, block weak setups, annotate context, and in paper/dry-run "

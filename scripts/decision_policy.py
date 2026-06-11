@@ -14,9 +14,6 @@ Purpose:
 
 from __future__ import annotations
 
-from strategy_constants import DAILY_LOSS_LIMIT_PCT
-from strategy_memory import contextual_memory_for_signal
-
 from services.confidence_calibration_service import build_calibrated_confidence
 from services.decision_utility_service import estimate_decision_utility
 from services.execution_quality_service import estimate_execution_quality
@@ -24,6 +21,8 @@ from services.market_regime_service import classify_market_regime
 from services.portfolio_decision_service import evaluate_portfolio_decision
 from services.rollout_contract_service import telemetry_only_rollout_contract
 from services.transformer_authority_model_service import evaluate_transformer_authority
+from strategy_constants import DAILY_LOSS_LIMIT_PCT
+from strategy_memory import contextual_memory_for_signal
 
 _HARD_GATE_CONTEXT_CHECKS = [
     # (account_state key path, condition_fn, block_reason)
@@ -86,6 +85,116 @@ def _worst_recommendation(recs):
     if not recs:
         return None
     return max(recs, key=lambda r: priority.get(r, 0))
+
+
+def _shadow_divergence_gate(account_state):
+    health = account_state.get("shadow_prediction_health") or account_state.get(
+        "shadow_model_health"
+    )
+    if not isinstance(health, dict):
+        return {"decision": "pass", "reason": "shadow health unavailable"}
+    status = str(health.get("status") or "").lower()
+    rate = _to_float(health.get("divergence_rate"))
+    max_rate = _to_float((health.get("thresholds") or {}).get("max_divergence_rate"))
+    if max_rate is None:
+        max_rate = 0.35
+    if status == "divergence_alert" or (rate is not None and rate > max_rate):
+        return {
+            "decision": "block",
+            "reason": (
+                "shadow/live model divergence alert: "
+                f"rate={rate} threshold={max_rate} rows={health.get('comparable_rows')}"
+            ),
+            "evidence": health,
+        }
+    return {"decision": "pass", "reason": "shadow/live model agreement within tolerance"}
+
+
+def _quant_suite_gate(account_state):
+    suite = account_state.get("quant_model_suite") or account_state.get(
+        "quant_model_suite_validation"
+    )
+    if not isinstance(suite, dict):
+        return {"decision": "pass", "reason": "quant suite unavailable"}
+    raw_models = suite.get("models") or suite.get("model_votes") or suite.get("results") or []
+    votes = []
+    for row in raw_models if isinstance(raw_models, list) else []:
+        if not isinstance(row, dict):
+            continue
+        decision = str(
+            row.get("decision")
+            or row.get("recommendation")
+            or row.get("prediction_decision")
+            or row.get("vote")
+            or ""
+        ).lower()
+        provider = str(row.get("provider") or row.get("model") or row.get("name") or "")
+        if decision in {"block", "avoid", "sell", "short", "negative", "veto"}:
+            votes.append(("negative", provider))
+        elif decision in {"allow", "buy", "pass", "positive", "support"}:
+            votes.append(("positive", provider))
+    if not votes:
+        majority = str(suite.get("majority_decision") or suite.get("decision") or "").lower()
+        if majority in {"block", "avoid", "negative", "veto"}:
+            return {
+                "decision": "block",
+                "reason": f"quant suite majority veto: {majority}",
+                "evidence": suite,
+            }
+        return {"decision": "pass", "reason": "quant suite has no usable votes"}
+    negatives = [provider for vote, provider in votes if vote == "negative"]
+    positives = [provider for vote, provider in votes if vote == "positive"]
+    asymmetric_negative = any("asymmetric" in provider for provider in negatives)
+    if len(negatives) > len(positives):
+        return {
+            "decision": "block" if asymmetric_negative else "size_down",
+            "reason": (
+                "quant suite majority disagreement: "
+                f"negative={len(negatives)} positive={len(positives)} "
+                f"asymmetric_negative={asymmetric_negative}"
+            ),
+            "evidence": {
+                "negative_models": negatives,
+                "positive_models": positives,
+                "source": suite,
+            },
+        }
+    return {
+        "decision": "pass",
+        "reason": (
+            "quant suite majority is not negative: "
+            f"negative={len(negatives)} positive={len(positives)}"
+        ),
+    }
+
+
+def _historical_bar_regime_gate(symbol, account_state):
+    intelligence = account_state.get("historical_bar_model_intelligence") or {}
+    if not isinstance(intelligence, dict):
+        return {"decision": "pass", "reason": "historical-bar intelligence unavailable"}
+    symbol_u = str(symbol or "").upper()
+    blockers = []
+    matched = []
+    for label in intelligence.get("labels") or []:
+        if not isinstance(label, dict):
+            continue
+        for gate in label.get("symbol_gates") or []:
+            if not isinstance(gate, dict):
+                continue
+            if str(gate.get("symbol") or "").upper() != symbol_u:
+                continue
+            matched.append(gate)
+            blockers.extend(str(item) for item in gate.get("blockers") or [])
+    if not matched:
+        return {"decision": "pass", "reason": "no symbol-level historical-bar gate"}
+    if blockers:
+        toxicity_block = any("vpin_toxicity" in item for item in blockers)
+        return {
+            "decision": "block" if toxicity_block else "size_down",
+            "reason": ("historical-bar symbol gate failed: " + ", ".join(blockers[:4])),
+            "evidence": matched,
+        }
+    return {"decision": "pass", "reason": "historical-bar symbol gate passed"}
 
 
 def evaluate_decision_policy(
@@ -231,6 +340,40 @@ def evaluate_decision_policy(
     elif transformer_decision == "allow" and transformer_probability is not None:
         supports.append("transformer authority supports/allows")
 
+    shadow_gate = _shadow_divergence_gate(account_state)
+    shadow_action = shadow_gate.get("decision")
+    if shadow_action == "block":
+        risks.append(shadow_gate["reason"])
+        evidence.append(
+            "shadow_prediction_health="
+            f"{(shadow_gate.get('evidence') or {}).get('status')} "
+            f"divergence_rate={(shadow_gate.get('evidence') or {}).get('divergence_rate')}"
+        )
+    elif shadow_action == "pass" and account_state.get("shadow_prediction_health"):
+        supports.append("shadow/live model agreement within tolerance")
+
+    quant_gate = _quant_suite_gate(account_state)
+    quant_action = quant_gate.get("decision")
+    if quant_action == "block":
+        risks.append(quant_gate["reason"])
+        evidence.append("quant_model_suite=majority_block")
+    elif quant_action == "size_down":
+        risks.append(quant_gate["reason"])
+        evidence.append("quant_model_suite=majority_size_down")
+    elif account_state.get("quant_model_suite"):
+        supports.append("quant model suite does not veto")
+
+    historical_gate = _historical_bar_regime_gate(symbol, account_state)
+    historical_action = historical_gate.get("decision")
+    if historical_action == "block":
+        risks.append(historical_gate["reason"])
+        evidence.append("historical_bar_symbol_gate=block")
+    elif historical_action == "size_down":
+        risks.append(historical_gate["reason"])
+        evidence.append("historical_bar_symbol_gate=size_down")
+    elif account_state.get("historical_bar_model_intelligence"):
+        supports.append("historical-bar symbol gate passed")
+
     session_gate = intelligence_context.get("session_momentum_gate") or {}
     if session_gate.get("would_block"):
         risks.append(f"session momentum gate would block: {session_gate.get('reason')}")
@@ -316,6 +459,9 @@ def evaluate_decision_policy(
             or portfolio_action == "block"
             or execution_action == "block"
             or transformer_decision == "block"
+            or shadow_action == "block"
+            or quant_action == "block"
+            or historical_action == "block"
         ):
             decision = "block"
             size_multiplier = 0.0
@@ -323,7 +469,8 @@ def evaluate_decision_policy(
                 "deterministic policy block: "
                 f"opportunity={opp_decision}, prediction={pred_decision}, "
                 f"portfolio={portfolio_action}, execution={execution_action}, "
-                f"transformer={transformer_decision}"
+                f"transformer={transformer_decision}, shadow={shadow_action}, "
+                f"quant={quant_action}, historical_bar={historical_action}"
             )
 
     # Intelligence block-preferred becomes live block only if support is weak.
@@ -363,6 +510,14 @@ def evaluate_decision_policy(
                 float(transformer_authority.get("size_multiplier") or 0.75),
             )
             reason = "transformer authority requested reduced size"
+        elif quant_action == "size_down":
+            decision = "size_down"
+            size_multiplier = 0.65
+            reason = "quant model suite majority disagreement; reduce size"
+        elif historical_action == "size_down":
+            decision = "size_down"
+            size_multiplier = 0.60
+            reason = "historical-bar regime/symbol gate requested reduced size"
         elif recommended_action == "caution" or len(risks) >= 2:
             decision = "size_down"
             size_multiplier = 0.75
@@ -385,4 +540,7 @@ def evaluate_decision_policy(
         "portfolio_decision": portfolio_decision,
         "execution_quality": execution_quality,
         "transformer_authority": transformer_authority,
+        "shadow_prediction_gate": shadow_gate,
+        "quant_model_suite_gate": quant_gate,
+        "historical_bar_regime_gate": historical_gate,
     }

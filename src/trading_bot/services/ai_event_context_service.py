@@ -15,6 +15,26 @@ AI_EVENT_CONTEXT_VERSION = "ai_event_context_v1"
 AI_EVENT_CONTEXT_AUTHORITY = "context_only_no_standalone_buy_authority"
 
 Provider = Callable[[str], dict[str, Any] | str]
+SEMANTIC_SOURCE_TIERS = {"official", "confirmed_financial_news", "deep_analysis"}
+SEMANTIC_EVENT_TYPES = {
+    "earnings",
+    "guidance",
+    "regulatory",
+    "lawsuit",
+    "macro_geopolitical",
+    "congressional_trade_disclosure",
+    "strategic_partnership",
+    "mna_deal_chatter",
+    "customer_contract",
+    "supplier_signal",
+}
+SEMANTIC_IMPACTS = {
+    "strongly_bullish",
+    "moderately_bullish",
+    "moderately_bearish",
+    "strongly_bearish",
+}
+SEMANTIC_RELEVANCE = {"actionable", "caution", "review_required"}
 
 
 @dataclass(frozen=True)
@@ -121,6 +141,39 @@ def deterministic_event_context(event: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def should_use_semantic_event_provider(event: dict[str, Any]) -> bool:
+    """Return true when an event is worth deeper semantic interpretation.
+
+    This deliberately keeps noisy/untrusted routine headlines on the deterministic
+    path. LLM interpretation is reserved for reputable or official events that
+    are likely to affect risk, catalysts, or cross-symbol context.
+    """
+    source_tier = str(event.get("source_tier") or "").strip().lower()
+    if source_tier not in SEMANTIC_SOURCE_TIERS:
+        return False
+
+    event_type = str(event.get("event_type") or "").strip().lower()
+    impact = str(event.get("expected_market_impact") or "").strip().lower()
+    relevance = str(event.get("trade_relevance") or "").strip().lower()
+    direction = str(event.get("intent_direction") or "").strip().lower()
+    confirmation = str(event.get("confirmation_status") or "").strip().lower()
+    try:
+        net_score = abs(float(event.get("net_event_score") or 0.0))
+    except Exception:
+        net_score = 0.0
+
+    return any(
+        (
+            event_type in SEMANTIC_EVENT_TYPES,
+            impact in SEMANTIC_IMPACTS,
+            relevance in SEMANTIC_RELEVANCE,
+            direction in {"constructive", "risk_negative", "risk_watch"},
+            confirmation in {"official_confirmed", "reputable_reported"},
+            net_score >= 6.0,
+        )
+    )
+
+
 def _load_provider_payload(payload: dict[str, Any] | str) -> dict[str, Any]:
     if isinstance(payload, dict):
         return payload
@@ -206,6 +259,31 @@ class AIEventContextService:
             fallback["provider"] = f"{self.config.provider_name}_error_fallback"
             fallback["provider_error"] = str(exc)[:240]
             return fallback
+
+
+class SelectiveAIEventContextService:
+    """Use semantic AI only for high-value events, deterministic otherwise."""
+
+    def __init__(
+        self,
+        *,
+        semantic_service: AIEventContextService,
+        fallback_service: AIEventContextService | None = None,
+    ):
+        self.semantic_service = semantic_service
+        self.fallback_service = fallback_service or AIEventContextService(
+            config=AIEventContextConfig(enabled=True, provider_name="deterministic"),
+            provider=None,
+        )
+
+    def interpret(self, event: dict[str, Any]) -> dict[str, Any]:
+        if should_use_semantic_event_provider(event):
+            result = self.semantic_service.interpret(event)
+            result["selection_policy"] = "semantic_high_value_event"
+            return result
+        result = self.fallback_service.interpret(event)
+        result["selection_policy"] = "deterministic_low_value_or_untrusted_event"
+        return result
 
 
 def anthropic_event_context_provider(*, model: str = "claude-3-5-haiku-latest") -> Provider:

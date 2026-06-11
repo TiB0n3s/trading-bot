@@ -26,6 +26,13 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from alerts import send_alert
+from repositories.market_intelligence_repo import MarketIntelligenceRepository
+from services.ai_event_context_service import (
+    AIEventContextConfig,
+    AIEventContextService,
+    SelectiveAIEventContextService,
+    anthropic_event_context_provider,
+)
 from symbols_config import (
     APPROVED_SYMBOLS,
     APPROVED_SYMBOLS_LIST,
@@ -43,12 +50,6 @@ from market_intelligence.intelligence_store import (
     update_daily_context_from_events,
 )
 from market_intelligence.news_event_model import score_event
-from repositories.market_intelligence_repo import MarketIntelligenceRepository
-from services.ai_event_context_service import (
-    AIEventContextConfig,
-    AIEventContextService,
-    anthropic_event_context_provider,
-)
 
 
 def short(v, width):
@@ -163,6 +164,17 @@ def print_table(events):
 
 def build_ai_event_context_service(provider_name: str) -> AIEventContextService:
     provider_name = str(provider_name or "deterministic").strip().lower()
+    if provider_name == "hybrid":
+        return SelectiveAIEventContextService(
+            semantic_service=AIEventContextService(
+                config=AIEventContextConfig(enabled=True, provider_name="anthropic"),
+                provider=anthropic_event_context_provider(),
+            ),
+            fallback_service=AIEventContextService(
+                config=AIEventContextConfig(enabled=True, provider_name="deterministic"),
+                provider=None,
+            ),
+        )
     if provider_name == "anthropic":
         return AIEventContextService(
             config=AIEventContextConfig(enabled=True, provider_name="anthropic"),
@@ -228,8 +240,11 @@ def main():
     parser.add_argument(
         "--ai-event-provider",
         default="deterministic",
-        choices=("deterministic", "anthropic"),
-        help="Provider for --ai-interpret-events; anthropic uses a lazy API call",
+        choices=("deterministic", "anthropic", "hybrid"),
+        help=(
+            "Provider for --ai-interpret-events; hybrid uses Anthropic only for "
+            "trusted/high-value events and deterministic fallback otherwise"
+        ),
     )
     args = parser.parse_args()
 

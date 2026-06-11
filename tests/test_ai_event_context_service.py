@@ -13,7 +13,9 @@ from services.ai_event_context_service import (  # noqa: E402
     AI_EVENT_CONTEXT_AUTHORITY,
     AIEventContextConfig,
     AIEventContextService,
+    SelectiveAIEventContextService,
     deterministic_event_context,
+    should_use_semantic_event_provider,
 )
 
 
@@ -84,11 +86,86 @@ def test_provider_error_falls_back_safely():
     assert "provider_error" in result
 
 
+def test_semantic_event_provider_selection_requires_trusted_high_value_context():
+    routine = {
+        **_event(),
+        "source_tier": "unclassified",
+        "event_type": "industry_demand",
+        "expected_market_impact": "neutral",
+        "trade_relevance": "watch_only",
+        "net_event_score": 12,
+    }
+    high_value = {
+        **_event(),
+        "source_tier": "confirmed_financial_news",
+        "event_type": "guidance",
+        "expected_market_impact": "moderately_bullish",
+        "trade_relevance": "caution",
+        "net_event_score": 8,
+    }
+
+    assert should_use_semantic_event_provider(routine) is False
+    assert should_use_semantic_event_provider(high_value) is True
+
+
+def test_selective_service_uses_semantic_provider_only_for_high_value_events():
+    calls = []
+
+    def provider(_prompt):
+        calls.append("semantic")
+        return {
+            "summary": "High-value event needs semantic review.",
+            "intent": "guidance_catalyst",
+            "affected_symbols": ["NVDA", "AMD"],
+            "market_alignment": "constructive_watch",
+            "confidence": "medium",
+            "confirmation_status": "reputable_reported",
+            "missing_evidence": [],
+            "risk_notes": ["semantic test"],
+        }
+
+    service = SelectiveAIEventContextService(
+        semantic_service=AIEventContextService(
+            config=AIEventContextConfig(enabled=True, provider_name="test_semantic"),
+            provider=provider,
+        )
+    )
+
+    low_value = {
+        **_event(),
+        "source_tier": "unclassified",
+        "event_type": "industry_demand",
+        "expected_market_impact": "neutral",
+        "trade_relevance": "watch_only",
+        "net_event_score": 0,
+    }
+    high_value = {
+        **_event(),
+        "source_tier": "confirmed_financial_news",
+        "event_type": "guidance",
+        "expected_market_impact": "moderately_bullish",
+        "trade_relevance": "caution",
+        "net_event_score": 8,
+    }
+
+    low = service.interpret(low_value)
+    high = service.interpret(high_value)
+
+    assert calls == ["semantic"]
+    assert low["provider"] == "deterministic_fallback"
+    assert low["selection_policy"] == "deterministic_low_value_or_untrusted_event"
+    assert high["provider"] == "test_semantic"
+    assert high["selection_policy"] == "semantic_high_value_event"
+    assert high["authority"] == AI_EVENT_CONTEXT_AUTHORITY
+
+
 def main():
     tests = [
         test_deterministic_event_context_is_non_authoritative,
         test_provider_output_is_constrained_to_event_symbols_and_context_only,
         test_provider_error_falls_back_safely,
+        test_semantic_event_provider_selection_requires_trusted_high_value_context,
+        test_selective_service_uses_semantic_provider_only_for_high_value_events,
     ]
     for test in tests:
         test()

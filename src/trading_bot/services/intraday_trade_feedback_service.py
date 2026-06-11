@@ -172,47 +172,8 @@ class IntradayTradeFeedbackService:
             )
         return matches
 
-    @staticmethod
-    def _keys_for_match(match: dict[str, Any]) -> list[str]:
-        setup_action = _norm(match.get("setup_policy_action"))
-        ml_bucket = _norm(match.get("ml_prediction_bucket"))
-        session_label = _norm(match.get("session_trend_label"))
-        setup_label = _norm(match.get("setup_label"))
-        return [
-            f"ml={ml_bucket}|setup_action={setup_action}",
-            f"setup_action={setup_action}",
-            f"ml={ml_bucket}",
-            f"session={session_label}|setup_action={setup_action}",
-            f"setup_label={setup_label}",
-        ]
-
-    @staticmethod
-    def _keys_for_candidate(candidate: dict[str, Any]) -> list[str]:
-        setup_action = _norm(
-            candidate.get("setup_recommendation") or candidate.get("setup_policy_action")
-        )
-        ml_bucket = _norm(candidate.get("ml_prediction_bucket"))
-        session_label = _norm(candidate.get("session_trend_label"))
-        setup_label = _norm(candidate.get("setup_label"))
-        return [
-            f"ml={ml_bucket}|setup_action={setup_action}",
-            f"setup_action={setup_action}",
-            f"ml={ml_bucket}",
-            f"session={session_label}|setup_action={setup_action}",
-            f"setup_label={setup_label}",
-        ]
-
-    def build_evidence(
-        self,
-        target_date: str,
-        *,
-        include_historical: bool = True,
-    ) -> dict[str, dict[str, Any]]:
+    def _group_matches(self, matches: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
         grouped: dict[str, list[dict[str, Any]]] = defaultdict(list)
-        matches = self.same_day_matches(target_date)
-        if include_historical:
-            matches.extend(self.historical_matches(target_date))
-
         for match in matches:
             for key in self._keys_for_match(match):
                 grouped[key].append(match)
@@ -249,6 +210,182 @@ class IntradayTradeFeedbackService:
                 "historical_lookback_days": self.thresholds.historical_lookback_days,
             }
         return evidence
+
+    def _load_materialized_historical_evidence(self, target_date: str) -> dict[str, dict[str, Any]]:
+        rows = auto_buy_repo.historical_outcome_feedback_rows(
+            target_date,
+            lookback_days=self.thresholds.historical_lookback_days,
+            db_path=self.db_path or auto_buy_repo.DB_PATH,
+        )
+        evidence: dict[str, dict[str, Any]] = {}
+        for row in rows:
+            item = dict(row)
+            raw = item.get("evidence_json")
+            loaded = None
+            if raw:
+                try:
+                    loaded = json.loads(str(raw))
+                except Exception:
+                    loaded = None
+            if not isinstance(loaded, dict):
+                loaded = {
+                    "key": item.get("feedback_key"),
+                    "trades": item.get("trades"),
+                    "wins": item.get("wins"),
+                    "losses": item.get("losses"),
+                    "loss_rate": item.get("loss_rate"),
+                    "avg_pnl_pct": item.get("avg_pnl_pct"),
+                    "min_pnl_pct": item.get("min_pnl_pct"),
+                    "max_pnl_pct": item.get("max_pnl_pct"),
+                    "symbols": [],
+                    "sources": ["materialized_historical_outcomes"],
+                    "same_day_trades": 0,
+                    "historical_trades": item.get("trades"),
+                    "historical_lookback_days": item.get("lookback_days"),
+                }
+            loaded["feedback_source"] = "materialized_historical_outcomes"
+            loaded["historical_materialized"] = True
+            loaded["same_day_trades"] = 0
+            loaded["historical_trades"] = int(loaded.get("historical_trades") or 0)
+            evidence[str(loaded.get("key") or item.get("feedback_key"))] = loaded
+        return evidence
+
+    @staticmethod
+    def _keys_for_match(match: dict[str, Any]) -> list[str]:
+        setup_action = _norm(match.get("setup_policy_action"))
+        ml_bucket = _norm(match.get("ml_prediction_bucket"))
+        session_label = _norm(match.get("session_trend_label"))
+        setup_label = _norm(match.get("setup_label"))
+        return [
+            f"ml={ml_bucket}|setup_action={setup_action}",
+            f"setup_action={setup_action}",
+            f"ml={ml_bucket}",
+            f"session={session_label}|setup_action={setup_action}",
+            f"setup_label={setup_label}",
+        ]
+
+    @staticmethod
+    def _keys_for_candidate(candidate: dict[str, Any]) -> list[str]:
+        setup_action = _norm(
+            candidate.get("setup_recommendation") or candidate.get("setup_policy_action")
+        )
+        ml_bucket = _norm(candidate.get("ml_prediction_bucket"))
+        session_label = _norm(candidate.get("session_trend_label"))
+        setup_label = _norm(candidate.get("setup_label"))
+        return [
+            f"ml={ml_bucket}|setup_action={setup_action}",
+            f"setup_action={setup_action}",
+            f"ml={ml_bucket}",
+            f"session={session_label}|setup_action={setup_action}",
+            f"setup_label={setup_label}",
+        ]
+
+    def build_evidence(
+        self,
+        target_date: str,
+        *,
+        include_historical: bool = True,
+    ) -> dict[str, dict[str, Any]]:
+        evidence = self._group_matches(self.same_day_matches(target_date))
+        if include_historical:
+            historical = self._load_materialized_historical_evidence(target_date)
+            if not historical:
+                historical = self._group_matches(self.historical_matches(target_date))
+            for key, item in historical.items():
+                if key not in evidence:
+                    evidence[key] = item
+                    continue
+                combined = evidence[key]
+                trades = int(combined.get("trades") or 0) + int(item.get("trades") or 0)
+                losses = int(combined.get("losses") or 0) + int(item.get("losses") or 0)
+                wins = int(combined.get("wins") or 0) + int(item.get("wins") or 0)
+                combined["trades"] = trades
+                combined["wins"] = wins
+                combined["losses"] = losses
+                combined["loss_rate"] = round(losses / trades, 4) if trades else 0.0
+                if trades:
+                    same_total = float(combined.get("avg_pnl_pct") or 0) * int(
+                        combined.get("same_day_trades") or 0
+                    )
+                    hist_total = float(item.get("avg_pnl_pct") or 0) * int(
+                        item.get("historical_trades") or item.get("trades") or 0
+                    )
+                    combined["avg_pnl_pct"] = round((same_total + hist_total) / trades, 4)
+                mins = [
+                    value
+                    for value in (combined.get("min_pnl_pct"), item.get("min_pnl_pct"))
+                    if value is not None
+                ]
+                maxes = [
+                    value
+                    for value in (combined.get("max_pnl_pct"), item.get("max_pnl_pct"))
+                    if value is not None
+                ]
+                combined["min_pnl_pct"] = round(min(float(v) for v in mins), 4) if mins else None
+                combined["max_pnl_pct"] = round(max(float(v) for v in maxes), 4) if maxes else None
+                combined["symbols"] = sorted(
+                    set(combined.get("symbols") or []) | set(item.get("symbols") or [])
+                )
+                combined["sources"] = sorted(
+                    set(combined.get("sources") or []) | set(item.get("sources") or [])
+                )
+                combined["historical_trades"] = int(combined.get("historical_trades") or 0) + int(
+                    item.get("historical_trades") or item.get("trades") or 0
+                )
+                combined["historical_materialized"] = bool(
+                    combined.get("historical_materialized") or item.get("historical_materialized")
+                )
+
+        return evidence
+
+    def refresh_historical_outcome_feedback(
+        self,
+        target_date: str,
+        *,
+        created_at: str | None = None,
+    ) -> dict[str, Any]:
+        created_at = created_at or datetime.now(timezone.utc).isoformat()
+        raw_evidence = self._group_matches(self.historical_matches(target_date))
+        rows = []
+        for item in raw_evidence.values():
+            rows.append(
+                {
+                    **item,
+                    "status": self._classify_evidence_item(item),
+                    "runtime_effect": "paper_historical_outcome_feedback_materialized",
+                }
+            )
+        rows.sort(
+            key=lambda item: (
+                {"block": 3, "penalty": 2, "neutral": 1}.get(item["status"], 0),
+                item.get("trades") or 0,
+                item.get("loss_rate") or 0,
+            ),
+            reverse=True,
+        )
+        persisted = auto_buy_repo.replace_historical_outcome_feedback(
+            created_at=created_at,
+            target_date=target_date,
+            lookback_days=self.thresholds.historical_lookback_days,
+            evidence_rows=rows,
+            db_path=self.db_path or auto_buy_repo.DB_PATH,
+        )
+        return {
+            "version": "historical_outcome_feedback_refresh_v1",
+            "created_at": created_at,
+            "target_date": target_date,
+            "lookback_days": self.thresholds.historical_lookback_days,
+            "matched_trade_rows": len(self.historical_matches(target_date)),
+            "evidence_rows": len(rows),
+            "persisted_rows": persisted,
+            "status_counts": {
+                "block": sum(1 for row in rows if row["status"] == "block"),
+                "penalty": sum(1 for row in rows if row["status"] == "penalty"),
+                "neutral": sum(1 for row in rows if row["status"] == "neutral"),
+            },
+            "runtime_effect": "paper_historical_outcome_feedback_materialized",
+            "top_feedback": rows[:10],
+        }
 
     def _classify_evidence_item(self, item: dict[str, Any]) -> str:
         thresholds = self.thresholds

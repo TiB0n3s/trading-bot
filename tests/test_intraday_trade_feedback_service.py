@@ -365,6 +365,45 @@ def test_capture_intraday_performance_snapshot_persists_feedback_event():
     )
 
 
+def test_refresh_historical_outcome_feedback_persists_prior_sessions_for_active_evidence():
+    with tempfile.TemporaryDirectory() as tmp:
+        db_path = Path(tmp) / "trades.db"
+        with sqlite3.connect(db_path) as con:
+            _create_trades_table(con)
+            _create_matched_trades_table(con)
+            for i in range(1, 4):
+                _insert_matched_trade(
+                    con,
+                    entry_ts=f"2026-06-03 10:0{i}:00",
+                    exit_ts=f"2026-06-03 10:1{i}:00",
+                )
+
+        service = IntradayTradeFeedbackService(db_path=db_path)
+        payload = service.refresh_historical_outcome_feedback(
+            "2026-06-04",
+            created_at="2026-06-04T22:00:00+00:00",
+        )
+        evidence = service.build_evidence("2026-06-04")
+
+        with sqlite3.connect(db_path) as con:
+            rows = con.execute(
+                """
+                SELECT feedback_key, status, trades, evidence_json
+                FROM auto_buy_historical_outcome_feedback
+                WHERE target_date = '2026-06-04'
+                """
+            ).fetchall()
+
+    assert payload["persisted_rows"] > 0
+    assert rows
+    persisted_keys = {row[0] for row in rows}
+    assert "ml=weak_below_45|setup_action=avoid" in persisted_keys
+    item = evidence["ml=weak_below_45|setup_action=avoid"]
+    assert item["historical_materialized"] is True
+    assert item["historical_trades"] == 3
+    assert item["sources"] == ["historical_matched_trades"]
+
+
 if __name__ == "__main__":
     test_intraday_feedback_blocks_repeated_losing_bucket()
     test_historical_feedback_blocks_repeated_losing_pattern_on_future_day()
@@ -372,4 +411,5 @@ if __name__ == "__main__":
     test_broad_setup_action_only_penalizes_not_blocks()
     test_intraday_performance_snapshot_summarizes_same_day_feedback()
     test_capture_intraday_performance_snapshot_persists_feedback_event()
+    test_refresh_historical_outcome_feedback_persists_prior_sessions_for_active_evidence()
     print("intraday trade feedback service tests passed")

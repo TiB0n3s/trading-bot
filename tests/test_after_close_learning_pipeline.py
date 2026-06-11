@@ -39,6 +39,7 @@ def test_after_close_learning_dry_run_lists_recurring_quant_steps():
     assert "symbol_momentum_timing_memory" in out
     assert "policy_backtest_summary" in out
     assert "portfolio_replacement_memory" in out
+    assert "historical_outcome_feedback" in out
     assert "strategy_memory_refresh" in out
     assert "research_export" in out
     assert "paper_learning_authority" in out
@@ -51,6 +52,7 @@ def test_after_close_learning_dry_run_lists_recurring_quant_steps():
     assert "pipeline.retrain" in out
     assert "pipeline.historical_bar_completion_hook" in out
     assert "pipeline.symbol_universe_retrain" in out
+    assert "pipeline.historical_outcome_feedback" in out
 
 
 def test_after_close_wrapper_delegates_learning_to_pipeline_only():

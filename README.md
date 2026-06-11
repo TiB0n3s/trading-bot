@@ -1530,6 +1530,10 @@ Intraday learning has two bounded feedback paths:
 - `fill_stream.py` records a post-fill learning checkpoint after fill events.
   This updates same-day outcome feedback after trades close without running
   heavy model retraining during market hours.
+- `pipeline/historical_outcome_feedback.py` materializes prior-session
+  `matched_trades` outcomes into `auto_buy_historical_outcome_feedback`.
+  Auto-buy feedback evidence consumes this persisted table first, then falls
+  back to live grouping only when no materialized history exists.
 
 Heavy model fitting and promotion remain post-session responsibilities. The
 intraday loop is limited to evidence capture, feedback penalties, and hard

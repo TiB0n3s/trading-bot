@@ -88,6 +88,13 @@ def _build_steps(target_date: str) -> list[Step]:
             description="refresh portfolio replacement memory",
         ),
         Step(
+            name="historical_outcome_feedback",
+            module="pipeline.historical_outcome_feedback",
+            argv=["--date", target_date],
+            critical=False,
+            description="materialize prior-session outcome feedback for active paper intelligence",
+        ),
+        Step(
             name="strategy_memory_refresh",
             module="strategy_learner",
             argv=[],

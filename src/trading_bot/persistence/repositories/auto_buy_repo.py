@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from typing import Any
 
 from db import DB_PATH, get_connection
@@ -127,6 +128,42 @@ def init_tables(db_path=DB_PATH) -> None:
             """
             CREATE INDEX IF NOT EXISTS idx_auto_buy_intraday_feedback_date_key
             ON auto_buy_intraday_feedback(target_date, feedback_key, created_at)
+            """
+        )
+        con.execute(
+            """
+            CREATE TABLE IF NOT EXISTS auto_buy_historical_outcome_feedback (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                created_at TEXT NOT NULL,
+                target_date TEXT NOT NULL,
+                lookback_days INTEGER NOT NULL,
+                feedback_key TEXT NOT NULL,
+                status TEXT NOT NULL,
+                trades INTEGER,
+                wins INTEGER,
+                losses INTEGER,
+                loss_rate REAL,
+                avg_pnl_pct REAL,
+                min_pnl_pct REAL,
+                max_pnl_pct REAL,
+                symbols_json TEXT,
+                sources_json TEXT,
+                evidence_json TEXT,
+                runtime_effect TEXT NOT NULL,
+                UNIQUE(target_date, lookback_days, feedback_key)
+            )
+            """
+        )
+        con.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_auto_buy_historical_feedback_lookup
+            ON auto_buy_historical_outcome_feedback(target_date, lookback_days, feedback_key)
+            """
+        )
+        con.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_auto_buy_historical_feedback_status
+            ON auto_buy_historical_outcome_feedback(target_date, status, trades)
             """
         )
         existing_cols = {
@@ -425,6 +462,88 @@ def historical_matched_trade_rows_for_feedback(
             ORDER BY entry_timestamp ASC, id ASC
             """,
             (target_date, target_date, f"-{int(lookback_days)} days"),
+        ).fetchall()
+
+
+def replace_historical_outcome_feedback(
+    *,
+    created_at: str,
+    target_date: str,
+    lookback_days: int,
+    evidence_rows: list[dict[str, Any]],
+    db_path=DB_PATH,
+) -> int:
+    init_tables(db_path=db_path)
+    with get_connection(db_path) as con:
+        con.execute(
+            """
+            DELETE FROM auto_buy_historical_outcome_feedback
+            WHERE target_date = ? AND lookback_days = ?
+            """,
+            (target_date, int(lookback_days)),
+        )
+        for row in evidence_rows:
+            con.execute(
+                """
+                INSERT INTO auto_buy_historical_outcome_feedback (
+                    created_at,
+                    target_date,
+                    lookback_days,
+                    feedback_key,
+                    status,
+                    trades,
+                    wins,
+                    losses,
+                    loss_rate,
+                    avg_pnl_pct,
+                    min_pnl_pct,
+                    max_pnl_pct,
+                    symbols_json,
+                    sources_json,
+                    evidence_json,
+                    runtime_effect
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    created_at,
+                    target_date,
+                    int(lookback_days),
+                    row.get("key"),
+                    row.get("status"),
+                    row.get("trades"),
+                    row.get("wins"),
+                    row.get("losses"),
+                    row.get("loss_rate"),
+                    row.get("avg_pnl_pct"),
+                    row.get("min_pnl_pct"),
+                    row.get("max_pnl_pct"),
+                    json.dumps(row.get("symbols") or [], sort_keys=True),
+                    json.dumps(row.get("sources") or [], sort_keys=True),
+                    json.dumps(row, sort_keys=True),
+                    row.get("runtime_effect") or "paper_historical_outcome_feedback_materialized",
+                ),
+            )
+    return len(evidence_rows)
+
+
+def historical_outcome_feedback_rows(
+    target_date: str,
+    *,
+    lookback_days: int,
+    db_path=DB_PATH,
+):
+    if not table_exists("auto_buy_historical_outcome_feedback", db_path=db_path):
+        return []
+    with get_connection(db_path) as con:
+        return con.execute(
+            """
+            SELECT *
+            FROM auto_buy_historical_outcome_feedback
+            WHERE target_date = ?
+              AND lookback_days = ?
+            ORDER BY trades DESC, feedback_key
+            """,
+            (target_date, int(lookback_days)),
         ).fetchall()
 
 

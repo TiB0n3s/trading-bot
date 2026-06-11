@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import sys
+import tempfile
 from datetime import datetime
 from pathlib import Path
 
@@ -71,6 +72,37 @@ def test_authority_matrix_standardizes_runtime_permissions():
         "live size increase",
     )
     assert_equal(matrix.can("deterministic_risk", "block", "cash_full"), True, "risk block")
+
+
+def test_authority_matrix_can_load_config_overlay():
+    with tempfile.TemporaryDirectory() as tmp:
+        path = Path(tmp) / "authority.json"
+        path.write_text(
+            """
+            {
+              "layers": {
+                "transformer": {
+                  "can_block": "paper_block",
+                  "can_size_down": "live_block"
+                }
+              }
+            }
+            """
+        )
+        matrix = AuthorityMatrix(layers=None)
+        default_allowed = matrix.can("transformer", "block", "paper")
+
+        from src.trading_bot.runtime.authority import load_authority_layers_from_config
+
+        configured = AuthorityMatrix(layers=load_authority_layers_from_config(path))
+
+    assert_equal(default_allowed, False, "default transformer block")
+    assert_equal(configured.can("transformer", "block", "paper"), True, "configured paper block")
+    assert_equal(
+        configured.can("transformer", "size_down", "cash_full"),
+        True,
+        "configured live size down",
+    )
 
 
 def test_gate_engine_records_ordered_trace_and_caps():
@@ -452,6 +484,7 @@ def test_approval_path_stores_canonical_trace_for_paper_authority():
 def main():
     tests = [
         test_authority_matrix_standardizes_runtime_permissions,
+        test_authority_matrix_can_load_config_overlay,
         test_gate_engine_records_ordered_trace_and_caps,
         test_gate_engine_enforced_block_overrides_approved_state,
         test_gate_engine_accepts_legacy_src_gate_result_alias,

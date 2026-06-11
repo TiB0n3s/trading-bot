@@ -13,6 +13,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Callable
 
+from services.cash_readiness_interceptor_service import evaluate_cash_readiness_interceptor
 from services.decision.gates.live_risk import (
     evaluate_execution_quality_live_gate,
     evaluate_live_circuit_breaker,
@@ -74,6 +75,25 @@ def execute_order(
             submitted=False,
             status="dry_run",
             order_result=order_result,
+        )
+
+    cash_readiness = evaluate_cash_readiness_interceptor(
+        action=action,
+        execution_mode=execution_mode,
+        account_state=account_state,
+    )
+    account_state.setdefault("live_order_gates", {})["cash_readiness_interceptor"] = (
+        cash_readiness.to_dict()
+    )
+    if not cash_readiness.allowed:
+        return ExecutionOutcome(
+            submitted=False,
+            status="rejected",
+            rejection_category=cash_readiness.category,
+            rejection_reason=cash_readiness.reason,
+            failure_reason=f"{cash_readiness.category}: {cash_readiness.reason}",
+            account_state_updates={"live_order_gates": account_state.get("live_order_gates") or {}},
+            metadata=cash_readiness.metadata,
         )
 
     live_circuit = evaluate_live_circuit_breaker(

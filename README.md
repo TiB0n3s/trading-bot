@@ -1539,6 +1539,26 @@ Heavy model fitting and promotion remain post-session responsibilities. The
 intraday loop is limited to evidence capture, feedback penalties, and hard
 blocks for repeated losing patterns.
 
+Cash-Readiness Interlocks
+
+Broker submission is protected by `services.cash_readiness_interceptor_service`
+at the execution boundary before second-look checks or broker submit:
+
+- Any active `runtime_state/risk_lockout.json` state blocks order routing. Set
+  `RISK_LOCKOUT_STATE_PATH` to override the file location.
+- In `EXECUTION_MODE=cash_safe` or `EXECUTION_MODE=cash_full`, buy routing also
+  requires a fresh daily prediction cache with nonzero symbols and no cache
+  error. A missing, stale, empty, or corrupt cache activates the persistent
+  lockout with reason `cash_prediction_cache_gate:*`.
+- Paper validation can opt into the same prediction-cache cash-freeze behavior
+  with `PREDICTION_CACHE_CASH_LOCKOUT_IN_PAPER=true`.
+
+Runtime authority defaults remain in `src/trading_bot/runtime/authority.py`.
+Set `AUTHORITY_MATRIX_CONFIG=/path/to/authority.json` to apply a JSON overlay
+for promotion testing without changing core code. The overlay must use the
+standard authority vocabulary: `off`, `observe`, `warn`, `size_down`,
+`paper_block`, or `live_block`.
+
 Example:
 
 ```bash

@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import json
+import os
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 AUTHORITY_VOCABULARY = (
@@ -86,7 +89,7 @@ DEFAULT_LAYER_AUTHORITY: dict[str, LayerAuthority] = {
 
 class AuthorityMatrix:
     def __init__(self, layers: dict[str, LayerAuthority] | None = None):
-        self.layers = dict(layers or DEFAULT_LAYER_AUTHORITY)
+        self.layers = dict(layers or load_authority_layers_from_config() or DEFAULT_LAYER_AUTHORITY)
 
     @staticmethod
     def _mode_allows(permission: str, execution_mode: str) -> bool:
@@ -124,6 +127,7 @@ class AuthorityMatrix:
     def to_dict(self) -> dict[str, Any]:
         return {
             "version": "authority_matrix_v1",
+            "config_path": os.getenv("AUTHORITY_MATRIX_CONFIG"),
             "vocabulary": list(AUTHORITY_VOCABULARY),
             "layers": {
                 key: {
@@ -136,3 +140,48 @@ class AuthorityMatrix:
                 for key, value in sorted(self.layers.items())
             },
         }
+
+
+def _layer_from_dict(
+    payload: dict[str, Any], *, base: LayerAuthority | None = None
+) -> LayerAuthority:
+    base = base or LayerAuthority()
+    values = {}
+    for field_name in (
+        "can_block",
+        "can_size_down",
+        "can_approve",
+        "can_increase_size",
+        "can_submit_order",
+    ):
+        values[field_name] = normalize_authority_mode(
+            payload.get(field_name) or getattr(base, field_name)
+        )
+    return LayerAuthority(**values)
+
+
+def load_authority_layers_from_config(
+    path: str | Path | None = None,
+) -> dict[str, LayerAuthority] | None:
+    raw_path = path or os.getenv("AUTHORITY_MATRIX_CONFIG")
+    if not raw_path:
+        return None
+    config_path = Path(raw_path)
+    if not config_path.exists():
+        return None
+    try:
+        payload = json.loads(config_path.read_text())
+    except Exception:
+        return None
+    if not isinstance(payload, dict):
+        return None
+    raw_layers = payload.get("layers") if isinstance(payload.get("layers"), dict) else payload
+    if not isinstance(raw_layers, dict):
+        return None
+
+    layers = dict(DEFAULT_LAYER_AUTHORITY)
+    for layer, raw in raw_layers.items():
+        if not isinstance(raw, dict):
+            continue
+        layers[str(layer)] = _layer_from_dict(raw, base=layers.get(str(layer)))
+    return layers

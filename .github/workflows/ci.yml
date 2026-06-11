@@ -11,6 +11,8 @@ jobs:
     name: Fast safety checks
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    env:
+      TRADING_BOT_SKIP_VENV_REEXEC: "1"
 
     steps:
       - name: Check out repository
@@ -28,6 +30,17 @@ jobs:
           python -m pip install -r requirements-base.txt
           python -m pip install -r requirements-dev.txt
           python -m pip install --no-deps -e .
+
+      - name: Show Python dependency context
+        run: |
+          python --version
+          python -m pip --version
+          python -m pip check
+          python - <<'PY'
+          import importlib.util
+          for name in ("alpaca", "alpaca_trade_api", "webull", "google.protobuf"):
+              print(f"{name}: {importlib.util.find_spec(name) is not None}")
+          PY
 
       - name: Ruff lint touched safety surfaces
         run: |

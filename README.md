@@ -145,6 +145,9 @@ WEBHOOK_SECRET
 ANTHROPIC_API_KEY
 ALPACA_API_KEY
 ALPACA_SECRET_KEY
+WEBULL_API_KEY
+WEBULL_API_SECRET
+WEBULL_ACCOUNT_ID
 LOG_LEVEL
 EXECUTION_MODE
 LIVE_TRADING_ENABLED
@@ -178,8 +181,51 @@ use `trading_bot.*`, not `src.trading_bot.*`. Fresh checkouts should run
 `pip install -e .` or set `PYTHONPATH=src` before invoking packaged modules.
 `pyproject.toml` also declares optional extras for metadata and future packaging:
 `runtime`, `research`, `dashboard` (`streamlit`), `timescale` (`asyncpg`),
-`sentiment` (`transformers`), and `dev`. Docker and CI still use the
+`sentiment` (`transformers`), `webull` (`webull-openapi-python-sdk`), and `dev`.
+Docker and CI still use the
 requirements files as the operational install source.
+
+Webull is configured as a read-only diagnostic integration until parity and
+ledger evidence justify expanding authority. The official Webull SDK currently
+requires dependency versions that conflict with the Alpaca runtime stack
+(`urllib3>=2` versus `alpaca-trade-api` requiring `urllib3<2`), so do not
+install the Webull SDK into the main trading runtime venv. Use an isolated
+adapter venv when direct Webull API calls are needed:
+
+```bash
+python3 -m venv venv-webull
+./venv-webull/bin/pip install -U pip
+./venv-webull/bin/pip install -e .
+./venv-webull/bin/pip install webull-openapi-python-sdk==2.0.10
+```
+
+Store credentials outside git, normally in `/etc/trading-bot.env`:
+
+```bash
+WEBULL_API_KEY=...
+WEBULL_API_SECRET=...
+WEBULL_ACCOUNT_ID=...
+WEBULL_REGION=US
+```
+
+Validate readiness and quote parity:
+
+```bash
+python ops_check.py webull-readiness
+TRADING_BOT_SKIP_VENV_REEXEC=1 \
+  PYTHONPATH=/home/tradingbot/trading-bot/scripts:/home/tradingbot/trading-bot/src:/home/tradingbot/trading-bot \
+  ./venv-webull/bin/python ops_check.py webull-market-data-parity AAPL
+```
+
+The Webull SDK may require app-side device registration or 2FA before quote
+calls succeed. If the parity command returns `NO_AVAILABLE_DEVICE`, complete
+the latest Webull app 2FA/device verification and rerun the command. The SDK
+token cache is ignored via `conf/` and must not be committed.
+
+The Webull adapter is diagnostic-only in this phase. It does not route orders,
+increase size, approve trades, or replace Alpaca/Polygon as the ML training
+source. Its first role is provider redundancy: quote freshness, bid/ask spread,
+and cross-provider parity evidence for execution-quality scoring.
 
 Container build targets are split the same way:
 

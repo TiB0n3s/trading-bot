@@ -110,6 +110,8 @@ _LAZY_HANDLER_REFS = {
     "run_local_load_probe_report": "trading_bot.ops_checks.commands.local_load_probe_checks:run_local_load_probe_report",
     "run_log_ledger_consistency": "trading_bot.ops_checks.commands.log_ledger_checks:run_log_ledger_consistency",
     "run_market_data_parity": "trading_bot.ops_checks.commands.market_data_parity_checks:run_market_data_parity",
+    "run_webull_market_data_parity": "trading_bot.ops_checks.commands.webull_market_data_checks:run_webull_market_data_parity",
+    "run_webull_readiness": "trading_bot.ops_checks.commands.webull_market_data_checks:run_webull_readiness",
     "run_missed_buy_review": "trading_bot.ops_checks.commands.missed_buy_review_checks:run_missed_buy_review",
     "run_ml_dataset_export_check": "trading_bot.ops_checks.commands.ml_dataset_checks:run_ml_dataset_export_check",
     "run_model_promotion_evidence_report": "trading_bot.ops_checks.commands.model_promotion_evidence_checks:run_model_promotion_evidence_report",
@@ -160,6 +162,13 @@ ENV_FILE = Path("/etc/trading-bot.env")
 
 
 def reexec_under_venv_if_available():
+    if os.getenv("TRADING_BOT_SKIP_VENV_REEXEC", "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }:
+        return
     if not VENV_PYTHON.exists():
         return
 

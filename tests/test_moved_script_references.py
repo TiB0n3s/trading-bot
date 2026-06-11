@@ -104,6 +104,12 @@ def test_ci_uses_pinned_dev_requirements():
     assert "python -m pip install pytest ruff" not in ci
 
 
+def test_ops_check_allows_skipping_default_venv_reexec_for_adapter_venvs():
+    source = (ROOT / "src" / "trading_bot" / "ops_checks" / "legacy_cli.py").read_text()
+
+    assert "TRADING_BOT_SKIP_VENV_REEXEC" in source
+
+
 def main():
     tests = [
         test_run_tests_resolves_repo_root_after_move,
@@ -114,6 +120,7 @@ def main():
         test_moved_fill_stream_script_bootstraps_repo_import_paths,
         test_repo_safety_scripts_cover_active_source_dirs,
         test_ci_uses_pinned_dev_requirements,
+        test_ops_check_allows_skipping_default_venv_reexec_for_adapter_venvs,
     ]
     for test in tests:
         test()

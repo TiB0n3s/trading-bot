@@ -27,6 +27,7 @@ OPTIONAL_EXTRA_EXPECTATIONS = {
     "dashboard": {"streamlit"},
     "timescale": {"asyncpg"},
     "sentiment": {"transformers"},
+    "webull": {"webull-openapi-python-sdk"},
 }
 DEV_ONLY_PINS = {
     "mypy",

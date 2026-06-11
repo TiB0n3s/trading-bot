@@ -60,9 +60,16 @@ def normalize_bar(raw_bar: Any) -> dict[str, Any]:
 
 
 class MarketDataParityService:
-    def __init__(self, *, alpaca_market_data: Any, polygon_market_data: Any):
+    def __init__(
+        self,
+        *,
+        alpaca_market_data: Any,
+        polygon_market_data: Any,
+        webull_market_data: Any | None = None,
+    ):
         self.alpaca_market_data = alpaca_market_data
         self.polygon_market_data = polygon_market_data
+        self.webull_market_data = webull_market_data
 
     def latest_quote_parity(self, symbol: str) -> dict[str, Any]:
         symbol = str(symbol or "").upper().strip()
@@ -107,6 +114,55 @@ class MarketDataParityService:
             "spread_pct_diff": spread_pct_diff,
             "alpaca_error": alpaca_error,
             "polygon_error": polygon_error,
+        }
+
+    def latest_quote_provider_parity(self, symbol: str) -> dict[str, Any]:
+        payload = self.latest_quote_parity(symbol)
+        webull_error = None
+        if self.webull_market_data is None:
+            webull = normalize_quote("webull", {})
+            webull_error = "Webull market-data service is not configured"
+        else:
+            try:
+                webull = normalize_quote(
+                    "webull",
+                    self.webull_market_data.latest_quote_summary(symbol),
+                )
+            except Exception as exc:
+                webull_error = str(exc)
+                webull = normalize_quote("webull", {})
+
+        provider_rows = {
+            "alpaca": payload["alpaca"],
+            "polygon": payload["polygon"],
+            "webull": webull,
+        }
+        available_mids = {
+            provider: row["mid"]
+            for provider, row in provider_rows.items()
+            if row.get("mid") is not None
+        }
+        mid_range = None
+        mid_range_pct = None
+        if len(available_mids) >= 2:
+            values = list(available_mids.values())
+            mid_range = max(values) - min(values)
+            reference = sum(values) / len(values)
+            mid_range_pct = mid_range / reference * 100 if reference else None
+
+        status = "ok" if all(row["available"] for row in provider_rows.values()) else "partial"
+        if not any(row["available"] for row in provider_rows.values()):
+            status = "failed"
+
+        return {
+            **payload,
+            "version": "market_data_provider_parity_v1",
+            "providers": provider_rows,
+            "webull": webull,
+            "webull_error": webull_error,
+            "mid_range": mid_range,
+            "mid_range_pct": mid_range_pct,
+            "status": status,
         }
 
     def daily_bar_parity(self, symbol: str, target_date: str) -> dict[str, Any]:

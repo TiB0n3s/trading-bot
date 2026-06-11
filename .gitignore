@@ -1,4 +1,5 @@
 venv/
+venv-webull/
 __pycache__/
 *.pyc
 *.egg-info/
@@ -62,6 +63,7 @@ daily_summary.log
 fill_stream.log
 # Secrets / local env
 /etc/trading-bot.env
+conf/
 # Python/runtime cache
 .pytest_cache/
 rolling_momentum.json

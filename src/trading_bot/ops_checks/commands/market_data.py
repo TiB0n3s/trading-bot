@@ -20,6 +20,12 @@ COMMAND_SPECS: dict[str, OpsCommandSpec] = {
     "volatile-session-intelligence": spec("volatile-session-intelligence"),
     "cross-asset-lead-map": noarg("cross-asset-lead-map", "cross_asset_lead_map"),
     "market-data-parity": spec("market-data-parity", "market_data_parity", "symbol_arg"),
+    "webull-readiness": noarg("webull-readiness", "run_webull_readiness"),
+    "webull-market-data-parity": spec(
+        "webull-market-data-parity",
+        "run_webull_market_data_parity",
+        "symbol_arg",
+    ),
     "bar-pattern-backfill": spec("bar-pattern-backfill"),
     "historical-bar-archive": spec("historical-bar-archive"),
     "historical-bar-coverage": spec(

@@ -86,6 +86,9 @@ timescale = [
 sentiment = [
     "transformers>=4.40,<5",
 ]
+webull = [
+    "webull-openapi-python-sdk==2.0.10",
+]
 dev = [
     "mypy==1.18.2",
     "pip-audit==2.9.0",

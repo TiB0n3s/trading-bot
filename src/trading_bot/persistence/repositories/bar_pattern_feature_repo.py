@@ -56,6 +56,71 @@ class BarPatternFeatureRepository:
             ).fetchone()
             return int(row["rows"] or 0) if row else 0
 
+    def latest_webull_rsi_snapshot(self, symbol: str) -> dict[str, Any]:
+        normalized_symbol = str(symbol or "").upper().strip()
+        if not normalized_symbol:
+            return {"found": False, "symbol": "", "reason": "symbol_required"}
+        with get_connection(self.db_path) as con:
+            if not self._table_exists(con):
+                return {
+                    "found": False,
+                    "symbol": normalized_symbol,
+                    "reason": "bar_pattern_features_missing",
+                }
+            columns = self._table_columns(con)
+            required = {
+                "symbol",
+                "bar_timestamp",
+                "timeframe",
+                "close",
+                "webull_rsi_14",
+                "webull_rsi_zone",
+                "webull_rsi_exit_signal",
+                "webull_rsi_bearish_divergence",
+            }
+            missing = sorted(required - columns)
+            if missing:
+                return {
+                    "found": False,
+                    "symbol": normalized_symbol,
+                    "reason": f"missing_columns:{','.join(missing)}",
+                }
+            row = con.execute(
+                """
+                SELECT
+                    bar_timestamp,
+                    timeframe,
+                    close,
+                    webull_rsi_14,
+                    webull_rsi_zone,
+                    webull_rsi_exit_signal,
+                    webull_rsi_bearish_divergence
+                FROM bar_pattern_features
+                WHERE symbol = ?
+                  AND webull_rsi_14 IS NOT NULL
+                ORDER BY bar_timestamp DESC
+                LIMIT 1
+                """,
+                (normalized_symbol,),
+            ).fetchone()
+        if not row:
+            return {
+                "found": False,
+                "symbol": normalized_symbol,
+                "reason": "no_persisted_webull_rsi_rows",
+            }
+        return {
+            "found": True,
+            "symbol": normalized_symbol,
+            "bar_timestamp": row["bar_timestamp"],
+            "timeframe": row["timeframe"],
+            "close": row["close"],
+            "webull_rsi_14": row["webull_rsi_14"],
+            "webull_rsi_zone": row["webull_rsi_zone"],
+            "webull_rsi_exit_signal": row["webull_rsi_exit_signal"],
+            "webull_rsi_bearish_divergence": row["webull_rsi_bearish_divergence"],
+        }
+
     def init_table(self) -> None:
         with get_connection(self.db_path) as con:
             con.execute(
@@ -105,6 +170,10 @@ class BarPatternFeatureRepository:
                     macd REAL,
                     macd_signal REAL,
                     rsi_14 REAL,
+                    webull_rsi_14 REAL,
+                    webull_rsi_zone TEXT,
+                    webull_rsi_exit_signal TEXT,
+                    webull_rsi_bearish_divergence INTEGER,
                     efi REAL,
                     efi_ema_13 REAL,
                     efi_slope_3 REAL,
@@ -205,6 +274,10 @@ class BarPatternFeatureRepository:
             self._ensure_column(con, "macd", "REAL")
             self._ensure_column(con, "macd_signal", "REAL")
             self._ensure_column(con, "rsi_14", "REAL")
+            self._ensure_column(con, "webull_rsi_14", "REAL")
+            self._ensure_column(con, "webull_rsi_zone", "TEXT")
+            self._ensure_column(con, "webull_rsi_exit_signal", "TEXT")
+            self._ensure_column(con, "webull_rsi_bearish_divergence", "INTEGER")
             self._ensure_column(con, "candle_body_pct", "REAL")
             self._ensure_column(con, "upper_wick_pct", "REAL")
             self._ensure_column(con, "lower_wick_pct", "REAL")
@@ -295,6 +368,8 @@ class BarPatternFeatureRepository:
                     slippage_estimate_pct, execution_cost_estimate_pct,
                     liquidity_zone_label, liquidity_sweep_risk, ema_12,
                     ema_26, macd, macd_signal, rsi_14,
+                    webull_rsi_14, webull_rsi_zone, webull_rsi_exit_signal,
+                    webull_rsi_bearish_divergence,
                     efi, efi_ema_13, efi_slope_3, efi_zscore_20,
                     pvt, pvt_slope_5, pvt_new_high_30,
                     price_return_5, price_vs_sma_20_pct, breakout_20,
@@ -332,6 +407,8 @@ class BarPatternFeatureRepository:
                     :slippage_estimate_pct, :execution_cost_estimate_pct,
                     :liquidity_zone_label, :liquidity_sweep_risk, :ema_12,
                     :ema_26, :macd, :macd_signal, :rsi_14,
+                    :webull_rsi_14, :webull_rsi_zone, :webull_rsi_exit_signal,
+                    :webull_rsi_bearish_divergence,
                     :efi, :efi_ema_13, :efi_slope_3, :efi_zscore_20,
                     :pvt, :pvt_slope_5, :pvt_new_high_30,
                     :price_return_5, :price_vs_sma_20_pct, :breakout_20,
@@ -396,6 +473,10 @@ class BarPatternFeatureRepository:
                     macd = excluded.macd,
                     macd_signal = excluded.macd_signal,
                     rsi_14 = excluded.rsi_14,
+                    webull_rsi_14 = excluded.webull_rsi_14,
+                    webull_rsi_zone = excluded.webull_rsi_zone,
+                    webull_rsi_exit_signal = excluded.webull_rsi_exit_signal,
+                    webull_rsi_bearish_divergence = excluded.webull_rsi_bearish_divergence,
                     efi = excluded.efi,
                     efi_ema_13 = excluded.efi_ema_13,
                     efi_slope_3 = excluded.efi_slope_3,
@@ -507,7 +588,13 @@ class BarPatternFeatureRepository:
                           OR execution_cost_estimate_pct IS NOT NULL
                           OR liquidity_sweep_risk IS NOT NULL
                         THEN 1 ELSE 0 END) AS rows_with_microstructure_context,
-                    SUM(CASE WHEN ema_12 IS NOT NULL AND ema_26 IS NOT NULL AND macd IS NOT NULL AND rsi_14 IS NOT NULL THEN 1 ELSE 0 END)
+                    SUM(CASE
+                        WHEN ema_12 IS NOT NULL
+                         AND ema_26 IS NOT NULL
+                         AND macd IS NOT NULL
+                         AND rsi_14 IS NOT NULL
+                         AND webull_rsi_14 IS NOT NULL
+                        THEN 1 ELSE 0 END)
                         AS rows_with_technical_indicators,
                     SUM(CASE WHEN forward_return_pct IS NOT NULL THEN 1 ELSE 0 END)
                         AS rows_with_forward_outcome,

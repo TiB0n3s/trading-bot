@@ -219,6 +219,7 @@ python ops_check.py webull-readiness
 TRADING_BOT_SKIP_VENV_REEXEC=1 \
   PYTHONPATH=/home/tradingbot/trading-bot:/home/tradingbot/trading-bot/scripts:/home/tradingbot/trading-bot/src \
   ./venv-webull/bin/python ops_check.py webull-market-data-parity AAPL
+WEBULL_RSI_EXPECTED=62.4 python ops_check.py webull-rsi-calibration AAPL
 ```
 
 The Webull SDK may require app-side device registration or 2FA before quote
@@ -230,6 +231,10 @@ The Webull adapter is diagnostic-only in this phase. It does not route orders,
 increase size, approve trades, or replace Alpaca/Polygon as the ML training
 source. Its first role is provider redundancy: quote freshness, bid/ask spread,
 and cross-provider parity evidence for execution-quality scoring.
+The `webull-rsi-calibration` check compares the latest persisted
+Webull-compatible Wilder RSI feature against an optional manually supplied app
+value. This is also diagnostic-only and should be used to validate indicator
+parity before giving the feature promotion evidence.
 
 Container build targets are split the same way:
 
@@ -586,7 +591,7 @@ audited dataset snapshot.
 Historical bar contract:
 
 - cached CSVs include OHLCV, VWAP, source, adjusted flag, and inclusive interval-start metadata
-- `bar_pattern_features` persists raw OHLCV/VWAP plus engineered RSI/EMA/MACD, candle physics, EFI/PVT, CVD/VPIN proxies, fractional-memory, triple-barrier, and trend-scan fields
+- `bar_pattern_features` persists raw OHLCV/VWAP plus engineered RSI/EMA/MACD, Webull-compatible Wilder RSI, candle physics, EFI/PVT, CVD/VPIN proxies, fractional-memory, triple-barrier, and trend-scan fields
 - supervised training consumes normalized/derived features, not raw absolute price levels, so cross-symbol models are less likely to learn ticker price scale instead of behavior
 - intra-bar open/high/low/close event timestamps require tick-level data; Polygon 1-minute aggregate bars do not provide those timestamps
 - tick, volume, and dollar bars remain a future data-sampling layer once transaction-level data is archived

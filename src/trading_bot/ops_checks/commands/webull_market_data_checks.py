@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import io
+import os
 from contextlib import redirect_stderr, redirect_stdout
 from typing import Any
 
@@ -14,6 +15,7 @@ from services.webull_market_data_service import (
     _suppress_webull_sdk_logging,
     webull_readiness,
 )
+from services.webull_rsi_calibration_service import latest_webull_rsi_snapshot
 
 
 def _fmt(value: Any, digits: int = 4) -> str:
@@ -107,4 +109,51 @@ def run_webull_market_data_parity(symbol: str) -> bool:
     ok = payload["status"] == "ok"
     print()
     print("[OK] provider quote parity available" if ok else "[WARN] provider quote parity partial")
+    return ok
+
+
+def run_webull_rsi_calibration(symbol: str) -> bool:
+    symbol = str(symbol or "").upper().strip()
+
+    print()
+    print("=" * 72)
+    print(f"  Webull RSI Calibration - {symbol or 'UNKNOWN'}")
+    print("=" * 72)
+    if not symbol:
+        print("[WARN] symbol is required")
+        return False
+
+    snapshot = latest_webull_rsi_snapshot(symbol)
+    if not snapshot.found:
+        print(f"[WARN] {snapshot.reason or 'webull_rsi_snapshot_unavailable'}")
+        return False
+
+    observed = float(snapshot.webull_rsi_14 or 0.0)
+    expected_text = os.getenv(f"WEBULL_RSI_EXPECTED_{symbol}") or os.getenv("WEBULL_RSI_EXPECTED")
+    tolerance = float(os.getenv("WEBULL_RSI_TOLERANCE", "0.75"))
+    print("report_version          : webull_rsi_calibration_v1")
+    print("runtime_effect          : diagnostic_only_no_live_authority")
+    print(f"symbol                  : {symbol}")
+    print(f"bar_timestamp           : {snapshot.bar_timestamp}")
+    print(f"timeframe               : {snapshot.timeframe}")
+    print(f"close                   : {_fmt(snapshot.close)}")
+    print(f"webull_rsi_14           : {_fmt(observed)}")
+    print(f"webull_rsi_zone         : {snapshot.webull_rsi_zone or '-'}")
+    print(f"webull_rsi_exit_signal  : {snapshot.webull_rsi_exit_signal or '-'}")
+    print(f"bearish_divergence      : {snapshot.webull_rsi_bearish_divergence}")
+    print(f"expected_source         : WEBULL_RSI_EXPECTED_{symbol} or WEBULL_RSI_EXPECTED")
+    print(f"tolerance               : {tolerance:.4f}")
+
+    if not expected_text:
+        print()
+        print("[OK] Webull RSI feature is present; set WEBULL_RSI_EXPECTED to compare app value")
+        return True
+
+    expected = float(expected_text)
+    delta = abs(observed - expected)
+    ok = delta <= tolerance
+    print(f"expected_rsi            : {_fmt(expected)}")
+    print(f"absolute_delta          : {_fmt(delta)}")
+    print()
+    print("[OK] Webull RSI within tolerance" if ok else "[WARN] Webull RSI outside tolerance")
     return ok

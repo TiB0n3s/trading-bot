@@ -173,6 +173,82 @@ def _rsi_at(values: list[float], idx: int, window: int = 14) -> float | None:
     return 100.0 - (100.0 / (1.0 + rs))
 
 
+def _wilder_rsi(values: list[float], window: int = 14) -> list[float | None]:
+    output: list[float | None] = [None] * len(values)
+    if len(values) <= window:
+        return output
+
+    gains: list[float] = []
+    losses: list[float] = []
+    for pos in range(1, window + 1):
+        change = values[pos] - values[pos - 1]
+        gains.append(max(0.0, change))
+        losses.append(max(0.0, -change))
+
+    avg_gain = sum(gains) / window
+    avg_loss = sum(losses) / window
+
+    def _calculate(avg_gain_value: float, avg_loss_value: float) -> float:
+        if avg_loss_value == 0:
+            return 100.0 if avg_gain_value > 0 else 50.0
+        rs = avg_gain_value / avg_loss_value
+        return 100.0 - (100.0 / (1.0 + rs))
+
+    output[window] = _calculate(avg_gain, avg_loss)
+    for idx in range(window + 1, len(values)):
+        change = values[idx] - values[idx - 1]
+        gain = max(0.0, change)
+        loss = max(0.0, -change)
+        avg_gain = ((avg_gain * (window - 1)) + gain) / window
+        avg_loss = ((avg_loss * (window - 1)) + loss) / window
+        output[idx] = _calculate(avg_gain, avg_loss)
+    return output
+
+
+def _webull_rsi_zone(value: float | None) -> str | None:
+    if value is None:
+        return None
+    if value >= 70.0:
+        return "overbought"
+    if value <= 30.0:
+        return "oversold"
+    return "neutral"
+
+
+def _webull_rsi_exit_signal(previous: float | None, current: float | None) -> str | None:
+    if previous is None or current is None:
+        return None
+    if previous >= 70.0 and current < 70.0:
+        return "exited_overbought"
+    if previous <= 30.0 and current > 30.0:
+        return "exited_oversold"
+    return "none"
+
+
+def _webull_rsi_bearish_divergence(
+    closes: list[float],
+    rsi_values: list[float | None],
+    idx: int,
+    *,
+    window: int = 20,
+) -> int:
+    if idx <= 0 or idx >= len(closes) or idx >= len(rsi_values):
+        return 0
+    current_rsi = rsi_values[idx]
+    if current_rsi is None:
+        return 0
+    start = max(0, idx - window)
+    prior_pairs = [
+        (closes[pos], rsi_values[pos]) for pos in range(start, idx) if rsi_values[pos] is not None
+    ]
+    if not prior_pairs:
+        return 0
+    prior_high_close, prior_high_rsi = max(prior_pairs, key=lambda item: item[0])
+    if prior_high_rsi is None:
+        return 0
+    return 1 if closes[idx] > prior_high_close and current_rsi < prior_high_rsi else 0
+
+
 def _zscore(values: list[float]) -> float | None:
     if len(values) < 2:
         return None
@@ -730,6 +806,7 @@ class BarPatternFeatureService:
         fractional_diff_close = [
             _fractional_diff_at(closes, idx, d=0.45) for idx in range(len(normalized))
         ]
+        webull_rsi_14_values = _wilder_rsi(closes, 14)
         market_dts = [_parse_timestamp(row["timestamp"]) for row in normalized]
         market_dates = [dt.date() if dt else None for dt in market_dts]
         prior_session_closes: list[float | None] = []
@@ -920,6 +997,18 @@ class BarPatternFeatureService:
             execution_cost_estimate_pct = normalized[idx].get("execution_cost_estimate_pct")
             liquidity_zone_label = normalized[idx].get("liquidity_zone_label")
             liquidity_sweep_risk = normalized[idx].get("liquidity_sweep_risk")
+            webull_rsi_14 = webull_rsi_14_values[idx]
+            previous_webull_rsi_14 = webull_rsi_14_values[idx - 1] if idx > 0 else None
+            webull_rsi_zone = _webull_rsi_zone(webull_rsi_14)
+            webull_rsi_exit_signal = _webull_rsi_exit_signal(
+                previous_webull_rsi_14,
+                webull_rsi_14,
+            )
+            webull_rsi_bearish_divergence = _webull_rsi_bearish_divergence(
+                closes,
+                webull_rsi_14_values,
+                idx,
+            )
 
             feature_json = {
                 "bar_source": row_source,
@@ -963,6 +1052,10 @@ class BarPatternFeatureService:
                 "macd": macd,
                 "macd_signal": macd_signal,
                 "rsi_14": _rsi_at(closes, idx, 14),
+                "webull_rsi_14": webull_rsi_14,
+                "webull_rsi_zone": webull_rsi_zone,
+                "webull_rsi_exit_signal": webull_rsi_exit_signal,
+                "webull_rsi_bearish_divergence": webull_rsi_bearish_divergence,
                 "efi": efi_raw[idx],
                 "efi_ema_13": efi_ema[idx],
                 "efi_slope_3": efi_slope_3,
@@ -1043,6 +1136,10 @@ class BarPatternFeatureService:
                     "macd": _round(macd),
                     "macd_signal": _round(macd_signal),
                     "rsi_14": _round(_rsi_at(closes, idx, 14)),
+                    "webull_rsi_14": _round(webull_rsi_14),
+                    "webull_rsi_zone": webull_rsi_zone,
+                    "webull_rsi_exit_signal": webull_rsi_exit_signal,
+                    "webull_rsi_bearish_divergence": webull_rsi_bearish_divergence,
                     "efi": _round(efi_raw[idx]),
                     "efi_ema_13": _round(efi_ema[idx]),
                     "efi_slope_3": _round(efi_slope_3),

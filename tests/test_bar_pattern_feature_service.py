@@ -92,6 +92,10 @@ def test_bar_pattern_service_builds_efi_pvt_forward_features():
     assert first["macd"] is not None
     assert first["macd_signal"] is not None
     assert first["rsi_14"] is not None
+    assert first["webull_rsi_14"] is not None
+    assert first["webull_rsi_zone"] in {"overbought", "oversold", "neutral"}
+    assert first["webull_rsi_exit_signal"] in {"exited_overbought", "exited_oversold", "none"}
+    assert first["webull_rsi_bearish_divergence"] in {0, 1}
     assert first["efi"] is not None
     assert first["efi_ema_13"] is not None
     assert first["pvt"] is not None

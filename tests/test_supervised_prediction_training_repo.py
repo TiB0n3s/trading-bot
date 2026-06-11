@@ -67,6 +67,8 @@ def _build_db(path: Path) -> None:
                 macd REAL,
                 macd_signal REAL,
                 rsi_14 REAL,
+                webull_rsi_14 REAL,
+                webull_rsi_bearish_divergence INTEGER,
                 trend_scan_label INTEGER,
                 trend_scan_tstat REAL,
                 trend_scan_bars INTEGER,
@@ -119,6 +121,7 @@ def _build_db(path: Path) -> None:
                     vpin_toxicity_20, fractional_diff_close_045,
                     fractional_diff_zscore_20,
                     ema_12, ema_26, macd, macd_signal, rsi_14,
+                    webull_rsi_14, webull_rsi_bearish_divergence,
                     trend_scan_label,
                     trend_scan_tstat, trend_scan_bars, trend_scan_return_pct,
                     pattern_label, pattern_score,
@@ -134,6 +137,7 @@ def _build_db(path: Path) -> None:
                     1200, 1200, 3600, 0.42,
                     0.74, 12.3, 1.1,
                     101.2, 100.9, 0.3, 0.25, 64.0,
+                    63.5, 1,
                     1,
                     2.8, 8, 0.9,
                     'constructive_force_pvt', 72,
@@ -164,6 +168,8 @@ def test_fetch_training_rows_respects_feature_available_at_cutoff():
     assert rows[0]["ema_12"] == 101.2
     assert rows[0]["macd"] == 0.3
     assert rows[0]["rsi_14"] == 64.0
+    assert rows[0]["webull_rsi_14"] == 63.5
+    assert rows[0]["webull_rsi_bearish_divergence"] == 1
     assert rows[0]["trend_scan_label"] == 1
     assert rows[0]["triple_barrier_label"] == 1
     assert rows[0]["spacex_value_chain_in_scope"] is True

@@ -55,6 +55,8 @@ CANDLE_PHYSICS_FEATURE_COLUMNS = (
     "macd",
     "macd_signal",
     "rsi_14",
+    "webull_rsi_14",
+    "webull_rsi_bearish_divergence",
     "candle_body_pct",
     "upper_wick_pct",
     "lower_wick_pct",

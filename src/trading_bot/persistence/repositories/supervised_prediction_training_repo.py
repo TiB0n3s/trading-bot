@@ -174,6 +174,8 @@ def fetch_training_rows(
                 {bp_expr("macd")},
                 {bp_expr("macd_signal")},
                 {bp_expr("rsi_14")},
+                {bp_expr("webull_rsi_14")},
+                {bp_expr("webull_rsi_bearish_divergence")},
                 {bp_expr("trend_scan_label")},
                 {bp_expr("trend_scan_tstat")},
                 {bp_expr("trend_scan_bars")},

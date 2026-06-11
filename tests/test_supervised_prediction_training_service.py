@@ -37,6 +37,8 @@ def _rows(n=60):
                 "macd": 0.4,
                 "macd_signal": 0.35,
                 "rsi_14": 62.0,
+                "webull_rsi_14": 61.5,
+                "webull_rsi_bearish_divergence": 0,
                 "candle_body_pct": 0.6,
                 "upper_wick_pct": 0.1,
                 "lower_wick_pct": 0.3,
@@ -87,6 +89,8 @@ def test_train_supervised_prediction_model_uses_baseline_without_required_deps()
     assert "ema_12" in result["feature_columns"]
     assert "macd" in result["feature_columns"]
     assert "rsi_14" in result["feature_columns"]
+    assert "webull_rsi_14" in result["feature_columns"]
+    assert "webull_rsi_bearish_divergence" in result["feature_columns"]
     assert "prior_session_return_pct" in result["feature_columns"]
     assert "prior_5_session_return_pct" in result["feature_columns"]
     assert "friday_rebalance_flag" in result["feature_columns"]

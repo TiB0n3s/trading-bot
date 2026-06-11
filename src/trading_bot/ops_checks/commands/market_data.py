@@ -27,6 +27,11 @@ COMMAND_SPECS: dict[str, OpsCommandSpec] = {
         "run_webull_market_data_parity",
         "symbol_arg",
     ),
+    "webull-rsi-calibration": spec(
+        "webull-rsi-calibration",
+        "run_webull_rsi_calibration",
+        "symbol_arg",
+    ),
     "bar-pattern-backfill": spec("bar-pattern-backfill"),
     "historical-bar-archive": spec("historical-bar-archive"),
     "historical-bar-coverage": spec(

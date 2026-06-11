@@ -231,6 +231,16 @@ The check compares currently configured Alpaca, Polygon, and Webull quote
 snapshots, counts usable providers, measures provider mid-price disagreement,
 and reports spread/provider errors without granting trading authority.
 
+For Webull RSI indicator parity, use:
+
+```bash
+WEBULL_RSI_EXPECTED=62.4 python3 ops_check.py webull-rsi-calibration AAPL
+```
+
+The command reads the latest persisted Webull-compatible Wilder RSI feature and
+compares it to the optional app value within `WEBULL_RSI_TOLERANCE` points
+(default `0.75`). It is diagnostic-only and grants no trading authority.
+
 ## Architecture Surface Cleanup
 
 Use the architecture-surface report before and after structural refactors:
@@ -337,7 +347,7 @@ Data contract:
 
 - Polygon backfill requests `adjusted=True` and filters to regular market hours.
 - Cached CSV chunks include OHLCV, VWAP, source, adjusted flag, and inclusive interval-start metadata.
-- Persisted `bar_pattern_features` rows include raw OHLCV/VWAP plus RSI/EMA/MACD, candle-physics ratios, EFI/PVT, CVD/VPIN proxies, fractional-memory, triple-barrier, and trend-scan features.
+- Persisted `bar_pattern_features` rows include raw OHLCV/VWAP plus RSI/EMA/MACD, Webull-compatible Wilder RSI, candle-physics ratios, EFI/PVT, CVD/VPIN proxies, fractional-memory, triple-barrier, and trend-scan features.
 - Intra-bar timestamps for the exact open/high/low/close event sequence are not available from Polygon aggregate bars. Those require tick-level data and should be treated as a future archive layer.
 
 Tick-level entitlement probe:

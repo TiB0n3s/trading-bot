@@ -14,11 +14,13 @@ from functools import lru_cache
 from pathlib import Path
 
 ROOT_DIR = Path(__file__).resolve().parents[3]
+SRC_DIR = ROOT_DIR / "src"
 SCRIPTS_DIR = ROOT_DIR / "scripts"
-if SCRIPTS_DIR.exists():
-    scripts_path = str(SCRIPTS_DIR)
-    if scripts_path not in sys.path:
-        sys.path.insert(0, scripts_path)
+for path in (SCRIPTS_DIR, SRC_DIR, ROOT_DIR):
+    if path.exists():
+        path_s = str(path)
+        if path_s not in sys.path:
+            sys.path.insert(0, path_s)
 
 from trading_bot.ops_checks.bundles import run_all_bundle, run_premarket_bundle
 from trading_bot.ops_checks.registry import OPS_COMMAND_SPECS, build_command_args
@@ -177,7 +179,8 @@ def reexec_under_venv_if_available():
 
     venv_dir = VENV_PYTHON.parent.parent.resolve()
     current_prefix = Path(sys.prefix).resolve()
-    if current_prefix == venv_dir:
+    webull_venv_dir = (BASE_DIR / "venv-webull").resolve()
+    if current_prefix in {venv_dir, webull_venv_dir}:
         return
 
     os.execv(str(VENV_PYTHON), [str(VENV_PYTHON), str(Path(__file__).resolve()), *sys.argv[1:]])

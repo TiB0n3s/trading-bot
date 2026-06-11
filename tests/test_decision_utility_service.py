@@ -230,6 +230,32 @@ def test_execution_quality_cost_reduces_net_edge():
     assert_equal(adjusted.execution_cost_pct, 0.65, "execution cost")
 
 
+def test_alpha_factor_aggregation_lifts_supportive_context_utility():
+    base_state = _strong_buy_state()
+    alpha_state = _strong_buy_state()
+    alpha_state["bar_pattern_features"] = {
+        "pattern_score": 88,
+        "long_opportunity_score": 92,
+        "vpin_toxicity_20": 0.12,
+    }
+    alpha_state["prediction_gate"]["ml_prediction_score"] = 82
+
+    base = estimate_decision_utility(action="buy", account_state=base_state)
+    alpha = estimate_decision_utility(action="buy", account_state=alpha_state)
+
+    assert_gt(
+        alpha.probability_favorable_move,
+        base.probability_favorable_move,
+        "alpha probability lift",
+    )
+    assert_gt(alpha.expected_upside_pct, base.expected_upside_pct, "alpha upside lift")
+    assert_gt(
+        alpha.portfolio_adjusted_utility_pct,
+        base.portfolio_adjusted_utility_pct,
+        "alpha utility lift",
+    )
+
+
 def test_microstructure_features_shift_probability_and_utility():
     base_state = _strong_buy_state()
     supportive_state = _strong_buy_state()
@@ -440,7 +466,9 @@ def test_missing_telemetry_uses_neutral_fallback_without_fake_confidence():
         "telemetry_observe_only",
         "telemetry only",
     )
-    assert_equal(estimate.utility_decision in {"trade_candidate", "do_not_trade"}, True, "known decision")
+    assert_equal(
+        estimate.utility_decision in {"trade_candidate", "do_not_trade"}, True, "known decision"
+    )
 
 
 def main():
@@ -453,6 +481,7 @@ def main():
         test_calibrated_confidence_blends_probability_when_sampled,
         test_portfolio_duplicate_risk_reduces_utility,
         test_execution_quality_cost_reduces_net_edge,
+        test_alpha_factor_aggregation_lifts_supportive_context_utility,
         test_microstructure_features_shift_probability_and_utility,
         test_market_participation_confirmation_shifts_edge,
         test_volatility_normalization_reduces_stretched_entry_edge,

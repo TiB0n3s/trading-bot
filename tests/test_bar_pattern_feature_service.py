@@ -79,6 +79,13 @@ def test_bar_pattern_service_builds_efi_pvt_forward_features():
     assert first["rolling_volatility_20_pct"] is not None
     assert first["day_of_week"] is not None
     assert first["minute_of_day"] is not None
+    assert first["day_of_month"] is not None
+    assert first["week_of_month"] is not None
+    assert first["month_end_proximity_days"] is not None
+    assert first["monday_volatility_flag"] in {0, 1}
+    assert first["friday_rebalance_flag"] in {0, 1}
+    assert "prior_session_return_pct" in first
+    assert "prior_5_session_return_pct" in first
     assert first["session_phase"] is not None
     assert first["ema_12"] is not None
     assert first["ema_26"] is not None

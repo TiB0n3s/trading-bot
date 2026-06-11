@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import calendar
 import math
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -86,6 +87,12 @@ def _session_phase(dt: datetime | None) -> str | None:
     if minute < 15 * 60:
         return "afternoon_reprice"
     return "power_hour"
+
+
+def _month_end_proximity_days(dt: datetime | None) -> int | None:
+    if dt is None:
+        return None
+    return calendar.monthrange(dt.year, dt.month)[1] - dt.day
 
 
 def normalize_bar(bar: Any) -> dict[str, Any]:
@@ -723,6 +730,26 @@ class BarPatternFeatureService:
         fractional_diff_close = [
             _fractional_diff_at(closes, idx, d=0.45) for idx in range(len(normalized))
         ]
+        market_dts = [_parse_timestamp(row["timestamp"]) for row in normalized]
+        market_dates = [dt.date() if dt else None for dt in market_dts]
+        prior_session_closes: list[float | None] = []
+        prior_5_session_closes: list[float | None] = []
+        seen_dates = []
+        last_close_by_date: dict[Any, float] = {}
+        for idx, market_date in enumerate(market_dates):
+            prior_dates = [item for item in seen_dates if item != market_date]
+            prior_session = prior_dates[-1] if prior_dates else None
+            prior_5_session = prior_dates[-5] if len(prior_dates) >= 5 else None
+            prior_session_closes.append(
+                last_close_by_date.get(prior_session) if prior_session is not None else None
+            )
+            prior_5_session_closes.append(
+                last_close_by_date.get(prior_5_session) if prior_5_session is not None else None
+            )
+            if market_date is not None:
+                last_close_by_date[market_date] = closes[idx]
+                if not seen_dates or seen_dates[-1] != market_date:
+                    seen_dates.append(market_date)
         efi_ema = _ema(efi_raw, 13)
         ema_12 = _ema(closes, 12)
         ema_26 = _ema(closes, 26)
@@ -765,7 +792,20 @@ class BarPatternFeatureService:
             market_dt = _parse_timestamp(normalized[idx]["timestamp"])
             day_of_week = market_dt.weekday() if market_dt else None
             minute_of_day = market_dt.hour * 60 + market_dt.minute if market_dt else None
+            day_of_month = market_dt.day if market_dt else None
+            week_of_month = ((market_dt.day - 1) // 7 + 1) if market_dt else None
+            month_end_proximity_days = _month_end_proximity_days(market_dt)
+            monday_volatility_flag = 1 if day_of_week == 0 else 0
+            friday_rebalance_flag = (
+                1
+                if day_of_week == 4
+                and month_end_proximity_days is not None
+                and month_end_proximity_days <= 7
+                else 0
+            )
             session_phase = _session_phase(market_dt)
+            prior_session_return_pct = _pct_change(prior_session_closes[idx], close)
+            prior_5_session_return_pct = _pct_change(prior_5_session_closes[idx], close)
             prev_high_20 = max(highs[idx - 20 : idx]) if idx >= 20 else None
             price_return_5 = _pct_change(closes[idx - 5], close) if idx >= 5 else None
             pressure_return_3 = _pct_change(closes[idx - 3], close) if idx >= 3 else None
@@ -903,6 +943,13 @@ class BarPatternFeatureService:
                 "rolling_volatility_20_pct": rolling_volatility_20_pct,
                 "day_of_week": day_of_week,
                 "minute_of_day": minute_of_day,
+                "day_of_month": day_of_month,
+                "week_of_month": week_of_month,
+                "month_end_proximity_days": month_end_proximity_days,
+                "monday_volatility_flag": monday_volatility_flag,
+                "friday_rebalance_flag": friday_rebalance_flag,
+                "prior_session_return_pct": prior_session_return_pct,
+                "prior_5_session_return_pct": prior_5_session_return_pct,
                 "session_phase": session_phase,
                 "bid_price": bid_price,
                 "ask_price": ask_price,
@@ -976,6 +1023,13 @@ class BarPatternFeatureService:
                     "rolling_volatility_20_pct": _round(rolling_volatility_20_pct),
                     "day_of_week": day_of_week,
                     "minute_of_day": minute_of_day,
+                    "day_of_month": day_of_month,
+                    "week_of_month": week_of_month,
+                    "month_end_proximity_days": month_end_proximity_days,
+                    "monday_volatility_flag": monday_volatility_flag,
+                    "friday_rebalance_flag": friday_rebalance_flag,
+                    "prior_session_return_pct": _round(prior_session_return_pct),
+                    "prior_5_session_return_pct": _round(prior_5_session_return_pct),
                     "session_phase": session_phase,
                     "bid_price": _round(bid_price),
                     "ask_price": _round(ask_price),

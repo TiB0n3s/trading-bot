@@ -10,6 +10,8 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass, field
 from typing import Any
 
+from services.alpha_factor_aggregation_service import aggregate_alpha_factors
+
 
 @dataclass(frozen=True)
 class ProbabilisticEdgeEstimate:
@@ -163,6 +165,9 @@ def estimate_probabilistic_edge(
     participation = _dict(account_state.get("market_participation"))
     volatility = _dict(account_state.get("volatility_normalization"))
     downside = _dict(account_state.get("downside_asymmetry"))
+    alpha_factors = _dict(account_state.get("alpha_factor_aggregation"))
+    if not alpha_factors:
+        alpha_factors = aggregate_alpha_factors(account_state)
 
     opportunity_unit = _score_to_unit(
         opportunity.get("score") or buy_opportunity.get("buy_opportunity_score"),
@@ -481,6 +486,15 @@ def estimate_probabilistic_edge(
             + float(execution_quality.get("net_execution_cost_pct") or 0.0) * 0.10,
             4,
         )
+
+    alpha_modifier = _float(alpha_factors.get("expectancy_modifier"))
+    alpha_score = _float(alpha_factors.get("aggregate_score"))
+    if alpha_modifier is not None and alpha_factors.get("status") == "scored":
+        expected_upside_pct = round(expected_upside_pct * alpha_modifier, 4)
+        if alpha_score is not None:
+            probability += (alpha_score - 0.50) * 0.08
+            probability = round(_clamp(probability, 0.05, 0.95), 4)
+        reasons.append(f"alpha_factor_aggregation={alpha_score:.2f}")
 
     if session_severity in {"soft_negative", "reversal_caution"}:
         expected_adverse_excursion_pct = round(expected_adverse_excursion_pct + 0.15, 4)

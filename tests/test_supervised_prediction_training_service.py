@@ -10,12 +10,12 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
+from services.optional_dependency_service import optional_dependency_status
 from services.supervised_prediction_training_service import (
     asymmetric_false_positive_logistic_objective,
     train_quant_model_suite,
     train_supervised_prediction_model,
 )
-from services.optional_dependency_service import optional_dependency_status
 
 
 def _rows(n=60):
@@ -58,6 +58,13 @@ def _rows(n=60):
                 "trend_scan_label": 1 if i % 3 == 0 else (-1 if i % 3 == 1 else 0),
                 "trend_scan_tstat": 2.6 if i % 3 == 0 else -2.2,
                 "trend_scan_return_pct": 0.8 if i % 3 == 0 else -0.6,
+                "day_of_month": 2,
+                "week_of_month": 1,
+                "month_end_proximity_days": 28,
+                "monday_volatility_flag": 0,
+                "friday_rebalance_flag": 1,
+                "prior_session_return_pct": 0.4,
+                "prior_5_session_return_pct": 1.8,
                 "pattern_score": 72,
                 "long_opportunity_score": 80,
                 "sell_opportunity_score": 20,
@@ -80,6 +87,9 @@ def test_train_supervised_prediction_model_uses_baseline_without_required_deps()
     assert "ema_12" in result["feature_columns"]
     assert "macd" in result["feature_columns"]
     assert "rsi_14" in result["feature_columns"]
+    assert "prior_session_return_pct" in result["feature_columns"]
+    assert "prior_5_session_return_pct" in result["feature_columns"]
+    assert "friday_rebalance_flag" in result["feature_columns"]
 
 
 def test_train_supervised_prediction_model_blocks_small_samples():
@@ -109,7 +119,9 @@ def test_train_quant_model_suite_compares_available_observe_only_models():
     if deps.get("xgboost", {}).get("available"):
         assert "xgboost_asymmetric_false_positive" in providers
     assert result["best_model"] is None or result["best_model"]["provider"] in providers
-    assert all(row["runtime_effect"] == "observe_only_no_live_authority" for row in result["models"])
+    assert all(
+        row["runtime_effect"] == "observe_only_no_live_authority" for row in result["models"]
+    )
 
 
 def test_asymmetric_objective_penalizes_false_positive_pressure():

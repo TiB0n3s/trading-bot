@@ -85,6 +85,13 @@ class BarPatternFeatureRepository:
                     rolling_volatility_20_pct REAL,
                     day_of_week INTEGER,
                     minute_of_day INTEGER,
+                    day_of_month INTEGER,
+                    week_of_month INTEGER,
+                    month_end_proximity_days INTEGER,
+                    monday_volatility_flag INTEGER,
+                    friday_rebalance_flag INTEGER,
+                    prior_session_return_pct REAL,
+                    prior_5_session_return_pct REAL,
                     session_phase TEXT,
                     bid_price REAL,
                     ask_price REAL,
@@ -178,6 +185,13 @@ class BarPatternFeatureRepository:
             self._ensure_column(con, "rolling_volatility_20_pct", "REAL")
             self._ensure_column(con, "day_of_week", "INTEGER")
             self._ensure_column(con, "minute_of_day", "INTEGER")
+            self._ensure_column(con, "day_of_month", "INTEGER")
+            self._ensure_column(con, "week_of_month", "INTEGER")
+            self._ensure_column(con, "month_end_proximity_days", "INTEGER")
+            self._ensure_column(con, "monday_volatility_flag", "INTEGER")
+            self._ensure_column(con, "friday_rebalance_flag", "INTEGER")
+            self._ensure_column(con, "prior_session_return_pct", "REAL")
+            self._ensure_column(con, "prior_5_session_return_pct", "REAL")
             self._ensure_column(con, "session_phase", "TEXT")
             self._ensure_column(con, "bid_price", "REAL")
             self._ensure_column(con, "ask_price", "REAL")
@@ -274,6 +288,9 @@ class BarPatternFeatureRepository:
                     sma_20, bollinger_upper_20, bollinger_lower_20,
                     bollinger_width_20_pct, bollinger_percent_b_20,
                     rolling_volatility_20_pct, day_of_week, minute_of_day,
+                    day_of_month, week_of_month, month_end_proximity_days,
+                    monday_volatility_flag, friday_rebalance_flag,
+                    prior_session_return_pct, prior_5_session_return_pct,
                     session_phase, bid_price, ask_price, bid_ask_spread_pct,
                     slippage_estimate_pct, execution_cost_estimate_pct,
                     liquidity_zone_label, liquidity_sweep_risk, ema_12,
@@ -306,7 +323,11 @@ class BarPatternFeatureRepository:
                     :close, :volume, :vwap, :sma_20, :bollinger_upper_20,
                     :bollinger_lower_20, :bollinger_width_20_pct,
                     :bollinger_percent_b_20, :rolling_volatility_20_pct,
-                    :day_of_week, :minute_of_day, :session_phase,
+                    :day_of_week, :minute_of_day, :day_of_month,
+                    :week_of_month, :month_end_proximity_days,
+                    :monday_volatility_flag, :friday_rebalance_flag,
+                    :prior_session_return_pct, :prior_5_session_return_pct,
+                    :session_phase,
                     :bid_price, :ask_price, :bid_ask_spread_pct,
                     :slippage_estimate_pct, :execution_cost_estimate_pct,
                     :liquidity_zone_label, :liquidity_sweep_risk, :ema_12,
@@ -355,6 +376,13 @@ class BarPatternFeatureRepository:
                     rolling_volatility_20_pct = excluded.rolling_volatility_20_pct,
                     day_of_week = excluded.day_of_week,
                     minute_of_day = excluded.minute_of_day,
+                    day_of_month = excluded.day_of_month,
+                    week_of_month = excluded.week_of_month,
+                    month_end_proximity_days = excluded.month_end_proximity_days,
+                    monday_volatility_flag = excluded.monday_volatility_flag,
+                    friday_rebalance_flag = excluded.friday_rebalance_flag,
+                    prior_session_return_pct = excluded.prior_session_return_pct,
+                    prior_5_session_return_pct = excluded.prior_5_session_return_pct,
                     session_phase = excluded.session_phase,
                     bid_price = excluded.bid_price,
                     ask_price = excluded.ask_price,

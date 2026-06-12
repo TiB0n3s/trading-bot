@@ -1199,13 +1199,18 @@ optional DB files are reported in the manifest without failing the backup if at
 least one DB verifies.
 
 ```bash
-python3 pipeline/database_backup.py
+python3 pipeline/database_backup.py --backup-tier father --retention-days 28
 python3 ops_check.py database-backups
 ```
 
-The tracked cron snapshot runs the verified backup weekly after Friday close.
-Because `trades.db` can be tens of GB, increase backup frequency only after
-checking available disk and retention impact.
+The tracked cron snapshot uses a conservative GFS policy for database files:
+weekly Father backups after Friday close and a monthly Grandfather backup on the
+first Saturday. Nightly VM snapshots provide the current daily Son recovery
+layer. Do not raw-copy `trades.db`, `trades.db-wal`, or `trades.db-shm` while the
+runtime is active; SQLite WAL files are not standalone point-in-time recovery
+artifacts in this deployment. Because `trades.db` can be tens of GB, increase
+database-file backup frequency only after checking disk, retention impact, and
+market-window timing.
 
 Current tracked migrations cover feature leakage/audit fields,
 `rejected_signal_outcomes`, webhook-event lifecycle/status columns, and trade

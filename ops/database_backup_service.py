@@ -16,6 +16,13 @@ from pathlib import Path
 from typing import Any, Iterable
 
 DEFAULT_DB_NAMES = ("trades.db", "predictions.db", "jobs.db")
+DEFAULT_BACKUP_TIER = "adhoc"
+BACKUP_TIER_RETENTION_DAYS = {
+    "son": 7,
+    "father": 28,
+    "grandfather": 2555,
+    "adhoc": 30,
+}
 RESTORABLE_BACKUP_STATUSES = {
     "verified",
     "reused_recent_full",
@@ -25,6 +32,14 @@ RESTORABLE_BACKUP_STATUSES = {
 
 def utc_stamp() -> str:
     return datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+
+
+def _normalize_backup_tier(value: str | None) -> str:
+    tier = (value or DEFAULT_BACKUP_TIER).strip().lower()
+    if tier not in BACKUP_TIER_RETENTION_DAYS:
+        allowed = ", ".join(sorted(BACKUP_TIER_RETENTION_DAYS))
+        raise ValueError(f"unknown backup tier {tier!r}; expected one of: {allowed}")
+    return tier
 
 
 @dataclass(frozen=True)
@@ -48,6 +63,7 @@ class DatabaseBackupManifest:
     runtime_effect: str
     created_at: str
     backup_dir: str
+    backup_tier: str
     retention_days: int
     dry_run: bool
     results: list[DatabaseBackupResult]
@@ -146,8 +162,10 @@ class DatabaseBackupService:
         timestamp: str | None = None,
         dry_run: bool = False,
         skip_recent_full_hours: float | None = None,
+        backup_tier: str = DEFAULT_BACKUP_TIER,
     ) -> DatabaseBackupManifest:
         stamp = timestamp or utc_stamp()
+        tier = _normalize_backup_tier(backup_tier)
         results: list[DatabaseBackupResult] = []
 
         for name in db_names:
@@ -157,15 +175,21 @@ class DatabaseBackupService:
                     timestamp=stamp,
                     dry_run=dry_run,
                     skip_recent_full_hours=skip_recent_full_hours,
+                    backup_tier=tier,
                 )
             )
 
-        pruned_files = self._prune_old_backups(retention_days=retention_days, dry_run=dry_run)
+        pruned_files = self._prune_old_backups(
+            retention_days=retention_days,
+            dry_run=dry_run,
+            backup_tier=tier,
+        )
         return DatabaseBackupManifest(
             report_version="database_backup_manifest_v1",
             runtime_effect="filesystem_backup_only_no_trading_authority",
             created_at=datetime.now(timezone.utc).isoformat(),
             backup_dir=str(self.backup_dir),
+            backup_tier=tier,
             retention_days=retention_days,
             dry_run=dry_run,
             results=results,
@@ -173,8 +197,9 @@ class DatabaseBackupService:
         )
 
     def write_manifest(self, manifest: DatabaseBackupManifest) -> Path:
-        self.backup_dir.mkdir(parents=True, exist_ok=True)
-        path = self.backup_dir / f"database_backup_{utc_stamp()}.manifest.json"
+        root = self._tier_root(_normalize_backup_tier(manifest.backup_tier))
+        root.mkdir(parents=True, exist_ok=True)
+        path = root / f"database_backup_{utc_stamp()}.manifest.json"
         path.write_text(json.dumps(manifest.to_dict(), indent=2, sort_keys=True) + "\n")
         return path
 
@@ -185,6 +210,7 @@ class DatabaseBackupService:
         timestamp: str,
         dry_run: bool,
         skip_recent_full_hours: float | None,
+        backup_tier: str,
     ) -> DatabaseBackupResult:
         source = self.base_dir / name
         if not source.exists():
@@ -197,7 +223,7 @@ class DatabaseBackupService:
             )
 
         source_size = source.stat().st_size
-        backup_path = self.backup_dir / timestamp / name
+        backup_path = self._tier_root(backup_tier) / timestamp / name
         recent = self._recent_full_backup(
             name,
             max_age_hours=skip_recent_full_hours,
@@ -294,7 +320,7 @@ class DatabaseBackupService:
 
         max_age_seconds = max_age_hours * 60 * 60
         now = time.time()
-        manifests = sorted(self.backup_dir.glob("database_backup_*.manifest.json"), reverse=True)
+        manifests = sorted(self.backup_dir.glob("**/database_backup_*.manifest.json"), reverse=True)
         for manifest_path in manifests:
             try:
                 manifest = json.loads(manifest_path.read_text())
@@ -311,7 +337,9 @@ class DatabaseBackupService:
                 return backup_path, row, "reused_recent_full"
 
         candidates = []
-        for backup_path in self.backup_dir.glob(f"*/{name}"):
+        for backup_path in self.backup_dir.glob(f"**/{name}"):
+            if "restore_drills" in backup_path.parts:
+                continue
             try:
                 stat = backup_path.stat()
             except OSError:
@@ -334,13 +362,22 @@ class DatabaseBackupService:
             )
         return None
 
-    def _prune_old_backups(self, *, retention_days: int, dry_run: bool) -> list[str]:
-        if retention_days <= 0 or not self.backup_dir.exists():
+    def _prune_old_backups(
+        self,
+        *,
+        retention_days: int,
+        dry_run: bool,
+        backup_tier: str,
+    ) -> list[str]:
+        root = self._tier_root(backup_tier)
+        if retention_days <= 0 or not root.exists():
             return []
 
         cutoff = time.time() - (retention_days * 24 * 60 * 60)
         pruned: list[str] = []
-        for path in sorted(self.backup_dir.glob("**/*.db")):
+        for path in sorted(root.glob("**/*.db")):
+            if "restore_drills" in path.parts:
+                continue
             try:
                 if path.stat().st_mtime >= cutoff:
                     continue
@@ -350,6 +387,11 @@ class DatabaseBackupService:
             except OSError:
                 continue
         return pruned
+
+    def _tier_root(self, backup_tier: str) -> Path:
+        if backup_tier == DEFAULT_BACKUP_TIER:
+            return self.backup_dir
+        return self.backup_dir / backup_tier
 
 
 class DatabaseRestoreDrillService:
@@ -399,7 +441,7 @@ class DatabaseRestoreDrillService:
         manifest_path: Path | None,
     ) -> tuple[Path | None, dict[str, Any] | None]:
         if manifest_path is None:
-            manifests = sorted(self.backup_dir.glob("database_backup_*.manifest.json"))
+            manifests = sorted(self.backup_dir.glob("**/database_backup_*.manifest.json"))
             manifest_path = manifests[-1] if manifests else None
         if manifest_path is None or not manifest_path.exists():
             return manifest_path, None

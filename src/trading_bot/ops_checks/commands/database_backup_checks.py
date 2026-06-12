@@ -11,7 +11,7 @@ from ops.database_backup_service import DatabaseRestoreDrillService
 
 
 def _load_latest_manifest(backup_dir: Path) -> tuple[Path | None, dict[str, Any] | None]:
-    manifests = sorted(backup_dir.glob("database_backup_*.manifest.json"))
+    manifests = sorted(backup_dir.glob("**/database_backup_*.manifest.json"))
     if not manifests:
         return None, None
     latest = manifests[-1]
@@ -60,6 +60,7 @@ def run_database_backup_report(*, base_dir: Path, max_age_hours: float = 30.0) -
     print(f"dry_run                 : {manifest.get('dry_run')}")
     print(f"backed_up_count         : {backed_up}")
     print(f"reused_count            : {reused}")
+    print(f"backup_tier             : {manifest.get('backup_tier') or 'legacy'}")
     print(f"missing_count           : {missing}")
     print(f"failed_count            : {failed}")
     print(f"stale                   : {stale}")

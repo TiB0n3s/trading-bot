@@ -103,6 +103,23 @@ def test_premarket_dependency_chain_uses_single_pipeline():
     assert not offenders, offenders
 
 
+def test_database_backups_use_safe_gfs_tiers():
+    lines = [line for line in _cron_command_lines() if "pipeline/database_backup.py" in line]
+    assert len(lines) == 2, lines
+    assert any("--backup-tier father" in line and "--retention-days 28" in line for line in lines)
+    assert any(
+        "--backup-tier grandfather" in line and "--retention-days 2555" in line for line in lines
+    )
+
+    raw_copy_tokens = (" cp ", " rsync ", " trades.db-wal", " trades.db-shm")
+    offenders = [
+        line
+        for line in _cron_command_lines()
+        if any(token in f" {line} " for token in raw_copy_tokens)
+    ]
+    assert not offenders, offenders
+
+
 def main():
     tests = [
         test_no_raw_flock_jobs_remain,
@@ -113,6 +130,7 @@ def main():
         test_auto_buy_captures_full_candidate_universe,
         test_fill_poller_is_regular_session_only,
         test_premarket_dependency_chain_uses_single_pipeline,
+        test_database_backups_use_safe_gfs_tiers,
     ]
     for test in tests:
         test()

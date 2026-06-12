@@ -3,10 +3,12 @@
 
 from __future__ import annotations
 
+import os
 import sqlite3
 import subprocess
 import sys
 import tempfile
+import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -172,10 +174,50 @@ def test_database_backup_service_reuses_recent_existing_full_artifact_without_ma
         assert manifest.results[0].backup_path == str(existing_backup)
 
 
+def test_database_backup_service_writes_and_prunes_by_gfs_tier():
+    with tempfile.TemporaryDirectory() as tmp:
+        base_dir = Path(tmp) / "base"
+        backup_dir = base_dir / "backups" / "databases"
+        base_dir.mkdir()
+        _build_db(base_dir / "trades.db")
+
+        service = DatabaseBackupService(base_dir=base_dir, backup_dir=backup_dir)
+        old_son_dir = backup_dir / "son" / "20260601T150000Z"
+        old_father_dir = backup_dir / "father" / "20260601T150000Z"
+        old_son_dir.mkdir(parents=True)
+        old_father_dir.mkdir(parents=True)
+        old_son_backup = old_son_dir / "trades.db"
+        old_father_backup = old_father_dir / "trades.db"
+        old_son_backup.write_bytes((base_dir / "trades.db").read_bytes())
+        old_father_backup.write_bytes((base_dir / "trades.db").read_bytes())
+        old_time = time.time() - (10 * 24 * 60 * 60)
+        old_son_backup.touch()
+        old_father_backup.touch()
+        os.utime(old_son_backup, (old_time, old_time))
+        os.utime(old_father_backup, (old_time, old_time))
+
+        manifest = service.run(
+            db_names=["trades.db"],
+            timestamp="20260612T150000Z",
+            backup_tier="son",
+            retention_days=7,
+        )
+        manifest_path = service.write_manifest(manifest)
+
+        assert manifest.ok
+        assert manifest.backup_tier == "son"
+        assert "/son/" in str(manifest.results[0].backup_path)
+        assert "/son/" in str(manifest_path)
+        assert str(old_son_backup) in manifest.pruned_files
+        assert not old_son_backup.exists()
+        assert old_father_backup.exists()
+
+
 if __name__ == "__main__":
     test_database_backup_service_verifies_online_backup()
     test_database_backup_cli_writes_manifest_and_ops_report_reads_it()
     test_database_restore_drill_verifies_latest_backup_manifest()
     test_database_backup_service_reuses_recent_verified_full_backup()
     test_database_backup_service_reuses_recent_existing_full_artifact_without_manifest()
+    test_database_backup_service_writes_and_prunes_by_gfs_tier()
     print("database backup service tests passed")

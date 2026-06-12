@@ -237,10 +237,11 @@ option rather than a current dependency.
 
 ## Database Backups
 
-Use the Python backup path instead of shell-only `sqlite3 .backup` commands:
+Use the Python backup path instead of shell-only `sqlite3 .backup` commands or
+raw file copies:
 
 ```bash
-python3 pipeline/database_backup.py
+python3 pipeline/database_backup.py --backup-tier father --retention-days 28
 python3 ops_check.py database-backups
 python3 ops_check.py database-restore-drill
 ```
@@ -249,8 +250,14 @@ The backup service uses SQLite's online backup API, stores verified copies under
 `backups/databases/`, writes a manifest, and runs `PRAGMA integrity_check` on
 each copied database. The default set is `trades.db`, `predictions.db`, and
 `jobs.db`; missing optional files are reported but do not fail the run if at
-least one database verifies. The tracked cron file schedules this weekly after
-Friday close.
+least one database verifies. The tracked cron file uses a GFS policy: weekly
+Father backups after Friday close and a monthly Grandfather backup on the first
+Saturday. Nightly VM snapshots currently provide the daily Son recovery layer.
+
+Do not raw-copy `trades.db`, `trades.db-wal`, or `trades.db-shm` while the
+runtime is active. SQLite WAL files are tied to the main database and checkpoint
+state; copying them alone is not a safe transaction-log archive for this
+deployment.
 
 `database-restore-drill` re-opens the latest verified backup manifest, restores
 each verified database into `backups/databases/restore_drills/`, runs SQLite

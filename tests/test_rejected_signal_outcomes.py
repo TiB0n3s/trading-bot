@@ -5,16 +5,21 @@ Run:
   python3 tests/test_rejected_signal_outcomes.py
 """
 
-import sys
 import sqlite3
+import sys
 import tempfile
 from pathlib import Path
+from types import SimpleNamespace
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
+sys.path.insert(0, str(ROOT / "scripts"))
 
 from rejected_signal_outcome_builder import compute_outcome
 from repositories.rejected_signal_outcome_repo import RejectedSignalOutcomeRepository
+from services.rejected_signal_outcome_market_data_service import (
+    RejectedSignalOutcomeMarketDataService,
+)
 
 
 def assert_equal(actual, expected, label):
@@ -231,13 +236,44 @@ def test_repository_links_outcome_to_canonical_decision_snapshot():
             ).fetchone()
 
         assert_equal(outcome["decision_snapshot_id"], snapshot_id, "decision snapshot link")
-        assert_equal(outcome["canonical_intelligence_version"], "canonical_intelligence_v1", "canonical version")
+        assert_equal(
+            outcome["canonical_intelligence_version"],
+            "canonical_intelligence_v1",
+            "canonical version",
+        )
         assert_equal(outcome["canonical_intelligence_hash"], "c" * 64, "canonical hash")
         assert_equal(
             outcome["canonical_intelligence_json"],
             '{"version":"canonical_intelligence_v1"}',
             "canonical json",
         )
+
+
+def test_rejected_signal_market_data_accepts_list_bar_responses():
+    service = RejectedSignalOutcomeMarketDataService(market_data=SimpleNamespace())
+    rows = service._barset_rows(
+        [
+            {
+                "symbol": "AAPL",
+                "timestamp": "2026-06-10T09:30:00-04:00",
+                "high": 101.0,
+                "low": 99.5,
+                "close": 100.5,
+            },
+            {
+                "symbol": "MSFT",
+                "timestamp": "2026-06-10T09:30:00-04:00",
+                "high": 201.0,
+                "low": 199.5,
+                "close": 200.5,
+            },
+        ],
+        "AAPL",
+    )
+
+    assert_equal(len(rows), 1, "filtered rows")
+    assert_equal(rows[0]["symbol"], "AAPL", "symbol")
+    assert_equal(rows[0]["close"], 100.5, "close")
 
 
 def main():
@@ -248,6 +284,7 @@ def main():
         test_missing_forward_bars_partial_reason,
         test_excursions_are_action_adjusted_and_sign_bounded,
         test_repository_links_outcome_to_canonical_decision_snapshot,
+        test_rejected_signal_market_data_accepts_list_bar_responses,
     ]
 
     for test in tests:

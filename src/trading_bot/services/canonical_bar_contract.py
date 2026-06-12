@@ -91,6 +91,9 @@ def dataframe_to_canonical_bar_rows(
 
     rows: list[dict[str, Any]] = []
     for idx, row in bar_rows:
+        row_symbol = _row_value(row, "symbol", "S")
+        if row_symbol is not None and str(row_symbol).strip().upper() != symbol:
+            continue
         close = _float_or_none(_row_value(row, "close", "c"))
         vwap = _float_or_none(_row_value(row, "vwap", "vw", "VWAP"))
         rows.append(

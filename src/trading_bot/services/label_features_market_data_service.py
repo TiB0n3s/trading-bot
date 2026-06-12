@@ -28,8 +28,9 @@ class LabelFeaturesMarketDataService:
             adjustment=CANONICAL_BAR_ADJUSTMENT,
         )
         feed_used = self.market_data.get_feed_used(symbol) or None
+        bars_payload = getattr(bars, "df", bars)
         return dataframe_to_canonical_bar_rows(
-            bars.df,
+            bars_payload,
             symbol=symbol,
             feed=feed_used,
             adjusted=False,

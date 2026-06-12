@@ -14,6 +14,11 @@ ENV_FILE = Path("/etc/trading-bot.env")
 
 if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
+if str(BASE_DIR) not in sys.path:
+    sys.path.insert(0, str(BASE_DIR))
+SRC_DIR = BASE_DIR / "src"
+if str(SRC_DIR) not in sys.path:
+    sys.path.insert(0, str(SRC_DIR))
 
 
 def reexec_under_venv_if_available() -> None:
@@ -52,7 +57,6 @@ def load_env_file(path: Path = ENV_FILE) -> bool:
 load_env_file()
 
 import pytz
-
 from repositories.label_features_repo import LabelFeaturesRepository
 from services.label_features_market_data_service import label_features_market_data_service
 
@@ -175,6 +179,7 @@ def main() -> int:
 
     labeled = 0
     skipped = 0
+    errors = 0
 
     for row in rows:
         try:
@@ -207,12 +212,13 @@ def main() -> int:
             )
         except Exception as e:
             skipped += 1
+            errors += 1
             logger.error(f"{row['symbol']} snapshot_id={row['id']}: failed: {e}")
 
-    logger.info(f"Labeling complete: labeled={labeled}, skipped={skipped}")
+    logger.info(f"Labeling complete: labeled={labeled}, skipped={skipped}, errors={errors}")
     print(f"rows_written: {labeled}")
-    print(f"label_features_summary: labeled={labeled} skipped={skipped}")
-    return 0
+    print(f"label_features_summary: labeled={labeled} skipped={skipped} errors={errors}")
+    return 1 if errors and labeled == 0 else 0
 
 
 if __name__ == "__main__":

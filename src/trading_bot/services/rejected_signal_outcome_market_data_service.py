@@ -6,6 +6,7 @@ import os
 from datetime import timedelta
 from typing import Any
 
+from services.canonical_bar_contract import dataframe_to_canonical_bar_rows
 from services.market_data_service import market_data_service
 
 
@@ -15,25 +16,8 @@ class RejectedSignalOutcomeMarketDataService:
 
     @staticmethod
     def _barset_rows(barset, symbol: str) -> list[dict]:
-        bars = barset.df
-
-        if bars is None or bars.empty:
-            return []
-
-        if "symbol" in bars.columns:
-            bars = bars[bars["symbol"] == symbol]
-
-        rows = []
-        for idx, bar in bars.iterrows():
-            rows.append(
-                {
-                    "timestamp": idx.isoformat() if hasattr(idx, "isoformat") else str(idx),
-                    "close": float(bar["close"]),
-                    "high": float(bar["high"]),
-                    "low": float(bar["low"]),
-                }
-            )
-        return rows
+        bars_payload = getattr(barset, "df", barset)
+        return dataframe_to_canonical_bar_rows(bars_payload, symbol=symbol)
 
     def fetch_forward_bars(
         self,

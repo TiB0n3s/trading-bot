@@ -105,6 +105,24 @@ size-down logic. It cannot independently approve trades or override risk gates.
 See `ops/prime_brokerage_flow_context.md` for the input and no-lookahead
 contract.
 
+## Dealer Gamma Context
+
+Dealer gamma / options GEX context is normalized into
+`runtime_state/dealer_gamma.json` and consumed by pre-market/intraday market
+context refreshes as per-symbol volatility-regime and structural level evidence.
+
+```bash
+cd ~/trading-bot
+./venv/bin/python scripts/dealer_gamma_update.py \
+  --input data/dealer_gamma/latest_gamma.json \
+  --output runtime_state/dealer_gamma.json
+```
+
+This context can inform ML features, strategy-family weighting, gamma-flip chop
+warnings, dynamic stop-level evidence, and size-down logic. It cannot
+independently approve trades or override risk gates. See
+`ops/dealer_gamma_context.md` for the input and no-lookahead contract.
+
 ## Configuration Audit
 
 Use the config audit after changing `/etc/trading-bot.env`, adding new env

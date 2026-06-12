@@ -31,6 +31,13 @@ from market_intelligence.cot_positioning import (
     cot_context_for_symbol,
     load_cot_state,
 )
+from market_intelligence.dealer_gamma import (
+    DEFAULT_STATE_PATH as DEALER_GAMMA_DEFAULT_STATE_PATH,
+)
+from market_intelligence.dealer_gamma import (
+    dealer_gamma_context_for_symbol,
+    load_dealer_gamma_state,
+)
 from market_intelligence.intelligence_store import ingest_market_context
 from market_intelligence.market_brief_builder import (
     build_market_brief,
@@ -55,6 +62,9 @@ COT_POSITIONING_STATE_FILE = Path(
 )
 PRIME_BROKERAGE_STATE_FILE = Path(
     os.getenv("PRIME_BROKERAGE_STATE_FILE", str(BASE_DIR / PB_DEFAULT_STATE_PATH))
+)
+DEALER_GAMMA_STATE_FILE = Path(
+    os.getenv("DEALER_GAMMA_STATE_FILE", str(BASE_DIR / DEALER_GAMMA_DEFAULT_STATE_PATH))
 )
 
 PRE_MARKET_ALPACA_SYMBOL_SLEEP_SECONDS = float(
@@ -677,6 +687,23 @@ def update_performance_context(symbol_entry: dict) -> dict:
         if size_modifier is not None and size_modifier < 1.0:
             evidence.append(f"pb_size_modifier:{size_modifier:.2f}")
 
+    gamma_context = symbol_entry.get("dealer_gamma_context") or {}
+    if isinstance(gamma_context, dict):
+        regime = str(gamma_context.get("gex_regime") or "")
+        size_modifier = _perf_float(gamma_context.get("gamma_size_modifier"))
+        distance_to_flip = _perf_float(gamma_context.get("distance_to_gamma_flip_pct"))
+        if regime == "positive_gamma_vol_dampening":
+            score -= 3
+            evidence.append("dealer_gamma_positive_vol_dampening")
+        elif regime == "negative_gamma_vol_accelerating":
+            score += 4
+            evidence.append("dealer_gamma_negative_vol_accelerating")
+        if distance_to_flip is not None and abs(distance_to_flip) <= 0.5:
+            score -= 4
+            evidence.append(f"near_gamma_flip:{distance_to_flip:+.2f}%")
+        if size_modifier is not None and size_modifier < 1.0:
+            evidence.append(f"gamma_size_modifier:{size_modifier:.2f}")
+
     score = round(max(0.0, min(100.0, score)), 2)
     label = _performance_label(score)
     performance_confidence = _performance_confidence(score, len(evidence))
@@ -971,6 +998,23 @@ def load_prime_brokerage_context() -> dict:
     return state
 
 
+def load_dealer_gamma_context() -> dict:
+    """Load options dealer-gamma context for market-context enrichment."""
+    try:
+        state = load_dealer_gamma_state(DEALER_GAMMA_STATE_FILE)
+    except Exception as e:
+        logger.warning(f"Dealer gamma context load failed: {e}")
+        return {
+            "available": False,
+            "reason": f"Dealer gamma context load failed: {e}",
+            "runtime_effect": "options_dealer_gamma_context_no_trade_authority",
+            "symbols": {},
+        }
+    if not state.get("available"):
+        logger.info(state.get("reason") or "Dealer gamma context unavailable")
+    return state
+
+
 def apply_cot_positioning_context(symbol: str, symbol_entry: dict, cot_state: dict) -> None:
     """Attach COT macro-positioning context to one symbol entry.
 
@@ -1013,6 +1057,56 @@ def apply_cot_positioning_context(symbol: str, symbol_entry: dict, cot_state: di
             f"{reason} COT positioning: {mapped_market} regime={regime}, "
             f"leveraged_index_52w={cot_index}, size_modifier={size_modifier}; "
             "weekly macro context only."
+        ).strip()
+
+
+def apply_dealer_gamma_context(symbol: str, symbol_entry: dict, gamma_state: dict) -> None:
+    """Attach options dealer-gamma context to one symbol entry."""
+    context = dealer_gamma_context_for_symbol(symbol, gamma_state)
+    if not context:
+        return
+
+    symbol_entry["dealer_gamma_context"] = context
+
+    regime = context.get("gex_regime")
+    flip = context.get("gamma_flip_zone")
+    distance_to_flip = context.get("distance_to_gamma_flip_pct")
+    size_modifier = context.get("gamma_size_modifier")
+
+    risks = symbol_entry.setdefault("key_risks", [])
+    catalysts = symbol_entry.setdefault("key_catalysts", [])
+    evidence = symbol_entry.setdefault("performance_evidence", [])
+
+    if regime == "positive_gamma_vol_dampening":
+        note = (
+            "Dealer gamma is positive/vol-dampening; aggressive breakout signals "
+            f"should be size-down reviewed. gamma_flip={flip} distance={distance_to_flip}%."
+        )
+        if isinstance(risks, list) and note not in risks:
+            risks.append(note)
+    elif regime == "negative_gamma_vol_accelerating":
+        note = (
+            "Dealer gamma is negative/vol-accelerating; momentum and breakout "
+            "signals have supportive volatility context."
+        )
+        if isinstance(catalysts, list) and note not in catalysts:
+            catalysts.append(note)
+
+    floor = context.get("nearest_positive_gamma_floor")
+    if isinstance(floor, dict) and floor.get("strike") is not None:
+        note = f"Nearest positive-gamma floor below spot: {floor.get('strike')}."
+        if isinstance(catalysts, list) and note not in catalysts:
+            catalysts.append(note)
+
+    if isinstance(evidence, list):
+        evidence.append(f"dealer_gamma:{regime}:size_modifier={size_modifier}")
+
+    reason = symbol_entry.get("reason") or ""
+    if "Dealer gamma:" not in reason:
+        symbol_entry["reason"] = (
+            f"{reason} Dealer gamma: regime={regime}, flip={flip}, "
+            f"distance_to_flip_pct={distance_to_flip}, size_modifier={size_modifier}; "
+            "options-structure context only."
         ).strip()
 
 
@@ -1234,6 +1328,7 @@ def main():
     event_enrichment = load_event_enrichment(today)
     cot_positioning_context = load_cot_positioning_context()
     prime_brokerage_context = load_prime_brokerage_context()
+    dealer_gamma_context = load_dealer_gamma_context()
 
     logger.info(f"Running no-Claude data research for {len(symbols)} symbols")
     logger.info(f"Loaded event enrichment for {len(event_enrichment)} symbols")
@@ -1245,6 +1340,10 @@ def main():
         "Loaded prime brokerage context for "
         f"{len(prime_brokerage_context.get('sectors') or {})} sector(s), "
         f"{len(prime_brokerage_context.get('symbols') or {})} symbol(s)"
+    )
+    logger.info(
+        "Loaded dealer gamma context for "
+        f"{len(dealer_gamma_context.get('symbols') or {})} symbol(s)"
     )
 
     market_data = {}
@@ -1279,6 +1378,7 @@ def main():
     template["event_enrichment_count"] = len(event_enrichment)
     template["cot_positioning_context"] = cot_positioning_context
     template["prime_brokerage_context"] = prime_brokerage_context
+    template["dealer_gamma_context"] = dealer_gamma_context
 
     symbols_out = template.get("symbols", {})
 
@@ -1305,6 +1405,7 @@ def main():
             apply_event_enrichment(symbols_out[sym], event_enrichment.get(sym) or {})
             apply_cot_positioning_context(sym, symbols_out[sym], cot_positioning_context)
             apply_prime_brokerage_context(sym, symbols_out[sym], prime_brokerage_context)
+            apply_dealer_gamma_context(sym, symbols_out[sym], dealer_gamma_context)
             update_performance_context(symbols_out[sym])
         else:
             symbols_out[sym].update(
@@ -1320,6 +1421,7 @@ def main():
             )
             apply_cot_positioning_context(sym, symbols_out[sym], cot_positioning_context)
             apply_prime_brokerage_context(sym, symbols_out[sym], prime_brokerage_context)
+            apply_dealer_gamma_context(sym, symbols_out[sym], dealer_gamma_context)
             update_performance_context(symbols_out[sym])
 
     template["symbols"] = symbols_out

@@ -88,6 +88,7 @@ LEARNING_ENRICHMENT_FIELDS = (
     "performance_evidence",
     "cot_positioning_context",
     "prime_brokerage_context",
+    "dealer_gamma_context",
 )
 
 
@@ -218,6 +219,13 @@ def normalize_symbol_entry(symbol: str, entry: dict[str, Any] | None) -> dict[st
             if isinstance(entry.get("prime_brokerage_context"), dict)
             else None
         ),
+        # Options dealer-gamma context. This is volatility-regime and level
+        # context only, never standalone trade authority.
+        "dealer_gamma_context": (
+            entry.get("dealer_gamma_context")
+            if isinstance(entry.get("dealer_gamma_context"), dict)
+            else None
+        ),
     }
 
     normalized.update(learning_enrichment_fields(entry))
@@ -270,6 +278,11 @@ def normalize_market_context(
         "prime_brokerage_context": (
             raw.get("prime_brokerage_context")
             if isinstance(raw.get("prime_brokerage_context"), dict)
+            else None
+        ),
+        "dealer_gamma_context": (
+            raw.get("dealer_gamma_context")
+            if isinstance(raw.get("dealer_gamma_context"), dict)
             else None
         ),
         "symbols": symbols,

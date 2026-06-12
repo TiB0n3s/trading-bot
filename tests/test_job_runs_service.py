@@ -145,7 +145,7 @@ def test_job_runner_infers_rows_from_common_runtime_log_patterns():
         assert rows[0]["rows_written"] == 37
 
 
-def test_job_runner_records_lock_skipped_run():
+def test_job_runner_logs_lock_skipped_run_without_touching_ledger():
     with tempfile.TemporaryDirectory() as tmp:
         tmp_path = Path(tmp)
         db_path = tmp_path / "jobs.db"
@@ -177,13 +177,7 @@ def test_job_runner_records_lock_skipped_run():
             )
 
         assert result.returncode == 0, result.stderr
-        rows = _rows(db_path)
-        assert len(rows) == 1
-        row = rows[0]
-        assert row["job_name"] == "unit_job"
-        assert row["exit_code"] is None
-        assert row["lock_acquired"] == 0
-        assert row["skipped_reason"] == "lock_busy"
+        assert not db_path.exists()
         assert "lock-busy: unit_job skipped" in log_path.read_text()
 
 
@@ -515,7 +509,7 @@ def main():
         test_job_runner_records_completed_run,
         test_job_runner_infers_rows_and_warnings_from_log_output,
         test_job_runner_infers_rows_from_common_runtime_log_patterns,
-        test_job_runner_records_lock_skipped_run,
+        test_job_runner_logs_lock_skipped_run_without_touching_ledger,
         test_job_runner_ledger_failure_is_best_effort,
         test_service_records_artifact_hash,
         test_service_builds_runtime_health_payload,

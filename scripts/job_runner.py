@@ -151,11 +151,6 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
 
 def main(argv: list[str] | None = None) -> int:
     args = _parse_args(argv or sys.argv[1:])
-    service = (
-        JobRunsService(JobRunsRepository(args.db_path))
-        if args.db_path
-        else build_default_job_runs_service()
-    )
     started_at = _now_iso()
     started_monotonic = time.monotonic()
 
@@ -169,25 +164,17 @@ def main(argv: list[str] | None = None) -> int:
         except BlockingIOError:
             message = f"{_now_iso()} lock-busy: {args.job_name} skipped"
             _append_log(args.log_file, message)
-            record = service.build_record(
-                job_name=args.job_name,
-                started_at=started_at,
-                started_monotonic=started_monotonic,
-                exit_code=None,
-                lock_acquired=False,
-                skipped_reason="lock_busy",
-                rows_written=args.rows_written,
-                warnings_count=args.warnings_count,
-                artifact_path=args.artifact_path,
-                command=args.command,
-            )
-            _record_run_best_effort(
-                service,
-                record,
-                log_file=args.log_file,
-                job_name=args.job_name,
-            )
+            # Do not touch the SQLite job ledger on lock-busy skips. During
+            # market hours these skips can happen every minute, and opening the
+            # DB before the lock is acquired increases WAL pressure precisely
+            # when a previous job is already slow or blocked.
             return 0
+
+    service = (
+        JobRunsService(JobRunsRepository(args.db_path))
+        if args.db_path
+        else build_default_job_runs_service()
+    )
 
     _append_log(args.log_file, f"{_now_iso()} job-start: {args.job_name}")
     log_start_offset = _log_size(args.log_file)

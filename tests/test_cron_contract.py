@@ -85,6 +85,21 @@ def test_fill_poller_is_regular_session_only():
     assert any(line.startswith("*/2 9-14 * * 1-5") for line in lines), lines
 
 
+def test_live_and_label_features_are_regular_session_only():
+    live_lines = [line for line in _cron_command_lines() if "--job-name run_live_features" in line]
+    label_lines = [
+        line for line in _cron_command_lines() if "--job-name run_label_features" in line
+    ]
+    assert len(live_lines) == 2, live_lines
+    assert len(label_lines) == 2, label_lines
+    assert any(line.startswith("30-59/2 8 * * 1-5") for line in live_lines), live_lines
+    assert any(line.startswith("*/2 9-14 * * 1-5") for line in live_lines), live_lines
+    assert any(line.startswith("30-59/5 8 * * 1-5") for line in label_lines), label_lines
+    assert any(line.startswith("*/5 9-14 * * 1-5") for line in label_lines), label_lines
+    assert not any(line.startswith("*/2 8-14") for line in live_lines), live_lines
+    assert not any(line.startswith("*/5 8-14") for line in label_lines), label_lines
+
+
 def test_premarket_dependency_chain_uses_single_pipeline():
     lines = _cron_command_lines()
     pipeline = [line for line in lines if "pipeline/pre_market.py" in line]
@@ -129,6 +144,7 @@ def main():
         test_job_runner_lines_have_job_name,
         test_auto_buy_captures_full_candidate_universe,
         test_fill_poller_is_regular_session_only,
+        test_live_and_label_features_are_regular_session_only,
         test_premarket_dependency_chain_uses_single_pipeline,
         test_database_backups_use_safe_gfs_tiers,
     ]

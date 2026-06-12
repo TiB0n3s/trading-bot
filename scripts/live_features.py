@@ -55,10 +55,9 @@ def load_env_file(path: Path = ENV_FILE) -> bool:
 load_env_file()
 
 import pytz
-from market_time import is_trading_day, now_et
-from strategy_constants import SYMBOL_MARKET_ALIGNMENT
-
+from market_time import is_market_hours, is_trading_day, now_et
 from services.live_features_service import build_default_live_features_service
+from strategy_constants import SYMBOL_MARKET_ALIGNMENT
 
 logger = logging.getLogger("live_features")
 logging.basicConfig(
@@ -198,8 +197,15 @@ def main() -> int:
     if args.symbol and args.all_symbols:
         parser.error("Use either --symbol or --all-symbols, not both")
 
-    if not is_trading_day(now_et().date()):
+    now = now_et()
+    if not is_trading_day(now.date()):
         logger.info("Skipping live feature collection: today is not a trading day")
+        return 0
+    if not is_market_hours(now):
+        logger.info(
+            "Skipping live feature collection: outside regular market hours "
+            f"({now.strftime('%Y-%m-%d %H:%M:%S %Z')})"
+        )
         return 0
 
     if args.all_symbols:

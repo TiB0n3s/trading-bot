@@ -16,6 +16,17 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+ROOT = Path(__file__).resolve().parents[1]
+SCRIPTS_DIR = Path(__file__).resolve().parent
+if str(SCRIPTS_DIR) not in sys.path:
+    sys.path.insert(0, str(SCRIPTS_DIR))
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+SRC_DIR = ROOT / "src"
+if str(SRC_DIR) not in sys.path:
+    sys.path.insert(0, str(SRC_DIR))
+
+from market_time import is_market_hours, now_et
 from repositories.label_v1_repo import LabelV1Repository
 
 LABEL_BUILDER_VERSION = "label_v1_builder_20260527"
@@ -50,6 +61,20 @@ def validate_feature_snapshot_contract(db_path: Path | str | None = None) -> dic
 
 
 def build_labels(limit: int = 200) -> dict[str, Any]:
+    now = now_et()
+    if not is_market_hours(now):
+        return {
+            "status": "skipped",
+            "reason": "outside_regular_market_hours",
+            "market_time": now.isoformat(),
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+            "ok": True,
+            "label_builder_version": LABEL_BUILDER_VERSION,
+            "label_version": LABEL_VERSION,
+            "exit_policy_version": EXIT_POLICY_VERSION,
+            "position_manager_version": POSITION_MANAGER_VERSION,
+        }
+
     contract = validate_feature_snapshot_contract()
     if not contract["ok"]:
         return {

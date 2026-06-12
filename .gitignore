@@ -92,3 +92,8 @@ manual_polygon_backfill_v4_*.log
 portfolio_replacement_memory.json
 position_manager_state.json
 strategy_memory.json
+reports/historical_outcome_feedback/2026-06-11.json
+reports/historical_outcome_feedback/2026-06-12.json
+.gitignore
+reports/intraday_learning/2026-06-12_backfill_repair.json
+reports/intraday_learning/2026-06-11_backfill_repair.json

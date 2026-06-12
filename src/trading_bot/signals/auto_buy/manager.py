@@ -1033,6 +1033,8 @@ def evaluate_auto_buy_candidate(
             "pattern_confidence_quality": "not_applicable",
             "pattern_runtime_effect": "observe_only_no_live_authority",
             "pattern_source": "auto_buy_held_short_circuit",
+            "evaluation_depth": "short_circuit_held",
+            "layered_ml_evaluation_depth": "not_evaluated_held_symbol",
         }
 
     score = 0.0
@@ -1484,6 +1486,7 @@ def evaluate_auto_buy_candidate(
         and (layered_ml_veto_relevant or layered_ml_promotion_relevant)
     )
     if layered_ml_build_relevant:
+        layered_ml_evaluation_depth = "full_layered_ml"
         layered_ml = auto_buy_layered_ml_context(
             symbol=symbol,
             session=session,
@@ -1495,18 +1498,24 @@ def evaluate_auto_buy_candidate(
             bar_pattern_features=bar_pattern_features_for_memory,
         )
     else:
-        if hard_block_reasons:
+        if not AUTO_BUY_LAYERED_ML_ENABLED:
+            skip_reason = "layered_ml_disabled"
+            layered_ml_evaluation_depth = "layered_ml_disabled"
+        elif hard_block_reasons:
             skip_reason = "hard_block_present"
+            layered_ml_evaluation_depth = "shallow_hard_block"
         elif score + AUTO_BUY_LAYERED_ML_SCORE_BOOST < AUTO_BUY_WATCH_SCORE:
             skip_reason = (
                 "score_unreachable:"
                 f"{score:.2f}+{AUTO_BUY_LAYERED_ML_SCORE_BOOST:.2f}<"
                 f"{AUTO_BUY_WATCH_SCORE:.2f}"
             )
+            layered_ml_evaluation_depth = "shallow_unreachable_score"
         else:
             skip_reason = (
                 f"outside_layered_authority_window:gap={layered_ml_threshold_gap_before_build:.2f}"
             )
+            layered_ml_evaluation_depth = "shallow_outside_authority_window"
         layered_ml = skipped_auto_buy_layered_ml_context(skip_reason)
         reasons.append(f"layered_ml_skipped:{skip_reason}")
     layered_ml_available = bool(layered_ml.get("available"))
@@ -1690,6 +1699,7 @@ def evaluate_auto_buy_candidate(
         "strong_buy_threshold": strong_threshold,
         "reason": "; ".join(reasons) if reasons else "no positive auto-buy evidence",
         "hard_block_reason": hard_block_reason,
+        "evaluation_depth": layered_ml_evaluation_depth,
         "market_bias": bias,
         "entry_quality": entry_quality,
         "risk_level": risk_level,
@@ -1749,6 +1759,7 @@ def evaluate_auto_buy_candidate(
             else "observe_only_or_not_qualified"
         ),
         "layered_ml_enabled": bool(AUTO_BUY_LAYERED_ML_ENABLED),
+        "layered_ml_evaluation_depth": layered_ml_evaluation_depth,
         "layered_ml_available": bool(layered_ml_available),
         "layered_ml_runtime_effect": layered_ml.get("runtime_effect"),
         "layered_ml_final_instruction": layered_instruction,

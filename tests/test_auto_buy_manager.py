@@ -14,6 +14,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
+sys.path.insert(0, str(ROOT / "scripts"))
 
 from auto_buy_manager import attach_canonical_decision_metadata
 from auto_buy_manager import evaluate_auto_buy_candidate
@@ -1410,6 +1411,58 @@ def test_layered_ml_can_promote_near_threshold_auto_buy_candidate_in_paper_mode(
         raise AssertionError("missing layered ML promotion reason")
 
 
+def test_layered_ml_runs_for_otherwise_strong_auto_buy_candidate():
+    old_context = auto_buy_manager.auto_buy_layered_ml_context
+    old_enabled = auto_buy_manager.AUTO_BUY_LAYERED_ML_ENABLED
+    old_promotion = auto_buy_manager.AUTO_BUY_LAYERED_ML_PROMOTION_ENABLED
+    calls = {"count": 0}
+
+    def _layered_context(**kwargs):
+        calls["count"] += 1
+        return {
+            "enabled": True,
+            "available": True,
+            "runtime_effect": "paper_bounded_auto_buy_intelligence_authority",
+            "final_instruction": "pass",
+            "final_size_pct": 0.5,
+            "ensemble_probability_pct": 66.0,
+            "meta_label_effect": "pass",
+            "meta_label_instruction": "pass",
+            "master_confidence_score": 66.0,
+            "paper_recommendation": "paper_watch",
+            "reason": "test layered pass",
+            "decision": {"final_instruction": "pass"},
+            "historical_bar_paper_strategy": {"master_confidence_score": 66.0},
+            "bar_pattern_features": {"symbol": "AMZN"},
+        }
+
+    auto_buy_manager.AUTO_BUY_LAYERED_ML_ENABLED = True
+    auto_buy_manager.AUTO_BUY_LAYERED_ML_PROMOTION_ENABLED = False
+    auto_buy_manager.auto_buy_layered_ml_context = _layered_context
+    try:
+        candidate = evaluate_auto_buy_candidate(
+            symbol="AMZN",
+            session=strong_session(),
+            feature=favorable_feature(),
+            context=buy_context(),
+            held=set(),
+        )
+    finally:
+        auto_buy_manager.auto_buy_layered_ml_context = old_context
+        auto_buy_manager.AUTO_BUY_LAYERED_ML_ENABLED = old_enabled
+        auto_buy_manager.AUTO_BUY_LAYERED_ML_PROMOTION_ENABLED = old_promotion
+
+    assert_equal(calls["count"], 1, "layered context calls")
+    assert_equal(candidate["decision"], "strong_buy_candidate", "decision")
+    assert_equal(candidate["evaluation_depth"], "full_layered_ml", "evaluation depth")
+    assert_equal(
+        candidate["layered_ml_evaluation_depth"],
+        "full_layered_ml",
+        "layered evaluation depth",
+    )
+    assert_equal(candidate["layered_ml_available"], True, "layered availability")
+
+
 def test_layered_ml_is_skipped_for_hard_blocked_auto_buy_candidate():
     old_context = auto_buy_manager.auto_buy_layered_ml_context
     old_enabled = auto_buy_manager.AUTO_BUY_LAYERED_ML_ENABLED
@@ -1445,6 +1498,7 @@ def test_layered_ml_is_skipped_for_hard_blocked_auto_buy_candidate():
     assert_equal(calls["count"], 0, "layered context calls")
     assert_equal(candidate["decision"], "skip", "decision")
     assert_equal(candidate["layered_ml_available"], False, "layered availability")
+    assert_equal(candidate["evaluation_depth"], "shallow_hard_block", "evaluation depth")
     assert_equal(
         candidate["layered_ml_runtime_effect"],
         "skipped_hot_path_no_decision_authority",
@@ -1470,7 +1524,7 @@ def test_layered_ml_is_skipped_for_unreachable_auto_buy_score():
     auto_buy_manager.auto_buy_layered_ml_context = _unexpected_layered_context
     try:
         feature = favorable_feature()
-        feature["setup_recommendation"] = "avoid"
+        feature["setup_recommendation"] = "watch"
         feature["setup_score"] = 5
         feature["momentum_acceleration_pct"] = -0.06
         candidate = evaluate_auto_buy_candidate(
@@ -1495,6 +1549,7 @@ def test_layered_ml_is_skipped_for_unreachable_auto_buy_score():
     assert_equal(calls["count"], 0, "layered context calls")
     assert_equal(candidate["decision"], "skip", "decision")
     assert_equal(candidate["layered_ml_available"], False, "layered availability")
+    assert_equal(candidate["evaluation_depth"], "shallow_unreachable_score", "evaluation depth")
     if "layered_ml_skipped" not in candidate["reason"]:
         raise AssertionError("missing layered skip reason")
 
@@ -1580,6 +1635,7 @@ def main():
         test_learned_tiebreaker_does_not_override_hard_blocks,
         test_learned_tiebreaker_can_override_soft_intelligence_blocks_in_paper_mode,
         test_layered_ml_can_promote_near_threshold_auto_buy_candidate_in_paper_mode,
+        test_layered_ml_runs_for_otherwise_strong_auto_buy_candidate,
         test_layered_ml_is_skipped_for_hard_blocked_auto_buy_candidate,
         test_layered_ml_is_skipped_for_unreachable_auto_buy_score,
         test_layered_ml_veto_blocks_otherwise_strong_auto_buy_candidate_in_paper_mode,

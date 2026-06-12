@@ -23,6 +23,9 @@ DEFAULT_FEATURES = (
     "range_atr_ratio",
     "atr_20_pct",
     "volume_ratio_20",
+    "volume_profile_poc_dist_pct",
+    "volume_profile_value_area_width_pct",
+    "volume_profile_close_position",
     "trend_scan_tstat",
 )
 

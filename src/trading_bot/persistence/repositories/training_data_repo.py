@@ -11,6 +11,7 @@ from services.bar_pattern_feature_service import BAR_PATTERN_FEATURE_VERSION
 
 SNAPSHOT_JOIN_FEATURE_VERSION_ALIASES = (
     BAR_PATTERN_FEATURE_VERSION,
+    "efi_pvt_orderflow_math_bar_pattern_v4",
     "v4",
     "efi_pvt_orderflow_math_bar_pattern_v3",
 )
@@ -98,6 +99,10 @@ class TrainingDataRepository:
             bp_cols = self._table_columns(con, "bar_pattern_features")
             bp_version_filter = self._bar_pattern_version_filter(bp_cols)
 
+            def bp_expr(col: str, alias: str | None = None, fallback: str = "NULL") -> str:
+                alias = alias or col
+                return f"bp.{col} AS {alias}" if col in bp_cols else f"{fallback} AS {alias}"
+
             label_join = (
                 """
                 LEFT JOIN labeled_setups ls
@@ -165,6 +170,16 @@ class TrainingDataRepository:
                     {("bp.candle_body_pct" if has_bar_patterns else "NULL")} AS candle_body_pct,
                     {("bp.close_location" if has_bar_patterns else "NULL")} AS close_location,
                     {("bp.range_atr_ratio" if has_bar_patterns else "NULL")} AS range_atr_ratio,
+                    {bp_expr("volume_profile_poc_dist_pct")},
+                    {bp_expr("volume_profile_vah_dist_pct")},
+                    {bp_expr("volume_profile_val_dist_pct")},
+                    {bp_expr("volume_profile_hvn_dist_pct")},
+                    {bp_expr("volume_profile_lvn_dist_pct")},
+                    {bp_expr("volume_profile_poc_volume_zscore")},
+                    {bp_expr("volume_profile_total_volume_zscore")},
+                    {bp_expr("volume_profile_value_area_width_pct")},
+                    {bp_expr("volume_profile_close_position")},
+                    {bp_expr("volume_profile_low_volume_zone")},
                     {("bp.volume_weighted_pressure_3" if has_bar_patterns else "NULL")} AS volume_weighted_pressure_3,
                     {("bp.volume_delta" if has_bar_patterns else "NULL")} AS volume_delta,
                     {("bp.institutional_volume_delta" if has_bar_patterns else "NULL")} AS institutional_volume_delta,
@@ -302,6 +317,36 @@ class TrainingDataRepository:
                     {bp_opt("range_atr_ratio")},
                     {bp_opt("atr_20_pct")},
                     {bp_opt("volume_ratio_20")},
+                    {bp_opt("volume_profile_poc_dist_pct")},
+                    {bp_opt("volume_profile_vah_dist_pct")},
+                    {bp_opt("volume_profile_val_dist_pct")},
+                    {bp_opt("volume_profile_hvn_dist_pct")},
+                    {bp_opt("volume_profile_lvn_dist_pct")},
+                    {bp_opt("volume_profile_poc_volume_zscore")},
+                    {bp_opt("volume_profile_total_volume_zscore")},
+                    {bp_opt("volume_profile_value_area_width_pct")},
+                    {bp_opt("volume_profile_close_position")},
+                    {bp_opt("volume_profile_low_volume_zone")},
+                    {bp_opt("volume_profile_bin_00")},
+                    {bp_opt("volume_profile_bin_01")},
+                    {bp_opt("volume_profile_bin_02")},
+                    {bp_opt("volume_profile_bin_03")},
+                    {bp_opt("volume_profile_bin_04")},
+                    {bp_opt("volume_profile_bin_05")},
+                    {bp_opt("volume_profile_bin_06")},
+                    {bp_opt("volume_profile_bin_07")},
+                    {bp_opt("volume_profile_bin_08")},
+                    {bp_opt("volume_profile_bin_09")},
+                    {bp_opt("volume_profile_bin_10")},
+                    {bp_opt("volume_profile_bin_11")},
+                    {bp_opt("volume_profile_bin_12")},
+                    {bp_opt("volume_profile_bin_13")},
+                    {bp_opt("volume_profile_bin_14")},
+                    {bp_opt("volume_profile_bin_15")},
+                    {bp_opt("volume_profile_bin_16")},
+                    {bp_opt("volume_profile_bin_17")},
+                    {bp_opt("volume_profile_bin_18")},
+                    {bp_opt("volume_profile_bin_19")},
                     {bp_opt("pressure_return_3")},
                     {bp_opt("pressure_return_8")},
                     {bp_opt("volume_weighted_pressure_3")},

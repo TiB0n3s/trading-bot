@@ -46,6 +46,19 @@ QUERY_VERSION = "ml_dataset_builder_v1"
 LABEL_VERSION = "label_taxonomy_v1"
 BAR_PATTERN_FEATURE_TARGET_VERSION = "bar_pattern_feature_target_v1"
 ADVANCED_ALPHA_FEATURE_VERSION = "advanced_alpha_feature_target_v1"
+VOLUME_PROFILE_FEATURE_COLUMNS = (
+    "volume_profile_poc_dist_pct",
+    "volume_profile_vah_dist_pct",
+    "volume_profile_val_dist_pct",
+    "volume_profile_hvn_dist_pct",
+    "volume_profile_lvn_dist_pct",
+    "volume_profile_poc_volume_zscore",
+    "volume_profile_total_volume_zscore",
+    "volume_profile_value_area_width_pct",
+    "volume_profile_close_position",
+    "volume_profile_low_volume_zone",
+    *tuple(f"volume_profile_bin_{idx:02d}" for idx in range(20)),
+)
 
 FIXED_HORIZON_TARGETS = [
     "ret_fwd_15m",
@@ -120,6 +133,7 @@ ROW_COLUMNS = [
     "range_atr_ratio",
     "atr_20_pct",
     "volume_ratio_20",
+    *VOLUME_PROFILE_FEATURE_COLUMNS,
     "pressure_return_3",
     "pressure_return_8",
     "volume_weighted_pressure_3",

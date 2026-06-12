@@ -139,6 +139,16 @@ def test_bar_pattern_service_builds_efi_pvt_forward_features():
     assert any(row["triple_barrier_reason"] for row in rows)
     assert any(row["cvd_price_corr_20"] is not None for row in rows)
     assert any(row["vpin_toxicity_20"] is not None for row in rows)
+    assert any(row["volume_profile_poc_dist_pct"] is not None for row in rows)
+    assert any(row["volume_profile_vah_dist_pct"] is not None for row in rows)
+    assert any(row["volume_profile_val_dist_pct"] is not None for row in rows)
+    assert any(row["volume_profile_value_area_width_pct"] is not None for row in rows)
+    assert any(row["volume_profile_close_position"] is not None for row in rows)
+    assert any(row["volume_profile_low_volume_zone"] in {0, 1} for row in rows)
+    profile_rows = [row for row in rows if row["volume_profile_bin_00"] is not None]
+    assert profile_rows
+    profile_total = sum(profile_rows[-1][f"volume_profile_bin_{idx:02d}"] for idx in range(20))
+    assert abs(profile_total - 1.0) < 0.0001
     assert any(row["fractional_diff_zscore_20"] is not None for row in rows)
     assert any(row["trend_scan_label"] in {-1, 0, 1} for row in rows)
     assert any(row["trend_scan_reason"] for row in rows)
@@ -171,6 +181,7 @@ def test_bar_pattern_repository_persists_and_summarizes(tmp_path: Path):
     assert summary["trend_scans"]
     assert summary["cvd_divergences"]
     assert summary["rows_with_order_flow"] > 0
+    assert summary["rows_with_volume_profile"] > 0
     assert summary["rows_with_fractional_memory"] > 0
     assert any(row["opportunity_action"] == "buy_candidate" for row in summary["opportunities"])
 

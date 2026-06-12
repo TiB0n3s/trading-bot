@@ -12,10 +12,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from ml_platform.config import DEFAULT_DB_PATH
 from repositories.training_data_repo import TrainingDataRepository
 from setup_engine import classify_feature_snapshot as classify_setup
 
+from ml_platform.config import DEFAULT_DB_PATH
 
 BRAIN_FEATURE_VERSION = "bot_brain_features_v1"
 
@@ -72,6 +72,12 @@ BRAIN_FEATURE_COLUMNS = [
     "close_location",
     "range_atr_ratio",
     "volume_weighted_pressure_3",
+    "volume_profile_poc_dist_pct",
+    "volume_profile_vah_dist_pct",
+    "volume_profile_val_dist_pct",
+    "volume_profile_value_area_width_pct",
+    "volume_profile_close_position",
+    "volume_profile_low_volume_zone",
     "cvd_price_corr_20",
     "vpin_toxicity_20",
     "fractional_diff_zscore_20",
@@ -84,7 +90,9 @@ BRAIN_FEATURE_COLUMNS = [
 ]
 
 
-def _date_filter(date_arg: str | None, start_date: str | None, end_date: str | None) -> tuple[str, tuple[str, ...]]:
+def _date_filter(
+    date_arg: str | None, start_date: str | None, end_date: str | None
+) -> tuple[str, tuple[str, ...]]:
     if date_arg and (start_date or end_date):
         raise ValueError("Use either date or start/end range, not both")
     if date_arg:
@@ -157,6 +165,12 @@ def build_brain_feature_row(row: Any | dict[str, Any]) -> dict[str, Any]:
         "close_location": data.get("close_location"),
         "range_atr_ratio": data.get("range_atr_ratio"),
         "volume_weighted_pressure_3": data.get("volume_weighted_pressure_3"),
+        "volume_profile_poc_dist_pct": data.get("volume_profile_poc_dist_pct"),
+        "volume_profile_vah_dist_pct": data.get("volume_profile_vah_dist_pct"),
+        "volume_profile_val_dist_pct": data.get("volume_profile_val_dist_pct"),
+        "volume_profile_value_area_width_pct": data.get("volume_profile_value_area_width_pct"),
+        "volume_profile_close_position": data.get("volume_profile_close_position"),
+        "volume_profile_low_volume_zone": data.get("volume_profile_low_volume_zone"),
         "cvd_price_corr_20": data.get("cvd_price_corr_20"),
         "vpin_toxicity_20": data.get("vpin_toxicity_20"),
         "fractional_diff_zscore_20": data.get("fractional_diff_zscore_20"),

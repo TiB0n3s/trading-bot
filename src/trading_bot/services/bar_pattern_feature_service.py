@@ -11,9 +11,12 @@ from zoneinfo import ZoneInfo
 
 from repositories.bar_pattern_feature_repo import BarPatternFeatureRepository
 
-BAR_PATTERN_FEATURE_VERSION = "efi_pvt_orderflow_math_bar_pattern_v4"
+BAR_PATTERN_FEATURE_VERSION = "efi_pvt_orderflow_math_volume_profile_bar_pattern_v5"
 BAR_PATTERN_RUNTIME_EFFECT = "observe_only_pattern_learning_no_live_authority"
 MARKET_TZ = ZoneInfo("America/New_York")
+VOLUME_PROFILE_BINS = 20
+VOLUME_PROFILE_RANGE_PCT = 2.0
+VOLUME_PROFILE_LOOKBACK = 60
 
 
 def _float(value: Any) -> float | None:
@@ -586,6 +589,179 @@ def _candle_physics(
     }
 
 
+def _volume_profile_bin_columns() -> tuple[str, ...]:
+    return tuple(f"volume_profile_bin_{idx:02d}" for idx in range(VOLUME_PROFILE_BINS))
+
+
+def _empty_volume_profile() -> dict[str, float | int | None]:
+    profile: dict[str, float | int | None] = {
+        "volume_profile_poc_dist_pct": None,
+        "volume_profile_vah_dist_pct": None,
+        "volume_profile_val_dist_pct": None,
+        "volume_profile_hvn_dist_pct": None,
+        "volume_profile_lvn_dist_pct": None,
+        "volume_profile_poc_volume_zscore": None,
+        "volume_profile_total_volume_zscore": None,
+        "volume_profile_value_area_width_pct": None,
+        "volume_profile_close_position": None,
+        "volume_profile_low_volume_zone": None,
+    }
+    for column in _volume_profile_bin_columns():
+        profile[column] = None
+    return profile
+
+
+def _volume_profile_features_at(
+    *,
+    highs: list[float],
+    lows: list[float],
+    closes: list[float],
+    volumes: list[float],
+    idx: int,
+    lookback: int = VOLUME_PROFILE_LOOKBACK,
+    bins: int = VOLUME_PROFILE_BINS,
+    profile_range_pct: float = VOLUME_PROFILE_RANGE_PCT,
+) -> dict[str, float | int | None]:
+    """Build stationary volume-at-relative-price features using only past bars.
+
+    This approximates a volume profile from OHLCV bars by distributing each
+    bar's volume across relative price bins anchored to the current close. The
+    output is fixed-width and price-normalized, so models learn the profile
+    shape rather than absolute historical price levels.
+    """
+
+    if idx < 0 or idx >= len(closes):
+        return _empty_volume_profile()
+    anchor = closes[idx]
+    if not anchor or anchor <= 0 or bins <= 0:
+        return _empty_volume_profile()
+
+    start = max(0, idx + 1 - lookback)
+    lower_bound = -profile_range_pct
+    upper_bound = profile_range_pct
+    bin_width = (upper_bound - lower_bound) / bins
+    if bin_width <= 0:
+        return _empty_volume_profile()
+
+    bin_volumes = [0.0] * bins
+
+    def _bin_for_dist(dist_pct: float) -> int | None:
+        if dist_pct < lower_bound or dist_pct > upper_bound:
+            return None
+        if dist_pct == upper_bound:
+            return bins - 1
+        pos = int((dist_pct - lower_bound) / bin_width)
+        if 0 <= pos < bins:
+            return pos
+        return None
+
+    for pos in range(start, idx + 1):
+        volume = volumes[pos] if pos < len(volumes) else 0.0
+        if volume <= 0:
+            continue
+        low = lows[pos] if pos < len(lows) else closes[pos]
+        high = highs[pos] if pos < len(highs) else closes[pos]
+        close = closes[pos]
+        if high < low:
+            low, high = high, low
+
+        low_dist = (low - anchor) / anchor * 100.0
+        high_dist = (high - anchor) / anchor * 100.0
+        low_bin = _bin_for_dist(max(lower_bound, low_dist))
+        high_bin = _bin_for_dist(min(upper_bound, high_dist))
+        if low_bin is None or high_bin is None or high_bin < low_bin:
+            close_bin = _bin_for_dist((close - anchor) / anchor * 100.0)
+            if close_bin is not None:
+                bin_volumes[close_bin] += volume
+            continue
+
+        touched = max(1, high_bin - low_bin + 1)
+        per_bin = volume / touched
+        for bin_idx in range(low_bin, high_bin + 1):
+            bin_volumes[bin_idx] += per_bin
+
+    total_volume = sum(bin_volumes)
+    if total_volume <= 0:
+        return _empty_volume_profile()
+
+    def _bin_midpoint(bin_idx: int) -> float:
+        return lower_bound + (bin_idx + 0.5) * bin_width
+
+    poc_idx = max(range(bins), key=lambda pos: bin_volumes[pos])
+    mean_bin_volume = total_volume / bins
+    variance = sum((value - mean_bin_volume) ** 2 for value in bin_volumes) / bins
+    std_bin_volume = math.sqrt(variance)
+    zscore = (
+        (bin_volumes[poc_idx] - mean_bin_volume) / std_bin_volume if std_bin_volume > 0 else 0.0
+    )
+
+    target_value_area_volume = total_volume * 0.70
+    left = right = poc_idx
+    value_area_volume = bin_volumes[poc_idx]
+    while value_area_volume < target_value_area_volume and (left > 0 or right < bins - 1):
+        left_volume = bin_volumes[left - 1] if left > 0 else -1.0
+        right_volume = bin_volumes[right + 1] if right < bins - 1 else -1.0
+        if right_volume >= left_volume and right < bins - 1:
+            right += 1
+            value_area_volume += bin_volumes[right]
+        elif left > 0:
+            left -= 1
+            value_area_volume += bin_volumes[left]
+        else:
+            break
+
+    current_bin = _bin_for_dist(0.0)
+    low_volume_threshold = mean_bin_volume - (0.5 * std_bin_volume)
+    low_volume_zone = (
+        1
+        if current_bin is not None and bin_volumes[current_bin] <= max(0.0, low_volume_threshold)
+        else 0
+    )
+
+    hvn_candidates = [
+        (abs(_bin_midpoint(pos)), pos)
+        for pos, value in enumerate(bin_volumes)
+        if pos != poc_idx and value >= mean_bin_volume + (0.5 * std_bin_volume)
+    ]
+    hvn_idx = min(hvn_candidates)[1] if hvn_candidates else poc_idx
+    lvn_candidates = [
+        (abs(_bin_midpoint(pos)), pos)
+        for pos, value in enumerate(bin_volumes)
+        if value <= max(0.0, low_volume_threshold)
+    ]
+    lvn_idx = (
+        min(lvn_candidates)[1]
+        if lvn_candidates
+        else (min(range(bins), key=lambda pos: bin_volumes[pos]))
+    )
+
+    rolling_total_volumes = []
+    for pos in range(start, idx + 1):
+        roll_start = max(0, pos + 1 - lookback)
+        rolling_total_volumes.append(sum(volumes[roll_start : pos + 1]))
+    total_volume_zscore = _zscore(rolling_total_volumes)
+
+    val_dist = _bin_midpoint(left)
+    vah_dist = _bin_midpoint(right)
+    close_position = _safe_div(0.0 - val_dist, vah_dist - val_dist)
+
+    profile: dict[str, float | int | None] = {
+        "volume_profile_poc_dist_pct": _bin_midpoint(poc_idx),
+        "volume_profile_vah_dist_pct": vah_dist,
+        "volume_profile_val_dist_pct": val_dist,
+        "volume_profile_hvn_dist_pct": _bin_midpoint(hvn_idx),
+        "volume_profile_lvn_dist_pct": _bin_midpoint(lvn_idx),
+        "volume_profile_poc_volume_zscore": zscore,
+        "volume_profile_total_volume_zscore": total_volume_zscore,
+        "volume_profile_value_area_width_pct": vah_dist - val_dist,
+        "volume_profile_close_position": close_position,
+        "volume_profile_low_volume_zone": low_volume_zone,
+    }
+    for bin_idx, column in enumerate(_volume_profile_bin_columns()):
+        profile[column] = bin_volumes[bin_idx] / total_volume
+    return profile
+
+
 def _triple_barrier_label(
     *,
     close: float,
@@ -1025,6 +1201,13 @@ class BarPatternFeatureService:
                 volume=volumes[idx],
                 pressure_return_3=pressure_return_3,
             )
+            volume_profile = _volume_profile_features_at(
+                highs=highs,
+                lows=lows,
+                closes=closes,
+                volumes=volumes,
+                idx=idx,
+            )
             efi_slope_3 = (
                 efi_ema[idx] - efi_ema[idx - 3] if idx >= 3 and len(efi_ema) > idx else None
             )
@@ -1228,6 +1411,7 @@ class BarPatternFeatureService:
                 "range_atr_ratio": candle["range_atr_ratio"],
                 "atr_20_pct": candle["atr_20_pct"],
                 "volume_ratio_20": candle["volume_ratio_20"],
+                **volume_profile,
                 "pressure_return_3": pressure_return_3,
                 "pressure_return_8": pressure_return_8,
                 "volume_weighted_pressure_3": candle["volume_weighted_pressure_3"],
@@ -1328,6 +1512,14 @@ class BarPatternFeatureService:
                     "range_atr_ratio": _round(candle["range_atr_ratio"]),
                     "atr_20_pct": _round(candle["atr_20_pct"]),
                     "volume_ratio_20": _round(candle["volume_ratio_20"]),
+                    **{
+                        key: (
+                            int(value)
+                            if key == "volume_profile_low_volume_zone" and value is not None
+                            else _round(value)
+                        )
+                        for key, value in volume_profile.items()
+                    },
                     "pressure_return_3": _round(pressure_return_3),
                     "pressure_return_8": _round(pressure_return_8),
                     "volume_weighted_pressure_3": _round(candle["volume_weighted_pressure_3"]),

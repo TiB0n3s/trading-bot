@@ -159,6 +159,13 @@ or destabilize the webhook path if treated as routine cleanup.
      redirection, and durable `job_runs` rows with job name, start/end,
      duration, exit code, lock-acquired/skipped state, optional rows written,
      warnings, and artifact paths/hashes.
+   - Intraday evidence writers are staggered away from the auto-buy cadence
+     and run with `--ionice-idle --nice 10`; auto-buy and position management
+     keep normal priority. These jobs also defer when the auto-buy lock is
+     held, so slow auto-buy scans cannot be made worse by the next evidence
+     writer opening SQLite. SQLite runtime defaults are WAL with bounded
+     checkpoint and journal-size controls, plus an offset `sqlite_wal_checkpoint`
+     cron.
    - Next observability step: pass real row/warning/artifact metrics from
      individual jobs instead of only command-level status.
 8. Runtime/offline feature parity:

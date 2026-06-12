@@ -7,6 +7,7 @@ import argparse
 import fcntl
 import os
 import re
+import shutil
 import signal
 import subprocess
 import sys
@@ -161,7 +162,18 @@ def _run_command(
     *,
     job_name: str,
     timeout_seconds: int | None,
+    nice: int | None = None,
+    ionice_idle: bool = False,
 ) -> int:
+    effective_command = list(command)
+    if nice is not None:
+        effective_command = ["nice", "-n", str(nice), *effective_command]
+    if ionice_idle:
+        if shutil.which("ionice"):
+            effective_command = ["ionice", "-c3", *effective_command]
+        else:
+            _append_log(log_file, f"{_now_iso()} job-runner-warning: ionice not found")
+
     stdout = None
     log_handle = None
     if log_file:
@@ -172,7 +184,7 @@ def _run_command(
 
     try:
         proc = subprocess.Popen(
-            command,
+            effective_command,
             stdout=stdout,
             stderr=subprocess.STDOUT if stdout is not None else None,
             start_new_session=True,
@@ -198,6 +210,20 @@ def _release_lock(lock_handle) -> None:
         fcntl.flock(lock_handle.fileno(), fcntl.LOCK_UN)
     finally:
         lock_handle.close()
+
+
+def _is_lock_busy(lock_file: str) -> bool:
+    lock_path = Path(lock_file)
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    lock_handle = lock_path.open("w")
+    try:
+        try:
+            fcntl.flock(lock_handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            return True
+        return False
+    finally:
+        _release_lock(lock_handle)
 
 
 def _record_run_best_effort(
@@ -226,6 +252,22 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--artifact-path")
     parser.add_argument("--db-path")
     parser.add_argument("--timeout-seconds", type=int)
+    parser.add_argument(
+        "--defer-while-locked",
+        action="append",
+        default=[],
+        help="Skip this job when another lock file is currently held.",
+    )
+    parser.add_argument(
+        "--nice",
+        type=int,
+        help="Run the child command with nice -n VALUE.",
+    )
+    parser.add_argument(
+        "--ionice-idle",
+        action="store_true",
+        help="Run the child command with best-effort idle I/O priority when ionice is available.",
+    )
     parser.add_argument("command", nargs=argparse.REMAINDER)
     args = parser.parse_args(argv)
 
@@ -241,6 +283,14 @@ def main(argv: list[str] | None = None) -> int:
     started_at = _now_iso()
     started_monotonic = time.monotonic()
     timeout_seconds = _timeout_for_job(args.job_name, args.timeout_seconds)
+
+    for defer_lock in args.defer_while_locked:
+        if _is_lock_busy(defer_lock):
+            _append_log(
+                args.log_file,
+                f"{_now_iso()} defer-lock-busy: {args.job_name} skipped lock={defer_lock}",
+            )
+            return 0
 
     lock_handle = None
     if args.lock_file:
@@ -273,6 +323,8 @@ def main(argv: list[str] | None = None) -> int:
             args.log_file,
             job_name=args.job_name,
             timeout_seconds=timeout_seconds,
+            nice=args.nice,
+            ionice_idle=args.ionice_idle,
         )
         return exit_code
     finally:

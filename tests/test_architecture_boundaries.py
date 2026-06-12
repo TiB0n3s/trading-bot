@@ -84,6 +84,7 @@ def _assert_no_import(directory: str, banned: set[str], label: str):
 APPROVED_DB_BOUNDARIES = {
     "scripts/db.py",
     "scripts/db_migrations.py",
+    "scripts/sqlite_checkpoint.py",
     "ops/database_backup_service.py",
 }
 APPROVED_DB_BOUNDARY_PREFIXES = {

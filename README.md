@@ -1532,6 +1532,29 @@ non-blocking lock acquisition, lock-busy logging, command output redirection,
 and durable `job_runs` ledger rows with start/end time, duration, exit code,
 lock state, optional row counts, warning counts, and artifact hashes.
 
+Intraday database contention controls:
+
+- SQLite defaults to WAL with `synchronous=NORMAL`, `wal_autocheckpoint=1000`,
+  `journal_size_limit=67108864`, and a 5s busy timeout. Override with
+  `SQLITE_JOURNAL_MODE`, `SQLITE_SYNCHRONOUS`,
+  `SQLITE_WAL_AUTOCHECKPOINT`, `SQLITE_JOURNAL_SIZE_LIMIT`, and
+  `SQLITE_BUSY_TIMEOUT_MS` only for a specific incident.
+- Evidence writers (`run_live_features`, `run_label_features`,
+  `rolling_momentum`, `session_momentum`) run offset from auto-buy and with
+  `job_runner.py --ionice-idle --nice 10` so auto-buy and position management
+  keep scheduler and disk priority. They also use
+  `--defer-while-locked /tmp/tradingbot_auto_buy_manager.lock`, so they skip
+  instead of opening the database when auto-buy is still scanning.
+- `scripts/sqlite_checkpoint.py` is the bounded WAL maintenance command. Cron
+  runs it on an offset market-hours cadence with a short timeout; manual use:
+
+```bash
+/home/tradingbot/trading-bot/venv/bin/python scripts/sqlite_checkpoint.py \
+  --db-path /home/tradingbot/trading-bot/trades.db \
+  --set-wal \
+  --mode TRUNCATE
+```
+
 Intraday learning has two bounded feedback paths:
 
 - `pipeline/intraday_learning.py --phase noon` writes a noon performance

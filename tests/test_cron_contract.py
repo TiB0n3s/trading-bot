@@ -102,12 +102,40 @@ def test_live_and_label_features_are_regular_session_only():
     ]
     assert len(live_lines) == 2, live_lines
     assert len(label_lines) == 2, label_lines
-    assert any(line.startswith("30-59/2 8 * * 1-5") for line in live_lines), live_lines
-    assert any(line.startswith("*/2 9-14 * * 1-5") for line in live_lines), live_lines
+    assert any(line.startswith("31-59/2 8 * * 1-5") for line in live_lines), live_lines
+    assert any(line.startswith("1-59/2 9-14 * * 1-5") for line in live_lines), live_lines
+    assert all("--ionice-idle --nice 10" in line for line in live_lines), live_lines
+    assert all(
+        "--defer-while-locked /tmp/tradingbot_auto_buy_manager.lock" in line for line in live_lines
+    ), live_lines
     assert any(line.startswith("30-59/5 8 * * 1-5") for line in label_lines), label_lines
     assert any(line.startswith("*/5 9-14 * * 1-5") for line in label_lines), label_lines
+    assert all("--ionice-idle --nice 10" in line for line in label_lines), label_lines
+    assert all(
+        "--defer-while-locked /tmp/tradingbot_auto_buy_manager.lock" in line for line in label_lines
+    ), label_lines
     assert not any(line.startswith("*/2 8-14") for line in live_lines), live_lines
     assert not any(line.startswith("*/5 8-14") for line in label_lines), label_lines
+
+
+def test_intraday_evidence_writers_are_staggered_and_deprioritized():
+    lines = _cron_command_lines()
+    rolling_lines = [line for line in lines if "--job-name rolling_momentum" in line]
+    session_lines = [line for line in lines if "--job-name session_momentum" in line]
+    checkpoint_lines = [line for line in lines if "--job-name sqlite_wal_checkpoint" in line]
+
+    assert len(rolling_lines) == 1, rolling_lines
+    assert len(session_lines) == 1, session_lines
+    assert len(checkpoint_lines) == 1, checkpoint_lines
+    assert rolling_lines[0].startswith("1-59/4 8-15 * * 1-5"), rolling_lines
+    assert session_lines[0].startswith("3-59/4 8-15 * * 1-5"), session_lines
+    assert "--ionice-idle --nice 10" in rolling_lines[0]
+    assert "--ionice-idle --nice 10" in session_lines[0]
+    assert "--defer-while-locked /tmp/tradingbot_auto_buy_manager.lock" in rolling_lines[0]
+    assert "--defer-while-locked /tmp/tradingbot_auto_buy_manager.lock" in session_lines[0]
+    assert checkpoint_lines[0].startswith("7,22,37,52 9-14 * * 1-5"), checkpoint_lines
+    assert "scripts/sqlite_checkpoint.py" in checkpoint_lines[0]
+    assert "--defer-while-locked /tmp/tradingbot_auto_buy_manager.lock" in checkpoint_lines[0]
 
 
 def test_premarket_dependency_chain_uses_single_pipeline():
@@ -156,6 +184,7 @@ def main():
         test_auto_buy_is_regular_session_only,
         test_fill_poller_is_regular_session_only,
         test_live_and_label_features_are_regular_session_only,
+        test_intraday_evidence_writers_are_staggered_and_deprioritized,
         test_premarket_dependency_chain_uses_single_pipeline,
         test_database_backups_use_safe_gfs_tiers,
     ]

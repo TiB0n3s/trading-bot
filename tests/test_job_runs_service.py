@@ -181,6 +181,44 @@ def test_job_runner_logs_lock_skipped_run_without_touching_ledger():
         assert "lock-busy: unit_job skipped" in log_path.read_text()
 
 
+def test_job_runner_defers_behind_priority_lock_without_touching_ledger():
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp_path = Path(tmp)
+        db_path = tmp_path / "jobs.db"
+        log_path = tmp_path / "job.log"
+        priority_lock_path = tmp_path / "priority.lock"
+
+        with priority_lock_path.open("w") as lock_handle:
+            fcntl.flock(lock_handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(ROOT / "scripts" / "job_runner.py"),
+                    "--job-name",
+                    "batch_job",
+                    "--defer-while-locked",
+                    str(priority_lock_path),
+                    "--log-file",
+                    str(log_path),
+                    "--db-path",
+                    str(db_path),
+                    "--",
+                    sys.executable,
+                    "-c",
+                    "raise SystemExit(7)",
+                ],
+                cwd=ROOT,
+                text=True,
+                capture_output=True,
+            )
+
+        assert result.returncode == 0, result.stderr
+        assert not db_path.exists()
+        text = log_path.read_text()
+        assert "defer-lock-busy: batch_job skipped" in text
+        assert f"lock={priority_lock_path}" in text
+
+
 def test_job_runner_times_out_long_running_job():
     with tempfile.TemporaryDirectory() as tmp:
         tmp_path = Path(tmp)
@@ -548,6 +586,7 @@ def main():
         test_job_runner_infers_rows_and_warnings_from_log_output,
         test_job_runner_infers_rows_from_common_runtime_log_patterns,
         test_job_runner_logs_lock_skipped_run_without_touching_ledger,
+        test_job_runner_defers_behind_priority_lock_without_touching_ledger,
         test_job_runner_ledger_failure_is_best_effort,
         test_service_records_artifact_hash,
         test_service_builds_runtime_health_payload,

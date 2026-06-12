@@ -4,7 +4,10 @@ Shared SQLite helpers for the trading bot.
 
 Goals:
 - Consistent row_factory
-- Configurable journal mode; default rollback journal avoids unbounded WAL growth
+- Configurable journal mode; default WAL keeps readers and writers from
+  serializing during intraday scans
+- Bounded WAL checkpoint/size settings to prevent stale readers from letting
+  sidecar files grow without limit
 - busy_timeout to reduce transient lock failures
 - Centralized schema/index maintenance
 """
@@ -15,8 +18,11 @@ from pathlib import Path
 
 DB_PATH = Path(__file__).resolve().parents[1] / "trades.db"
 
-BUSY_TIMEOUT_MS = 60000
-SQLITE_JOURNAL_MODE = os.getenv("SQLITE_JOURNAL_MODE", "DELETE").strip().upper()
+BUSY_TIMEOUT_MS = int(os.getenv("SQLITE_BUSY_TIMEOUT_MS", "5000"))
+SQLITE_JOURNAL_MODE = os.getenv("SQLITE_JOURNAL_MODE", "WAL").strip().upper()
+SQLITE_SYNCHRONOUS = os.getenv("SQLITE_SYNCHRONOUS", "NORMAL").strip().upper()
+SQLITE_WAL_AUTOCHECKPOINT = int(os.getenv("SQLITE_WAL_AUTOCHECKPOINT", "1000"))
+SQLITE_JOURNAL_SIZE_LIMIT = int(os.getenv("SQLITE_JOURNAL_SIZE_LIMIT", "67108864"))
 
 
 def _configure_journal_mode(con: sqlite3.Connection) -> None:
@@ -32,6 +38,15 @@ def _configure_journal_mode(con: sqlite3.Connection) -> None:
         # Keep the connection alive and let the actual operation honor busy_timeout.
 
 
+def _configure_runtime_pragmas(con: sqlite3.Connection) -> None:
+    if SQLITE_SYNCHRONOUS:
+        con.execute(f"PRAGMA synchronous={SQLITE_SYNCHRONOUS}")
+    if SQLITE_WAL_AUTOCHECKPOINT > 0:
+        con.execute(f"PRAGMA wal_autocheckpoint={SQLITE_WAL_AUTOCHECKPOINT}")
+    if SQLITE_JOURNAL_SIZE_LIMIT >= 0:
+        con.execute(f"PRAGMA journal_size_limit={SQLITE_JOURNAL_SIZE_LIMIT}")
+
+
 def get_connection(db_path: Path | str = DB_PATH) -> sqlite3.Connection:
     """Return a configured SQLite connection."""
     con = sqlite3.connect(db_path, timeout=BUSY_TIMEOUT_MS / 1000)
@@ -39,6 +54,7 @@ def get_connection(db_path: Path | str = DB_PATH) -> sqlite3.Connection:
 
     con.execute(f"PRAGMA busy_timeout={BUSY_TIMEOUT_MS}")
     _configure_journal_mode(con)
+    _configure_runtime_pragmas(con)
     con.execute("PRAGMA foreign_keys=ON")
 
     return con

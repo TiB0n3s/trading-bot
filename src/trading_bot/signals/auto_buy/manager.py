@@ -2040,7 +2040,7 @@ def symbol_window_summary(scope: str, evaluated_count: int) -> dict[str, Any]:
 
 
 AUTO_BUY_MAX_SIGNALS_PER_SYMBOL = int(os.getenv("AUTO_BUY_MAX_SIGNALS_PER_SYMBOL", "2"))
-AUTO_BUY_MAX_SYMBOLS_PER_RUN = int(os.getenv("AUTO_BUY_MAX_SYMBOLS_PER_RUN", "25"))
+AUTO_BUY_MAX_SYMBOLS_PER_RUN = int(os.getenv("AUTO_BUY_MAX_SYMBOLS_PER_RUN", "0"))
 AUTO_BUY_TIMING_LOG_ENABLED = os.getenv("AUTO_BUY_TIMING_LOG_ENABLED", "true").lower() in (
     "1",
     "true",

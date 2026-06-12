@@ -659,6 +659,25 @@ def test_auto_buy_symbol_window_summary_marks_bounded_runs():
     assert_equal(full["bounded"], False, "full flag")
 
 
+def test_auto_buy_symbol_window_default_is_full_universe():
+    old_cap = auto_buy_manager.AUTO_BUY_MAX_SYMBOLS_PER_RUN
+    old_symbols_for_scope = auto_buy_manager.symbols_for_scope
+    auto_buy_manager.AUTO_BUY_MAX_SYMBOLS_PER_RUN = 0
+    auto_buy_manager.symbols_for_scope = lambda scope: ["A", "B", "C"]
+    try:
+        symbols, start, total = window_symbols_for_run(["A", "B", "C"])
+        summary = symbol_window_summary("all", len(symbols))
+    finally:
+        auto_buy_manager.AUTO_BUY_MAX_SYMBOLS_PER_RUN = old_cap
+        auto_buy_manager.symbols_for_scope = old_symbols_for_scope
+
+    assert_equal(symbols, ["A", "B", "C"], "default symbol window")
+    assert_equal(start, None, "default symbol window start")
+    assert_equal(total, 3, "default symbol window total")
+    assert_equal(summary["bounded"], False, "default bounded flag")
+    assert_equal(summary["runtime_effect"], "full_symbol_universe_evaluated", "runtime effect")
+
+
 def test_live_buy_requires_market_open_and_env_flag():
     candidate = {
         "symbol": "AMZN",
@@ -1373,6 +1392,7 @@ def main():
         test_early_session_buffer_skips_collection,
         test_auto_buy_symbol_window_rotates_large_universe,
         test_auto_buy_symbol_window_summary_marks_bounded_runs,
+        test_auto_buy_symbol_window_default_is_full_universe,
         test_live_buy_requires_market_open_and_env_flag,
         test_live_auto_buy_does_not_execute_tradingview_alert_symbols_by_default,
         test_internal_all_mode_stays_candidate_only_for_tradingview_symbols,

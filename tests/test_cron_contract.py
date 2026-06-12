@@ -5,7 +5,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-
 ROOT = Path(__file__).resolve().parents[1]
 CRONTAB = ROOT / "ops" / "crontab.tradingbot.current.txt"
 
@@ -21,11 +20,7 @@ def _cron_command_lines() -> list[str]:
 
 
 def test_no_raw_flock_jobs_remain():
-    offenders = [
-        line
-        for line in _cron_command_lines()
-        if "flock -n " in line
-    ]
+    offenders = [line for line in _cron_command_lines() if "flock -n " in line]
     assert not offenders, offenders
 
 
@@ -33,9 +28,7 @@ def test_locked_jobs_use_job_runner_with_logs():
     offenders = [
         line
         for line in _cron_command_lines()
-        if "job_runner.py" in line
-        and "--lock-file" in line
-        and "--log-file" not in line
+        if "job_runner.py" in line and "--lock-file" in line and "--log-file" not in line
     ]
     assert not offenders, offenders
 
@@ -83,6 +76,15 @@ def test_auto_buy_captures_full_candidate_universe():
     assert "AUTO_BUY_MAX_DAILY_ORDERS_OVERRIDE:-12" in lines[0]
 
 
+def test_fill_poller_is_regular_session_only():
+    lines = [line for line in _cron_command_lines() if "--job-name fill_poller" in line]
+    assert len(lines) == 2, lines
+    assert all("scripts/fill_poller.py" in line for line in lines)
+    assert not any(line.startswith("*/2 * * * *") for line in lines), lines
+    assert any(line.startswith("30-59/2 8 * * 1-5") for line in lines), lines
+    assert any(line.startswith("*/2 9-14 * * 1-5") for line in lines), lines
+
+
 def test_premarket_dependency_chain_uses_single_pipeline():
     lines = _cron_command_lines()
     pipeline = [line for line in lines if "pipeline/pre_market.py" in line]
@@ -97,12 +99,7 @@ def test_premarket_dependency_chain_uses_single_pipeline():
         "collect_and_score_events.py --date $(date +\\%F)",
         "prediction_cache.py preload --date",
     )
-    offenders = [
-        line
-        for line in lines
-        for replaced in replaced_jobs
-        if replaced in line
-    ]
+    offenders = [line for line in lines for replaced in replaced_jobs if replaced in line]
     assert not offenders, offenders
 
 
@@ -114,6 +111,7 @@ def main():
         test_after_close_and_post_session_share_lock,
         test_job_runner_lines_have_job_name,
         test_auto_buy_captures_full_candidate_universe,
+        test_fill_poller_is_regular_session_only,
         test_premarket_dependency_chain_uses_single_pipeline,
     ]
     for test in tests:

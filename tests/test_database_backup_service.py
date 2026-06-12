@@ -109,8 +109,73 @@ def test_database_restore_drill_verifies_latest_backup_manifest():
         assert run_database_restore_drill(base_dir=base_dir) is True
 
 
+def test_database_backup_service_reuses_recent_verified_full_backup():
+    with tempfile.TemporaryDirectory() as tmp:
+        base_dir = Path(tmp) / "base"
+        backup_dir = base_dir / "backups" / "databases"
+        base_dir.mkdir()
+        _build_db(base_dir / "trades.db")
+
+        service = DatabaseBackupService(base_dir=base_dir, backup_dir=backup_dir)
+        first = service.run(
+            db_names=["trades.db"],
+            timestamp="20260608T150000Z",
+        )
+        service.write_manifest(first)
+
+        second = service.run(
+            db_names=["trades.db"],
+            timestamp="20260608T160000Z",
+            skip_recent_full_hours=24.0,
+        )
+        manifest_path = service.write_manifest(second)
+
+        assert second.ok
+        assert second.backed_up_count == 0
+        assert second.reused_count == 1
+        assert second.results[0].status == "reused_recent_full"
+        assert second.results[0].backup_path == first.results[0].backup_path
+        assert run_database_backup_report(base_dir=base_dir, max_age_hours=24.0) is True
+
+        drill_service = DatabaseRestoreDrillService(backup_dir=backup_dir)
+        restore_manifest = drill_service.run(
+            manifest_path=manifest_path,
+            restore_dir=backup_dir / "restore_reused_test",
+        )
+        assert restore_manifest.ok
+        assert restore_manifest.verified_count == 1
+
+
+def test_database_backup_service_reuses_recent_existing_full_artifact_without_manifest():
+    with tempfile.TemporaryDirectory() as tmp:
+        base_dir = Path(tmp) / "base"
+        backup_dir = base_dir / "backups" / "databases"
+        base_dir.mkdir()
+        _build_db(base_dir / "trades.db")
+
+        existing_dir = backup_dir / "20260608T150000Z"
+        existing_dir.mkdir(parents=True)
+        existing_backup = existing_dir / "trades.db"
+        existing_backup.write_bytes((base_dir / "trades.db").read_bytes())
+
+        service = DatabaseBackupService(base_dir=base_dir, backup_dir=backup_dir)
+        manifest = service.run(
+            db_names=["trades.db"],
+            timestamp="20260608T160000Z",
+            skip_recent_full_hours=24.0,
+        )
+
+        assert manifest.ok
+        assert manifest.backed_up_count == 0
+        assert manifest.reused_count == 1
+        assert manifest.results[0].status == "reused_recent_existing_full"
+        assert manifest.results[0].backup_path == str(existing_backup)
+
+
 if __name__ == "__main__":
     test_database_backup_service_verifies_online_backup()
     test_database_backup_cli_writes_manifest_and_ops_report_reads_it()
     test_database_restore_drill_verifies_latest_backup_manifest()
+    test_database_backup_service_reuses_recent_verified_full_backup()
+    test_database_backup_service_reuses_recent_existing_full_artifact_without_manifest()
     print("database backup service tests passed")

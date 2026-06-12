@@ -9,6 +9,7 @@ import time
 from datetime import datetime
 
 from alpaca.trading.stream import TradingStream
+from market_time import is_market_hours
 from runtime_config import get_alpaca_base_url
 from services.intraday_trade_feedback_service import IntradayTradeFeedbackService
 
@@ -26,10 +27,12 @@ class FillEventHandler:
         repository=fill_repo,
         logger: logging.Logger | None = None,
         feedback_service: IntradayTradeFeedbackService | None = None,
+        market_hours_fn=is_market_hours,
     ):
         self.repository = repository
         self.logger = logger or logging.getLogger(__name__)
         self.feedback_service = feedback_service or IntradayTradeFeedbackService()
+        self.market_hours_fn = market_hours_fn
 
     def init_storage(self) -> None:
         self.repository.init_fill_events_table()
@@ -179,6 +182,9 @@ class FillEventHandler:
             event = data.event
             order = data.order
 
+            if not self.market_hours_fn():
+                return
+
             self.record_fill_event(event, order)
 
             order_id = order.get("id")
@@ -255,6 +261,7 @@ class FillStreamService:
         base_url: str | None = None,
         reconnect_delay: int = RECONNECT_DELAY,
         heartbeat_seconds: int | None = None,
+        market_hours_fn=is_market_hours,
     ):
         self.handler = handler
         self.logger = logger or logging.getLogger(__name__)
@@ -269,6 +276,7 @@ class FillStreamService:
             heartbeat_seconds if heartbeat_seconds is not None else _fill_stream_heartbeat_seconds()
         )
         self._heartbeat_started = False
+        self.market_hours_fn = market_hours_fn
 
     @classmethod
     def from_container(cls, container) -> "FillStreamService":
@@ -299,6 +307,8 @@ class FillStreamService:
         def _heartbeat_loop() -> None:
             while True:
                 time.sleep(self.heartbeat_seconds)
+                if not self.market_hours_fn():
+                    continue
                 self.logger.info(
                     "Fill stream heartbeat: process_alive=true base_url=%s",
                     self.base_url,
@@ -315,10 +325,16 @@ class FillStreamService:
             self.logger.error("ALPACA_API_KEY or ALPACA_SECRET_KEY not set - exiting")
             raise SystemExit(1)
 
-        self.handler.init_storage()
         self.start_heartbeat()
+        storage_initialized = False
 
         while True:
+            if not self.market_hours_fn():
+                time.sleep(self.reconnect_delay)
+                continue
+            if not storage_initialized:
+                self.handler.init_storage()
+                storage_initialized = True
             try:
                 self.run_stream()
                 self.logger.warning(

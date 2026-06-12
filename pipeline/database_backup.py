@@ -27,6 +27,15 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
     )
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--json-manifest", action="store_true")
+    parser.add_argument(
+        "--skip-recent-full-hours",
+        type=float,
+        default=None,
+        help=(
+            "Reuse a recent verified full backup instead of copying the DB again. "
+            "This writes a fresh manifest with status=reused_recent_full."
+        ),
+    )
     return parser.parse_args(argv)
 
 
@@ -40,6 +49,7 @@ def main(argv: list[str] | None = None) -> int:
         db_names=args.db_names or DEFAULT_DB_NAMES,
         retention_days=args.retention_days,
         dry_run=args.dry_run,
+        skip_recent_full_hours=args.skip_recent_full_hours,
     )
     manifest_path = service.write_manifest(manifest)
 

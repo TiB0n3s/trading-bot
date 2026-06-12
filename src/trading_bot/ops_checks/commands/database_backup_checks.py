@@ -52,12 +52,14 @@ def run_database_backup_report(*, base_dir: Path, max_age_hours: float = 30.0) -
     stale = age_hours is None or age_hours > max_age_hours
     failed = int(summary.get("failed_count") or 0)
     backed_up = int(summary.get("backed_up_count") or 0)
+    reused = int(summary.get("reused_count") or 0)
     missing = int(summary.get("missing_count") or 0)
 
     print(f"manifest_version        : {manifest.get('report_version')}")
     print(f"created_at              : {manifest.get('created_at')}")
     print(f"dry_run                 : {manifest.get('dry_run')}")
     print(f"backed_up_count         : {backed_up}")
+    print(f"reused_count            : {reused}")
     print(f"missing_count           : {missing}")
     print(f"failed_count            : {failed}")
     print(f"stale                   : {stale}")
@@ -79,11 +81,11 @@ def run_database_backup_report(*, base_dir: Path, max_age_hours: float = 30.0) -
     if stale:
         print(f"[WARN] latest database backup manifest is older than {max_age_hours:.1f} hours")
         return False
-    if backed_up <= 0:
-        print("[WARN] latest database backup did not verify any database files")
+    if backed_up + reused <= 0:
+        print("[WARN] latest database backup did not verify or reuse any database files")
         return False
 
-    print("[OK] latest database backup manifest is fresh and verified")
+    print("[OK] latest database backup manifest is fresh and restorable")
     return True
 
 

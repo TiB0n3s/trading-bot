@@ -5,6 +5,8 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 
+from market_time import is_market_hours
+
 from repositories import fill_repo
 
 PENDING_STATUSES = ("pending_new", "new", "partially_filled")
@@ -25,11 +27,13 @@ class FillPollerService:
         repository=fill_repo,
         logger: logging.Logger | None = None,
         pending_statuses: tuple[str, ...] = PENDING_STATUSES,
+        market_hours_fn=is_market_hours,
     ):
         self.broker_service = broker_service
         self.repository = repository
         self.logger = logger or logging.getLogger(__name__)
         self.pending_statuses = pending_statuses
+        self.market_hours_fn = market_hours_fn
 
     @classmethod
     def from_container(cls, container) -> "FillPollerService":
@@ -40,6 +44,9 @@ class FillPollerService:
 
     def poll_fills(self) -> FillPollerResult:
         checked = updated = skipped = 0
+
+        if not self.market_hours_fn():
+            return FillPollerResult(checked=checked, updated=updated, skipped=skipped)
 
         rows = self.repository.pending_trade_orders(self.pending_statuses)
 

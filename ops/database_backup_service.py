@@ -16,6 +16,11 @@ from pathlib import Path
 from typing import Any, Iterable
 
 DEFAULT_DB_NAMES = ("trades.db", "predictions.db", "jobs.db")
+RESTORABLE_BACKUP_STATUSES = {
+    "verified",
+    "reused_recent_full",
+    "reused_recent_existing_full",
+}
 
 
 def utc_stamp() -> str:
@@ -53,6 +58,10 @@ class DatabaseBackupManifest:
         return sum(1 for row in self.results if row.status == "verified")
 
     @property
+    def reused_count(self) -> int:
+        return sum(1 for row in self.results if row.status.startswith("reused_recent"))
+
+    @property
     def failed_count(self) -> int:
         return sum(1 for row in self.results if row.status == "failed")
 
@@ -62,13 +71,14 @@ class DatabaseBackupManifest:
 
     @property
     def ok(self) -> bool:
-        return self.failed_count == 0 and self.backed_up_count > 0
+        return self.failed_count == 0 and (self.backed_up_count + self.reused_count) > 0
 
     def to_dict(self) -> dict:
         payload = asdict(self)
         payload["summary"] = {
             "ok": self.ok,
             "backed_up_count": self.backed_up_count,
+            "reused_count": self.reused_count,
             "failed_count": self.failed_count,
             "missing_count": self.missing_count,
         }
@@ -135,6 +145,7 @@ class DatabaseBackupService:
         retention_days: int = 30,
         timestamp: str | None = None,
         dry_run: bool = False,
+        skip_recent_full_hours: float | None = None,
     ) -> DatabaseBackupManifest:
         stamp = timestamp or utc_stamp()
         results: list[DatabaseBackupResult] = []
@@ -145,6 +156,7 @@ class DatabaseBackupService:
                     name=name,
                     timestamp=stamp,
                     dry_run=dry_run,
+                    skip_recent_full_hours=skip_recent_full_hours,
                 )
             )
 
@@ -172,6 +184,7 @@ class DatabaseBackupService:
         name: str,
         timestamp: str,
         dry_run: bool,
+        skip_recent_full_hours: float | None,
     ) -> DatabaseBackupResult:
         source = self.base_dir / name
         if not source.exists():
@@ -185,6 +198,28 @@ class DatabaseBackupService:
 
         source_size = source.stat().st_size
         backup_path = self.backup_dir / timestamp / name
+        recent = self._recent_full_backup(
+            name,
+            max_age_hours=skip_recent_full_hours,
+            min_size_bytes=int(source_size * 0.8),
+        )
+        if recent is not None and not dry_run:
+            recent_path, recent_row, status = recent
+            return DatabaseBackupResult(
+                name=name,
+                source_path=str(source),
+                backup_path=str(recent_path),
+                source_exists=True,
+                status=status,
+                source_size_bytes=source_size,
+                backup_size_bytes=recent_path.stat().st_size if recent_path.exists() else None,
+                integrity_check=recent_row.get("integrity_check"),
+                table_count=recent_row.get("table_count"),
+                error=(
+                    "recent full backup reused; no new full copy attempted "
+                    f"within {skip_recent_full_hours:.1f}h window"
+                ),
+            )
         if dry_run:
             return DatabaseBackupResult(
                 name=name,
@@ -246,6 +281,58 @@ class DatabaseBackupService:
                 ).fetchone()[0]
             )
         return integrity_check, table_count
+
+    def _recent_full_backup(
+        self,
+        name: str,
+        *,
+        max_age_hours: float | None,
+        min_size_bytes: int,
+    ) -> tuple[Path, dict[str, Any], str] | None:
+        if max_age_hours is None or max_age_hours <= 0 or not self.backup_dir.exists():
+            return None
+
+        max_age_seconds = max_age_hours * 60 * 60
+        now = time.time()
+        manifests = sorted(self.backup_dir.glob("database_backup_*.manifest.json"), reverse=True)
+        for manifest_path in manifests:
+            try:
+                manifest = json.loads(manifest_path.read_text())
+            except Exception:
+                continue
+            for row in manifest.get("results", []):
+                if row.get("name") != name or row.get("status") != "verified":
+                    continue
+                backup_path = Path(str(row.get("backup_path") or ""))
+                if not backup_path.exists():
+                    continue
+                if now - backup_path.stat().st_mtime > max_age_seconds:
+                    continue
+                return backup_path, row, "reused_recent_full"
+
+        candidates = []
+        for backup_path in self.backup_dir.glob(f"*/{name}"):
+            try:
+                stat = backup_path.stat()
+            except OSError:
+                continue
+            if stat.st_size < min_size_bytes:
+                continue
+            if now - stat.st_mtime > max_age_seconds:
+                continue
+            candidates.append((stat.st_mtime, backup_path))
+
+        if candidates:
+            _, backup_path = sorted(candidates, reverse=True)[0]
+            return (
+                backup_path,
+                {
+                    "integrity_check": "not_rechecked_existing_full",
+                    "table_count": None,
+                },
+                "reused_recent_existing_full",
+            )
+        return None
 
     def _prune_old_backups(self, *, retention_days: int, dry_run: bool) -> list[str]:
         if retention_days <= 0 or not self.backup_dir.exists():
@@ -342,7 +429,7 @@ class DatabaseRestoreDrillService:
         for row in manifest.get("results") or []:
             name = str(row.get("name") or "unknown.db")
             backup_path = Path(str(row.get("backup_path") or ""))
-            if row.get("status") != "verified" or not row.get("backup_path"):
+            if row.get("status") not in RESTORABLE_BACKUP_STATUSES or not row.get("backup_path"):
                 results.append(
                     DatabaseRestoreDrillResult(
                         name=name,

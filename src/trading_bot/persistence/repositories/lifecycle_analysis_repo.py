@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from db import DB_PATH, get_connection
+from db import DB_PATH, get_read_connection
 
 
 class LifecycleAnalysisRepository:
@@ -43,7 +43,9 @@ class LifecycleAnalysisRepository:
         symbol: str | None = None,
         limit: int | None = None,
     ) -> list[Any]:
-        with get_connection(self.db_path) as con:
+        if not Path(self.db_path).exists():
+            return []
+        with get_read_connection(self.db_path) as con:
             if not self._table_exists(con, "decision_snapshots"):
                 return []
 
@@ -449,7 +451,9 @@ class LifecycleAnalysisRepository:
         symbol: str | None = None,
     ) -> list[Any]:
         """Approved trade rows that predate or bypass decision snapshot capture."""
-        with get_connection(self.db_path) as con:
+        if not Path(self.db_path).exists():
+            return []
+        with get_read_connection(self.db_path) as con:
             if not self._table_exists(con, "trades"):
                 return []
 

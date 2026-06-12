@@ -85,6 +85,52 @@ def test_persist_exit_candidate_considered_not_taken():
         assert_equal(rows[0]["candidate_status"], "exit_considered_not_taken", "status")
 
 
+def test_candidate_summary_between_uses_forward_outcome_payloads():
+    with tempfile.TemporaryDirectory() as tmp:
+        db_path = Path(tmp) / "test.db"
+        service = CandidateUniverseService(CandidateUniverseRepository(db_path))
+
+        service.persist_scored_candidate(
+            candidate_ts="2026-06-01T14:30:00+00:00",
+            symbol="AAPL",
+            action="buy",
+            score=94,
+            threshold=100,
+            taken=False,
+            payload={"forward_return_pct": 0.7},
+        )
+        service.persist_scored_candidate(
+            candidate_ts="2026-06-01T14:32:00+00:00",
+            symbol="MSFT",
+            action="buy",
+            score=70,
+            threshold=100,
+            taken=True,
+            payload={"candidate": {"return_60m": -0.2}},
+        )
+        service.persist_scored_candidate(
+            candidate_ts="2026-06-01T14:34:00+00:00",
+            symbol="NVDA",
+            action="buy",
+            score=50,
+            threshold=100,
+            taken=False,
+            payload={"note": "no outcome yet"},
+        )
+
+        summary = CandidateUniverseRepository(db_path).summary_between(
+            "2026-06-01",
+            "2026-06-01",
+        )
+
+        assert_equal(summary["rows"], 3, "rows")
+        assert_equal(summary["rows_with_forward_outcome"], 2, "forward rows")
+        assert_equal(summary["missing_forward_outcome"], 1, "missing forward")
+        assert_equal(summary["non_taken_rows"], 2, "non-taken rows")
+        assert_equal(summary["non_taken_with_forward_outcome"], 1, "non-taken forward")
+        assert_equal(summary["by_kind"]["entry"], 3, "kind count")
+
+
 def test_invalid_candidate_contract_values_are_rejected():
     service = CandidateUniverseService(CandidateUniverseRepository(":memory:"))
     try:
@@ -107,6 +153,7 @@ def main():
     tests = [
         test_persist_entry_candidates_and_near_threshold_status,
         test_persist_exit_candidate_considered_not_taken,
+        test_candidate_summary_between_uses_forward_outcome_payloads,
         test_invalid_candidate_contract_values_are_rejected,
     ]
     for test in tests:

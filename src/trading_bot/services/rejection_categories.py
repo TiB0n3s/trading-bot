@@ -69,6 +69,8 @@ AUTHORITY_MATRIX = "authority_matrix"
 EXECUTION_QUALITY = "execution_quality"
 HISTORICAL_BAR_META_LABEL_VETO = "historical_bar_meta_label_veto"
 LIVE_CIRCUIT_BREAKER = "live_circuit_breaker"
+LAYERED_MODEL_AUTHORITY_VETO = "layered_model_authority_veto"
+SLIPPAGE_KELLY = "slippage_kelly"
 
 ALL_REJECTION_CATEGORIES = {
     MARKET_HOURS,
@@ -132,6 +134,8 @@ ALL_REJECTION_CATEGORIES = {
     EXECUTION_QUALITY,
     HISTORICAL_BAR_META_LABEL_VETO,
     LIVE_CIRCUIT_BREAKER,
+    LAYERED_MODEL_AUTHORITY_VETO,
+    SLIPPAGE_KELLY,
 }
 
 LEGACY_CATEGORY_ALIASES: dict[str, str] = {

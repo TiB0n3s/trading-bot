@@ -32,6 +32,7 @@ def _config(**overrides):
         "max_age_seconds": 0,
         "size_cap_pct": 0.8,
         "negative_decisions": ["avoid", "block", "caution"],
+        "circuit_breaker": {"enabled": False},
     }
     config.update(overrides)
     return config

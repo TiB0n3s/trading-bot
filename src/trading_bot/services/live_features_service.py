@@ -218,7 +218,17 @@ class LiveFeaturesService:
         benchmark_symbol = self.benchmark_for(symbol)
 
         closes, volumes, timeframe, bar_count = self.get_bar_series(symbol, session=session)
-        benchmark_closes, _, _, _ = self.get_bar_series(benchmark_symbol, session=session)
+        try:
+            benchmark_closes, _, _, _ = self.get_bar_series(benchmark_symbol, session=session)
+        except RuntimeError:
+            if benchmark_symbol == symbol:
+                raise
+            self.logger.warning(
+                "%s: benchmark %s bars unavailable; using symbol bars for relative features",
+                symbol,
+                benchmark_symbol,
+            )
+            benchmark_closes = closes
 
         ctx = self.load_market_context()
         symbol_ctx = (ctx.get("symbols") or {}).get(symbol) or {}

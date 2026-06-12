@@ -49,6 +49,7 @@ def _decision_date(row: dict[str, Any]) -> str | None:
 def _candidate_summary(rows: Iterable[dict[str, Any]]) -> dict[str, Any]:
     rows_list = [dict(row) for row in rows]
     coverage = summarize_candidate_outcome_coverage(rows_list)
+    sessions = len({date for row in rows_list if (date := _decision_date(row))})
     by_status: dict[str, int] = {}
     by_kind: dict[str, int] = {}
     for row in rows_list:
@@ -58,6 +59,7 @@ def _candidate_summary(rows: Iterable[dict[str, Any]]) -> dict[str, Any]:
         by_kind[kind] = by_kind.get(kind, 0) + 1
     return {
         "rows": len(rows_list),
+        "sessions": sessions,
         "scored_rows": sum(1 for row in rows_list if row.get("score") is not None),
         "near_threshold": by_status.get("near_threshold", 0),
         "scored_not_taken": by_status.get("scored_not_taken", 0),
@@ -311,6 +313,7 @@ def build_learning_readiness_payload(
     lifecycle_rows: Iterable[dict[str, Any]],
     runtime_trend: dict[str, Any] | None = None,
     candidate_rows: Iterable[dict[str, Any]] = (),
+    candidate_summary: dict[str, Any] | None = None,
     symbol_pattern_summary: dict[str, Any] | None = None,
     feature_summary: dict[str, Any] | None = None,
     feature_guardrails: list[dict[str, Any]] | None = None,
@@ -320,7 +323,11 @@ def build_learning_readiness_payload(
 ) -> LearningReadinessPayload:
     rows = [dict(row) for row in lifecycle_rows]
     sessions = len({date for row in rows if (date := _decision_date(row))})
-    candidate = _candidate_summary(candidate_rows)
+    candidate = (
+        dict(candidate_summary)
+        if candidate_summary is not None
+        else _candidate_summary(candidate_rows)
+    )
     runtime = runtime_trend or {
         "rows": 0,
         "jobs": [],
@@ -339,9 +346,12 @@ def build_learning_readiness_payload(
     rejected_trade_backed = int(lifecycle_summary.get("rejected_with_counterfactual") or 0) + int(
         lifecycle_summary.get("rejected_without_counterfactual") or 0
     )
-    rows_with_outcome = int(pattern_summary.get("rows_with_outcome") or 0)
-    if not rows_with_outcome:
-        rows_with_outcome = sum(1 for row in rows if _outcome(row) is not None)
+    lifecycle_rows_with_outcome = int(pattern_summary.get("rows_with_outcome") or 0)
+    if not lifecycle_rows_with_outcome:
+        lifecycle_rows_with_outcome = sum(1 for row in rows if _outcome(row) is not None)
+    candidate_forward_outcomes = int(candidate.get("rows_with_forward_outcome") or 0)
+    rows_with_outcome = lifecycle_rows_with_outcome or candidate_forward_outcomes
+    candidate_sessions = int(candidate.get("sessions") or 0)
     progress = _integrated_outcome_progress(
         rows,
         full_readiness_target=full_readiness_target,
@@ -363,8 +373,10 @@ def build_learning_readiness_payload(
     elif not runtime.get("clean"):
         blockers.append("runtime_health_not_clean")
     lifecycle_row_count = int(lifecycle_summary.get("rows") or 0)
-    if not lifecycle_row_count:
+    if not lifecycle_row_count and not candidate_forward_outcomes:
         blockers.append("missing_lifecycle_rows")
+    elif not lifecycle_row_count:
+        blockers.append("missing_trade_lifecycle_rows")
     if lifecycle_row_count and not rows_with_outcome:
         blockers.append("missing_outcome_rows")
     if rejected_trade_backed and (rejected_coverage is None or rejected_coverage < 0.80):
@@ -400,7 +412,7 @@ def build_learning_readiness_payload(
     ]
 
     stage = _stage(
-        sessions=sessions,
+        sessions=max(sessions, candidate_sessions),
         rows_with_outcome=rows_with_outcome,
         blockers=blockers,
     )
@@ -445,6 +457,11 @@ def build_learning_readiness_payload(
         )
     if "missing_candidate_universe_rows" in blockers:
         next_actions.append("verify candidate-universe capture is running with scope=all")
+    if "missing_trade_lifecycle_rows" in blockers:
+        next_actions.append(
+            "candidate forward outcomes are available; collect or backfill trade lifecycle rows "
+            "before execution-attribution promotion"
+        )
     if "candidate_forward_outcome_coverage_below_80pct" in blockers:
         next_actions.append(
             "run candidate-outcome-backfill until candidate forward-outcome coverage is at least 80%"

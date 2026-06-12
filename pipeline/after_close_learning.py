@@ -23,6 +23,13 @@ from pipeline import Step, run_pipeline  # noqa: E402
 def _build_steps(target_date: str) -> list[Step]:
     return [
         Step(
+            name="db_workload_cleanup",
+            module="scripts.db_workload_report",
+            argv=["--checkpoint", "--checkpoint-mode", "PASSIVE"],
+            critical=False,
+            description="report database pressure and run a bounded passive WAL checkpoint",
+        ),
+        Step(
             name="trade_matcher",
             module="trade_matcher",
             argv=[],

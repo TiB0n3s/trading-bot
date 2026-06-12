@@ -287,6 +287,7 @@ def test_unmatched_buy_fill_inserts_synthetic_ledger_row(tmp_path, monkeypatch):
     handler = FillEventHandler(
         repository=repo,
         feedback_service=feedback,
+        market_hours_fn=lambda: True,
         logger=SimpleNamespace(
             info=lambda *a, **k: None, warning=lambda *a, **k: None, error=lambda *a, **k: None
         ),

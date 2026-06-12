@@ -37,6 +37,18 @@ class FailingArchiveService:
         raise AssertionError("existing pattern rows should skip archive service construction")
 
 
+class ProviderErrorArchiveService:
+    def archive_polygon_1m_bars(self, **kwargs):
+        return SimpleNamespace(
+            as_dict=lambda: {
+                "raw_bars": 0,
+                "regular_hours_bars": 0,
+                "persisted_pattern_rows": 0,
+                "errors": ["HTTPError: HTTP Error 403: Forbidden"],
+            }
+        )
+
+
 def test_historical_archive_pipeline_loops_symbols_and_reports_rows(monkeypatch=None):
     original_service = archive_pipeline.HistoricalBarArchiveService
     original_symbols = archive_pipeline.APPROVED_SYMBOLS_LIST
@@ -127,6 +139,56 @@ def test_historical_archive_pipeline_skips_existing_pattern_rows(tmp_path: Path)
     assert code == 0
 
 
+def test_historical_archive_pipeline_warns_when_existing_coverage_is_high(tmp_path: Path):
+    db_path = tmp_path / "trades.db"
+    symbols = ["AAPL", "MSFT", "NVDA", "SPY", "JNPR"]
+    with sqlite3.connect(db_path) as con:
+        con.execute(
+            """
+            CREATE TABLE bar_pattern_features (
+                symbol TEXT NOT NULL,
+                bar_timestamp TEXT NOT NULL,
+                timeframe TEXT NOT NULL
+            )
+            """
+        )
+        rows = []
+        for symbol in symbols[:-1]:
+            rows.extend(
+                (symbol, f"2026-06-03T10:{minute:02d}:00-04:00", "1m") for minute in range(60)
+            )
+        con.executemany(
+            """
+            INSERT INTO bar_pattern_features(symbol, bar_timestamp, timeframe)
+            VALUES (?, ?, ?)
+            """,
+            rows,
+        )
+
+    original_service = archive_pipeline.HistoricalBarArchiveService
+    original_symbols = archive_pipeline.APPROVED_SYMBOLS_LIST
+    try:
+        archive_pipeline.HistoricalBarArchiveService = ProviderErrorArchiveService
+        archive_pipeline.APPROVED_SYMBOLS_LIST = symbols
+        code = archive_pipeline.main(
+            [
+                "--date",
+                "2026-06-03",
+                "--all",
+                "--db-path",
+                str(db_path),
+                "--skip-existing-patterns",
+                "--min-existing-pattern-rows",
+                "50",
+            ]
+        )
+    finally:
+        archive_pipeline.HistoricalBarArchiveService = original_service
+        archive_pipeline.APPROVED_SYMBOLS_LIST = original_symbols
+
+    assert code == 0
+
+
 if __name__ == "__main__":
     test_historical_archive_pipeline_loops_symbols_and_reports_rows()
     test_historical_archive_pipeline_uses_custom_cache_dir()
@@ -134,7 +196,10 @@ if __name__ == "__main__":
 
     with tempfile.TemporaryDirectory() as tmp:
         test_historical_archive_pipeline_skips_existing_pattern_rows(Path(tmp))
+    with tempfile.TemporaryDirectory() as tmp:
+        test_historical_archive_pipeline_warns_when_existing_coverage_is_high(Path(tmp))
     print("[OK] test_historical_archive_pipeline_loops_symbols_and_reports_rows")
     print("[OK] test_historical_archive_pipeline_uses_custom_cache_dir")
     print("[OK] test_historical_archive_pipeline_skips_existing_pattern_rows")
-    print("\nAll 3 historical archive pipeline tests passed.")
+    print("[OK] test_historical_archive_pipeline_warns_when_existing_coverage_is_high")
+    print("\nAll 4 historical archive pipeline tests passed.")

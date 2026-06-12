@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from db import DB_PATH, get_connection
+from db import DB_PATH, get_connection, get_read_connection
 
 
 class JobRunsRepository:
@@ -83,13 +83,15 @@ class JobRunsRepository:
             return int(cur.lastrowid)
 
     def recent_runs(self, *, limit: int = 50, job_name: str | None = None):
+        if not Path(self.db_path).exists():
+            return []
         params: list[Any] = []
         where = ["1=1"]
         if job_name:
             where.append("job_name = ?")
             params.append(job_name)
         params.append(limit)
-        with get_connection(self.db_path) as con:
+        with get_read_connection(self.db_path) as con:
             return con.execute(
                 f"""
                 SELECT
@@ -115,13 +117,15 @@ class JobRunsRepository:
             ).fetchall()
 
     def runs_for_date(self, target_date: str, *, limit: int | None = None):
+        if not Path(self.db_path).exists():
+            return []
         params: list[Any] = [target_date]
         limit_sql = ""
         if limit is not None:
             limit_sql = "LIMIT ?"
             params.append(int(limit))
 
-        with get_connection(self.db_path) as con:
+        with get_read_connection(self.db_path) as con:
             return con.execute(
                 f"""
                 SELECT
@@ -147,7 +151,9 @@ class JobRunsRepository:
             ).fetchall()
 
     def runs_between(self, start_date: str, end_date: str):
-        with get_connection(self.db_path) as con:
+        if not Path(self.db_path).exists():
+            return []
+        with get_read_connection(self.db_path) as con:
             return con.execute(
                 """
                 SELECT
@@ -173,7 +179,9 @@ class JobRunsRepository:
 
     def last_run_per_job(self):
         """Return the most-recent row for every distinct job_name, ordered by job_name."""
-        with get_connection(self.db_path) as con:
+        if not Path(self.db_path).exists():
+            return []
+        with get_read_connection(self.db_path) as con:
             return con.execute(
                 """
                 SELECT

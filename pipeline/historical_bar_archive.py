@@ -16,16 +16,18 @@ from datetime import date, timedelta
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT))
+for path in (ROOT, ROOT / "scripts", ROOT / "src"):
+    path_text = str(path)
+    if path_text not in sys.path:
+        sys.path.insert(0, path_text)
 
 from market_time import expected_market_context_date  # noqa: E402
-from symbols_config import APPROVED_SYMBOLS_LIST  # noqa: E402
-
 from repositories.bar_pattern_feature_repo import BarPatternFeatureRepository  # noqa: E402
 from services.historical_bar_archive_service import (  # noqa: E402
     DEFAULT_HISTORICAL_BAR_DIR,
     HistoricalBarArchiveService,
 )
+from symbols_config import APPROVED_SYMBOLS_LIST  # noqa: E402
 
 
 def _parse_symbols(values: list[str] | None, all_symbols: bool) -> list[str]:
@@ -173,6 +175,14 @@ def main(argv: list[str] | None = None) -> int:
     }
     print(json.dumps(summary, sort_keys=True))
     print(f"rows_written: {rows_written}")
+    successful_or_existing = int(summary["successful_symbols"]) + skipped_existing_patterns
+    coverage_rate = successful_or_existing / max(1, len(symbols))
+    if errors and coverage_rate >= 0.80:
+        print(
+            "archive_warning: provider errors present but existing/successful "
+            f"coverage is {coverage_rate:.2%}; treating as non-critical"
+        )
+        return 0
     return 0 if (results or skipped_existing_patterns) and not errors else 1
 
 

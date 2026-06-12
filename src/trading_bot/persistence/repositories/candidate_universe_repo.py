@@ -6,7 +6,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from db import DB_PATH, get_connection
+from db import DB_PATH, get_connection, get_read_connection
 
 
 class CandidateUniverseRepository:
@@ -79,6 +79,59 @@ class CandidateUniverseRepository:
                 """
             )
 
+    @staticmethod
+    def _table_exists(con, table: str) -> bool:
+        return (
+            con.execute(
+                "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?",
+                (table,),
+            ).fetchone()
+            is not None
+        )
+
+    @staticmethod
+    def _forward_outcome_sql() -> str:
+        paths = (
+            "$.forward_return_pct",
+            "$.return_60m",
+            "$.return_30m",
+            "$.return_eod",
+            "$.forward_mfe_pct",
+            "$.max_favorable_60m",
+            "$.max_favorable_30m",
+            "$.max_favorable_eod",
+            "$.candidate.forward_return_pct",
+            "$.candidate.return_60m",
+            "$.candidate.return_30m",
+            "$.candidate.return_eod",
+            "$.candidate.forward_mfe_pct",
+            "$.candidate.max_favorable_60m",
+            "$.candidate.max_favorable_30m",
+            "$.candidate.max_favorable_eod",
+        )
+        checks = " OR ".join(f"json_type(candidate_json, '{path}') IS NOT NULL" for path in paths)
+        return f"(json_valid(candidate_json) AND ({checks}))"
+
+    @staticmethod
+    def _non_taken_sql() -> str:
+        return """
+        (
+            COALESCE(candidate_status, '') != 'taken'
+            AND LOWER(COALESCE(decision, '')) NOT IN ('submitted', 'approved', 'buy')
+            AND (
+                candidate_status IN (
+                    'near_threshold',
+                    'scored_not_taken',
+                    'skipped',
+                    'watch',
+                    'exit_considered_not_taken'
+                )
+                OR COALESCE(candidate_status, '') != ''
+                OR COALESCE(decision, '') != ''
+            )
+        )
+        """
+
     def insert_candidate(self, row: dict[str, Any]) -> int:
         self.init_table()
         columns = list(row.keys())
@@ -100,7 +153,8 @@ class CandidateUniverseRepository:
         symbol: str | None = None,
         candidate_kind: str | None = None,
     ) -> list[Any]:
-        self.init_table()
+        if not Path(self.db_path).exists():
+            return []
         clauses = ["substr(candidate_ts, 1, 10) = ?"]
         params: list[Any] = [target_date]
         if symbol:
@@ -109,7 +163,9 @@ class CandidateUniverseRepository:
         if candidate_kind:
             clauses.append("candidate_kind = ?")
             params.append(candidate_kind)
-        with get_connection(self.db_path) as con:
+        with get_read_connection(self.db_path) as con:
+            if not self._table_exists(con, "candidate_universe"):
+                return []
             return con.execute(
                 f"""
                 SELECT *
@@ -129,7 +185,8 @@ class CandidateUniverseRepository:
         candidate_kind: str | None = None,
         candidate_statuses: tuple[str, ...] | None = None,
     ) -> list[Any]:
-        self.init_table()
+        if not Path(self.db_path).exists():
+            return []
         clauses = ["substr(candidate_ts, 1, 10) BETWEEN ? AND ?"]
         params: list[Any] = [start_date, end_date]
         if symbol:
@@ -142,7 +199,9 @@ class CandidateUniverseRepository:
             placeholders = ", ".join("?" for _ in candidate_statuses)
             clauses.append(f"candidate_status IN ({placeholders})")
             params.extend(candidate_statuses)
-        with get_connection(self.db_path) as con:
+        with get_read_connection(self.db_path) as con:
+            if not self._table_exists(con, "candidate_universe"):
+                return []
             return con.execute(
                 f"""
                 SELECT *
@@ -152,6 +211,118 @@ class CandidateUniverseRepository:
                 """,
                 params,
             ).fetchall()
+
+    def summary_between(
+        self,
+        start_date: str,
+        end_date: str,
+        *,
+        symbol: str | None = None,
+        candidate_kind: str | None = None,
+        candidate_statuses: tuple[str, ...] | None = None,
+    ) -> dict[str, Any]:
+        empty = {
+            "rows": 0,
+            "sessions": 0,
+            "scored_rows": 0,
+            "near_threshold": 0,
+            "scored_not_taken": 0,
+            "taken": 0,
+            "exit_considered_not_taken": 0,
+            "by_status": {},
+            "by_kind": {},
+            "rows_with_forward_outcome": 0,
+            "missing_forward_outcome": 0,
+            "forward_outcome_coverage_rate": None,
+            "non_taken_rows": 0,
+            "non_taken_with_forward_outcome": 0,
+            "non_taken_forward_outcome_coverage_rate": None,
+        }
+        if not Path(self.db_path).exists():
+            return empty
+        clauses = ["substr(candidate_ts, 1, 10) BETWEEN ? AND ?"]
+        params: list[Any] = [start_date, end_date]
+        if symbol:
+            clauses.append("UPPER(symbol) = ?")
+            params.append(symbol.upper())
+        if candidate_kind:
+            clauses.append("candidate_kind = ?")
+            params.append(candidate_kind)
+        if candidate_statuses:
+            placeholders = ", ".join("?" for _ in candidate_statuses)
+            clauses.append(f"candidate_status IN ({placeholders})")
+            params.extend(candidate_statuses)
+
+        where_sql = " AND ".join(clauses)
+        forward_sql = self._forward_outcome_sql()
+        non_taken_sql = self._non_taken_sql()
+        with get_read_connection(self.db_path) as con:
+            if not self._table_exists(con, "candidate_universe"):
+                return empty
+            summary = con.execute(
+                f"""
+                SELECT
+                    COUNT(*) AS rows,
+                    COUNT(DISTINCT substr(candidate_ts, 1, 10)) AS sessions,
+                    SUM(CASE WHEN score IS NOT NULL THEN 1 ELSE 0 END) AS scored_rows,
+                    SUM(CASE WHEN candidate_status = 'near_threshold' THEN 1 ELSE 0 END)
+                        AS near_threshold,
+                    SUM(CASE WHEN candidate_status = 'scored_not_taken' THEN 1 ELSE 0 END)
+                        AS scored_not_taken,
+                    SUM(CASE WHEN candidate_status = 'taken' THEN 1 ELSE 0 END) AS taken,
+                    SUM(CASE WHEN candidate_status = 'exit_considered_not_taken' THEN 1 ELSE 0 END)
+                        AS exit_considered_not_taken,
+                    SUM(CASE WHEN {forward_sql} THEN 1 ELSE 0 END) AS rows_with_forward_outcome,
+                    SUM(CASE WHEN {non_taken_sql} THEN 1 ELSE 0 END) AS non_taken_rows,
+                    SUM(CASE WHEN ({non_taken_sql}) AND ({forward_sql}) THEN 1 ELSE 0 END)
+                        AS non_taken_with_forward_outcome
+                FROM candidate_universe
+                WHERE {where_sql}
+                """,
+                params,
+            ).fetchone()
+            by_status = con.execute(
+                f"""
+                SELECT COALESCE(candidate_status, 'unknown') AS key, COUNT(*) AS rows
+                FROM candidate_universe
+                WHERE {where_sql}
+                GROUP BY COALESCE(candidate_status, 'unknown')
+                """,
+                params,
+            ).fetchall()
+            by_kind = con.execute(
+                f"""
+                SELECT COALESCE(candidate_kind, 'unknown') AS key, COUNT(*) AS rows
+                FROM candidate_universe
+                WHERE {where_sql}
+                GROUP BY COALESCE(candidate_kind, 'unknown')
+                """,
+                params,
+            ).fetchall()
+
+        total = int(summary["rows"] or 0)
+        forward = int(summary["rows_with_forward_outcome"] or 0)
+        non_taken = int(summary["non_taken_rows"] or 0)
+        non_taken_forward = int(summary["non_taken_with_forward_outcome"] or 0)
+        return {
+            "rows": total,
+            "sessions": int(summary["sessions"] or 0),
+            "scored_rows": int(summary["scored_rows"] or 0),
+            "near_threshold": int(summary["near_threshold"] or 0),
+            "scored_not_taken": int(summary["scored_not_taken"] or 0),
+            "taken": int(summary["taken"] or 0),
+            "exit_considered_not_taken": int(summary["exit_considered_not_taken"] or 0),
+            "by_status": {str(row["key"]): int(row["rows"] or 0) for row in by_status},
+            "by_kind": {str(row["key"]): int(row["rows"] or 0) for row in by_kind},
+            "rows_with_forward_outcome": forward,
+            "missing_forward_outcome": total - forward,
+            "forward_outcome_coverage_rate": round(forward / total, 4) if total else None,
+            "non_taken_rows": non_taken,
+            "non_taken_with_forward_outcome": non_taken_forward,
+            "non_taken_forward_outcome_coverage_rate": (
+                round(non_taken_forward / non_taken, 4) if non_taken else None
+            ),
+        }
 
     def update_candidate_json(self, candidate_id: int, payload: dict[str, Any]) -> None:
         self.init_table()
@@ -195,15 +366,10 @@ class CandidateUniverseRepository:
         symbol: str,
         target_date: str,
     ) -> list[dict[str, Any]]:
-        with get_connection(self.db_path) as con:
-            table = con.execute(
-                """
-                SELECT 1
-                FROM sqlite_master
-                WHERE type = 'table' AND name = 'feature_snapshots'
-                """
-            ).fetchone()
-            if not table:
+        if not Path(self.db_path).exists():
+            return []
+        with get_read_connection(self.db_path) as con:
+            if not self._table_exists(con, "feature_snapshots"):
                 return []
             rows = con.execute(
                 """

@@ -60,6 +60,24 @@ def get_connection(db_path: Path | str = DB_PATH) -> sqlite3.Connection:
     return con
 
 
+def get_read_connection(db_path: Path | str = DB_PATH) -> sqlite3.Connection:
+    """Return a read-only SQLite connection for reports and diagnostics.
+
+    Read-only jobs should not attempt journal-mode changes or schema/index
+    creation.  On the live 60GB+ database those write-capable pragmas can join
+    the same lock queue as trade-path writers even when the caller only needs a
+    dashboard query.
+    """
+    path = Path(db_path)
+    uri = f"file:{path}?mode=ro"
+    con = sqlite3.connect(uri, timeout=BUSY_TIMEOUT_MS / 1000, uri=True)
+    con.row_factory = sqlite3.Row
+    con.execute(f"PRAGMA busy_timeout={BUSY_TIMEOUT_MS}")
+    con.execute("PRAGMA query_only=ON")
+    con.execute("PRAGMA foreign_keys=ON")
+    return con
+
+
 def ensure_recent_favorable_setups_table() -> None:
     with get_connection(DB_PATH) as con:
         con.execute(

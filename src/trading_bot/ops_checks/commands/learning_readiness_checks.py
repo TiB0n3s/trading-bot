@@ -70,14 +70,11 @@ def run_learning_readiness(
         start_date=start_date,
         end_date=runtime_health_end,
     )
-    candidate_rows = [
-        dict(row)
-        for row in CandidateUniverseRepository(db_path).rows_between(
-            start_date,
-            end,
-            symbol=symbol,
-        )
-    ]
+    candidate_summary = CandidateUniverseRepository(db_path).summary_between(
+        start_date,
+        end,
+        symbol=symbol,
+    )
     pattern_payload = build_symbol_pattern_outcome_payload(
         rows,
         min_sample_size=min_pattern_sample_size,
@@ -106,7 +103,7 @@ def run_learning_readiness(
         lifecycle_summary=lifecycle_payload.summary,
         lifecycle_rows=rows,
         runtime_trend=runtime_trend,
-        candidate_rows=candidate_rows,
+        candidate_summary=candidate_summary,
         symbol_pattern_summary=pattern_payload.summary,
         feature_summary=feature_payload.summary,
         feature_guardrails=feature_payload.rollout_guardrails,

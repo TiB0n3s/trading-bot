@@ -70,6 +70,68 @@ class RejectedSignalOutcomeRepository:
                 query_params,
             ).fetchall()
 
+    def rejected_decision_snapshot_rows(
+        self,
+        *,
+        target_date: str,
+        limit: int | None = None,
+        symbol: str | None = None,
+    ) -> list[Any]:
+        """Decision snapshots rejected before order routing.
+
+        The legacy builder labels rejected rows from ``trades``. Paper-only
+        discovery/decision paths can reject before a trade row exists, so those
+        snapshots need their own counterfactual outcome path.
+        """
+        self.ensure_table()
+        query_params: list[Any] = [target_date]
+        clauses = [
+            "substr(ds.decision_time, 1, 10) = ?",
+            "COALESCE(ds.approved, 0) = 0",
+            "ds.trade_id IS NULL",
+            "ds.symbol IS NOT NULL",
+            "ds.action IS NOT NULL",
+            "ds.signal_price IS NOT NULL",
+            "LOWER(ds.action) IN ('buy', 'sell')",
+            "rso.id IS NULL",
+        ]
+        if symbol:
+            clauses.append("UPPER(ds.symbol) = ?")
+            query_params.append(symbol.upper())
+        limit_sql = ""
+        if limit is not None:
+            limit_sql = "LIMIT ?"
+            query_params.append(int(limit))
+
+        with get_connection(self.db_path) as con:
+            table = con.execute(
+                "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'decision_snapshots'"
+            ).fetchone()
+            if not table:
+                return []
+            return con.execute(
+                f"""
+                SELECT
+                    ds.id,
+                    ds.decision_time AS timestamp,
+                    ds.symbol,
+                    ds.action,
+                    ds.signal_price,
+                    ds.rejection_reason,
+                    ds.canonical_intelligence_version,
+                    ds.canonical_intelligence_hash,
+                    ds.canonical_intelligence_json
+                FROM decision_snapshots ds
+                LEFT JOIN rejected_signal_outcomes rso
+                  ON rso.decision_snapshot_id = ds.id
+                 AND rso.trade_id IS NULL
+                WHERE {" AND ".join(clauses)}
+                ORDER BY ds.decision_time ASC, ds.id ASC
+                {limit_sql}
+                """,
+                query_params,
+            ).fetchall()
+
     def upsert_outcome(self, row: Any, outcome: dict[str, Any], source: str) -> None:
         self.ensure_table()
         with get_connection(self.db_path) as con:
@@ -128,5 +190,57 @@ class RejectedSignalOutcomeRepository:
                     snapshot.get("canonical_intelligence_version"),
                     snapshot.get("canonical_intelligence_hash"),
                     snapshot.get("canonical_intelligence_json"),
+                ),
+            )
+
+    def upsert_decision_snapshot_outcome(
+        self,
+        row: Any,
+        outcome: dict[str, Any],
+        source: str,
+    ) -> None:
+        """Upsert a counterfactual outcome for a snapshot-only rejection."""
+        self.ensure_table()
+        with get_connection(self.db_path) as con:
+            con.execute(
+                """
+                DELETE FROM rejected_signal_outcomes
+                WHERE decision_snapshot_id = ?
+                  AND trade_id IS NULL
+                """,
+                (int(row["id"]),),
+            )
+            con.execute(
+                """
+                INSERT INTO rejected_signal_outcomes (
+                    trade_id, timestamp, symbol, action, signal_price, rejection_reason,
+                    return_5m, return_15m, return_30m, return_60m, return_eod,
+                    max_favorable_60m, max_adverse_60m,
+                    label_status, partial_reason, source,
+                    decision_snapshot_id, canonical_intelligence_version,
+                    canonical_intelligence_hash, canonical_intelligence_json,
+                    generated_at
+                ) VALUES (NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+                """,
+                (
+                    row["timestamp"],
+                    row["symbol"],
+                    row["action"],
+                    row["signal_price"],
+                    row["rejection_reason"],
+                    outcome.get("return_5m"),
+                    outcome.get("return_15m"),
+                    outcome.get("return_30m"),
+                    outcome.get("return_60m"),
+                    outcome.get("return_eod"),
+                    outcome.get("max_favorable_60m"),
+                    outcome.get("max_adverse_60m"),
+                    outcome.get("label_status") or "pending",
+                    outcome.get("partial_reason"),
+                    source,
+                    int(row["id"]),
+                    row["canonical_intelligence_version"],
+                    row["canonical_intelligence_hash"],
+                    row["canonical_intelligence_json"],
                 ),
             )

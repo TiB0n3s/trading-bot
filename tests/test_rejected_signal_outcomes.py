@@ -249,6 +249,86 @@ def test_repository_links_outcome_to_canonical_decision_snapshot():
         )
 
 
+def test_repository_labels_snapshot_only_rejections():
+    with tempfile.TemporaryDirectory() as tmp:
+        db_path = Path(tmp) / "test.db"
+        with sqlite3.connect(db_path) as con:
+            con.row_factory = sqlite3.Row
+            con.execute(
+                """
+                CREATE TABLE trades (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT
+                )
+                """
+            )
+            con.execute(
+                """
+                CREATE TABLE decision_snapshots (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    decision_time TEXT,
+                    trade_id INTEGER,
+                    symbol TEXT,
+                    action TEXT,
+                    signal_price REAL,
+                    approved INTEGER,
+                    rejection_reason TEXT,
+                    canonical_intelligence_version TEXT,
+                    canonical_intelligence_hash TEXT,
+                    canonical_intelligence_json TEXT
+                )
+                """
+            )
+            snapshot_id = con.execute(
+                """
+                INSERT INTO decision_snapshots (
+                    decision_time, trade_id, symbol, action, signal_price,
+                    approved, rejection_reason, canonical_intelligence_version,
+                    canonical_intelligence_hash, canonical_intelligence_json
+                ) VALUES (?, NULL, ?, ?, ?, 0, ?, ?, ?, ?)
+                """,
+                (
+                    "2026-05-26T09:35:00-04:00",
+                    "AAPL",
+                    "buy",
+                    100.0,
+                    "historical_bar_meta_label_veto",
+                    "canonical_intelligence_v1",
+                    "d" * 64,
+                    '{"version":"canonical_intelligence_v1"}',
+                ),
+            ).lastrowid
+
+        repo = RejectedSignalOutcomeRepository(db_path)
+        rows = repo.rejected_decision_snapshot_rows(target_date="2026-05-26")
+        assert_equal(len(rows), 1, "snapshot-only rejected row count")
+        repo.upsert_decision_snapshot_outcome(
+            rows[0],
+            {
+                "return_5m": 0.1,
+                "return_15m": 0.2,
+                "return_30m": 0.3,
+                "return_60m": 0.4,
+                "return_eod": 0.5,
+                "max_favorable_60m": 0.8,
+                "max_adverse_60m": -0.2,
+                "label_status": "labeled",
+            },
+            "unit_test",
+        )
+
+        with sqlite3.connect(db_path) as con:
+            con.row_factory = sqlite3.Row
+            outcome = con.execute(
+                "SELECT * FROM rejected_signal_outcomes WHERE decision_snapshot_id = ?",
+                (snapshot_id,),
+            ).fetchone()
+
+        assert_equal(outcome["trade_id"], None, "snapshot outcome has no trade id")
+        assert_equal(outcome["decision_snapshot_id"], snapshot_id, "decision snapshot link")
+        assert_equal(outcome["return_60m"], 0.4, "snapshot return")
+        assert_equal(outcome["canonical_intelligence_hash"], "d" * 64, "canonical hash")
+
+
 def test_rejected_signal_market_data_accepts_list_bar_responses():
     service = RejectedSignalOutcomeMarketDataService(market_data=SimpleNamespace())
     rows = service._barset_rows(
@@ -284,6 +364,7 @@ def main():
         test_missing_forward_bars_partial_reason,
         test_excursions_are_action_adjusted_and_sign_bounded,
         test_repository_links_outcome_to_canonical_decision_snapshot,
+        test_repository_labels_snapshot_only_rejections,
         test_rejected_signal_market_data_accepts_list_bar_responses,
     ]
 

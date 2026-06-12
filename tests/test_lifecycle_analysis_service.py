@@ -346,6 +346,49 @@ def test_lifecycle_analysis_classifies_snapshot_only_rejections():
         assert payload.rows[0]["lifecycle_status"] == "rejected_snapshot_only_no_trade"
 
 
+def test_lifecycle_analysis_excludes_portfolio_audit_rows_without_symbol():
+    with tempfile.TemporaryDirectory() as tmp:
+        db_path = Path(tmp) / "test.db"
+        with sqlite3.connect(db_path) as con:
+            con.execute(
+                """
+                CREATE TABLE decision_snapshots (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    trade_id INTEGER,
+                    decision_time TEXT,
+                    symbol TEXT,
+                    action TEXT,
+                    approved INTEGER,
+                    final_decision TEXT,
+                    rejection_reason TEXT
+                )
+                """
+            )
+            con.execute(
+                """
+                INSERT INTO decision_snapshots (
+                    trade_id, decision_time, symbol, action, approved,
+                    final_decision, rejection_reason
+                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    None,
+                    "2026-05-31T14:35:00+00:00",
+                    None,
+                    "sell",
+                    0,
+                    "no_replace_now",
+                    "recommendation=observe_only",
+                ),
+            )
+
+        service = LifecycleAnalysisService(LifecycleAnalysisRepository(db_path))
+        payload = service.payload(start_date="2026-05-31")
+
+        assert payload.summary["rows"] == 0
+        assert payload.rows == []
+
+
 def test_lifecycle_analysis_tolerates_pre_canonical_schema():
     with tempfile.TemporaryDirectory() as tmp:
         db_path = Path(tmp) / "test.db"
@@ -668,6 +711,7 @@ def main():
         test_lifecycle_analysis_backfills_pattern_from_historical_snapshot_columns,
         test_lifecycle_analysis_flags_missing_rejected_counterfactuals,
         test_lifecycle_analysis_classifies_snapshot_only_rejections,
+        test_lifecycle_analysis_excludes_portfolio_audit_rows_without_symbol,
         test_lifecycle_analysis_tolerates_pre_canonical_schema,
         test_lifecycle_analysis_classifies_matched_exit_missing_snapshot,
         test_lifecycle_analysis_includes_approved_trade_without_decision_snapshot,

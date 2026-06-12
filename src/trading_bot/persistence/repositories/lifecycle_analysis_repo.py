@@ -398,6 +398,7 @@ class LifecycleAnalysisRepository:
             clauses = [
                 "substr(ds.decision_time, 1, 10) BETWEEN ? AND ?",
                 "LOWER(COALESCE(ds.action, '')) IN ('buy', 'sell')",
+                "ds.symbol IS NOT NULL",
             ]
             params: list[Any] = [start_date, end_date]
             if symbol:

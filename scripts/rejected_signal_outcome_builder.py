@@ -46,7 +46,6 @@ def load_env_file(path: Path = ENV_FILE) -> bool:
 load_env_file()
 
 import pytz
-
 from repositories.rejected_signal_outcome_repo import RejectedSignalOutcomeRepository
 from services.rejected_signal_outcome_market_data_service import (
     rejected_signal_outcome_market_data_service,
@@ -236,17 +235,47 @@ def rejected_rows(target_date: str, limit: int | None = None, symbol: str | None
     return _repo.rejected_rows(clauses, params, limit=limit)
 
 
+def rejected_decision_snapshot_rows(
+    target_date: str,
+    limit: int | None = None,
+    symbol: str | None = None,
+) -> list:
+    return _repo.rejected_decision_snapshot_rows(
+        target_date=target_date,
+        limit=limit,
+        symbol=symbol,
+    )
+
+
 def upsert_outcome(row, outcome: dict, source: str = "rejected_signal_outcome_builder") -> None:
     _repo.upsert_outcome(row, outcome, source)
+
+
+def upsert_decision_snapshot_outcome(
+    row,
+    outcome: dict,
+    source: str = "rejected_signal_decision_snapshot_outcome_builder",
+) -> None:
+    _repo.upsert_decision_snapshot_outcome(row, outcome, source)
 
 
 def build(target_date: str, limit: int | None = None, symbol: str | None = None) -> dict:
     _repo.ensure_table()
     rows = rejected_rows(target_date, limit=limit, symbol=symbol)
+    snapshot_limit = None
+    if limit is not None:
+        snapshot_limit = max(0, int(limit) - len(rows))
+    snapshot_rows = rejected_decision_snapshot_rows(
+        target_date,
+        limit=snapshot_limit,
+        symbol=symbol,
+    )
     bars_by_symbol: dict[str, list[dict]] = {}
 
     counts = {
-        "rows": len(rows),
+        "rows": len(rows) + len(snapshot_rows),
+        "trade_rows": len(rows),
+        "snapshot_rows": len(snapshot_rows),
         "labeled": 0,
         "partial": 0,
         "pending": 0,
@@ -289,6 +318,41 @@ def build(target_date: str, limit: int | None = None, symbol: str | None = None)
             upsert_outcome(row, error_outcome)
             logger.error("%s trade_id=%s failed: %s", row["symbol"], row["id"], exc)
 
+    for row in snapshot_rows:
+        try:
+            row_symbol = row["symbol"]
+            if row_symbol not in bars_by_symbol:
+                bars_by_symbol[row_symbol] = fetch_day_bars(row_symbol, target_date)
+            bars = bars_by_symbol[row_symbol]
+            outcome = compute_outcome(dict(row), bars)
+            upsert_decision_snapshot_outcome(row, outcome)
+            status = outcome.get("label_status") or "pending"
+            counts[status] = counts.get(status, 0) + 1
+            logger.info(
+                "%s decision_snapshot_id=%s %s status=%s ret15=%s ret60=%s",
+                row["symbol"],
+                row["id"],
+                row["timestamp"],
+                status,
+                outcome.get("return_15m"),
+                outcome.get("return_60m"),
+            )
+        except Exception as exc:
+            counts["error"] += 1
+            error_outcome = {
+                "label_status": "error",
+                "partial_reason": "exception",
+                "return_5m": None,
+                "return_15m": None,
+                "return_30m": None,
+                "return_60m": None,
+                "return_eod": None,
+                "max_favorable_60m": None,
+                "max_adverse_60m": None,
+            }
+            upsert_decision_snapshot_outcome(row, error_outcome)
+            logger.error("%s decision_snapshot_id=%s failed: %s", row["symbol"], row["id"], exc)
+
     return counts
 
 
@@ -301,7 +365,16 @@ def main() -> int:
 
     counts = build(args.date, limit=args.limit, symbol=args.symbol)
     print("Rejected signal outcome build")
-    for key in ("rows", "labeled", "partial", "pending", "no_bars", "error"):
+    for key in (
+        "rows",
+        "trade_rows",
+        "snapshot_rows",
+        "labeled",
+        "partial",
+        "pending",
+        "no_bars",
+        "error",
+    ):
         print(f"{key:>8}: {counts.get(key, 0)}")
 
     return 0 if counts.get("error", 0) == 0 else 1

@@ -362,9 +362,10 @@ def build_learning_readiness_payload(
         blockers.append("missing_runtime_job_runs")
     elif not runtime.get("clean"):
         blockers.append("runtime_health_not_clean")
-    if not int(lifecycle_summary.get("rows") or 0):
+    lifecycle_row_count = int(lifecycle_summary.get("rows") or 0)
+    if not lifecycle_row_count:
         blockers.append("missing_lifecycle_rows")
-    if not rows_with_outcome:
+    if lifecycle_row_count and not rows_with_outcome:
         blockers.append("missing_outcome_rows")
     if rejected_trade_backed and (rejected_coverage is None or rejected_coverage < 0.80):
         blockers.append("rejected_forward_outcome_coverage_below_80pct")

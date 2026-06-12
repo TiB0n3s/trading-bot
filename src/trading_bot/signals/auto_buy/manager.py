@@ -2014,7 +2014,9 @@ def window_symbols_for_run(
 ) -> tuple[list[str], int | None, int]:
     max_symbols = AUTO_BUY_MAX_SYMBOLS_PER_RUN if max_symbols is None else int(max_symbols)
     total_symbols = len(symbols)
-    if max_symbols <= 0 or total_symbols <= max_symbols:
+    if max_symbols < 0:
+        max_symbols = max(1, (total_symbols + 1) // 2)
+    if max_symbols == 0 or total_symbols <= max_symbols:
         return list(symbols), None, total_symbols
     bucket = int(time.time() // 120) if rotation_bucket is None else int(rotation_bucket)
     start_idx = (bucket * max_symbols) % total_symbols
@@ -2024,12 +2026,23 @@ def window_symbols_for_run(
 
 def symbol_window_summary(scope: str, evaluated_count: int) -> dict[str, Any]:
     total_symbols = len(symbols_for_scope(scope))
-    bounded = AUTO_BUY_MAX_SYMBOLS_PER_RUN > 0 and evaluated_count < total_symbols
+    configured_cap = int(AUTO_BUY_MAX_SYMBOLS_PER_RUN)
+    effective_cap = max(1, (total_symbols + 1) // 2) if configured_cap < 0 else configured_cap
+    bounded = effective_cap > 0 and evaluated_count < total_symbols
+    mode = (
+        "half_universe"
+        if configured_cap < 0
+        else "full_universe"
+        if configured_cap == 0
+        else "fixed_cap"
+    )
     return {
         "scope": scope,
         "evaluated": int(evaluated_count),
         "total": int(total_symbols),
-        "max_symbols_per_run": int(AUTO_BUY_MAX_SYMBOLS_PER_RUN),
+        "max_symbols_per_run": configured_cap,
+        "effective_symbol_cap": int(effective_cap),
+        "mode": mode,
         "bounded": bool(bounded),
         "runtime_effect": (
             "rotating_symbol_window_to_keep_auto_buy_within_cron_cadence"
@@ -2040,7 +2053,7 @@ def symbol_window_summary(scope: str, evaluated_count: int) -> dict[str, Any]:
 
 
 AUTO_BUY_MAX_SIGNALS_PER_SYMBOL = int(os.getenv("AUTO_BUY_MAX_SIGNALS_PER_SYMBOL", "2"))
-AUTO_BUY_MAX_SYMBOLS_PER_RUN = int(os.getenv("AUTO_BUY_MAX_SYMBOLS_PER_RUN", "0"))
+AUTO_BUY_MAX_SYMBOLS_PER_RUN = int(os.getenv("AUTO_BUY_MAX_SYMBOLS_PER_RUN", "-1"))
 AUTO_BUY_TIMING_LOG_ENABLED = os.getenv("AUTO_BUY_TIMING_LOG_ENABLED", "true").lower() in (
     "1",
     "true",
@@ -2197,7 +2210,8 @@ def render(candidates: list[dict[str, Any]], scope: str, market_open: bool) -> N
     print(f"  scope          : {scope}")
     print(f"  symbols        : {window['evaluated']} of {window['total']}")
     print(f"  symbol_window  : {window['runtime_effect']}")
-    print(f"  window_cap     : {window['max_symbols_per_run']}")
+    print(f"  window_mode    : {window['mode']}")
+    print(f"  window_cap     : {window['effective_symbol_cap']}")
     print(f"  market_open    : {market_open}")
     print(f"  live_buy_flag  : {AUTO_BUY_LIVE_BUYS}")
     print(

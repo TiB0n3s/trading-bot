@@ -659,7 +659,32 @@ def test_auto_buy_symbol_window_summary_marks_bounded_runs():
     assert_equal(full["bounded"], False, "full flag")
 
 
-def test_auto_buy_symbol_window_default_is_full_universe():
+def test_auto_buy_symbol_window_default_is_half_universe():
+    old_cap = auto_buy_manager.AUTO_BUY_MAX_SYMBOLS_PER_RUN
+    old_symbols_for_scope = auto_buy_manager.symbols_for_scope
+    auto_buy_manager.AUTO_BUY_MAX_SYMBOLS_PER_RUN = -1
+    auto_buy_manager.symbols_for_scope = lambda scope: ["A", "B", "C", "D", "E"]
+    try:
+        symbols, start, total = window_symbols_for_run(["A", "B", "C", "D", "E"])
+        summary = symbol_window_summary("all", len(symbols))
+    finally:
+        auto_buy_manager.AUTO_BUY_MAX_SYMBOLS_PER_RUN = old_cap
+        auto_buy_manager.symbols_for_scope = old_symbols_for_scope
+
+    assert_equal(symbols, ["A", "B", "C"], "default symbol window")
+    assert_equal(start, 0, "default symbol window start")
+    assert_equal(total, 5, "default symbol window total")
+    assert_equal(summary["bounded"], True, "default bounded flag")
+    assert_equal(summary["mode"], "half_universe", "default window mode")
+    assert_equal(summary["effective_symbol_cap"], 3, "default effective cap")
+    assert_equal(
+        summary["runtime_effect"],
+        "rotating_symbol_window_to_keep_auto_buy_within_cron_cadence",
+        "runtime effect",
+    )
+
+
+def test_auto_buy_symbol_window_zero_cap_is_full_universe():
     old_cap = auto_buy_manager.AUTO_BUY_MAX_SYMBOLS_PER_RUN
     old_symbols_for_scope = auto_buy_manager.symbols_for_scope
     auto_buy_manager.AUTO_BUY_MAX_SYMBOLS_PER_RUN = 0
@@ -671,10 +696,11 @@ def test_auto_buy_symbol_window_default_is_full_universe():
         auto_buy_manager.AUTO_BUY_MAX_SYMBOLS_PER_RUN = old_cap
         auto_buy_manager.symbols_for_scope = old_symbols_for_scope
 
-    assert_equal(symbols, ["A", "B", "C"], "default symbol window")
-    assert_equal(start, None, "default symbol window start")
-    assert_equal(total, 3, "default symbol window total")
-    assert_equal(summary["bounded"], False, "default bounded flag")
+    assert_equal(symbols, ["A", "B", "C"], "full symbol window")
+    assert_equal(start, None, "full symbol window start")
+    assert_equal(total, 3, "full symbol window total")
+    assert_equal(summary["bounded"], False, "full bounded flag")
+    assert_equal(summary["mode"], "full_universe", "full window mode")
     assert_equal(summary["runtime_effect"], "full_symbol_universe_evaluated", "runtime effect")
 
 
@@ -1392,7 +1418,8 @@ def main():
         test_early_session_buffer_skips_collection,
         test_auto_buy_symbol_window_rotates_large_universe,
         test_auto_buy_symbol_window_summary_marks_bounded_runs,
-        test_auto_buy_symbol_window_default_is_full_universe,
+        test_auto_buy_symbol_window_default_is_half_universe,
+        test_auto_buy_symbol_window_zero_cap_is_full_universe,
         test_live_buy_requires_market_open_and_env_flag,
         test_live_auto_buy_does_not_execute_tradingview_alert_symbols_by_default,
         test_internal_all_mode_stays_candidate_only_for_tradingview_symbols,

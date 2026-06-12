@@ -70,12 +70,20 @@ def test_job_runner_lines_have_job_name():
 
 def test_auto_buy_captures_full_candidate_universe():
     lines = [line for line in _cron_command_lines() if "auto_buy_manager.py" in line]
-    assert len(lines) == 1, lines
-    assert "--scope all" in lines[0]
-    assert "AUTO_BUY_MAX_ACTIVE_POSITIONS_OVERRIDE:-3" not in lines[0]
-    assert "AUTO_BUY_MAX_DAILY_ORDERS_OVERRIDE:-12" not in lines[0]
-    assert 'if [ -n "${AUTO_BUY_MAX_ACTIVE_POSITIONS_OVERRIDE:-}" ]' in lines[0]
-    assert 'if [ -n "${AUTO_BUY_MAX_DAILY_ORDERS_OVERRIDE:-}" ]' in lines[0]
+    assert len(lines) == 2, lines
+    assert all("--scope all" in line for line in lines)
+    assert all("AUTO_BUY_MAX_ACTIVE_POSITIONS_OVERRIDE:-3" not in line for line in lines)
+    assert all("AUTO_BUY_MAX_DAILY_ORDERS_OVERRIDE:-12" not in line for line in lines)
+    assert all('if [ -n "${AUTO_BUY_MAX_ACTIVE_POSITIONS_OVERRIDE:-}" ]' in line for line in lines)
+    assert all('if [ -n "${AUTO_BUY_MAX_DAILY_ORDERS_OVERRIDE:-}" ]' in line for line in lines)
+
+
+def test_auto_buy_is_regular_session_only():
+    lines = [line for line in _cron_command_lines() if "--job-name auto_buy_manager" in line]
+    assert len(lines) == 2, lines
+    assert any(line.startswith("30-59/2 8 * * 1-5") for line in lines), lines
+    assert any(line.startswith("*/2 9-14 * * 1-5") for line in lines), lines
+    assert not any(line.startswith("*/2 8-15") for line in lines), lines
 
 
 def test_fill_poller_is_regular_session_only():
@@ -145,6 +153,7 @@ def main():
         test_after_close_and_post_session_share_lock,
         test_job_runner_lines_have_job_name,
         test_auto_buy_captures_full_candidate_universe,
+        test_auto_buy_is_regular_session_only,
         test_fill_poller_is_regular_session_only,
         test_live_and_label_features_are_regular_session_only,
         test_premarket_dependency_chain_uses_single_pipeline,

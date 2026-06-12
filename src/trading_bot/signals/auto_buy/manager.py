@@ -2022,6 +2022,23 @@ def window_symbols_for_run(
     return rotated[:max_symbols], start_idx, total_symbols
 
 
+def symbol_window_summary(scope: str, evaluated_count: int) -> dict[str, Any]:
+    total_symbols = len(symbols_for_scope(scope))
+    bounded = AUTO_BUY_MAX_SYMBOLS_PER_RUN > 0 and evaluated_count < total_symbols
+    return {
+        "scope": scope,
+        "evaluated": int(evaluated_count),
+        "total": int(total_symbols),
+        "max_symbols_per_run": int(AUTO_BUY_MAX_SYMBOLS_PER_RUN),
+        "bounded": bool(bounded),
+        "runtime_effect": (
+            "rotating_symbol_window_to_keep_auto_buy_within_cron_cadence"
+            if bounded
+            else "full_symbol_universe_evaluated"
+        ),
+    }
+
+
 AUTO_BUY_MAX_SIGNALS_PER_SYMBOL = int(os.getenv("AUTO_BUY_MAX_SIGNALS_PER_SYMBOL", "2"))
 AUTO_BUY_MAX_SYMBOLS_PER_RUN = int(os.getenv("AUTO_BUY_MAX_SYMBOLS_PER_RUN", "25"))
 AUTO_BUY_TIMING_LOG_ENABLED = os.getenv("AUTO_BUY_TIMING_LOG_ENABLED", "true").lower() in (
@@ -2173,10 +2190,14 @@ def build_candidates(scope: str) -> list[dict[str, Any]]:
 
 
 def render(candidates: list[dict[str, Any]], scope: str, market_open: bool) -> None:
+    window = symbol_window_summary(scope, len(candidates))
     print("=" * 112)
     print("  Auto-Buy Candidate Manager")
     print("=" * 112)
     print(f"  scope          : {scope}")
+    print(f"  symbols        : {window['evaluated']} of {window['total']}")
+    print(f"  symbol_window  : {window['runtime_effect']}")
+    print(f"  window_cap     : {window['max_symbols_per_run']}")
     print(f"  market_open    : {market_open}")
     print(f"  live_buy_flag  : {AUTO_BUY_LIVE_BUYS}")
     print(
@@ -2271,6 +2292,7 @@ def main() -> int:
             json.dumps(
                 {
                     "candidates": candidates,
+                    "symbol_window": symbol_window_summary(args.scope, len(candidates)),
                     "discovery_execution_bridge": bridge_results,
                 },
                 indent=2,

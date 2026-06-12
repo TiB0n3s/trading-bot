@@ -21,6 +21,7 @@ from auto_buy_manager import auto_buy_capacity_check
 from auto_buy_manager import log_auto_buy_order
 from auto_buy_manager import maybe_execute_auto_buy
 from auto_buy_manager import should_collect_candidates
+from auto_buy_manager import symbol_window_summary
 from auto_buy_manager import window_symbols_for_run
 import auto_buy_manager
 
@@ -638,6 +639,24 @@ def test_auto_buy_symbol_window_rotates_large_universe():
     assert_equal(wrapped, ["E", "A"], "wrapped symbol window")
     assert_equal(wrapped_start, 4, "wrapped symbol window start")
     assert_equal(wrapped_total, 5, "wrapped symbol window total")
+
+
+def test_auto_buy_symbol_window_summary_marks_bounded_runs():
+    old_cap = auto_buy_manager.AUTO_BUY_MAX_SYMBOLS_PER_RUN
+    old_symbols_for_scope = auto_buy_manager.symbols_for_scope
+    auto_buy_manager.AUTO_BUY_MAX_SYMBOLS_PER_RUN = 25
+    auto_buy_manager.symbols_for_scope = lambda scope: ["A", "B", "C"]
+    try:
+        bounded = symbol_window_summary("all", 2)
+        full = symbol_window_summary("all", 3)
+    finally:
+        auto_buy_manager.AUTO_BUY_MAX_SYMBOLS_PER_RUN = old_cap
+        auto_buy_manager.symbols_for_scope = old_symbols_for_scope
+
+    assert_equal(bounded["evaluated"], 2, "bounded evaluated")
+    assert_equal(bounded["total"], 3, "bounded total")
+    assert_equal(bounded["bounded"], True, "bounded flag")
+    assert_equal(full["bounded"], False, "full flag")
 
 
 def test_live_buy_requires_market_open_and_env_flag():
@@ -1353,6 +1372,7 @@ def main():
         test_internal_all_mode_removes_tradingview_threshold_penalty,
         test_early_session_buffer_skips_collection,
         test_auto_buy_symbol_window_rotates_large_universe,
+        test_auto_buy_symbol_window_summary_marks_bounded_runs,
         test_live_buy_requires_market_open_and_env_flag,
         test_live_auto_buy_does_not_execute_tradingview_alert_symbols_by_default,
         test_internal_all_mode_stays_candidate_only_for_tradingview_symbols,

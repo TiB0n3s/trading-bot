@@ -110,7 +110,9 @@ TradingView alerts are now one possible signal source, not the only source.
 When configured for paper-mode breadth, `scripts/auto_buy_manager.py --scope all --live`
 can evaluate the full approved universe from internal bar/session/setup data and
 submit only candidates that pass the same capacity, cooldown, risk, and broker
-safety checks.
+safety checks. The installed cron preserves `/etc/trading-bot.env` capacity
+values, with optional `AUTO_BUY_*_OVERRIDE` variables reserved for deliberate
+temporary session caps.
 
 ## Runtime Environment
 

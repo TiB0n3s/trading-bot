@@ -72,8 +72,10 @@ def test_auto_buy_captures_full_candidate_universe():
     lines = [line for line in _cron_command_lines() if "auto_buy_manager.py" in line]
     assert len(lines) == 1, lines
     assert "--scope all" in lines[0]
-    assert "AUTO_BUY_MAX_ACTIVE_POSITIONS_OVERRIDE:-3" in lines[0]
-    assert "AUTO_BUY_MAX_DAILY_ORDERS_OVERRIDE:-12" in lines[0]
+    assert "AUTO_BUY_MAX_ACTIVE_POSITIONS_OVERRIDE:-3" not in lines[0]
+    assert "AUTO_BUY_MAX_DAILY_ORDERS_OVERRIDE:-12" not in lines[0]
+    assert 'if [ -n "${AUTO_BUY_MAX_ACTIVE_POSITIONS_OVERRIDE:-}" ]' in lines[0]
+    assert 'if [ -n "${AUTO_BUY_MAX_DAILY_ORDERS_OVERRIDE:-}" ]' in lines[0]
 
 
 def test_fill_poller_is_regular_session_only():

@@ -513,18 +513,28 @@ For paper-mode breadth across the approved universe, use:
 ```bash
 AUTO_BUY_SIGNAL_MODE=internal_all
 AUTO_BUY_LIVE_BUYS=true
-AUTO_BUY_MAX_ORDERS_PER_RUN=2
+AUTO_BUY_MAX_ORDERS_PER_RUN=3
 AUTO_BUY_MAX_ACTIVE_POSITIONS=10
-AUTO_BUY_MAX_ACTIVE_POSITIONS_OVERRIDE=10
 AUTO_BUY_MAX_DAILY_ORDERS=24
-AUTO_BUY_MAX_DAILY_ORDERS_OVERRIDE=24
 AUTO_BUY_COOLDOWN_MINUTES=20
 AUTO_BUY_MAX_SIGNALS_PER_SYMBOL=2
+DECISION_POLICY_AUTHORITY_MODE=paper_only
+DECISION_POLICY_LIVE_BLOCK=true
+DECISION_POLICY_LIVE_SIZE_DOWN=true
+ML_AUTHORITY_MODE=paper_block
+BUY_OPPORTUNITY_STRONG_CONVICTION_MAX_PCT=1.50
+POSITION_MANAGER_STRONG_CONVICTION_MIN_PROFIT_PARTIAL_PCT=1.0
+POSITION_MANAGER_STRONG_CONVICTION_GIVEBACK_TRIGGER_PCT=70
 ```
 
-The override variables matter for the installed cron entry, which intentionally
-defaults to a smaller 3/12 exposure profile unless `/etc/trading-bot.env`
-provides explicit paper-mode overrides.
+The installed cron entry now preserves the normal `/etc/trading-bot.env`
+exposure caps. Use `AUTO_BUY_MAX_ACTIVE_POSITIONS_OVERRIDE` or
+`AUTO_BUY_MAX_DAILY_ORDERS_OVERRIDE` only when intentionally applying a
+temporary cap for a specific session.
+Keep `TRANSFORMER_AUTHORITY_ENABLED=false` until a promoted transformer artifact
+is registered with `TRANSFORMER_MODEL_ID`; once registered for paper authority,
+use `TRANSFORMER_AUTHORITY_MODE=paper_gate` so it can block paper candidates
+without bypassing hard risk gates.
 `auto_buy_outcome_report.py` compares captured candidates against forward
 feature-snapshot returns, score buckets, and the TradingView signal baseline.
 `strong_day_participation_report.py --write-db` persists full-universe

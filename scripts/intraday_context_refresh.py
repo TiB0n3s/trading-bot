@@ -64,6 +64,7 @@ from pre_market_research_data import (  # noqa: E402
     apply_dealer_gamma_context,
     apply_event_enrichment,
     apply_prime_brokerage_context,
+    apply_webull_morning_brief_context,
     build_index_state,
     build_sector_state,
     build_symbol_evidence,
@@ -75,6 +76,7 @@ from pre_market_research_data import (  # noqa: E402
     load_dealer_gamma_context,
     load_event_enrichment,
     load_prime_brokerage_context,
+    load_webull_morning_brief_context,
     safe_round,
 )
 
@@ -115,6 +117,7 @@ def _rebuild_symbols(
     cot_positioning_context: dict,
     prime_brokerage_context: dict,
     dealer_gamma_context: dict,
+    webull_morning_brief_context: dict,
     macro_sentiment: str,
     macro_regime: str,
     market_date: str,
@@ -141,6 +144,7 @@ def _rebuild_symbols(
         apply_cot_positioning_context(sym, entry, cot_positioning_context)
         apply_prime_brokerage_context(sym, entry, prime_brokerage_context)
         apply_dealer_gamma_context(sym, entry, dealer_gamma_context)
+        apply_webull_morning_brief_context(sym, entry, webull_morning_brief_context)
         entry = enrich_with_session_context(sym, entry, market_date)
         symbols_out[sym] = entry
 
@@ -161,6 +165,7 @@ def rebuild_market_context(market_date: str) -> dict:
     cot_positioning_context = load_cot_positioning_context()
     prime_brokerage_context = load_prime_brokerage_context()
     dealer_gamma_context = load_dealer_gamma_context()
+    webull_morning_brief_context = load_webull_morning_brief_context()
     logger.info(f"Loaded event enrichment for {len(event_enrichment)} symbols")
     logger.info(
         "Loaded COT positioning context for "
@@ -174,6 +179,10 @@ def rebuild_market_context(market_date: str) -> dict:
     logger.info(
         "Loaded dealer gamma context for "
         f"{len(dealer_gamma_context.get('symbols') or {})} symbol(s)"
+    )
+    logger.info(
+        "Loaded Webull morning brief context for "
+        f"{len(webull_morning_brief_context.get('symbols') or {})} symbol(s)"
     )
 
     logger.info(f"Fetching fresh Alpaca bars for {len(APPROVED_SYMBOLS_LIST)} symbols")
@@ -196,6 +205,7 @@ def rebuild_market_context(market_date: str) -> dict:
         cot_positioning_context,
         prime_brokerage_context,
         dealer_gamma_context,
+        webull_morning_brief_context,
         macro_sentiment,
         macro_regime,
         market_date,
@@ -218,6 +228,7 @@ def rebuild_market_context(market_date: str) -> dict:
     existing["cot_positioning_context"] = cot_positioning_context
     existing["prime_brokerage_context"] = prime_brokerage_context
     existing["dealer_gamma_context"] = dealer_gamma_context
+    existing["webull_morning_brief_context"] = webull_morning_brief_context
 
     brief = build_market_brief(existing)
 

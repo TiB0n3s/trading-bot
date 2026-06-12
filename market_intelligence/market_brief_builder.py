@@ -203,6 +203,7 @@ def build_market_brief(
         "cot_positioning_context": raw.get("cot_positioning_context"),
         "prime_brokerage_context": raw.get("prime_brokerage_context"),
         "dealer_gamma_context": raw.get("dealer_gamma_context"),
+        "webull_morning_brief_context": raw.get("webull_morning_brief_context"),
         "symbols": merge_symbol_research(raw.get("symbols")),
         "source": source,
         "format": "rich_market_brief_v1",

@@ -53,6 +53,13 @@ from market_intelligence.prime_brokerage_flows import (
 )
 from market_intelligence.raw_research_template import build_template
 from market_intelligence.research_output import raw_research_summary
+from market_intelligence.webull_morning_brief import (
+    DEFAULT_STATE_PATH as WEBULL_MORNING_BRIEF_DEFAULT_STATE_PATH,
+)
+from market_intelligence.webull_morning_brief import (
+    load_webull_morning_brief_state,
+    webull_morning_brief_context_for_symbol,
+)
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 BASE_DIR = SCRIPT_DIR.parent
@@ -65,6 +72,12 @@ PRIME_BROKERAGE_STATE_FILE = Path(
 )
 DEALER_GAMMA_STATE_FILE = Path(
     os.getenv("DEALER_GAMMA_STATE_FILE", str(BASE_DIR / DEALER_GAMMA_DEFAULT_STATE_PATH))
+)
+WEBULL_MORNING_BRIEF_STATE_FILE = Path(
+    os.getenv(
+        "WEBULL_MORNING_BRIEF_STATE_FILE",
+        str(BASE_DIR / WEBULL_MORNING_BRIEF_DEFAULT_STATE_PATH),
+    )
 )
 
 PRE_MARKET_ALPACA_SYMBOL_SLEEP_SECONDS = float(
@@ -1015,6 +1028,25 @@ def load_dealer_gamma_context() -> dict:
     return state
 
 
+def load_webull_morning_brief_context() -> dict:
+    """Load Webull morning brief context for market-context enrichment."""
+    try:
+        state = load_webull_morning_brief_state(WEBULL_MORNING_BRIEF_STATE_FILE)
+    except Exception as e:
+        logger.warning(f"Webull morning brief context load failed: {e}")
+        return {
+            "available": False,
+            "reason": f"Webull morning brief context load failed: {e}",
+            "runtime_effect": "webull_morning_event_context_no_trade_authority",
+            "index_futures": {},
+            "technical_signal_balance": {},
+            "symbols": {},
+        }
+    if not state.get("available"):
+        logger.info(state.get("reason") or "Webull morning brief context unavailable")
+    return state
+
+
 def apply_cot_positioning_context(symbol: str, symbol_entry: dict, cot_state: dict) -> None:
     """Attach COT macro-positioning context to one symbol entry.
 
@@ -1057,6 +1089,49 @@ def apply_cot_positioning_context(symbol: str, symbol_entry: dict, cot_state: di
             f"{reason} COT positioning: {mapped_market} regime={regime}, "
             f"leveraged_index_52w={cot_index}, size_modifier={size_modifier}; "
             "weekly macro context only."
+        ).strip()
+
+
+def apply_webull_morning_brief_context(symbol: str, symbol_entry: dict, webull_state: dict) -> None:
+    """Attach Webull morning brief context to one symbol entry."""
+    context = webull_morning_brief_context_for_symbol(symbol, webull_state)
+    if not context:
+        return
+
+    symbol_entry["webull_morning_brief_context"] = context
+
+    event_bias = str(context.get("event_bias") or "neutral").lower()
+    signal = context.get("brief_signal") or "webull_morning_brief"
+    pct_change = context.get("pct_change")
+    macro_read = context.get("macro_read")
+
+    risks = symbol_entry.setdefault("key_risks", [])
+    catalysts = symbol_entry.setdefault("key_catalysts", [])
+    evidence = symbol_entry.setdefault("performance_evidence", [])
+
+    if event_bias in {"caution", "negative", "avoid"}:
+        note = (
+            f"Webull morning brief caution for {symbol}: {signal}; "
+            f"pct_change={pct_change}, macro_read={macro_read}."
+        )
+        if isinstance(risks, list) and note not in risks:
+            risks.append(note)
+    elif event_bias in {"positive", "supportive"}:
+        note = (
+            f"Webull morning brief supportive context for {symbol}: {signal}; "
+            f"pct_change={pct_change}, macro_read={macro_read}."
+        )
+        if isinstance(catalysts, list) and note not in catalysts:
+            catalysts.append(note)
+
+    if isinstance(evidence, list):
+        evidence.append(f"webull_morning_brief:{event_bias}:{signal}")
+
+    reason = symbol_entry.get("reason") or ""
+    if "Webull morning brief:" not in reason:
+        symbol_entry["reason"] = (
+            f"{reason} Webull morning brief: signal={signal}, bias={event_bias}, "
+            f"pct_change={pct_change}, macro_read={macro_read}; context only."
         ).strip()
 
 
@@ -1329,6 +1404,7 @@ def main():
     cot_positioning_context = load_cot_positioning_context()
     prime_brokerage_context = load_prime_brokerage_context()
     dealer_gamma_context = load_dealer_gamma_context()
+    webull_morning_brief_context = load_webull_morning_brief_context()
 
     logger.info(f"Running no-Claude data research for {len(symbols)} symbols")
     logger.info(f"Loaded event enrichment for {len(event_enrichment)} symbols")
@@ -1344,6 +1420,10 @@ def main():
     logger.info(
         "Loaded dealer gamma context for "
         f"{len(dealer_gamma_context.get('symbols') or {})} symbol(s)"
+    )
+    logger.info(
+        "Loaded Webull morning brief context for "
+        f"{len(webull_morning_brief_context.get('symbols') or {})} symbol(s)"
     )
 
     market_data = {}
@@ -1379,6 +1459,7 @@ def main():
     template["cot_positioning_context"] = cot_positioning_context
     template["prime_brokerage_context"] = prime_brokerage_context
     template["dealer_gamma_context"] = dealer_gamma_context
+    template["webull_morning_brief_context"] = webull_morning_brief_context
 
     symbols_out = template.get("symbols", {})
 
@@ -1406,6 +1487,7 @@ def main():
             apply_cot_positioning_context(sym, symbols_out[sym], cot_positioning_context)
             apply_prime_brokerage_context(sym, symbols_out[sym], prime_brokerage_context)
             apply_dealer_gamma_context(sym, symbols_out[sym], dealer_gamma_context)
+            apply_webull_morning_brief_context(sym, symbols_out[sym], webull_morning_brief_context)
             update_performance_context(symbols_out[sym])
         else:
             symbols_out[sym].update(
@@ -1422,6 +1504,7 @@ def main():
             apply_cot_positioning_context(sym, symbols_out[sym], cot_positioning_context)
             apply_prime_brokerage_context(sym, symbols_out[sym], prime_brokerage_context)
             apply_dealer_gamma_context(sym, symbols_out[sym], dealer_gamma_context)
+            apply_webull_morning_brief_context(sym, symbols_out[sym], webull_morning_brief_context)
             update_performance_context(symbols_out[sym])
 
     template["symbols"] = symbols_out

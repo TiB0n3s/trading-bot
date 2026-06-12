@@ -123,6 +123,24 @@ warnings, dynamic stop-level evidence, and size-down logic. It cannot
 independently approve trades or override risk gates. See
 `ops/dealer_gamma_context.md` for the input and no-lookahead contract.
 
+## Webull Morning Brief Context
+
+Webull morning brief context is normalized into
+`runtime_state/webull_morning_brief.json` and consumed by pre-market/intraday
+market context refreshes as event, attention, futures, and technical-signal
+evidence.
+
+```bash
+cd ~/trading-bot
+./venv/bin/python scripts/webull_morning_brief_update.py \
+  --input data/webull/morning_brief_YYYY-MM-DD.json \
+  --output runtime_state/webull_morning_brief.json
+```
+
+This context can inform ML features, event-risk review, symbol attention, and
+size-down/caution logic. It cannot independently approve trades or override
+risk gates.
+
 ## Configuration Audit
 
 Use the config audit after changing `/etc/trading-bot.env`, adding new env

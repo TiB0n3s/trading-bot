@@ -4,27 +4,31 @@ Shared SQLite helpers for the trading bot.
 
 Goals:
 - Consistent row_factory
-- WAL mode for better concurrent read/write behavior
+- Configurable journal mode; default rollback journal avoids unbounded WAL growth
 - busy_timeout to reduce transient lock failures
 - Centralized schema/index maintenance
 """
 
+import os
 import sqlite3
 from pathlib import Path
 
 DB_PATH = Path(__file__).resolve().parents[1] / "trades.db"
 
 BUSY_TIMEOUT_MS = 60000
+SQLITE_JOURNAL_MODE = os.getenv("SQLITE_JOURNAL_MODE", "DELETE").strip().upper()
 
 
-def _enable_wal_if_available(con: sqlite3.Connection) -> None:
+def _configure_journal_mode(con: sqlite3.Connection) -> None:
+    if not SQLITE_JOURNAL_MODE:
+        return
     try:
-        con.execute("PRAGMA journal_mode=WAL")
+        con.execute(f"PRAGMA journal_mode={SQLITE_JOURNAL_MODE}")
     except sqlite3.OperationalError as exc:
         if "locked" not in str(exc).lower():
             raise
-        # WAL mode is a database-level setting. During a live lock storm, failing
-        # here prevents read-only/reporting jobs from even reaching their own SQL.
+        # Journal mode is a database-level setting. During a live lock storm,
+        # failing here prevents read-only/reporting jobs from reaching their SQL.
         # Keep the connection alive and let the actual operation honor busy_timeout.
 
 
@@ -34,7 +38,7 @@ def get_connection(db_path: Path | str = DB_PATH) -> sqlite3.Connection:
     con.row_factory = sqlite3.Row
 
     con.execute(f"PRAGMA busy_timeout={BUSY_TIMEOUT_MS}")
-    _enable_wal_if_available(con)
+    _configure_journal_mode(con)
     con.execute("PRAGMA foreign_keys=ON")
 
     return con

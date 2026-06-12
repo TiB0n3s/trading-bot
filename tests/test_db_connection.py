@@ -10,7 +10,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 
-from db import _enable_wal_if_available  # noqa: E402
+import db  # noqa: E402
 
 
 class _FakeConnection:
@@ -23,29 +23,51 @@ class _FakeConnection:
         raise self.error
 
 
-def test_enable_wal_tolerates_database_locked_error():
+def test_configure_journal_mode_tolerates_database_locked_error():
     con = _FakeConnection(sqlite3.OperationalError("database is locked"))
+    old_mode = db.SQLITE_JOURNAL_MODE
+    db.SQLITE_JOURNAL_MODE = "DELETE"
+    try:
+        db._configure_journal_mode(con)  # type: ignore[arg-type]
+    finally:
+        db.SQLITE_JOURNAL_MODE = old_mode
 
-    _enable_wal_if_available(con)  # type: ignore[arg-type]
-
-    assert con.calls == ["PRAGMA journal_mode=WAL"]
+    assert con.calls == ["PRAGMA journal_mode=DELETE"]
 
 
-def test_enable_wal_reraises_non_lock_errors():
+def test_configure_journal_mode_reraises_non_lock_errors():
     con = _FakeConnection(sqlite3.OperationalError("disk I/O error"))
+    old_mode = db.SQLITE_JOURNAL_MODE
+    db.SQLITE_JOURNAL_MODE = "DELETE"
 
     try:
-        _enable_wal_if_available(con)  # type: ignore[arg-type]
+        try:
+            db._configure_journal_mode(con)  # type: ignore[arg-type]
+        finally:
+            db.SQLITE_JOURNAL_MODE = old_mode
     except sqlite3.OperationalError as exc:
         assert "disk I/O error" in str(exc)
     else:
-        raise AssertionError("expected non-lock WAL setup failure to be raised")
+        raise AssertionError("expected non-lock journal setup failure to be raised")
+
+
+def test_configure_journal_mode_skips_empty_mode():
+    con = _FakeConnection(sqlite3.OperationalError("should not be called"))
+    old_mode = db.SQLITE_JOURNAL_MODE
+    db.SQLITE_JOURNAL_MODE = ""
+    try:
+        db._configure_journal_mode(con)  # type: ignore[arg-type]
+    finally:
+        db.SQLITE_JOURNAL_MODE = old_mode
+
+    assert con.calls == []
 
 
 def main():
     tests = [
-        test_enable_wal_tolerates_database_locked_error,
-        test_enable_wal_reraises_non_lock_errors,
+        test_configure_journal_mode_tolerates_database_locked_error,
+        test_configure_journal_mode_reraises_non_lock_errors,
+        test_configure_journal_mode_skips_empty_mode,
     ]
     for test in tests:
         test()

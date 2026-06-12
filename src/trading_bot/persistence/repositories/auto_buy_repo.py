@@ -3,9 +3,14 @@
 from __future__ import annotations
 
 import json
+import sqlite3
 from typing import Any
 
 from db import DB_PATH, get_connection
+
+
+def is_database_locked_error(exc: BaseException) -> bool:
+    return isinstance(exc, sqlite3.OperationalError) and "database is locked" in str(exc).lower()
 
 
 def init_tables(db_path=DB_PATH) -> None:

@@ -664,7 +664,15 @@ def should_collect_candidates(now=None) -> tuple[bool, str]:
 
 
 def init_auto_buy_table() -> None:
-    auto_buy_repo.init_tables(DB_PATH)
+    try:
+        auto_buy_repo.init_tables(DB_PATH)
+    except Exception as exc:
+        if not auto_buy_repo.is_database_locked_error(exc):
+            raise
+        print(
+            "auto_buy table initialization skipped: database is locked; "
+            "assuming migrated production schema is already present"
+        )
     _initialized_auto_buy_db_paths.add(str(DB_PATH))
 
 
@@ -672,8 +680,7 @@ def ensure_auto_buy_tables_initialized() -> None:
     db_key = str(DB_PATH)
     if db_key in _initialized_auto_buy_db_paths:
         return
-    auto_buy_repo.init_tables(DB_PATH)
-    _initialized_auto_buy_db_paths.add(db_key)
+    init_auto_buy_table()
 
 
 def latest_session(symbol: str) -> dict[str, Any]:

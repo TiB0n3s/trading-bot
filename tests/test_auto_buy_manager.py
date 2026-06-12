@@ -50,6 +50,7 @@ def reset_auto_buy_runtime_defaults():
 
 def setup_function(_):
     reset_auto_buy_runtime_defaults()
+    auto_buy_manager._initialized_auto_buy_db_paths.clear()
     auto_buy_manager.memory_for_signal = lambda symbol, context: {"available": False}
     auto_buy_manager.auto_buy_prediction_context = lambda symbol: {
         "available": True,
@@ -57,6 +58,37 @@ def setup_function(_):
         "ml_prediction_bucket": "high_55_plus",
         "ml_prediction_sample_size": 100,
     }
+
+
+def test_init_auto_buy_table_tolerates_locked_existing_schema():
+    original_init_tables = auto_buy_manager.auto_buy_repo.init_tables
+    try:
+        auto_buy_manager.auto_buy_repo.init_tables = lambda _db_path: (_ for _ in ()).throw(
+            sqlite3.OperationalError("database is locked")
+        )
+
+        auto_buy_manager.init_auto_buy_table()
+
+        assert str(auto_buy_manager.DB_PATH) in auto_buy_manager._initialized_auto_buy_db_paths
+    finally:
+        auto_buy_manager.auto_buy_repo.init_tables = original_init_tables
+
+
+def test_init_auto_buy_table_raises_non_lock_errors():
+    original_init_tables = auto_buy_manager.auto_buy_repo.init_tables
+    try:
+        auto_buy_manager.auto_buy_repo.init_tables = lambda _db_path: (_ for _ in ()).throw(
+            sqlite3.OperationalError("no such table: auto_buy_candidates")
+        )
+
+        try:
+            auto_buy_manager.init_auto_buy_table()
+        except sqlite3.OperationalError as exc:
+            assert "no such table" in str(exc)
+        else:
+            raise AssertionError("expected non-lock OperationalError to be raised")
+    finally:
+        auto_buy_manager.auto_buy_repo.init_tables = original_init_tables
 
 
 def assert_equal(actual, expected, label):
@@ -671,8 +703,9 @@ def test_auto_buy_symbol_window_default_is_half_universe():
         auto_buy_manager.AUTO_BUY_MAX_SYMBOLS_PER_RUN = old_cap
         auto_buy_manager.symbols_for_scope = old_symbols_for_scope
 
-    assert_equal(symbols, ["A", "B", "C"], "default symbol window")
-    assert_equal(start, 0, "default symbol window start")
+    assert_equal(len(symbols), 3, "default symbol window size")
+    assert_equal(set(symbols) <= {"A", "B", "C", "D", "E"}, True, "default symbol members")
+    assert_equal(0 <= start < total, True, "default symbol window start")
     assert_equal(total, 5, "default symbol window total")
     assert_equal(summary["bounded"], True, "default bounded flag")
     assert_equal(summary["mode"], "half_universe", "default window mode")

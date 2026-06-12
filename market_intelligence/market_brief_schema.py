@@ -90,6 +90,7 @@ LEARNING_ENRICHMENT_FIELDS = (
     "prime_brokerage_context",
     "dealer_gamma_context",
     "webull_morning_brief_context",
+    "webull_market_context",
 )
 
 
@@ -234,6 +235,13 @@ def normalize_symbol_entry(symbol: str, entry: dict[str, Any] | None) -> dict[st
             if isinstance(entry.get("webull_morning_brief_context"), dict)
             else None
         ),
+        # Webull screener/news/attention evidence. This is context and
+        # learning-attribution metadata only, never standalone trade authority.
+        "webull_market_context": (
+            entry.get("webull_market_context")
+            if isinstance(entry.get("webull_market_context"), dict)
+            else None
+        ),
     }
 
     normalized.update(learning_enrichment_fields(entry))
@@ -296,6 +304,11 @@ def normalize_market_context(
         "webull_morning_brief_context": (
             raw.get("webull_morning_brief_context")
             if isinstance(raw.get("webull_morning_brief_context"), dict)
+            else None
+        ),
+        "webull_market_context": (
+            raw.get("webull_market_context")
+            if isinstance(raw.get("webull_market_context"), dict)
             else None
         ),
         "symbols": symbols,

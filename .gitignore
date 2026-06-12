@@ -83,6 +83,7 @@ data/exports/
 data/cot/latest_financial_futures.json
 data/cot/raw/
 data/webull/morning_brief_*.json
+data/webull/market_evidence_*.json
 data/historical_bars/
 data/historical_ticks/
 manual_polygon_backfill_v4_*.log

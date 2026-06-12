@@ -24,6 +24,11 @@ def test_active_learning_integration_detects_wired_learning_paths():
             "ml_prediction_bucket": "high_55_plus",
             "setup_label": "near_vwap_recovery",
             "setup_recommendation": "favorable",
+            "webull_market_context": {
+                "runtime_effect": "webull_screener_news_attention_context_no_trade_authority",
+                "authority": "webull_context_only_no_standalone_trade_authority",
+            },
+            "webull_market_evidence_tags": ["webull_screener:top_active:rank=3"],
         },
         "forward_return_pct": 0.6,
         "forward_mfe_pct": 1.0,
@@ -92,6 +97,7 @@ def test_active_learning_integration_detects_wired_learning_paths():
     assert payload.auto_buy_path["symbol_pattern_authority_rows"] == 0
     assert payload.lifecycle_path["rows_with_outcome"] == 1
     assert payload.candidate_universe["rows_with_forward_outcome"] == 1
+    assert payload.auto_buy_path["webull_market_evidence_rows"] == 2
     assert payload.blockers == []
 
 

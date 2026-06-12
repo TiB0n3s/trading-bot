@@ -18,10 +18,17 @@ import argparse
 import json
 import logging
 import os
+import sys
 import time
 from collections import Counter
 from datetime import date, datetime
 from pathlib import Path
+
+SCRIPT_DIR = Path(__file__).resolve().parent
+BASE_DIR = SCRIPT_DIR.parent
+sys.path.insert(0, str(BASE_DIR))
+sys.path.insert(0, str(SCRIPT_DIR))
+sys.path.insert(0, str(BASE_DIR / "src"))
 
 from alerts import send_alert
 from symbols_config import APPROVED_SYMBOLS_LIST, SYMBOL_CONFIG
@@ -53,6 +60,13 @@ from market_intelligence.prime_brokerage_flows import (
 )
 from market_intelligence.raw_research_template import build_template
 from market_intelligence.research_output import raw_research_summary
+from market_intelligence.webull_market_evidence import (
+    DEFAULT_STATE_PATH as WEBULL_MARKET_EVIDENCE_DEFAULT_STATE_PATH,
+)
+from market_intelligence.webull_market_evidence import (
+    load_webull_market_evidence_state,
+    webull_market_context_for_symbol,
+)
 from market_intelligence.webull_morning_brief import (
     DEFAULT_STATE_PATH as WEBULL_MORNING_BRIEF_DEFAULT_STATE_PATH,
 )
@@ -61,8 +75,6 @@ from market_intelligence.webull_morning_brief import (
     webull_morning_brief_context_for_symbol,
 )
 
-SCRIPT_DIR = Path(__file__).resolve().parent
-BASE_DIR = SCRIPT_DIR.parent
 OUTPUT_FILE = BASE_DIR / "market_context.json"
 COT_POSITIONING_STATE_FILE = Path(
     os.getenv("COT_POSITIONING_STATE_FILE", str(BASE_DIR / DEFAULT_STATE_PATH))
@@ -77,6 +89,12 @@ WEBULL_MORNING_BRIEF_STATE_FILE = Path(
     os.getenv(
         "WEBULL_MORNING_BRIEF_STATE_FILE",
         str(BASE_DIR / WEBULL_MORNING_BRIEF_DEFAULT_STATE_PATH),
+    )
+)
+WEBULL_MARKET_EVIDENCE_STATE_FILE = Path(
+    os.getenv(
+        "WEBULL_MARKET_EVIDENCE_STATE_FILE",
+        str(BASE_DIR / WEBULL_MARKET_EVIDENCE_DEFAULT_STATE_PATH),
     )
 )
 
@@ -1047,6 +1065,24 @@ def load_webull_morning_brief_context() -> dict:
     return state
 
 
+def load_webull_market_context() -> dict:
+    """Load Webull screener/news/attention evidence for market-context enrichment."""
+    try:
+        state = load_webull_market_evidence_state(WEBULL_MARKET_EVIDENCE_STATE_FILE)
+    except Exception as e:
+        logger.warning(f"Webull market evidence context load failed: {e}")
+        return {
+            "available": False,
+            "reason": f"Webull market evidence context load failed: {e}",
+            "runtime_effect": "webull_screener_news_attention_context_no_trade_authority",
+            "symbols": {},
+            "coverage": {"symbol_count": 0},
+        }
+    if not state.get("available"):
+        logger.info(state.get("reason") or "Webull market evidence context unavailable")
+    return state
+
+
 def apply_cot_positioning_context(symbol: str, symbol_entry: dict, cot_state: dict) -> None:
     """Attach COT macro-positioning context to one symbol entry.
 
@@ -1132,6 +1168,62 @@ def apply_webull_morning_brief_context(symbol: str, symbol_entry: dict, webull_s
         symbol_entry["reason"] = (
             f"{reason} Webull morning brief: signal={signal}, bias={event_bias}, "
             f"pct_change={pct_change}, macro_read={macro_read}; context only."
+        ).strip()
+
+
+def apply_webull_market_context(symbol: str, symbol_entry: dict, webull_state: dict) -> None:
+    """Attach Webull screener/news/attention context to one symbol entry."""
+    context = webull_market_context_for_symbol(symbol, webull_state)
+    if not context:
+        return
+
+    symbol_entry["webull_market_context"] = context
+
+    screener = context.get("screener") or {}
+    news = context.get("news") or {}
+    attention = context.get("attention") or {}
+    evidence_tags = context.get("evidence_tags") or []
+
+    risks = symbol_entry.setdefault("key_risks", [])
+    catalysts = symbol_entry.setdefault("key_catalysts", [])
+    evidence = symbol_entry.setdefault("performance_evidence", [])
+
+    loser_rank = screener.get("loser_rank")
+    gainer_rank = screener.get("gainer_rank")
+    top_active_rank = screener.get("top_active_rank")
+    relative_volume_10d = screener.get("relative_volume_10d")
+    negative_news = int(news.get("negative_count") or 0)
+    positive_news = int(news.get("positive_count") or 0)
+    attention_rank = attention.get("rank")
+
+    if loser_rank or negative_news:
+        note = (
+            f"Webull context caution for {symbol}: loser_rank={loser_rank}, "
+            f"negative_news={negative_news}, attention_rank={attention_rank}."
+        )
+        if isinstance(risks, list) and note not in risks:
+            risks.append(note)
+    if gainer_rank or top_active_rank or positive_news:
+        note = (
+            f"Webull context support for {symbol}: gainer_rank={gainer_rank}, "
+            f"top_active_rank={top_active_rank}, relative_volume_10d={relative_volume_10d}, "
+            f"positive_news={positive_news}."
+        )
+        if isinstance(catalysts, list) and note not in catalysts:
+            catalysts.append(note)
+
+    if isinstance(evidence, list):
+        for tag in evidence_tags:
+            tagged = f"webull_market:{tag}"
+            if tagged not in evidence:
+                evidence.append(tagged)
+
+    reason = symbol_entry.get("reason") or ""
+    if "Webull market evidence:" not in reason:
+        symbol_entry["reason"] = (
+            f"{reason} Webull market evidence: top_active_rank={top_active_rank}, "
+            f"gainer_rank={gainer_rank}, loser_rank={loser_rank}, "
+            f"news_pos_neg={positive_news}/{negative_news}; context only."
         ).strip()
 
 
@@ -1405,6 +1497,7 @@ def main():
     prime_brokerage_context = load_prime_brokerage_context()
     dealer_gamma_context = load_dealer_gamma_context()
     webull_morning_brief_context = load_webull_morning_brief_context()
+    webull_market_context = load_webull_market_context()
 
     logger.info(f"Running no-Claude data research for {len(symbols)} symbols")
     logger.info(f"Loaded event enrichment for {len(event_enrichment)} symbols")
@@ -1424,6 +1517,10 @@ def main():
     logger.info(
         "Loaded Webull morning brief context for "
         f"{len(webull_morning_brief_context.get('symbols') or {})} symbol(s)"
+    )
+    logger.info(
+        "Loaded Webull market evidence context for "
+        f"{len(webull_market_context.get('symbols') or {})} symbol(s)"
     )
 
     market_data = {}
@@ -1460,6 +1557,7 @@ def main():
     template["prime_brokerage_context"] = prime_brokerage_context
     template["dealer_gamma_context"] = dealer_gamma_context
     template["webull_morning_brief_context"] = webull_morning_brief_context
+    template["webull_market_context"] = webull_market_context
 
     symbols_out = template.get("symbols", {})
 
@@ -1488,6 +1586,7 @@ def main():
             apply_prime_brokerage_context(sym, symbols_out[sym], prime_brokerage_context)
             apply_dealer_gamma_context(sym, symbols_out[sym], dealer_gamma_context)
             apply_webull_morning_brief_context(sym, symbols_out[sym], webull_morning_brief_context)
+            apply_webull_market_context(sym, symbols_out[sym], webull_market_context)
             update_performance_context(symbols_out[sym])
         else:
             symbols_out[sym].update(
@@ -1505,6 +1604,7 @@ def main():
             apply_prime_brokerage_context(sym, symbols_out[sym], prime_brokerage_context)
             apply_dealer_gamma_context(sym, symbols_out[sym], dealer_gamma_context)
             apply_webull_morning_brief_context(sym, symbols_out[sym], webull_morning_brief_context)
+            apply_webull_market_context(sym, symbols_out[sym], webull_market_context)
             update_performance_context(symbols_out[sym])
 
     template["symbols"] = symbols_out

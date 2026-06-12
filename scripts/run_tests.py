@@ -70,6 +70,7 @@ TESTS = [
     "tests/test_position_momentum_monitor_ml.py",
     "tests/test_intraday_trade_feedback_service.py",
     "tests/test_market_context_schema.py",
+    "tests/test_webull_market_evidence.py",
     "tests/test_setup_policy.py",
     "tests/test_setup_engine_service.py",
     "tests/test_setup_structure_service.py",

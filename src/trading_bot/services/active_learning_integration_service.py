@@ -70,6 +70,7 @@ def _auto_buy_summary(rows: Iterable[dict[str, Any]]) -> dict[str, Any]:
     pattern_authority_rows = 0
     ml_rows = 0
     setup_rows = 0
+    webull_market_rows = 0
     submitted = 0
     broker_failure_detail_rows = 0
 
@@ -117,6 +118,16 @@ def _auto_buy_summary(rows: Iterable[dict[str, Any]]) -> dict[str, Any]:
             candidate_payload.get("setup_recommendation")
         ):
             setup_rows += 1
+        webull_context = candidate_payload.get("webull_market_context")
+        webull_tags = candidate_payload.get("webull_market_evidence_tags")
+        performance_evidence = candidate_payload.get("performance_evidence")
+        has_webull_context = isinstance(webull_context, dict) and bool(webull_context)
+        has_webull_tags = isinstance(webull_tags, list) and bool(webull_tags)
+        has_webull_performance_evidence = isinstance(performance_evidence, list) and any(
+            str(tag).startswith("webull_market:") for tag in performance_evidence
+        )
+        if has_webull_context or has_webull_tags or has_webull_performance_evidence:
+            webull_market_rows += 1
         if row.get("order_submitted"):
             submitted += 1
         if "broker returned no order:" in str(row.get("live_block_reason") or ""):
@@ -136,6 +147,8 @@ def _auto_buy_summary(rows: Iterable[dict[str, Any]]) -> dict[str, Any]:
         "ml_prediction_row_rate": _rate(ml_rows, total),
         "setup_quality_rows": setup_rows,
         "setup_quality_row_rate": _rate(setup_rows, total),
+        "webull_market_evidence_rows": webull_market_rows,
+        "webull_market_evidence_row_rate": _rate(webull_market_rows, total),
         "broker_failure_detail_rows": broker_failure_detail_rows,
     }
 
@@ -283,6 +296,7 @@ def build_active_learning_integration_payload(
     active_signals += 1 if auto_buy["strategy_memory_rows"] else 0
     active_signals += 1 if auto_buy["symbol_pattern_rows"] else 0
     active_signals += 1 if auto_buy["ml_prediction_rows"] else 0
+    active_signals += 1 if auto_buy["webull_market_evidence_rows"] else 0
     active_signals += 1 if auto_buy["strategy_memory_constrained_rows"] else 0
     active_signals += 1 if lifecycle["rows_with_outcome"] else 0
     active_signals += 1 if candidates["rows_with_forward_outcome"] else 0

@@ -1025,6 +1025,8 @@ def evaluate_auto_buy_candidate(
     entry_quality = context.get("entry_quality")
     risk_level = context.get("risk_level")
     avoid_type = context.get("avoid_type")
+    webull_market_context = context.get("webull_market_context") or {}
+    webull_morning_brief_context = context.get("webull_morning_brief_context") or {}
     rolling_context = rolling_context or {}
 
     if bias == "avoid":
@@ -1644,6 +1646,11 @@ def evaluate_auto_buy_candidate(
         "market_bias": bias,
         "entry_quality": entry_quality,
         "risk_level": risk_level,
+        "webull_market_context": webull_market_context,
+        "webull_market_evidence_tags": webull_market_context.get("evidence_tags") or [],
+        "webull_market_runtime_effect": webull_market_context.get("runtime_effect"),
+        "webull_morning_brief_context": webull_morning_brief_context,
+        "webull_morning_brief_runtime_effect": webull_morning_brief_context.get("runtime_effect"),
         "session_trend_label": label,
         "session_trend_score": session_score,
         "session_return_pct": session_return,

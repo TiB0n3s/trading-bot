@@ -141,6 +141,26 @@ This context can inform ML features, event-risk review, symbol attention, and
 size-down/caution logic. It cannot independently approve trades or override
 risk gates.
 
+## Webull Screener / News / Attention Context
+
+Webull screener, news-summary, and attention evidence is normalized into
+`runtime_state/webull_market_evidence.json` and consumed by pre-market/intraday
+market context refreshes as non-authoritative symbol evidence.
+
+```bash
+cd ~/trading-bot
+./venv/bin/python scripts/webull_market_evidence_update.py \
+  --input data/webull/market_evidence_YYYY-MM-DD.json \
+  --output runtime_state/webull_market_evidence.json
+```
+
+The normalized context is attached under `webull_market_context` and emits
+`webull_market:*` performance-evidence tags. Auto-buy records those tags in
+candidate snapshots so after-close learning can test whether Webull screener,
+news, and attention features improve forward outcomes before any gate
+relaxation or tightening is considered. It cannot independently approve trades,
+override risk gates, or size positions.
+
 ## Configuration Audit
 
 Use the config audit after changing `/etc/trading-bot.env`, adding new env

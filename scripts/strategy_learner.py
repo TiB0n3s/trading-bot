@@ -18,9 +18,8 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 from policy_artifacts import atomic_write_json
-from trade_matcher import rebuild_matched_trades
-
 from repositories.reporting_repo import ReportingRepository
+from trade_matcher import rebuild_matched_trades
 
 BASE_DIR = Path(__file__).resolve().parents[1]
 OUT_FILE = BASE_DIR / "strategy_memory.json"
@@ -217,14 +216,31 @@ def finalize_pattern_bucket(bucket):
     )
     candle_rows = bucket["candle_rows"]
 
-    if rows < 30:
+    authority_ready = False
+    runtime_effect = "observe_only_pattern_learning_no_live_authority"
+    recommendation = "observe"
+    min_setup_score = None
+
+    if rows < 30 or outcome_rows < 10:
         evidence_label = "thin_sample"
     elif best_buy_rate >= 25 and avg_return is not None and avg_return > 0:
         evidence_label = "constructive_buy_pattern"
+        authority_ready = True
+        runtime_effect = "paper_pattern_learning_authority"
+        recommendation = "favor"
+        min_setup_score = 50
     elif sell_or_avoid_rate >= 25 and avg_return is not None and avg_return < 0:
         evidence_label = "sell_or_avoid_pattern"
+        authority_ready = True
+        runtime_effect = "paper_pattern_learning_authority"
+        recommendation = "avoid"
+        min_setup_score = 70
     else:
         evidence_label = "mixed_pattern"
+        if outcome_rows >= 20:
+            authority_ready = True
+            runtime_effect = "paper_pattern_learning_authority"
+            recommendation = "neutral"
 
     return {
         "rows": rows,
@@ -252,10 +268,15 @@ def finalize_pattern_bucket(bucket):
             round(bucket["volume_pressure_total"] / candle_rows, 4) if candle_rows else None
         ),
         "evidence_label": evidence_label,
-        "recommendation": "observe",
-        "authority_ready": False,
-        "runtime_effect": "observe_only_pattern_learning_no_live_authority",
-        "reason": "bar-pattern memory is evidence-only until promotion guardrails pass",
+        "recommendation": recommendation,
+        "min_setup_score": min_setup_score,
+        "authority_ready": authority_ready,
+        "runtime_effect": runtime_effect,
+        "reason": (
+            "bar-pattern memory has enough completed outcomes for paper authority"
+            if authority_ready
+            else "bar-pattern memory remains observe-only until sample/outcome guardrails pass"
+        ),
     }
 
 
@@ -549,7 +570,7 @@ def main():
         "report_memories": load_report_memories(),
         "trade_count": len(rows),
         "bar_pattern_rows": len(bar_pattern_rows),
-        "bar_pattern_runtime_effect": "observe_only_pattern_learning_no_live_authority",
+        "bar_pattern_runtime_effect": "paper_pattern_learning_authority",
     }
 
     memory = apply_manual_overrides(memory)

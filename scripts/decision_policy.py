@@ -595,8 +595,17 @@ def evaluate_decision_policy(
 
     # Learned/contextual memory. strategy_memory_override injects a point-in-time
     # archived dict instead of the live strategy_memory.json (used by replay tools).
+    memory_context = {
+        **(intelligence_context if isinstance(intelligence_context, dict) else {}),
+        "bar_pattern_features": (
+            account_state.get("bar_pattern_features")
+            or account_state.get("latest_bar_pattern_features")
+            or account_state.get("historical_bar_features")
+            or {}
+        ),
+    }
     memory = contextual_memory_for_signal(
-        symbol, intelligence_context, memory_override=strategy_memory_override
+        symbol, memory_context, memory_override=strategy_memory_override
     )
     memory_matches = memory.get("matches") or []
 

@@ -1192,9 +1192,11 @@ def evaluate_auto_buy_candidate(
         reasons.append(f"mature_chase_extension:-4(session={session_return:.2f}%,vwap={vwap:.2f}%)")
 
     phase_started = time.monotonic()
+    bar_pattern_features_for_memory = latest_bar_pattern_features(symbol, feature)
     strategy_memory = memory_for_signal(
         symbol,
         {
+            "bar_pattern_features": bar_pattern_features_for_memory,
             "setup_quality": {
                 "label": setup_label,
                 "recommendation": setup_rec,
@@ -1217,6 +1219,7 @@ def evaluate_auto_buy_candidate(
     phase_started = _timed("strategy_memory", phase_started)
     learned_min_setup_score = strategy_memory.get("min_setup_score")
     memory_rec = str(strategy_memory.get("recommendation") or "none").strip().lower()
+    bar_pattern_memory = strategy_memory.get("bar_pattern_evidence") or {}
     strategy_memory_caution_gate = False
     if strategy_memory.get("available"):
         reasons.append(
@@ -1224,6 +1227,13 @@ def evaluate_auto_buy_candidate(
             f"{memory_rec}:min_setup={learned_min_setup_score}:"
             f"trades={((strategy_memory.get('symbol_memory') or {}).get('trades'))}"
         )
+        if bar_pattern_memory.get("authority_ready"):
+            reasons.append(
+                "bar_pattern_memory:"
+                f"{bar_pattern_memory.get('active_recommendation')}:"
+                f"{bar_pattern_memory.get('matched_pattern_label') or 'no_label'}:"
+                f"{bar_pattern_memory.get('matched_opportunity_key') or 'no_opportunity'}"
+            )
         if isinstance(learned_min_setup_score, int) and setup_score < learned_min_setup_score:
             if memory_rec == "avoid":
                 reasons.append(
@@ -1660,6 +1670,18 @@ def evaluate_auto_buy_candidate(
         "strategy_memory_min_setup_score": learned_min_setup_score,
         "strategy_memory_reason": strategy_memory.get("reason"),
         "strategy_memory_available": bool(strategy_memory.get("available")),
+        "strategy_memory_bar_pattern_authority_ready": bool(
+            bar_pattern_memory.get("authority_ready")
+        ),
+        "strategy_memory_bar_pattern_recommendation": (
+            bar_pattern_memory.get("active_recommendation")
+        ),
+        "strategy_memory_bar_pattern_label": bar_pattern_memory.get("matched_pattern_label"),
+        "strategy_memory_bar_pattern_opportunity": (
+            bar_pattern_memory.get("matched_opportunity_key")
+        ),
+        "strategy_memory_bar_pattern_runtime_effect": bar_pattern_memory.get("runtime_effect"),
+        "strategy_memory_bar_pattern_features": bar_pattern_features_for_memory,
         "paper_strong_evidence_promotion_enabled": bool(
             AUTO_BUY_PAPER_STRONG_EVIDENCE_PROMOTION_ENABLED
         ),

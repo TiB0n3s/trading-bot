@@ -46,6 +46,28 @@ def avoid_memory(symbol, intelligence_context=None, **kwargs):
     }
 
 
+def bar_pattern_avoid_memory(symbol, intelligence_context=None, **kwargs):
+    assert_true(
+        (intelligence_context or {}).get("bar_pattern_features", {}).get("pattern_label")
+        == "efi_pvt_distribution_warning",
+        "bar pattern context is passed to memory",
+    )
+    return {
+        "available": True,
+        "matches": [
+            {
+                "label": "bar_pattern_label",
+                "section": "bar_pattern_memory",
+                "key": "efi_pvt_distribution_warning",
+                "recommendation": "avoid",
+                "min_setup_score": 70,
+                "reason": "learned sell-or-avoid pattern",
+                "runtime_effect": "paper_pattern_learning_authority",
+            }
+        ],
+    }
+
+
 def test_hard_gate_context_can_only_block():
     result = decision_policy.evaluate_decision_policy(
         "AAPL",
@@ -644,6 +666,41 @@ def test_strategy_memory_distribution_drift_sizes_down_buy_review():
     )
 
 
+def test_bar_pattern_strategy_memory_can_constrain_buy_review():
+    original = decision_policy.contextual_memory_for_signal
+    try:
+        decision_policy.contextual_memory_for_signal = bar_pattern_avoid_memory
+        result = decision_policy.evaluate_decision_policy(
+            "AAPL",
+            "buy",
+            intelligence_context={
+                "summary": {"recommended_action": "allow"},
+                "opportunity_score": {"score": 60, "decision": "allow"},
+                "prediction": {"prediction_decision": "allow", "prediction_score": 80},
+            },
+            account_state={
+                "bar_pattern_features": {
+                    "pattern_label": "efi_pvt_distribution_warning",
+                    "opportunity_action": "sell_or_avoid_candidate",
+                    "opportunity_quality": "avoid_window",
+                },
+                "portfolio_decision": {"decision": "allow"},
+                "execution_quality": {"decision": "allow"},
+                "transformer_authority": {"decision": "allow", "probability": 0.8},
+            },
+        )
+    finally:
+        decision_policy.contextual_memory_for_signal = original
+
+    assert_equal(result["decision"], "block", "bar pattern memory block")
+    assert_true(
+        any(
+            "strategy_memory_matches=bar_pattern_label:avoid" in item for item in result["evidence"]
+        ),
+        "bar pattern memory evidence",
+    )
+
+
 def test_ema200_macd_reversal_gate_sizes_down_adverse_buy_review():
     original = decision_policy.contextual_memory_for_signal
     try:
@@ -729,8 +786,10 @@ if __name__ == "__main__":
     print("[OK] test_historical_bar_symbol_gate_sizes_down_low_accuracy_symbol")
     test_strategy_memory_distribution_drift_sizes_down_buy_review()
     print("[OK] test_strategy_memory_distribution_drift_sizes_down_buy_review")
+    test_bar_pattern_strategy_memory_can_constrain_buy_review()
+    print("[OK] test_bar_pattern_strategy_memory_can_constrain_buy_review")
     test_ema200_macd_reversal_gate_sizes_down_adverse_buy_review()
     print("[OK] test_ema200_macd_reversal_gate_sizes_down_adverse_buy_review")
     test_decision_policy_module_does_not_import_order_execution()
     print("[OK] test_decision_policy_module_does_not_import_order_execution")
-    print("\nAll 21 decision policy tests passed.")
+    print("\nAll 22 decision policy tests passed.")

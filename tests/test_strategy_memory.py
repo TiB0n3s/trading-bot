@@ -80,9 +80,7 @@ def test_memory_for_signal_uses_context_matches(tmp_path):
         "aapl",
         {
             "setup_quality": {"label": "above_vwap_neutral_continuation"},
-            "buy_opportunity": {
-                "buy_opportunity_recommendation": "small_buy_candidate"
-            },
+            "buy_opportunity": {"buy_opportunity_recommendation": "small_buy_candidate"},
         },
     )
 
@@ -177,6 +175,49 @@ def test_bar_pattern_evidence_does_not_change_live_recommendation(tmp_path):
     )
 
 
+def test_bar_pattern_evidence_can_influence_paper_memory_when_authority_ready(tmp_path):
+    path = tmp_path / "strategy_memory.json"
+    path.write_text(
+        json.dumps(
+            {
+                "symbols": {
+                    "AAPL": {
+                        "recommendation": "neutral",
+                        "min_setup_score": 45,
+                        "reason": "normal symbol memory",
+                    }
+                },
+                "bar_pattern_runtime_effect": "paper_pattern_learning_authority",
+                "symbol_bar_pattern_label_context": {
+                    "AAPL|efi_pvt_distribution_warning": {
+                        "rows": 80,
+                        "forward_outcome_rows": 40,
+                        "recommendation": "avoid",
+                        "min_setup_score": 70,
+                        "authority_ready": True,
+                        "runtime_effect": "paper_pattern_learning_authority",
+                        "evidence_label": "sell_or_avoid_pattern",
+                        "avg_forward_return_pct": -0.42,
+                    }
+                },
+                "symbol_bar_pattern_opportunity_context": {},
+            }
+        )
+    )
+    _reset_memory(path)
+
+    result = strategy_memory.memory_for_signal(
+        "aapl",
+        {"bar_pattern_features": {"pattern_label": "efi_pvt_distribution_warning"}},
+    )
+
+    assert result["recommendation"] == "avoid"
+    assert result["min_setup_score"] == 70
+    assert result["bar_pattern_evidence"]["authority_ready"] is True
+    assert result["bar_pattern_evidence"]["active_recommendation"] == "avoid"
+    assert result["bar_pattern_evidence"]["runtime_effect"] == "paper_pattern_learning_authority"
+
+
 def test_strategy_memory_context_normalizes_malformed_context():
     with _capture_strategy_memory_warnings() as warnings:
         result = strategy_memory.normalize_strategy_memory_context("not-a-dict")
@@ -268,6 +309,7 @@ def main():
         test_memory_for_signal_uses_context_matches,
         test_memory_for_signal_preserves_symbol_memory_without_context,
         test_bar_pattern_evidence_does_not_change_live_recommendation,
+        test_bar_pattern_evidence_can_influence_paper_memory_when_authority_ready,
         test_strategy_memory_context_normalizes_malformed_context,
         test_strategy_memory_context_accepts_current_aliases,
         test_strategy_memory_context_logs_malformed_nested_and_unknown_enums,

@@ -691,7 +691,7 @@ def test_auto_buy_symbol_window_summary_marks_bounded_runs():
     assert_equal(full["bounded"], False, "full flag")
 
 
-def test_auto_buy_symbol_window_default_is_half_universe():
+def test_auto_buy_symbol_window_negative_cap_is_half_universe():
     old_cap = auto_buy_manager.AUTO_BUY_MAX_SYMBOLS_PER_RUN
     old_symbols_for_scope = auto_buy_manager.symbols_for_scope
     auto_buy_manager.AUTO_BUY_MAX_SYMBOLS_PER_RUN = -1
@@ -710,6 +710,31 @@ def test_auto_buy_symbol_window_default_is_half_universe():
     assert_equal(summary["bounded"], True, "default bounded flag")
     assert_equal(summary["mode"], "half_universe", "default window mode")
     assert_equal(summary["effective_symbol_cap"], 3, "default effective cap")
+    assert_equal(
+        summary["runtime_effect"],
+        "rotating_symbol_window_to_keep_auto_buy_within_cron_cadence",
+        "runtime effect",
+    )
+
+
+def test_auto_buy_symbol_window_default_is_fixed_cap():
+    old_cap = auto_buy_manager.AUTO_BUY_MAX_SYMBOLS_PER_RUN
+    old_symbols_for_scope = auto_buy_manager.symbols_for_scope
+    auto_buy_manager.AUTO_BUY_MAX_SYMBOLS_PER_RUN = 20
+    auto_buy_manager.symbols_for_scope = lambda scope: [f"S{i}" for i in range(25)]
+    try:
+        symbols, start, total = window_symbols_for_run([f"S{i}" for i in range(25)])
+        summary = symbol_window_summary("all", len(symbols))
+    finally:
+        auto_buy_manager.AUTO_BUY_MAX_SYMBOLS_PER_RUN = old_cap
+        auto_buy_manager.symbols_for_scope = old_symbols_for_scope
+
+    assert_equal(len(symbols), 20, "default fixed symbol window size")
+    assert_equal(0 <= start < total, True, "default fixed symbol window start")
+    assert_equal(total, 25, "default fixed symbol window total")
+    assert_equal(summary["bounded"], True, "default fixed bounded flag")
+    assert_equal(summary["mode"], "fixed_cap", "default fixed window mode")
+    assert_equal(summary["effective_symbol_cap"], 20, "default fixed effective cap")
     assert_equal(
         summary["runtime_effect"],
         "rotating_symbol_window_to_keep_auto_buy_within_cron_cadence",
@@ -1451,7 +1476,8 @@ def main():
         test_early_session_buffer_skips_collection,
         test_auto_buy_symbol_window_rotates_large_universe,
         test_auto_buy_symbol_window_summary_marks_bounded_runs,
-        test_auto_buy_symbol_window_default_is_half_universe,
+        test_auto_buy_symbol_window_negative_cap_is_half_universe,
+        test_auto_buy_symbol_window_default_is_fixed_cap,
         test_auto_buy_symbol_window_zero_cap_is_full_universe,
         test_live_buy_requires_market_open_and_env_flag,
         test_live_auto_buy_does_not_execute_tradingview_alert_symbols_by_default,

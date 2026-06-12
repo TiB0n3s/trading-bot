@@ -181,6 +181,44 @@ def test_job_runner_logs_lock_skipped_run_without_touching_ledger():
         assert "lock-busy: unit_job skipped" in log_path.read_text()
 
 
+def test_job_runner_times_out_long_running_job():
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp_path = Path(tmp)
+        db_path = tmp_path / "jobs.db"
+        log_path = tmp_path / "job.log"
+
+        result = subprocess.run(
+            [
+                sys.executable,
+                str(ROOT / "scripts" / "job_runner.py"),
+                "--job-name",
+                "timeout_job",
+                "--log-file",
+                str(log_path),
+                "--db-path",
+                str(db_path),
+                "--timeout-seconds",
+                "1",
+                "--",
+                sys.executable,
+                "-c",
+                "import time; time.sleep(30)",
+            ],
+            cwd=ROOT,
+            text=True,
+            capture_output=True,
+        )
+
+        assert result.returncode == 124, result.stderr
+        text = log_path.read_text()
+        assert "job-timeout: timeout_job exceeded 1s" in text
+        assert "job-finish: timeout_job exit_code=124" in text
+        rows = _rows(db_path)
+        assert len(rows) == 1
+        assert rows[0]["job_name"] == "timeout_job"
+        assert rows[0]["exit_code"] == 124
+
+
 def test_job_runner_ledger_failure_is_best_effort():
     with tempfile.TemporaryDirectory() as tmp:
         tmp_path = Path(tmp)

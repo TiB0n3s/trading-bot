@@ -5,7 +5,9 @@ from __future__ import annotations
 
 import argparse
 import fcntl
+import os
 import re
+import signal
 import subprocess
 import sys
 import time
@@ -93,16 +95,100 @@ def _infer_warnings_count(output: str) -> int:
     return warnings
 
 
-def _run_command(command: list[str], log_file: str | None) -> int:
+DEFAULT_JOB_TIMEOUT_SECONDS = {
+    "auto_buy_manager": 105,
+}
+
+
+def _timeout_for_job(job_name: str, explicit_timeout: int | None) -> int | None:
+    if explicit_timeout is not None:
+        return explicit_timeout if explicit_timeout > 0 else None
+
+    env_names = (
+        f"{job_name.upper()}_TIMEOUT_SECONDS",
+        "JOB_RUNNER_TIMEOUT_SECONDS",
+    )
+    for env_name in env_names:
+        raw = os.getenv(env_name)
+        if raw is None or raw.strip() == "":
+            continue
+        try:
+            value = int(raw)
+        except ValueError:
+            continue
+        return value if value > 0 else None
+
+    return DEFAULT_JOB_TIMEOUT_SECONDS.get(job_name)
+
+
+def _terminate_process_group(proc: subprocess.Popen, log_file: str | None, job_name: str) -> None:
+    try:
+        os.killpg(proc.pid, signal.SIGTERM)
+    except ProcessLookupError:
+        return
+    except Exception as exc:
+        _append_log(
+            log_file,
+            f"{_now_iso()} job-timeout-terminate-failed: {job_name} error={type(exc).__name__}: {exc}",
+        )
+        return
+
+    try:
+        proc.wait(timeout=5)
+        return
+    except subprocess.TimeoutExpired:
+        pass
+
+    try:
+        os.killpg(proc.pid, signal.SIGKILL)
+    except ProcessLookupError:
+        return
+    except Exception as exc:
+        _append_log(
+            log_file,
+            f"{_now_iso()} job-timeout-kill-failed: {job_name} error={type(exc).__name__}: {exc}",
+        )
+        return
+    try:
+        proc.wait(timeout=5)
+    except subprocess.TimeoutExpired:
+        _append_log(log_file, f"{_now_iso()} job-timeout-child-still-running: {job_name}")
+
+
+def _run_command(
+    command: list[str],
+    log_file: str | None,
+    *,
+    job_name: str,
+    timeout_seconds: int | None,
+) -> int:
+    stdout = None
+    log_handle = None
     if log_file:
         p = Path(log_file)
         p.parent.mkdir(parents=True, exist_ok=True)
-        with p.open("a") as fh:
-            result = subprocess.run(command, stdout=fh, stderr=subprocess.STDOUT)
-            return result.returncode
+        log_handle = p.open("a")
+        stdout = log_handle
 
-    result = subprocess.run(command)
-    return result.returncode
+    try:
+        proc = subprocess.Popen(
+            command,
+            stdout=stdout,
+            stderr=subprocess.STDOUT if stdout is not None else None,
+            start_new_session=True,
+        )
+        try:
+            return proc.wait(timeout=timeout_seconds)
+        except subprocess.TimeoutExpired:
+            _append_log(
+                log_file,
+                f"{_now_iso()} job-timeout: {job_name} exceeded {timeout_seconds}s",
+            )
+            _terminate_process_group(proc, log_file, job_name)
+            return 124
+    finally:
+        if log_handle is not None:
+            log_handle.close()
 
 
 def _release_lock(lock_handle) -> None:
@@ -139,6 +225,7 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--warnings-count", type=int)
     parser.add_argument("--artifact-path")
     parser.add_argument("--db-path")
+    parser.add_argument("--timeout-seconds", type=int)
     parser.add_argument("command", nargs=argparse.REMAINDER)
     args = parser.parse_args(argv)
 
@@ -153,6 +240,7 @@ def main(argv: list[str] | None = None) -> int:
     args = _parse_args(argv or sys.argv[1:])
     started_at = _now_iso()
     started_monotonic = time.monotonic()
+    timeout_seconds = _timeout_for_job(args.job_name, args.timeout_seconds)
 
     lock_handle = None
     if args.lock_file:
@@ -180,7 +268,12 @@ def main(argv: list[str] | None = None) -> int:
     log_start_offset = _log_size(args.log_file)
     exit_code = 1
     try:
-        exit_code = _run_command(args.command, args.log_file)
+        exit_code = _run_command(
+            args.command,
+            args.log_file,
+            job_name=args.job_name,
+            timeout_seconds=timeout_seconds,
+        )
         return exit_code
     finally:
         _append_log(

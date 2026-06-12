@@ -2006,7 +2006,24 @@ def symbols_for_scope(scope: str) -> list[str]:
     return INTERNAL_BAR_ONLY_SYMBOLS_LIST
 
 
+def window_symbols_for_run(
+    symbols: list[str],
+    *,
+    max_symbols: int | None = None,
+    rotation_bucket: int | None = None,
+) -> tuple[list[str], int | None, int]:
+    max_symbols = AUTO_BUY_MAX_SYMBOLS_PER_RUN if max_symbols is None else int(max_symbols)
+    total_symbols = len(symbols)
+    if max_symbols <= 0 or total_symbols <= max_symbols:
+        return list(symbols), None, total_symbols
+    bucket = int(time.time() // 120) if rotation_bucket is None else int(rotation_bucket)
+    start_idx = (bucket * max_symbols) % total_symbols
+    rotated = symbols[start_idx:] + symbols[:start_idx]
+    return rotated[:max_symbols], start_idx, total_symbols
+
+
 AUTO_BUY_MAX_SIGNALS_PER_SYMBOL = int(os.getenv("AUTO_BUY_MAX_SIGNALS_PER_SYMBOL", "2"))
+AUTO_BUY_MAX_SYMBOLS_PER_RUN = int(os.getenv("AUTO_BUY_MAX_SYMBOLS_PER_RUN", "25"))
 AUTO_BUY_TIMING_LOG_ENABLED = os.getenv("AUTO_BUY_TIMING_LOG_ENABLED", "true").lower() in (
     "1",
     "true",
@@ -2063,6 +2080,14 @@ def build_candidates(scope: str) -> list[dict[str, Any]]:
     market_suppressed = mkt_label in SUPPRESSED_LABELS
 
     symbols = symbols_for_scope(scope)
+    symbols, start_idx, total_symbols = window_symbols_for_run(symbols)
+    if start_idx is not None:
+        if AUTO_BUY_TIMING_LOG_ENABLED:
+            print(
+                "[TIMING] auto_buy.symbol_window "
+                f"scope={scope} start={start_idx} selected={len(symbols)} total={total_symbols}",
+                flush=True,
+            )
     phase_started = _phase("load_symbols_for_scope", phase_started)
     for symbol in symbols:
         symbol_started = time.monotonic()

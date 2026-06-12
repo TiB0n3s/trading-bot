@@ -21,6 +21,7 @@ from auto_buy_manager import auto_buy_capacity_check
 from auto_buy_manager import log_auto_buy_order
 from auto_buy_manager import maybe_execute_auto_buy
 from auto_buy_manager import should_collect_candidates
+from auto_buy_manager import window_symbols_for_run
 import auto_buy_manager
 
 
@@ -613,6 +614,30 @@ def test_early_session_buffer_skips_collection():
     assert_equal(ok, False, "collection allowed")
     if "session elapsed" not in reason:
         raise AssertionError(f"unexpected buffer reason: {reason}")
+
+
+def test_auto_buy_symbol_window_rotates_large_universe():
+    symbols = ["A", "B", "C", "D", "E"]
+
+    first, first_start, first_total = window_symbols_for_run(
+        symbols, max_symbols=2, rotation_bucket=0
+    )
+    second, second_start, second_total = window_symbols_for_run(
+        symbols, max_symbols=2, rotation_bucket=1
+    )
+    wrapped, wrapped_start, wrapped_total = window_symbols_for_run(
+        symbols, max_symbols=2, rotation_bucket=2
+    )
+
+    assert_equal(first, ["A", "B"], "first symbol window")
+    assert_equal(first_start, 0, "first symbol window start")
+    assert_equal(first_total, 5, "first symbol window total")
+    assert_equal(second, ["C", "D"], "second symbol window")
+    assert_equal(second_start, 2, "second symbol window start")
+    assert_equal(second_total, 5, "second symbol window total")
+    assert_equal(wrapped, ["E", "A"], "wrapped symbol window")
+    assert_equal(wrapped_start, 4, "wrapped symbol window start")
+    assert_equal(wrapped_total, 5, "wrapped symbol window total")
 
 
 def test_live_buy_requires_market_open_and_env_flag():
@@ -1327,6 +1352,7 @@ def main():
         test_tradingview_symbols_need_higher_auto_buy_threshold,
         test_internal_all_mode_removes_tradingview_threshold_penalty,
         test_early_session_buffer_skips_collection,
+        test_auto_buy_symbol_window_rotates_large_universe,
         test_live_buy_requires_market_open_and_env_flag,
         test_live_auto_buy_does_not_execute_tradingview_alert_symbols_by_default,
         test_internal_all_mode_stays_candidate_only_for_tradingview_symbols,

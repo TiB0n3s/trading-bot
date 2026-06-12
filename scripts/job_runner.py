@@ -105,6 +105,31 @@ def _run_command(command: list[str], log_file: str | None) -> int:
     return result.returncode
 
 
+def _release_lock(lock_handle) -> None:
+    if lock_handle is None:
+        return
+    try:
+        fcntl.flock(lock_handle.fileno(), fcntl.LOCK_UN)
+    finally:
+        lock_handle.close()
+
+
+def _record_run_best_effort(
+    service: JobRunsService,
+    record,
+    *,
+    log_file: str | None,
+    job_name: str,
+) -> None:
+    try:
+        service.record_run(record)
+    except Exception as exc:
+        _append_log(
+            log_file,
+            (f"{_now_iso()} job-ledger-write-failed: {job_name} error={type(exc).__name__}: {exc}"),
+        )
+
+
 def _parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--job-name", required=True)
@@ -156,7 +181,12 @@ def main(argv: list[str] | None = None) -> int:
                 artifact_path=args.artifact_path,
                 command=args.command,
             )
-            service.record_run(record)
+            _record_run_best_effort(
+                service,
+                record,
+                log_file=args.log_file,
+                job_name=args.job_name,
+            )
             return 0
 
     _append_log(args.log_file, f"{_now_iso()} job-start: {args.job_name}")
@@ -189,10 +219,16 @@ def main(argv: list[str] | None = None) -> int:
             artifact_path=args.artifact_path,
             command=args.command,
         )
-        service.record_run(record)
+        _release_lock(lock_handle)
+        lock_handle = None
+        _record_run_best_effort(
+            service,
+            record,
+            log_file=args.log_file,
+            job_name=args.job_name,
+        )
         if lock_handle is not None:
-            fcntl.flock(lock_handle.fileno(), fcntl.LOCK_UN)
-            lock_handle.close()
+            _release_lock(lock_handle)
 
 
 if __name__ == "__main__":

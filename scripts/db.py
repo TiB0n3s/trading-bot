@@ -17,13 +17,24 @@ DB_PATH = Path(__file__).resolve().parents[1] / "trades.db"
 BUSY_TIMEOUT_MS = 60000
 
 
+def _enable_wal_if_available(con: sqlite3.Connection) -> None:
+    try:
+        con.execute("PRAGMA journal_mode=WAL")
+    except sqlite3.OperationalError as exc:
+        if "locked" not in str(exc).lower():
+            raise
+        # WAL mode is a database-level setting. During a live lock storm, failing
+        # here prevents read-only/reporting jobs from even reaching their own SQL.
+        # Keep the connection alive and let the actual operation honor busy_timeout.
+
+
 def get_connection(db_path: Path | str = DB_PATH) -> sqlite3.Connection:
     """Return a configured SQLite connection."""
     con = sqlite3.connect(db_path, timeout=BUSY_TIMEOUT_MS / 1000)
     con.row_factory = sqlite3.Row
 
-    con.execute("PRAGMA journal_mode=WAL")
     con.execute(f"PRAGMA busy_timeout={BUSY_TIMEOUT_MS}")
+    _enable_wal_if_available(con)
     con.execute("PRAGMA foreign_keys=ON")
 
     return con

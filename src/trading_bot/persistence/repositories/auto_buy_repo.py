@@ -694,7 +694,7 @@ def latest_feature(symbol: str, db_path=DB_PATH) -> dict[str, Any]:
             SELECT *
             FROM feature_snapshots
             WHERE symbol = ?
-            ORDER BY timestamp DESC, id DESC
+            ORDER BY id DESC
             LIMIT 1
             """,
             (symbol,),

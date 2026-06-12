@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import fcntl
+import importlib.util
 import sqlite3
 import subprocess
 import sys
@@ -15,6 +16,18 @@ sys.path.insert(0, str(ROOT))
 
 from repositories.job_runs_repo import JobRunsRepository  # noqa: E402
 from services.job_runs_service import JobRunsService  # noqa: E402
+
+
+def _load_job_runner_module():
+    spec = importlib.util.spec_from_file_location(
+        "job_runner_under_test",
+        ROOT / "scripts" / "job_runner.py",
+    )
+    assert spec is not None
+    module = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    spec.loader.exec_module(module)
+    return module
 
 
 def _rows(db_path: Path):
@@ -172,6 +185,51 @@ def test_job_runner_records_lock_skipped_run():
         assert row["lock_acquired"] == 0
         assert row["skipped_reason"] == "lock_busy"
         assert "lock-busy: unit_job skipped" in log_path.read_text()
+
+
+def test_job_runner_ledger_failure_is_best_effort():
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp_path = Path(tmp)
+        log_path = tmp_path / "job.log"
+        lock_path = tmp_path / "unit.lock"
+        job_runner = _load_job_runner_module()
+
+        class FakeService:
+            def build_record(self, **kwargs):
+                return kwargs
+
+            def record_run(self, record):
+                raise sqlite3.OperationalError("database is locked")
+
+        original_builder = job_runner.build_default_job_runs_service
+        job_runner.build_default_job_runs_service = lambda: FakeService()
+        try:
+            result = job_runner.main(
+                [
+                    "--job-name",
+                    "ledger_failure_job",
+                    "--lock-file",
+                    str(lock_path),
+                    "--log-file",
+                    str(log_path),
+                    "--",
+                    sys.executable,
+                    "-c",
+                    "print('job still completed')",
+                ]
+            )
+        finally:
+            job_runner.build_default_job_runs_service = original_builder
+
+        assert result == 0
+        text = log_path.read_text()
+        assert "job still completed" in text
+        assert "job-finish: ledger_failure_job exit_code=0" in text
+        assert "job-ledger-write-failed: ledger_failure_job" in text
+
+        with lock_path.open("w") as lock_handle:
+            fcntl.flock(lock_handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+            fcntl.flock(lock_handle.fileno(), fcntl.LOCK_UN)
 
 
 def test_service_records_artifact_hash():
@@ -458,6 +516,7 @@ def main():
         test_job_runner_infers_rows_and_warnings_from_log_output,
         test_job_runner_infers_rows_from_common_runtime_log_patterns,
         test_job_runner_records_lock_skipped_run,
+        test_job_runner_ledger_failure_is_best_effort,
         test_service_records_artifact_hash,
         test_service_builds_runtime_health_payload,
         test_service_marks_runtime_health_unclean_on_failed_job,

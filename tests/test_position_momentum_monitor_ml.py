@@ -134,6 +134,57 @@ def test_layered_ml_does_not_downgrade_protective_emergency_exit():
 
     assert_equal(decision["action"], "sell_candidate", "action")
     assert_equal(decision["severity"], "emergency_loss", "severity")
+    assert_equal(decision["layered_ml_available"], False, "layered availability")
+    assert_equal(
+        decision["layered_ml_runtime_effect"],
+        "skipped_hot_path_no_decision_authority",
+        "layered runtime effect",
+    )
+
+
+def test_layered_ml_skips_healthy_hold_without_authority():
+    old_context = monitor.build_position_layered_ml_context
+    old_enabled = monitor.POSITION_MOMENTUM_LAYERED_ML_ENABLED
+    calls = {"count": 0}
+    monitor.POSITION_MOMENTUM_LAYERED_ML_ENABLED = True
+
+    def _unexpected_context(**kwargs):
+        calls["count"] += 1
+        return _layered()
+
+    monitor.build_position_layered_ml_context = _unexpected_context
+    try:
+        decision = monitor.apply_layered_ml_to_sell_decision(
+            position=Position(unrealized_plpc=0.01),
+            session={"trend_label": "strong_uptrend"},
+            decision={
+                "symbol": "AAPL",
+                "action": "hold",
+                "severity": "healthy",
+                "score": 4,
+                "sell_pressure_score": 0,
+                "reason": "healthy hold",
+            },
+        )
+    finally:
+        monitor.build_position_layered_ml_context = old_context
+        monitor.POSITION_MOMENTUM_LAYERED_ML_ENABLED = old_enabled
+
+    assert_equal(calls["count"], 0, "layered calls")
+    assert_equal(decision["action"], "hold", "action")
+    assert_equal(decision["layered_ml_available"], False, "layered availability")
+
+
+def test_emergency_loss_exit_precedes_missing_session_data():
+    decision = monitor.evaluate_position_momentum(
+        Position(symbol="AAPL", qty=2, unrealized_plpc=-0.03),
+        None,
+    )
+
+    assert_equal(decision["action"], "sell_candidate", "action")
+    assert_equal(decision["severity"], "emergency_loss", "severity")
+    if "emergency loss exit" not in decision["reason"]:
+        raise AssertionError("missing emergency loss reason")
 
 
 def test_position_momentum_repo_persists_layered_ml_evidence():
@@ -330,6 +381,8 @@ def main():
         test_layered_ml_promotes_loss_watch_to_sell_candidate,
         test_layered_ml_downgrades_weak_nonprotective_sell_candidate,
         test_layered_ml_does_not_downgrade_protective_emergency_exit,
+        test_layered_ml_skips_healthy_hold_without_authority,
+        test_emergency_loss_exit_precedes_missing_session_data,
         test_position_momentum_repo_persists_layered_ml_evidence,
         test_auto_sell_repo_persists_learning_candidate_and_snapshot,
         test_log_position_momentum_check_emits_auto_sell_learning_snapshot,

@@ -407,15 +407,7 @@ def apply_layered_ml_to_sell_decision(
 ) -> dict[str, Any]:
     symbol = getattr(position, "symbol", "UNKNOWN")
     unrealized_plpc = _to_float(getattr(position, "unrealized_plpc", 0)) * 100
-    layered = build_position_layered_ml_context(
-        symbol=symbol,
-        session=session,
-        decision=decision,
-        unrealized_plpc=unrealized_plpc,
-    )
     enriched = dict(decision)
-    master = _to_float(layered.get("master_confidence_score"), None)
-    ensemble = _to_float(layered.get("ensemble_probability_pct"), None)
     sell_pressure = _to_float(enriched.get("sell_pressure_score"), 0)
     protective_severity = enriched.get("severity") in {
         "emergency_loss",
@@ -423,6 +415,41 @@ def apply_layered_ml_to_sell_decision(
         "failed_continuation",
         "profit_protection",
     }
+    layered_can_promote = enriched.get("action") in {"hold", "watch"} and (
+        unrealized_plpc <= POSITION_MOMENTUM_LAYERED_ML_MAX_LOSS_PCT
+        or sell_pressure >= POSITION_MOMENTUM_LAYERED_ML_MIN_SELL_PRESSURE
+    )
+    layered_can_downgrade = enriched.get("action") == "sell_candidate" and not protective_severity
+    layered_build_relevant = POSITION_MOMENTUM_LAYERED_ML_ENABLED and (
+        layered_can_promote or layered_can_downgrade
+    )
+
+    if layered_build_relevant:
+        layered = build_position_layered_ml_context(
+            symbol=symbol,
+            session=session,
+            decision=decision,
+            unrealized_plpc=unrealized_plpc,
+        )
+    else:
+        if protective_severity:
+            skip_reason = "protective_exit_has_priority"
+        elif enriched.get("action") in {"hold", "watch"}:
+            skip_reason = (
+                "outside_layered_sell_authority:"
+                f"plpc={unrealized_plpc:.2f},sell_pressure={sell_pressure:.1f}"
+            )
+        else:
+            skip_reason = "action_not_layered_relevant"
+        layered = {
+            "enabled": bool(POSITION_MOMENTUM_LAYERED_ML_ENABLED),
+            "available": False,
+            "runtime_effect": "skipped_hot_path_no_decision_authority",
+            "reason": skip_reason,
+        }
+
+    master = _to_float(layered.get("master_confidence_score"), None)
+    ensemble = _to_float(layered.get("ensemble_probability_pct"), None)
 
     enriched.update(
         {
@@ -504,6 +531,22 @@ def evaluate_position_momentum(position: Any, session: dict[str, Any] | None) ->
             "reason": f"qty={qty} is not a long position",
         }
 
+    emergency_loss_pct = float(os.getenv("POSITION_MOMENTUM_EMERGENCY_LOSS_PCT", "-1.25"))
+    if unrealized_plpc <= emergency_loss_pct:
+        return {
+            "symbol": symbol,
+            "action": "sell_candidate",
+            "severity": "emergency_loss",
+            "label": (session or {}).get("trend_label") or "risk_floor",
+            "score": int((session or {}).get("trend_score") or 0),
+            "reason": (
+                "emergency loss exit: "
+                f"unrealized_pl=${unrealized_pl:.2f} "
+                f"unrealized_plpc={unrealized_plpc:.2f}% "
+                f"threshold={emergency_loss_pct:.2f}%"
+            ),
+        }
+
     if not session:
         return {
             "symbol": symbol,
@@ -522,23 +565,6 @@ def evaluate_position_momentum(position: Any, session: dict[str, Any] | None) ->
 
     bar_count = int(session.get("bar_count") or 0)
     if bar_count < MIN_BARS_FOR_ACTION:
-        emergency_loss_pct = float(os.getenv("POSITION_MOMENTUM_EMERGENCY_LOSS_PCT", "-1.25"))
-
-        if unrealized_plpc <= emergency_loss_pct:
-            return {
-                "symbol": symbol,
-                "action": "sell_candidate",
-                "severity": "emergency_loss",
-                "label": session.get("trend_label") or "insufficient_data",
-                "score": int(session.get("trend_score") or 0),
-                "reason": (
-                    f"emergency loss exit: bar_count={bar_count} < {MIN_BARS_FOR_ACTION} "
-                    f"unrealized_pl=${unrealized_pl:.2f} "
-                    f"unrealized_plpc={unrealized_plpc:.2f}% "
-                    f"threshold={emergency_loss_pct:.2f}%"
-                ),
-            }
-
         return {
             "symbol": symbol,
             "action": "hold",

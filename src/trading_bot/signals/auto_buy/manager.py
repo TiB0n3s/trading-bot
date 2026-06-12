@@ -384,6 +384,7 @@ def auto_buy_layered_ml_context(
     prediction_context: dict[str, Any],
     score: float,
     strong_threshold: float | None = None,
+    bar_pattern_features: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Build the Level 0-3 intelligence decision used to influence auto-buy."""
     if not AUTO_BUY_LAYERED_ML_ENABLED:
@@ -395,7 +396,7 @@ def auto_buy_layered_ml_context(
         }
 
     try:
-        bar_features = latest_bar_pattern_features(symbol, feature)
+        bar_features = bar_pattern_features or latest_bar_pattern_features(symbol, feature)
         intelligence = _historical_bar_intelligence()
         account_state = {
             "symbol": symbol,
@@ -492,6 +493,15 @@ def auto_buy_layered_ml_context(
             "runtime_effect": "lookup_error_observe_only",
             "reason": str(exc),
         }
+
+
+def skipped_auto_buy_layered_ml_context(reason: str) -> dict[str, Any]:
+    return {
+        "enabled": bool(AUTO_BUY_LAYERED_ML_ENABLED),
+        "available": False,
+        "runtime_effect": "skipped_hot_path_no_decision_authority",
+        "reason": reason,
+    }
 
 
 def _today() -> str:
@@ -1200,6 +1210,38 @@ def evaluate_auto_buy_candidate(
         score -= 4
         reasons.append(f"mature_chase_extension:-4(session={session_return:.2f}%,vwap={vwap:.2f}%)")
 
+    relative_strength = _to_float(feature.get("relative_strength_5m"), 0) or 0
+    ret5 = _to_float(feature.get("ret_5m"), 0) or 0
+    ret15 = _to_float(feature.get("ret_15m"), 0) or 0
+    feature_vwap = _to_float(feature.get("distance_from_vwap"), 0) or 0
+
+    if relative_strength >= 0.30:
+        score += 1
+        reasons.append("relative_strength:+1")
+    if ret5 > 0 and ret15 > 0:
+        score += 1
+        reasons.append("feature_5m_15m_positive:+1")
+    if feature_vwap > 1.50:
+        score -= 2
+        reasons.append("feature_vwap_extended:-2")
+
+    # Momentum acceleration modifier — same thresholds as setup_engine._score_modifiers.
+    # feature_snapshots already computes this field every bar cycle.
+    mom_acc = _to_float(feature.get("momentum_acceleration_pct"))
+    if mom_acc is not None:
+        if mom_acc <= -0.05:
+            score -= 12
+            reasons.append(f"mom_strong_decel({mom_acc:.3f}):-12")
+        elif mom_acc <= -0.03:
+            score -= 8
+            reasons.append(f"mom_decel({mom_acc:.3f}):-8")
+        elif mom_acc >= 0.05:
+            score += 6
+            reasons.append(f"mom_strong_accel({mom_acc:.3f}):+6")
+        elif mom_acc >= 0.03:
+            score += 3
+            reasons.append(f"mom_accel({mom_acc:.3f}):+3")
+
     phase_started = time.monotonic()
     bar_pattern_features_for_memory = latest_bar_pattern_features(symbol, feature)
     strategy_memory = memory_for_signal(
@@ -1258,38 +1300,6 @@ def evaluate_auto_buy_candidate(
                 )
     else:
         reasons.append(f"strategy_memory:unavailable:{strategy_memory.get('reason')}")
-
-    relative_strength = _to_float(feature.get("relative_strength_5m"), 0) or 0
-    ret5 = _to_float(feature.get("ret_5m"), 0) or 0
-    ret15 = _to_float(feature.get("ret_15m"), 0) or 0
-    feature_vwap = _to_float(feature.get("distance_from_vwap"), 0) or 0
-
-    if relative_strength >= 0.30:
-        score += 1
-        reasons.append("relative_strength:+1")
-    if ret5 > 0 and ret15 > 0:
-        score += 1
-        reasons.append("feature_5m_15m_positive:+1")
-    if feature_vwap > 1.50:
-        score -= 2
-        reasons.append("feature_vwap_extended:-2")
-
-    # Momentum acceleration modifier — same thresholds as setup_engine._score_modifiers.
-    # feature_snapshots already computes this field every bar cycle.
-    mom_acc = _to_float(feature.get("momentum_acceleration_pct"))
-    if mom_acc is not None:
-        if mom_acc <= -0.05:
-            score -= 12
-            reasons.append(f"mom_strong_decel({mom_acc:.3f}):-12")
-        elif mom_acc <= -0.03:
-            score -= 8
-            reasons.append(f"mom_decel({mom_acc:.3f}):-8")
-        elif mom_acc >= 0.05:
-            score += 6
-            reasons.append(f"mom_strong_accel({mom_acc:.3f}):+6")
-        elif mom_acc >= 0.03:
-            score += 3
-            reasons.append(f"mom_accel({mom_acc:.3f}):+3")
 
     hard_block_reasons = []
 
@@ -1460,15 +1470,45 @@ def evaluate_auto_buy_candidate(
     elif signal_source == "tradingview_alert":
         reasons.append(f"internal_signal_execution:{execution_signal_mode}")
 
-    layered_ml = auto_buy_layered_ml_context(
-        symbol=symbol,
-        session=session,
-        feature=feature,
-        context=context,
-        prediction_context=prediction_context,
-        score=score,
-        strong_threshold=strong_threshold,
+    layered_ml_threshold_gap_before_build = round(float(strong_threshold) - float(score), 4)
+    layered_ml_veto_relevant = score >= (
+        float(strong_threshold) - AUTO_BUY_LAYERED_ML_VETO_SCORE_PENALTY
     )
+    layered_ml_promotion_relevant = (
+        score + AUTO_BUY_LAYERED_ML_SCORE_BOOST >= AUTO_BUY_WATCH_SCORE
+        and layered_ml_threshold_gap_before_build <= AUTO_BUY_LAYERED_ML_MAX_THRESHOLD_GAP
+    )
+    layered_ml_build_relevant = (
+        AUTO_BUY_LAYERED_ML_ENABLED
+        and not hard_block_reasons
+        and (layered_ml_veto_relevant or layered_ml_promotion_relevant)
+    )
+    if layered_ml_build_relevant:
+        layered_ml = auto_buy_layered_ml_context(
+            symbol=symbol,
+            session=session,
+            feature=feature,
+            context=context,
+            prediction_context=prediction_context,
+            score=score,
+            strong_threshold=strong_threshold,
+            bar_pattern_features=bar_pattern_features_for_memory,
+        )
+    else:
+        if hard_block_reasons:
+            skip_reason = "hard_block_present"
+        elif score + AUTO_BUY_LAYERED_ML_SCORE_BOOST < AUTO_BUY_WATCH_SCORE:
+            skip_reason = (
+                "score_unreachable:"
+                f"{score:.2f}+{AUTO_BUY_LAYERED_ML_SCORE_BOOST:.2f}<"
+                f"{AUTO_BUY_WATCH_SCORE:.2f}"
+            )
+        else:
+            skip_reason = (
+                f"outside_layered_authority_window:gap={layered_ml_threshold_gap_before_build:.2f}"
+            )
+        layered_ml = skipped_auto_buy_layered_ml_context(skip_reason)
+        reasons.append(f"layered_ml_skipped:{skip_reason}")
     layered_ml_available = bool(layered_ml.get("available"))
     layered_instruction = str(layered_ml.get("final_instruction") or "none").strip().lower()
     layered_meta_effect = str(layered_ml.get("meta_label_effect") or "none").strip().lower()

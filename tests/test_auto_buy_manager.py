@@ -1410,6 +1410,95 @@ def test_layered_ml_can_promote_near_threshold_auto_buy_candidate_in_paper_mode(
         raise AssertionError("missing layered ML promotion reason")
 
 
+def test_layered_ml_is_skipped_for_hard_blocked_auto_buy_candidate():
+    old_context = auto_buy_manager.auto_buy_layered_ml_context
+    old_enabled = auto_buy_manager.AUTO_BUY_LAYERED_ML_ENABLED
+    calls = {"count": 0}
+
+    def _unexpected_layered_context(**kwargs):
+        calls["count"] += 1
+        return {
+            "enabled": True,
+            "available": True,
+            "final_instruction": "paper_approval",
+            "final_size_pct": 1.0,
+        }
+
+    auto_buy_manager.AUTO_BUY_LAYERED_ML_ENABLED = True
+    auto_buy_manager.auto_buy_layered_ml_context = _unexpected_layered_context
+    try:
+        session = strong_session()
+        session["trend_label"] = "downtrend"
+        session["trend_score"] = -6
+        session["momentum_15m_pct"] = -0.4
+        candidate = evaluate_auto_buy_candidate(
+            symbol="AMZN",
+            session=session,
+            feature=favorable_feature(),
+            context=buy_context(),
+            held=set(),
+        )
+    finally:
+        auto_buy_manager.auto_buy_layered_ml_context = old_context
+        auto_buy_manager.AUTO_BUY_LAYERED_ML_ENABLED = old_enabled
+
+    assert_equal(calls["count"], 0, "layered context calls")
+    assert_equal(candidate["decision"], "skip", "decision")
+    assert_equal(candidate["layered_ml_available"], False, "layered availability")
+    assert_equal(
+        candidate["layered_ml_runtime_effect"],
+        "skipped_hot_path_no_decision_authority",
+        "layered runtime effect",
+    )
+
+
+def test_layered_ml_is_skipped_for_unreachable_auto_buy_score():
+    old_context = auto_buy_manager.auto_buy_layered_ml_context
+    old_enabled = auto_buy_manager.AUTO_BUY_LAYERED_ML_ENABLED
+    calls = {"count": 0}
+
+    def _unexpected_layered_context(**kwargs):
+        calls["count"] += 1
+        return {
+            "enabled": True,
+            "available": True,
+            "final_instruction": "paper_approval",
+            "final_size_pct": 1.0,
+        }
+
+    auto_buy_manager.AUTO_BUY_LAYERED_ML_ENABLED = True
+    auto_buy_manager.auto_buy_layered_ml_context = _unexpected_layered_context
+    try:
+        feature = favorable_feature()
+        feature["setup_recommendation"] = "avoid"
+        feature["setup_score"] = 5
+        feature["momentum_acceleration_pct"] = -0.06
+        candidate = evaluate_auto_buy_candidate(
+            symbol="AMZN",
+            session={
+                "trend_label": "rangebound",
+                "trend_score": 0,
+                "session_return_pct": 0.0,
+                "momentum_5m_pct": 0.0,
+                "momentum_15m_pct": 0.0,
+                "momentum_30m_pct": 0.0,
+                "distance_from_vwap_pct": 0.0,
+            },
+            feature=feature,
+            context={"bias": "neutral", "entry_quality": "neutral", "risk_level": "medium"},
+            held=set(),
+        )
+    finally:
+        auto_buy_manager.auto_buy_layered_ml_context = old_context
+        auto_buy_manager.AUTO_BUY_LAYERED_ML_ENABLED = old_enabled
+
+    assert_equal(calls["count"], 0, "layered context calls")
+    assert_equal(candidate["decision"], "skip", "decision")
+    assert_equal(candidate["layered_ml_available"], False, "layered availability")
+    if "layered_ml_skipped" not in candidate["reason"]:
+        raise AssertionError("missing layered skip reason")
+
+
 def test_layered_ml_veto_blocks_otherwise_strong_auto_buy_candidate_in_paper_mode():
     old_context = auto_buy_manager.auto_buy_layered_ml_context
     old_cash_mode = auto_buy_manager.is_cash_mode
@@ -1491,6 +1580,8 @@ def main():
         test_learned_tiebreaker_does_not_override_hard_blocks,
         test_learned_tiebreaker_can_override_soft_intelligence_blocks_in_paper_mode,
         test_layered_ml_can_promote_near_threshold_auto_buy_candidate_in_paper_mode,
+        test_layered_ml_is_skipped_for_hard_blocked_auto_buy_candidate,
+        test_layered_ml_is_skipped_for_unreachable_auto_buy_score,
         test_layered_ml_veto_blocks_otherwise_strong_auto_buy_candidate_in_paper_mode,
         test_log_auto_buy_order_writes_canonical_trade_row,
         test_auto_buy_candidate_attaches_canonical_decision_trace,

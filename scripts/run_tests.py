@@ -184,6 +184,7 @@ TESTS = [
     "tests/test_job_runs_service.py",
     "tests/test_db_connection.py",
     "tests/test_retention_policy.py",
+    "tests/test_sqlite_vacuum_swap.py",
     "tests/test_broker.py",
     "tests/test_db_migrations.py",
     "tests/test_fill_stream.py",

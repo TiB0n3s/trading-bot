@@ -1614,6 +1614,47 @@ SQLite does not reduce the physical size of `trades.db`; it creates reusable
 free pages. Shrinking the file requires a separate downtime-safe `VACUUM INTO`
 and swap plan, not an intraday cleanup.
 
+Downtime-safe SQLite compaction:
+
+`pipeline/sqlite_vacuum_swap.py` is the controlled compaction workflow for
+shrinking `trades.db` after cold rows have been archived. It uses
+`VACUUM INTO` to build a compact copy, verifies the compact DB, and only swaps
+it into place when explicitly requested. The old DB is retained as
+`trades.db.rollback_<timestamp>` for rollback.
+
+Read-only plan:
+
+```bash
+/home/tradingbot/trading-bot/venv/bin/python pipeline/sqlite_vacuum_swap.py \
+  --db-path /home/tradingbot/trading-bot/trades.db
+```
+
+Build compact copy without replacing the live DB:
+
+```bash
+/home/tradingbot/trading-bot/venv/bin/python pipeline/sqlite_vacuum_swap.py \
+  --db-path /home/tradingbot/trading-bot/trades.db \
+  --build \
+  --replace-build
+```
+
+Swap during a downtime window only:
+
+```bash
+sudo systemctl stop trading-bot fill-stream fill-poller live-bar-stream
+
+/home/tradingbot/trading-bot/venv/bin/python pipeline/sqlite_vacuum_swap.py \
+  --db-path /home/tradingbot/trading-bot/trades.db \
+  --swap
+
+sudo systemctl start trading-bot fill-stream fill-poller live-bar-stream
+```
+
+If you want the build and swap in one downtime command, add `--build --swap`.
+The script blocks swaps while known runtime services are active unless
+`--skip-service-check` or `--force` is used. Do not use those bypasses for the
+production `trades.db` unless you have already stopped all writers another way.
+
 Cash-Readiness Interlocks
 
 Broker submission is protected by `services.cash_readiness_interceptor_service`

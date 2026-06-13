@@ -96,6 +96,8 @@ class TrainingDataRepository:
             has_context = self._table_exists(con, "daily_symbol_context")
             has_predictions = self._table_exists(con, "daily_symbol_predictions")
             has_bar_patterns = self._table_exists(con, "bar_pattern_features")
+            has_timing_quality = self._table_exists(con, "bar_timing_quality_labels")
+            timing_quality_available = has_bar_patterns and has_timing_quality
             bp_cols = self._table_columns(con, "bar_pattern_features")
             bp_version_filter = self._bar_pattern_version_filter(bp_cols)
 
@@ -143,6 +145,14 @@ class TrainingDataRepository:
                  )
             """
                 if has_bar_patterns
+                else ""
+            )
+            timing_quality_join = (
+                """
+                LEFT JOIN bar_timing_quality_labels btq
+                  ON btq.bar_pattern_feature_id = bp.id
+                """
+                if timing_quality_available
                 else ""
             )
 
@@ -195,12 +205,18 @@ class TrainingDataRepository:
                     {("bp.rsi_14" if has_bar_patterns else "NULL")} AS rsi_14,
                     {("bp.triple_barrier_label" if has_bar_patterns else "NULL")} AS triple_barrier_label,
                     {("bp.trend_scan_label" if has_bar_patterns else "NULL")} AS trend_scan_label,
-                    {("bp.trend_scan_tstat" if has_bar_patterns else "NULL")} AS trend_scan_tstat
+                    {("bp.trend_scan_tstat" if has_bar_patterns else "NULL")} AS trend_scan_tstat,
+                    {("btq.entry_timing_label" if timing_quality_available else "NULL")} AS entry_timing_label,
+                    {("btq.entry_timing_score" if timing_quality_available else "NULL")} AS entry_timing_score,
+                    {("btq.exit_timing_label" if timing_quality_available else "NULL")} AS exit_timing_label,
+                    {("btq.exit_timing_score" if timing_quality_available else "NULL")} AS exit_timing_score,
+                    {("btq.label_version" if timing_quality_available else "NULL")} AS bar_timing_quality_version
                 FROM feature_snapshots fs
                 {label_join}
                 {context_join}
                 {prediction_join}
                 {bar_pattern_join}
+                {timing_quality_join}
                 WHERE {where_sql}
                 ORDER BY fs.timestamp, fs.symbol, fs.id
             """
@@ -239,6 +255,8 @@ class TrainingDataRepository:
 
             fs_cols = self._table_columns(con, "feature_snapshots")
             bp_cols = self._table_columns(con, "bar_pattern_features")
+            has_timing_quality = self._table_exists(con, "bar_timing_quality_labels")
+            timing_quality_available = bool(bp_cols) and has_timing_quality
             bp_version_filter = self._bar_pattern_version_filter(bp_cols)
             opt = self._opt
 
@@ -260,6 +278,14 @@ class TrainingDataRepository:
                       {bp_version_filter}
                  )
                 """
+            timing_quality_join = (
+                """
+                LEFT JOIN bar_timing_quality_labels btq
+                  ON btq.bar_pattern_feature_id = bp.id
+                """
+                if timing_quality_available
+                else ""
+            )
             limit_sql = ""
             if limit and limit > 0:
                 limit_sql = f" LIMIT {int(limit)}"
@@ -374,6 +400,11 @@ class TrainingDataRepository:
                     {bp_opt("opportunity_quality", "bar_opportunity_quality")},
                     {bp_opt("long_opportunity_score", "bar_long_opportunity_score")},
                     {bp_opt("sell_opportunity_score", "bar_sell_opportunity_score")},
+                    {("btq.entry_timing_label" if timing_quality_available else "NULL")} AS entry_timing_label,
+                    {("btq.entry_timing_score" if timing_quality_available else "NULL")} AS entry_timing_score,
+                    {("btq.exit_timing_label" if timing_quality_available else "NULL")} AS exit_timing_label,
+                    {("btq.exit_timing_score" if timing_quality_available else "NULL")} AS exit_timing_score,
+                    {("btq.label_version" if timing_quality_available else "NULL")} AS bar_timing_quality_version,
                     ls.future_price_5m,
                     ls.future_price_15m,
                     ls.future_price_30m,
@@ -418,6 +449,7 @@ class TrainingDataRepository:
                 LEFT JOIN labeled_setups ls
                   ON ls.snapshot_id = fs.id
                 {bar_pattern_join}
+                {timing_quality_join}
                 LEFT JOIN daily_symbol_context c
                   ON c.market_date = substr(fs.timestamp, 1, 10)
                  AND c.symbol      = fs.symbol

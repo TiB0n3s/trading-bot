@@ -172,6 +172,21 @@ CREATE TABLE bar_pattern_features (
 )
 """
 
+_BAR_TIMING_QUALITY_DDL = """
+CREATE TABLE bar_timing_quality_labels (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    bar_pattern_feature_id INTEGER NOT NULL,
+    symbol TEXT NOT NULL,
+    bar_timestamp TEXT NOT NULL,
+    timeframe TEXT NOT NULL,
+    entry_timing_label TEXT,
+    entry_timing_score REAL,
+    exit_timing_label TEXT,
+    exit_timing_score REAL,
+    label_version TEXT
+)
+"""
+
 
 def _create_tables(con: sqlite3.Connection) -> None:
     for ddl in (_FS_DDL, _LS_DDL, _CONTEXT_DDL, _PREDICTIONS_DDL, _BAR_PATTERN_DDL):
@@ -229,7 +244,7 @@ def _insert_ls(con, *, snapshot_id, complete=True, outcome_label="win"):
 
 
 def _insert_bar_pattern(con, *, ts, symbol, label=1):
-    con.execute(
+    cur = con.execute(
         """
         INSERT INTO bar_pattern_features (
             symbol, bar_timestamp, timeframe, feature_version,
@@ -259,6 +274,24 @@ def _insert_bar_pattern(con, *, ts, symbol, label=1):
         )
         """,
         (symbol, ts, label),
+    )
+    return cur.lastrowid
+
+
+def _create_bar_timing_quality_table(con: sqlite3.Connection) -> None:
+    con.execute(_BAR_TIMING_QUALITY_DDL)
+
+
+def _insert_bar_timing_quality(con, *, bar_pattern_id, ts, symbol):
+    con.execute(
+        """
+        INSERT INTO bar_timing_quality_labels (
+            bar_pattern_feature_id, symbol, bar_timestamp, timeframe,
+            entry_timing_label, entry_timing_score,
+            exit_timing_label, exit_timing_score, label_version
+        ) VALUES (?, ?, ?, '1m', 'best_entry', 88.0, 'hold_preferred', 74.0, 'bar_timing_quality_v1')
+        """,
+        (bar_pattern_id, symbol, ts),
     )
 
 
@@ -357,7 +390,9 @@ def _filter_fixture(tmp_dir: Path) -> Path:
         ts1 = "2026-05-26T10:00:00"
         sid1 = _insert_fs(con, ts=ts1, symbol="NOC")
         _insert_ls(con, snapshot_id=sid1, complete=True, outcome_label="win")
-        _insert_bar_pattern(con, ts=ts1, symbol="NOC")
+        bar_pattern_id = _insert_bar_pattern(con, ts=ts1, symbol="NOC")
+        _create_bar_timing_quality_table(con)
+        _insert_bar_timing_quality(con, bar_pattern_id=bar_pattern_id, ts=ts1, symbol="NOC")
         # Row 2 — partial_near_close (ret_fwd_30m NULL)
         sid2 = _insert_fs(con, ts="2026-05-26T10:30:00", symbol="NVDA")
         _insert_ls(con, snapshot_id=sid2, complete=False, outcome_label=None)
@@ -382,6 +417,15 @@ def test_complete_only_excludes_non_complete_rows():
         row["bar_pattern_feature_version"],
         "efi_pvt_orderflow_math_bar_pattern_v3",
         "bar pattern version exported",
+    )
+    assert_equal(row["entry_timing_label"], "best_entry", "entry timing label exported")
+    assert_equal(row["entry_timing_score"], 88.0, "entry timing score exported")
+    assert_equal(row["exit_timing_label"], "hold_preferred", "exit timing label exported")
+    assert_equal(row["exit_timing_score"], 74.0, "exit timing score exported")
+    assert_equal(
+        row["bar_timing_quality_version"],
+        "bar_timing_quality_v1",
+        "bar timing quality version exported",
     )
     assert_true(row["spacex_value_chain_in_scope"], "SpaceX value-chain scope exported")
     assert_equal(

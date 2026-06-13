@@ -36,6 +36,7 @@ def test_post_session_review_dry_run_lists_warn_only_review_steps():
     assert "rejected_signal_outcome_builder" in out
     assert "decision_lifecycle_dashboard" in out
     assert "automated_retraining" in out
+    assert "bar_timing_quality_report" in out
     assert "learning_artifacts" in out
     assert "[CRITICAL]" not in out
 

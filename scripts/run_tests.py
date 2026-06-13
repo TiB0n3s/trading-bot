@@ -213,6 +213,7 @@ TESTS = [
     "tests/test_daily_summary_service.py",
     "tests/test_excursion_service.py",
     "tests/test_entry_quality_service.py",
+    "tests/test_bar_timing_quality_service.py",
     "tests/test_filter_report_service.py",
     "tests/test_prediction_validation_service.py",
     "tests/test_prediction_drift_service.py",

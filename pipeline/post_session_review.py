@@ -18,7 +18,7 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 if str(BASE_DIR) not in sys.path:
     sys.path.insert(0, str(BASE_DIR))
 
-from pipeline import Step, run_pipeline
+from pipeline import Step, run_pipeline  # noqa: E402
 
 
 def _build_steps(target_date: str) -> list[Step]:
@@ -134,6 +134,13 @@ def _build_steps(target_date: str) -> list[Step]:
             argv=["--date", target_date],
             critical=False,
             description="summarize entry quality evidence",
+        ),
+        Step(
+            name="bar_timing_quality_report",
+            module="bar_timing_quality_report",
+            argv=["--date", target_date],
+            critical=False,
+            description="materialize and summarize best/good entry and exit bar timing labels",
         ),
         Step(
             name="decision_snapshots",

@@ -1577,6 +1577,14 @@ Intraday learning has two bounded feedback paths:
   `matched_trades` outcomes into `auto_buy_historical_outcome_feedback`.
   Auto-buy feedback evidence consumes this persisted table first, then falls
   back to live grouping only when no materialized history exists.
+- `scripts/bar_timing_quality_report.py --date YYYY-MM-DD` materializes
+  observe-only `bar_timing_quality_labels` from `bar_pattern_features`.
+  These labels identify `best_entry`, `good_entry`, `avoid_entry`,
+  `best_exit`, `good_exit`, and `hold_preferred` bars from forward
+  MFE/MAE/return paths. The ML training/export query joins these fields so the
+  intelligence can learn ideal entry/exit bar patterns from both historical
+  archive rows and live-session bar captures without granting the labels direct
+  trade authority.
 
 Heavy model fitting and promotion remain post-session responsibilities. The
 intraday loop is limited to evidence capture, feedback penalties, and hard

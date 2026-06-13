@@ -663,6 +663,9 @@ candidate diagnostics/artifacts under `ml/models/historical_bar_patterns_v1`,
 and remains `observe_only_no_live_authority`. It is the fastest way to verify
 that the multi-year Polygon bar backfill is being consumed by ML without
 requiring a matching multi-year `feature_snapshots` table.
+Training reads both hot `trades.db` rows and the cold historical-bar archive at
+`data_archive/sqlite/historical_bars.db`, so archived bar-pattern rows remain
+model-consumable after retention cleanup.
 Use `--rows-per-symbol` for balanced universe sampling; a plain chronological
 global limit can overrepresent the earliest symbols in the archive. Use
 `--skip-suite --baseline-only` for routine validation; omit `--baseline-only`
@@ -1573,6 +1576,43 @@ Intraday learning has two bounded feedback paths:
 Heavy model fitting and promotion remain post-session responsibilities. The
 intraday loop is limited to evidence capture, feedback penalties, and hard
 blocks for repeated losing patterns.
+
+Cold ML retention/archive:
+
+`pipeline/cold_learning_archive.py` moves cold learning rows into separate
+SQLite stores while preserving all actual trades/fills in `trades.db`.
+Default retention is:
+
+- `bar_pattern_features`: keep 5 hot days in `trades.db`; archive older rows to
+  `data_archive/sqlite/historical_bars.db`.
+- `feature_snapshots`: keep 10 hot days in `trades.db`; archive older rows to
+  `data_archive/sqlite/features.db`.
+- decision/candidate snapshots: keep 30 hot days in `trades.db`; archive older
+  rows to `data_archive/sqlite/learning_archive.db`.
+- `trades`, fills, matched trades, orders, and positions are protected and are
+  not archived by this command.
+
+Dry-run before execution:
+
+```bash
+/home/tradingbot/trading-bot/venv/bin/python pipeline/cold_learning_archive.py \
+  --target-date 2026-06-12 \
+  --chunk-size 50000
+```
+
+Execute after historical-bar training evidence is clean:
+
+```bash
+/home/tradingbot/trading-bot/venv/bin/python pipeline/cold_learning_archive.py \
+  --target-date 2026-06-12 \
+  --chunk-size 50000 \
+  --execute
+```
+
+Each run writes a manifest under `data_archive/manifests/`. Deleting rows from
+SQLite does not reduce the physical size of `trades.db`; it creates reusable
+free pages. Shrinking the file requires a separate downtime-safe `VACUUM INTO`
+and swap plan, not an intraday cleanup.
 
 Cash-Readiness Interlocks
 

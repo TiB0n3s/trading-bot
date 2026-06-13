@@ -37,9 +37,16 @@ RETENTION_RULES: tuple[RetentionRule, ...] = (
     RetentionRule(
         "feature_snapshots",
         "warm",
-        45,
-        "main_sqlite_then_archive",
-        "High-volume intraday ML features; needed for recent labels and daily QA.",
+        10,
+        "features_sqlite_archive",
+        "High-volume intraday ML features; keep 5-10 hot days for labels and daily QA.",
+    ),
+    RetentionRule(
+        "bar_pattern_features",
+        "warm",
+        5,
+        "historical_bars_sqlite_archive",
+        "High-volume historical bar features; train before archiving and keep archive model-readable.",
     ),
     RetentionRule(
         "labeled_setups",
@@ -65,9 +72,9 @@ RETENTION_RULES: tuple[RetentionRule, ...] = (
     RetentionRule(
         "decision_snapshots",
         "cold",
-        None,
-        "archive_or_separate_sqlite",
-        "Immutable replay/audit trail; preserve rather than compact destructively.",
+        30,
+        "learning_sqlite_archive",
+        "Immutable replay/audit trail; keep 30 hot days and archive older rows.",
     ),
     RetentionRule(
         "exit_snapshots",

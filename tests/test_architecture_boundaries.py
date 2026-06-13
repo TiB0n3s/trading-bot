@@ -86,6 +86,7 @@ APPROVED_DB_BOUNDARIES = {
     "scripts/db_migrations.py",
     "scripts/db_workload_report.py",
     "scripts/sqlite_checkpoint.py",
+    "pipeline/cold_learning_archive.py",
     "ops/database_backup_service.py",
 }
 APPROVED_DB_BOUNDARY_PREFIXES = {

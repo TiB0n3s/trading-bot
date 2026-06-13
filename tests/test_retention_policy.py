@@ -16,6 +16,7 @@ def test_retention_policy_classifies_new_ml_tables():
 
     required = {
         "feature_snapshots",
+        "bar_pattern_features",
         "labeled_setups",
         "rejected_signal_outcomes",
         "auto_buy_candidates",
@@ -32,6 +33,10 @@ def test_retention_policy_classifies_new_ml_tables():
 
     if names["decision_snapshots"]["tier"] != "cold":
         raise AssertionError("decision_snapshots should be cold archival data")
+    if names["feature_snapshots"]["default_window_days"] != 10:
+        raise AssertionError("feature_snapshots should retain 10 hot days")
+    if names["bar_pattern_features"]["default_window_days"] != 5:
+        raise AssertionError("bar_pattern_features should retain 5 hot days")
     if names["exit_snapshots"]["tier"] != "cold":
         raise AssertionError("exit_snapshots should be cold archival data")
 

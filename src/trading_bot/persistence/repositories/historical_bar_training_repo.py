@@ -11,6 +11,9 @@ from services.bar_pattern_feature_service import BAR_PATTERN_FEATURE_VERSION
 from symbols_config import APPROVED_SYMBOLS_LIST
 
 CURRENT_FEATURE_VERSION_ALIASES = (BAR_PATTERN_FEATURE_VERSION, "v4")
+DEFAULT_HISTORICAL_BAR_ARCHIVE_DB = (
+    Path(DB_PATH).resolve().parent / "data_archive" / "sqlite" / "historical_bars.db"
+)
 
 
 HISTORICAL_BAR_TRAINING_COLUMNS = (
@@ -130,6 +133,7 @@ def _expr(columns: set[str], column: str) -> str:
 def fetch_historical_bar_training_rows(
     *,
     db_path: Path | str = DB_PATH,
+    archive_db_path: Path | str | None = DEFAULT_HISTORICAL_BAR_ARCHIVE_DB,
     start_date: str | None = None,
     end_date: str | None = None,
     symbol: str | None = None,
@@ -142,6 +146,53 @@ def fetch_historical_bar_training_rows(
     This deliberately does not join runtime decisions or account state. The
     historical-bar model is an evidence layer over completed Polygon/Alpaca bar
     data and cannot affect live authority by itself.
+    """
+    paths = [Path(db_path)]
+    if archive_db_path:
+        archive_path = Path(archive_db_path)
+        if archive_path != paths[0]:
+            paths.append(archive_path)
+
+    combined: list[dict[str, Any]] = []
+    for path in paths:
+        combined.extend(
+            _fetch_historical_bar_training_rows_from_db(
+                db_path=path,
+                start_date=start_date,
+                end_date=end_date,
+                symbol=symbol,
+                label_target=label_target,
+                limit=limit,
+                rows_per_symbol=rows_per_symbol,
+            )
+        )
+    combined.sort(
+        key=lambda row: (
+            str(row.get("bar_timestamp") or ""),
+            str(row.get("symbol") or ""),
+            int(row.get("symbol_row_number") or 0),
+        )
+    )
+    if limit and limit > 0:
+        combined = combined[: int(limit)]
+    return combined
+
+
+def _fetch_historical_bar_training_rows_from_db(
+    *,
+    db_path: Path | str,
+    start_date: str | None,
+    end_date: str | None,
+    symbol: str | None,
+    label_target: str,
+    limit: int,
+    rows_per_symbol: int,
+) -> list[dict[str, Any]]:
+    """Fetch rows from one SQLite store.
+
+    Cold archival stores use the same logical table name and original columns,
+    with archive metadata columns prefixed by ``_``. This reader selects only
+    the training contract columns so archived rows remain model-consumable.
     """
     path = Path(db_path)
     if not path.exists():

@@ -13,12 +13,11 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
-from market_time import now_et
-from symbols_config import APPROVED_SYMBOLS_LIST
-
+from market_time import is_market_hours, now_et
 from services.rolling_momentum_service import (
     RollingMomentumService,
 )
+from symbols_config import APPROVED_SYMBOLS_LIST
 
 BASE_DIR = Path(__file__).resolve().parents[1]
 OUTPUT_FILE = BASE_DIR / "rolling_momentum.json"
@@ -36,6 +35,16 @@ def build_symbol_context(symbol):
 
 def main():
     started = datetime.now()
+    market_now = now_et()
+    if not is_market_hours(market_now):
+        print("=" * 96)
+        print("  Rolling Momentum Context - Live Context Provider")
+        print("=" * 96)
+        print("  skipped      : outside_regular_market_hours")
+        print(f"  market_time  : {market_now.isoformat()}")
+        print("rows_written: 0")
+        return 0
+
     results = {}
 
     for sym in APPROVED_SYMBOLS_LIST:
@@ -44,7 +53,7 @@ def main():
 
     output = {
         "generated_at": datetime.now().isoformat(),
-        "market_time_et": now_et().isoformat(),
+        "market_time_et": market_now.isoformat(),
         "source": "rolling_momentum.py",
         "mode": "live_context_provider",
         "symbols_count": len(APPROVED_SYMBOLS_LIST),
@@ -85,6 +94,6 @@ def main():
 
 if __name__ == "__main__":
     try:
-        main()
+        raise SystemExit(main())
     except KeyboardInterrupt:
         sys.exit(130)

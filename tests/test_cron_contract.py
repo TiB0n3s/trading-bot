@@ -124,18 +124,72 @@ def test_intraday_evidence_writers_are_staggered_and_deprioritized():
     session_lines = [line for line in lines if "--job-name session_momentum" in line]
     checkpoint_lines = [line for line in lines if "--job-name sqlite_wal_checkpoint" in line]
 
-    assert len(rolling_lines) == 1, rolling_lines
-    assert len(session_lines) == 1, session_lines
+    assert len(rolling_lines) == 2, rolling_lines
+    assert len(session_lines) == 2, session_lines
     assert len(checkpoint_lines) == 1, checkpoint_lines
-    assert rolling_lines[0].startswith("1-59/4 8-15 * * 1-5"), rolling_lines
-    assert session_lines[0].startswith("3-59/4 8-15 * * 1-5"), session_lines
-    assert "--ionice-idle --nice 10" in rolling_lines[0]
-    assert "--ionice-idle --nice 10" in session_lines[0]
-    assert "--defer-while-locked /tmp/tradingbot_auto_buy_manager.lock" in rolling_lines[0]
-    assert "--defer-while-locked /tmp/tradingbot_auto_buy_manager.lock" in session_lines[0]
+    assert any(line.startswith("31-59/4 8 * * 1-5") for line in rolling_lines), rolling_lines
+    assert any(line.startswith("1-59/4 9-14 * * 1-5") for line in rolling_lines), rolling_lines
+    assert any(line.startswith("33-59/4 8 * * 1-5") for line in session_lines), session_lines
+    assert any(line.startswith("3-59/4 9-14 * * 1-5") for line in session_lines), session_lines
+    assert all("--ionice-idle --nice 10" in line for line in rolling_lines)
+    assert all("--ionice-idle --nice 10" in line for line in session_lines)
+    assert all(
+        "--defer-while-locked /tmp/tradingbot_auto_buy_manager.lock" in line
+        for line in rolling_lines
+    )
+    assert all(
+        "--defer-while-locked /tmp/tradingbot_auto_buy_manager.lock" in line
+        for line in session_lines
+    )
     assert checkpoint_lines[0].startswith("7,22,37,52 9-14 * * 1-5"), checkpoint_lines
     assert "scripts/sqlite_checkpoint.py" in checkpoint_lines[0]
     assert "--defer-while-locked /tmp/tradingbot_auto_buy_manager.lock" in checkpoint_lines[0]
+
+
+def test_position_management_jobs_are_regular_session_only():
+    lines = _cron_command_lines()
+    monitor_lines = [line for line in lines if "--job-name position_momentum_monitor" in line]
+    manager_lines = [line for line in lines if "--job-name run_position_manager" in line]
+    rotation_lines = [line for line in lines if "--job-name portfolio_rotation" in line]
+
+    assert len(monitor_lines) == 2, monitor_lines
+    assert len(manager_lines) == 2, manager_lines
+    assert len(rotation_lines) == 2, rotation_lines
+    assert any(line.startswith("31-59/2 8 * * 1-5") for line in monitor_lines), monitor_lines
+    assert any(line.startswith("1-59/2 9-14 * * 1-5") for line in monitor_lines), monitor_lines
+    assert any(line.startswith("30-59/2 8 * * 1-5") for line in manager_lines), manager_lines
+    assert any(line.startswith("*/2 9-14 * * 1-5") for line in manager_lines), manager_lines
+    assert any(line.startswith("30-59/2 8 * * 1-5") for line in rotation_lines), rotation_lines
+    assert any(line.startswith("*/2 9-14 * * 1-5") for line in rotation_lines), rotation_lines
+    offenders = monitor_lines + manager_lines + rotation_lines
+    assert not any(line.startswith("*/2 8-15") for line in offenders), offenders
+    assert not any(line.startswith("1-59/2 8-15") for line in offenders), offenders
+
+
+def test_context_jobs_keep_afterhours_and_weekend_coverage():
+    lines = _cron_command_lines()
+    intraday = [line for line in lines if "--job-name intraday_context_refresh" in line]
+    afterhours = [
+        line for line in lines if "--job-name collect_and_score_events_afterhours" in line
+    ]
+    friday = [
+        line for line in lines if "--job-name collect_and_score_events_friday_afterhours" in line
+    ]
+    weekend = [line for line in lines if "--job-name collect_and_score_events_weekend" in line]
+
+    assert len(intraday) == 1, intraday
+    assert intraday[0].startswith("*/45 9-14 * * 1-5"), intraday
+    assert len(afterhours) == 1 and afterhours[0].startswith("0 18 * * 1-4"), afterhours
+    assert len(friday) == 1 and friday[0].startswith("0 18 * * 5"), friday
+    assert len(weekend) == 1 and weekend[0].startswith("0 10,18 * * 6,0"), weekend
+
+
+def test_live_service_watchdog_is_regular_session_only():
+    lines = [line for line in _cron_command_lines() if "--job-name service_health_watchdog" in line]
+    assert len(lines) == 2, lines
+    assert any(line.startswith("30-59/10 8 * * 1-5") for line in lines), lines
+    assert any(line.startswith("*/10 9-14 * * 1-5") for line in lines), lines
+    assert not any(line.startswith("*/10 * * * *") for line in lines), lines
 
 
 def test_premarket_dependency_chain_uses_single_pipeline():
@@ -185,6 +239,9 @@ def main():
         test_fill_poller_is_regular_session_only,
         test_live_and_label_features_are_regular_session_only,
         test_intraday_evidence_writers_are_staggered_and_deprioritized,
+        test_position_management_jobs_are_regular_session_only,
+        test_context_jobs_keep_afterhours_and_weekend_coverage,
+        test_live_service_watchdog_is_regular_session_only,
         test_premarket_dependency_chain_uses_single_pipeline,
         test_database_backups_use_safe_gfs_tiers,
     ]

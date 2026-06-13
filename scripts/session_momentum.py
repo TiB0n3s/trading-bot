@@ -64,12 +64,12 @@ def load_env_file(path: Path = ENV_FILE) -> bool:
 
 load_env_file()
 
-from symbols_config import APPROVED_SYMBOLS_LIST  # noqa: E402
-
+from market_time import is_market_hours, now_et  # noqa: E402
 from services.session_momentum_service import (  # noqa: E402
     SessionMomentumService,
     get_default_session_momentum_service,
 )
+from symbols_config import APPROVED_SYMBOLS_LIST  # noqa: E402
 
 logger = logging.getLogger("session_momentum")
 
@@ -108,6 +108,17 @@ def main() -> int:
         parser.error("Provide --symbol SYMBOL or --all")
 
     logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
+
+    market_now = now_et()
+    if not is_market_hours(market_now):
+        print("=" * 80)
+        print("  Session Momentum Tracker")
+        print("=" * 80)
+        print("  skipped     : outside_regular_market_hours")
+        print(f"  market_time : {market_now.isoformat()}")
+        print("rows_written: 0")
+        print("session_momentum_summary: success=0 failed=0 skipped=outside_regular_market_hours")
+        return 0
 
     service = get_default_session_momentum_service()
     symbols = APPROVED_SYMBOLS_LIST if args.all else [args.symbol.upper()]

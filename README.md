@@ -1512,15 +1512,16 @@ crontab -l
 
 Current major cron categories:
 
-*/2 * * * *          fill_poller.py
-0 8 * * 1-5          pre_market_research_data.py
-5 8 * * 1-5          collect_and_score_events.py --apply-context --predict
+8:30-14:59 Mon-Fri  fill_poller.py
+7:50 Mon-Fri         pipeline/pre_market.py
+9:00-14:59 Mon-Fri  intraday_context_refresh.py
 0 12 * * 1-5         intraday_learning.py --phase noon
 0 16 * * 1-5         daily_summary.py
 5 16 * * 5           daily_summary.py --week
 10 16 * * 1-5        trade_matcher.py
-*/2 8-15 * * 1-5     rolling/session/position momentum jobs
-*/2 8-15 * * 1-5     position manager
+8:30-14:59 Mon-Fri  live_features / label_features
+8:30-14:59 Mon-Fri  rolling/session/position momentum jobs
+8:30-14:59 Mon-Fri  position manager / portfolio rotation
 30 16 * * 1-5        after-close learning
 0 18 * * 1-4         after-hours event collection for next session
 0 18 * * 5           Friday after-hours event collection
@@ -1548,6 +1549,10 @@ Intraday database contention controls:
   keep scheduler and disk priority. They also use
   `--defer-while-locked /tmp/tradingbot_auto_buy_manager.lock`, so they skip
   instead of opening the database when auto-buy is still scanning.
+- Jobs that pull live bars or live trading-loop state are scheduled only for
+  the regular session window, 8:30 AM through 2:59 PM Central on weekdays.
+  Weekend and after-hours intelligence is limited to event/context collection,
+  after-close learning, summaries, and backup/maintenance work.
 - `scripts/sqlite_checkpoint.py` is the bounded WAL maintenance command. Cron
   runs it on an offset market-hours cadence with a short timeout; manual use:
 

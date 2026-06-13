@@ -15,6 +15,8 @@ sys.path.insert(0, str(ROOT / "scripts"))
 
 import scripts.label_v1_builder as label_v1_builder  # noqa: E402
 import scripts.live_features as live_features  # noqa: E402
+import scripts.rolling_momentum as rolling_momentum  # noqa: E402
+import scripts.session_momentum as session_momentum  # noqa: E402
 
 ET = pytz.timezone("America/New_York")
 
@@ -71,10 +73,55 @@ def test_label_v1_builder_noops_outside_regular_market_hours():
         label_v1_builder.validate_feature_snapshot_contract = original_validate
 
 
+def test_rolling_momentum_noops_outside_regular_market_hours():
+    original_now_et = rolling_momentum.now_et
+    original_is_market_hours = rolling_momentum.is_market_hours
+    original_build = rolling_momentum.build_symbol_context
+    try:
+        rolling_momentum.now_et = lambda: ET.localize(datetime(2026, 6, 13, 10, 0))
+        rolling_momentum.is_market_hours = lambda now: False
+
+        def _fail_build(*args, **kwargs):
+            raise AssertionError("rolling momentum should not pull bars outside market hours")
+
+        rolling_momentum.build_symbol_context = _fail_build
+        _assert_equal(rolling_momentum.main(), 0, "rolling momentum outside-hours exit")
+    finally:
+        rolling_momentum.now_et = original_now_et
+        rolling_momentum.is_market_hours = original_is_market_hours
+        rolling_momentum.build_symbol_context = original_build
+
+
+def test_session_momentum_noops_outside_regular_market_hours():
+    original_argv = sys.argv[:]
+    original_now_et = session_momentum.now_et
+    original_is_market_hours = session_momentum.is_market_hours
+    original_service = session_momentum.get_default_session_momentum_service
+    try:
+        sys.argv = ["session_momentum.py", "--all"]
+        session_momentum.now_et = lambda: ET.localize(datetime(2026, 6, 13, 10, 0))
+        session_momentum.is_market_hours = lambda now: False
+
+        def _fail_service(*args, **kwargs):
+            raise AssertionError(
+                "session momentum service should not initialize outside market hours"
+            )
+
+        session_momentum.get_default_session_momentum_service = _fail_service
+        _assert_equal(session_momentum.main(), 0, "session momentum outside-hours exit")
+    finally:
+        sys.argv = original_argv
+        session_momentum.now_et = original_now_et
+        session_momentum.is_market_hours = original_is_market_hours
+        session_momentum.get_default_session_momentum_service = original_service
+
+
 def main():
     tests = [
         test_live_features_noops_outside_regular_market_hours,
         test_label_v1_builder_noops_outside_regular_market_hours,
+        test_rolling_momentum_noops_outside_regular_market_hours,
+        test_session_momentum_noops_outside_regular_market_hours,
     ]
     for test in tests:
         test()

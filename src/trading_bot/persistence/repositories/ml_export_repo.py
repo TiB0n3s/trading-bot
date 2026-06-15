@@ -47,7 +47,10 @@ class MlExportRepository:
             if missing:
                 raise SystemExit(f"Missing required table(s): {', '.join(missing)}")
             fs_columns = _table_columns(con, "feature_snapshots")
+            ls_columns = _table_columns(con, "labeled_setups")
             bp_columns = _table_columns(con, "bar_pattern_features")
+            ds_columns = _table_columns(con, "decision_snapshots")
+            es_columns = _table_columns(con, "exit_snapshots")
             bar_pattern_join = ""
             if bp_columns:
                 bar_pattern_join = """
@@ -63,6 +66,88 @@ class MlExportRepository:
                       AND bp2.timeframe = '1m'
                  )
                 """
+
+            exit_snapshot_join = ""
+            realized_exit_label_status = (
+                "'excluded_no_realized_exit_snapshot' AS realized_exit_label_status"
+            )
+            realized_exit_label_version = "NULL AS realized_exit_label_version"
+            exit_policy_version = "NULL AS exit_policy_version"
+            position_manager_version = "NULL AS position_manager_version"
+            canonical_exit_version = "NULL AS canonical_exit_version"
+            if {"id", "symbol", "decision_time"} <= ds_columns and {
+                "id",
+                "decision_snapshot_id",
+            } <= es_columns:
+                exit_snapshot_join = """
+                LEFT JOIN decision_snapshots ds
+                  ON ds.symbol = fs.symbol
+                 AND ds.decision_time = fs.timestamp
+                LEFT JOIN exit_snapshots es
+                  ON es.decision_snapshot_id = ds.id
+                """
+                has_exit_versions = {
+                    "realized_exit_label_version",
+                    "exit_policy_version",
+                    "position_manager_version",
+                } <= es_columns
+                realized_exit_label_status = (
+                    """
+                    CASE
+                        WHEN es.id IS NULL
+                            THEN 'excluded_no_realized_exit_snapshot'
+                        WHEN es.realized_exit_label_version IS NULL
+                          OR es.exit_policy_version IS NULL
+                          OR es.position_manager_version IS NULL
+                            THEN 'excluded_missing_realized_exit_version'
+                        ELSE 'versioned_realized_exit_observe_only'
+                    END AS realized_exit_label_status
+                    """
+                    if has_exit_versions
+                    else "'excluded_missing_realized_exit_version' AS realized_exit_label_status"
+                )
+                realized_exit_label_version = _optional_column(
+                    es_columns, "es", "realized_exit_label_version"
+                )
+                exit_policy_version = _optional_column(es_columns, "es", "exit_policy_version")
+                position_manager_version = _optional_column(
+                    es_columns, "es", "position_manager_version"
+                )
+                canonical_exit_version = _optional_column(
+                    es_columns, "es", "canonical_exit_version"
+                )
+
+            if "ret_fwd_60m" in ls_columns:
+                horizon_status_case = """
+                    CASE
+                        WHEN ls.snapshot_id IS NULL
+                            THEN 'unlabeled'
+                        WHEN ls.ret_fwd_5m IS NULL
+                         AND ls.ret_fwd_15m IS NULL
+                         AND ls.ret_fwd_30m IS NULL
+                         AND ls.ret_fwd_60m IS NULL
+                            THEN 'incomplete'
+                        WHEN ls.ret_fwd_60m IS NULL
+                            THEN 'partial_near_close'
+                        ELSE 'complete'
+                    END AS label_horizon_status
+                """
+                label_target_family = "'fixed_horizon_v2_60m_action_mfe_mae' AS label_target_family"
+            else:
+                horizon_status_case = """
+                    CASE
+                        WHEN ls.snapshot_id IS NULL
+                            THEN 'unlabeled'
+                        WHEN ls.ret_fwd_5m IS NULL
+                         AND ls.ret_fwd_15m IS NULL
+                         AND ls.ret_fwd_30m IS NULL
+                            THEN 'incomplete'
+                        WHEN ls.ret_fwd_30m IS NULL
+                            THEN 'partial_near_close'
+                        ELSE 'complete'
+                    END AS label_horizon_status
+                """
+                label_target_family = "'fixed_horizon_v1' AS label_target_family"
 
             query = f"""
                 SELECT
@@ -165,11 +250,18 @@ class MlExportRepository:
                     ls.future_price_5m,
                     ls.future_price_15m,
                     ls.future_price_30m,
+                    {_optional_column(ls_columns, "ls", "future_price_60m")},
                     ls.ret_fwd_5m,
                     ls.ret_fwd_15m,
                     ls.ret_fwd_30m,
+                    {_optional_column(ls_columns, "ls", "ret_fwd_60m")},
                     ls.max_up_15m,
                     ls.max_down_15m,
+                    {_optional_column(ls_columns, "ls", "max_up_60m")},
+                    {_optional_column(ls_columns, "ls", "max_down_60m")},
+                    {_optional_column(ls_columns, "ls", "action_direction")},
+                    {_optional_column(ls_columns, "ls", "action_mfe_60m_pct")},
+                    {_optional_column(ls_columns, "ls", "action_mae_60m_pct")},
                     ls.outcome_label,
                     {_optional_column(bp_columns, "bp", "triple_barrier_label")},
                     {_optional_column(bp_columns, "bp", "triple_barrier_reason")},
@@ -190,25 +282,18 @@ class MlExportRepository:
                     p.expected_pnl,
                     p.confidence AS prediction_confidence,
                     p.sample_size AS prediction_sample_size,
-                    CASE
-                        WHEN ls.snapshot_id IS NULL
-                            THEN 'unlabeled'
-                        WHEN ls.ret_fwd_5m IS NULL
-                         AND ls.ret_fwd_15m IS NULL
-                         AND ls.ret_fwd_30m IS NULL
-                            THEN 'incomplete'
-                        WHEN ls.ret_fwd_30m IS NULL
-                            THEN 'partial_near_close'
-                        ELSE 'complete'
-                    END AS label_horizon_status,
-                    'fixed_horizon_v1' AS label_target_family,
-                    'excluded_not_training_target' AS realized_exit_label_status,
-                    NULL AS exit_policy_version,
-                    NULL AS position_manager_version
+                    {horizon_status_case},
+                    {label_target_family},
+                    {realized_exit_label_status},
+                    {realized_exit_label_version},
+                    {exit_policy_version},
+                    {position_manager_version},
+                    {canonical_exit_version}
                 FROM feature_snapshots fs
                 LEFT JOIN labeled_setups ls
                   ON ls.snapshot_id = fs.id
                 {bar_pattern_join}
+                {exit_snapshot_join}
                 LEFT JOIN daily_symbol_context c
                   ON c.market_date = substr(fs.timestamp, 1, 10)
                  AND c.symbol = fs.symbol

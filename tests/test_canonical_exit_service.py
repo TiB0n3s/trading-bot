@@ -21,7 +21,12 @@ from services.canonical_exit_service import (
     canonical_exit_json_size_bytes,
     validate_canonical_exit_snapshot_contract,
 )
-from services.exit_snapshot_service import ExitSnapshotService
+from services.exit_snapshot_service import (
+    EXIT_POLICY_VERSION,
+    POSITION_MANAGER_VERSION,
+    REALIZED_EXIT_LABEL_VERSION,
+    ExitSnapshotService,
+)
 
 
 def _canonical_intelligence(**overrides):
@@ -101,7 +106,9 @@ def test_build_canonical_exit_snapshot_collects_exit_state_and_hashes():
     assert data["exit_identity"]["entry_canonical_intelligence_hash"] == "b" * 64
     assert data["exit_trigger"]["trigger"] == "peak_lock_floor"
     assert data["canonical_intelligence_state"]["hash"] == "a" * 64
-    assert data["canonical_intelligence_state"]["momentum_state"]["session_label"] == "strong_uptrend"
+    assert (
+        data["canonical_intelligence_state"]["momentum_state"]["session_label"] == "strong_uptrend"
+    )
     assert data["realized_outcome"]["capture_ratio"] == 0.525
     assert data["realized_outcome"]["max_adverse_excursion_pct"] == -0.35
     assert data["foregone_outcome"]["avoided_drawdown_pct"] == 0.3
@@ -193,6 +200,9 @@ def test_canonical_exit_persistence_writes_queryable_row():
         assert row["capture_ratio"] == 0.525
         assert row["max_adverse_excursion_pct"] == -0.35
         assert row["reentry_window_summary"] == "no_clean_reentry_60m"
+        assert row["realized_exit_label_version"] == REALIZED_EXIT_LABEL_VERSION
+        assert row["exit_policy_version"] == EXIT_POLICY_VERSION
+        assert row["position_manager_version"] == POSITION_MANAGER_VERSION
         assert row["canonical_exit_version"] == CANONICAL_EXIT_VERSION
         assert row["canonical_exit_hash"] == snapshot.exit_snapshot_hash
         assert row["canonical_intelligence_hash"] == "a" * 64

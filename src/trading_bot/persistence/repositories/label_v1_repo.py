@@ -16,6 +16,12 @@ class LabelV1Repository:
                 for row in con.execute("PRAGMA table_info(feature_snapshots)").fetchall()
             }
 
+    def labeled_setup_columns(self) -> set[str]:
+        with get_connection(self.db_path) as con:
+            return {
+                row["name"] for row in con.execute("PRAGMA table_info(labeled_setups)").fetchall()
+            }
+
     def stale_feature_snapshot_count(self) -> int:
         with get_connection(self.db_path) as con:
             row = con.execute(

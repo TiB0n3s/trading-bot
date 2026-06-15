@@ -18,7 +18,7 @@ class LabelFeaturesMarketDataService:
         self.market_data = market_data
 
     def fetch_forward_bars(self, *, symbol: str, snapshot_dt) -> list[dict]:
-        end_dt = snapshot_dt + timedelta(minutes=35)
+        end_dt = snapshot_dt + timedelta(minutes=65)
 
         bars = self.market_data.get_barset_with_fallback(
             symbol,

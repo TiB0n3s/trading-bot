@@ -231,11 +231,18 @@ def init_prediction_tables(db_path: Path | str = DB_PATH) -> None:
                 future_price_5m REAL,
                 future_price_15m REAL,
                 future_price_30m REAL,
+                future_price_60m REAL,
                 ret_fwd_5m REAL,
                 ret_fwd_15m REAL,
                 ret_fwd_30m REAL,
+                ret_fwd_60m REAL,
                 max_up_15m REAL,
                 max_down_15m REAL,
+                max_up_60m REAL,
+                max_down_60m REAL,
+                action_direction TEXT,
+                action_mfe_60m_pct REAL,
+                action_mae_60m_pct REAL,
                 outcome_label TEXT,
                 FOREIGN KEY (snapshot_id) REFERENCES feature_snapshots(id)
             )
@@ -285,6 +292,22 @@ def init_prediction_tables(db_path: Path | str = DB_PATH) -> None:
         for col_name, col_type in feature_snapshot_cols:
             if col_name not in existing_cols:
                 con.execute(f"ALTER TABLE feature_snapshots ADD COLUMN {col_name} {col_type}")
+
+        labeled_cols = {
+            row["name"] for row in con.execute("PRAGMA table_info(labeled_setups)").fetchall()
+        }
+        label_target_cols = [
+            ("future_price_60m", "REAL"),
+            ("ret_fwd_60m", "REAL"),
+            ("max_up_60m", "REAL"),
+            ("max_down_60m", "REAL"),
+            ("action_direction", "TEXT"),
+            ("action_mfe_60m_pct", "REAL"),
+            ("action_mae_60m_pct", "REAL"),
+        ]
+        for col_name, col_type in label_target_cols:
+            if col_name not in labeled_cols:
+                con.execute(f"ALTER TABLE labeled_setups ADD COLUMN {col_name} {col_type}")
 
 
 def init_db_performance_indexes(db_path: Path | str = DB_PATH) -> None:

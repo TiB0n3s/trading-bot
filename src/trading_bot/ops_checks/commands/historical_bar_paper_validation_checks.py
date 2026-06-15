@@ -9,7 +9,8 @@ from typing import Any
 from repositories.historical_bar_training_repo import fetch_historical_bar_training_rows
 
 PAPER_VALIDATION_VERSION = "historical_bar_paper_validation_v1"
-WALK_FORWARD_VERSION = "historical_bar_walk_forward_v1"
+WALK_FORWARD_VERSION = "historical_bar_purged_embargoed_walk_forward_v2"
+PURGED_WALK_FORWARD_METHOD = "purged_walk_forward_v1"
 
 
 def _float(value: Any) -> float | None:
@@ -260,6 +261,8 @@ def build_historical_bar_walk_forward_payload(
     limit: int,
     threshold: float,
     folds: int,
+    purge_bars: int = 60,
+    embargo_bars: int = 30,
 ) -> dict[str, Any]:
     rows = fetch_historical_bar_training_rows(
         db_path=base_dir / "trades.db",
@@ -271,6 +274,8 @@ def build_historical_bar_walk_forward_payload(
     )
     rows = sorted(rows, key=lambda row: str(row.get("bar_timestamp") or ""))
     folds = max(2, int(folds or 5))
+    purge_bars = max(0, int(purge_bars or 0))
+    embargo_bars = max(0, int(embargo_bars or 0))
     fold_size = max(1, len(rows) // folds)
     fold_rows = []
     for idx in range(folds):
@@ -279,12 +284,26 @@ def build_historical_bar_walk_forward_payload(
         chunk = rows[start:end]
         if not chunk:
             continue
+        purge_start = max(0, start - purge_bars)
+        purge_end = start
+        embargo_start = end
+        embargo_end = min(len(rows), end + embargo_bars)
+        excluded_start = purge_start
+        excluded_end = embargo_end
+        train_rows = rows[:excluded_start] + rows[excluded_end:]
         metrics = _score_rows(chunk, label_target=label_target, threshold=threshold)
         fold_rows.append(
             {
                 "fold": idx + 1,
+                "validation_method": PURGED_WALK_FORWARD_METHOD,
                 "start_ts": chunk[0].get("bar_timestamp"),
                 "end_ts": chunk[-1].get("bar_timestamp"),
+                "train_rows": len(train_rows),
+                "test_rows": len(chunk),
+                "purged_rows": purge_end - purge_start,
+                "embargoed_rows": embargo_end - embargo_start,
+                "purge_bars": purge_bars,
+                "embargo_bars": embargo_bars,
                 **metrics,
             }
         )
@@ -301,13 +320,18 @@ def build_historical_bar_walk_forward_payload(
         blockers.append(f"{negative_delta_folds}_folds_without_positive_delta")
     if spread is not None and spread > 0.25:
         blockers.append("fold_hit_rate_spread_above_25pct")
+    if any(int(row.get("train_rows") or 0) == 0 for row in fold_rows):
+        blockers.append("one_or_more_folds_without_train_rows_after_purge_embargo")
     return {
         "report_version": WALK_FORWARD_VERSION,
-        "runtime_effect": "walk_forward_validation_only_no_live_authority",
+        "runtime_effect": "purged_embargoed_walk_forward_validation_only_no_live_authority",
+        "validation_method": PURGED_WALK_FORWARD_METHOD,
         "start_date": start_date,
         "end_date": end_date,
         "label_target": label_target,
         "rows": len(rows),
+        "purge_bars": purge_bars,
+        "embargo_bars": embargo_bars,
         "folds": fold_rows,
         "fold_hit_rate_min": round(min(hit_rates), 4) if hit_rates else None,
         "fold_hit_rate_max": round(max(hit_rates), 4) if hit_rates else None,
@@ -398,6 +422,8 @@ def run_historical_bar_walk_forward(
     limit: int = 30000,
     threshold: float = 65.0,
     folds: int = 5,
+    purge_bars: int = 60,
+    embargo_bars: int = 30,
 ) -> bool:
     payload = build_historical_bar_walk_forward_payload(
         base_dir=base_dir,
@@ -408,6 +434,8 @@ def run_historical_bar_walk_forward(
         limit=limit,
         threshold=threshold,
         folds=folds,
+        purge_bars=purge_bars,
+        embargo_bars=embargo_bars,
     )
     print()
     print("=" * 72)
@@ -417,7 +445,10 @@ def run_historical_bar_walk_forward(
     print(f"runtime_effect          : {payload['runtime_effect']}")
     print(f"date_filter             : {start_date}..{end_date}")
     print(f"label_target            : {label_target}")
+    print(f"validation_method       : {payload['validation_method']}")
     print(f"rows                    : {payload['rows']}")
+    print(f"purge_bars              : {payload['purge_bars']}")
+    print(f"embargo_bars            : {payload['embargo_bars']}")
     print(f"fold_hit_rate_spread    : {payload['fold_hit_rate_spread']}")
     print(f"stability_status        : {payload['stability_status']}")
     print(
@@ -429,6 +460,8 @@ def run_historical_bar_walk_forward(
     for row in payload["folds"]:
         print(
             f"  {row['fold']:<2} {row['start_ts']}..{row['end_ts']} "
+            f"train={row['train_rows']:<5} test={row['test_rows']:<5} "
+            f"purge={row['purged_rows']:<4} embargo={row['embargoed_rows']:<4} "
             f"taken={row['paper_taken']:<5} hit={row['paper_hit_rate']:<6.3f} "
             f"base={row['baseline_hit_rate']:<6.3f} delta={row['hit_rate_delta']:<7.3f}"
         )

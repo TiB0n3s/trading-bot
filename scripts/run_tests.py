@@ -163,6 +163,7 @@ TESTS = [
     "tests/test_historical_bar_model_intelligence_service.py",
     "tests/test_historical_bar_paper_strategy_service.py",
     "tests/test_historical_bar_meta_label_authority_service.py",
+    "tests/test_historical_bar_walk_forward_validation.py",
     "tests/test_alternative_data_gate_service.py",
     "tests/test_concept_drift_service.py",
     "tests/test_counterfactual_learning_service.py",

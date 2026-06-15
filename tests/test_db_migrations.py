@@ -608,6 +608,52 @@ def test_feature_snapshot_bar_contract_migration_adds_columns():
         )
 
 
+def test_promotion_label_targets_migration_adds_columns():
+    with tempfile.TemporaryDirectory() as tmp:
+        db_path = Path(tmp) / "test.db"
+        with sqlite3.connect(db_path) as con:
+            con.execute("CREATE TABLE labeled_setups (id INTEGER PRIMARY KEY)")
+            con.execute(
+                """
+                CREATE TABLE exit_snapshots (
+                    id INTEGER PRIMARY KEY,
+                    canonical_exit_version TEXT NOT NULL,
+                    canonical_exit_hash TEXT NOT NULL,
+                    canonical_exit_json TEXT NOT NULL
+                )
+                """
+            )
+
+        migration = next(
+            m for m in MIGRATIONS if m.migration_id == "20260615_027_promotion_label_targets"
+        )
+        applied = apply_migration(migration, db_path)
+        assert_equal(applied, True, "apply")
+
+        expected_label_cols = {
+            "future_price_60m",
+            "ret_fwd_60m",
+            "max_up_60m",
+            "max_down_60m",
+            "action_direction",
+            "action_mfe_60m_pct",
+            "action_mae_60m_pct",
+        }
+        expected_exit_cols = {
+            "realized_exit_label_version",
+            "exit_policy_version",
+            "position_manager_version",
+        }
+        assert_true(
+            expected_label_cols <= table_columns(db_path, "labeled_setups"),
+            "promotion label target columns",
+        )
+        assert_true(
+            expected_exit_cols <= table_columns(db_path, "exit_snapshots"),
+            "realized exit policy version columns",
+        )
+
+
 if __name__ == "__main__":
     test_feature_audit_migration_is_idempotent()
     print("[OK] test_feature_audit_migration_is_idempotent")
@@ -647,4 +693,6 @@ if __name__ == "__main__":
     print("[OK] test_auto_buy_execution_bridge_state_migration_adds_columns")
     test_feature_snapshot_bar_contract_migration_adds_columns()
     print("[OK] test_feature_snapshot_bar_contract_migration_adds_columns")
-    print("\nAll 19 DB migration tests passed.")
+    test_promotion_label_targets_migration_adds_columns()
+    print("[OK] test_promotion_label_targets_migration_adds_columns")
+    print("\nAll 20 DB migration tests passed.")

@@ -11,6 +11,10 @@ from services.canonical_exit_service import (
 )
 from services.canonical_intelligence_service import stable_canonical_json
 
+REALIZED_EXIT_LABEL_VERSION = "realized_exit_label_v1"
+EXIT_POLICY_VERSION = "canonical_exit_policy_v1"
+POSITION_MANAGER_VERSION = "position_manager_exit_v1"
+
 
 class ExitSnapshotService:
     def __init__(self, repository: ExitSnapshotRepository | None = None):
@@ -52,6 +56,9 @@ class ExitSnapshotService:
             "exit_regime_state_json": stable_canonical_json(regime_state),
             "exit_momentum_state_json": stable_canonical_json(momentum_state),
             "exit_trend_state_json": stable_canonical_json(trend_state),
+            "realized_exit_label_version": REALIZED_EXIT_LABEL_VERSION,
+            "exit_policy_version": EXIT_POLICY_VERSION,
+            "position_manager_version": POSITION_MANAGER_VERSION,
             "canonical_exit_version": data["version"],
             "canonical_exit_hash": data["exit_snapshot_hash"],
             "canonical_exit_json": canonical_exit_json(snapshot),

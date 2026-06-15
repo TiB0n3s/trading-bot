@@ -102,10 +102,10 @@ def first_price_at_or_after(
     return None
 
 
-def excursion_15m(
-    rows: list[dict], snapshot_price: float, snapshot_dt: datetime
+def excursion(
+    rows: list[dict], snapshot_price: float, snapshot_dt: datetime, minutes_forward: int
 ) -> tuple[float | None, float | None]:
-    cutoff = snapshot_dt + timedelta(minutes=15)
+    cutoff = snapshot_dt + timedelta(minutes=minutes_forward)
     highs = []
     lows = []
 
@@ -126,6 +126,30 @@ def excursion_15m(
     return max_up, max_down
 
 
+def action_direction(row) -> str:
+    raw = " ".join(
+        str(row[key] or "").lower()
+        for key in ("setup_recommendation", "setup_label")
+        if key in row.keys()
+    )
+    if any(token in raw for token in ("short", "sell", "exit", "reduce")):
+        return "short"
+    return "long"
+
+
+def action_excursion_60m(
+    *,
+    direction: str,
+    max_up_60m: float | None,
+    max_down_60m: float | None,
+) -> tuple[float | None, float | None]:
+    if max_up_60m is None or max_down_60m is None:
+        return None, None
+    if direction == "short":
+        return round(abs(min(max_down_60m, 0.0)), 6), round(-abs(max_up_60m), 6)
+    return max_up_60m, max_down_60m
+
+
 def outcome_label(ret_fwd_15m: float | None) -> str | None:
     if ret_fwd_15m is None:
         return None
@@ -141,7 +165,7 @@ def outcome_label(ret_fwd_15m: float | None) -> str | None:
 
 
 def unlabeled_snapshots(limit: int = 100) -> list:
-    cutoff = datetime.now(ET) - timedelta(minutes=35)
+    cutoff = datetime.now(ET) - timedelta(minutes=65)
     return _repo.unlabeled_snapshots(cutoff, limit)
 
 
@@ -150,11 +174,18 @@ def insert_label(
     fwd5: float | None,
     fwd15: float | None,
     fwd30: float | None,
+    fwd60: float | None,
     ret5: float | None,
     ret15: float | None,
     ret30: float | None,
+    ret60: float | None,
     max_up_15m: float | None,
     max_down_15m: float | None,
+    max_up_60m: float | None,
+    max_down_60m: float | None,
+    direction: str | None,
+    action_mfe_60m_pct: float | None,
+    action_mae_60m_pct: float | None,
     label: str | None,
 ) -> None:
     _repo.insert_label(
@@ -162,11 +193,18 @@ def insert_label(
         fwd5=fwd5,
         fwd15=fwd15,
         fwd30=fwd30,
+        fwd60=fwd60,
         ret5=ret5,
         ret15=ret15,
         ret30=ret30,
+        ret60=ret60,
         max_up_15m=max_up_15m,
         max_down_15m=max_down_15m,
+        max_up_60m=max_up_60m,
+        max_down_60m=max_down_60m,
+        action_direction=direction,
+        action_mfe_60m_pct=action_mfe_60m_pct,
+        action_mae_60m_pct=action_mae_60m_pct,
         label=label,
     )
 
@@ -195,16 +233,41 @@ def main() -> int:
             fwd5 = first_price_at_or_after(bars, 5, snapshot_dt)
             fwd15 = first_price_at_or_after(bars, 15, snapshot_dt)
             fwd30 = first_price_at_or_after(bars, 30, snapshot_dt)
+            fwd60 = first_price_at_or_after(bars, 60, snapshot_dt)
 
             ret5 = safe_pct_change(fwd5, snapshot_price)
             ret15 = safe_pct_change(fwd15, snapshot_price)
             ret30 = safe_pct_change(fwd30, snapshot_price)
+            ret60 = safe_pct_change(fwd60, snapshot_price)
 
-            max_up_15m, max_down_15m = excursion_15m(bars, snapshot_price, snapshot_dt)
+            max_up_15m, max_down_15m = excursion(bars, snapshot_price, snapshot_dt, 15)
+            max_up_60m, max_down_60m = excursion(bars, snapshot_price, snapshot_dt, 60)
+            direction = action_direction(row)
+            action_mfe, action_mae = action_excursion_60m(
+                direction=direction,
+                max_up_60m=max_up_60m,
+                max_down_60m=max_down_60m,
+            )
             label = outcome_label(ret15)
 
             insert_label(
-                row, fwd5, fwd15, fwd30, ret5, ret15, ret30, max_up_15m, max_down_15m, label
+                row,
+                fwd5,
+                fwd15,
+                fwd30,
+                fwd60,
+                ret5,
+                ret15,
+                ret30,
+                ret60,
+                max_up_15m,
+                max_down_15m,
+                max_up_60m,
+                max_down_60m,
+                direction,
+                action_mfe,
+                action_mae,
+                label,
             )
             labeled += 1
             logger.info(

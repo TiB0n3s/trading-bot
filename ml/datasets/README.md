@@ -40,9 +40,11 @@ over the next 15 or 30 minutes?
 Avoid using “should buy” as the first target. It mixes market outcome, current
 policy, broker state, and risk controls into one noisy label.
 
-Prefer fixed-horizon labels for training. Realized PnL labels are useful, but
-they depend on the active exit logic and must carry `exit_policy_version` and
-`position_manager_version`.
+Prefer fixed-horizon labels for training. Current fixed-horizon targets include
+15m, 30m, and 60m forward returns, 15m/60m raw excursions, and 60m
+action-aware MFE/MAE. Realized PnL labels are useful, but they depend on the
+active exit logic and must carry `realized_exit_label_version`,
+`exit_policy_version`, and `position_manager_version`.
 
 ## Counterfactual Outcomes
 

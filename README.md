@@ -1173,14 +1173,15 @@ By default, `export_ml_dataset.py` writes only complete fixed-horizon label
 rows. Incomplete, unlabeled, and near-close partial rows are excluded from the
 CSV and counted in the manifest under `excluded_rows_reason_counts`. Use
 `--include-incomplete-labels` only for audit exports, not first-pass training.
-Realized-PnL labels are not part of the default training export; any future
-realized-exit label export must carry `exit_policy_version` and
-`position_manager_version`.
+Realized-PnL labels are not part of the default training export; any realized
+exit audit/export surface must carry `realized_exit_label_version`,
+`exit_policy_version`, and `position_manager_version`.
 
 Initial safe training targets are fixed-horizon fields such as `ret_fwd_15m`,
-`ret_fwd_30m`, `max_up_15m`, and `max_down_15m`. `ret_fwd_60m`,
-`max_favorable_excursion`, and `max_adverse_excursion` remain pending for the
-feature-snapshot label schema.
+`ret_fwd_30m`, `ret_fwd_60m`, `max_up_15m`, `max_down_15m`, `max_up_60m`,
+`max_down_60m`, `action_mfe_60m_pct`, and `action_mae_60m_pct`.
+Generic `max_favorable_excursion` and `max_adverse_excursion` aliases remain
+reserved for future schema work.
 
 Feature leakage fields now live in `feature_snapshots` and are exported in ML
 datasets:

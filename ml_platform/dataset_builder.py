@@ -42,8 +42,8 @@ from ml_platform.config import DEFAULT_DB_PATH, FEATURE_VERSION  # noqa: E402
 from ml_platform.governance import build_dataset_manifest  # noqa: E402
 from ml_platform.pit_context import get_archive_root, pit_coverage_for_range  # noqa: E402
 
-QUERY_VERSION = "ml_dataset_builder_v1"
-LABEL_VERSION = "label_taxonomy_v1"
+QUERY_VERSION = "ml_dataset_builder_v2_60m_action_targets"
+LABEL_VERSION = "label_taxonomy_v2_60m_action_mfe_mae"
 BAR_PATTERN_FEATURE_TARGET_VERSION = "bar_pattern_feature_target_v1"
 ADVANCED_ALPHA_FEATURE_VERSION = "advanced_alpha_feature_target_v1"
 VOLUME_PROFILE_FEATURE_COLUMNS = (
@@ -63,14 +63,18 @@ VOLUME_PROFILE_FEATURE_COLUMNS = (
 FIXED_HORIZON_TARGETS = [
     "ret_fwd_15m",
     "ret_fwd_30m",
+    "ret_fwd_60m",
     "max_up_15m",
     "max_down_15m",
+    "max_up_60m",
+    "max_down_60m",
+    "action_mfe_60m_pct",
+    "action_mae_60m_pct",
     "triple_barrier_label",
     "trend_scan_label",
 ]
 
 FUTURE_FIXED_HORIZON_TARGETS = [
-    "ret_fwd_60m",
     "max_favorable_excursion",
     "max_adverse_excursion",
 ]
@@ -160,11 +164,18 @@ ROW_COLUMNS = [
     "future_price_5m",
     "future_price_15m",
     "future_price_30m",
+    "future_price_60m",
     "ret_fwd_5m",
     "ret_fwd_15m",
     "ret_fwd_30m",
+    "ret_fwd_60m",
     "max_up_15m",
     "max_down_15m",
+    "max_up_60m",
+    "max_down_60m",
+    "action_direction",
+    "action_mfe_60m_pct",
+    "action_mae_60m_pct",
     "outcome_label",
     # Triple-barrier label metadata (from bar_pattern_features)
     "triple_barrier_label",

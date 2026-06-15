@@ -23,6 +23,7 @@ from ml_platform.feature_parity_contract import parity_contract_summary
 from ml_platform.lifecycle import lifecycle_contract_summary
 from trading_bot.ops_checks.commands.historical_bar_paper_validation_checks import (
     build_historical_bar_paper_validation_payload,
+    build_historical_bar_walk_forward_payload,
 )
 from trading_bot.ops_checks.commands.historical_bar_validation_checks import (
     build_historical_bar_validation_payload,
@@ -111,6 +112,18 @@ def build_model_promotion_evidence_payload(
         threshold=55.0,
         thresholds=[50.0, 55.0, 60.0, 65.0],
     )
+    purged_walk_forward = build_historical_bar_walk_forward_payload(
+        base_dir=base_dir,
+        start_date="2024-06-01",
+        end_date="2026-06-04",
+        label_target="triple_barrier_label",
+        rows_per_symbol=250,
+        limit=20000,
+        threshold=55.0,
+        folds=5,
+        purge_bars=60,
+        embargo_bars=30,
+    )
     promotion_metrics = build_ml_promotion_metrics_payload(
         PromotionMetricsConfig(
             start_date="2024-06-01",
@@ -156,14 +169,16 @@ def build_model_promotion_evidence_payload(
         },
         "purged_walk_forward": {
             "ready": bool(
-                triple_validation["rows_loaded"] >= 5000 and trend_validation["rows_loaded"] >= 5000
+                purged_walk_forward["rows"] >= 5000
+                and purged_walk_forward["folds"]
+                and purged_walk_forward["stability_status"] == "stable_paper_candidate"
             ),
             "generated_at": generated_at,
             "runtime_effect": "historical_validation_evidence_no_runtime_change",
-            "validation_method": "purged_walk_forward_v1",
+            "validation_method": purged_walk_forward["validation_method"],
             "triple_barrier_rows": triple_validation["rows_loaded"],
             "trend_scan_rows": trend_validation["rows_loaded"],
-            "caveat": "historical validation payload is used as lifecycle evidence; model registration still requires artifact-level metadata",
+            "walk_forward": purged_walk_forward,
         },
         "calibration_report": {
             "ready": bool(

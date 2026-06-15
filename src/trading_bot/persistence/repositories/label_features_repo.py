@@ -64,7 +64,13 @@ class LabelFeaturesRepository:
         with get_connection(self.db_path) as con:
             return con.execute(
                 """
-                SELECT fs.id, fs.symbol, fs.timestamp, fs.last_price
+                SELECT
+                    fs.id,
+                    fs.symbol,
+                    fs.timestamp,
+                    fs.last_price,
+                    fs.setup_recommendation,
+                    fs.setup_label
                 FROM feature_snapshots fs
                 LEFT JOIN labeled_setups ls
                   ON ls.snapshot_id = fs.id
@@ -84,14 +90,36 @@ class LabelFeaturesRepository:
         fwd5: float | None,
         fwd15: float | None,
         fwd30: float | None,
+        fwd60: float | None,
         ret5: float | None,
         ret15: float | None,
         ret30: float | None,
+        ret60: float | None,
         max_up_15m: float | None,
         max_down_15m: float | None,
+        max_up_60m: float | None,
+        max_down_60m: float | None,
+        action_direction: str | None,
+        action_mfe_60m_pct: float | None,
+        action_mae_60m_pct: float | None,
         label: str | None,
     ) -> None:
         with get_connection(self.db_path) as con:
+            existing_cols = {
+                row["name"] for row in con.execute("PRAGMA table_info(labeled_setups)").fetchall()
+            }
+            addable = {
+                "future_price_60m": "REAL",
+                "ret_fwd_60m": "REAL",
+                "max_up_60m": "REAL",
+                "max_down_60m": "REAL",
+                "action_direction": "TEXT",
+                "action_mfe_60m_pct": "REAL",
+                "action_mae_60m_pct": "REAL",
+            }
+            for col, col_type in addable.items():
+                if col not in existing_cols:
+                    con.execute(f"ALTER TABLE labeled_setups ADD COLUMN {col} {col_type}")
             con.execute(
                 """
                 INSERT INTO labeled_setups (
@@ -102,13 +130,20 @@ class LabelFeaturesRepository:
                     future_price_5m,
                     future_price_15m,
                     future_price_30m,
+                    future_price_60m,
                     ret_fwd_5m,
                     ret_fwd_15m,
                     ret_fwd_30m,
+                    ret_fwd_60m,
                     max_up_15m,
                     max_down_15m,
+                    max_up_60m,
+                    max_down_60m,
+                    action_direction,
+                    action_mfe_60m_pct,
+                    action_mae_60m_pct,
                     outcome_label
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     row["id"],
@@ -118,11 +153,18 @@ class LabelFeaturesRepository:
                     fwd5,
                     fwd15,
                     fwd30,
+                    fwd60,
                     ret5,
                     ret15,
                     ret30,
+                    ret60,
                     max_up_15m,
                     max_down_15m,
+                    max_up_60m,
+                    max_down_60m,
+                    action_direction,
+                    action_mfe_60m_pct,
+                    action_mae_60m_pct,
                     label,
                 ),
             )

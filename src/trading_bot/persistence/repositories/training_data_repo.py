@@ -254,6 +254,7 @@ class TrainingDataRepository:
                     raise RuntimeError(f"Required table missing: {table}")
 
             fs_cols = self._table_columns(con, "feature_snapshots")
+            ls_cols = self._table_columns(con, "labeled_setups")
             bp_cols = self._table_columns(con, "bar_pattern_features")
             has_timing_quality = self._table_exists(con, "bar_timing_quality_labels")
             timing_quality_available = bool(bp_cols) and has_timing_quality
@@ -263,6 +264,32 @@ class TrainingDataRepository:
             def bp_opt(col: str, alias: str | None = None, fallback: str = "NULL") -> str:
                 alias = alias or col
                 return f"bp.{col} AS {alias}" if col in bp_cols else f"{fallback} AS {alias}"
+
+            if "ret_fwd_60m" in ls_cols:
+                horizon_status_case = """
+                    CASE
+                        WHEN ls.snapshot_id IS NULL           THEN 'unlabeled'
+                        WHEN ls.ret_fwd_5m  IS NULL
+                         AND ls.ret_fwd_15m IS NULL
+                         AND ls.ret_fwd_30m IS NULL
+                         AND ls.ret_fwd_60m IS NULL            THEN 'incomplete'
+                        WHEN ls.ret_fwd_60m IS NULL            THEN 'partial_near_close'
+                        ELSE 'complete'
+                    END                            AS label_horizon_status
+                """
+                label_target_family = "'fixed_horizon_v2_60m_action_mfe_mae' AS label_target_family"
+            else:
+                horizon_status_case = """
+                    CASE
+                        WHEN ls.snapshot_id IS NULL           THEN 'unlabeled'
+                        WHEN ls.ret_fwd_5m  IS NULL
+                         AND ls.ret_fwd_15m IS NULL
+                         AND ls.ret_fwd_30m IS NULL            THEN 'incomplete'
+                        WHEN ls.ret_fwd_30m IS NULL            THEN 'partial_near_close'
+                        ELSE 'complete'
+                    END                            AS label_horizon_status
+                """
+                label_target_family = "'fixed_horizon_v1' AS label_target_family"
 
             bar_pattern_join = ""
             if bp_cols:
@@ -408,11 +435,18 @@ class TrainingDataRepository:
                     ls.future_price_5m,
                     ls.future_price_15m,
                     ls.future_price_30m,
+                    {opt(ls_cols, "ls", "future_price_60m")},
                     ls.ret_fwd_5m,
                     ls.ret_fwd_15m,
                     ls.ret_fwd_30m,
+                    {opt(ls_cols, "ls", "ret_fwd_60m")},
                     ls.max_up_15m,
                     ls.max_down_15m,
+                    {opt(ls_cols, "ls", "max_up_60m")},
+                    {opt(ls_cols, "ls", "max_down_60m")},
+                    {opt(ls_cols, "ls", "action_direction")},
+                    {opt(ls_cols, "ls", "action_mfe_60m_pct")},
+                    {opt(ls_cols, "ls", "action_mae_60m_pct")},
                     ls.outcome_label,
                     {bp_opt("triple_barrier_label")},
                     {bp_opt("triple_barrier_reason")},
@@ -433,15 +467,8 @@ class TrainingDataRepository:
                     p.expected_pnl,
                     p.confidence                   AS prediction_confidence,
                     p.sample_size                  AS prediction_sample_size,
-                    CASE
-                        WHEN ls.snapshot_id IS NULL           THEN 'unlabeled'
-                        WHEN ls.ret_fwd_5m  IS NULL
-                         AND ls.ret_fwd_15m IS NULL
-                         AND ls.ret_fwd_30m IS NULL            THEN 'incomplete'
-                        WHEN ls.ret_fwd_30m IS NULL            THEN 'partial_near_close'
-                        ELSE 'complete'
-                    END                            AS label_horizon_status,
-                    'fixed_horizon_v1'             AS label_target_family,
+                    {horizon_status_case},
+                    {label_target_family},
                     'excluded_not_training_target' AS realized_exit_label_status,
                     NULL                           AS exit_policy_version,
                     NULL                           AS position_manager_version

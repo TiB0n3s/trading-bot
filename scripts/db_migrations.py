@@ -622,6 +622,22 @@ MIGRATIONS: tuple[Migration, ...] = (
             "ALTER TABLE feature_snapshots ADD COLUMN bar_required_fields TEXT",
         ),
     ),
+    Migration(
+        migration_id="20260615_027_promotion_label_targets",
+        description="Add 60m and action-aware MFE/MAE label targets plus realized-exit policy versions.",
+        statements=(
+            "ALTER TABLE labeled_setups ADD COLUMN future_price_60m REAL",
+            "ALTER TABLE labeled_setups ADD COLUMN ret_fwd_60m REAL",
+            "ALTER TABLE labeled_setups ADD COLUMN max_up_60m REAL",
+            "ALTER TABLE labeled_setups ADD COLUMN max_down_60m REAL",
+            "ALTER TABLE labeled_setups ADD COLUMN action_direction TEXT",
+            "ALTER TABLE labeled_setups ADD COLUMN action_mfe_60m_pct REAL",
+            "ALTER TABLE labeled_setups ADD COLUMN action_mae_60m_pct REAL",
+            "ALTER TABLE exit_snapshots ADD COLUMN realized_exit_label_version TEXT",
+            "ALTER TABLE exit_snapshots ADD COLUMN exit_policy_version TEXT",
+            "ALTER TABLE exit_snapshots ADD COLUMN position_manager_version TEXT",
+        ),
+    ),
 )
 
 

@@ -29,8 +29,8 @@ if str(SRC_DIR) not in sys.path:
 from market_time import is_market_hours, now_et
 from repositories.label_v1_repo import LabelV1Repository
 
-LABEL_BUILDER_VERSION = "label_v1_builder_20260527"
-LABEL_VERSION = "label_taxonomy_v1"
+LABEL_BUILDER_VERSION = "label_v1_builder_20260615"
+LABEL_VERSION = "label_taxonomy_v2_60m_action_mfe_mae"
 EXIT_POLICY_VERSION = "fixed_horizon_v1_no_realized_exit"
 POSITION_MANAGER_VERSION = "not_applicable_fixed_horizon"
 _repo = LabelV1Repository()
@@ -48,10 +48,22 @@ def validate_feature_snapshot_contract(db_path: Path | str | None = None) -> dic
         "staleness_reason",
     }
     missing = sorted(required - cols)
+    label_cols = repo.labeled_setup_columns()
+    required_label_targets = {
+        "future_price_60m",
+        "ret_fwd_60m",
+        "max_up_60m",
+        "max_down_60m",
+        "action_direction",
+        "action_mfe_60m_pct",
+        "action_mae_60m_pct",
+    }
+    missing_label_targets = sorted(required_label_targets - label_cols)
     stale_count = repo.stale_feature_snapshot_count() if not missing else 0
     return {
-        "ok": not missing,
+        "ok": not missing and not missing_label_targets,
         "missing_feature_audit_fields": missing,
+        "missing_label_target_fields": missing_label_targets,
         "stale_feature_snapshot_count": stale_count,
         "label_builder_version": LABEL_BUILDER_VERSION,
         "label_version": LABEL_VERSION,

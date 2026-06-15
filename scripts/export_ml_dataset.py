@@ -22,9 +22,10 @@ import csv
 import json
 from pathlib import Path
 
+from repositories.ml_export_repo import MlExportRepository
+
 from ml_platform.governance import build_dataset_manifest
 from ml_platform.pit_context import get_archive_root, pit_coverage_for_range
-from repositories.ml_export_repo import MlExportRepository
 
 BASE_COLUMNS = [
     "snapshot_id",
@@ -96,11 +97,18 @@ BASE_COLUMNS = [
     "future_price_5m",
     "future_price_15m",
     "future_price_30m",
+    "future_price_60m",
     "ret_fwd_5m",
     "ret_fwd_15m",
     "ret_fwd_30m",
+    "ret_fwd_60m",
     "max_up_15m",
     "max_down_15m",
+    "max_up_60m",
+    "max_down_60m",
+    "action_direction",
+    "action_mfe_60m_pct",
+    "action_mae_60m_pct",
     "outcome_label",
     "triple_barrier_label",
     "triple_barrier_reason",
@@ -124,21 +132,27 @@ BASE_COLUMNS = [
     "label_horizon_status",
     "label_target_family",
     "realized_exit_label_status",
+    "realized_exit_label_version",
     "exit_policy_version",
     "position_manager_version",
+    "canonical_exit_version",
 ]
 
 FIXED_HORIZON_TARGETS = [
     "ret_fwd_15m",
     "ret_fwd_30m",
+    "ret_fwd_60m",
     "max_up_15m",
     "max_down_15m",
+    "max_up_60m",
+    "max_down_60m",
+    "action_mfe_60m_pct",
+    "action_mae_60m_pct",
     "triple_barrier_label",
     "trend_scan_label",
 ]
 
 FUTURE_FIXED_HORIZON_TARGETS = [
-    "ret_fwd_60m",
     "max_favorable_excursion",
     "max_adverse_excursion",
 ]
@@ -260,8 +274,9 @@ def main() -> int:
         manifest["realized_exit_labels_included"] = False
         manifest["realized_exit_label_policy"] = (
             "Realized-PnL labels are excluded from this fixed-horizon training export. "
-            "Any future realized-exit export must include exit_policy_version and "
-            "position_manager_version and must not mix exit-policy versions without controls."
+            "Any realized-exit audit surface must include realized_exit_label_version, "
+            "exit_policy_version, and position_manager_version and must not mix "
+            "exit-policy versions without controls."
         )
         manifest["safe_training_targets"] = FIXED_HORIZON_TARGETS
         manifest["future_fixed_horizon_targets_pending_schema"] = FUTURE_FIXED_HORIZON_TARGETS

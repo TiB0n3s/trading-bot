@@ -85,6 +85,10 @@ def affected_approved_symbols(event: dict) -> set[str]:
         linked_symbol = str(linked).upper().strip()
         if linked_symbol in APPROVED_SYMBOLS:
             out.add(linked_symbol)
+    for impact in event.get("adjacency_impacts") or []:
+        target_symbol = str(impact.get("target_symbol") or "").upper().strip()
+        if target_symbol in APPROVED_SYMBOLS:
+            out.add(target_symbol)
     return out
 
 

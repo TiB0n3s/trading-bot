@@ -51,6 +51,15 @@ Requesting a context-only symbol without `--include-context-symbols` fails inten
 - Context-only symbols cannot generate predictions unless they are also approved symbols.
 - Context-only symbols cannot become trade candidates.
 - Context-only events can only enrich linked approved symbols.
+- Adjacent/value-chain events are stored as discounted ML evidence only:
+  `adjacent_event_count`, `adjacent_impact_score`,
+  `adjacent_source_symbols`, `adjacent_relationships`, and
+  `adjacent_themes` are written under `daily_symbol_context.raw_json.event_context`.
+- Adjacent evidence has `context_only_no_standalone_trade_authority`; it can be
+  learned against forward outcomes, but it must not directly approve or size a
+  trade without a later authority-promotion change.
+- Approved-symbol adjacency uses explicit value-chain mappings, not generic
+  cluster overlap, to avoid broad sector bleed-through.
 - `linked_symbols` must reference approved symbols only.
 - Promotion from context-only to tradable requires adding the symbol to `SYMBOL_CONFIG` through normal risk review.
 

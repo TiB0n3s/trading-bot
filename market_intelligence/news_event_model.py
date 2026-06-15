@@ -21,6 +21,7 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass
 from typing import Any
 
+from market_intelligence.adjacency_impact import build_adjacency_impacts
 from market_intelligence.source_reliability import classify_source, confidence_cap_for_sources
 
 VALID_EVENT_TYPES = {
@@ -769,6 +770,9 @@ def score_event(event: dict[str, Any]) -> dict[str, Any]:
     out["trade_relevance"] = relevance
     out["net_event_score"] = round(net, 2)
     out["scoring_reason"] = "; ".join(reason_bits)
+    out["adjacency_impacts"] = build_adjacency_impacts(out)
+    if out["adjacency_impacts"]:
+        out["adjacency_impact_version"] = "adjacency_impact_v1"
 
     return out
 

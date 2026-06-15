@@ -75,6 +75,66 @@ def test_context_only_event_aggregates_into_linked_approved_symbol(tmp_path):
     assert aapl["has_events"] is False
 
 
+def test_adjacent_context_event_contributes_discounted_impact_to_linked_symbol(tmp_path):
+    db_path = tmp_path / "trades.db"
+    event = score_event(
+        {
+            "market_date": "2026-06-01",
+            "symbol": "MU",
+            "event_type": "industry_demand",
+            "event_summary": (
+                "Micron reports record AI memory demand growth, beats estimates, "
+                "raises forecast, and cites robust expansion"
+            ),
+            "source": "Reuters",
+            "tradable": False,
+            "context_only": True,
+            "linked_symbols": ["NVDA", "AMD", "TSM"],
+            "relationship_type": "semiconductor_peer",
+            "relationship_themes": ["semiconductors", "ai_infra", "memory"],
+        }
+    )
+    insert_daily_symbol_event(event, db_path=db_path)
+
+    nvda = aggregate_symbol_events("2026-06-01", "NVDA", db_path=db_path)
+
+    assert event["adjacency_impacts"]
+    assert nvda["has_events"] is True
+    assert nvda["event_context"]["adjacent_event_count"] == 1
+    assert nvda["event_context"]["adjacent_source_symbols"] == ["MU"]
+    assert "peer" in nvda["event_context"]["adjacent_relationships"]
+    assert nvda["event_context"]["adjacent_impact_score"] > 0
+    assert nvda["event_context"]["authority"] == "context_only_no_standalone_buy_authority"
+
+
+def test_approved_symbol_event_can_create_adjacent_ml_evidence(tmp_path):
+    db_path = tmp_path / "trades.db"
+    event = score_event(
+        {
+            "market_date": "2026-06-01",
+            "symbol": "TSM",
+            "event_type": "guidance",
+            "event_summary": (
+                "Taiwan Semiconductor raises outlook after record AI foundry demand growth, "
+                "beats estimates, and cites robust expansion"
+            ),
+            "source": "Reuters",
+        }
+    )
+    insert_daily_symbol_event(event, db_path=db_path)
+
+    nvda = aggregate_symbol_events("2026-06-01", "NVDA", db_path=db_path)
+    aapl = aggregate_symbol_events("2026-06-01", "AAPL", db_path=db_path)
+
+    assert any(impact["target_symbol"] == "NVDA" for impact in event["adjacency_impacts"])
+    assert any(impact["target_symbol"] == "AAPL" for impact in event["adjacency_impacts"])
+    assert nvda["event_context"]["adjacent_event_count"] == 1
+    assert nvda["event_context"]["adjacent_source_symbols"] == ["TSM"]
+    assert "customer" in nvda["event_context"]["adjacent_relationships"]
+    assert nvda["event_context"]["adjacent_impact_score"] > 0
+    assert aapl["event_context"]["adjacent_impact_score"] > 0
+
+
 def test_weak_query_match_is_stored_but_downweighted_for_target_symbol(tmp_path):
     db_path = tmp_path / "trades.db"
     collected = event_from_item(
@@ -122,6 +182,8 @@ def test_ticker_attribution_does_not_match_common_lowercase_word_path():
 def main():
     with tempfile.TemporaryDirectory() as tmp:
         test_context_only_event_aggregates_into_linked_approved_symbol(Path(tmp))
+        test_adjacent_context_event_contributes_discounted_impact_to_linked_symbol(Path(tmp))
+        test_approved_symbol_event_can_create_adjacent_ml_evidence(Path(tmp))
         test_weak_query_match_is_stored_but_downweighted_for_target_symbol(Path(tmp))
         test_ticker_attribution_does_not_match_common_lowercase_word_path()
     print("[OK] context symbol event tests passed")

@@ -16,6 +16,8 @@ from pathlib import Path
 
 from repositories.market_intelligence_repo import MarketIntelligenceRepository
 
+from market_intelligence.adjacency_impact import adjacency_impacts_for_target
+
 DB_PATH = Path(__file__).resolve().parents[1] / "trades.db"
 
 
@@ -282,6 +284,18 @@ def _max(values):
 def _event_relevance_weight(row, raw: dict, target_symbol: str) -> float:
     row_symbol = str(row["symbol"] or "").upper()
     target_symbol = target_symbol.upper()
+    if row_symbol != target_symbol:
+        impacts = adjacency_impacts_for_target(raw, target_symbol)
+        if impacts:
+            return max(
+                0.0,
+                min(
+                    0.75,
+                    max(
+                        abs(float(impact.get("adjacent_impact_score") or 0.0)) for impact in impacts
+                    ),
+                ),
+            )
     try:
         base = float(raw.get("symbol_relevance_weight"))
     except (TypeError, ValueError):
@@ -348,8 +362,11 @@ def aggregate_symbol_events(market_date: str, symbol: str, db_path: Path | str =
 
         row_symbol = str(row["symbol"] or "").upper()
         linked_symbols = {str(s).upper() for s in (raw.get("linked_symbols") or [])}
-        if row_symbol == target_symbol or (
-            raw.get("context_only") is True and target_symbol in linked_symbols
+        adjacent_impacts = adjacency_impacts_for_target(raw, target_symbol)
+        if (
+            row_symbol == target_symbol
+            or (raw.get("context_only") is True and target_symbol in linked_symbols)
+            or (bool(adjacent_impacts))
         ):
             events.append(row)
             raw_by_event_id[row["id"]] = raw
@@ -428,6 +445,11 @@ def aggregate_symbol_events(market_date: str, symbol: str, db_path: Path | str =
     weighted_event_exposure = 0.0
     direct_event_count = 0
     linked_event_count = 0
+    adjacent_event_count = 0
+    adjacent_impact_score = 0.0
+    adjacent_source_symbols = []
+    adjacent_relationships = []
+    adjacent_themes = []
     for e in events:
         try:
             raw = raw_by_event_id.get(e["id"]) or json.loads(e["raw_json"] or "{}")
@@ -439,6 +461,20 @@ def aggregate_symbol_events(market_date: str, symbol: str, db_path: Path | str =
                     linked_event_count += 1
                     if raw.get("symbol"):
                         linked_context_symbols.append(str(raw["symbol"]).upper())
+                adjacent_impacts = adjacency_impacts_for_target(raw, target_symbol)
+                if adjacent_impacts:
+                    adjacent_event_count += 1
+                    for impact in adjacent_impacts:
+                        try:
+                            adjacent_impact_score += float(impact.get("adjacent_impact_score") or 0)
+                        except (TypeError, ValueError):
+                            pass
+                        if impact.get("source_symbol"):
+                            adjacent_source_symbols.append(str(impact["source_symbol"]).upper())
+                        if impact.get("relationship"):
+                            adjacent_relationships.append(str(impact["relationship"]))
+                        for theme in impact.get("relationship_themes") or []:
+                            adjacent_themes.append(str(theme))
                 if weights_by_event_id.get(e["id"], 1.0) < 0.5:
                     weak_attribution_count += 1
                 weighted_event_exposure += float(weights_by_event_id.get(e["id"], 1.0))
@@ -502,6 +538,11 @@ def aggregate_symbol_events(market_date: str, symbol: str, db_path: Path | str =
         "event_count": len(events),
         "direct_event_count": direct_event_count,
         "linked_context_event_count": linked_event_count,
+        "adjacent_event_count": adjacent_event_count,
+        "adjacent_impact_score": round(adjacent_impact_score, 4),
+        "adjacent_source_symbols": sorted(set(adjacent_source_symbols)),
+        "adjacent_relationships": sorted(set(adjacent_relationships)),
+        "adjacent_themes": sorted(set(adjacent_themes)),
         "weak_attribution_event_count": weak_attribution_count,
         "weighted_event_exposure": round(weighted_event_exposure, 2),
         "linked_context_symbols": sorted(set(linked_context_symbols)),

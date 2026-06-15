@@ -188,12 +188,22 @@ class MarketIntelligenceRepository:
                       AND raw_json LIKE '%"context_only": true%'
                       AND raw_json LIKE '%"linked_symbols"%'
                     )
+                    OR (
+                      raw_json LIKE ?
+                      AND raw_json LIKE '%"adjacency_impacts"%'
+                    )
                   )
                 ORDER BY
                   CASE WHEN symbol = ? THEN 0 ELSE 1 END,
                   id
                 """,
-                (market_date, symbol, f"%{linked_symbol_token}%", symbol),
+                (
+                    market_date,
+                    symbol,
+                    f"%{linked_symbol_token}%",
+                    f"%{linked_symbol_token}%",
+                    symbol,
+                ),
             ).fetchall()
 
     def daily_symbol_event_keys(self, market_date: str) -> set[tuple[str, str, str, str]]:

@@ -1761,6 +1761,7 @@ def test_prediction_probability_is_forwarded_for_conviction_gate():
             "probability_of_profit": 0.64,
             "probability_of_profit_pct": 64.0,
             "probability_pct": 64.0,
+            "probability_source": "probability_of_profit",
         }
         candidate = evaluate_auto_buy_candidate(
             symbol="AMZN",
@@ -1777,7 +1778,7 @@ def test_prediction_probability_is_forwarded_for_conviction_gate():
     assert_equal(candidate["prediction_probability_pct"], 64.0, "prediction probability")
     assert_equal(
         candidate["probability_source"],
-        "daily_symbol_predictions",
+        "probability_of_profit",
         "probability source",
     )
 

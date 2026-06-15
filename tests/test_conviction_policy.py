@@ -24,8 +24,10 @@ def test_defaults_are_off_and_paper_only():
     cfg = load_conviction_config()
     assert cfg.enabled is False
     assert cfg.paper_only is True
-    # Entry bar is far above the AUTO_BUY default of 13.
-    assert cfg.min_score >= 30.0
+    # Entry bar is above AUTO_BUY default but calibrated to observed score distribution.
+    assert cfg.min_score == 23.0
+    assert cfg.min_probability_pct == 62.0
+    assert cfg.min_system_probability_pct == 80.0
 
 
 def test_overrides_apply():
@@ -40,6 +42,7 @@ def test_overrides_apply():
     [
         ("min_score", 0.0),
         ("min_probability_pct", 150.0),
+        ("min_system_probability_pct", 150.0),
         ("max_concurrent_positions", 0),
         ("position_size_pct", 0.0),
         ("position_size_pct", 120.0),
@@ -162,6 +165,38 @@ def test_entry_probability_below_bar():
     )
     assert d["enter"] is False
     assert d["reason"] == "probability_below_bar"
+
+
+def test_entry_uses_stricter_bar_for_system_probability_fallback():
+    cfg = load_conviction_config(
+        enabled=True,
+        min_probability_pct=62.0,
+        min_system_probability_pct=80.0,
+    )
+    blocked = conviction_entry_decision(
+        candidate=_strong_candidate(
+            probability_pct=70.0,
+            probability_source="daily_symbol_predictions:probability_of_order",
+        ),
+        account_state=_flat_account(),
+        last_trade_state=_no_recent_trade(),
+        cfg=cfg,
+    )
+    assert blocked["enter"] is False
+    assert blocked["reason"] == "probability_below_bar"
+    assert blocked["probability_threshold_pct"] == 80.0
+
+    allowed = conviction_entry_decision(
+        candidate=_strong_candidate(
+            probability_pct=82.0,
+            probability_source="daily_symbol_predictions:probability_of_order",
+        ),
+        account_state=_flat_account(),
+        last_trade_state=_no_recent_trade(),
+        cfg=cfg,
+    )
+    assert allowed["enter"] is True
+    assert allowed["probability_threshold_pct"] == 80.0
 
 
 def test_entry_missing_probability_blocks_when_required():

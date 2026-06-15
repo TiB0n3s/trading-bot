@@ -28,12 +28,17 @@ class ConvictionConfig:
     paper_only: bool = True
 
     # --- Entry selectivity (all are mandatory gates) ------------------------
-    # Heuristic composite score bar. Far above the AUTO_BUY default of 13 so
-    # only exceptional setups qualify rather than "best of a weak scan".
-    min_score: float = 30.0
+    # Heuristic composite score bar. Calibrated near the top of observed
+    # auto-buy score history so the gate can produce paper validation data
+    # without accepting ordinary "best of scan" candidates.
+    min_score: float = 23.0
     # Learned probability bar (percent, 0-100). Sourced from the existing
-    # auto_buy prediction/layered-ML context.
+    # profit-probability or layered-ML context.
     min_probability_pct: float = 62.0
+    # Fallback probability bar for system probabilities such as approval/order.
+    # These are not profit probabilities, so they require a stricter threshold
+    # when used only to avoid dropping otherwise rare score-qualified setups.
+    min_system_probability_pct: float = 80.0
     # If True, a candidate with no learned probability is blocked rather than
     # waved through on the heuristic alone.
     require_probability: bool = True
@@ -88,6 +93,13 @@ class ConvictionConfig:
             "min_probability_pct",
             "CONVICTION_MIN_PROBABILITY_PCT",
             self.min_probability_pct,
+            "must be within [0, 100]",
+        )
+        _check(
+            0.0 <= self.min_system_probability_pct <= 100.0,
+            "min_system_probability_pct",
+            "CONVICTION_MIN_SYSTEM_PROBABILITY_PCT",
+            self.min_system_probability_pct,
             "must be within [0, 100]",
         )
         _check(
@@ -163,13 +175,14 @@ def load_conviction_config(**overrides) -> ConvictionConfig:
 
     Example::
 
-        cfg = load_conviction_config(enabled=True, min_score=35.0)
+        cfg = load_conviction_config(enabled=True, min_score=23.0)
     """
     kwargs: dict = dict(
         enabled=env_bool("CONVICTION_MODE_ENABLED", False),
         paper_only=env_bool("CONVICTION_PAPER_ONLY", True),
-        min_score=env_float("CONVICTION_MIN_SCORE", 30.0),
+        min_score=env_float("CONVICTION_MIN_SCORE", 23.0),
         min_probability_pct=env_float("CONVICTION_MIN_PROBABILITY_PCT", 62.0),
+        min_system_probability_pct=env_float("CONVICTION_MIN_SYSTEM_PROBABILITY_PCT", 80.0),
         require_probability=env_bool("CONVICTION_REQUIRE_PROBABILITY", True),
         block_on_ml_veto=env_bool("CONVICTION_BLOCK_ON_ML_VETO", True),
         require_market_context_ok=env_bool("CONVICTION_REQUIRE_MARKET_CONTEXT_OK", True),

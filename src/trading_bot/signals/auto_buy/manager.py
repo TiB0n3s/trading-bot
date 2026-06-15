@@ -371,6 +371,14 @@ def _first_probability_pct(*values: Any) -> float | None:
     return None
 
 
+def _first_probability_pct_with_source(*items: tuple[str, Any]) -> tuple[float | None, str | None]:
+    for source, value in items:
+        probability = _probability_pct(value)
+        if probability is not None:
+            return probability, source
+    return None, None
+
+
 def _historical_bar_intelligence() -> dict[str, Any]:
     global _historical_bar_intelligence_cache
     if _historical_bar_intelligence_cache is None:
@@ -624,6 +632,11 @@ def auto_buy_prediction_context(symbol: str) -> dict[str, Any]:
 
     if row:
         score = row.get("prediction_score")
+        probability_pct, probability_source = _first_probability_pct_with_source(
+            ("probability_of_profit", row.get("probability_of_profit")),
+            ("probability_of_approval", row.get("probability_of_approval")),
+            ("probability_of_order", row.get("probability_of_order")),
+        )
         result.update(
             {
                 "available": True,
@@ -636,11 +649,8 @@ def auto_buy_prediction_context(symbol: str) -> dict[str, Any]:
                 "probability_of_profit_pct": _probability_pct(row.get("probability_of_profit")),
                 "probability_of_approval_pct": _probability_pct(row.get("probability_of_approval")),
                 "probability_of_order_pct": _probability_pct(row.get("probability_of_order")),
-                "probability_pct": _first_probability_pct(
-                    row.get("probability_of_profit"),
-                    row.get("probability_of_approval"),
-                    row.get("probability_of_order"),
-                ),
+                "probability_pct": probability_pct,
+                "probability_source": probability_source,
                 "ml_prediction_score": score,
                 "ml_prediction_bucket": ml_prediction_bucket(score),
                 "ml_prediction_confidence": row.get("confidence"),
@@ -1646,17 +1656,20 @@ def evaluate_auto_buy_candidate(
     layered_meta_effect = str(layered_ml.get("meta_label_effect") or "none").strip().lower()
     layered_master_confidence = _to_float(layered_ml.get("master_confidence_score"))
     layered_ensemble_pct = _to_float(layered_ml.get("ensemble_probability_pct"))
-    prediction_probability_pct = _first_probability_pct(
-        prediction_context.get("probability_pct"),
-        prediction_context.get("probability_of_profit"),
-        prediction_context.get("probability_of_approval"),
-        prediction_context.get("probability_of_order"),
+    prediction_probability_pct, prediction_probability_source = _first_probability_pct_with_source(
+        (
+            str(prediction_context.get("probability_source") or "probability_pct"),
+            prediction_context.get("probability_pct"),
+        ),
+        ("probability_of_profit", prediction_context.get("probability_of_profit")),
+        ("probability_of_approval", prediction_context.get("probability_of_approval")),
+        ("probability_of_order", prediction_context.get("probability_of_order")),
     )
     conviction_probability_pct = layered_ensemble_pct
     conviction_probability_source = "layered_ml_ensemble_probability_pct"
     if conviction_probability_pct is None:
         conviction_probability_pct = prediction_probability_pct
-        conviction_probability_source = "daily_symbol_predictions"
+        conviction_probability_source = prediction_probability_source or "daily_symbol_predictions"
     if layered_ml.get("enabled") and not layered_ml_available:
         reasons.append(f"layered_ml:unavailable:{layered_ml.get('reason')}")
     elif layered_ml_available:
@@ -1876,6 +1889,7 @@ def evaluate_auto_buy_candidate(
             conviction_probability_source if conviction_probability_pct is not None else None
         ),
         "prediction_probability_pct": prediction_probability_pct,
+        "prediction_probability_source": prediction_probability_source,
         "prediction_probability_of_profit_pct": prediction_context.get("probability_of_profit_pct"),
         "prediction_probability_of_approval_pct": prediction_context.get(
             "probability_of_approval_pct"

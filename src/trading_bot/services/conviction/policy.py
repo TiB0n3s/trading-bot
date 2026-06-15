@@ -74,8 +74,8 @@ def conviction_entry_decision(
     Args:
         candidate: ranked candidate. Recognized keys (all optional, read
             defensively): ``symbol``, ``score`` (heuristic composite),
-            ``probability_pct`` (learned 0-100), ``ml_veto`` (bool),
-            ``market_context_ok`` (bool).
+            ``probability_pct`` (learned 0-100), ``probability_source``,
+            ``ml_veto`` (bool), ``market_context_ok`` (bool).
         account_state: ``open_positions`` (int).
         last_trade_state: ``minutes_since_last_entry`` (float|None). None means
             no prior entry today -> cooldown treated as satisfied.
@@ -93,6 +93,7 @@ def conviction_entry_decision(
     symbol = candidate.get("symbol")
     score = _to_float(candidate.get("score"), 0.0) or 0.0
     probability_pct = _to_float(candidate.get("probability_pct"), None)
+    probability_source = str(candidate.get("probability_source") or "").strip().lower()
     ml_veto = _bool(candidate.get("ml_veto"))
     market_context_ok = _bool(candidate.get("market_context_ok"))
 
@@ -114,10 +115,21 @@ def conviction_entry_decision(
     checks["score_ok"] = score >= float(cfg.min_score)
 
     # --- Quality: learned probability bar ----------------------------------
+    system_probability_sources = {
+        "probability_of_approval",
+        "probability_of_order",
+        "daily_symbol_predictions:probability_of_approval",
+        "daily_symbol_predictions:probability_of_order",
+    }
+    probability_threshold = (
+        float(getattr(cfg, "min_system_probability_pct", cfg.min_probability_pct))
+        if probability_source in system_probability_sources
+        else float(cfg.min_probability_pct)
+    )
     if probability_pct is None:
         checks["probability_ok"] = not bool(cfg.require_probability)
     else:
-        checks["probability_ok"] = probability_pct >= float(cfg.min_probability_pct)
+        checks["probability_ok"] = probability_pct >= probability_threshold
 
     # --- Risk: ML veto ------------------------------------------------------
     checks["ml_ok"] = not (bool(cfg.block_on_ml_veto) and ml_veto)
@@ -153,6 +165,8 @@ def conviction_entry_decision(
         "symbol": symbol,
         "conviction_score": round(score, 4),
         "probability_pct": probability_pct,
+        "probability_source": probability_source or None,
+        "probability_threshold_pct": probability_threshold,
         "checks": checks,
     }
 

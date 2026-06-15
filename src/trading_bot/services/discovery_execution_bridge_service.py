@@ -387,6 +387,7 @@ class DiscoveryExecutionBridgeService:
                 "symbol": candidate.get("symbol"),
                 "score": candidate.get("score"),
                 "probability_pct": _candidate_probability_pct(candidate),
+                "probability_source": candidate.get("probability_source"),
                 "ml_veto": _candidate_ml_veto(candidate),
                 "market_context_ok": _candidate_market_context_ok(candidate),
             },

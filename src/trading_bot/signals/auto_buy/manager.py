@@ -110,6 +110,7 @@ from symbols_config import (
     SYMBOL_SIGNAL_SOURCE,
 )
 
+from config.conviction import load_conviction_config
 from repositories import auto_buy_repo
 from risk.exposure import any_cluster_limit_hit, cluster_exposure
 
@@ -2334,6 +2335,14 @@ AUTO_BUY_TIMING_LOG_ENABLED = os.getenv("AUTO_BUY_TIMING_LOG_ENABLED", "true").l
     "yes",
     "on",
 )
+AUTO_BUY_SCORE_DETAIL_LOG_ENABLED = os.getenv(
+    "AUTO_BUY_SCORE_DETAIL_LOG_ENABLED", "true"
+).lower() in (
+    "1",
+    "true",
+    "yes",
+    "on",
+)
 
 AUTO_BUY_BUCKING_TAPE_MIN_SESSION_RETURN_PCT = float(
     os.getenv("AUTO_BUY_BUCKING_TAPE_MIN_SESSION_RETURN_PCT", "2.0")
@@ -2476,6 +2485,102 @@ def build_candidates(scope: str) -> list[dict[str, Any]]:
     return candidates
 
 
+def _log_value(value: Any, default: str = "-") -> str:
+    if value is None or value == "":
+        return default
+    if isinstance(value, float):
+        return f"{value:.3f}".rstrip("0").rstrip(".")
+    return str(value)
+
+
+def _pct_text(value: Any) -> str:
+    parsed = _to_float(value)
+    return "-" if parsed is None else f"{parsed:.1f}%"
+
+
+def _render_scoring_details(candidates: list[dict[str, Any]]) -> None:
+    if not AUTO_BUY_SCORE_DETAIL_LOG_ENABLED:
+        return
+
+    conviction_cfg = load_conviction_config()
+    print()
+    print("  Scoring Breakdown")
+    print(
+        "  Conviction gate: "
+        f"confluence_score >= {conviction_cfg.min_score:.1f}; "
+        f"profit_probability >= {conviction_cfg.min_probability_pct:.1f}%; "
+        f"system_probability >= {conviction_cfg.min_system_probability_pct:.1f}%; "
+        f"require_probability={conviction_cfg.require_probability}; "
+        f"max_positions={conviction_cfg.max_concurrent_positions}"
+    )
+    print("-" * 156)
+    for c in candidates:
+        print(
+            f"  {c.get('symbol', '-'):<6} "
+            f"final_score={_log_value(c.get('score'))} "
+            f"confluence_score={_log_value(c.get('confluence_score'))} "
+            f"conviction_score={_log_value(c.get('conviction_score'))} "
+            f"auto_buy_threshold={_log_value(c.get('strong_buy_threshold'))} "
+            f"decision={c.get('decision', '-')}"
+        )
+        print(
+            "    probability: "
+            f"selected={_pct_text(c.get('probability_pct'))} "
+            f"source={_log_value(c.get('probability_source'))} "
+            f"prediction={_pct_text(c.get('prediction_probability_pct'))} "
+            f"prediction_source={_log_value(c.get('prediction_probability_source'))} "
+            f"profit={_pct_text(c.get('prediction_probability_of_profit_pct'))} "
+            f"approval={_pct_text(c.get('prediction_probability_of_approval_pct'))} "
+            f"order={_pct_text(c.get('prediction_probability_of_order_pct'))}"
+        )
+        print(
+            "    session: "
+            f"label={_log_value(c.get('session_trend_label'))} "
+            f"score={_log_value(c.get('session_trend_score'))} "
+            f"return={_pct_text(c.get('session_return_pct'))} "
+            f"m5={_pct_text(c.get('momentum_5m_pct'))} "
+            f"m15={_pct_text(c.get('momentum_15m_pct'))} "
+            f"m30={_pct_text(c.get('momentum_30m_pct'))} "
+            f"m60={_pct_text(c.get('momentum_60m_pct'))} "
+            f"m120={_pct_text(c.get('momentum_120m_pct'))} "
+            f"vwap_dist={_pct_text(c.get('distance_from_vwap_pct'))}"
+        )
+        print(
+            "    structure: "
+            f"trend_regime={_log_value(c.get('trend_regime'))} "
+            f"trend_persistence={_log_value(c.get('trend_persistence_score'))} "
+            f"pullback_with_trend={_log_value(c.get('pullback_with_trend_score'))} "
+            f"late_chase={_log_value(c.get('late_chase_maturity_score'))} "
+            f"five_day={_pct_text(c.get('five_day_return_pct'))} "
+            f"rolling_continuation={_log_value(c.get('rolling_continuation_score'))}"
+        )
+        print(
+            "    setup_memory: "
+            f"setup={_log_value(c.get('setup_recommendation'))}/"
+            f"{_log_value(c.get('setup_label'))} "
+            f"setup_score={_log_value(c.get('setup_score'))} "
+            f"strategy_memory={_log_value(c.get('strategy_memory_recommendation'))} "
+            f"learned_min_setup={_log_value(c.get('strategy_memory_min_setup_score'))} "
+            f"memory_available={_log_value(c.get('strategy_memory_available'))}"
+        )
+        print(
+            "    ml_layers: "
+            f"evaluation_depth={_log_value(c.get('layered_ml_evaluation_depth'))} "
+            f"available={_log_value(c.get('layered_ml_available'))} "
+            f"instruction={_log_value(c.get('layered_ml_final_instruction'))} "
+            f"ensemble_prob={_pct_text(c.get('layered_ml_ensemble_probability_pct'))} "
+            f"master_confidence={_log_value(c.get('layered_ml_master_confidence_score'))} "
+            f"promotion={_log_value(c.get('layered_ml_promotion_applied'))}"
+        )
+        print(
+            "    feedback: "
+            f"intraday_status={_log_value(c.get('intraday_feedback_status'))} "
+            f"intraday_penalty={_log_value(c.get('intraday_feedback_score_penalty'))} "
+            f"hard_block={_log_value(c.get('hard_block_reason'))}"
+        )
+        print(f"    score_reasons: {c.get('reason') or '-'}")
+
+
 def render(candidates: list[dict[str, Any]], scope: str, market_open: bool) -> None:
     window = symbol_window_summary(scope, len(candidates))
     print("=" * 112)
@@ -2515,6 +2620,7 @@ def render(candidates: list[dict[str, Any]], scope: str, market_open: bool) -> N
             f"{str(c.get('setup_label') or '-')[:30]:<30} "
             f"{c.get('hard_block_reason') or c.get('reason')}"
         )
+    _render_scoring_details(candidates)
 
 
 def main() -> int:

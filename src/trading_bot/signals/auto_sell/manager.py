@@ -31,7 +31,12 @@ from services.historical_bar_paper_strategy_service import build_historical_bar_
 from services.layered_model_decision_service import build_layered_model_decision
 from session_momentum import get_latest_session_momentum
 
+from config.conviction import load_conviction_config
 from repositories import auto_sell_repo, position_momentum_repo
+from trading_bot.signals.conviction.policy import (
+    conviction_active_for_mode,
+    conviction_exit_decision,
+)
 
 logging.basicConfig(
     level=logging.INFO,
@@ -39,6 +44,8 @@ logging.basicConfig(
 )
 
 logger = logging.getLogger("position_momentum_monitor")
+
+_CONVICTION_CFG = load_conviction_config()
 
 
 def _env_bool(name: str, default: bool = False) -> bool:
@@ -954,6 +961,71 @@ def recently_bought(
     return False, f"latest approved buy {age_minutes:.1f}m ago"
 
 
+def position_age_minutes(symbol: str) -> float | None:
+    ts = latest_approved_buy_time(symbol)
+    if not ts:
+        return None
+    return (datetime.now() - ts).total_seconds() / 60.0
+
+
+def apply_conviction_exit_to_sell_decision(
+    *,
+    position: Any,
+    session: dict[str, Any] | None,
+    decision: dict[str, Any],
+) -> dict[str, Any]:
+    if not conviction_active_for_mode(_CONVICTION_CFG, os.getenv("EXECUTION_MODE", "paper")):
+        return decision
+
+    symbol = getattr(position, "symbol", "UNKNOWN")
+    original_action = decision.get("action")
+    entry_time = latest_approved_buy_time(symbol)
+    minutes_held = (
+        (now_et().replace(tzinfo=None) - entry_time).total_seconds() / 60.0
+        if entry_time is not None
+        else 0.0
+    )
+    unrealized_plpc = _to_float(getattr(position, "unrealized_plpc", 0)) * 100
+    high_water_plpc = get_position_high_water_plpc(symbol)
+    final_instruction = str(decision.get("layered_ml_final_instruction") or "").lower()
+    ml_bearish = bool(decision.get("layered_ml_bearish")) or final_instruction in {
+        "veto",
+        "exit",
+        "sell",
+        "paper_avoid",
+    }
+
+    conviction = conviction_exit_decision(
+        position_state={
+            "unrealized_plpc": unrealized_plpc,
+            "high_water_plpc": high_water_plpc,
+            "minutes_held": minutes_held,
+            "momentum_reversal": original_action in ("sell_candidate", "partial_sell_candidate"),
+            "ml_bearish": ml_bearish,
+        },
+        cfg=_CONVICTION_CFG,
+    )
+
+    enriched = dict(decision)
+    enriched["conviction"] = conviction
+    enriched["conviction_exit_decision"] = conviction
+    enriched["conviction_mode_enabled"] = True
+    if conviction["action"] != "exit":
+        enriched["action"] = "hold"
+        enriched["severity"] = "conviction_hold"
+        enriched["reason"] = f"conviction_hold:{conviction['reason']} {conviction['trailing']}"
+        return enriched
+
+    enriched["action"] = "sell_candidate"
+    enriched["severity"] = "conviction_exit"
+    enriched["label"] = (
+        enriched.get("label") or (session or {}).get("trend_label") or "conviction_exit"
+    )
+    enriched["unrealized_plpc"] = unrealized_plpc
+    enriched["reason"] = f"conviction_exit:{conviction['reason']} {conviction['trailing']}"
+    return enriched
+
+
 def maybe_execute_auto_sell(position, decision, market_open: bool) -> dict[str, Any] | None:
     symbol = getattr(position, "symbol", "UNKNOWN")
 
@@ -1056,6 +1128,11 @@ def maybe_execute_auto_sell(position, decision, market_open: bool) -> dict[str, 
         )
     )
 
+    conviction_exit = (
+        severity == "conviction_exit"
+        and decision.get("conviction_exit_decision", {}).get("action") == "exit"
+    )
+
     hard_risk_exit = (
         severity == "hard_negative"
         and unrealized_plpc <= hard_exit_max_loss_pct
@@ -1069,6 +1146,7 @@ def maybe_execute_auto_sell(position, decision, market_open: bool) -> dict[str, 
         or severe_breakdown_exit
         or failed_continuation_exit
         or layered_ml_exit
+        or conviction_exit
     ):
         logger.warning(
             f"POSITION MOMENTUM AUTO-SELL blocked for {symbol}: "
@@ -1079,7 +1157,8 @@ def maybe_execute_auto_sell(position, decision, market_open: bool) -> dict[str, 
             f"emergency_loss_exit={emergency_loss_exit}, "
             f"severe_breakdown_exit={severe_breakdown_exit}, "
             f"failed_continuation_exit={failed_continuation_exit}, "
-            f"layered_ml_exit={layered_ml_exit} | {decision.get('reason')}"
+            f"layered_ml_exit={layered_ml_exit}, "
+            f"conviction_exit={conviction_exit} | {decision.get('reason')}"
         )
         return None
 
@@ -1092,7 +1171,8 @@ def maybe_execute_auto_sell(position, decision, market_open: bool) -> dict[str, 
         f"emergency_loss_exit={emergency_loss_exit}, "
         f"severe_breakdown_exit={severe_breakdown_exit}, "
         f"failed_continuation_exit={failed_continuation_exit}, "
-        f"layered_ml_exit={layered_ml_exit}"
+        f"layered_ml_exit={layered_ml_exit}, "
+        f"conviction_exit={conviction_exit}"
     )
 
     client_order_id = build_client_order_id(symbol)
@@ -1214,6 +1294,11 @@ def main() -> int:
             _to_float(getattr(position, "unrealized_plpc", 0)) * 100,
         )
         decision = apply_layered_ml_to_sell_decision(
+            position=position,
+            session=session,
+            decision=decision,
+        )
+        decision = apply_conviction_exit_to_sell_decision(
             position=position,
             session=session,
             decision=decision,

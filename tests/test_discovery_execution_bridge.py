@@ -12,11 +12,13 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "src" / "trading_bot"))
 
+import services.discovery_execution_bridge_service as bridge_module
 from services.discovery_execution_bridge_service import (
     FAILED,
     PENDING,
     REASON_CODE_ALLOCATION_ROUNDS_TO_ZERO,
     REASON_CODE_BROKER_TRANSIENT_FAILURE,
+    REASON_CODE_CONVICTION_ENTRY_BLOCK,
     REASON_CODE_COOLDOWN_ACTIVE,
     REASON_CODE_MISSING_CANONICAL_TRACE,
     REASON_CODE_OPEN_ORDER_EXISTS,
@@ -26,6 +28,7 @@ from services.discovery_execution_bridge_service import (
     DiscoveryExecutionBridgeService,
 )
 
+from config.conviction import load_conviction_config
 from repositories import auto_buy_repo
 
 _DEFAULT_ORDER = object()
@@ -38,11 +41,13 @@ class FakeBroker:
         position=None,
         open_orders=None,
         failure_reason=None,
+        positions=None,
     ):
         self.order = {"id": "order-1", "status": "submitted"} if order is _DEFAULT_ORDER else order
         self.position = position
         self.open_orders = open_orders or []
         self.failure_reason = failure_reason
+        self.positions = positions or []
         self.calls = []
 
     def place_order(self, **kwargs):
@@ -57,6 +62,9 @@ class FakeBroker:
 
     def list_open_orders(self, symbol=None):
         return self.open_orders
+
+    def list_positions(self):
+        return self.positions
 
 
 class FakeLogger:
@@ -451,6 +459,71 @@ def test_full_share_allocation_rounding_blocks_before_broker_route():
         assert logger.info_calls[-1][1][2] == REASON_CODE_ALLOCATION_ROUNDS_TO_ZERO
 
 
+def test_conviction_entry_block_fails_candidate_before_broker_route():
+    old_cfg = bridge_module._CONVICTION_CFG
+    bridge_module._CONVICTION_CFG = load_conviction_config(
+        enabled=True,
+        min_score=30.0,
+        require_probability=True,
+    )
+    try:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "trades.db"
+            auto_buy_repo.init_tables(db_path)
+            candidate = _candidate(symbol="MSFT", score=45.0, trace=_approved_trace())
+            candidate["market_context_ok"] = True
+            row_id = _insert_snapshot(db_path, candidate)
+            broker = FakeBroker(order={"id": "order-should-not-route", "status": "filled"})
+            logger = FakeLogger()
+
+            results = _service(db_path, broker, logger=logger).route_eligible_candidates()
+
+            row = _status(db_path, row_id)
+            assert len(results) == 1
+            assert results[0].status == FAILED
+            assert results[0].reason_code == REASON_CODE_CONVICTION_ENTRY_BLOCK
+            assert "probability_unavailable" in results[0].reason
+            assert broker.calls == []
+            assert row["execution_status"] == FAILED
+            assert logger.info_calls[-1][1][2] == REASON_CODE_CONVICTION_ENTRY_BLOCK
+    finally:
+        bridge_module._CONVICTION_CFG = old_cfg
+
+
+def test_conviction_entry_replaces_request_with_conviction_size():
+    old_cfg = bridge_module._CONVICTION_CFG
+    bridge_module._CONVICTION_CFG = load_conviction_config(
+        enabled=True,
+        min_score=30.0,
+        position_size_pct=90.0,
+    )
+    try:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "trades.db"
+            auto_buy_repo.init_tables(db_path)
+            candidate = _candidate(symbol="MSFT", score=45.0, trace=_approved_trace())
+            candidate["layered_ml_ensemble_probability_pct"] = 70.0
+            candidate["market_context_ok"] = True
+            row_id = _insert_snapshot(db_path, candidate)
+            broker = FakeBroker(order={"id": "order-123", "status": "filled"})
+
+            results = _service(db_path, broker).route_eligible_candidates()
+
+            row = _status(db_path, row_id)
+            assert len(results) == 1
+            assert results[0].status == ROUTED
+            assert broker.calls[0]["position_size_pct"] == 90.0
+            assert row["execution_status"] == ROUTED
+            with auto_buy_repo.get_connection(db_path) as con:
+                trade = con.execute(
+                    "SELECT position_size_pct FROM trades WHERE order_id = ?",
+                    ("order-123",),
+                ).fetchone()
+            assert trade["position_size_pct"] == 90.0
+    finally:
+        bridge_module._CONVICTION_CFG = old_cfg
+
+
 def test_transient_broker_submit_failure_returns_candidate_to_pending():
     with tempfile.TemporaryDirectory() as tmpdir:
         db_path = Path(tmpdir) / "trades.db"
@@ -483,6 +556,8 @@ def main() -> None:
         test_existing_open_order_blocks_bridge_route_with_reason_code,
         test_symbol_cooldown_drop_logs_candidate_tracking_id,
         test_full_share_allocation_rounding_blocks_before_broker_route,
+        test_conviction_entry_block_fails_candidate_before_broker_route,
+        test_conviction_entry_replaces_request_with_conviction_size,
         test_transient_broker_submit_failure_returns_candidate_to_pending,
     ]
     for test in tests:

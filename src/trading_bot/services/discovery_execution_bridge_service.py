@@ -5,17 +5,29 @@ from __future__ import annotations
 import json
 import logging
 import os
-from dataclasses import dataclass
+import sys
+from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
+
+ROOT_DIR = Path(__file__).resolve().parents[3]
+if str(ROOT_DIR) in sys.path:
+    sys.path.remove(str(ROOT_DIR))
+sys.path.insert(0, str(ROOT_DIR))
 
 from repositories.discovery_execution_bridge_repo import DiscoveryExecutionBridgeRepository
 from services.auto_buy_execution_service import (
     AutoBuyBroker,
     build_auto_buy_execution_request,
     execute_auto_buy_order,
+)
+
+from config.conviction import load_conviction_config
+from trading_bot.signals.conviction.policy import (
+    conviction_active_for_mode,
+    conviction_entry_decision,
 )
 
 PENDING = "PENDING"
@@ -34,6 +46,9 @@ REASON_CODE_BROKER_REJECTED_ORDER = "broker_rejected_order"
 REASON_CODE_BROKER_TRANSIENT_FAILURE = "broker_transient_failure"
 REASON_CODE_CANDIDATE_DECODE_FAILED = "candidate_decode_failed"
 REASON_CODE_ALLOCATION_ROUNDS_TO_ZERO = "allocation_rounds_to_zero"
+REASON_CODE_CONVICTION_ENTRY_BLOCK = "conviction_entry_block"
+
+_CONVICTION_CFG = load_conviction_config()
 
 
 @dataclass(frozen=True)
@@ -186,6 +201,24 @@ class DiscoveryExecutionBridgeService:
                     reason_code=reason_code,
                 )
 
+            conviction_block = self._conviction_entry_block(candidate)
+            if conviction_block:
+                reason_code, reason = conviction_block
+                self.repository.mark_failed(candidate_id=candidate_id, reason=reason)
+                self._log_drop(
+                    candidate_id=candidate_id,
+                    symbol=symbol,
+                    reason_code=reason_code,
+                    reason_detail=reason,
+                )
+                return DiscoveryBridgeResult(
+                    candidate_id=candidate_id,
+                    symbol=symbol,
+                    status=FAILED,
+                    reason=reason,
+                    reason_code=reason_code,
+                )
+
             request = build_auto_buy_execution_request(
                 candidate=candidate,
                 default_position_size_pct=self.config.default_position_size_pct,
@@ -195,6 +228,11 @@ class DiscoveryExecutionBridgeService:
                     f"auto-bridge-{candidate_id}-{order_symbol}"
                 ),
             )
+            if conviction_active_for_mode(_CONVICTION_CFG, self.config.execution_mode):
+                request = replace(
+                    request,
+                    position_size_pct=float(_CONVICTION_CFG.position_size_pct),
+                )
             sizing_block = self._allocation_sizing_block(candidate, request.position_size_pct)
             if sizing_block:
                 reason_code, reason = sizing_block
@@ -340,6 +378,45 @@ class DiscoveryExecutionBridgeService:
 
         return None
 
+    def _conviction_entry_block(self, candidate: dict[str, Any]) -> tuple[str, str] | None:
+        if not conviction_active_for_mode(_CONVICTION_CFG, self.config.execution_mode):
+            return None
+
+        decision = conviction_entry_decision(
+            candidate={
+                "symbol": candidate.get("symbol"),
+                "score": candidate.get("score"),
+                "probability_pct": _candidate_probability_pct(candidate),
+                "ml_veto": _candidate_ml_veto(candidate),
+                "market_context_ok": _candidate_market_context_ok(candidate),
+            },
+            account_state={"open_positions": self._open_position_count()},
+            last_trade_state={"minutes_since_last_entry": None},
+            cfg=_CONVICTION_CFG,
+        )
+        candidate["conviction_entry_decision"] = decision
+        if decision.get("enter"):
+            return None
+
+        reason = (
+            "bridge blocked: conviction entry gate failed "
+            f"reason={decision.get('reason')} checks={decision.get('checks')}"
+        )
+        return REASON_CODE_CONVICTION_ENTRY_BLOCK, reason
+
+    def _open_position_count(self) -> int:
+        position_lister = getattr(self.broker, "list_positions", None)
+        if not callable(position_lister):
+            return 0
+        try:
+            positions = position_lister()
+        except Exception:
+            return 0
+        try:
+            return len([position for position in positions or [] if _position_has_qty(position)])
+        except TypeError:
+            return 0
+
     def _allocation_sizing_block(
         self,
         candidate: dict[str, Any],
@@ -468,6 +545,44 @@ def _is_transient_broker_failure(reason: str | None) -> bool:
             "gateway timeout",
         )
     )
+
+
+def _candidate_probability_pct(candidate: dict[str, Any]) -> float | None:
+    for key in (
+        "layered_ml_ensemble_probability_pct",
+        "ensemble_probability_pct",
+        "probability_pct",
+    ):
+        value = candidate.get(key)
+        try:
+            if value not in (None, ""):
+                parsed = float(value)
+                return parsed * 100.0 if 0 <= parsed <= 1 else parsed
+        except (TypeError, ValueError):
+            continue
+    return None
+
+
+def _candidate_ml_veto(candidate: dict[str, Any]) -> bool:
+    if bool(candidate.get("ml_veto")) or bool(candidate.get("layered_ml_veto")):
+        return True
+    instruction = str(candidate.get("layered_ml_final_instruction") or "").strip().lower()
+    if instruction in {"veto", "block", "hard_block", "paper_avoid"}:
+        return True
+    reason = str(candidate.get("hard_block_reason") or candidate.get("reason") or "").lower()
+    return "layered_ml_veto:veto" in reason
+
+
+def _candidate_market_context_ok(candidate: dict[str, Any]) -> bool:
+    if "market_context_ok" in candidate:
+        return bool(candidate.get("market_context_ok"))
+    if bool(candidate.get("block_new_buys")):
+        return False
+    if str(candidate.get("market_bias") or "").strip().lower() in {"avoid", "blocked"}:
+        return False
+    if candidate.get("avoid_type"):
+        return False
+    return True
 
 
 def _float_candidate_value(candidate: dict[str, Any], keys: tuple[str, ...]) -> float | None:

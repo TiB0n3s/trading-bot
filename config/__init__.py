@@ -24,6 +24,7 @@ Adding a new env var:
 """
 
 from config.auto_buy import AutoBuyConfig, load_auto_buy_config
+from config.conviction import ConvictionConfig, load_conviction_config
 from config.ml import MLConfig, load_ml_config
 from config.position_manager import PositionManagerConfig, load_position_manager_config
 from config.risk import RiskConfig, load_risk_config
@@ -36,6 +37,8 @@ __all__ = [
     "load_risk_config",
     "AutoBuyConfig",
     "load_auto_buy_config",
+    "ConvictionConfig",
+    "load_conviction_config",
     "PositionManagerConfig",
     "load_position_manager_config",
     "MLConfig",

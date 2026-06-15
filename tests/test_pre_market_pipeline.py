@@ -36,6 +36,8 @@ def test_pre_market_dry_run_persists_trend_context_before_events():
     assert "historical_trend_context" in out
     assert "build_historical_trend_context" in out
     assert "collect_events" in out
+    assert "refresh_market_context_json" in out
+    assert "--reuse-existing-market-data" in out
     assert out.index("research_data") < out.index("historical_trend_context")
     assert out.index("historical_trend_context") < out.index("collect_events")
 

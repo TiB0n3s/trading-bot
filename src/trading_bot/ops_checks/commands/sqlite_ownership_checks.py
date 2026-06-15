@@ -17,8 +17,8 @@ DB_CONTRACTS = (
     },
     {
         "db_file": "predictions.db",
-        "primary_writer": "prediction cache / prediction generation jobs",
-        "allowed_concurrent_research": "read-only or isolated prediction writer",
+        "primary_writer": "optional future split prediction store; current prediction tables live in trades.db",
+        "allowed_concurrent_research": "not applicable unless the split DB exists",
         "risk": "medium",
         "required": False,
     },

@@ -34,7 +34,7 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
         "--db",
         action="append",
         dest="db_names",
-        help="Database filename to back up. Can be repeated. Defaults to trades/predictions/jobs.",
+        help="Database filename to back up. Can be repeated. Defaults to trades/jobs.",
     )
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--json-manifest", action="store_true")

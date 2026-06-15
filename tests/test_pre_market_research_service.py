@@ -25,6 +25,14 @@ def _bar(close, high=None, low=None):
     )
 
 
+def _verbose_bar(close, high=None, low=None):
+    return SimpleNamespace(
+        close=close,
+        high=high if high is not None else close,
+        low=low if low is not None else close,
+    )
+
+
 def _pct_change(old, new):
     if old <= 0:
         return None
@@ -119,6 +127,23 @@ def test_get_recent_bars_combines_daily_and_minute_context():
     assert row["bar_count_1m"] == 30
     assert row["support_levels"] == [99.0, 96.0, 94.0]
     assert row["resistance_levels"] == [130.0, 130.29]
+
+
+def test_get_recent_bars_accepts_verbose_alpaca_bar_attributes():
+    minute_bars = [_verbose_bar(100 + i, high=101 + i, low=99 + i) for i in range(30)]
+    service = _service(
+        FakeMarketData(
+            daily_bars=[_verbose_bar(95, high=98, low=94), _verbose_bar(100, high=102, low=96)],
+            minute_bars=minute_bars,
+        )
+    )
+
+    row = service.get_recent_bars("AAPL")
+
+    assert row["error"] is None
+    assert round(row["daily_pct"], 3) == 5.263
+    assert row["last_price"] == 129.0
+    assert row["bar_count_1m"] == 30
 
 
 def test_daily_failure_skips_minute_when_configured():
@@ -335,6 +360,7 @@ if __name__ == "__main__":
 
     tests = [
         test_get_recent_bars_combines_daily_and_minute_context,
+        test_get_recent_bars_accepts_verbose_alpaca_bar_attributes,
         test_daily_failure_skips_minute_when_configured,
         test_build_symbol_evidence_marks_missing_technical_levels_as_degraded,
         test_repository_reads_are_delegated,

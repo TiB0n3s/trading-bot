@@ -50,8 +50,43 @@ def test_intraday_event_collection_uses_hybrid_context_without_prediction_writes
     assert captured["timeout"] == 180
 
 
+def test_reuse_existing_market_data_builds_from_context_snapshots():
+    original_symbols = intraday_context_refresh.APPROVED_SYMBOLS_LIST
+    intraday_context_refresh.APPROVED_SYMBOLS_LIST = ["AAPL", "MSFT"]
+    try:
+        market_data = intraday_context_refresh._market_data_from_existing_context(
+            {
+                "symbols": {
+                    "AAPL": {
+                        "data_snapshot": {
+                            "daily_pct": 1.2,
+                            "intraday_pct": 0.4,
+                            "momentum_30m_pct": 0.1,
+                            "last_price": 199.5,
+                            "bar_count_1m": 120,
+                        },
+                        "support_levels": [197.0],
+                        "resistance_levels": [202.0],
+                    },
+                    "MSFT": {},
+                }
+            }
+        )
+    finally:
+        intraday_context_refresh.APPROVED_SYMBOLS_LIST = original_symbols
+
+    assert list(market_data) == ["AAPL"]
+    assert market_data["AAPL"]["last_price"] == 199.5
+    assert market_data["AAPL"]["support_levels"] == [197.0]
+    assert market_data["AAPL"]["resistance_levels"] == [202.0]
+    assert market_data["AAPL"]["source"] == "existing_market_context"
+
+
 def main():
-    tests = [test_intraday_event_collection_uses_hybrid_context_without_prediction_writes]
+    tests = [
+        test_intraday_event_collection_uses_hybrid_context_without_prediction_writes,
+        test_reuse_existing_market_data_builds_from_context_snapshots,
+    ]
     for test in tests:
         test()
         print(f"[OK] {test.__name__}")

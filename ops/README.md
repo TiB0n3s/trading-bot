@@ -286,11 +286,12 @@ python3 ops_check.py database-restore-drill
 
 The backup service uses SQLite's online backup API, stores verified copies under
 `backups/databases/`, writes a manifest, and runs `PRAGMA integrity_check` on
-each copied database. The default set is `trades.db`, `predictions.db`, and
-`jobs.db`; missing optional files are reported but do not fail the run if at
-least one database verifies. The tracked cron file uses a GFS policy: weekly
-Father backups after Friday close and a monthly Grandfather backup on the first
-Saturday. Nightly VM snapshots currently provide the daily Son recovery layer.
+each copied database. The default set is `trades.db` and `jobs.db`; prediction
+history currently lives inside `trades.db`. Optional split database files can be
+passed explicitly with `--db` if introduced later. The tracked cron file uses a
+GFS policy: weekly Father backups after Friday close and a monthly Grandfather
+backup on the first Saturday. Nightly VM snapshots currently provide the daily
+Son recovery layer.
 
 Do not raw-copy `trades.db`, `trades.db-wal`, or `trades.db-shm` while the
 runtime is active. SQLite WAL files are tied to the main database and checkpoint

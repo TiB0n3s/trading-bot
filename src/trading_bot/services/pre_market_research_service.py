@@ -20,6 +20,13 @@ class PreMarketResearchConfig:
     minute_lookback_hours: float
 
 
+def _bar_value(bar: Any, compact_name: str, verbose_name: str) -> float:
+    value = getattr(bar, compact_name, None)
+    if value is None:
+        value = getattr(bar, verbose_name)
+    return float(value)
+
+
 class PreMarketResearchService:
     def __init__(
         self,
@@ -67,14 +74,19 @@ class PreMarketResearchService:
                 if len(daily_bars) >= 2:
                     prev = daily_bars[-2]
                     last = daily_bars[-1]
-                    out["daily_pct"] = self.pct_change(float(prev.c), float(last.c))
-                    out["last_price"] = float(last.c)
+                    out["daily_pct"] = self.pct_change(
+                        _bar_value(prev, "c", "close"),
+                        _bar_value(last, "c", "close"),
+                    )
+                    out["last_price"] = _bar_value(last, "c", "close")
                 elif len(daily_bars) == 1:
-                    out["last_price"] = float(daily_bars[-1].c)
+                    out["last_price"] = _bar_value(daily_bars[-1], "c", "close")
 
                 recent_daily = daily_bars[-5:]
-                daily_supports = sorted((float(b.l) for b in recent_daily), reverse=True)
-                daily_resistances = sorted((float(b.h) for b in recent_daily))
+                daily_supports = sorted(
+                    (_bar_value(b, "l", "low") for b in recent_daily), reverse=True
+                )
+                daily_resistances = sorted(_bar_value(b, "h", "high") for b in recent_daily)
                 out["support_levels"] = self.unique_price_levels(daily_supports)
                 out["resistance_levels"] = self.unique_price_levels(daily_resistances)
             except Exception as e:
@@ -100,19 +112,19 @@ class PreMarketResearchService:
                 out["bar_count_1m"] = len(minute_bars)
 
                 if len(minute_bars) >= 2:
-                    first = float(minute_bars[0].c)
-                    last = float(minute_bars[-1].c)
+                    first = _bar_value(minute_bars[0], "c", "close")
+                    last = _bar_value(minute_bars[-1], "c", "close")
                     out["intraday_pct"] = self.pct_change(first, last)
                     out["last_price"] = last
 
                 if len(minute_bars) >= 30:
-                    first_30 = float(minute_bars[-30].c)
-                    last_30 = float(minute_bars[-1].c)
+                    first_30 = _bar_value(minute_bars[-30], "c", "close")
+                    last_30 = _bar_value(minute_bars[-1], "c", "close")
                     out["momentum_30m_pct"] = self.pct_change(first_30, last_30)
 
                 if minute_bars:
-                    minute_support = min(float(b.l) for b in minute_bars)
-                    minute_resistance = max(float(b.h) for b in minute_bars)
+                    minute_support = min(_bar_value(b, "l", "low") for b in minute_bars)
+                    minute_resistance = max(_bar_value(b, "h", "high") for b in minute_bars)
                     out["support_levels"] = self.unique_price_levels(
                         [minute_support] + out["support_levels"]
                     )

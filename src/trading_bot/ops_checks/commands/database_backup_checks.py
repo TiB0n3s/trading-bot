@@ -11,7 +11,10 @@ from ops.database_backup_service import DatabaseRestoreDrillService
 
 
 def _load_latest_manifest(backup_dir: Path) -> tuple[Path | None, dict[str, Any] | None]:
-    manifests = sorted(backup_dir.glob("**/database_backup_*.manifest.json"))
+    manifests = sorted(
+        backup_dir.glob("**/database_backup_*.manifest.json"),
+        key=lambda p: p.stat().st_mtime,
+    )
     if not manifests:
         return None, None
     latest = manifests[-1]

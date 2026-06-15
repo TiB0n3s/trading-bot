@@ -116,6 +116,29 @@ def _fetch_market_data(symbols: list[str]) -> dict:
     return market_data
 
 
+def _market_data_from_existing_context(existing_context: dict) -> dict:
+    """Reuse already-built market snapshots instead of refetching bars."""
+    market_data = {}
+    symbols = existing_context.get("symbols") or {}
+    for sym in APPROVED_SYMBOLS_LIST:
+        entry = symbols.get(sym) or {}
+        snapshot = entry.get("data_snapshot") or {}
+        if not snapshot:
+            continue
+        market_data[sym] = {
+            "symbol": sym,
+            "daily_pct": snapshot.get("daily_pct"),
+            "intraday_pct": snapshot.get("intraday_pct"),
+            "momentum_30m_pct": snapshot.get("momentum_30m_pct"),
+            "last_price": snapshot.get("last_price"),
+            "support_levels": entry.get("support_levels") or [],
+            "resistance_levels": entry.get("resistance_levels") or [],
+            "bar_count_1m": snapshot.get("bar_count_1m", 0),
+            "source": "existing_market_context",
+        }
+    return market_data
+
+
 def _rebuild_symbols(
     existing_context: dict,
     market_data: dict,
@@ -159,7 +182,7 @@ def _rebuild_symbols(
     return symbols_out
 
 
-def rebuild_market_context(market_date: str) -> dict:
+def rebuild_market_context(market_date: str, *, reuse_existing_market_data: bool = False) -> dict:
     """Stage 2: fetch fresh prices, re-classify, atomically overwrite market_context.json."""
     if not OUTPUT_FILE.exists():
         raise FileNotFoundError(
@@ -198,8 +221,14 @@ def rebuild_market_context(market_date: str) -> dict:
         f"{len(webull_market_context.get('symbols') or {})} symbol(s)"
     )
 
-    logger.info(f"Fetching fresh Alpaca bars for {len(APPROVED_SYMBOLS_LIST)} symbols")
-    market_data = _fetch_market_data(APPROVED_SYMBOLS_LIST)
+    if reuse_existing_market_data:
+        market_data = _market_data_from_existing_context(existing)
+        logger.info(
+            f"Reusing existing market_context.json bar snapshots for {len(market_data)} symbols"
+        )
+    else:
+        logger.info(f"Fetching fresh Alpaca bars for {len(APPROVED_SYMBOLS_LIST)} symbols")
+        market_data = _fetch_market_data(APPROVED_SYMBOLS_LIST)
 
     (
         macro_sentiment,
@@ -276,6 +305,15 @@ def main():
         action="store_true",
         help="Only rebuild market_context.json from existing daily_symbol_context/event rows.",
     )
+    parser.add_argument(
+        "--reuse-existing-market-data",
+        action="store_true",
+        help=(
+            "Reuse data_snapshot values already present in market_context.json instead of "
+            "fetching fresh Alpaca bars. Intended for pre-market pipeline refresh after "
+            "pre_market_research_data has just built context."
+        ),
+    )
     args = parser.parse_args()
 
     market_date = args.date
@@ -286,6 +324,9 @@ def main():
     print(f"  Date    : {market_date}")
     print(f"  Started : {started.strftime('%H:%M:%S')}")
     print(f"  Collect : {'skipped' if args.skip_collect else 'enabled'}")
+    print(
+        f"  Bars    : {'reuse existing context' if args.reuse_existing_market_data else 'fresh Alpaca'}"
+    )
     print()
 
     # Stage 1 — collect fresh events
@@ -298,7 +339,10 @@ def main():
 
     # Stage 2 — rebuild market_context.json
     try:
-        summary = rebuild_market_context(market_date)
+        summary = rebuild_market_context(
+            market_date,
+            reuse_existing_market_data=args.reuse_existing_market_data,
+        )
     except Exception as exc:
         logger.error(f"rebuild_market_context failed: {exc}")
         try:

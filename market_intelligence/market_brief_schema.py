@@ -42,6 +42,9 @@ VALID_MACRO_REGIME = {
 
 
 LEARNING_ENRICHMENT_FIELDS = (
+    "data_snapshot",
+    "technical_levels_degraded",
+    "technical_levels_source",
     "prior_session_market_date",
     "prior_session_session_return_pct",
     "prior_session_mfe_pct",

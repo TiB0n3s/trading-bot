@@ -14,7 +14,10 @@ from services.job_runs_service import JobRunsService
 
 def _latest_backup_summary(base_dir: Path) -> dict[str, Any]:
     backup_dir = base_dir / "backups" / "databases"
-    manifests = sorted(backup_dir.glob("database_backup_*.manifest.json"))
+    manifests = sorted(
+        backup_dir.glob("**/database_backup_*.manifest.json"),
+        key=lambda p: p.stat().st_mtime,
+    )
     if not manifests:
         return {
             "status": "missing_manifest",

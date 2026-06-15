@@ -47,7 +47,10 @@ def _age_hours(path: Path | None) -> float | None:
 
 def _latest_backup_manifest(base_dir: Path) -> tuple[Path | None, dict[str, Any] | None]:
     backup_dir = base_dir / "backups" / "databases"
-    manifests = sorted(backup_dir.glob("database_backup_*.manifest.json"))
+    manifests = sorted(
+        backup_dir.glob("**/database_backup_*.manifest.json"),
+        key=lambda p: p.stat().st_mtime,
+    )
     if not manifests:
         return None, None
     path = manifests[-1]
@@ -71,8 +74,9 @@ def _backup_check(base_dir: Path, *, max_age_hours: float) -> OperationalCheck:
     summary = manifest.get("summary") or {}
     failed = int(summary.get("failed_count") or 0)
     backed_up = int(summary.get("backed_up_count") or 0)
+    reused = int(summary.get("reused_count") or 0)
     stale = age is None or age > max_age_hours
-    ok = failed == 0 and backed_up > 0 and not stale
+    ok = failed == 0 and (backed_up + reused) > 0 and not stale
     return OperationalCheck(
         name="database_backup",
         status="ok" if ok else "fail",
@@ -87,6 +91,7 @@ def _backup_check(base_dir: Path, *, max_age_hours: float) -> OperationalCheck:
             "age_hours": age,
             "max_age_hours": max_age_hours,
             "backed_up_count": backed_up,
+            "reused_count": reused,
             "failed_count": failed,
             "missing_count": int(summary.get("missing_count") or 0),
         },

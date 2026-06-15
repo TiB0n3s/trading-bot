@@ -92,9 +92,17 @@ def _build_steps(target_date: str, *, dry_run: bool = False) -> list[Step]:
         Step(
             name="refresh_market_context_json",
             module="intraday_context_refresh",
-            argv=["--date", target_date, "--skip-collect"],
+            argv=[
+                "--date",
+                target_date,
+                "--skip-collect",
+                "--reuse-existing-market-data",
+            ],
             critical=True,
-            description="rewrite market_context.json from event-enriched daily context without collecting events twice",
+            description=(
+                "rewrite market_context.json from event-enriched daily context without "
+                "collecting events twice or refetching bars already built by research_data"
+            ),
         ),
         Step(
             name="validate_predictions",

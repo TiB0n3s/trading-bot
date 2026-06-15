@@ -11,6 +11,8 @@ sys.path.insert(0, str(ROOT / "scripts"))
 
 from symbols_config import APPROVED_SYMBOLS_LIST
 
+from market_intelligence.market_brief_builder import build_market_brief
+
 REQUIRED_TOP = {
     "block_new_buys",
     "format",
@@ -313,6 +315,40 @@ def test_rich_market_context_has_no_research_pending_placeholders():
     assert not placeholders, placeholders
 
 
+def test_market_brief_preserves_symbol_data_snapshot_for_refresh_reuse():
+    raw = {
+        "market_date": "2026-06-15",
+        "symbols": {
+            "AAPL": {
+                "bias": "neutral",
+                "confidence": "low",
+                "fundamental_score": "neutral",
+                "risk_level": "medium",
+                "entry_quality": "conditional",
+                "support_levels": [197.0],
+                "resistance_levels": [202.0],
+                "data_snapshot": {
+                    "daily_pct": 1.2,
+                    "intraday_pct": 0.4,
+                    "momentum_30m_pct": 0.1,
+                    "last_price": 199.5,
+                    "bar_count_1m": 120,
+                },
+                "technical_levels_degraded": False,
+                "technical_levels_source": "market_data",
+            }
+        },
+    }
+
+    brief = build_market_brief(raw)
+    entry = brief["symbols"]["AAPL"]
+
+    assert entry["data_snapshot"]["last_price"] == 199.5
+    assert entry["data_snapshot"]["bar_count_1m"] == 120
+    assert entry["technical_levels_degraded"] is False
+    assert entry["technical_levels_source"] == "market_data"
+
+
 if __name__ == "__main__":
     test_rich_market_context_has_required_top_fields()
     test_rich_market_context_source_and_format()
@@ -324,4 +360,5 @@ if __name__ == "__main__":
     test_rich_market_context_score_fields_are_numeric()
     test_rich_market_context_symbol_research_lists_are_populated()
     test_rich_market_context_has_no_research_pending_placeholders()
+    test_market_brief_preserves_symbol_data_snapshot_for_refresh_reuse()
     print("[OK] rich market context schema")

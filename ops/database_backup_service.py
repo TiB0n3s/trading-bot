@@ -15,7 +15,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable
 
-DEFAULT_DB_NAMES = ("trades.db", "predictions.db", "jobs.db")
+DEFAULT_DB_NAMES = ("trades.db", "jobs.db")
 DEFAULT_BACKUP_TIER = "adhoc"
 BACKUP_TIER_RETENTION_DAYS = {
     "son": 7,

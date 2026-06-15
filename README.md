@@ -251,11 +251,14 @@ inside the `runtime` target with heavy ML dependencies absent. That validates th
 optional-dependency fallback branch separately from the research image where ML
 dependencies are present.
 
-For SQLite, reason about write ownership per database file. Keep `trades.db`,
-`predictions.db`, and `jobs.db` on same-host bind mounts, never NFS/network
-volumes, and run at most one writer for any given DB file. The live runtime
-should own live order/trade writes; research jobs may run concurrently only when
-their writes are isolated to separate DB files or read-only access.
+For SQLite, reason about write ownership per database file. Keep `trades.db`
+and `jobs.db` on same-host bind mounts, never NFS/network volumes, and run at
+most one writer for any given DB file. Current prediction history
+(`daily_symbol_predictions`, `shadow_predictions`, and decision evidence) lives
+inside `trades.db`; a separate `predictions.db` is optional future split storage,
+not required current backup coverage. The live runtime should own live
+order/trade writes; research jobs may run concurrently only when their writes
+are isolated to separate DB files or read-only access.
 
 Additional validation commands:
 
@@ -1199,9 +1202,9 @@ premarket/all ops check bundles.
 Operational SQLite backups are handled by `pipeline/database_backup.py`.
 It uses SQLite's online backup API, writes a JSON manifest under
 `backups/databases/`, and verifies each copied DB with `PRAGMA integrity_check`.
-The default target set is `trades.db`, `predictions.db`, and `jobs.db`; missing
-optional DB files are reported in the manifest without failing the backup if at
-least one DB verifies.
+The default target set is `trades.db` and `jobs.db`. Prediction/outcome history
+is currently stored in `trades.db`, so backing up `trades.db` protects the active
+ML prediction substrate.
 
 ```bash
 python3 pipeline/database_backup.py --backup-tier father --retention-days 28

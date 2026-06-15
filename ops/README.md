@@ -78,6 +78,15 @@ context refreshes as macro positioning evidence.
 
 ```bash
 cd ~/trading-bot
+./venv/bin/python scripts/cot_positioning_fetch.py
+```
+
+`pipeline/pre_market.py` runs this fetch/normalize step automatically before
+building `market_context.json`. Manual normalization from a prepared JSON file
+is still available for replay or vendor-failover cases:
+
+```bash
+cd ~/trading-bot
 ./venv/bin/python scripts/cot_positioning_update.py \
   --input data/cot/latest_financial_futures.json \
   --output runtime_state/cot_positioning.json
@@ -132,6 +141,17 @@ evidence.
 
 ```bash
 cd ~/trading-bot
+./venv/bin/python scripts/webull_context_collect.py --date "$(date +%F)"
+```
+
+`pipeline/pre_market.py` runs this collector automatically before the context
+build. The collector uses Webull OpenAPI screener rankings as a
+morning-brief-compatible proxy because the SDK exposes ranked market data, not
+the exact in-app Morning Brief panel. Manual normalization from captured app
+payloads remains available:
+
+```bash
+cd ~/trading-bot
 ./venv/bin/python scripts/webull_morning_brief_update.py \
   --input data/webull/morning_brief_YYYY-MM-DD.json \
   --output runtime_state/webull_morning_brief.json
@@ -146,6 +166,15 @@ risk gates.
 Webull screener, news-summary, and attention evidence is normalized into
 `runtime_state/webull_market_evidence.json` and consumed by pre-market/intraday
 market context refreshes as non-authoritative symbol evidence.
+
+```bash
+cd ~/trading-bot
+./venv/bin/python scripts/webull_context_collect.py --date "$(date +%F)"
+```
+
+The same automated collector writes `data/webull/market_evidence_YYYY-MM-DD.json`
+and `runtime_state/webull_market_evidence.json`. Manual normalization remains
+available for externally captured payloads:
 
 ```bash
 cd ~/trading-bot

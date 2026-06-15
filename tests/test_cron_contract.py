@@ -177,8 +177,9 @@ def test_context_jobs_keep_afterhours_and_weekend_coverage():
     ]
     weekend = [line for line in lines if "--job-name collect_and_score_events_weekend" in line]
 
-    assert len(intraday) == 1, intraday
-    assert intraday[0].startswith("*/45 9-14 * * 1-5"), intraday
+    assert len(intraday) == 2, intraday
+    assert any(line.startswith("35 8 * * 1-5") for line in intraday), intraday
+    assert any(line.startswith("*/45 9-14 * * 1-5") for line in intraday), intraday
     assert len(afterhours) == 1 and afterhours[0].startswith("0 18 * * 1-4"), afterhours
     assert len(friday) == 1 and friday[0].startswith("0 18 * * 5"), friday
     assert len(weekend) == 1 and weekend[0].startswith("0 10,18 * * 6,0"), weekend

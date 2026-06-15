@@ -42,6 +42,7 @@ from symbols_config import (
 
 from market_intelligence.event_collectors.company_news_collector import (
     collect_company_news_events,
+    event_symbol_attribution,
 )
 from market_intelligence.experience_model import predict_all_symbols
 from market_intelligence.intelligence_store import (
@@ -145,6 +146,50 @@ def backfill_ai_event_context(
     return updated, affected_by_date
 
 
+def backfill_event_attribution_and_scores(
+    market_date: str,
+    *,
+    force: bool = False,
+) -> tuple[int, dict[str, set[str]]]:
+    """Recompute symbol attribution and score fields for existing event rows."""
+    repo = MarketIntelligenceRepository()
+    updated = 0
+    affected_by_date: dict[str, set[str]] = defaultdict(set)
+    updated_at = datetime.now(timezone.utc).isoformat()
+
+    for row in repo.daily_symbol_event_rows_for_date(market_date):
+        event = _event_from_row(row)
+        text = " ".join(
+            str(event.get(key) or "")
+            for key in ("raw_headline", "raw_description", "event_summary")
+        )
+        attribution = event_symbol_attribution(
+            str(event.get("symbol") or ""),
+            text,
+            str(event.get("search_scope") or "company_direct"),
+        )
+        event.update(attribution)
+        scored_event = score_event(event)
+        if (
+            not force
+            and event.get("symbol_attribution") == scored_event["symbol_attribution"]
+            and float(event.get("symbol_relevance_weight") or -1)
+            == float(scored_event["symbol_relevance_weight"])
+            and event.get("source_tier") == scored_event.get("source_tier")
+            and event.get("source_name") == scored_event.get("source_name")
+        ):
+            continue
+        repo.update_daily_symbol_event_from_scored(
+            int(row["id"]),
+            scored_event,
+            updated_at,
+        )
+        updated += 1
+        for affected in affected_approved_symbols(scored_event):
+            affected_by_date[scored_event["market_date"]].add(affected)
+    return updated, affected_by_date
+
+
 def print_table(events):
     print()
     print(f"  {'#':>3} {'Sym':<7} {'Type':<22} {'Impact':<20} {'Relevance':<22} {'Net':>7} Summary")
@@ -228,6 +273,16 @@ def main():
         help="Add context-only AI interpretation metadata to existing same-day event rows",
     )
     parser.add_argument(
+        "--backfill-event-attribution",
+        action="store_true",
+        help="Recompute symbol attribution/relevance weights and score labels for existing same-day event rows",
+    )
+    parser.add_argument(
+        "--backfill-event-attribution-only",
+        action="store_true",
+        help="Only recompute existing event attribution/scores; skip fresh collection",
+    )
+    parser.add_argument(
         "--backfill-ai-context-only",
         action="store_true",
         help="Only backfill existing same-day event rows; skip fresh collection",
@@ -272,6 +327,9 @@ def main():
     print(f"  Context syms  : {args.include_context_symbols}")
     print(f"  AI context    : {args.ai_interpret_events} ({args.ai_event_provider})")
     print(f"  AI backfill   : {args.backfill_ai_context or args.backfill_ai_context_only}")
+    print(
+        f"  Attr backfill : {args.backfill_event_attribution or args.backfill_event_attribution_only}"
+    )
     print(f"  Max/symbol    : {args.max_per_symbol}")
     print(f"  Dry run       : {args.dry_run}")
     print(f"  Apply context : {args.apply_context}")
@@ -279,6 +337,15 @@ def main():
     init_intelligence_tables()
 
     updated_symbols_by_date = defaultdict(set)
+
+    if args.backfill_event_attribution or args.backfill_event_attribution_only:
+        updated, affected = backfill_event_attribution_and_scores(
+            args.date,
+            force=args.force_ai_context,
+        )
+        for market_date, syms in affected.items():
+            updated_symbols_by_date[market_date].update(syms)
+        print(f"Backfilled event attribution rows: {updated}")
 
     if args.backfill_ai_context or args.backfill_ai_context_only:
         updated, affected = backfill_ai_event_context(
@@ -290,14 +357,14 @@ def main():
             updated_symbols_by_date[market_date].update(syms)
         print(f"Backfilled AI event context rows: {updated}")
 
-    if args.backfill_ai_context_only:
+    if args.backfill_ai_context_only or args.backfill_event_attribution_only:
         inserted = []
         new_events = []
         errors = []
         duplicates = 0
         scored = []
         raw_events = []
-        print("Fresh collection skipped due to --backfill-ai-context-only.")
+        print("Fresh collection skipped due to backfill-only mode.")
         if not args.apply_context and not args.predict:
             return 0
         goto_apply_context = True

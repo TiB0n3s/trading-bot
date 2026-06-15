@@ -18,11 +18,10 @@ Design:
 
 from __future__ import annotations
 
-from dataclasses import dataclass, asdict
+from dataclasses import asdict, dataclass
 from typing import Any
 
 from market_intelligence.source_reliability import classify_source, confidence_cap_for_sources
-
 
 VALID_EVENT_TYPES = {
     "product_launch",
@@ -295,6 +294,13 @@ def _search_scope(event: dict[str, Any]) -> str:
     return str(event.get("search_scope") or event.get("relevance_scope") or "unknown")
 
 
+def _symbol_relevance_weight(event: dict[str, Any]) -> float:
+    try:
+        return clamp(float(event.get("symbol_relevance_weight")), 0.0, 1.0)
+    except (TypeError, ValueError):
+        return 1.0
+
+
 def _confirmation_status(event: dict[str, Any], source_tier: str) -> str:
     explicit = str(event.get("confirmation_status") or "").strip().lower()
     if explicit:
@@ -314,7 +320,13 @@ def _intent_scope(event: dict[str, Any], event_type: str) -> str:
         return "direct_company"
     if scope in ("company_peripheral", "peripheral", "supplier", "customer"):
         return "peripheral_company"
-    if event_type in ("supplier_signal", "customer_contract", "leadership_personnel", "mna_deal_chatter", "insider_transaction"):
+    if event_type in (
+        "supplier_signal",
+        "customer_contract",
+        "leadership_personnel",
+        "mna_deal_chatter",
+        "insider_transaction",
+    ):
         return "peripheral_company"
     if event_type in ("congressional_trade_disclosure",):
         return "public_official_disclosure"
@@ -444,9 +456,8 @@ def interpret_event_intent(
 def score_event(event: dict[str, Any]) -> dict[str, Any]:
     """Return event payload enriched with normalized scores."""
     event = dict(event)
-    if not event.get("source_tier"):
-        source_policy = classify_source(event.get("source"), url=event.get("source_url"))
-        event.update({k: v for k, v in source_policy.items() if event.get(k) is None})
+    source_policy = classify_source(event.get("source"), url=event.get("source_url"))
+    event.update(source_policy)
 
     event_type = normalize_event_type(event.get("event_type"))
     summary = str(event.get("event_summary") or event.get("summary") or "")
@@ -625,11 +636,16 @@ def score_event(event: dict[str, Any]) -> dict[str, Any]:
         expected_market_impact="neutral",
         trade_relevance="watch_only",
         time_horizon=str(event.get("time_horizon") or default_time_horizon(event_type)),
-        confidence=str(event.get("confidence") or infer_confidence(
-            summary, bullish, bearish,
-            event_type=event_type,
-            net_score=bullish - bearish,
-        )),
+        confidence=str(
+            event.get("confidence")
+            or infer_confidence(
+                summary,
+                bullish,
+                bearish,
+                event_type=event_type,
+                net_score=bullish - bearish,
+            )
+        ),
         scoring_reason="; ".join(reason_bits),
     )
 
@@ -648,14 +664,7 @@ def score_event(event: dict[str, Any]) -> dict[str, Any]:
     )
     raw_net = upside - risk
     neutral_upside = 50 * 0.25 + 50 * 0.30 + 50 * 0.25
-    neutral_risk = (
-        35 * 0.15
-        + 30 * 0.15
-        + 20 * 0.15
-        + 30 * 0.15
-        + 30 * 0.15
-        + 25 * 0.10
-    )
+    neutral_risk = 35 * 0.15 + 30 * 0.15 + 20 * 0.15 + 30 * 0.15 + 30 * 0.15 + 25 * 0.10
     # A neutral event should score neutral. The previous raw upside-risk spread
     # had a positive baseline, which made weak/unrelated headlines look bullish.
     net = raw_net - (neutral_upside - neutral_risk)
@@ -691,9 +700,7 @@ def score_event(event: dict[str, Any]) -> dict[str, Any]:
         if net < 20 or source_tier in ("unclassified", "low_confidence", "unknown"):
             impact = "neutral"
             relevance = "watch_for_confirmation" if net >= 12 else "watch_only"
-            reason_bits.append(
-                f"bullish inference capped by source reliability tier={source_tier}"
-            )
+            reason_bits.append(f"bullish inference capped by source reliability tier={source_tier}")
         elif impact == "strongly_bullish":
             impact = "moderately_bullish"
             relevance = "watch_for_confirmation"
@@ -729,6 +736,20 @@ def score_event(event: dict[str, Any]) -> dict[str, Any]:
             impact = "neutral"
         relevance = "watch_only"
 
+    relevance_weight = _symbol_relevance_weight(event)
+    attribution = str(event.get("symbol_attribution") or "unspecified")
+    if relevance_weight < 0.5 and event.get("context_only") is not True:
+        reason_bits.append(f"weak symbol attribution={attribution}:weight={relevance_weight:.2f}")
+        if impact in (
+            "strongly_bullish",
+            "moderately_bullish",
+            "strongly_bearish",
+            "moderately_bearish",
+        ):
+            impact = "neutral"
+            relevance = "watch_only"
+            reason_bits.append("directional inference capped by weak symbol attribution")
+
     intent = interpret_event_intent(
         event=event,
         event_type=event_type,
@@ -763,7 +784,13 @@ def default_time_horizon(event_type: str) -> str:
         "strategic_partnership",
     ):
         return "weeks_to_quarters"
-    if event_type in ("earnings", "guidance", "analyst_action", "leadership_personnel", "insider_transaction"):
+    if event_type in (
+        "earnings",
+        "guidance",
+        "analyst_action",
+        "leadership_personnel",
+        "insider_transaction",
+    ):
         return "days_to_weeks"
     if event_type in ("congressional_trade_disclosure",):
         return "delayed_disclosure_context"

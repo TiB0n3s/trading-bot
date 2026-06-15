@@ -101,6 +101,24 @@ COMPANY_QUERY_NAMES = {
     "HBAN": "Huntington Bancshares",
     "KEY": "KeyCorp",
     "KHC": "Kraft Heinz",
+    "NOC": "Northrop Grumman",
+    "LHX": "L3Harris",
+    "HON": "Honeywell",
+    "TDY": "Teledyne Technologies",
+    "INTC": "Intel",
+    "CSCO": "Cisco",
+    "JNPR": "Juniper Networks",
+    "MRVL": "Marvell Technology",
+    "ANET": "Arista Networks",
+    "ETN": "Eaton",
+    "CEG": "Constellation Energy",
+    "MP": "MP Materials",
+    "FCX": "Freeport-McMoRan",
+    "ALB": "Albemarle",
+    "KTOS": "Kratos Defense",
+    "AVAV": "AeroVironment",
+    "PATH": "UiPath",
+    "SYM": "Symbotic",
 }
 
 for _symbol, _cfg in CONTEXT_ONLY_SYMBOL_CONFIG.items():
@@ -538,6 +556,54 @@ def _context_symbol_metadata(symbol: str) -> dict:
     }
 
 
+def _symbol_aliases(symbol: str) -> list[str]:
+    symbol = symbol.upper().strip()
+    aliases = [symbol]
+    company_name = COMPANY_QUERY_NAMES.get(symbol)
+    if company_name:
+        aliases.append(company_name)
+        aliases.extend(part for part in re.split(r"[\s,/&-]+", company_name) if len(part) >= 4)
+    return sorted({alias.strip() for alias in aliases if alias and alias.strip()})
+
+
+def _has_symbol_attribution(text: str, symbol: str) -> bool:
+    lowered = text.lower()
+    symbol = symbol.upper().strip()
+    for alias in _symbol_aliases(symbol):
+        if alias.upper() == symbol:
+            # Avoid noisy one-letter ticker matches like T/V/F.
+            if len(symbol) <= 2:
+                continue
+            if re.search(rf"(?<![A-Z0-9])[$(]?{re.escape(symbol)}[)]?(?![A-Z0-9])", text):
+                return True
+            continue
+        if alias.lower() in lowered:
+            return True
+    return False
+
+
+def event_symbol_attribution(symbol: str, text: str, search_scope: str) -> dict:
+    """Classify how strongly a fetched headline is attributable to the symbol."""
+    direct_match = _has_symbol_attribution(text, symbol)
+    if direct_match:
+        return {
+            "symbol_attribution": "direct_symbol_or_company_match",
+            "symbol_relevance_weight": 1.0,
+            "symbol_attribution_reason": "headline_or_snippet_mentions_symbol_or_company",
+        }
+    if search_scope == "company_peripheral":
+        return {
+            "symbol_attribution": "peripheral_query_weak_match",
+            "symbol_relevance_weight": 0.35,
+            "symbol_attribution_reason": "peripheral_query_result_without_explicit_symbol_match",
+        }
+    return {
+        "symbol_attribution": "weak_query_match",
+        "symbol_relevance_weight": 0.25,
+        "symbol_attribution_reason": "query_result_without_explicit_symbol_or_company_match",
+    }
+
+
 def event_from_item(
     market_date: str, symbol: str, item: dict, search_scope: str = "company_direct"
 ) -> dict:
@@ -549,6 +615,7 @@ def event_from_item(
     publisher = publisher_from_google_news_title(title)
     source_policy = classify_source(publisher, url=item.get("link"))
     source_name = source_policy["source_name"]
+    attribution = event_symbol_attribution(symbol, text, search_scope)
 
     return {
         "market_date": market_date,
@@ -572,6 +639,7 @@ def event_from_item(
         "raw_published_at": item.get("published_at"),
         "raw_headline": title,
         "raw_description": desc,
+        **attribution,
         **_context_symbol_metadata(symbol),
     }
 

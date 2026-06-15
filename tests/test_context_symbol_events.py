@@ -10,6 +10,9 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
+from market_intelligence.event_collectors.company_news_collector import (
+    event_from_item,  # noqa: E402
+)
 from market_intelligence.intelligence_store import (  # noqa: E402
     aggregate_symbol_events,
     insert_daily_symbol_event,
@@ -72,11 +75,56 @@ def test_context_only_event_aggregates_into_linked_approved_symbol(tmp_path):
     assert aapl["has_events"] is False
 
 
+def test_weak_query_match_is_stored_but_downweighted_for_target_symbol(tmp_path):
+    db_path = tmp_path / "trades.db"
+    collected = event_from_item(
+        "2026-06-01",
+        "PATH",
+        {
+            "title": "Should You Buy Nvidia Stock Before June 24? - The Globe and Mail",
+            "description": "Nvidia demand and AI infrastructure discussion.",
+            "link": "https://example.com/nvidia-context",
+            "published_at": "2026-06-01T12:00:00+00:00",
+        },
+        search_scope="company_direct",
+    )
+    event = score_event(collected)
+    insert_daily_symbol_event(event, db_path=db_path)
+
+    path = aggregate_symbol_events("2026-06-01", "PATH", db_path=db_path)
+
+    assert event["symbol_attribution"] == "weak_query_match"
+    assert event["symbol_relevance_weight"] == 0.25
+    assert event["expected_market_impact"] == "neutral"
+    assert path["has_events"] is True
+    assert path["event_context"]["weak_attribution_event_count"] == 1
+    assert path["event_context"]["weighted_event_exposure"] == 0.25
+    assert path["catalyst_score"] <= 35
+
+
+def test_ticker_attribution_does_not_match_common_lowercase_word_path():
+    event = event_from_item(
+        "2026-06-01",
+        "PATH",
+        {
+            "title": "Will SpaceX stock follow the typical path after a skyrocketing IPO? - AOL.com",
+            "description": "SpaceX IPO context unrelated to automation software.",
+            "link": "https://example.com/spacex-path",
+            "published_at": "2026-06-01T12:00:00+00:00",
+        },
+        search_scope="company_direct",
+    )
+
+    assert event["symbol_attribution"] == "weak_query_match"
+    assert event["symbol_relevance_weight"] == 0.25
+
+
 def main():
     with tempfile.TemporaryDirectory() as tmp:
         test_context_only_event_aggregates_into_linked_approved_symbol(Path(tmp))
-    print("[OK] test_context_only_event_aggregates_into_linked_approved_symbol")
-    print("\nAll 1 context symbol event tests passed.")
+        test_weak_query_match_is_stored_but_downweighted_for_target_symbol(Path(tmp))
+        test_ticker_attribution_does_not_match_common_lowercase_word_path()
+    print("[OK] context symbol event tests passed")
 
 
 if __name__ == "__main__":

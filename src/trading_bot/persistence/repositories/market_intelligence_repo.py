@@ -245,6 +245,72 @@ class MarketIntelligenceRepository:
                 (raw_json, updated_at, event_id),
             )
 
+    def update_daily_symbol_event_from_scored(
+        self,
+        event_id: int,
+        event: dict[str, Any],
+        updated_at: str,
+    ) -> None:
+        with get_connection(self.db_path) as con:
+            con.execute(
+                """
+                UPDATE daily_symbol_events
+                SET
+                    event_type = ?,
+                    event_subtype = ?,
+                    event_summary = ?,
+                    source = ?,
+                    source_url = ?,
+                    product_name = ?,
+                    company_segment = ?,
+                    industry = ?,
+                    expected_market_impact = ?,
+                    trade_relevance = ?,
+                    time_horizon = ?,
+                    confidence = ?,
+                    consumer_appetite_score = ?,
+                    revenue_impact_score = ?,
+                    profit_potential_score = ?,
+                    margin_risk_score = ?,
+                    supply_chain_risk_score = ?,
+                    materials_risk_score = ?,
+                    regulatory_risk_score = ?,
+                    competitive_risk_score = ?,
+                    execution_risk_score = ?,
+                    macro_risk_score = ?,
+                    raw_json = ?,
+                    updated_at = ?
+                WHERE id = ?
+                """,
+                (
+                    event.get("event_type"),
+                    event.get("event_subtype"),
+                    event.get("event_summary"),
+                    event.get("source"),
+                    event.get("source_url"),
+                    event.get("product_name"),
+                    event.get("company_segment"),
+                    event.get("industry"),
+                    event.get("expected_market_impact"),
+                    event.get("trade_relevance"),
+                    event.get("time_horizon"),
+                    event.get("confidence"),
+                    event.get("consumer_appetite_score"),
+                    event.get("revenue_impact_score"),
+                    event.get("profit_potential_score"),
+                    event.get("margin_risk_score"),
+                    event.get("supply_chain_risk_score"),
+                    event.get("materials_risk_score"),
+                    event.get("regulatory_risk_score"),
+                    event.get("competitive_risk_score"),
+                    event.get("execution_risk_score"),
+                    event.get("macro_risk_score"),
+                    json.dumps(event, sort_keys=True),
+                    updated_at,
+                    event_id,
+                ),
+            )
+
     def context_symbols(self, market_date: str) -> list[str]:
         with get_connection(self.db_path) as con:
             rows = con.execute(

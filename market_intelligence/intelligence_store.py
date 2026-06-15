@@ -279,6 +279,49 @@ def _max(values):
     return round(max(nums), 2) if nums else None
 
 
+def _event_relevance_weight(row, raw: dict, target_symbol: str) -> float:
+    row_symbol = str(row["symbol"] or "").upper()
+    target_symbol = target_symbol.upper()
+    try:
+        base = float(raw.get("symbol_relevance_weight"))
+    except (TypeError, ValueError):
+        base = 1.0
+    base = max(0.0, min(1.0, base))
+    if row_symbol == target_symbol:
+        return base
+    if raw.get("context_only") is True:
+        try:
+            relationship_weight = float(raw.get("relationship_weight"))
+        except (TypeError, ValueError):
+            relationship_weight = 0.6
+        return max(0.0, min(0.75, relationship_weight))
+    return 0.25
+
+
+def _weighted_avg(pairs):
+    nums = []
+    total_weight = 0.0
+    for value, weight in pairs:
+        try:
+            if value is not None and weight > 0:
+                nums.append(float(value) * float(weight))
+                total_weight += float(weight)
+        except (TypeError, ValueError):
+            pass
+    return round(sum(nums) / total_weight, 2) if total_weight > 0 else None
+
+
+def _weighted_max(pairs):
+    nums = []
+    for value, weight in pairs:
+        try:
+            if value is not None and weight > 0:
+                nums.append(float(value) * float(weight))
+        except (TypeError, ValueError):
+            pass
+    return round(max(nums), 2) if nums else None
+
+
 def aggregate_symbol_events(market_date: str, symbol: str, db_path: Path | str = DB_PATH) -> dict:
     """Aggregate daily_symbol_events into one learnable symbol-level score set.
 
@@ -293,6 +336,7 @@ def aggregate_symbol_events(market_date: str, symbol: str, db_path: Path | str =
     )
     events = []
     raw_by_event_id = {}
+    weights_by_event_id = {}
     target_symbol = symbol.upper()
     for row in event_rows:
         raw = {}
@@ -309,6 +353,7 @@ def aggregate_symbol_events(market_date: str, symbol: str, db_path: Path | str =
         ):
             events.append(row)
             raw_by_event_id[row["id"]] = raw
+            weights_by_event_id[row["id"]] = _event_relevance_weight(row, raw, target_symbol)
 
     if not events:
         return {
@@ -339,10 +384,14 @@ def aggregate_symbol_events(market_date: str, symbol: str, db_path: Path | str =
     }
 
     for field in upside_fields:
-        out[field] = _avg([e[field] for e in events])
+        out[field] = _weighted_avg(
+            [(e[field], weights_by_event_id.get(e["id"], 1.0)) for e in events]
+        )
 
     for field in risk_fields:
-        out[field] = _max([e[field] for e in events])
+        out[field] = _weighted_max(
+            [(e[field], weights_by_event_id.get(e["id"], 1.0)) for e in events]
+        )
 
     # Catalyst score balances upside and confidence against risk.
     upside = (
@@ -375,6 +424,8 @@ def aggregate_symbol_events(market_date: str, symbol: str, db_path: Path | str =
     relevance = [e["trade_relevance"] for e in events if e["trade_relevance"]]
     raw_events = []
     linked_context_symbols = []
+    weak_attribution_count = 0
+    weighted_event_exposure = 0.0
     direct_event_count = 0
     linked_event_count = 0
     for e in events:
@@ -388,8 +439,14 @@ def aggregate_symbol_events(market_date: str, symbol: str, db_path: Path | str =
                     linked_event_count += 1
                     if raw.get("symbol"):
                         linked_context_symbols.append(str(raw["symbol"]).upper())
+                if weights_by_event_id.get(e["id"], 1.0) < 0.5:
+                    weak_attribution_count += 1
+                weighted_event_exposure += float(weights_by_event_id.get(e["id"], 1.0))
         except Exception:
             pass
+
+    if events and weak_attribution_count == len(events) and weighted_event_exposure < 0.5:
+        out["catalyst_score"] = min(float(out["catalyst_score"]), 35.0)
 
     intent_directions = [
         str(e.get("intent_direction")) for e in raw_events if e.get("intent_direction")
@@ -445,6 +502,8 @@ def aggregate_symbol_events(market_date: str, symbol: str, db_path: Path | str =
         "event_count": len(events),
         "direct_event_count": direct_event_count,
         "linked_context_event_count": linked_event_count,
+        "weak_attribution_event_count": weak_attribution_count,
+        "weighted_event_exposure": round(weighted_event_exposure, 2),
         "linked_context_symbols": sorted(set(linked_context_symbols)),
         "intent_directions": sorted(set(intent_directions)),
         "intent_categories": sorted(set(intent_categories)),

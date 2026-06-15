@@ -50,6 +50,44 @@ def test_unclassified_source_caps_weak_bullish_inference():
     assert "capped by source reliability" in event["scoring_reason"]
 
 
+def test_weak_symbol_attribution_caps_directional_inference_even_from_trusted_source():
+    event = score_event(
+        {
+            "market_date": "2026-06-01",
+            "symbol": "PATH",
+            "event_type": "industry_demand",
+            "event_summary": "Nvidia reports record AI demand and raises guidance",
+            "source": "reuters",
+            "source_tier": "confirmed_financial_news",
+            "trusted_source": True,
+            "symbol_attribution": "weak_query_match",
+            "symbol_relevance_weight": 0.25,
+        }
+    )
+
+    assert event["expected_market_impact"] == "neutral"
+    assert event["trade_relevance"] == "watch_only"
+    assert "weak symbol attribution" in event["scoring_reason"]
+
+
+def test_score_event_refreshes_stale_source_policy_metadata():
+    event = score_event(
+        {
+            "market_date": "2026-06-01",
+            "symbol": "AAPL",
+            "event_type": "industry_demand",
+            "event_summary": "Apple demand update from finance publisher",
+            "source": "The Motley Fool",
+            "source_name": "the motley fool",
+            "source_tier": "unclassified",
+            "trusted_source": False,
+        }
+    )
+
+    assert event["source_name"] == "the motley fool"
+    assert event["source_tier"] == "medium_confidence"
+
+
 def test_trusted_source_can_support_bullish_inference():
     event = score_event(
         {
@@ -104,7 +142,9 @@ def test_untrusted_deal_chatter_requires_confirmation():
 
     assert event["expected_market_impact"] == "neutral"
     assert event["trade_relevance"] in ("watch_only", "watch_for_confirmation")
-    assert "rumor-sensitive peripheral event requires trusted confirmation" in event["scoring_reason"]
+    assert (
+        "rumor-sensitive peripheral event requires trusted confirmation" in event["scoring_reason"]
+    )
     assert event["confirmation_status"] == "unconfirmed"
     assert "official_or_second_reputable_source" in event["missing_evidence"]
 
@@ -215,6 +255,8 @@ def main():
     tests = [
         test_neutral_headline_baseline_does_not_infer_bullish,
         test_unclassified_source_caps_weak_bullish_inference,
+        test_weak_symbol_attribution_caps_directional_inference_even_from_trusted_source,
+        test_score_event_refreshes_stale_source_policy_metadata,
         test_trusted_source_can_support_bullish_inference,
         test_supplier_signal_models_risk_without_untrusted_bullish_jump,
         test_untrusted_deal_chatter_requires_confirmation,

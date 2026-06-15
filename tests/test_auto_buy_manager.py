@@ -1649,6 +1649,11 @@ def test_layered_ml_runs_for_otherwise_strong_auto_buy_candidate():
     assert_equal(calls["count"], 1, "layered context calls")
     assert_equal(candidate["decision"], "strong_buy_candidate", "decision")
     assert_equal(candidate["evaluation_depth"], "full_layered_ml", "evaluation depth")
+    assert_equal(candidate["conviction_score"], candidate["confluence_score"], "conviction score")
+    if candidate["score"] <= candidate["confluence_score"]:
+        raise AssertionError(
+            "expected layered ML pass to adjust final score above confluence score"
+        )
     assert_equal(
         candidate["layered_ml_evaluation_depth"],
         "full_layered_ml",

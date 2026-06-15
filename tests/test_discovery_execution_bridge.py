@@ -553,6 +553,38 @@ def test_conviction_entry_accepts_daily_profit_probability_fallback():
         bridge_module._CONVICTION_CFG = old_cfg
 
 
+def test_conviction_entry_uses_confluence_score_not_layered_adjusted_score():
+    old_cfg = bridge_module._CONVICTION_CFG
+    bridge_module._CONVICTION_CFG = load_conviction_config(
+        enabled=True,
+        min_score=23.0,
+        min_probability_pct=62.0,
+    )
+    try:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "trades.db"
+            auto_buy_repo.init_tables(db_path)
+            candidate = _candidate(symbol="MSFT", score=27.0, trace=_approved_trace())
+            candidate["confluence_score"] = 21.0
+            candidate["probability_pct"] = 90.0
+            candidate["probability_source"] = "probability_of_profit"
+            candidate["market_context_ok"] = True
+            row_id = _insert_snapshot(db_path, candidate)
+            broker = FakeBroker(order={"id": "order-should-not-route", "status": "filled"})
+
+            results = _service(db_path, broker).route_eligible_candidates()
+
+            row = _status(db_path, row_id)
+            assert len(results) == 1
+            assert results[0].status == FAILED
+            assert results[0].reason_code == REASON_CODE_CONVICTION_ENTRY_BLOCK
+            assert "score_below_conviction_bar" in results[0].reason
+            assert broker.calls == []
+            assert row["execution_status"] == FAILED
+    finally:
+        bridge_module._CONVICTION_CFG = old_cfg
+
+
 def test_conviction_entry_requires_stricter_system_probability_fallback():
     old_cfg = bridge_module._CONVICTION_CFG
     bridge_module._CONVICTION_CFG = load_conviction_config(

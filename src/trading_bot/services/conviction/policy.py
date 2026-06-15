@@ -73,7 +73,7 @@ def conviction_entry_decision(
 
     Args:
         candidate: ranked candidate. Recognized keys (all optional, read
-            defensively): ``symbol``, ``score`` (heuristic composite),
+            defensively): ``symbol``, ``score`` (deterministic confluence score),
             ``probability_pct`` (learned 0-100), ``probability_source``,
             ``ml_veto`` (bool), ``market_context_ok`` (bool).
         account_state: ``open_positions`` (int).
@@ -84,7 +84,8 @@ def conviction_entry_decision(
     Returns:
         dict with ``enter`` (bool), ``reason`` (first failing gate or
         "conviction_entry_confirmed"), ``checks`` (per-gate booleans), and
-        ``conviction_score`` (the candidate score that cleared/failed the bar).
+        ``conviction_score`` (the deterministic candidate confluence score that
+        cleared/failed the bar, not a probability or trained-model output).
     """
     candidate = candidate if isinstance(candidate, dict) else {}
     account_state = account_state if isinstance(account_state, dict) else {}

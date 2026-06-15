@@ -385,7 +385,7 @@ class DiscoveryExecutionBridgeService:
         decision = conviction_entry_decision(
             candidate={
                 "symbol": candidate.get("symbol"),
-                "score": candidate.get("score"),
+                "score": _candidate_conviction_score(candidate),
                 "probability_pct": _candidate_probability_pct(candidate),
                 "probability_source": candidate.get("probability_source"),
                 "ml_veto": _candidate_ml_veto(candidate),
@@ -559,6 +559,17 @@ def _candidate_probability_pct(candidate: dict[str, Any]) -> float | None:
             if value not in (None, ""):
                 parsed = float(value)
                 return parsed * 100.0 if 0 <= parsed <= 1 else parsed
+        except (TypeError, ValueError):
+            continue
+    return None
+
+
+def _candidate_conviction_score(candidate: dict[str, Any]) -> float | None:
+    for key in ("confluence_score", "conviction_score", "score"):
+        value = candidate.get(key)
+        try:
+            if value not in (None, ""):
+                return float(value)
         except (TypeError, ValueError):
             continue
     return None

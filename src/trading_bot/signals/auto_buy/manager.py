@@ -1670,6 +1670,10 @@ def evaluate_auto_buy_candidate(
     if conviction_probability_pct is None:
         conviction_probability_pct = prediction_probability_pct
         conviction_probability_source = prediction_probability_source or "daily_symbol_predictions"
+
+    # Conviction entry uses the deterministic candidate confluence score, not
+    # later layered-ML score nudges. Layered ML remains a veto/probability input.
+    confluence_score = score
     if layered_ml.get("enabled") and not layered_ml_available:
         reasons.append(f"layered_ml:unavailable:{layered_ml.get('reason')}")
     elif layered_ml_available:
@@ -1877,6 +1881,8 @@ def evaluate_auto_buy_candidate(
         "decision": decision,
         "severity": severity,
         "score": round(score, 2),
+        "confluence_score": round(confluence_score, 2),
+        "conviction_score": round(confluence_score, 2),
         "strong_buy_threshold": strong_threshold,
         "reason": "; ".join(reasons) if reasons else "no positive auto-buy evidence",
         "hard_block_reason": hard_block_reason,

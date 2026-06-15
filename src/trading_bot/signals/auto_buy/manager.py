@@ -239,6 +239,22 @@ AUTO_BUY_PAPER_STRONG_EVIDENCE_MIN_ML_SCORE = float(
 AUTO_BUY_PAPER_STRONG_EVIDENCE_MIN_SESSION_SCORE = float(
     os.getenv("AUTO_BUY_PAPER_STRONG_EVIDENCE_MIN_SESSION_SCORE", "5.0")
 )
+AUTO_BUY_PAPER_EXPLORATION_FALLBACK_ENABLED = os.getenv(
+    "AUTO_BUY_PAPER_EXPLORATION_FALLBACK_ENABLED",
+    _paper_runtime_default("true", "false"),
+).strip().lower() in ("1", "true", "yes", "on")
+AUTO_BUY_PAPER_EXPLORATION_MIN_SCORE = float(
+    os.getenv("AUTO_BUY_PAPER_EXPLORATION_MIN_SCORE", "10.0")
+)
+AUTO_BUY_PAPER_EXPLORATION_MIN_SETUP_SCORE = float(
+    os.getenv("AUTO_BUY_PAPER_EXPLORATION_MIN_SETUP_SCORE", "50.0")
+)
+AUTO_BUY_PAPER_EXPLORATION_MIN_SESSION_SCORE = float(
+    os.getenv("AUTO_BUY_PAPER_EXPLORATION_MIN_SESSION_SCORE", "5.0")
+)
+AUTO_BUY_PAPER_EXPLORATION_MIN_ML_SCORE = float(
+    os.getenv("AUTO_BUY_PAPER_EXPLORATION_MIN_ML_SCORE", "50.0")
+)
 AUTO_BUY_LAYERED_ML_ENABLED = os.getenv(
     "AUTO_BUY_LAYERED_ML_ENABLED",
     _paper_runtime_default("true", "false"),
@@ -278,8 +294,12 @@ LEARNED_TIEBREAKER_SOFT_BLOCK_PREFIXES = (
     "30m_falling",
     "ml_prediction_weak",
     "ml_prediction_weak_bucket",
+    "strategy_memory_avoid_weak_evidence",
 )
-PAPER_STRONG_EVIDENCE_SOFT_BLOCK_PREFIXES = ("setup_avoid",)
+PAPER_STRONG_EVIDENCE_SOFT_BLOCK_PREFIXES = (
+    "setup_avoid",
+    "strategy_memory_avoid_weak_evidence",
+)
 
 _prediction_context_cache: dict[str, dict[str, Any]] = {}
 _learned_tiebreaker_cache: dict[tuple[str, str, str], dict[str, Any]] = {}
@@ -537,6 +557,26 @@ def paper_strong_evidence_soft_block_only(block_reasons: list[str]) -> bool:
         if not str(reason).startswith(PAPER_STRONG_EVIDENCE_SOFT_BLOCK_PREFIXES):
             return False
     return True
+
+
+def strategy_memory_avoid_has_weak_evidence(strategy_memory: dict[str, Any]) -> bool:
+    """Treat thin/no-memory avoid lessons as paper-soft, not execution-hard.
+
+    Strategy memory can inherit an avoid recommendation from adjacent/contextual
+    matches even when the traded symbol has no closed-trade evidence or only a
+    tiny sample. Hard-blocking those cases in paper mode prevents the platform
+    from collecting the forward evidence needed to prove or reject the lesson.
+    """
+    reason = str(strategy_memory.get("reason") or "").strip().lower()
+    if "no symbol memory" in reason or "sample too small" in reason:
+        return True
+
+    symbol_memory = strategy_memory.get("symbol_memory") or {}
+    try:
+        trades = int(float(symbol_memory.get("trades") or 0))
+    except (TypeError, ValueError):
+        trades = 0
+    return trades < 3
 
 
 def _parse_et_timestamp(raw_ts: Any) -> datetime | None:
@@ -1375,11 +1415,16 @@ def evaluate_auto_buy_candidate(
         and isinstance(learned_min_setup_score, int)
         and setup_score < learned_min_setup_score
     ):
-        hard_block_reasons.append(
-            "strategy_memory_avoid:"
+        memory_avoid_reason = (
             f"setup_score={setup_score:.1f}<learned_min={learned_min_setup_score};"
             f"{strategy_memory.get('reason')}"
         )
+        if not is_cash_mode() and strategy_memory_avoid_has_weak_evidence(strategy_memory):
+            hard_block_reasons.append(
+                f"strategy_memory_avoid_weak_evidence:{memory_avoid_reason}"
+            )
+        else:
+            hard_block_reasons.append(f"strategy_memory_avoid:{memory_avoid_reason}")
     if label in ("downtrend", "fading"):
         if not bucking_negative_tape:
             hard_block_reasons.append(f"negative_session:{label}")
@@ -1615,6 +1660,42 @@ def evaluate_auto_buy_candidate(
         )
         reasons.append(f"paper_strong_evidence_promoted:{paper_promotion_reason}")
 
+    paper_exploration_fallback_applied = False
+    paper_exploration_fallback_reason = None
+    paper_exploration_fallback_soft_blocks_only = learned_tiebreaker_soft_block_only(
+        hard_block_reasons
+    )
+    paper_exploration_fallback_allowed = (
+        AUTO_BUY_PAPER_EXPLORATION_FALLBACK_ENABLED
+        and not is_cash_mode()
+        and not requires_webhook
+        and decision in {"watch", "skip"}
+        and score >= AUTO_BUY_PAPER_EXPLORATION_MIN_SCORE
+        and paper_exploration_fallback_soft_blocks_only
+        and setup_score >= AUTO_BUY_PAPER_EXPLORATION_MIN_SETUP_SCORE
+        and session_score >= AUTO_BUY_PAPER_EXPLORATION_MIN_SESSION_SCORE
+        and m15 > 0
+        and m30 > 0
+        and not extreme_chase
+        and ml_score_for_promotion >= AUTO_BUY_PAPER_EXPLORATION_MIN_ML_SCORE
+        and str(intraday_feedback.get("status") or "neutral") not in {"block", "would_block"}
+    )
+    if paper_exploration_fallback_allowed:
+        decision = "strong_buy_candidate"
+        severity = "high"
+        paper_exploration_fallback_applied = True
+        if hard_block_reasons:
+            hard_block_reason = None
+        paper_exploration_fallback_reason = (
+            "paper_exploration_fallback:"
+            f"score={score:.2f}>={AUTO_BUY_PAPER_EXPLORATION_MIN_SCORE:.2f};"
+            f"setup={setup_score:.1f};session={session_score:.1f};"
+            f"ml={ml_score_for_promotion:.2f}"
+        )
+        reasons.append(
+            f"paper_exploration_fallback_promoted:{paper_exploration_fallback_reason}"
+        )
+
     layered_ml_promotion_applied = False
     layered_ml_promotion_reason = None
     layered_ml_threshold_gap = round(float(strong_threshold) - float(score), 4)
@@ -1756,6 +1837,20 @@ def evaluate_auto_buy_candidate(
         "paper_strong_evidence_runtime_effect": (
             "paper_only_auto_buy_promotion"
             if paper_promotion_applied
+            else "observe_only_or_not_qualified"
+        ),
+        "paper_exploration_fallback_enabled": bool(
+            AUTO_BUY_PAPER_EXPLORATION_FALLBACK_ENABLED
+        ),
+        "paper_exploration_fallback_allowed": bool(paper_exploration_fallback_allowed),
+        "paper_exploration_fallback_applied": bool(paper_exploration_fallback_applied),
+        "paper_exploration_fallback_reason": paper_exploration_fallback_reason,
+        "paper_exploration_fallback_soft_blocks_only": bool(
+            paper_exploration_fallback_soft_blocks_only
+        ),
+        "paper_exploration_fallback_runtime_effect": (
+            "bounded_paper_exploration_from_soft_blocks"
+            if paper_exploration_fallback_applied
             else "observe_only_or_not_qualified"
         ),
         "layered_ml_enabled": bool(AUTO_BUY_LAYERED_ML_ENABLED),

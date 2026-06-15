@@ -36,6 +36,7 @@ AUTO_BUY_RUNTIME_DEFAULTS = {
     "AUTO_BUY_WATCH_SETUP_STRONG_BUY_ENABLED": False,
     "AUTO_BUY_INTRADAY_FEEDBACK_ENABLED": False,
     "AUTO_BUY_PAPER_STRONG_EVIDENCE_PROMOTION_ENABLED": False,
+    "AUTO_BUY_PAPER_EXPLORATION_FALLBACK_ENABLED": False,
     "AUTO_BUY_LAYERED_ML_ENABLED": False,
     "AUTO_BUY_LAYERED_ML_PROMOTION_ENABLED": False,
     "AUTO_BUY_LAYERED_ML_VETO_HARD_BLOCK_ENABLED": False,
@@ -563,6 +564,95 @@ def test_strategy_memory_avoid_blocks_auto_buy_candidate():
     assert_equal(result["severity"], "blocked", "severity")
     if "strategy_memory_avoid" not in result["hard_block_reason"]:
         raise AssertionError(f"missing strategy memory block: {result['hard_block_reason']}")
+
+
+def test_weak_strategy_memory_avoid_is_soft_for_paper_tiebreaker():
+    old_memory = auto_buy_manager.memory_for_signal
+    old_tiebreaker = auto_buy_manager.learned_auto_buy_tiebreaker_decision
+    old_cash_mode = auto_buy_manager.is_cash_mode
+    old_enabled = auto_buy_manager.AUTO_BUY_LEARNED_TIEBREAKER_ENABLED
+    old_gap = auto_buy_manager.AUTO_BUY_LEARNED_TIEBREAKER_MAX_THRESHOLD_GAP
+    auto_buy_manager.memory_for_signal = lambda symbol, context: {
+        "available": True,
+        "recommendation": "avoid",
+        "min_setup_score": 95,
+        "reason": f"no symbol memory for {symbol}",
+        "symbol_memory": {"trades": 0},
+    }
+    auto_buy_manager.learned_auto_buy_tiebreaker_decision = lambda candidate: {
+        "qualified": True,
+        "reason": "paper_bucket_passed",
+        "evidence": {"qualified_bucket": "weak_memory_probe"},
+    }
+    auto_buy_manager.is_cash_mode = lambda: False
+    auto_buy_manager.AUTO_BUY_LEARNED_TIEBREAKER_ENABLED = True
+    auto_buy_manager.AUTO_BUY_LEARNED_TIEBREAKER_MAX_THRESHOLD_GAP = 20.0
+    try:
+        result = evaluate_auto_buy_candidate(
+            symbol="CEG",
+            session=strong_session(),
+            feature=favorable_feature(),
+            context=buy_context(),
+            held=set(),
+            signal_source="internal_bar_only",
+        )
+    finally:
+        auto_buy_manager.memory_for_signal = old_memory
+        auto_buy_manager.learned_auto_buy_tiebreaker_decision = old_tiebreaker
+        auto_buy_manager.is_cash_mode = old_cash_mode
+        auto_buy_manager.AUTO_BUY_LEARNED_TIEBREAKER_ENABLED = old_enabled
+        auto_buy_manager.AUTO_BUY_LEARNED_TIEBREAKER_MAX_THRESHOLD_GAP = old_gap
+
+    assert_equal(result["decision"], "strong_buy_candidate", "decision")
+    assert_equal(result["learned_tiebreaker_applied"], True, "tiebreaker applied")
+    assert_equal(result["learned_tiebreaker_soft_blocks_only"], True, "soft block only")
+    assert_equal(result["hard_block_reason"], None, "hard block cleared")
+    if "strategy_memory_avoid_weak_evidence" not in result["learned_tiebreaker_original_hard_block_reason"]:
+        raise AssertionError(
+            "missing weak strategy-memory soft block marker: "
+            f"{result['learned_tiebreaker_original_hard_block_reason']}"
+        )
+
+
+def test_paper_exploration_fallback_promotes_soft_blocked_candidate():
+    old_memory = auto_buy_manager.memory_for_signal
+    old_cash_mode = auto_buy_manager.is_cash_mode
+    old_enabled = auto_buy_manager.AUTO_BUY_PAPER_EXPLORATION_FALLBACK_ENABLED
+    auto_buy_manager.memory_for_signal = lambda symbol, context: {
+        "available": True,
+        "recommendation": "avoid",
+        "min_setup_score": 70,
+        "reason": f"sample too small: 1 closed trades for {symbol}",
+        "symbol_memory": {"trades": 1},
+    }
+    auto_buy_manager.is_cash_mode = lambda: False
+    auto_buy_manager.AUTO_BUY_PAPER_EXPLORATION_FALLBACK_ENABLED = True
+    try:
+        session = strong_session()
+        feature = favorable_feature()
+        feature["setup_score"] = 55
+        result = evaluate_auto_buy_candidate(
+            symbol="MSFT",
+            session=session,
+            feature=feature,
+            context=buy_context(),
+            held=set(),
+            signal_source="internal_bar_only",
+        )
+    finally:
+        auto_buy_manager.memory_for_signal = old_memory
+        auto_buy_manager.is_cash_mode = old_cash_mode
+        auto_buy_manager.AUTO_BUY_PAPER_EXPLORATION_FALLBACK_ENABLED = old_enabled
+
+    assert_equal(result["decision"], "strong_buy_candidate", "decision")
+    assert_equal(
+        result["paper_exploration_fallback_applied"],
+        True,
+        "paper exploration applied",
+    )
+    assert_equal(result["hard_block_reason"], None, "hard block cleared")
+    if "paper_exploration_fallback_promoted" not in result["reason"]:
+        raise AssertionError(f"missing exploration reason: {result['reason']}")
 
 
 def test_tradingview_symbols_need_higher_auto_buy_threshold():
@@ -1615,6 +1705,8 @@ def main():
         test_unclassified_extended_vwap_blocks_candidate,
         test_strategy_memory_caution_reduces_auto_buy_score,
         test_strategy_memory_avoid_blocks_auto_buy_candidate,
+        test_weak_strategy_memory_avoid_is_soft_for_paper_tiebreaker,
+        test_paper_exploration_fallback_promotes_soft_blocked_candidate,
         test_tradingview_symbols_need_higher_auto_buy_threshold,
         test_internal_all_mode_removes_tradingview_threshold_penalty,
         test_early_session_buffer_skips_collection,

@@ -60,10 +60,28 @@ class LabelFeaturesRepository:
                 (target_date,),
             ).fetchall()
 
-    def unlabeled_snapshots(self, cutoff: datetime, limit: int) -> list[Any]:
+    def unlabeled_snapshots(
+        self,
+        cutoff: datetime,
+        limit: int,
+        *,
+        newest_first: bool = True,
+        target_date: str | None = None,
+    ) -> list[Any]:
+        clauses = [
+            "ls.snapshot_id IS NULL",
+            "fs.last_price IS NOT NULL",
+            "fs.timestamp <= ?",
+        ]
+        params: list[Any] = [cutoff.isoformat()]
+        if target_date:
+            clauses.append("substr(fs.timestamp, 1, 10) = ?")
+            params.append(target_date)
+        order_direction = "DESC" if newest_first else "ASC"
+        params.append(limit)
         with get_connection(self.db_path) as con:
             return con.execute(
-                """
+                f"""
                 SELECT
                     fs.id,
                     fs.symbol,
@@ -74,13 +92,11 @@ class LabelFeaturesRepository:
                 FROM feature_snapshots fs
                 LEFT JOIN labeled_setups ls
                   ON ls.snapshot_id = fs.id
-                WHERE ls.snapshot_id IS NULL
-                  AND fs.last_price IS NOT NULL
-                  AND fs.timestamp <= ?
-                ORDER BY fs.timestamp ASC
+                WHERE {" AND ".join(clauses)}
+                ORDER BY fs.timestamp {order_direction}, fs.id {order_direction}
                 LIMIT ?
                 """,
-                (cutoff.isoformat(), limit),
+                params,
             ).fetchall()
 
     def insert_label(

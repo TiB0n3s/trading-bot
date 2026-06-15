@@ -97,7 +97,7 @@ def build_labels(limit: int = 200) -> dict[str, Any]:
 
     before = _label_count()
     rc = subprocess.run(
-        [sys.executable, "label_features.py"],
+        [sys.executable, "label_features.py", "--limit", str(limit)],
         cwd=Path(__file__).resolve().parent,
     ).returncode
     after = _label_count()

@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+import argparse
 import logging
 import os
 import sys
@@ -164,9 +165,19 @@ def outcome_label(ret_fwd_15m: float | None) -> str | None:
     return "flat"
 
 
-def unlabeled_snapshots(limit: int = 100) -> list:
+def unlabeled_snapshots(
+    limit: int = 100,
+    *,
+    newest_first: bool = True,
+    target_date: str | None = None,
+) -> list:
     cutoff = datetime.now(ET) - timedelta(minutes=65)
-    return _repo.unlabeled_snapshots(cutoff, limit)
+    return _repo.unlabeled_snapshots(
+        cutoff,
+        limit,
+        newest_first=newest_first,
+        target_date=target_date,
+    )
 
 
 def insert_label(
@@ -210,10 +221,36 @@ def insert_label(
 
 
 def main() -> int:
-    rows = unlabeled_snapshots(limit=200)
+    parser = argparse.ArgumentParser(description="Label matured feature snapshots.")
+    parser.add_argument("--limit", type=int, default=int(os.getenv("LABEL_FEATURES_LIMIT", "200")))
+    parser.add_argument(
+        "--date",
+        default=os.getenv("LABEL_FEATURES_TARGET_DATE"),
+        help="Optional feature snapshot date to label, YYYY-MM-DD.",
+    )
+    parser.add_argument(
+        "--oldest-first",
+        action="store_true",
+        default=os.getenv("LABEL_FEATURES_OLDEST_FIRST", "").lower() in ("1", "true", "yes"),
+        help="Process historical backlog oldest-first. Default is newest matured snapshots first.",
+    )
+    args = parser.parse_args()
+
+    rows = unlabeled_snapshots(
+        limit=args.limit,
+        newest_first=not args.oldest_first,
+        target_date=args.date,
+    )
     if not rows:
         logger.info("No unlabeled snapshots found")
         return 0
+
+    logger.info(
+        "Labeling %s matured snapshots newest_first=%s target_date=%s",
+        len(rows),
+        not args.oldest_first,
+        args.date or "any",
+    )
 
     labeled = 0
     skipped = 0

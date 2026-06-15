@@ -97,3 +97,5 @@ reports/historical_outcome_feedback/2026-06-12.json
 .gitignore
 reports/intraday_learning/2026-06-12_backfill_repair.json
 reports/intraday_learning/2026-06-11_backfill_repair.json
+reports/historical_outcome_feedback/2026-06-15.json
+reports/intraday_learning/2026-06-15_mid_session_verify.json

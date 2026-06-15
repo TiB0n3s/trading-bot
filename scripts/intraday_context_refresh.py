@@ -89,6 +89,14 @@ from pre_market_research_data import (  # noqa: E402
 
 def _collect_events(market_date: str) -> int:
     """Run Stage 1: collect fresh events via subprocess, return exit code."""
+    env = os.environ.copy()
+    pythonpath_parts = [
+        str(BASE_DIR),
+        str(SCRIPT_DIR),
+        str(BASE_DIR / "src"),
+        env.get("PYTHONPATH", ""),
+    ]
+    env["PYTHONPATH"] = os.pathsep.join(part for part in pythonpath_parts if part)
     cmd = [
         sys.executable,
         str(SCRIPT_DIR / "collect_and_score_events.py"),
@@ -102,7 +110,7 @@ def _collect_events(market_date: str) -> int:
         "--apply-context",
     ]
     logger.info(f"Stage 1: collecting fresh events — {' '.join(cmd[2:])}")
-    result = subprocess.run(cmd, cwd=SCRIPT_DIR, timeout=180)
+    result = subprocess.run(cmd, cwd=BASE_DIR, env=env, timeout=180)
     return result.returncode
 
 

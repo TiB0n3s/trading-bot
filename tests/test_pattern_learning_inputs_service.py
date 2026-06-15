@@ -1,7 +1,7 @@
 """Tests for pattern-learning input coverage summaries."""
 
-from pathlib import Path
 import sys
+from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
@@ -37,12 +37,22 @@ def test_pattern_learning_inputs_classifies_trade_and_candidate_coverage():
             {
                 "symbol": "NVDA",
                 "candidate_status": "near_threshold",
-                "candidate_json": '{"forward_mfe_pct": 1.4, "forward_return_pct": 0.7, "symbol_pattern": "trend_continuation_with_participation"}',
+                "candidate_json": (
+                    '{"forward_mfe_pct": 1.4, "forward_return_pct": 0.7, '
+                    '"candidate": {"symbol_pattern": "trend_continuation_with_participation", '
+                    '"confluence_score": 24.0, "conviction_score": 24.0, '
+                    '"probability_pct": 64.5, '
+                    '"probability_source": "daily_symbol_predictions:probability_of_profit"}}'
+                ),
             },
             {
                 "symbol": "TSLA",
                 "candidate_status": "scored_not_taken",
-                "candidate_json": "{}",
+                "candidate_json": (
+                    '{"candidate": {"confluence_score": 18.0, '
+                    '"conviction_score": 18.0, "probability_pct": 81.0, '
+                    '"probability_source": "daily_symbol_predictions:probability_of_order"}}'
+                ),
             },
         ],
         [
@@ -109,27 +119,42 @@ def test_pattern_learning_inputs_classifies_trade_and_candidate_coverage():
     assert payload.candidate_label_coverage["rows"] == 2
     assert payload.candidate_label_coverage["rows_with_forward_outcome"] == 1
     assert payload.candidate_label_coverage["proven_good"] == 1
+    assert payload.candidate_label_coverage["rows_with_confluence_score"] == 2
+    assert payload.candidate_label_coverage["rows_with_conviction_score"] == 2
+    assert payload.candidate_label_coverage["rows_with_probability_pct"] == 2
+    assert payload.candidate_label_coverage["avg_confluence_score"] == 21.0
+    assert payload.candidate_label_coverage["avg_conviction_score"] == 21.0
+    assert payload.candidate_label_coverage["confluence_score_buckets"]["23_plus"] == 1
+    assert payload.candidate_label_coverage["conviction_score_buckets"]["15_to_19_99"] == 1
+    assert payload.candidate_label_coverage["probability_buckets"]["62_to_79_99"] == 1
+    assert payload.candidate_label_coverage["probability_buckets"]["80_plus"] == 1
+    assert (
+        payload.candidate_label_coverage["probability_source_counts"][
+            "daily_symbol_predictions:probability_of_profit"
+        ]
+        == 1
+    )
+    assert payload.candidate_label_coverage["conviction_score_ready_rows"] == 1
+    assert payload.candidate_label_coverage["conviction_probability_ready_rows"] == 2
+    assert payload.candidate_label_coverage["conviction_candidate_rows"] == 1
+    assert payload.candidate_label_coverage["conviction_candidate_rate"] == 0.5
     assert payload.candidate_label_coverage["top_missed_by_mfe"][0]["symbol"] == "NVDA"
+    assert payload.candidate_label_coverage["top_missed_by_mfe"][0]["conviction_score"] == 24.0
+    assert payload.candidate_label_coverage["top_missed_by_mfe"][0]["probability_pct"] == 64.5
     assert payload.summary["bar_pattern_rows"] == 2
+    assert payload.summary["candidate_rows_with_confluence_score"] == 2
+    assert payload.summary["candidate_rows_with_conviction_score"] == 2
+    assert payload.summary["candidate_rows_with_probability_pct"] == 2
+    assert payload.summary["conviction_candidate_rows"] == 1
     assert payload.summary["bar_pattern_rows_with_opportunity_label"] == 2
     assert payload.bar_pattern_evidence["rows_with_forward_outcome"] == 2
-    assert payload.bar_pattern_evidence["opportunity_counts"][
-        "long_candidate|best_buy_window"
-    ] == 1
-    assert payload.bar_pattern_evidence["triple_barrier_counts"][
-        "1|profit_target_first"
-    ] == 1
-    assert payload.bar_pattern_evidence["triple_barrier_counts"][
-        "-1|stop_loss_first"
-    ] == 1
+    assert payload.bar_pattern_evidence["opportunity_counts"]["long_candidate|best_buy_window"] == 1
+    assert payload.bar_pattern_evidence["triple_barrier_counts"]["1|profit_target_first"] == 1
+    assert payload.bar_pattern_evidence["triple_barrier_counts"]["-1|stop_loss_first"] == 1
     assert payload.bar_pattern_evidence["triple_barrier_expectancy"]
-    assert payload.bar_pattern_evidence["trend_scan_counts"][
-        "1|positive_structural_trend"
-    ] == 1
+    assert payload.bar_pattern_evidence["trend_scan_counts"]["1|positive_structural_trend"] == 1
     assert payload.bar_pattern_evidence["trend_scan_expectancy"]
-    assert payload.bar_pattern_evidence["cvd_divergence_counts"][
-        "bullish_absorption"
-    ] == 1
+    assert payload.bar_pattern_evidence["cvd_divergence_counts"]["bullish_absorption"] == 1
     assert payload.bar_pattern_evidence["order_flow_coverage_rate"] == 1.0
     assert payload.bar_pattern_evidence["fractional_memory_coverage_rate"] == 1.0
     assert payload.bar_pattern_evidence["buy_window_rows_with_forward_return"] == 1

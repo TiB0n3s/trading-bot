@@ -11,8 +11,17 @@ import json
 from dataclasses import dataclass
 from typing import Any, Iterable
 
+from config.conviction import load_conviction_config
+
 PATTERN_LEARNING_INPUTS_VERSION = "pattern_learning_inputs_v1"
 PATTERN_LEARNING_RUNTIME_EFFECT = "diagnostic_only_no_live_authority"
+
+SYSTEM_PROBABILITY_SOURCES = {
+    "probability_of_approval",
+    "probability_of_order",
+    "daily_symbol_predictions:probability_of_approval",
+    "daily_symbol_predictions:probability_of_order",
+}
 
 
 @dataclass(frozen=True)
@@ -81,6 +90,52 @@ def _candidate_mfe(payload: dict[str, Any]) -> float | None:
     )
 
 
+def _candidate_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    candidate = payload.get("candidate")
+    return candidate if isinstance(candidate, dict) else {}
+
+
+def _candidate_value(
+    row: dict[str, Any],
+    payload: dict[str, Any],
+    candidate_payload: dict[str, Any],
+    key: str,
+) -> Any:
+    for source in (candidate_payload, payload, row):
+        value = source.get(key)
+        if value not in (None, ""):
+            return value
+    return None
+
+
+def _score_bucket(value: float | None) -> str:
+    if value is None:
+        return "missing"
+    if value >= 23.0:
+        return "23_plus"
+    if value >= 20.0:
+        return "20_to_22_99"
+    if value >= 15.0:
+        return "15_to_19_99"
+    if value >= 10.0:
+        return "10_to_14_99"
+    if value >= 0.0:
+        return "0_to_9_99"
+    return "negative"
+
+
+def _probability_bucket(value: float | None) -> str:
+    if value is None:
+        return "missing"
+    if value >= 80.0:
+        return "80_plus"
+    if value >= 62.0:
+        return "62_to_79_99"
+    if value >= 50.0:
+        return "50_to_61_99"
+    return "below_50"
+
+
 def _trade_quality(row: dict[str, Any]) -> str:
     pnl = _float(row.get("realized_pnl_pct"))
     mfe = _float(row.get("mfe_pct"))
@@ -132,27 +187,90 @@ def _expectancy(rows: list[dict[str, Any]], key: str) -> list[dict[str, Any]]:
 
 
 def _candidate_coverage(candidate_rows: list[dict[str, Any]]) -> dict[str, Any]:
+    conviction_cfg = load_conviction_config()
     status_counts: dict[str, int] = {}
     pattern_counts: dict[str, int] = {}
+    confluence_score_buckets: dict[str, int] = {}
+    conviction_score_buckets: dict[str, int] = {}
+    probability_buckets: dict[str, int] = {}
+    probability_source_counts: dict[str, int] = {}
+    confluence_scores: list[float] = []
+    conviction_scores: list[float] = []
+    probabilities: list[float] = []
     proven_good = 0
     proven_bad = 0
     rows_with_forward_outcome = 0
     rows_with_forward_mfe = 0
+    rows_with_confluence_score = 0
+    rows_with_conviction_score = 0
+    rows_with_probability_pct = 0
+    conviction_score_ready_rows = 0
+    conviction_probability_ready_rows = 0
+    conviction_candidate_rows = 0
     top_missed: list[dict[str, Any]] = []
 
     for row in candidate_rows:
         status = _bucket(row, "candidate_status")
         status_counts[status] = status_counts.get(status, 0) + 1
         payload = _load_json(row.get("candidate_json"))
-        candidate_payload = (
-            payload.get("candidate") if isinstance(payload.get("candidate"), dict) else {}
-        )
+        candidate_payload = _candidate_payload(payload)
         pattern = (
             candidate_payload.get("symbol_pattern")
             or payload.get("symbol_pattern")
             or _bucket(row, "setup_label")
         )
         pattern_counts[str(pattern)] = pattern_counts.get(str(pattern), 0) + 1
+
+        confluence_score = _float(
+            _candidate_value(row, payload, candidate_payload, "confluence_score")
+        )
+        conviction_score = _float(
+            _candidate_value(row, payload, candidate_payload, "conviction_score")
+        )
+        probability_pct = _float(
+            _candidate_value(row, payload, candidate_payload, "probability_pct")
+        )
+        probability_source = str(
+            _candidate_value(row, payload, candidate_payload, "probability_source") or "missing"
+        )
+        normalized_probability_source = probability_source.strip().lower()
+        confluence_score_buckets[_score_bucket(confluence_score)] = (
+            confluence_score_buckets.get(_score_bucket(confluence_score), 0) + 1
+        )
+        conviction_score_buckets[_score_bucket(conviction_score)] = (
+            conviction_score_buckets.get(_score_bucket(conviction_score), 0) + 1
+        )
+        probability_buckets[_probability_bucket(probability_pct)] = (
+            probability_buckets.get(_probability_bucket(probability_pct), 0) + 1
+        )
+        probability_source_counts[probability_source] = (
+            probability_source_counts.get(probability_source, 0) + 1
+        )
+        if confluence_score is not None:
+            rows_with_confluence_score += 1
+            confluence_scores.append(confluence_score)
+        if conviction_score is not None:
+            rows_with_conviction_score += 1
+            conviction_scores.append(conviction_score)
+        if probability_pct is not None:
+            rows_with_probability_pct += 1
+            probabilities.append(probability_pct)
+
+        score_ready = conviction_score is not None and conviction_score >= float(
+            conviction_cfg.min_score
+        )
+        probability_threshold = (
+            float(conviction_cfg.min_system_probability_pct)
+            if normalized_probability_source in SYSTEM_PROBABILITY_SOURCES
+            else float(conviction_cfg.min_probability_pct)
+        )
+        probability_ready = probability_pct is not None and probability_pct >= probability_threshold
+        if score_ready:
+            conviction_score_ready_rows += 1
+        if probability_ready:
+            conviction_probability_ready_rows += 1
+        if score_ready and probability_ready:
+            conviction_candidate_rows += 1
 
         forward_return = _candidate_return(payload)
         forward_mfe = _candidate_mfe(payload)
@@ -171,6 +289,18 @@ def _candidate_coverage(candidate_rows: list[dict[str, Any]]) -> dict[str, Any]:
                         "candidate_ts": row.get("candidate_ts"),
                         "candidate_status": row.get("candidate_status"),
                         "score": row.get("score"),
+                        "confluence_score": (
+                            round(confluence_score, 4) if confluence_score is not None else None
+                        ),
+                        "conviction_score": (
+                            round(conviction_score, 4) if conviction_score is not None else None
+                        ),
+                        "probability_pct": (
+                            round(probability_pct, 4) if probability_pct is not None else None
+                        ),
+                        "probability_source": (
+                            probability_source if probability_source != "missing" else None
+                        ),
                         "threshold_distance": row.get("threshold_distance"),
                         "pattern": pattern,
                         "forward_mfe_pct": round(forward_mfe, 4),
@@ -193,6 +323,26 @@ def _candidate_coverage(candidate_rows: list[dict[str, Any]]) -> dict[str, Any]:
         ),
         "rows_with_forward_outcome": rows_with_forward_outcome,
         "rows_with_forward_mfe": rows_with_forward_mfe,
+        "rows_with_confluence_score": rows_with_confluence_score,
+        "rows_with_conviction_score": rows_with_conviction_score,
+        "rows_with_probability_pct": rows_with_probability_pct,
+        "avg_confluence_score": _mean(confluence_scores),
+        "avg_conviction_score": _mean(conviction_scores),
+        "avg_probability_pct": _mean(probabilities),
+        "confluence_score_buckets": dict(sorted(confluence_score_buckets.items())),
+        "conviction_score_buckets": dict(sorted(conviction_score_buckets.items())),
+        "probability_buckets": dict(sorted(probability_buckets.items())),
+        "probability_source_counts": dict(sorted(probability_source_counts.items())),
+        "conviction_gate_config": {
+            "min_score": float(conviction_cfg.min_score),
+            "min_probability_pct": float(conviction_cfg.min_probability_pct),
+            "min_system_probability_pct": float(conviction_cfg.min_system_probability_pct),
+            "require_probability": bool(conviction_cfg.require_probability),
+        },
+        "conviction_score_ready_rows": conviction_score_ready_rows,
+        "conviction_probability_ready_rows": conviction_probability_ready_rows,
+        "conviction_candidate_rows": conviction_candidate_rows,
+        "conviction_candidate_rate": _rate(conviction_candidate_rows, len(candidate_rows)),
         "proven_good": proven_good,
         "proven_bad": proven_bad,
         "forward_outcome_coverage_rate": _rate(rows_with_forward_outcome, len(candidate_rows)),
@@ -521,6 +671,10 @@ def build_pattern_learning_inputs_payload(
         "candidate_rows": len(candidates),
         "candidate_rows_with_forward_outcome": candidate_coverage["rows_with_forward_outcome"],
         "candidate_rows_with_forward_mfe": candidate_coverage["rows_with_forward_mfe"],
+        "candidate_rows_with_confluence_score": candidate_coverage["rows_with_confluence_score"],
+        "candidate_rows_with_conviction_score": candidate_coverage["rows_with_conviction_score"],
+        "candidate_rows_with_probability_pct": candidate_coverage["rows_with_probability_pct"],
+        "conviction_candidate_rows": candidate_coverage["conviction_candidate_rows"],
         "bar_pattern_rows": len(bar_patterns),
         "bar_pattern_rows_with_forward_outcome": bar_pattern_evidence["rows_with_forward_outcome"],
         "bar_pattern_rows_with_opportunity_label": bar_pattern_evidence[

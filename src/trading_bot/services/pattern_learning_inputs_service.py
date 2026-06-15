@@ -136,6 +136,12 @@ def _probability_bucket(value: float | None) -> str:
     return "below_50"
 
 
+def _count_bucket(counts: dict[str, int], value: Any, default: str = "missing") -> str:
+    bucket = str(value if value not in (None, "") else default)
+    counts[bucket] = counts.get(bucket, 0) + 1
+    return bucket
+
+
 def _trade_quality(row: dict[str, Any]) -> str:
     pnl = _float(row.get("realized_pnl_pct"))
     mfe = _float(row.get("mfe_pct"))
@@ -194,6 +200,9 @@ def _candidate_coverage(candidate_rows: list[dict[str, Any]]) -> dict[str, Any]:
     conviction_score_buckets: dict[str, int] = {}
     probability_buckets: dict[str, int] = {}
     probability_source_counts: dict[str, int] = {}
+    layered_ml_evaluation_depth_counts: dict[str, int] = {}
+    layered_ml_instruction_counts: dict[str, int] = {}
+    layered_ml_skip_reason_counts: dict[str, int] = {}
     confluence_scores: list[float] = []
     conviction_scores: list[float] = []
     probabilities: list[float] = []
@@ -207,6 +216,19 @@ def _candidate_coverage(candidate_rows: list[dict[str, Any]]) -> dict[str, Any]:
     conviction_score_ready_rows = 0
     conviction_probability_ready_rows = 0
     conviction_candidate_rows = 0
+    layered_ml_available_rows = 0
+    layered_ml_full_evaluation_rows = 0
+    layered_ml_veto_rows = 0
+    layered_ml_boost_rows = 0
+    layered_ml_watch_rows = 0
+    layered_ml_promotion_applied_rows = 0
+    layered_ml_score_unreachable_rows = 0
+    layered_ml_outside_authority_window_rows = 0
+    layered_ml_hard_block_skip_rows = 0
+    skipped_layered_ml_score_ready_rows = 0
+    skipped_layered_ml_probability_ready_rows = 0
+    skipped_layered_ml_conviction_ready_rows = 0
+    skipped_layered_ml_near_score_window_rows = 0
     top_missed: list[dict[str, Any]] = []
 
     for row in candidate_rows:
@@ -246,6 +268,48 @@ def _candidate_coverage(candidate_rows: list[dict[str, Any]]) -> dict[str, Any]:
         probability_source_counts[probability_source] = (
             probability_source_counts.get(probability_source, 0) + 1
         )
+        layered_ml_depth = _count_bucket(
+            layered_ml_evaluation_depth_counts,
+            _candidate_value(row, payload, candidate_payload, "layered_ml_evaluation_depth")
+            or _candidate_value(row, payload, candidate_payload, "evaluation_depth"),
+        )
+        layered_ml_instruction = _count_bucket(
+            layered_ml_instruction_counts,
+            _candidate_value(row, payload, candidate_payload, "layered_ml_final_instruction"),
+            default="none",
+        ).strip().lower()
+        layered_ml_reason = str(
+            _candidate_value(row, payload, candidate_payload, "layered_ml_reason") or ""
+        )
+        if layered_ml_depth.startswith("shallow_") or layered_ml_depth in {
+            "layered_ml_disabled",
+            "not_evaluated_held_symbol",
+        }:
+            _count_bucket(
+                layered_ml_skip_reason_counts,
+                layered_ml_reason or layered_ml_depth,
+                default=layered_ml_depth,
+            )
+        if bool(_candidate_value(row, payload, candidate_payload, "layered_ml_available")):
+            layered_ml_available_rows += 1
+        if layered_ml_depth == "full_layered_ml":
+            layered_ml_full_evaluation_rows += 1
+        if layered_ml_depth == "shallow_unreachable_score":
+            layered_ml_score_unreachable_rows += 1
+        if layered_ml_depth == "shallow_outside_authority_window":
+            layered_ml_outside_authority_window_rows += 1
+        if layered_ml_depth == "shallow_hard_block":
+            layered_ml_hard_block_skip_rows += 1
+        if layered_ml_instruction == "veto":
+            layered_ml_veto_rows += 1
+        if layered_ml_instruction in {"pass", "paper_approval", "size_increase"}:
+            layered_ml_boost_rows += 1
+        if layered_ml_instruction == "watch":
+            layered_ml_watch_rows += 1
+        if bool(
+            _candidate_value(row, payload, candidate_payload, "layered_ml_promotion_applied")
+        ):
+            layered_ml_promotion_applied_rows += 1
         if confluence_score is not None:
             rows_with_confluence_score += 1
             confluence_scores.append(confluence_score)
@@ -271,6 +335,19 @@ def _candidate_coverage(candidate_rows: list[dict[str, Any]]) -> dict[str, Any]:
             conviction_probability_ready_rows += 1
         if score_ready and probability_ready:
             conviction_candidate_rows += 1
+        layered_ml_skipped = layered_ml_depth != "full_layered_ml"
+        if layered_ml_skipped and score_ready:
+            skipped_layered_ml_score_ready_rows += 1
+        if layered_ml_skipped and probability_ready:
+            skipped_layered_ml_probability_ready_rows += 1
+        if layered_ml_skipped and score_ready and probability_ready:
+            skipped_layered_ml_conviction_ready_rows += 1
+        if (
+            layered_ml_skipped
+            and conviction_score is not None
+            and conviction_score >= float(conviction_cfg.min_score) - 3.0
+        ):
+            skipped_layered_ml_near_score_window_rows += 1
 
         forward_return = _candidate_return(payload)
         forward_mfe = _candidate_mfe(payload)
@@ -333,6 +410,27 @@ def _candidate_coverage(candidate_rows: list[dict[str, Any]]) -> dict[str, Any]:
         "conviction_score_buckets": dict(sorted(conviction_score_buckets.items())),
         "probability_buckets": dict(sorted(probability_buckets.items())),
         "probability_source_counts": dict(sorted(probability_source_counts.items())),
+        "layered_ml_evaluation_depth_counts": dict(
+            sorted(layered_ml_evaluation_depth_counts.items())
+        ),
+        "layered_ml_instruction_counts": dict(sorted(layered_ml_instruction_counts.items())),
+        "layered_ml_skip_reason_counts": dict(sorted(layered_ml_skip_reason_counts.items())),
+        "layered_ml_available_rows": layered_ml_available_rows,
+        "layered_ml_full_evaluation_rows": layered_ml_full_evaluation_rows,
+        "layered_ml_authority_window_rate": _rate(
+            layered_ml_full_evaluation_rows, len(candidate_rows)
+        ),
+        "layered_ml_veto_rows": layered_ml_veto_rows,
+        "layered_ml_boost_rows": layered_ml_boost_rows,
+        "layered_ml_watch_rows": layered_ml_watch_rows,
+        "layered_ml_promotion_applied_rows": layered_ml_promotion_applied_rows,
+        "layered_ml_score_unreachable_rows": layered_ml_score_unreachable_rows,
+        "layered_ml_outside_authority_window_rows": layered_ml_outside_authority_window_rows,
+        "layered_ml_hard_block_skip_rows": layered_ml_hard_block_skip_rows,
+        "skipped_layered_ml_score_ready_rows": skipped_layered_ml_score_ready_rows,
+        "skipped_layered_ml_probability_ready_rows": skipped_layered_ml_probability_ready_rows,
+        "skipped_layered_ml_conviction_ready_rows": skipped_layered_ml_conviction_ready_rows,
+        "skipped_layered_ml_near_score_window_rows": skipped_layered_ml_near_score_window_rows,
         "conviction_gate_config": {
             "min_score": float(conviction_cfg.min_score),
             "min_probability_pct": float(conviction_cfg.min_probability_pct),
@@ -675,6 +773,20 @@ def build_pattern_learning_inputs_payload(
         "candidate_rows_with_conviction_score": candidate_coverage["rows_with_conviction_score"],
         "candidate_rows_with_probability_pct": candidate_coverage["rows_with_probability_pct"],
         "conviction_candidate_rows": candidate_coverage["conviction_candidate_rows"],
+        "layered_ml_full_evaluation_rows": candidate_coverage[
+            "layered_ml_full_evaluation_rows"
+        ],
+        "layered_ml_score_unreachable_rows": candidate_coverage[
+            "layered_ml_score_unreachable_rows"
+        ],
+        "layered_ml_outside_authority_window_rows": candidate_coverage[
+            "layered_ml_outside_authority_window_rows"
+        ],
+        "layered_ml_veto_rows": candidate_coverage["layered_ml_veto_rows"],
+        "layered_ml_boost_rows": candidate_coverage["layered_ml_boost_rows"],
+        "skipped_layered_ml_conviction_ready_rows": candidate_coverage[
+            "skipped_layered_ml_conviction_ready_rows"
+        ],
         "bar_pattern_rows": len(bar_patterns),
         "bar_pattern_rows_with_forward_outcome": bar_pattern_evidence["rows_with_forward_outcome"],
         "bar_pattern_rows_with_opportunity_label": bar_pattern_evidence[

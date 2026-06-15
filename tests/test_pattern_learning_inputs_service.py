@@ -42,7 +42,11 @@ def test_pattern_learning_inputs_classifies_trade_and_candidate_coverage():
                     '"candidate": {"symbol_pattern": "trend_continuation_with_participation", '
                     '"confluence_score": 24.0, "conviction_score": 24.0, '
                     '"probability_pct": 64.5, '
-                    '"probability_source": "daily_symbol_predictions:probability_of_profit"}}'
+                    '"probability_source": "daily_symbol_predictions:probability_of_profit", '
+                    '"layered_ml_evaluation_depth": "full_layered_ml", '
+                    '"layered_ml_available": true, '
+                    '"layered_ml_final_instruction": "paper_approval", '
+                    '"layered_ml_promotion_applied": true}}'
                 ),
             },
             {
@@ -51,7 +55,10 @@ def test_pattern_learning_inputs_classifies_trade_and_candidate_coverage():
                 "candidate_json": (
                     '{"candidate": {"confluence_score": 18.0, '
                     '"conviction_score": 18.0, "probability_pct": 81.0, '
-                    '"probability_source": "daily_symbol_predictions:probability_of_order"}}'
+                    '"probability_source": "daily_symbol_predictions:probability_of_order", '
+                    '"layered_ml_evaluation_depth": "shallow_unreachable_score", '
+                    '"layered_ml_reason": "score_unreachable:18.00+3.00<13.00", '
+                    '"layered_ml_final_instruction": "none"}}'
                 ),
             },
         ],
@@ -138,6 +145,26 @@ def test_pattern_learning_inputs_classifies_trade_and_candidate_coverage():
     assert payload.candidate_label_coverage["conviction_probability_ready_rows"] == 2
     assert payload.candidate_label_coverage["conviction_candidate_rows"] == 1
     assert payload.candidate_label_coverage["conviction_candidate_rate"] == 0.5
+    assert (
+        payload.candidate_label_coverage["layered_ml_evaluation_depth_counts"][
+            "full_layered_ml"
+        ]
+        == 1
+    )
+    assert (
+        payload.candidate_label_coverage["layered_ml_evaluation_depth_counts"][
+            "shallow_unreachable_score"
+        ]
+        == 1
+    )
+    assert payload.candidate_label_coverage["layered_ml_full_evaluation_rows"] == 1
+    assert payload.candidate_label_coverage["layered_ml_authority_window_rate"] == 0.5
+    assert payload.candidate_label_coverage["layered_ml_available_rows"] == 1
+    assert payload.candidate_label_coverage["layered_ml_boost_rows"] == 1
+    assert payload.candidate_label_coverage["layered_ml_score_unreachable_rows"] == 1
+    assert payload.candidate_label_coverage["layered_ml_promotion_applied_rows"] == 1
+    assert payload.candidate_label_coverage["skipped_layered_ml_probability_ready_rows"] == 1
+    assert payload.candidate_label_coverage["skipped_layered_ml_near_score_window_rows"] == 0
     assert payload.candidate_label_coverage["top_missed_by_mfe"][0]["symbol"] == "NVDA"
     assert payload.candidate_label_coverage["top_missed_by_mfe"][0]["conviction_score"] == 24.0
     assert payload.candidate_label_coverage["top_missed_by_mfe"][0]["probability_pct"] == 64.5
@@ -146,6 +173,10 @@ def test_pattern_learning_inputs_classifies_trade_and_candidate_coverage():
     assert payload.summary["candidate_rows_with_conviction_score"] == 2
     assert payload.summary["candidate_rows_with_probability_pct"] == 2
     assert payload.summary["conviction_candidate_rows"] == 1
+    assert payload.summary["layered_ml_full_evaluation_rows"] == 1
+    assert payload.summary["layered_ml_score_unreachable_rows"] == 1
+    assert payload.summary["layered_ml_boost_rows"] == 1
+    assert payload.summary["skipped_layered_ml_conviction_ready_rows"] == 0
     assert payload.summary["bar_pattern_rows_with_opportunity_label"] == 2
     assert payload.bar_pattern_evidence["rows_with_forward_outcome"] == 2
     assert payload.bar_pattern_evidence["opportunity_counts"]["long_candidate|best_buy_window"] == 1

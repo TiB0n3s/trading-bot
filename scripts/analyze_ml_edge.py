@@ -146,9 +146,10 @@ def _raw_json_value(raw_json: Any, keys: Iterable[str]) -> Any:
     if not raw:
         return None
     for key in keys:
-        match = _json_value_pattern(key).search(raw)
-        if match:
-            return _decode_json_scalar(match.group(1))
+        for match in _json_value_pattern(key).finditer(raw):
+            value = _decode_json_scalar(match.group(1))
+            if value is not None:
+                return value
     return None
 
 

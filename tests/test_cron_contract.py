@@ -190,7 +190,18 @@ def test_live_service_watchdog_is_regular_session_only():
     assert len(lines) == 2, lines
     assert any(line.startswith("30-59/10 8 * * 1-5") for line in lines), lines
     assert any(line.startswith("*/10 9-14 * * 1-5") for line in lines), lines
+    assert all("scripts/fill_stream_runtime_guard.py --ensure" in line for line in lines), lines
+    assert not any("WARNING: fill-stream is not active" in line for line in lines), lines
     assert not any(line.startswith("*/10 * * * *") for line in lines), lines
+
+
+def test_fill_stream_fallback_stop_runs_after_regular_session():
+    lines = [
+        line for line in _cron_command_lines() if "--job-name fill_stream_runtime_stop" in line
+    ]
+    assert len(lines) == 1, lines
+    assert lines[0].startswith("5 15 * * 1-5"), lines
+    assert "scripts/fill_stream_runtime_guard.py --stop" in lines[0], lines
 
 
 def test_premarket_dependency_chain_uses_single_pipeline():

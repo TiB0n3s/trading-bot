@@ -607,7 +607,10 @@ def test_weak_strategy_memory_avoid_is_soft_for_paper_tiebreaker():
     assert_equal(result["learned_tiebreaker_applied"], True, "tiebreaker applied")
     assert_equal(result["learned_tiebreaker_soft_blocks_only"], True, "soft block only")
     assert_equal(result["hard_block_reason"], None, "hard block cleared")
-    if "strategy_memory_avoid_weak_evidence" not in result["learned_tiebreaker_original_hard_block_reason"]:
+    if (
+        "strategy_memory_avoid_weak_evidence"
+        not in result["learned_tiebreaker_original_hard_block_reason"]
+    ):
         raise AssertionError(
             "missing weak strategy-memory soft block marker: "
             f"{result['learned_tiebreaker_original_hard_block_reason']}"
@@ -1314,6 +1317,107 @@ def test_bucking_fading_tape_does_not_hard_block():
     assert "30m_falling_soft" in candidate["reason"]
 
 
+def test_longer_session_context_softens_30m_pullback_block():
+    old_prediction_context = auto_buy_manager.auto_buy_prediction_context
+    auto_buy_manager.auto_buy_prediction_context = lambda symbol: {
+        "available": False,
+        "ml_prediction_bucket": "unknown",
+        "ml_prediction_score": None,
+        "ml_prediction_sample_size": None,
+    }
+    try:
+        candidate = evaluate_auto_buy_candidate(
+            symbol="NVDA",
+            session={
+                "trend_label": "fading",
+                "trend_score": -3,
+                "session_return_pct": 0.95,
+                "momentum_5m_pct": 0.08,
+                "momentum_15m_pct": 0.05,
+                "momentum_30m_pct": -0.50,
+                "momentum_60m_pct": 0.85,
+                "momentum_120m_pct": 1.10,
+                "trend_regime": "pullback_with_uptrend",
+                "trend_persistence_score": 4,
+                "pullback_with_trend_score": 3,
+                "late_chase_maturity_score": 1,
+                "distance_from_vwap_pct": 0.45,
+            },
+            feature={
+                "setup_recommendation": "watch",
+                "setup_label": "structural_pullback_test",
+                "setup_score": 60,
+                "relative_strength_5m": 0.35,
+                "ret_5m": 0.10,
+                "ret_15m": 0.05,
+                "distance_from_vwap": 0.45,
+                "momentum_acceleration_pct": 0.03,
+            },
+            context={"bias": "buy", "entry_quality": "good_on_pullbacks", "risk_level": "low"},
+            held=set(),
+            signal_source="internal_bar_only",
+        )
+    finally:
+        auto_buy_manager.auto_buy_prediction_context = old_prediction_context
+
+    assert candidate["hard_block_reason"] is None
+    assert_equal(candidate["momentum_60m_pct"], 0.85, "60m momentum")
+    assert_equal(candidate["momentum_120m_pct"], 1.10, "120m momentum")
+    assert "negative_session_soft_structural_context:fading" in candidate["reason"]
+    assert "30m_falling_soft_structural_context:-0.500" in candidate["reason"]
+    assert "pullback_with_uptrend:+2" in candidate["reason"]
+    assert "constructive_30m_pullback:+1" in candidate["reason"]
+
+
+def test_longer_session_downtrend_penalizes_short_term_bounce():
+    old_prediction_context = auto_buy_manager.auto_buy_prediction_context
+    auto_buy_manager.auto_buy_prediction_context = lambda symbol: {
+        "available": False,
+        "ml_prediction_bucket": "unknown",
+        "ml_prediction_score": None,
+        "ml_prediction_sample_size": None,
+    }
+    try:
+        candidate = evaluate_auto_buy_candidate(
+            symbol="AMD",
+            session={
+                "trend_label": "rangebound",
+                "trend_score": 0,
+                "session_return_pct": -0.40,
+                "momentum_5m_pct": 0.12,
+                "momentum_15m_pct": 0.25,
+                "momentum_30m_pct": 0.40,
+                "momentum_60m_pct": -0.80,
+                "momentum_120m_pct": -1.05,
+                "trend_regime": "persistent_downtrend",
+                "trend_persistence_score": -4,
+                "pullback_with_trend_score": 0,
+                "late_chase_maturity_score": 0,
+                "distance_from_vwap_pct": -0.20,
+            },
+            feature={
+                "setup_recommendation": "watch",
+                "setup_label": "short_term_bounce_test",
+                "setup_score": 55,
+                "relative_strength_5m": 0.30,
+                "ret_5m": 0.15,
+                "ret_15m": 0.20,
+                "distance_from_vwap": -0.20,
+                "momentum_acceleration_pct": 0.04,
+            },
+            context={"bias": "buy", "entry_quality": "good", "risk_level": "low"},
+            held=set(),
+            signal_source="internal_bar_only",
+        )
+    finally:
+        auto_buy_manager.auto_buy_prediction_context = old_prediction_context
+
+    assert "60m_falling:-2" in candidate["reason"]
+    assert "120m_falling:-2" in candidate["reason"]
+    assert "structural_downtrend:-3" in candidate["reason"]
+    assert_equal(candidate["trend_regime"], "persistent_downtrend", "trend regime")
+
+
 def test_learned_tiebreaker_can_promote_watch_candidate_in_paper_mode():
     old_tiebreaker = auto_buy_manager.learned_auto_buy_tiebreaker_decision
     old_cash_mode = auto_buy_manager.is_cash_mode
@@ -1723,6 +1827,8 @@ def main():
         test_auto_buy_capacity_allows_replacement_when_flat_under_gross_cap,
         test_auto_buy_capacity_blocks_at_gross_daily_circuit_cap,
         test_bucking_fading_tape_does_not_hard_block,
+        test_longer_session_context_softens_30m_pullback_block,
+        test_longer_session_downtrend_penalizes_short_term_bounce,
         test_learned_tiebreaker_can_promote_watch_candidate_in_paper_mode,
         test_learned_tiebreaker_does_not_override_hard_blocks,
         test_learned_tiebreaker_can_override_soft_intelligence_blocks_in_paper_mode,

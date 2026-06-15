@@ -1114,6 +1114,12 @@ def evaluate_auto_buy_candidate(
     m5 = _to_float(session.get("momentum_5m_pct"), 0) or 0
     m15 = _to_float(session.get("momentum_15m_pct"), 0) or 0
     m30 = _to_float(session.get("momentum_30m_pct"), 0) or 0
+    m60 = _to_float(session.get("momentum_60m_pct"), 0) or 0
+    m120 = _to_float(session.get("momentum_120m_pct"), 0) or 0
+    trend_regime = str(session.get("trend_regime") or "").strip().lower()
+    trend_persistence_score = _to_float(session.get("trend_persistence_score"), 0) or 0
+    pullback_with_trend_score = _to_float(session.get("pullback_with_trend_score"), 0) or 0
+    late_chase_maturity_score = _to_float(session.get("late_chase_maturity_score"), 0) or 0
     vwap = _to_float(session.get("distance_from_vwap_pct"), 0) or 0
     session_return = _to_float(session.get("session_return_pct"), 0) or 0
     five_day_return = _to_float(rolling_context.get("five_day_return_pct"))
@@ -1168,6 +1174,57 @@ def evaluate_auto_buy_candidate(
     elif m30 < -0.35:
         score -= 3
         reasons.append("30m_falling:-3")
+
+    if m60 > 0.50:
+        score += 2
+        reasons.append("60m_rising:+2")
+    elif m60 < -0.50:
+        score -= 2
+        reasons.append("60m_falling:-2")
+
+    if m120 > 0.75:
+        score += 2
+        reasons.append("120m_rising:+2")
+    elif m120 < -0.75:
+        score -= 2
+        reasons.append("120m_falling:-2")
+
+    structural_uptrend = (
+        trend_regime in {"persistent_uptrend", "pullback_with_uptrend"}
+        or trend_persistence_score >= 3
+        or (m60 >= 0.50 and m120 >= 0.50)
+        or (session_return >= 0.75 and m60 >= 0.30)
+    )
+    structural_downtrend = (
+        trend_regime == "persistent_downtrend"
+        or trend_persistence_score <= -3
+        or (m60 <= -0.50 and m120 <= -0.50)
+    )
+    structural_context_offsets_30m = structural_uptrend and not structural_downtrend
+    constructive_pullback = structural_uptrend and (
+        trend_regime == "pullback_with_uptrend" or pullback_with_trend_score >= 3
+    )
+
+    if trend_regime == "persistent_uptrend":
+        score += 2
+        reasons.append("structural_uptrend:+2")
+    elif trend_regime == "pullback_with_uptrend":
+        score += 2
+        reasons.append("pullback_with_uptrend:+2")
+    elif trend_regime == "persistent_downtrend":
+        score -= 3
+        reasons.append("structural_downtrend:-3")
+    elif trend_regime == "mature_uptrend":
+        score -= 1
+        reasons.append("mature_uptrend_caution:-1")
+
+    if constructive_pullback and m30 < -0.35:
+        score += 1
+        reasons.append("constructive_30m_pullback:+1")
+
+    if late_chase_maturity_score >= 3 and session_return >= 1.5:
+        score -= 2
+        reasons.append(f"late_chase_maturity:-2({late_chase_maturity_score:.0f})")
 
     if m5 > 0.10:
         score += 1
@@ -1420,22 +1477,24 @@ def evaluate_auto_buy_candidate(
             f"{strategy_memory.get('reason')}"
         )
         if not is_cash_mode() and strategy_memory_avoid_has_weak_evidence(strategy_memory):
-            hard_block_reasons.append(
-                f"strategy_memory_avoid_weak_evidence:{memory_avoid_reason}"
-            )
+            hard_block_reasons.append(f"strategy_memory_avoid_weak_evidence:{memory_avoid_reason}")
         else:
             hard_block_reasons.append(f"strategy_memory_avoid:{memory_avoid_reason}")
     if label in ("downtrend", "fading"):
-        if not bucking_negative_tape:
+        if not bucking_negative_tape and not structural_context_offsets_30m:
             hard_block_reasons.append(f"negative_session:{label}")
+        elif structural_context_offsets_30m:
+            reasons.append(f"negative_session_soft_structural_context:{label}")
     if m15 < -0.20:
         if not bucking_negative_tape:
             hard_block_reasons.append(f"15m_falling:{m15:.3f}")
         else:
             reasons.append(f"15m_falling_soft:{m15:.3f}")
     if m30 < -0.35:
-        if not bucking_negative_tape:
+        if not bucking_negative_tape and not structural_context_offsets_30m:
             hard_block_reasons.append(f"30m_falling:{m30:.3f}")
+        elif structural_context_offsets_30m:
+            reasons.append(f"30m_falling_soft_structural_context:{m30:.3f}")
         else:
             reasons.append(f"30m_falling_soft:{m30:.3f}")
     if (
@@ -1692,9 +1751,7 @@ def evaluate_auto_buy_candidate(
             f"setup={setup_score:.1f};session={session_score:.1f};"
             f"ml={ml_score_for_promotion:.2f}"
         )
-        reasons.append(
-            f"paper_exploration_fallback_promoted:{paper_exploration_fallback_reason}"
-        )
+        reasons.append(f"paper_exploration_fallback_promoted:{paper_exploration_fallback_reason}")
 
     layered_ml_promotion_applied = False
     layered_ml_promotion_reason = None
@@ -1807,6 +1864,12 @@ def evaluate_auto_buy_candidate(
         "momentum_5m_pct": m5,
         "momentum_15m_pct": m15,
         "momentum_30m_pct": m30,
+        "momentum_60m_pct": m60,
+        "momentum_120m_pct": m120,
+        "trend_regime": trend_regime,
+        "trend_persistence_score": trend_persistence_score,
+        "pullback_with_trend_score": pullback_with_trend_score,
+        "late_chase_maturity_score": late_chase_maturity_score,
         "distance_from_vwap_pct": vwap,
         "setup_label": setup_label,
         "setup_recommendation": setup_rec,
@@ -1839,9 +1902,7 @@ def evaluate_auto_buy_candidate(
             if paper_promotion_applied
             else "observe_only_or_not_qualified"
         ),
-        "paper_exploration_fallback_enabled": bool(
-            AUTO_BUY_PAPER_EXPLORATION_FALLBACK_ENABLED
-        ),
+        "paper_exploration_fallback_enabled": bool(AUTO_BUY_PAPER_EXPLORATION_FALLBACK_ENABLED),
         "paper_exploration_fallback_allowed": bool(paper_exploration_fallback_allowed),
         "paper_exploration_fallback_applied": bool(paper_exploration_fallback_applied),
         "paper_exploration_fallback_reason": paper_exploration_fallback_reason,

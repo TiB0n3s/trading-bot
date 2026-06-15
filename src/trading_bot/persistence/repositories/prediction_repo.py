@@ -96,10 +96,16 @@ class PredictionRepository:
                 for row in con.execute("PRAGMA table_info(daily_symbol_predictions)").fetchall()
             }
             prediction_generated_at_expr = _prediction_generated_at_expr(columns)
+            probability_of_profit_expr = _column_expr(columns, "probability_of_profit")
+            probability_of_approval_expr = _column_expr(columns, "probability_of_approval")
+            probability_of_order_expr = _column_expr(columns, "probability_of_order")
             row = con.execute(
                 f"""
                 SELECT market_date, symbol, prediction_score, confidence,
                        sample_size, trend_label, timing_score, reason,
+                       {probability_of_profit_expr},
+                       {probability_of_approval_expr},
+                       {probability_of_order_expr},
                        {prediction_generated_at_expr} AS prediction_generated_at
                 FROM daily_symbol_predictions
                 WHERE market_date = ?

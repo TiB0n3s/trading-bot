@@ -1748,6 +1748,40 @@ def test_layered_ml_is_skipped_for_unreachable_auto_buy_score():
         raise AssertionError("missing layered skip reason")
 
 
+def test_prediction_probability_is_forwarded_for_conviction_gate():
+    old_prediction_context = auto_buy_manager.auto_buy_prediction_context
+    old_layered_ml_enabled = auto_buy_manager.AUTO_BUY_LAYERED_ML_ENABLED
+    try:
+        auto_buy_manager.AUTO_BUY_LAYERED_ML_ENABLED = False
+        auto_buy_manager.auto_buy_prediction_context = lambda symbol: {
+            "available": True,
+            "ml_prediction_score": 58.0,
+            "ml_prediction_bucket": "high_55_plus",
+            "ml_prediction_sample_size": 100,
+            "probability_of_profit": 0.64,
+            "probability_of_profit_pct": 64.0,
+            "probability_pct": 64.0,
+        }
+        candidate = evaluate_auto_buy_candidate(
+            symbol="AMZN",
+            session=strong_session(),
+            feature=favorable_feature(),
+            context=buy_context(),
+            held=set(),
+        )
+    finally:
+        auto_buy_manager.auto_buy_prediction_context = old_prediction_context
+        auto_buy_manager.AUTO_BUY_LAYERED_ML_ENABLED = old_layered_ml_enabled
+
+    assert_equal(candidate["probability_pct"], 64.0, "conviction probability")
+    assert_equal(candidate["prediction_probability_pct"], 64.0, "prediction probability")
+    assert_equal(
+        candidate["probability_source"],
+        "daily_symbol_predictions",
+        "probability source",
+    )
+
+
 def test_layered_ml_veto_blocks_otherwise_strong_auto_buy_candidate_in_paper_mode():
     old_context = auto_buy_manager.auto_buy_layered_ml_context
     old_cash_mode = auto_buy_manager.is_cash_mode
@@ -1836,6 +1870,7 @@ def main():
         test_layered_ml_runs_for_otherwise_strong_auto_buy_candidate,
         test_layered_ml_is_skipped_for_hard_blocked_auto_buy_candidate,
         test_layered_ml_is_skipped_for_unreachable_auto_buy_score,
+        test_prediction_probability_is_forwarded_for_conviction_gate,
         test_layered_ml_veto_blocks_otherwise_strong_auto_buy_candidate_in_paper_mode,
         test_log_auto_buy_order_writes_canonical_trade_row,
         test_auto_buy_candidate_attaches_canonical_decision_trace,

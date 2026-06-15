@@ -363,6 +363,14 @@ def _probability_pct(value: Any) -> float | None:
     return parsed * 100.0 if 0.0 <= parsed <= 1.0 else parsed
 
 
+def _first_probability_pct(*values: Any) -> float | None:
+    for value in values:
+        probability = _probability_pct(value)
+        if probability is not None:
+            return probability
+    return None
+
+
 def _historical_bar_intelligence() -> dict[str, Any]:
     global _historical_bar_intelligence_cache
     if _historical_bar_intelligence_cache is None:
@@ -622,6 +630,17 @@ def auto_buy_prediction_context(symbol: str) -> dict[str, Any]:
                 "prediction_score": score,
                 "prediction_decision": "observe_only",
                 "prediction_reason": row.get("reason"),
+                "probability_of_profit": row.get("probability_of_profit"),
+                "probability_of_approval": row.get("probability_of_approval"),
+                "probability_of_order": row.get("probability_of_order"),
+                "probability_of_profit_pct": _probability_pct(row.get("probability_of_profit")),
+                "probability_of_approval_pct": _probability_pct(row.get("probability_of_approval")),
+                "probability_of_order_pct": _probability_pct(row.get("probability_of_order")),
+                "probability_pct": _first_probability_pct(
+                    row.get("probability_of_profit"),
+                    row.get("probability_of_approval"),
+                    row.get("probability_of_order"),
+                ),
                 "ml_prediction_score": score,
                 "ml_prediction_bucket": ml_prediction_bucket(score),
                 "ml_prediction_confidence": row.get("confidence"),
@@ -1627,6 +1646,17 @@ def evaluate_auto_buy_candidate(
     layered_meta_effect = str(layered_ml.get("meta_label_effect") or "none").strip().lower()
     layered_master_confidence = _to_float(layered_ml.get("master_confidence_score"))
     layered_ensemble_pct = _to_float(layered_ml.get("ensemble_probability_pct"))
+    prediction_probability_pct = _first_probability_pct(
+        prediction_context.get("probability_pct"),
+        prediction_context.get("probability_of_profit"),
+        prediction_context.get("probability_of_approval"),
+        prediction_context.get("probability_of_order"),
+    )
+    conviction_probability_pct = layered_ensemble_pct
+    conviction_probability_source = "layered_ml_ensemble_probability_pct"
+    if conviction_probability_pct is None:
+        conviction_probability_pct = prediction_probability_pct
+        conviction_probability_source = "daily_symbol_predictions"
     if layered_ml.get("enabled") and not layered_ml_available:
         reasons.append(f"layered_ml:unavailable:{layered_ml.get('reason')}")
     elif layered_ml_available:
@@ -1841,6 +1871,16 @@ def evaluate_auto_buy_candidate(
         "market_bias": bias,
         "entry_quality": entry_quality,
         "risk_level": risk_level,
+        "probability_pct": conviction_probability_pct,
+        "probability_source": (
+            conviction_probability_source if conviction_probability_pct is not None else None
+        ),
+        "prediction_probability_pct": prediction_probability_pct,
+        "prediction_probability_of_profit_pct": prediction_context.get("probability_of_profit_pct"),
+        "prediction_probability_of_approval_pct": prediction_context.get(
+            "probability_of_approval_pct"
+        ),
+        "prediction_probability_of_order_pct": prediction_context.get("probability_of_order_pct"),
         "webull_market_context": webull_market_context,
         "webull_market_evidence_tags": webull_market_context.get("evidence_tags") or [],
         "webull_market_runtime_effect": webull_market_context.get("runtime_effect"),

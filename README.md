@@ -1627,6 +1627,44 @@ SQLite does not reduce the physical size of `trades.db`; it creates reusable
 free pages. Shrinking the file requires a separate downtime-safe `VACUUM INTO`
 and swap plan, not an intraday cleanup.
 
+Automated right-sizing maintenance:
+
+`pipeline/db_right_size_maintenance.py` orchestrates the right-sizing sequence
+so it does not remain a manual checklist. It runs a bounded workload report,
+archives cold learning rows, optionally builds/swaps a compact copy, checkpoints
+WAL, and writes a manifest under `data_archive/manifests/`. Mutating modes are
+blocked during regular market hours and while known runtime services are active
+unless explicitly forced.
+
+Weekly scheduled maintenance should use the conservative form:
+
+```bash
+/home/tradingbot/trading-bot/venv/bin/python pipeline/db_right_size_maintenance.py \
+  --execute-archive \
+  --checkpoint \
+  --chunk-size 5000
+```
+
+Downtime compaction is explicit:
+
+```bash
+sudo systemctl stop trading-bot fill-stream fill-poller live-bar-stream
+
+/home/tradingbot/trading-bot/venv/bin/python pipeline/db_right_size_maintenance.py \
+  --execute-archive \
+  --checkpoint \
+  --compact \
+  --swap \
+  --chunk-size 5000
+
+sudo systemctl start trading-bot fill-stream fill-poller live-bar-stream
+```
+
+The tracked cron reference schedules the conservative weekly archive/checkpoint
+path at `03:30` Saturday. It intentionally does not schedule `--compact --swap`
+because `VACUUM INTO` can be long-running on large databases and should remain a
+planned downtime action.
+
 Downtime-safe SQLite compaction:
 
 `pipeline/sqlite_vacuum_swap.py` is the controlled compaction workflow for

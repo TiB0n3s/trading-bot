@@ -96,4 +96,5 @@ reports/historical_outcome_feedback/2026-06-11.json
 reports/historical_outcome_feedback/2026-06-12.json
 .gitignore
 reports/intraday_learning/
+reports/historical_market_view/
 reports/historical_outcome_feedback/2026-06-15.json

@@ -881,6 +881,8 @@ def feature_decile_lift(
     min_rows: int | None = None,
     permutations: int = 200,
     permutation_seed: int = 7,
+    permutation_block_field: str = "market_date",
+    min_unique_values: int | None = None,
 ) -> dict[str, Any]:
     usable = [
         row
@@ -904,6 +906,26 @@ def feature_decile_lift(
             "null_verdict": "not_run",
             "permutations": permutations,
             "verdict": "too_few_rows",
+            "unique_values": 0,
+        }
+    unique_values = len({row.numeric_features[feature] for row in usable})
+    required_unique = min_unique_values or n_buckets
+    if unique_values < required_unique:
+        return {
+            "feature": feature,
+            "n": n,
+            "required_n": required_n,
+            "base_win_pct": None,
+            "buckets": [],
+            "lift_pct": None,
+            "monotonicity": None,
+            "null_p_value": None,
+            "null_lift_p95": None,
+            "null_verdict": "not_run",
+            "permutations": permutations,
+            "verdict": "too_few_unique_values",
+            "unique_values": unique_values,
+            "required_unique_values": required_unique,
         }
 
     returns = [row.forward_return_pct for row in usable if row.forward_return_pct is not None]
@@ -949,6 +971,7 @@ def feature_decile_lift(
         returns=[
             float(row.forward_return_pct) for row in usable if row.forward_return_pct is not None
         ],
+        blocks=[_permutation_block_value(row, permutation_block_field) for row in usable],
         n_buckets=n_buckets,
         observed_lift=lift,
         permutations=permutations,
@@ -957,6 +980,8 @@ def feature_decile_lift(
     return {
         "feature": feature,
         "n": n,
+        "unique_values": unique_values,
+        "required_unique_values": required_unique,
         "required_n": required_n,
         "base_win_pct": base_win,
         "buckets": buckets,
@@ -975,6 +1000,21 @@ def _bucket_ranges(n: int, n_buckets: int) -> list[tuple[int, int]]:
     ]
 
 
+def _permutation_block_value(row: EdgeRow, field: str) -> str:
+    normalized = str(field or "").strip()
+    if not normalized or normalized.lower() in {"iid", "none", "off"}:
+        return "__iid__"
+    if normalized == "market_date":
+        return row.market_date or "__missing__"
+    value = row.categorical_features.get(normalized)
+    if value not in (None, ""):
+        return str(value)
+    numeric = row.numeric_features.get(normalized)
+    if numeric is not None:
+        return str(numeric)
+    return "__missing__"
+
+
 def _lift_from_ordered_returns(returns: list[float], ranges: list[tuple[int, int]]) -> float:
     wins = []
     for lo, hi in ranges:
@@ -989,6 +1029,7 @@ def _lift_from_ordered_returns(returns: list[float], ranges: list[tuple[int, int
 def _permutation_null(
     *,
     returns: list[float],
+    blocks: list[str],
     n_buckets: int,
     observed_lift: float,
     permutations: int,
@@ -1000,13 +1041,26 @@ def _permutation_null(
             "null_lift_p95": None,
             "null_verdict": "not_run",
             "permutations": permutations,
+            "null_block": "not_run",
         }
     ranges = _bucket_ranges(len(returns), n_buckets)
     rng = random.Random(seed)
     null_lifts = []
     shuffled = list(returns)
+    block_indices: dict[str, list[int]] = defaultdict(list)
+    for idx, block in enumerate(blocks):
+        block_indices[block].append(idx)
+    is_iid = set(block_indices) == {"__iid__"}
     for _ in range(permutations):
-        rng.shuffle(shuffled)
+        if is_iid:
+            rng.shuffle(shuffled)
+        else:
+            shuffled[:] = returns
+            for indices in block_indices.values():
+                values = [returns[idx] for idx in indices]
+                rng.shuffle(values)
+                for idx, value in zip(indices, values):
+                    shuffled[idx] = value
         null_lifts.append(abs(_lift_from_ordered_returns(shuffled, ranges)))
     observed_abs = abs(float(observed_lift or 0.0))
     exceedances = sum(1 for value in null_lifts if value >= observed_abs)
@@ -1018,6 +1072,7 @@ def _permutation_null(
         "null_lift_p95": round(sorted_lifts[p95_idx], 1),
         "null_verdict": "beats_chance" if p_value <= 0.05 else "within_noise",
         "permutations": permutations,
+        "null_block": "iid" if is_iid else "blocked",
     }
 
 
@@ -1028,6 +1083,8 @@ def feature_lift_scan(
     min_rows: int = 100,
     permutations: int = 200,
     permutation_seed: int = 7,
+    permutation_block_field: str = "market_date",
+    min_unique_values: int | None = None,
 ) -> list[dict[str, Any]]:
     features = sorted(
         {
@@ -1045,10 +1102,16 @@ def feature_lift_scan(
             min_rows=min_rows,
             permutations=permutations,
             permutation_seed=permutation_seed,
+            permutation_block_field=permutation_block_field,
+            min_unique_values=min_unique_values,
         )
         for feature in features
     ]
-    usable = [result for result in results if result["verdict"] != "too_few_rows"]
+    usable = [
+        result
+        for result in results
+        if result["verdict"] not in {"too_few_rows", "too_few_unique_values"}
+    ]
     usable.sort(
         key=lambda item: (
             item.get("null_verdict") != "beats_chance",
@@ -1079,6 +1142,8 @@ def feature_lift_scan_by_regime(
     min_rows: int = 100,
     permutations: int = 200,
     permutation_seed: int = 7,
+    permutation_block_field: str = "market_date",
+    min_unique_values: int | None = None,
 ) -> list[dict[str, Any]]:
     grouped: dict[str, list[EdgeRow]] = defaultdict(list)
     for row in rows:
@@ -1106,6 +1171,8 @@ def feature_lift_scan_by_regime(
                     min_rows=min_rows,
                     permutations=permutations,
                     permutation_seed=permutation_seed + zlib.crc32(str(regime).encode("utf-8")),
+                    permutation_block_field=permutation_block_field,
+                    min_unique_values=min_unique_values,
                 ),
             }
         )
@@ -1207,7 +1274,7 @@ def _print_feature_scan(results: list[dict[str, Any]], *, limit: int) -> None:
     print(
         f"  {'feature':<38}{'n':>8}{'lift':>10}{'mono%':>10}"
         f"{'direction':>18}{'null_p':>10}{'null95':>10}"
-        f"{'chance':>14}{'base_win%':>12}{'d1_ret%':>12}{'d10_ret%':>12}"
+        f"{'chance':>14}{'block':>10}{'base_win%':>12}{'d1_ret%':>12}{'d10_ret%':>12}"
     )
     for item in results[:limit]:
         buckets = item.get("buckets") or []
@@ -1221,6 +1288,7 @@ def _print_feature_scan(results: list[dict[str, Any]], *, limit: int) -> None:
             f"{_fmt(item.get('null_p_value')):>10}"
             f"{_fmt(item.get('null_lift_p95')):>10}"
             f"{str(item.get('null_verdict', '-')):>14}"
+            f"{str(item.get('null_block', '-')):>10}"
             f"{_fmt(item['base_win_pct']):>12}"
             f"{_fmt(d1_ret):>12}"
             f"{_fmt(d10_ret):>12}"
@@ -1250,7 +1318,7 @@ def _print_regime_feature_scan(
         print(
             f"  {'feature':<38}{'n':>8}{'lift':>10}{'mono%':>10}"
             f"{'direction':>18}{'null_p':>10}{'null95':>10}"
-            f"{'chance':>14}{'d1_ret%':>12}{'d10_ret%':>12}"
+            f"{'chance':>14}{'block':>10}{'d1_ret%':>12}{'d10_ret%':>12}"
         )
         for item in features[:limit]:
             buckets = item.get("buckets") or []
@@ -1264,6 +1332,7 @@ def _print_regime_feature_scan(
                 f"{_fmt(item.get('null_p_value')):>10}"
                 f"{_fmt(item.get('null_lift_p95')):>10}"
                 f"{str(item.get('null_verdict', '-')):>14}"
+                f"{str(item.get('null_block', '-')):>10}"
                 f"{_fmt(d1_ret):>12}"
                 f"{_fmt(d10_ret):>12}"
             )
@@ -1282,6 +1351,8 @@ def print_report(
     regime_scan_min_rows: int,
     permutations: int,
     permutation_seed: int,
+    permutation_block_field: str,
+    min_unique_values: int | None,
 ) -> None:
     total = len(rows)
     outcome_rows = [row for row in rows if row.forward_return_pct is not None]
@@ -1353,6 +1424,8 @@ def print_report(
             min_rows=feature_scan_min_rows,
             permutations=permutations,
             permutation_seed=permutation_seed,
+            permutation_block_field=permutation_block_field,
+            min_unique_values=min_unique_values,
         ),
         limit=feature_scan_limit,
     )
@@ -1364,6 +1437,8 @@ def print_report(
             min_rows=regime_scan_min_rows,
             permutations=permutations,
             permutation_seed=permutation_seed,
+            permutation_block_field=permutation_block_field,
+            min_unique_values=min_unique_values,
         ),
         regime_field=regime_field,
         limit=regime_scan_limit,
@@ -1404,6 +1479,17 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--regime-scan-min-rows", type=int, default=100)
     parser.add_argument("--permutations", type=int, default=200)
     parser.add_argument("--permutation-seed", type=int, default=7)
+    parser.add_argument(
+        "--permutation-block-field",
+        default="market_date",
+        help="row field used for block-aware null shuffling; use 'iid' for independent shuffle",
+    )
+    parser.add_argument(
+        "--feature-scan-min-unique",
+        type=int,
+        default=None,
+        help="minimum distinct numeric values required for decile scans; defaults to decile buckets",
+    )
     parser.add_argument(
         "--min-score", type=float, default=float(os.getenv("CONVICTION_MIN_SCORE", "23"))
     )
@@ -1471,6 +1557,8 @@ def main() -> int:
             args.regime_scan_min_rows,
             args.permutations,
             args.permutation_seed,
+            args.permutation_block_field,
+            args.feature_scan_min_unique,
         )
     return 0
 

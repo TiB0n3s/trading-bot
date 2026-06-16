@@ -133,11 +133,12 @@ def _edge_row(
     forward_return: float,
     source: str = "test",
     regime: str = "test_regime",
+    market_date: str = "2026-06-15",
 ) -> EdgeRow:
     return EdgeRow(
         source="candidate_universe",
         symbol="TEST",
-        market_date="2026-06-15",
+        market_date=market_date,
         decision="skip",
         score=0.0,
         confluence_score=0.0,
@@ -232,3 +233,61 @@ def test_feature_lift_scan_by_regime_groups_rows():
     assert [item["regime"] for item in results] == ["strong_uptrend"]
     assert results[0]["features"][0]["verdict"] == "rank_orders_outcomes"
     assert results[0]["features"][0]["null_verdict"] == "beats_chance"
+
+
+def test_blocked_permutation_demotes_date_proxy_feature():
+    rows = []
+    for idx in range(50):
+        row = _edge_row(
+            1.0,
+            -1.0,
+            market_date="2026-06-15",
+        )
+        row.numeric_features["date_proxy"] = 1.0
+        rows.append(row)
+    for idx in range(50):
+        row = _edge_row(
+            2.0,
+            1.0,
+            market_date="2026-06-16",
+        )
+        row.numeric_features["date_proxy"] = 2.0
+        rows.append(row)
+
+    blocked = feature_lift_scan(
+        rows,
+        min_rows=30,
+        permutations=50,
+        permutation_block_field="market_date",
+        min_unique_values=2,
+    )
+    iid = feature_lift_scan(
+        rows,
+        min_rows=30,
+        permutations=50,
+        permutation_block_field="iid",
+        min_unique_values=2,
+    )
+
+    blocked_date = next(item for item in blocked if item["feature"] == "date_proxy")
+    iid_date = next(item for item in iid if item["feature"] == "date_proxy")
+    assert blocked_date["null_verdict"] == "within_noise"
+    assert blocked_date["null_block"] == "blocked"
+    assert iid_date["null_verdict"] == "beats_chance"
+    assert iid_date["null_block"] == "iid"
+
+
+def test_feature_lift_scan_skips_low_cardinality_numeric_features():
+    rows = []
+    for idx in range(50):
+        row = _edge_row(float(idx), -1.0, market_date="2026-06-15")
+        row.numeric_features["date_proxy"] = 1.0
+        rows.append(row)
+    for idx in range(50):
+        row = _edge_row(float(idx), 1.0, market_date="2026-06-16")
+        row.numeric_features["date_proxy"] = 2.0
+        rows.append(row)
+
+    results = feature_lift_scan(rows, min_rows=30, min_unique_values=10)
+
+    assert all(item["feature"] != "date_proxy" for item in results)

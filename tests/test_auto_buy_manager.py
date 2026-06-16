@@ -219,6 +219,18 @@ def test_negative_session_blocks_candidate():
     assert_equal(result["severity"], "blocked", "severity")
     if "negative_session:downtrend" not in result["hard_block_reason"]:
         raise AssertionError(f"missing hard block reason: {result['hard_block_reason']}")
+    assert_equal(result["hard_block_audit_active"], True, "hard block audit active")
+    if result["hard_block_audit_decision_without_hard_blocks"] not in {
+        "skip",
+        "watch",
+        "strong_buy_candidate",
+    }:
+        raise AssertionError(
+            "unexpected counterfactual decision: "
+            f"{result['hard_block_audit_decision_without_hard_blocks']}"
+        )
+    if "negative_session:downtrend" not in result["hard_block_audit_reasons"]:
+        raise AssertionError(f"missing audit reason: {result['hard_block_audit_reasons']}")
 
 
 def test_weak_ml_prediction_blocks_auto_buy_candidate():

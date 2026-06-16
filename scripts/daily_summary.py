@@ -108,6 +108,75 @@ def print_trade_table(p, title: str, rows: list[dict], limit: int = 10):
         )
 
 
+def print_auto_buy_hard_block_audit(p, audit: dict | None):
+    audit = audit or {}
+    p()
+    p("── AUTO-BUY HARD BLOCK AUDIT ───────────────────────────")
+    p("  Purpose         : measure blocked counterfactuals before changing any gate")
+    p("  Pulling         : saved auto-buy decision snapshots and candidate JSON")
+    p("  Counterfactual  : decision_without_hard_blocks, score, blocker, setup, regime")
+    p(
+        "  Action plan     : keep blocks until forward outcomes prove a block rejects positive net EV"
+    )
+    p("  Runtime effect  : observe-only diagnostics; no trade authority")
+
+    rows_seen = int(audit.get("rows_seen") or 0)
+    hard_blocked = int(audit.get("hard_blocked_rows") or 0)
+    counterfactual_strong = int(audit.get("counterfactual_strong_rows") or 0)
+    counterfactual_watch = int(audit.get("counterfactual_watch_rows") or 0)
+    p(f"  Snapshots read  : {rows_seen}")
+    p(f"  Hard-blocked    : {hard_blocked}")
+    p(f"  Would-be strong : {counterfactual_strong}")
+    p(f"  Would-be watch  : {counterfactual_watch}")
+
+    by_reason = audit.get("by_reason") or []
+    if by_reason:
+        p()
+        p("  Blocker summary:")
+        headers = ["Blocker", "Rows", "WouldStrong", "WouldWatch", "AvgScore", "MaxScore"]
+        widths = [34, 6, 12, 10, 9, 9]
+        fmt = " ".join(f"{{:<{w}}}" for w in widths)
+        p("  " + fmt.format(*headers))
+        p("  " + fmt.format(*["-" * w for w in widths]))
+        for row in by_reason[:10]:
+            avg_score = row.get("avg_score")
+            max_score = row.get("max_score")
+            p(
+                "  "
+                + fmt.format(
+                    str(row.get("reason") or "unknown")[:34],
+                    row.get("rows", 0),
+                    row.get("counterfactual_strong_rows", 0),
+                    row.get("counterfactual_watch_rows", 0),
+                    f"{avg_score:.1f}" if avg_score is not None else "-",
+                    f"{max_score:.1f}" if max_score is not None else "-",
+                )
+            )
+    else:
+        p("  Blocker summary : no hard-block rows captured.")
+
+    top_rows = audit.get("top_counterfactual_strong") or []
+    if top_rows:
+        p()
+        p("  Top would-be strong candidates rejected by hard blocks:")
+        headers = ["Time", "Sym", "Score", "Blocker", "Final"]
+        widths = [19, 6, 7, 34, 12]
+        fmt = " ".join(f"{{:<{w}}}" for w in widths)
+        p("  " + fmt.format(*headers))
+        p("  " + fmt.format(*["-" * w for w in widths]))
+        for row in top_rows[:8]:
+            p(
+                "  "
+                + fmt.format(
+                    str(row.get("timestamp") or "")[:19],
+                    str(row.get("symbol") or "")[:6],
+                    f"{row.get('score'):.1f}" if row.get("score") is not None else "-",
+                    str(row.get("primary_reason") or "unknown")[:34],
+                    str(row.get("final_decision") or "-")[:12],
+                )
+            )
+
+
 def _bucket_rejection_reason(reason: str | None) -> str:
     PREFIX_BUCKETS = {
         "market_hours": "Outside trading hours",
@@ -182,7 +251,7 @@ def _bucket_rejection_reason(reason: str | None) -> str:
     return "Other (Claude verbose)"
 
 
-def _render(rows, matched, header, trade_rows=None):
+def _render(rows, matched, header, trade_rows=None, auto_buy_hard_block_audit=None):
     lines = []
 
     def p(*args):
@@ -446,6 +515,8 @@ def _render(rows, matched, header, trade_rows=None):
         p("── Setup Policy Blocks ─────────────────────────────────")
         p("No setup-policy blocks for this period.")
 
+    print_auto_buy_hard_block_audit(p, auto_buy_hard_block_audit)
+
     p(f"\n{'=' * 60}\n")
 
     with open(LOG_PATH, "a") as f:
@@ -454,12 +525,24 @@ def _render(rows, matched, header, trade_rows=None):
 
 def run(target_date: str = None):
     payload = build_default_daily_summary_service(warning_sink=print).daily_payload(target_date)
-    _render(payload.rows, payload.matched, payload.header, trade_rows=payload.trade_rows)
+    _render(
+        payload.rows,
+        payload.matched,
+        payload.header,
+        trade_rows=payload.trade_rows,
+        auto_buy_hard_block_audit=payload.auto_buy_hard_block_audit,
+    )
 
 
 def run_week(target_date: str = None):
     payload = build_default_daily_summary_service(warning_sink=print).weekly_payload(target_date)
-    _render(payload.rows, payload.matched, payload.header, trade_rows=payload.trade_rows)
+    _render(
+        payload.rows,
+        payload.matched,
+        payload.header,
+        trade_rows=payload.trade_rows,
+        auto_buy_hard_block_audit=payload.auto_buy_hard_block_audit,
+    )
 
 
 if __name__ == "__main__":

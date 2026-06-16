@@ -23,6 +23,10 @@ class FakeRepository:
         self.calls.append(("context_for_day", target_date))
         return [{"setup_label": "x"}]
 
+    def auto_buy_hard_block_audit_for_day(self, target_date):
+        self.calls.append(("hard_block_audit_for_day", target_date))
+        return {"rows_seen": 1, "counterfactual_strong_rows": 0}
+
     def trades_for_range(self, start_date, end_date):
         self.calls.append(("trades_for_range", start_date, end_date))
         return [{"id": 2}]
@@ -34,6 +38,10 @@ class FakeRepository:
     def trade_context_rows_for_range(self, start_date, end_date):
         self.calls.append(("context_for_range", start_date, end_date))
         return [{"setup_label": "y"}]
+
+    def auto_buy_hard_block_audit_for_range(self, start_date, end_date):
+        self.calls.append(("hard_block_audit_for_range", start_date, end_date))
+        return {"rows_seen": 2, "counterfactual_strong_rows": 1}
 
 
 def test_daily_payload_refreshes_and_loads_day_rows():
@@ -50,11 +58,16 @@ def test_daily_payload_refreshes_and_loads_day_rows():
     assert payload.rows == [{"id": 1}]
     assert payload.matched == [{"symbol": "AAPL"}]
     assert payload.trade_rows == [{"setup_label": "x"}]
+    assert payload.auto_buy_hard_block_audit == {
+        "rows_seen": 1,
+        "counterfactual_strong_rows": 0,
+    }
     assert payload.header == "DAILY SUMMARY — 2026-05-30"
     assert repo.calls == [
         ("trades_for_day", "2026-05-30"),
         ("matched_for_day", "2026-05-30"),
         ("context_for_day", "2026-05-30"),
+        ("hard_block_audit_for_day", "2026-05-30"),
     ]
 
 
@@ -65,10 +78,15 @@ def test_weekly_payload_uses_market_week_range():
     payload = service.weekly_payload("2026-05-30")
 
     assert payload.header == "WEEKLY SUMMARY — 2026-05-25 to 2026-05-29"
+    assert payload.auto_buy_hard_block_audit == {
+        "rows_seen": 2,
+        "counterfactual_strong_rows": 1,
+    }
     assert repo.calls == [
         ("trades_for_range", "2026-05-25", "2026-05-30"),
         ("matched_for_range", "2026-05-25", "2026-05-30"),
         ("context_for_range", "2026-05-25", "2026-05-30"),
+        ("hard_block_audit_for_range", "2026-05-25", "2026-05-30"),
     ]
 
 

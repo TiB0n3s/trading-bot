@@ -1779,7 +1779,27 @@ def evaluate_auto_buy_candidate(
                 f"ensemble={layered_ensemble_pct}"
             )
 
-    hard_block_reason = "; ".join(hard_block_reasons) if hard_block_reasons else None
+    hard_block_audit_reasons = list(hard_block_reasons)
+    hard_block_audit_reason = (
+        "; ".join(hard_block_audit_reasons) if hard_block_audit_reasons else None
+    )
+
+    if strategy_memory_caution_gate and score >= AUTO_BUY_WATCH_SCORE:
+        hard_block_audit_decision_without_blocks = "watch"
+        hard_block_audit_severity_without_blocks = "medium"
+    elif score >= strong_threshold and (
+        setup_rec != "watch" or AUTO_BUY_WATCH_SETUP_STRONG_BUY_ENABLED
+    ):
+        hard_block_audit_decision_without_blocks = "strong_buy_candidate"
+        hard_block_audit_severity_without_blocks = "high"
+    elif score >= AUTO_BUY_WATCH_SCORE:
+        hard_block_audit_decision_without_blocks = "watch"
+        hard_block_audit_severity_without_blocks = "medium"
+    else:
+        hard_block_audit_decision_without_blocks = "skip"
+        hard_block_audit_severity_without_blocks = "low"
+
+    hard_block_reason = hard_block_audit_reason
 
     if hard_block_reasons:
         decision = "skip"
@@ -1953,6 +1973,17 @@ def evaluate_auto_buy_candidate(
         "strong_buy_threshold": strong_threshold,
         "reason": "; ".join(reasons) if reasons else "no positive auto-buy evidence",
         "hard_block_reason": hard_block_reason,
+        "hard_block_audit_active": bool(hard_block_audit_reasons),
+        "hard_block_audit_reason": hard_block_audit_reason,
+        "hard_block_audit_reasons": hard_block_audit_reasons,
+        "hard_block_audit_reason_count": len(hard_block_audit_reasons),
+        "hard_block_audit_decision_without_hard_blocks": (hard_block_audit_decision_without_blocks),
+        "hard_block_audit_severity_without_hard_blocks": (hard_block_audit_severity_without_blocks),
+        "hard_block_audit_would_be_strong_candidate": (
+            hard_block_audit_decision_without_blocks == "strong_buy_candidate"
+        ),
+        "hard_block_audit_score_gap_to_strong": round(float(score) - float(strong_threshold), 4),
+        "hard_block_audit_runtime_effect": ("counterfactual_observation_only_no_trade_authority"),
         "evaluation_depth": layered_ml_evaluation_depth,
         "market_bias": bias,
         "entry_quality": entry_quality,
@@ -2379,6 +2410,16 @@ def window_symbols_for_run(
     return rotated[:max_symbols], start_idx, total_symbols
 
 
+def append_hard_block_audit_reason(candidate: dict[str, Any], reason: str) -> None:
+    reasons = list(candidate.get("hard_block_audit_reasons") or [])
+    if reason and reason not in reasons:
+        reasons.append(reason)
+    candidate["hard_block_audit_active"] = bool(reasons)
+    candidate["hard_block_audit_reasons"] = reasons
+    candidate["hard_block_audit_reason_count"] = len(reasons)
+    candidate["hard_block_audit_reason"] = "; ".join(reasons) if reasons else None
+
+
 def symbol_window_summary(scope: str, evaluated_count: int) -> dict[str, Any]:
     total_symbols = len(symbols_for_scope(scope))
     configured_cap = int(AUTO_BUY_MAX_SYMBOLS_PER_RUN)
@@ -2526,24 +2567,29 @@ def build_candidates(scope: str) -> list[dict[str, Any]]:
 
         # Downgrade strong_buy_candidate → watch when market session is suppressed.
         if market_suppressed and candidate.get("decision") == "strong_buy_candidate":
+            block_reason = f"session_momentum_gate: {mkt_reason}={mkt_label}"
             candidate["decision"] = "watch"
             candidate["severity"] = "medium"
             candidate["hard_block_reason"] = (
-                (candidate.get("hard_block_reason") or "")
-                + f"; session_momentum_gate: {mkt_reason}={mkt_label}"
+                (candidate.get("hard_block_reason") or "") + f"; {block_reason}"
             ).lstrip("; ")
+            append_hard_block_audit_reason(candidate, block_reason)
 
         # Per-symbol daily signal cap: if this symbol has already fired
         # strong_buy_candidate twice today without a filled order, suppress it.
         if candidate.get("decision") == "strong_buy_candidate":
             prior_signals = strong_buy_signals_today(symbol)
             if prior_signals >= AUTO_BUY_MAX_SIGNALS_PER_SYMBOL:
+                block_reason = (
+                    f"daily_signal_cap: {prior_signals}>={AUTO_BUY_MAX_SIGNALS_PER_SYMBOL} "
+                    "unfilled signals today"
+                )
                 candidate["decision"] = "skip"
                 candidate["severity"] = "low"
                 candidate["hard_block_reason"] = (
-                    (candidate.get("hard_block_reason") or "")
-                    + f"; daily_signal_cap: {prior_signals}>={AUTO_BUY_MAX_SIGNALS_PER_SYMBOL} unfilled signals today"
+                    (candidate.get("hard_block_reason") or "") + f"; {block_reason}"
                 ).lstrip("; ")
+                append_hard_block_audit_reason(candidate, block_reason)
 
         candidates.append(candidate)
         if AUTO_BUY_TIMING_LOG_ENABLED:

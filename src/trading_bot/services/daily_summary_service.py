@@ -15,6 +15,7 @@ class SummaryPayload:
     rows: list[dict[str, Any]]
     matched: list[dict[str, Any]]
     trade_rows: list[dict[str, Any]]
+    auto_buy_hard_block_audit: dict[str, Any]
     header: str
 
 
@@ -44,6 +45,9 @@ class DailySummaryService:
             rows=self.repository.trades_for_day(target_date),
             matched=self.repository.matched_trades_for_day(target_date),
             trade_rows=self.repository.trade_context_rows_for_day(target_date),
+            auto_buy_hard_block_audit=self.repository.auto_buy_hard_block_audit_for_day(
+                target_date
+            ),
             header=f"DAILY SUMMARY — {target_date}",
         )
 
@@ -69,6 +73,10 @@ class DailySummaryService:
                 end_excl,
             ),
             trade_rows=self.repository.trade_context_rows_for_range(
+                monday.isoformat(),
+                end_excl,
+            ),
+            auto_buy_hard_block_audit=self.repository.auto_buy_hard_block_audit_for_range(
                 monday.isoformat(),
                 end_excl,
             ),

@@ -116,6 +116,8 @@ def evaluate_expected_value(
 
     if deployment.get("shares") == 0:
         verdict = "cannot_deploy_whole_share"
+    elif cost_pct == 0:
+        verdict = "no_cost_model_applied"
     elif net_ev > 0:
         verdict = "positive_ev_after_costs"
     else:

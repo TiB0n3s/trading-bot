@@ -7,6 +7,7 @@ import json
 import sqlite3
 
 from scripts.post_earnings_drift_research import (
+    _market_date,
     build_post_earnings_drift_payload,
     earnings_payload_to_features,
     main,
@@ -86,6 +87,30 @@ def test_validate_earnings_payloads_requires_point_in_time_contract():
     assert result["errors"][0]["errors"] == ["available_at_before_event_timestamp"]
 
 
+def test_validate_earnings_payloads_requires_canonical_utc_timestamps():
+    result = validate_earnings_payloads(
+        [
+            {
+                "symbol": "AAPL",
+                "earnings_ts": "2026-06-14T17:00:00-04:00",
+                "available_at": "2026-06-14T17:05:00-04:00",
+                "source": "fixture",
+                "eps_surprise_pct": 8.5,
+            }
+        ]
+    )
+
+    assert result["valid"] is False
+    assert result["errors"][0]["errors"] == [
+        "non_canonical_available_at_timestamp",
+        "non_canonical_event_timestamp",
+    ]
+
+
+def test_market_date_uses_new_york_session_not_utc_date():
+    assert _market_date("2026-06-16T00:30:00Z") == "2026-06-15"
+
+
 def test_validate_jsonl_command_fails_invalid_input(tmp_path):
     input_path = tmp_path / "earnings.jsonl"
     input_path.write_text(json.dumps({"symbol": "AAPL", "source": "fixture"}) + "\n")
@@ -150,3 +175,59 @@ def test_post_earnings_drift_scan_labels_forward_sessions(tmp_path):
     assert by_symbol["MSFT"].forward_return_pct < 0
     assert "earnings.eps_surprise_pct" in by_symbol["AAPL"].numeric_features
     assert payload["ev"]["n"] == 2
+    assert payload["symbol_cost_review"]["verdict"] == "provisional_no_symbol_costs"
+
+
+def test_post_earnings_drift_scan_flags_symbol_level_cost_failures(tmp_path):
+    db_path = tmp_path / "research.db"
+    _build_db(db_path)
+    input_path = tmp_path / "earnings.jsonl"
+    input_path.write_text(
+        "\n".join(
+            [
+                json.dumps(
+                    {
+                        "symbol": "AAPL",
+                        "earnings_ts": "2026-06-14T21:00:00Z",
+                        "available_at": "2026-06-15T12:00:00Z",
+                        "source": "fixture",
+                        "eps_surprise_pct": 8.5,
+                    }
+                ),
+                json.dumps(
+                    {
+                        "symbol": "MSFT",
+                        "earnings_ts": "2026-06-14T21:00:00Z",
+                        "available_at": "2026-06-15T12:00:00Z",
+                        "source": "fixture",
+                        "eps_surprise_pct": -4.0,
+                    }
+                ),
+            ]
+        )
+        + "\n"
+    )
+
+    assert main(["--db-path", str(db_path), "ingest-jsonl", "--input", str(input_path)]) == 0
+    payload, _rows = build_post_earnings_drift_payload(
+        db_path=db_path,
+        start="2026-06-15",
+        end="2026-06-16",
+        horizon_sessions=2,
+        min_rows=2,
+        permutations=10,
+        spread_pct=0.01,
+        slippage_pct=0.01,
+        account_equity=1000.0,
+        max_position_pct=1.0,
+        symbol_costs={
+            "AAPL": {"spread_pct": 0.01, "slippage_pct": 0.01, "reference_price": 100.0},
+            "MSFT": {"spread_pct": 0.01, "slippage_pct": 0.01, "reference_price": 2000.0},
+        },
+    )
+
+    review = payload["symbol_cost_review"]
+    assert review["verdict"] == "fail"
+    assert review["blocking_symbols"] == ["MSFT"]
+    msft = next(item for item in review["symbols"] if item["symbol"] == "MSFT")
+    assert msft["ev"]["verdict"] == "cannot_deploy_whole_share"

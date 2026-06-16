@@ -101,9 +101,11 @@ the corrected detector, and adds an expected-value review after friction. It is
 research-only and cannot grant auto-buy authority.
 
 Input JSONL rows should contain at least `symbol`, `earnings_ts`,
-`available_at`, and `source`. Scalar fields such as `report_timing`,
-`eps_surprise_pct`, `revenue_surprise_pct`, or `guidance_surprise` are expanded
-into earnings features.
+`available_at`, and `source`. Timestamp fields must be canonical UTC strings
+like `2026-06-14T21:05:00Z`; offset-local or naive timestamps are rejected so
+entry gating and market-session bucketing cannot shift silently. Scalar fields
+such as `report_timing`, `eps_surprise_pct`, `revenue_surprise_pct`, or
+`guidance_surprise` are expanded into earnings features.
 
 Before interpreting any result, complete the manual point-in-time audit in
 `ops/research/post_earnings_drift_v1_pit_audit.md`. The validator can reject
@@ -143,17 +145,31 @@ cd ~/trading-bot
   --spread-pct 0.05 \
   --slippage-pct 0.03 \
   --account-equity 500 \
+  --symbol-costs-json config/post_earnings_symbol_costs.json \
   --json-output reports/post_earnings_drift_5d_2026-01-01_2026-06-16.json
 ```
 
 Treat a positive detector result as a research lead only. A candidate still
 needs leakage review, independent validation, and a positive expected-value
-result at the intended account size before any promotion discussion.
+result at the intended account size before any promotion discussion. If
+`--symbol-costs-json` is omitted, the scan reports
+`provisional_no_symbol_costs`; that cannot satisfy the first-slice pass
+condition. The optional cost file is a JSON object keyed by symbol, with
+`DEFAULT` supported as a fallback:
+
+```json
+{
+  "DEFAULT": {"spread_pct": 0.08, "slippage_pct": 0.04},
+  "AAPL": {"spread_pct": 0.03, "slippage_pct": 0.02, "reference_price": 195.0}
+}
+```
+
 The binding pass/fail contract for the first slice is tracked in
 `ops/research/post_earnings_drift_v1_precommit.md`; it requires at least `30`
 labeled rows, absolute decile lift `>= 8.0` percentage points, blocked and
-family-wise p-values `<= 0.05`, and net EV after costs `>= +0.25%`. Archive
-completed results using `reports/post_earnings_drift/README.md`.
+family-wise p-values `<= 0.05`, net EV after costs `>= +0.25%`, and passing
+per-symbol cost review. Archive completed results using
+`reports/post_earnings_drift/README.md`.
 
 ## Cron
 

@@ -20,6 +20,9 @@ authority.
   `feature_family=earnings`.
 - Price/label source: `bar_pattern_features`.
 - Required event fields: `symbol`, `earnings_ts`, `available_at`, `source`.
+- Timestamp contract: event and availability timestamps must be canonical UTC
+  strings in `YYYY-MM-DDTHH:MM:SSZ` format. Session labels are derived in
+  `America/New_York` market time.
 - Useful but optional fields: `report_timing`, `eps_surprise_pct`,
   `revenue_surprise_pct`, `guidance_surprise`, `consensus_source`,
   `reported_eps`, `consensus_eps`, `reported_revenue`, `consensus_revenue`.
@@ -47,9 +50,9 @@ The thesis passes only if all of these are true:
    commission assumptions.
 8. Whole-share deployment is feasible: at least `1` share deployable at the
    reference price and no `cannot_deploy_whole_share` verdict.
-9. If per-symbol costs are available, the passing feature must also remain
-   positive-EV after symbol-specific spread/slippage overrides; otherwise the
-   result is provisional, not a pass.
+9. Per-symbol cost review must pass using symbol-specific spread/slippage
+   overrides, or an explicit `DEFAULT` fallback plus symbol reference prices.
+   A scan without symbol costs is provisional, not a pass.
 
 ## Fail Condition
 
@@ -62,8 +65,8 @@ The thesis fails if any of these are true:
 - Family-wise p-value is `> 0.05`.
 - Net expected value after costs is `< +0.25%`.
 - Whole-share deployment makes the signal uneconomic at the account size.
-- Per-symbol cost review, when available, drops the candidate below positive
-  net expected value.
+- Per-symbol cost review is missing, provisional, or drops any reviewed symbol
+  below positive net expected value.
 
 ## Actions
 

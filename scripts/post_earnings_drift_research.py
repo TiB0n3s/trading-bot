@@ -8,8 +8,10 @@ import json
 import sqlite3
 import sys
 from collections import defaultdict
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
+from zoneinfo import ZoneInfo
 
 ROOT = Path(__file__).resolve().parents[1]
 for path in (ROOT, ROOT / "scripts", ROOT / "src"):
@@ -30,6 +32,7 @@ from trading_bot.research.expected_value import (  # noqa: E402
 
 REPORT_VERSION = "post_earnings_drift_research_v1"
 RUNTIME_EFFECT = "research_only_no_trade_authority"
+MARKET_TZ = ZoneInfo("America/New_York")
 REQUIRED_EVENT_FIELDS = ("symbol", "available_at", "source")
 EVENT_TIMESTAMP_FIELDS = ("earnings_ts", "event_ts", "feature_ts")
 RESERVED_EVENT_FIELDS = {
@@ -78,6 +81,38 @@ def _required_ts(payload: dict[str, Any], *keys: str) -> str:
     raise ValueError(f"one of {', '.join(keys)} is required")
 
 
+def _parse_timestamp(value: Any) -> datetime | None:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    if text.endswith("Z"):
+        text = f"{text[:-1]}+00:00"
+    try:
+        parsed = datetime.fromisoformat(text)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        return None
+    return parsed.astimezone(UTC)
+
+
+def _canonical_utc_timestamp(value: Any) -> str | None:
+    parsed = _parse_timestamp(value)
+    if parsed is None:
+        return None
+    return parsed.replace(microsecond=0).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _is_canonical_utc_timestamp(value: Any) -> bool:
+    text = str(value or "").strip()
+    canonical = _canonical_utc_timestamp(text)
+    return canonical is not None and text == canonical
+
+
+def _canonical_or_original(value: Any) -> str:
+    return _canonical_utc_timestamp(value) or str(value or "").strip()
+
+
 def _float(value: Any) -> float | None:
     try:
         if value in (None, ""):
@@ -121,11 +156,23 @@ def validate_earnings_payloads(payloads: list[dict[str, Any]]) -> dict[str, Any]
             "",
         )
         available_at = str(payload.get("available_at") or "").strip()
+        parsed_available_at = _parse_timestamp(available_at)
+        parsed_feature_ts = _parse_timestamp(feature_ts)
+        if available_at:
+            if parsed_available_at is None:
+                row_errors.append("invalid_available_at_timestamp")
+            elif not _is_canonical_utc_timestamp(available_at):
+                row_errors.append("non_canonical_available_at_timestamp")
+        if feature_ts:
+            if parsed_feature_ts is None:
+                row_errors.append("invalid_event_timestamp")
+            elif not _is_canonical_utc_timestamp(feature_ts):
+                row_errors.append("non_canonical_event_timestamp")
         revision_policy = str(payload.get("revision_policy") or "point_in_time_as_reported")
         if (
-            feature_ts
-            and available_at
-            and available_at < feature_ts
+            parsed_feature_ts is not None
+            and parsed_available_at is not None
+            and parsed_available_at < parsed_feature_ts
             and revision_policy
             not in {"scheduled_known_before_event", "calendar_known_before_event"}
         ):
@@ -159,8 +206,10 @@ def validate_earnings_payloads(payloads: list[dict[str, Any]]) -> dict[str, Any]
 
 def earnings_payload_to_features(payload: dict[str, Any]) -> list[ExternalSignalFeature]:
     symbol = _clean_symbol(payload.get("symbol"))
-    feature_ts = _required_ts(payload, "earnings_ts", "event_ts", "feature_ts")
-    available_at = _required_ts(payload, "available_at")
+    feature_ts = _canonical_or_original(
+        _required_ts(payload, "earnings_ts", "event_ts", "feature_ts")
+    )
+    available_at = _canonical_or_original(_required_ts(payload, "available_at"))
     source = str(payload.get("source") or "earnings_event_jsonl")
     source_ref = payload.get("source_url_or_ref") or payload.get("source_url")
     revision_policy = str(payload.get("revision_policy") or "point_in_time_as_reported")
@@ -218,43 +267,72 @@ def _bar_price_rows(
 ) -> list[dict[str, Any]]:
     if not _has_table(con, "bar_pattern_features"):
         return []
+    available_dt = _parse_timestamp(available_at)
+    if available_dt is None:
+        return []
+    # Coarse SQL bound keeps the query small; parsed UTC filtering below is the
+    # authority so mixed but valid timestamp encodings cannot pass early.
+    coarse_start = (available_dt - timedelta(days=1)).date().isoformat()
     rows = con.execute(
         """
         SELECT symbol, bar_timestamp, open, close
         FROM bar_pattern_features
         WHERE symbol = ?
           AND timeframe = '1m'
-          AND bar_timestamp >= ?
+          AND substr(bar_timestamp, 1, 10) >= ?
           AND close IS NOT NULL
         ORDER BY bar_timestamp ASC
         """,
-        (symbol, available_at),
+        (symbol, coarse_start),
     ).fetchall()
-    return [dict(row) for row in rows]
+    result: list[dict[str, Any]] = []
+    for row in rows:
+        data = dict(row)
+        parsed_bar = _parse_timestamp(data.get("bar_timestamp"))
+        if parsed_bar is None or parsed_bar < available_dt:
+            continue
+        data["_parsed_bar_timestamp"] = parsed_bar
+        result.append(data)
+    return sorted(result, key=lambda item: item["_parsed_bar_timestamp"])
 
 
 def _prior_close(con: sqlite3.Connection, symbol: str, available_at: str) -> float | None:
     if not _has_table(con, "bar_pattern_features"):
         return None
-    row = con.execute(
+    available_dt = _parse_timestamp(available_at)
+    if available_dt is None:
+        return None
+    coarse_start = (available_dt - timedelta(days=14)).date().isoformat()
+    coarse_end = available_dt.date().isoformat()
+    rows = con.execute(
         """
-        SELECT close
+        SELECT close, bar_timestamp
         FROM bar_pattern_features
         WHERE symbol = ?
           AND timeframe = '1m'
-          AND bar_timestamp < ?
+          AND substr(bar_timestamp, 1, 10) >= ?
+          AND substr(bar_timestamp, 1, 10) <= ?
           AND close IS NOT NULL
         ORDER BY bar_timestamp DESC
-        LIMIT 1
         """,
-        (symbol, available_at),
-    ).fetchone()
-    return _float(row["close"]) if row else None
+        (symbol, coarse_start, coarse_end),
+    ).fetchall()
+    candidates: list[tuple[datetime, float]] = []
+    for row in rows:
+        parsed_bar = _parse_timestamp(row["bar_timestamp"])
+        close = _float(row["close"])
+        if parsed_bar is not None and close is not None and parsed_bar < available_dt:
+            candidates.append((parsed_bar, close))
+    if not candidates:
+        return None
+    return max(candidates, key=lambda item: item[0])[1]
 
 
 def _market_date(timestamp: Any) -> str | None:
-    text = str(timestamp or "")
-    return text[:10] if len(text) >= 10 else None
+    parsed = _parse_timestamp(timestamp)
+    if parsed is None:
+        return None
+    return parsed.astimezone(MARKET_TZ).date().isoformat()
 
 
 def _close_by_session(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -265,6 +343,101 @@ def _close_by_session(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
             continue
         by_date[market_date] = row
     return [by_date[key] for key in sorted(by_date)]
+
+
+def _load_symbol_costs(path: Path | str | None) -> dict[str, dict[str, Any]]:
+    if not path:
+        return {}
+    raw = json.loads(Path(path).read_text(encoding="utf-8"))
+    if not isinstance(raw, dict):
+        raise ValueError("symbol cost file must be a JSON object")
+    result: dict[str, dict[str, Any]] = {}
+    for symbol, assumptions in raw.items():
+        if not isinstance(assumptions, dict):
+            raise ValueError(f"cost assumptions for {symbol} must be a JSON object")
+        result[str(symbol).upper()] = assumptions
+    return result
+
+
+def _symbol_cost_review(
+    edge_rows: list[EdgeRow],
+    *,
+    symbol_costs: dict[str, dict[str, Any]] | None,
+    default_spread_pct: float,
+    default_slippage_pct: float,
+    account_equity: float | None,
+    max_position_pct: float,
+) -> dict[str, Any]:
+    costs = symbol_costs or {}
+    grouped: dict[str, list[EdgeRow]] = defaultdict(list)
+    for row in edge_rows:
+        grouped[row.symbol].append(row)
+
+    symbols: list[dict[str, Any]] = []
+    blocking_symbols: list[str] = []
+    defaulted_symbols: list[str] = []
+    for symbol in sorted(grouped):
+        rows = grouped[symbol]
+        override = costs.get(symbol) or costs.get("DEFAULT") or {}
+        source = (
+            "symbol_override"
+            if symbol in costs
+            else "default_override"
+            if "DEFAULT" in costs
+            else "scan_flat_default"
+        )
+        if source == "scan_flat_default":
+            defaulted_symbols.append(symbol)
+        reference_price = _float(override.get("reference_price")) or (
+            sum(row.numeric_features["earnings.entry_price"] for row in rows) / len(rows)
+        )
+        assumptions = ExpectedValueAssumptions(
+            spread_pct=_float(override.get("spread_pct")) or default_spread_pct,
+            slippage_pct=_float(override.get("slippage_pct")) or default_slippage_pct,
+            slippage_turns=_float(override.get("slippage_turns")) or 2.0,
+            commission_pct=_float(override.get("commission_pct")) or 0.0,
+            account_equity=account_equity,
+            max_position_pct=max_position_pct,
+            reference_price=reference_price,
+        )
+        ev = evaluate_expected_value(
+            [row.forward_return_pct for row in rows],
+            assumptions=assumptions,
+        )
+        if ev.get("verdict") in {
+            "cannot_deploy_whole_share",
+            "negative_ev_after_costs",
+            "no_cost_model_applied",
+        }:
+            blocking_symbols.append(symbol)
+        symbols.append(
+            {
+                "symbol": symbol,
+                "n": len(rows),
+                "cost_source": source,
+                "reference_price": round(reference_price, 4) if reference_price else None,
+                "ev": ev,
+            }
+        )
+
+    if not edge_rows:
+        verdict = "no_rows"
+    elif not costs:
+        verdict = "provisional_no_symbol_costs"
+    elif blocking_symbols:
+        verdict = "fail"
+    elif defaulted_symbols:
+        verdict = "provisional_missing_symbol_overrides"
+    else:
+        verdict = "pass"
+
+    return {
+        "verdict": verdict,
+        "symbols_reviewed": len(symbols),
+        "blocking_symbols": blocking_symbols,
+        "defaulted_symbols": defaulted_symbols,
+        "symbols": symbols,
+    }
 
 
 def _event_groups(repo: ExternalSignalFeatureRepository, start: str | None, end: str | None):
@@ -363,6 +536,7 @@ def build_post_earnings_drift_payload(
     slippage_pct: float,
     account_equity: float | None,
     max_position_pct: float,
+    symbol_costs: dict[str, dict[str, Any]] | None = None,
 ) -> tuple[dict[str, Any], list[EdgeRow]]:
     repo = ExternalSignalFeatureRepository(db_path)
     groups = _event_groups(repo, start, end)
@@ -396,6 +570,14 @@ def build_post_earnings_drift_payload(
         "events_seen": len(groups),
         "events_labeled": len(edge_rows),
         "ev": evaluate_expected_value(returns, assumptions=assumptions),
+        "symbol_cost_review": _symbol_cost_review(
+            edge_rows,
+            symbol_costs=symbol_costs,
+            default_spread_pct=spread_pct,
+            default_slippage_pct=slippage_pct,
+            account_equity=account_equity,
+            max_position_pct=max_position_pct,
+        ),
         "feature_scan": feature_lift_scan(
             edge_rows,
             min_rows=min_rows,
@@ -437,6 +619,13 @@ def main(argv: list[str] | None = None) -> int:
     scan.add_argument("--slippage-pct", type=float, default=0.03)
     scan.add_argument("--account-equity", type=float)
     scan.add_argument("--max-position-pct", type=float, default=1.0)
+    scan.add_argument(
+        "--symbol-costs-json",
+        help=(
+            "Optional JSON object keyed by symbol with spread_pct, slippage_pct, "
+            "commission_pct, slippage_turns, and/or reference_price overrides."
+        ),
+    )
     scan.add_argument("--json-output")
 
     args = parser.parse_args(argv)
@@ -487,6 +676,7 @@ def main(argv: list[str] | None = None) -> int:
         slippage_pct=args.slippage_pct,
         account_equity=args.account_equity,
         max_position_pct=args.max_position_pct,
+        symbol_costs=_load_symbol_costs(args.symbol_costs_json),
     )
     if args.json_output:
         output = Path(args.json_output)

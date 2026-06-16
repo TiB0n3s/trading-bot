@@ -70,6 +70,13 @@ def test_expected_value_blocks_undeployable_whole_share():
     assert result["verdict"] == "cannot_deploy_whole_share"
 
 
+def test_expected_value_marks_zero_cost_model_as_not_applied():
+    result = evaluate_expected_value([1.0, 0.5], assumptions=ExpectedValueAssumptions())
+
+    assert result["round_trip_cost_pct"] == 0.0
+    assert result["verdict"] == "no_cost_model_applied"
+
+
 def test_whole_share_deployment_reports_cash_drag():
     result = whole_share_deployment(
         ExpectedValueAssumptions(account_equity=1000.0, max_position_pct=0.5, reference_price=180.0)

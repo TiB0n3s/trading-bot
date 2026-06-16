@@ -56,6 +56,9 @@ Until a new thesis clears the checklist:
 - Keep this OHLCV auto-buy stack in observe/research mode.
 - Do not flip percentile probability mode, relax learned setup thresholds, or
   lower conviction bars as a substitute for measured edge.
+- Runtime config must treat `CONVICTION_PROBABILITY_GATE_MODE=percentile` as
+  non-authoritative unless `CONVICTION_ALLOW_PERCENTILE_PROBABILITY_GATE=true`
+  is also set for deliberate research.
 - Treat additional candidate captures as passive research data only.
 - Any future live or paper-authority promotion must include a new evidence note
   that explicitly supersedes this file.

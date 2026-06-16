@@ -43,6 +43,24 @@ def test_overrides_apply():
     assert cfg.max_concurrent_positions == 2
 
 
+def test_env_percentile_probability_gate_requires_explicit_allow(monkeypatch):
+    monkeypatch.setenv("CONVICTION_PROBABILITY_GATE_MODE", "percentile")
+    monkeypatch.delenv("CONVICTION_ALLOW_PERCENTILE_PROBABILITY_GATE", raising=False)
+
+    cfg = load_conviction_config()
+
+    assert cfg.probability_gate_mode == "absolute"
+
+
+def test_env_percentile_probability_gate_can_be_research_enabled(monkeypatch):
+    monkeypatch.setenv("CONVICTION_PROBABILITY_GATE_MODE", "percentile")
+    monkeypatch.setenv("CONVICTION_ALLOW_PERCENTILE_PROBABILITY_GATE", "true")
+
+    cfg = load_conviction_config()
+
+    assert cfg.probability_gate_mode == "percentile"
+
+
 @pytest.mark.parametrize(
     "field,value",
     [

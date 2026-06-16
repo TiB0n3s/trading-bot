@@ -234,13 +234,22 @@ def load_conviction_config(**overrides) -> ConvictionConfig:
 
         cfg = load_conviction_config(enabled=True, min_score=23.0)
     """
+    requested_probability_gate_mode = env_str(
+        "CONVICTION_PROBABILITY_GATE_MODE", "absolute"
+    ).lower()
+    allow_percentile_probability_gate = env_bool(
+        "CONVICTION_ALLOW_PERCENTILE_PROBABILITY_GATE", False
+    )
+    if requested_probability_gate_mode == "percentile" and not allow_percentile_probability_gate:
+        requested_probability_gate_mode = "absolute"
+
     kwargs: dict = dict(
         enabled=env_bool("CONVICTION_MODE_ENABLED", False),
         paper_only=env_bool("CONVICTION_PAPER_ONLY", True),
         min_score=env_float("CONVICTION_MIN_SCORE", 23.0),
         min_probability_pct=env_float("CONVICTION_MIN_PROBABILITY_PCT", 62.0),
         min_system_probability_pct=env_float("CONVICTION_MIN_SYSTEM_PROBABILITY_PCT", 80.0),
-        probability_gate_mode=env_str("CONVICTION_PROBABILITY_GATE_MODE", "absolute").lower(),
+        probability_gate_mode=requested_probability_gate_mode,
         min_probability_floor_pct=env_float("CONVICTION_MIN_PROBABILITY_FLOOR_PCT", 25.0),
         min_system_probability_floor_pct=env_float(
             "CONVICTION_MIN_SYSTEM_PROBABILITY_FLOOR_PCT", 50.0

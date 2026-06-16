@@ -33,6 +33,25 @@ path as currently built from price/volume-derived candidate features.
   candidate features are stored as large JSON blobs. A flat labeled feature
   table is optional research infrastructure, not a deployment unlock.
 
+## Observe-Mode Learning Ceiling
+
+Additional observe-mode data can improve estimates for signals the system
+already sees, but it should not be treated as a mechanism for discovering edge
+from the current feature set. More candidate-forward outcomes may improve
+probability calibration, more matched trades may reduce strategy-memory and
+intraday-feedback noise, and more market days may strengthen regime and symbol
+priors. That is useful learning, but if the underlying OHLCV-derived features
+remain non-discriminative, the expected result is a better-estimated null: more
+confident `avoid` or `caution` decisions, not deployable capital authority.
+
+Because execution is frozen, the realized-trade channel also does not receive
+new entry/exit/net-cost examples. Observe mode can refine candidate proxy
+labels, but it cannot answer whether actual fills, exits, spreads, slippage, and
+whole-share sizing produce net profitability. The data's primary value during
+the freeze is as a multi-regime research substrate for new orthogonal signals or
+new interaction hypotheses, not as passive fuel for the existing intelligence to
+bootstrap an edge.
+
 ## Promotion Checklist
 
 No auto-buy strategy variant may receive capital authority unless it clears all

@@ -3,7 +3,9 @@
 import sqlite3
 
 from scripts.analyze_ml_edge import (
+    EdgeRow,
     calibration,
+    decile_lift,
     edge_by_group,
     load_candidate_universe,
     load_rejected_outcomes,
@@ -116,3 +118,46 @@ def test_analyze_ml_edge_loads_candidate_and_rejected_sources(tmp_path):
     windows = {item["group"]: item for item in score_window(rows, 23.0)}
     assert windows["near_window"]["n"] == 1
     assert windows["below_window"]["n"] == 1
+
+
+def _edge_row(probability: float, forward_return: float, source: str = "test") -> EdgeRow:
+    return EdgeRow(
+        source="candidate_universe",
+        symbol="TEST",
+        market_date="2026-06-15",
+        decision="skip",
+        score=0.0,
+        confluence_score=0.0,
+        conviction_score=0.0,
+        probability_pct=probability,
+        probability_source=source,
+        instruction="none",
+        instruction_class="unknown",
+        forward_return_pct=forward_return,
+        forward_mfe_pct=None,
+    )
+
+
+def test_decile_lift_measures_probability_discrimination():
+    rows = []
+    for idx in range(100):
+        probability = float(idx)
+        forward_return = 1.0 if idx >= 50 else -1.0
+        rows.append(_edge_row(probability, forward_return))
+
+    result = decile_lift(rows)
+
+    assert result["n"] == 100
+    assert result["base_win_pct"] == 50.0
+    assert result["lift_pct"] == 100.0
+    assert result["monotonicity"] >= 0.8
+    assert result["verdict"] == "rank_orders_outcomes"
+
+
+def test_decile_lift_requires_enough_rows():
+    rows = [_edge_row(60.0, 1.0), _edge_row(40.0, -1.0)]
+
+    result = decile_lift(rows)
+
+    assert result["verdict"] == "too_few_rows"
+    assert result["required_n"] == 30

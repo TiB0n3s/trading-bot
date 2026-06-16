@@ -629,6 +629,76 @@ def probability_source_edge(rows: list[EdgeRow]) -> list[dict[str, Any]]:
     return result
 
 
+def decile_lift(
+    rows: list[EdgeRow],
+    *,
+    n_buckets: int = 10,
+    probability_source: str | None = None,
+) -> dict[str, Any]:
+    usable = [
+        row
+        for row in rows
+        if row.probability_pct is not None
+        and row.forward_return_pct is not None
+        and (probability_source is None or row.probability_source == probability_source)
+    ]
+    usable.sort(key=lambda row: float(row.probability_pct or 0.0))
+    n = len(usable)
+    min_rows = n_buckets * 3
+    if n < min_rows:
+        return {
+            "source": probability_source or "all",
+            "n": n,
+            "required_n": min_rows,
+            "base_win_pct": None,
+            "buckets": [],
+            "lift_pct": None,
+            "monotonicity": None,
+            "verdict": "too_few_rows",
+        }
+
+    returns = [row.forward_return_pct for row in usable if row.forward_return_pct is not None]
+    base_win = _win_rate(returns)
+    size = n // n_buckets
+    buckets = []
+    wins_by_bucket = []
+    for idx in range(n_buckets):
+        lo = idx * size
+        hi = n if idx == n_buckets - 1 else (idx + 1) * size
+        bucket = usable[lo:hi]
+        bucket_returns = [
+            row.forward_return_pct for row in bucket if row.forward_return_pct is not None
+        ]
+        bucket_probs = [row.probability_pct for row in bucket if row.probability_pct is not None]
+        win = _win_rate(bucket_returns)
+        wins_by_bucket.append(win or 0.0)
+        buckets.append(
+            {
+                "bucket": f"D{idx + 1}",
+                "n": len(bucket),
+                "prob_min": min(bucket_probs) if bucket_probs else None,
+                "prob_max": max(bucket_probs) if bucket_probs else None,
+                "win_pct": win,
+                "mean_return_pct": _avg(bucket_returns),
+            }
+        )
+
+    lift = round(wins_by_bucket[-1] - wins_by_bucket[0], 1)
+    ups = sum(1 for idx in range(1, n_buckets) if wins_by_bucket[idx] >= wins_by_bucket[idx - 1])
+    monotonicity = round(ups / (n_buckets - 1), 4)
+    verdict = "rank_orders_outcomes" if lift >= 8.0 and monotonicity >= 0.6 else "weak_or_flat"
+    return {
+        "source": probability_source or "all",
+        "n": n,
+        "required_n": min_rows,
+        "base_win_pct": base_win,
+        "buckets": buckets,
+        "lift_pct": lift,
+        "monotonicity": monotonicity,
+        "verdict": verdict,
+    }
+
+
 def score_window(rows: list[EdgeRow], min_score: float) -> list[dict[str, Any]]:
     grouped = {
         "below_window": [],
@@ -661,7 +731,40 @@ def score_window(rows: list[EdgeRow], min_score: float) -> list[dict[str, Any]]:
     return result
 
 
-def print_report(source: str, rows: list[EdgeRow], bins: int, min_score: float) -> None:
+def _print_decile_lift(title: str, result: dict[str, Any]) -> None:
+    print(f"\n  {title}")
+    print(
+        f"  source={result['source']} n={result['n']} "
+        f"required_n={result['required_n']} base_win%={_fmt(result['base_win_pct'])}"
+    )
+    if result["verdict"] == "too_few_rows":
+        print("  (too few probability/outcome rows for stable bucket lift)")
+        return
+    print(f"  {'bucket':<8}{'n':>8}{'prob_range%':>18}{'win%':>10}{'mean_ret%':>12}")
+    for item in result["buckets"]:
+        prob_range = (
+            "-"
+            if item["prob_min"] is None or item["prob_max"] is None
+            else f"{item['prob_min']:.1f}-{item['prob_max']:.1f}"
+        )
+        print(
+            f"  {item['bucket']:<8}{item['n']:>8}{prob_range:>18}"
+            f"{_fmt(item['win_pct']):>10}{_fmt(item['mean_return_pct']):>12}"
+        )
+    print(
+        f"  top-minus-bottom lift: {_fmt(result['lift_pct'])} pts"
+        f"   |   monotonicity: {100.0 * float(result['monotonicity']):.0f}%"
+        f"   |   verdict: {result['verdict']}"
+    )
+
+
+def print_report(
+    source: str,
+    rows: list[EdgeRow],
+    bins: int,
+    min_score: float,
+    decile_buckets: int,
+) -> None:
     total = len(rows)
     outcome_rows = [row for row in rows if row.forward_return_pct is not None]
     probability_rows = [row for row in rows if row.probability_pct is not None]
@@ -711,6 +814,17 @@ def print_report(source: str, rows: list[EdgeRow], bins: int, min_score: float) 
             f"{_fmt(item['mean_return_pct']):>12}"
         )
 
+    _print_decile_lift("DECILE LIFT", decile_lift(rows, n_buckets=decile_buckets))
+    for item in source_table:
+        _print_decile_lift(
+            "DECILE LIFT BY PROBABILITY SOURCE",
+            decile_lift(
+                rows,
+                n_buckets=decile_buckets,
+                probability_source=str(item["source"]),
+            ),
+        )
+
     print("\n  INSTRUCTION EDGE")
     print(f"  {'class':<14}{'n':>8}{'win%':>10}{'mean_ret%':>12}{'avg_mfe%':>12}")
     for item in edge_by_group(rows, "instruction_class"):
@@ -738,6 +852,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--start", default=None, help="inclusive timestamp/date lower bound")
     parser.add_argument("--end", default=None, help="exclusive timestamp/date upper bound")
     parser.add_argument("--bins", type=int, default=10)
+    parser.add_argument("--decile-buckets", type=int, default=10)
     parser.add_argument(
         "--min-score", type=float, default=float(os.getenv("CONVICTION_MIN_SCORE", "23"))
     )
@@ -792,7 +907,7 @@ def main() -> int:
     print(f"  end                               : {args.end or '-'}")
     print(f"  conviction min score              : {args.min_score}")
     for title, rows in reports:
-        print_report(title, rows, args.bins, args.min_score)
+        print_report(title, rows, args.bins, args.min_score, args.decile_buckets)
     return 0
 
 

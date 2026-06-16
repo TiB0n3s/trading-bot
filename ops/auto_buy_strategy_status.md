@@ -105,6 +105,22 @@ makes future intelligence harder to overfit or misread:
    the same OHLCV inputs are lower-priority unless they pass the corrected
    research harness out of sample.
 
+## Historical Candle Research Use
+
+Historical candle data should be used to widen the research view, not to relax
+runtime authority. Use `scripts/historical_market_view.py` to:
+
+- audit symbol/date/label coverage in `bar_pattern_features`,
+- summarize baseline outcomes by symbol, trend-scan label, bar-pattern label,
+  opportunity action, triple-barrier reason, day of week, and intraday bucket,
+- rerun the corrected feature scan over historical bar-pattern rows, including
+  blocked market-date permutation and max-statistic family correction,
+- optionally export a flat CSV substrate for future signal tests.
+
+This report is read-only and explicitly non-authoritative. A historical-candle
+survivor still needs the full promotion checklist, including leakage review,
+independent validation, and net-of-cost expectancy, before auto-buy can act.
+
 ## Reason To Reopen
 
 Reopen only for one of these bounded cases:

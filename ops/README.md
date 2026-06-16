@@ -14,6 +14,25 @@ null for feature-family selection. Additional observe-mode data should be
 treated as passive research substrate, not as evidence that the existing
 OHLCV-derived intelligence can bootstrap an edge.
 
+## Historical Candle Research View
+
+Use the historical market-view report to make sure candle-based research is not
+operating from an artificially narrow sample:
+
+```bash
+cd ~/trading-bot
+./venv/bin/python scripts/historical_market_view.py \
+  --start-date 2026-06-01 \
+  --end-date 2026-06-16 \
+  --target trend_scan_return_pct \
+  --json-output reports/historical_market_view_2026-06-01_2026-06-16.json \
+  --flat-output reports/historical_bar_research_2026-06-01_2026-06-16.csv
+```
+
+The report audits coverage, regime/label breadth, baseline outcomes, and
+corrected feature-lift results over existing `bar_pattern_features` rows. It is
+read-only research infrastructure and cannot grant auto-buy authority.
+
 ## Cron
 
 `crontab.tradingbot.current.txt` is a version-controlled snapshot of the

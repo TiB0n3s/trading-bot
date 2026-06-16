@@ -21,6 +21,10 @@ As of the latest roadmap work:
   within-test dependence and a max-statistic permutation null across scanned
   feature families. Per-feature p-values alone are not sufficient evidence for
   promotion.
+- `scripts/historical_market_view.py` now audits existing historical candle
+  coverage, regime/label breadth, baseline outcomes, flat research export, and
+  corrected feature scans over `bar_pattern_features` so candle history can
+  broaden research without changing auto-buy authority.
 - `app.py` is a Flask composition root: startup entry point, runtime compatibility context, container selection, and the public `process_signal()` compatibility wrapper. Flask app construction and route registration mechanics now live in `src/trading_bot/web/app_factory.py`, startup wiring lives in `src/trading_bot/runtime/startup.py`, and app-specific runtime settings are loaded by `src/trading_bot/config/runtime.py`.
 - Root Python file count is capped at five compatibility entrypoints. Legacy root scripts/modules have moved to `scripts/` while package migration continues into `src/trading_bot/`.
 - Live signal orchestration is owned by `services/live_signal_processor.py`; approval gates, sizing, execution adapters, audit persistence, runtime context, and repositories are service-owned.

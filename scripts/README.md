@@ -28,3 +28,7 @@ continues moving into `src/trading_bot/`.
   features as of the decision timestamp. It is read-only/non-authoritative for
   trading; it exists to test event, flow, macro, options, and other orthogonal
   signals through the existing detector.
+- `post_earnings_drift_research.py` ingests point-in-time earnings events,
+  labels multi-session post-event returns from `bar_pattern_features`, runs the
+  corrected feature detector, and adds expected-value-after-costs review. It is
+  research-only and cannot affect live or paper trading authority.

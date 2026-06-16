@@ -1,0 +1,55 @@
+#!/usr/bin/env python3
+"""Tests for research expected-value utilities."""
+
+from __future__ import annotations
+
+from trading_bot.research.expected_value import (
+    ExpectedValueAssumptions,
+    evaluate_decile_expected_value,
+    evaluate_expected_value,
+    round_trip_cost_pct,
+    whole_share_deployment,
+)
+
+
+def test_expected_value_subtracts_round_trip_costs():
+    assumptions = ExpectedValueAssumptions(spread_pct=0.04, slippage_pct=0.03)
+
+    result = evaluate_expected_value([1.0, -0.5, 0.5], assumptions=assumptions)
+
+    assert round_trip_cost_pct(assumptions) == 0.1
+    assert result["gross_expected_return_pct"] == 0.333333
+    assert result["net_expected_return_pct"] == 0.233333
+    assert result["verdict"] == "positive_ev_after_costs"
+
+
+def test_expected_value_blocks_undeployable_whole_share():
+    assumptions = ExpectedValueAssumptions(
+        account_equity=100.0,
+        max_position_pct=1.0,
+        reference_price=250.0,
+    )
+
+    result = evaluate_expected_value([10.0, 8.0], assumptions=assumptions)
+
+    assert result["shares"] == 0
+    assert result["verdict"] == "cannot_deploy_whole_share"
+
+
+def test_whole_share_deployment_reports_cash_drag():
+    result = whole_share_deployment(
+        ExpectedValueAssumptions(account_equity=1000.0, max_position_pct=0.5, reference_price=180.0)
+    )
+
+    assert result["target_notional"] == 500.0
+    assert result["shares"] == 2
+    assert result["deployed_notional"] == 360.0
+    assert result["whole_share_cash_drag_pct"] == 28.0
+
+
+def test_decile_expected_value_splits_ordered_returns():
+    buckets = evaluate_decile_expected_value([1, 2, 3, 4], n_buckets=2)
+
+    assert [bucket["bucket"] for bucket in buckets] == ["D1", "D2"]
+    assert buckets[0]["gross_expected_return_pct"] == 1.5
+    assert buckets[1]["gross_expected_return_pct"] == 3.5

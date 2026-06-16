@@ -73,6 +73,17 @@ of the following, in order:
 Net-of-costs review must include spread, slippage, order timing, missed fills,
 and whole-share sizing drag for the actual account size.
 
+The promotion model is:
+
+```text
+validated information -> calibrated probability -> expected value after costs -> action/no action
+```
+
+Do not promote probability-only gates, percentile-only gates,
+best-candidate-buying logic, unvalidated ML approvals, or OHLCV-only pattern
+authority. Probability is an input to the expected-value calculation, not a
+capital-authority decision by itself.
+
 ## Operational Guardrail
 
 Until a new thesis clears the checklist:
@@ -136,6 +147,12 @@ be represented without lookahead. The key contract is `available_at`: a feature
 must only join to candidate decisions after it was knowable in real time. The
 table and scanner are research infrastructure only; they do not grant capital
 authority.
+
+The first explicitly supported orthogonal thesis is post-earnings drift over
+multi-session horizons. Use `scripts/post_earnings_drift_research.py` to ingest
+point-in-time earnings events, label forward returns from `bar_pattern_features`,
+run the corrected feature detector, and compute expected value after spread,
+slippage, and whole-share deployment constraints.
 
 ## Reason To Reopen
 

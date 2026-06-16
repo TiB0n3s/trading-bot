@@ -92,6 +92,49 @@ timestamp when the source loader provides it, then applies the existing
 feature-lift detector with blocked market-date permutations and family-wise
 max-statistic correction.
 
+## Post-Earnings Drift Research
+
+Use the post-earnings drift runner as the first slower-horizon external thesis.
+It ingests point-in-time earnings events into `external_signal_features`, labels
+forward returns over multi-session horizons from `bar_pattern_features`, runs
+the corrected detector, and adds an expected-value review after friction. It is
+research-only and cannot grant auto-buy authority.
+
+Input JSONL rows should contain at least `symbol`, `earnings_ts`,
+`available_at`, and `source`. Scalar fields such as `report_timing`,
+`eps_surprise_pct`, `revenue_surprise_pct`, or `guidance_surprise` are expanded
+into earnings features.
+
+```bash
+cd ~/trading-bot
+./venv/bin/python scripts/post_earnings_drift_research.py \
+  --db-path trades.db \
+  ingest-jsonl \
+  --input data/earnings_events/YYYY-MM-DD.jsonl
+```
+
+Then scan a multi-session horizon:
+
+```bash
+cd ~/trading-bot
+./venv/bin/python scripts/post_earnings_drift_research.py \
+  --db-path trades.db \
+  scan \
+  --start-date 2026-01-01 \
+  --end-date 2026-06-16 \
+  --horizon-sessions 5 \
+  --min-rows 30 \
+  --permutations 200 \
+  --spread-pct 0.05 \
+  --slippage-pct 0.03 \
+  --account-equity 500 \
+  --json-output reports/post_earnings_drift_5d_2026-01-01_2026-06-16.json
+```
+
+Treat a positive detector result as a research lead only. A candidate still
+needs leakage review, independent validation, and a positive expected-value
+result at the intended account size before any promotion discussion.
+
 ## Cron
 
 `crontab.tradingbot.current.txt` is a version-controlled snapshot of the

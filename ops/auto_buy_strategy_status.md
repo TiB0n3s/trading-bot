@@ -121,6 +121,22 @@ This report is read-only and explicitly non-authoritative. A historical-candle
 survivor still needs the full promotion checklist, including leakage review,
 independent validation, and net-of-cost expectancy, before auto-buy can act.
 
+## Orthogonal Signal Research Use
+
+Price and volume remain useful as state: regime, risk, sizing context, and
+whether a move is already extended. They are not currently demonstrated as a
+standalone predictive edge. New edge work should therefore enter as
+point-in-time external features through `external_signal_features`, then pass
+the same detector and promotion checklist before any runtime authority changes.
+
+Acceptable external-feature candidates include event structure, earnings or
+filing evidence, macro/calendar state, options-derived positioning, sector or
+ETF flow context, short-interest context, and other data whose availability can
+be represented without lookahead. The key contract is `available_at`: a feature
+must only join to candidate decisions after it was knowable in real time. The
+table and scanner are research infrastructure only; they do not grant capital
+authority.
+
 ## Reason To Reopen
 
 Reopen only for one of these bounded cases:

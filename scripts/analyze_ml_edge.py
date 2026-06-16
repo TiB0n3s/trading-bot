@@ -325,6 +325,7 @@ def _edge_row_from_payload(
     outcome_mfe: Any = None,
 ) -> EdgeRow:
     candidate = _candidate_payload(payload)
+    market_timestamp = str(market_date or "")
     probability_pct, probability_source = _probability(payload, candidate)
     instruction, instruction_class = _instruction(payload, candidate, str(reason or ""))
     forward_return = _raw_float(outcome_return)
@@ -339,10 +340,13 @@ def _edge_row_from_payload(
                 keys=("forward_mfe_pct", "max_favorable_60m", "max_favorable_30m"),
             )
         )
+    categorical_features = _categorical_features(payload, candidate)
+    if market_timestamp:
+        categorical_features.setdefault("decision_ts", market_timestamp)
     return EdgeRow(
         source=source,
         symbol=str(symbol or "").upper() or None,
-        market_date=str(market_date or "")[:10] or None,
+        market_date=market_timestamp[:10] or None,
         decision=str(decision or "") or None,
         score=_raw_float(score),
         confluence_score=_raw_float(_first_value(candidate, payload, keys=("confluence_score",))),
@@ -355,7 +359,7 @@ def _edge_row_from_payload(
         forward_return_pct=forward_return,
         forward_mfe_pct=forward_mfe,
         numeric_features=_numeric_features(payload, candidate),
-        categorical_features=_categorical_features(payload, candidate),
+        categorical_features=categorical_features,
     )
 
 
@@ -371,6 +375,7 @@ def _edge_row_from_raw_payload(
     outcome_return: Any = None,
     outcome_mfe: Any = None,
 ) -> EdgeRow:
+    market_timestamp = str(market_date or "")
     probability_pct = None
     probability_source = None
     for key in PROBABILITY_KEYS:
@@ -411,10 +416,13 @@ def _edge_row_from_raw_payload(
     payload = _load_json(raw_payload)
     candidate = _candidate_payload(payload)
 
+    categorical_features = _categorical_features(payload, candidate)
+    if market_timestamp:
+        categorical_features.setdefault("decision_ts", market_timestamp)
     return EdgeRow(
         source=source,
         symbol=str(symbol or "").upper() or None,
-        market_date=str(market_date or "")[:10] or None,
+        market_date=market_timestamp[:10] or None,
         decision=str(decision or "") or None,
         score=_raw_float(score),
         confluence_score=_raw_float(_raw_json_value(raw_payload, ("confluence_score",))),
@@ -427,7 +435,7 @@ def _edge_row_from_raw_payload(
         forward_return_pct=forward_return,
         forward_mfe_pct=forward_mfe,
         numeric_features=_numeric_features(payload, candidate),
-        categorical_features=_categorical_features(payload, candidate),
+        categorical_features=categorical_features,
     )
 
 

@@ -22,3 +22,9 @@ continues moving into `src/trading_bot/`.
   substrate, and runs the corrected blocked/family-wise feature scan over
   historical candle rows. It is read-only and cannot affect live or paper
   trading authority.
+- `external_signal_features.py` ingests point-in-time external research
+  features from JSONL into `external_signal_features` and can rerun the
+  corrected candidate feature scan after enriching candidate rows with those
+  features as of the decision timestamp. It is read-only/non-authoritative for
+  trading; it exists to test event, flow, macro, options, and other orthogonal
+  signals through the existing detector.

@@ -47,6 +47,51 @@ cd ~/trading-bot
 
 Then point `historical_market_view.py --db-path` at that research DB.
 
+## Point-In-Time External Signal Features
+
+Use the external signal feature table for non-candle research inputs that are
+known at a specific decision time: event structure, macro/calendar state,
+options-derived positioning, flow/positioning, filings, or other orthogonal
+signals. These rows are research features only. They cannot approve trades or
+override auto-buy risk gates.
+
+Each JSONL row must include symbol, feature timestamp, availability timestamp,
+source, feature family, feature name, and a numeric or text value. Use `*` or
+omit `symbol` for market-wide context. `available_at` is the point-in-time
+contract used by scans; do not backfill with revised values unless the revision
+policy and true availability time are preserved. For scheduled future events
+that were legitimately known before the event time, set
+`revision_policy=scheduled_known_before_event` or
+`calendar_known_before_event` so the leakage audit treats that timing as
+intentional.
+
+```bash
+cd ~/trading-bot
+./venv/bin/python scripts/external_signal_features.py \
+  --db-path trades.db \
+  ingest-jsonl \
+  --input data/external_signal_features/YYYY-MM-DD.jsonl
+```
+
+After ingest, run the research scan over candidate/rejected outcomes:
+
+```bash
+cd ~/trading-bot
+./venv/bin/python scripts/external_signal_features.py \
+  --db-path trades.db \
+  scan-candidates \
+  --start-date 2026-06-01 \
+  --end-date 2026-06-16 \
+  --min-rows 100 \
+  --permutations 200 \
+  --json-output reports/external_signal_scan_2026-06-01_2026-06-16.json
+```
+
+The scan enriches rows using features available at the original decision
+timestamp when the source loader provides it, then applies the existing
+feature-lift detector with blocked market-date permutations and family-wise
+max-statistic correction.
+
 ## Cron
 
 `crontab.tradingbot.current.txt` is a version-controlled snapshot of the

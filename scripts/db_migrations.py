@@ -638,6 +638,51 @@ MIGRATIONS: tuple[Migration, ...] = (
             "ALTER TABLE exit_snapshots ADD COLUMN position_manager_version TEXT",
         ),
     ),
+    Migration(
+        migration_id="20260616_028_external_signal_features",
+        description="Create point-in-time external signal feature table.",
+        statements=(
+            """
+            CREATE TABLE IF NOT EXISTS external_signal_features (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                symbol TEXT NOT NULL,
+                feature_ts TEXT NOT NULL,
+                available_at TEXT NOT NULL,
+                source TEXT NOT NULL,
+                feature_family TEXT NOT NULL,
+                feature_name TEXT NOT NULL,
+                feature_value_numeric REAL,
+                feature_value_text TEXT,
+                lookback_window TEXT,
+                release_lag_seconds REAL,
+                source_url_or_ref TEXT,
+                revision_policy TEXT NOT NULL DEFAULT 'point_in_time_as_reported',
+                raw_json TEXT,
+                created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                UNIQUE (
+                    symbol,
+                    feature_ts,
+                    available_at,
+                    source,
+                    feature_family,
+                    feature_name
+                )
+            )
+            """,
+            """
+            CREATE INDEX IF NOT EXISTS idx_external_signal_features_symbol_available
+            ON external_signal_features(symbol, available_at)
+            """,
+            """
+            CREATE INDEX IF NOT EXISTS idx_external_signal_features_family_available
+            ON external_signal_features(feature_family, feature_name, available_at)
+            """,
+            """
+            CREATE INDEX IF NOT EXISTS idx_external_signal_features_source
+            ON external_signal_features(source, feature_ts)
+            """,
+        ),
+    ),
 )
 
 

@@ -654,6 +654,33 @@ def test_promotion_label_targets_migration_adds_columns():
         )
 
 
+def test_external_signal_features_migration_creates_table():
+    with tempfile.TemporaryDirectory() as tmp:
+        db_path = Path(tmp) / "test.db"
+
+        migration = next(
+            m for m in MIGRATIONS if m.migration_id == "20260616_028_external_signal_features"
+        )
+        applied = apply_migration(migration, db_path)
+        assert_equal(applied, True, "apply")
+
+        expected = {
+            "symbol",
+            "feature_ts",
+            "available_at",
+            "source",
+            "feature_family",
+            "feature_name",
+            "feature_value_numeric",
+            "feature_value_text",
+            "revision_policy",
+        }
+        assert_true(
+            expected <= table_columns(db_path, "external_signal_features"),
+            "external signal feature columns",
+        )
+
+
 if __name__ == "__main__":
     test_feature_audit_migration_is_idempotent()
     print("[OK] test_feature_audit_migration_is_idempotent")
@@ -695,4 +722,6 @@ if __name__ == "__main__":
     print("[OK] test_feature_snapshot_bar_contract_migration_adds_columns")
     test_promotion_label_targets_migration_adds_columns()
     print("[OK] test_promotion_label_targets_migration_adds_columns")
-    print("\nAll 20 DB migration tests passed.")
+    test_external_signal_features_migration_creates_table()
+    print("[OK] test_external_signal_features_migration_creates_table")
+    print("\nAll 21 DB migration tests passed.")

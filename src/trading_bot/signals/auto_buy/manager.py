@@ -633,8 +633,12 @@ def auto_buy_prediction_context(symbol: str) -> dict[str, Any]:
 
     if row:
         score = row.get("prediction_score")
+        profit_source = row.get("probability_of_profit_source")
+        probability_profit_source = (
+            f"probability_of_profit:{profit_source}" if profit_source else "probability_of_profit"
+        )
         probability_pct, probability_source = _first_probability_pct_with_source(
-            ("probability_of_profit", row.get("probability_of_profit")),
+            (probability_profit_source, row.get("probability_of_profit")),
             ("probability_of_approval", row.get("probability_of_approval")),
             ("probability_of_order", row.get("probability_of_order")),
         )
@@ -645,6 +649,8 @@ def auto_buy_prediction_context(symbol: str) -> dict[str, Any]:
                 "prediction_decision": "observe_only",
                 "prediction_reason": row.get("reason"),
                 "probability_of_profit": row.get("probability_of_profit"),
+                "probability_of_profit_source": profit_source,
+                "probability_of_profit_sample_size": row.get("probability_of_profit_sample_size"),
                 "probability_of_approval": row.get("probability_of_approval"),
                 "probability_of_order": row.get("probability_of_order"),
                 "probability_of_profit_pct": _probability_pct(row.get("probability_of_profit")),
@@ -1898,6 +1904,12 @@ def evaluate_auto_buy_candidate(
         "prediction_probability_pct": prediction_probability_pct,
         "prediction_probability_source": prediction_probability_source,
         "prediction_probability_of_profit_pct": prediction_context.get("probability_of_profit_pct"),
+        "prediction_probability_of_profit_source": prediction_context.get(
+            "probability_of_profit_source"
+        ),
+        "prediction_probability_of_profit_sample_size": prediction_context.get(
+            "probability_of_profit_sample_size"
+        ),
         "prediction_probability_of_approval_pct": prediction_context.get(
             "probability_of_approval_pct"
         ),

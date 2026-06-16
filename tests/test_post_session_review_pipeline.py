@@ -34,11 +34,13 @@ def test_post_session_review_dry_run_lists_warn_only_review_steps():
     assert "Post-session review pipeline" in out
     assert "post_session_operational_check" in out
     assert "rejected_signal_outcome_builder" in out
+    assert "exit_snapshot_backfill" in out
     assert "decision_lifecycle_dashboard" in out
     assert "automated_retraining" in out
     assert "bar_timing_quality_report" in out
     assert "learning_artifacts" in out
     assert "[CRITICAL]" not in out
+    assert out.index("exit_snapshot_backfill") < out.index("decision_lifecycle_dashboard")
 
 
 def test_post_session_wrapper_delegates_to_pipeline_only():

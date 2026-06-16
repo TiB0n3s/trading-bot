@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Any
 
@@ -9,6 +10,8 @@ from db import DB_PATH, get_connection
 
 
 class ExperienceModelRepository:
+    _candidate_forward_cache_by_db: dict[str, dict[tuple[str, str], list[dict[str, Any]]]] = {}
+
     def __init__(self, db_path: Path | str = DB_PATH):
         self.db_path = db_path
 
@@ -24,6 +27,8 @@ class ExperienceModelRepository:
 
                     prediction_score REAL,
                     probability_of_profit REAL,
+                    probability_of_profit_source TEXT,
+                    probability_of_profit_sample_size INTEGER,
                     probability_of_approval REAL,
                     probability_of_order REAL,
                     expected_pnl REAL,
@@ -76,6 +81,12 @@ class ExperienceModelRepository:
                 for row in con.execute("PRAGMA table_info(daily_symbol_predictions)").fetchall()
             }
             for col, col_type in timing_columns.items():
+                if col not in existing_cols:
+                    con.execute(f"ALTER TABLE daily_symbol_predictions ADD COLUMN {col} {col_type}")
+            for col, col_type in (
+                ("probability_of_profit_source", "TEXT"),
+                ("probability_of_profit_sample_size", "INTEGER"),
+            ):
                 if col not in existing_cols:
                     con.execute(f"ALTER TABLE daily_symbol_predictions ADD COLUMN {col} {col_type}")
             if "prediction_generated_at" not in existing_cols:
@@ -201,6 +212,82 @@ class ExperienceModelRepository:
                 """,
                 (f"{market_date}%", symbol),
             ).fetchall()
+
+    def candidate_forward_outcome_rows_for_context(self, market_date: str, symbol: str):
+        """Return candidate-universe forward outcome labels for a symbol/date.
+
+        These rows are observe-only counterfactual labels, not realized trade
+        exits. They are used as a fallback profit-probability substrate when a
+        symbol has no closed-trade history yet.
+        """
+        cache = self._candidate_forward_outcome_cache()
+        return list(cache.get((str(market_date)[:10], str(symbol).upper()), []))
+
+    def _candidate_forward_outcome_cache(self) -> dict[tuple[str, str], list[dict[str, Any]]]:
+        cache_key = str(self.db_path)
+        cached = self._candidate_forward_cache_by_db.get(cache_key)
+        if cached is not None:
+            return cached
+
+        result: dict[tuple[str, str], list[dict[str, Any]]] = {}
+        with get_connection(self.db_path) as con:
+            exists = con.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='candidate_universe'"
+            ).fetchone()
+            if not exists:
+                self._candidate_forward_cache_by_db[cache_key] = result
+                return result
+            rows = con.execute(
+                """
+                SELECT candidate_ts, symbol, candidate_status, score, candidate_json
+                FROM candidate_universe
+                ORDER BY candidate_ts ASC, id ASC
+                """
+            ).fetchall()
+
+        for row in rows:
+            try:
+                payload = json.loads(row["candidate_json"] or "{}")
+            except Exception:
+                payload = {}
+            if not isinstance(payload, dict):
+                payload = {}
+            candidate = payload.get("candidate")
+            if not isinstance(candidate, dict):
+                candidate = {}
+            forward_return = None
+            for key in (
+                "forward_return_pct",
+                "return_60m",
+                "return_30m",
+                "return_eod",
+                "candidate_forward_return_pct",
+            ):
+                value = candidate.get(key, payload.get(key))
+                if value not in (None, ""):
+                    try:
+                        forward_return = float(value)
+                    except (TypeError, ValueError):
+                        forward_return = None
+                    break
+            if forward_return is None:
+                continue
+            item = {
+                "candidate_ts": row["candidate_ts"],
+                "symbol": row["symbol"],
+                "candidate_status": row["candidate_status"],
+                "score": row["score"],
+                "forward_return_pct": forward_return,
+            }
+            result.setdefault(
+                (str(row["candidate_ts"])[:10], str(row["symbol"]).upper()), []
+            ).append(
+                {
+                    **item,
+                }
+            )
+        self._candidate_forward_cache_by_db[cache_key] = result
+        return result
 
     def trend_context_for_symbol(self, market_date: str, symbol: str):
         with get_connection(self.db_path) as con:

@@ -49,9 +49,17 @@ class PredictionRepository:
             }
             prediction_generated_at_expr = _prediction_generated_at_expr(columns)
             updated_at_expr = _column_expr(columns, "updated_at")
+            probability_of_profit_source_expr = _column_expr(
+                columns, "probability_of_profit_source"
+            )
+            probability_of_profit_sample_size_expr = _column_expr(
+                columns, "probability_of_profit_sample_size"
+            )
             rows = con.execute(
                 f"""
                 SELECT market_date, symbol, prediction_score, probability_of_profit,
+                       {probability_of_profit_source_expr},
+                       {probability_of_profit_sample_size_expr},
                        probability_of_order, expected_pnl, confidence, sample_size,
                        reason, timing_score, recommended_entry_timing,
                        recommended_exit_timing, trend_score, trend_label,
@@ -97,6 +105,12 @@ class PredictionRepository:
             }
             prediction_generated_at_expr = _prediction_generated_at_expr(columns)
             probability_of_profit_expr = _column_expr(columns, "probability_of_profit")
+            probability_of_profit_source_expr = _column_expr(
+                columns, "probability_of_profit_source"
+            )
+            probability_of_profit_sample_size_expr = _column_expr(
+                columns, "probability_of_profit_sample_size"
+            )
             probability_of_approval_expr = _column_expr(columns, "probability_of_approval")
             probability_of_order_expr = _column_expr(columns, "probability_of_order")
             row = con.execute(
@@ -104,6 +118,8 @@ class PredictionRepository:
                 SELECT market_date, symbol, prediction_score, confidence,
                        sample_size, trend_label, timing_score, reason,
                        {probability_of_profit_expr},
+                       {probability_of_profit_source_expr},
+                       {probability_of_profit_sample_size_expr},
                        {probability_of_approval_expr},
                        {probability_of_order_expr},
                        {prediction_generated_at_expr} AS prediction_generated_at

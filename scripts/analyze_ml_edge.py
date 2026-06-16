@@ -167,24 +167,34 @@ def _first_value(*sources: dict[str, Any], keys: Iterable[str]) -> Any:
     return None
 
 
-def _probability(payload: dict[str, Any], candidate: dict[str, Any]) -> tuple[float | None, str | None]:
+def _probability(
+    payload: dict[str, Any], candidate: dict[str, Any]
+) -> tuple[float | None, str | None]:
     for key in PROBABILITY_KEYS:
         value = candidate.get(key)
         if value in (None, ""):
             value = payload.get(key)
         probability = _float(value)
         if probability is not None:
-            source = str(candidate.get("probability_source") or payload.get("probability_source") or key)
+            source = str(
+                candidate.get("probability_source") or payload.get("probability_source") or key
+            )
             return probability, source
     return None, None
 
 
-def _instruction(payload: dict[str, Any], candidate: dict[str, Any], reason: str | None) -> tuple[str, str]:
-    instruction = str(
-        candidate.get("layered_ml_final_instruction")
-        or payload.get("layered_ml_final_instruction")
-        or "none"
-    ).strip().lower()
+def _instruction(
+    payload: dict[str, Any], candidate: dict[str, Any], reason: str | None
+) -> tuple[str, str]:
+    instruction = (
+        str(
+            candidate.get("layered_ml_final_instruction")
+            or payload.get("layered_ml_final_instruction")
+            or "none"
+        )
+        .strip()
+        .lower()
+    )
     if instruction in APPROVE_INSTRUCTIONS:
         return instruction, "approve"
     if instruction in CAUTION_INSTRUCTIONS:
@@ -231,12 +241,8 @@ def _edge_row_from_payload(
         market_date=str(market_date or "")[:10] or None,
         decision=str(decision or "") or None,
         score=_raw_float(score),
-        confluence_score=_raw_float(
-            _first_value(candidate, payload, keys=("confluence_score",))
-        ),
-        conviction_score=_raw_float(
-            _first_value(candidate, payload, keys=("conviction_score",))
-        ),
+        confluence_score=_raw_float(_first_value(candidate, payload, keys=("confluence_score",))),
+        conviction_score=_raw_float(_first_value(candidate, payload, keys=("conviction_score",))),
         probability_pct=probability_pct,
         probability_source=probability_source,
         instruction=instruction,
@@ -263,14 +269,14 @@ def _edge_row_from_raw_payload(
     for key in PROBABILITY_KEYS:
         probability_pct = _float(_raw_json_value(raw_payload, (key,)))
         if probability_pct is not None:
-            probability_source = str(
-                _raw_json_value(raw_payload, ("probability_source",)) or key
-            )
+            probability_source = str(_raw_json_value(raw_payload, ("probability_source",)) or key)
             break
 
-    instruction = str(
-        _raw_json_value(raw_payload, ("layered_ml_final_instruction",)) or "none"
-    ).strip().lower()
+    instruction = (
+        str(_raw_json_value(raw_payload, ("layered_ml_final_instruction",)) or "none")
+        .strip()
+        .lower()
+    )
     if instruction in APPROVE_INSTRUCTIONS:
         instruction_class = "approve"
     elif instruction in CAUTION_INSTRUCTIONS:
@@ -541,6 +547,32 @@ def edge_by_group(rows: list[EdgeRow], key: str) -> list[dict[str, Any]]:
     return result
 
 
+def probability_source_edge(rows: list[EdgeRow]) -> list[dict[str, Any]]:
+    grouped: dict[str, list[EdgeRow]] = defaultdict(list)
+    for row in rows:
+        if row.probability_pct is None or row.forward_return_pct is None:
+            continue
+        grouped[str(row.probability_source or "missing")].append(row)
+    result = []
+    for source, bucket in grouped.items():
+        returns = [row.forward_return_pct for row in bucket if row.forward_return_pct is not None]
+        probs = [row.probability_pct for row in bucket if row.probability_pct is not None]
+        pred = _avg(probs)
+        win = _win_rate(returns)
+        result.append(
+            {
+                "source": source,
+                "n": len(bucket),
+                "predicted_win_pct": pred,
+                "realized_win_pct": win,
+                "gap": round(pred - win, 4) if pred is not None and win is not None else None,
+                "mean_return_pct": _avg(returns),
+            }
+        )
+    result.sort(key=lambda item: (-int(item["n"]), item["source"]))
+    return result
+
+
 def score_window(rows: list[EdgeRow], min_score: float) -> list[dict[str, Any]]:
     grouped = {
         "below_window": [],
@@ -582,11 +614,19 @@ def print_report(source: str, rows: list[EdgeRow], bins: int, min_score: float) 
     print(f"  {source}")
     print("=" * 78)
     print(f"  rows                              : {total}")
-    print(f"  rows with forward outcome          : {len(outcome_rows)} ({_pct(len(outcome_rows), total)})")
-    print(f"  rows with probability              : {len(probability_rows)} ({_pct(len(probability_rows), total)})")
-    print(f"  rows with layered instruction       : {len(instruction_rows)} ({_pct(len(instruction_rows), total)})")
+    print(
+        f"  rows with forward outcome          : {len(outcome_rows)} ({_pct(len(outcome_rows), total)})"
+    )
+    print(
+        f"  rows with probability              : {len(probability_rows)} ({_pct(len(probability_rows), total)})"
+    )
+    print(
+        f"  rows with layered instruction       : {len(instruction_rows)} ({_pct(len(instruction_rows), total)})"
+    )
     if not outcome_rows:
-        print("  analysis                           : no forward outcomes available for this source")
+        print(
+            "  analysis                           : no forward outcomes available for this source"
+        )
         return
 
     print("\n  CALIBRATION")
@@ -598,6 +638,20 @@ def print_report(source: str, rows: list[EdgeRow], bins: int, min_score: float) 
         print(
             f"  {item['bin']:<10}{item['n']:>8}{_fmt(item['predicted_win_pct']):>12}"
             f"{_fmt(item['realized_win_pct']):>12}{_fmt(item['gap']):>10}"
+            f"{_fmt(item['mean_return_pct']):>12}"
+        )
+
+    print("\n  CALIBRATION BY PROBABILITY SOURCE")
+    print(f"  {'source':<42}{'n':>8}{'pred_win%':>12}{'real_win%':>12}{'gap':>10}{'mean_ret%':>12}")
+    source_table = probability_source_edge(rows)
+    if not source_table:
+        print("  (no probability/outcome overlap by source)")
+    for item in source_table:
+        print(
+            f"  {item['source']:<42}{item['n']:>8}"
+            f"{_fmt(item['predicted_win_pct']):>12}"
+            f"{_fmt(item['realized_win_pct']):>12}"
+            f"{_fmt(item['gap']):>10}"
             f"{_fmt(item['mean_return_pct']):>12}"
         )
 
@@ -628,7 +682,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--start", default=None, help="inclusive timestamp/date lower bound")
     parser.add_argument("--end", default=None, help="exclusive timestamp/date upper bound")
     parser.add_argument("--bins", type=int, default=10)
-    parser.add_argument("--min-score", type=float, default=float(os.getenv("CONVICTION_MIN_SCORE", "23")))
+    parser.add_argument(
+        "--min-score", type=float, default=float(os.getenv("CONVICTION_MIN_SCORE", "23"))
+    )
     parser.add_argument("--limit", type=int, default=None, help="debug limit per source")
     parser.add_argument(
         "--source",

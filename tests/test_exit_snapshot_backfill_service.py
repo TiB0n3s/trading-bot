@@ -71,6 +71,25 @@ def _seed(db_path: Path) -> None:
         )
         con.execute(
             """
+            CREATE TABLE auto_sell_decision_snapshots (
+                id INTEGER PRIMARY KEY,
+                created_at TEXT NOT NULL,
+                candidate_timestamp TEXT NOT NULL,
+                symbol TEXT NOT NULL,
+                action TEXT,
+                severity TEXT,
+                reason TEXT,
+                auto_sell_enabled INTEGER DEFAULT 0,
+                order_submitted INTEGER DEFAULT 0,
+                order_id TEXT,
+                order_status TEXT,
+                candidate_json TEXT,
+                runtime_effect TEXT NOT NULL DEFAULT 'auto_sell_paper_execution_path'
+            )
+            """
+        )
+        con.execute(
+            """
             INSERT INTO decision_snapshots (
                 id, decision_time, trade_id, symbol, action, approved,
                 canonical_intelligence_version, canonical_intelligence_hash,
@@ -127,6 +146,42 @@ def _seed(db_path: Path) -> None:
                 "position_manager_full_exit",
             ),
         )
+        con.execute(
+            """
+            INSERT INTO auto_sell_decision_snapshots (
+                id, created_at, candidate_timestamp, symbol, action, severity, reason,
+                auto_sell_enabled, order_submitted, order_id, order_status,
+                candidate_json, runtime_effect
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                99,
+                "2026-06-01T10:44:59-05:00",
+                "2026-06-01 10:44:59",
+                "NVDA",
+                "sell_candidate",
+                "conviction_exit",
+                "conviction_exit:trailing_stop",
+                1,
+                1,
+                "exit-1",
+                "accepted",
+                json.dumps(
+                    {
+                        "conviction_exit_decision": {
+                            "action": "exit",
+                            "reason": "trailing_stop",
+                        },
+                        "layered_ml_final_instruction": "paper_exit",
+                        "layered_ml_master_confidence_score": 0.82,
+                        "layered_ml_ensemble_probability_pct": 71.0,
+                        "sell_pressure_score": 4.0,
+                        "sell_pressure_recommendation": "exit",
+                    }
+                ),
+                "auto_sell_paper_execution_path",
+            ),
+        )
 
 
 def _rows(db_path: Path) -> list[sqlite3.Row]:
@@ -157,6 +212,12 @@ def test_backfill_approved_matched_exits_is_idempotent():
     assert rows[0]["realized_return_pct"] == 1.0
     assert rows[0]["missed_upside_pct"] == 0.5
     assert rows[0]["entry_canonical_intelligence_hash"] == "a" * 64
+    snapshot = json.loads(rows[0]["canonical_exit_json"])
+    auto_sell = snapshot["exit_trigger"]["metadata"]["auto_sell_decision"]
+    assert auto_sell["auto_sell_snapshot_id"] == 99
+    assert auto_sell["auto_sell_severity"] == "conviction_exit"
+    assert auto_sell["conviction_exit_decision"]["action"] == "exit"
+    assert auto_sell["layered_ml_final_instruction"] == "paper_exit"
 
 
 def test_backfill_repairs_trade_backed_exit_without_decision_snapshot():

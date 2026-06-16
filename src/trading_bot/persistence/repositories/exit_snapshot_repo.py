@@ -198,6 +198,46 @@ class ExitSnapshotRepository:
                 params,
             ).fetchall()
 
+    def auto_sell_decision_for_order(self, order_id: str | None) -> dict[str, Any] | None:
+        """Return the persisted auto-sell decision snapshot for an exit order."""
+        if not order_id:
+            return None
+        with get_connection(self.db_path) as con:
+            if not self._table_exists(con, "auto_sell_decision_snapshots"):
+                return None
+            cols = self._table_columns(con, "auto_sell_decision_snapshots")
+            required = {"id", "order_id", "candidate_timestamp"}
+            if not required <= cols:
+                return None
+
+            def col(name: str) -> str:
+                return f"{name}" if name in cols else f"NULL AS {name}"
+
+            row = con.execute(
+                f"""
+                SELECT
+                    id,
+                    candidate_timestamp,
+                    {col("created_at")},
+                    {col("symbol")},
+                    {col("action")},
+                    {col("severity")},
+                    {col("reason")},
+                    {col("auto_sell_enabled")},
+                    {col("order_submitted")},
+                    order_id,
+                    {col("order_status")},
+                    {col("candidate_json")},
+                    {col("runtime_effect")}
+                FROM auto_sell_decision_snapshots
+                WHERE order_id = ?
+                ORDER BY COALESCE(created_at, candidate_timestamp) DESC, id DESC
+                LIMIT 1
+                """,
+                (order_id,),
+            ).fetchone()
+        return dict(row) if row else None
+
     def latest_for_symbol(self, symbol: str, limit: int = 20):
         self.init_table()
         with get_connection(self.db_path) as con:

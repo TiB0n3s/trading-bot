@@ -20,9 +20,9 @@ from pathlib import Path
 from statistics import mean
 
 from build_historical_trend_context import ensure_historical_trend_context_table
-from market_intelligence.intelligence_store import init_intelligence_tables
 from repositories.experience_model_repo import ExperienceModelRepository
 
+from market_intelligence.intelligence_store import init_intelligence_tables
 
 DB_PATH = Path(__file__).resolve().parents[1] / "trades.db"
 
@@ -32,6 +32,8 @@ PREDICTION_COLUMNS = [
     "symbol",
     "prediction_score",
     "probability_of_profit",
+    "probability_of_profit_source",
+    "probability_of_profit_sample_size",
     "probability_of_approval",
     "probability_of_order",
     "expected_pnl",
@@ -58,6 +60,8 @@ PREDICTION_COLUMNS = [
     "created_at",
     "updated_at",
 ]
+
+_OUTCOME_CACHE: dict[tuple[str, str, str], dict] = {}
 
 
 def init_prediction_tables(db_path: Path | str = DB_PATH) -> None:
@@ -160,6 +164,11 @@ def outcome_for_context(repo: ExperienceModelRepository, market_date: str, symbo
     Uses live trades/matched_trades when present, plus learning-only historical
     tables rebuilt from Alpaca exports and signal logs.
     """
+    cache_key = (str(repo.db_path), str(market_date), str(symbol).upper())
+    cached = _OUTCOME_CACHE.get(cache_key)
+    if cached is not None:
+        return dict(cached)
+
     try:
         trades = repo.trade_rows_for_context(market_date, symbol)
     except Exception:
@@ -169,9 +178,9 @@ def outcome_for_context(repo: ExperienceModelRepository, market_date: str, symbo
     approved = sum(1 for r in trades if int(r["approved"] or 0) == 1)
     orders = sum(1 for r in trades if r["order_id"])
     filled = sum(
-        1 for r in trades
-        if r["order_status"] in ("filled", "partially_filled")
-        and r["fill_price"] is not None
+        1
+        for r in trades
+        if r["order_status"] in ("filled", "partially_filled") and r["fill_price"] is not None
     )
 
     # Add deduped historical signal events when live trades rows are missing due to DB rebuild.
@@ -191,7 +200,9 @@ def outcome_for_context(repo: ExperienceModelRepository, market_date: str, symbo
     if not signals and hist_signals:
         signals = len(hist_signals)
         approved = sum(1 for r in hist_signals if int(r["approved"] or 0) == 1)
-        orders = sum(1 for r in hist_signals if (r["order_id"] or r["decision_summary"] == "order_placed"))
+        orders = sum(
+            1 for r in hist_signals if (r["order_id"] or r["decision_summary"] == "order_placed")
+        )
         filled = orders
 
     matched = []
@@ -213,8 +224,34 @@ def outcome_for_context(repo: ExperienceModelRepository, market_date: str, symbo
     closed = len(closed_rows)
     pnl = sum(float(r["realized_pnl"] or 0) for r in closed_rows)
     wins = sum(1 for r in closed_rows if float(r["realized_pnl"] or 0) > 0)
+    profit_evidence_count = closed
+    profit_evidence_wins = wins
+    profit_evidence_source = "realized_trades" if closed else "none"
+    candidate_forward_count = 0
+    candidate_forward_wins = 0
+    candidate_forward_avg_return_pct = None
 
-    return {
+    if not closed:
+        try:
+            candidate_forward_rows = repo.candidate_forward_outcome_rows_for_context(
+                market_date, symbol
+            )
+        except Exception:
+            candidate_forward_rows = []
+        candidate_forward_returns = [
+            float(r["forward_return_pct"])
+            for r in candidate_forward_rows
+            if r.get("forward_return_pct") is not None
+        ]
+        candidate_forward_count = len(candidate_forward_returns)
+        candidate_forward_wins = sum(1 for value in candidate_forward_returns if value > 0)
+        if candidate_forward_returns:
+            candidate_forward_avg_return_pct = mean(candidate_forward_returns)
+            profit_evidence_count = candidate_forward_count
+            profit_evidence_wins = candidate_forward_wins
+            profit_evidence_source = "candidate_forward_outcomes"
+
+    outcome = {
         "signals": signals,
         "approved": approved,
         "orders": orders,
@@ -225,7 +262,15 @@ def outcome_for_context(repo: ExperienceModelRepository, market_date: str, symbo
         "profitable": 1 if pnl > 0 else 0 if closed > 0 else None,
         "win_rate": wins / closed if closed else None,
         "expectancy": pnl / closed if closed else None,
+        "profit_evidence_count": profit_evidence_count,
+        "profit_evidence_wins": profit_evidence_wins,
+        "profit_evidence_source": profit_evidence_source,
+        "candidate_forward_count": candidate_forward_count,
+        "candidate_forward_wins": candidate_forward_wins,
+        "candidate_forward_avg_return_pct": candidate_forward_avg_return_pct,
     }
+    _OUTCOME_CACHE[cache_key] = dict(outcome)
+    return outcome
 
 
 def event_signature(events):
@@ -302,7 +347,6 @@ def similarity_score(target_ctx, target_events, hist_ctx, hist_events):
     return score, reasons
 
 
-
 def _timing_recommendation_from_row(row):
     """Map aggregate timing stats into deterministic observe-only guidance."""
     matched = int(row["matched"] or 0)
@@ -337,7 +381,6 @@ def _timing_recommendation_from_row(row):
         return "sell_timing_needs_review", 45.0
 
     return "review_timing", 50.0
-
 
 
 def trend_context_for_symbol(repo: ExperienceModelRepository, market_date: str, symbol: str):
@@ -429,8 +472,9 @@ def trend_similarity_lesson(repo: ExperienceModelRepository, market_date: str, s
     }
 
 
-
-def timing_lesson_for_symbol(repo: ExperienceModelRepository, market_date: str, symbol: str) -> dict:
+def timing_lesson_for_symbol(
+    repo: ExperienceModelRepository, market_date: str, symbol: str
+) -> dict:
     """Return observe-only timing lesson from historical_signal_outcomes.
 
     Preference order:
@@ -479,13 +523,14 @@ def timing_lesson_for_symbol(repo: ExperienceModelRepository, market_date: str, 
     }
 
 
-
 def prediction_from_matches(target_ctx, matches):
     """Create probability/score from weighted historical matches."""
     if not matches:
         return {
             "prediction_score": 50.0,
             "probability_of_profit": None,
+            "probability_of_profit_source": None,
+            "probability_of_profit_sample_size": 0,
             "probability_of_approval": None,
             "probability_of_order": None,
             "expected_pnl": None,
@@ -506,6 +551,7 @@ def prediction_from_matches(target_ctx, matches):
     outcomes = [m["outcome"] for m in top]
     with_signals = [o for o in outcomes if o["signals"] > 0]
     with_closed = [o for o in outcomes if o["closed_trades"] > 0]
+    with_profit_evidence = [o for o in outcomes if int(o.get("profit_evidence_count") or 0) > 0]
 
     probability_of_approval = (
         sum(o["approved"] for o in with_signals) / sum(o["signals"] for o in with_signals)
@@ -519,11 +565,16 @@ def prediction_from_matches(target_ctx, matches):
         else None
     )
 
-    if with_closed:
-        profitable = sum(1 for o in with_closed if o["realized_pnl"] > 0)
-        probability_of_profit = profitable / len(with_closed)
-        expected_pnl = mean(o["expectancy"] for o in with_closed if o["expectancy"] is not None)
-        expected_win_rate = mean(o["win_rate"] for o in with_closed if o["win_rate"] is not None)
+    if with_profit_evidence:
+        profitable = sum(int(o.get("profit_evidence_wins") or 0) for o in with_profit_evidence)
+        profit_samples = sum(int(o.get("profit_evidence_count") or 0) for o in with_profit_evidence)
+        probability_of_profit = profitable / profit_samples if profit_samples else None
+        expectancy_values = [
+            o["expectancy"] for o in with_closed if o.get("expectancy") is not None
+        ]
+        win_rate_values = [o["win_rate"] for o in with_closed if o.get("win_rate") is not None]
+        expected_pnl = mean(expectancy_values) if expectancy_values else None
+        expected_win_rate = mean(win_rate_values) if win_rate_values else None
     else:
         probability_of_profit = None
         expected_pnl = None
@@ -553,7 +604,25 @@ def prediction_from_matches(target_ctx, matches):
 
     sample_size = len(top)
     closed_sample_size = len(with_closed)
-    confidence = confidence_from_sample(closed_sample_size if closed_sample_size else sample_size)
+    profit_evidence_sample_size = sum(
+        int(o.get("profit_evidence_count") or 0) for o in with_profit_evidence
+    )
+    confidence = confidence_from_sample(
+        closed_sample_size if closed_sample_size else profit_evidence_sample_size or sample_size
+    )
+    profit_sources = sorted(
+        {
+            str(o.get("profit_evidence_source") or "unknown")
+            for o in with_profit_evidence
+            if o.get("profit_evidence_source")
+        }
+    )
+    if len(profit_sources) == 1:
+        probability_of_profit_source = profit_sources[0]
+    elif profit_sources:
+        probability_of_profit_source = "mixed:" + ",".join(profit_sources)
+    else:
+        probability_of_profit_source = None
 
     best_reasons = []
     for m in top[:5]:
@@ -562,20 +631,25 @@ def prediction_from_matches(target_ctx, matches):
 
     reason = (
         f"Matched {sample_size} historical context rows"
-        f" ({closed_sample_size} with closed trades). "
+        f" ({closed_sample_size} with closed trades; "
+        f"{profit_evidence_sample_size} profit-evidence samples). "
     )
 
     if probability_of_profit is not None:
         reason += (
             f"Historical profit probability={probability_of_profit:.1%}, "
-            f"expected_pnl=${expected_pnl:+.2f}."
+            f"source={','.join(profit_sources) or 'unknown'}."
         )
+        if expected_pnl is not None:
+            reason += f" expected_pnl=${expected_pnl:+.2f}."
     else:
         reason += "No closed-trade outcome sample yet; prediction is mostly context-based."
 
     return {
         "prediction_score": prediction_score,
         "probability_of_profit": probability_of_profit,
+        "probability_of_profit_source": probability_of_profit_source,
+        "probability_of_profit_sample_size": profit_evidence_sample_size,
         "probability_of_approval": probability_of_approval,
         "probability_of_order": probability_of_order,
         "expected_pnl": expected_pnl,
@@ -595,6 +669,8 @@ def prediction_from_matches(target_ctx, matches):
                 }
                 for m in top[:10]
             ],
+            "profit_evidence_sample_size": profit_evidence_sample_size,
+            "profit_evidence_sources": profit_sources,
         },
     }
 
@@ -666,6 +742,7 @@ def weekly_symbol_performance(market_date: str, symbol: str, db_path: Path | str
             "reason": f"weekly_symbol_performance_error={e}",
         }
 
+
 def predict_symbol(market_date: str, symbol: str, db_path: Path | str = DB_PATH) -> dict:
     init_prediction_tables(db_path)
 
@@ -689,12 +766,14 @@ def predict_symbol(market_date: str, symbol: str, db_path: Path | str = DB_PATH)
 
         outcome = outcome_for_context(repo, hist_ctx["market_date"], hist_ctx["symbol"])
 
-        matches.append({
-            "similarity_score": sim_score,
-            "reasons": reasons,
-            "context": dict(hist_ctx),
-            "outcome": outcome,
-        })
+        matches.append(
+            {
+                "similarity_score": sim_score,
+                "reasons": reasons,
+                "context": dict(hist_ctx),
+                "outcome": outcome,
+            }
+        )
 
     pred = prediction_from_matches(target_ctx, matches)
 
@@ -718,13 +797,11 @@ def predict_symbol(market_date: str, symbol: str, db_path: Path | str = DB_PATH)
     weekly_reason = weekly.get("reason")
     if weekly_modifier:
         pred["reason"] = (
-            f"{pred.get('reason', '')} "
-            f"Weekly performance modifier applied: {weekly_reason}. "
+            f"{pred.get('reason', '')} Weekly performance modifier applied: {weekly_reason}. "
         ).strip()
     else:
         pred["reason"] = (
-            f"{pred.get('reason', '')} "
-            f"Weekly performance neutral: {weekly_reason}. "
+            f"{pred.get('reason', '')} Weekly performance neutral: {weekly_reason}. "
         ).strip()
 
     combined_raw = pred["raw"]
@@ -753,6 +830,8 @@ def upsert_prediction(prediction: dict, db_path: Path | str = DB_PATH) -> None:
         "symbol": prediction["symbol"],
         "prediction_score": prediction.get("prediction_score"),
         "probability_of_profit": prediction.get("probability_of_profit"),
+        "probability_of_profit_source": prediction.get("probability_of_profit_source"),
+        "probability_of_profit_sample_size": prediction.get("probability_of_profit_sample_size"),
         "probability_of_approval": prediction.get("probability_of_approval"),
         "probability_of_order": prediction.get("probability_of_order"),
         "expected_pnl": prediction.get("expected_pnl"),
@@ -783,7 +862,9 @@ def upsert_prediction(prediction: dict, db_path: Path | str = DB_PATH) -> None:
     ExperienceModelRepository(db_path).upsert_prediction(row, PREDICTION_COLUMNS)
 
 
-def predict_all_symbols(market_date: str, symbol: str | None = None, write: bool = True) -> list[dict]:
+def predict_all_symbols(
+    market_date: str, symbol: str | None = None, write: bool = True
+) -> list[dict]:
     init_prediction_tables()
 
     if symbol:

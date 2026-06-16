@@ -45,6 +45,13 @@ def _build_steps(target_date: str) -> list[Step]:
             description="summarize rejected outcome coverage",
         ),
         Step(
+            name="exit_snapshot_backfill",
+            module="ops_check",
+            argv=["exit-snapshot-backfill", target_date],
+            critical=False,
+            description="repair missing canonical exit snapshots before lifecycle reporting",
+        ),
+        Step(
             name="decision_lifecycle_dashboard",
             module="ops_check",
             argv=["decision-lifecycle-dashboard", target_date],

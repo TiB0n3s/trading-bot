@@ -62,6 +62,32 @@ def _dedupe_key(row: dict[str, Any]) -> tuple[Any, Any, Any]:
     )
 
 
+def _auto_sell_decision_metadata(row: dict[str, Any] | None) -> dict[str, Any]:
+    if not row:
+        return {}
+    candidate = _json_dict(row.get("candidate_json"))
+    return {
+        "auto_sell_snapshot_id": row.get("id"),
+        "auto_sell_candidate_timestamp": row.get("candidate_timestamp"),
+        "auto_sell_created_at": row.get("created_at"),
+        "auto_sell_action": row.get("action"),
+        "auto_sell_severity": row.get("severity"),
+        "auto_sell_reason": row.get("reason"),
+        "auto_sell_enabled": row.get("auto_sell_enabled"),
+        "auto_sell_order_submitted": row.get("order_submitted"),
+        "auto_sell_order_status": row.get("order_status"),
+        "auto_sell_runtime_effect": row.get("runtime_effect"),
+        "conviction_exit_decision": candidate.get("conviction_exit_decision")
+        or candidate.get("conviction")
+        or {},
+        "layered_ml_final_instruction": candidate.get("layered_ml_final_instruction"),
+        "layered_ml_master_confidence_score": candidate.get("layered_ml_master_confidence_score"),
+        "layered_ml_ensemble_probability_pct": candidate.get("layered_ml_ensemble_probability_pct"),
+        "sell_pressure_score": candidate.get("sell_pressure_score"),
+        "sell_pressure_recommendation": candidate.get("sell_pressure_recommendation"),
+    }
+
+
 class ExitSnapshotBackfillService:
     def __init__(
         self,
@@ -130,6 +156,10 @@ class ExitSnapshotBackfillService:
         for item in row_items:
             realized_pct = _float(item.get("realized_return_pct"))
             mfe_pct = _float(item.get("mfe_pct"))
+            exit_order_id = item.get("exit_order_id") or item.get("matched_exit_order_id")
+            auto_sell_metadata = _auto_sell_decision_metadata(
+                self.repository.auto_sell_decision_for_order(exit_order_id)
+            )
             snapshot = build_canonical_exit_snapshot(
                 symbol=item.get("symbol"),
                 exit_ts=item.get("exit_timestamp"),
@@ -168,8 +198,9 @@ class ExitSnapshotBackfillService:
                 trigger_metadata={
                     "matched_exit_reason": item.get("exit_reason"),
                     "entry_order_id": item.get("entry_order_id") or item.get("trade_order_id"),
-                    "exit_order_id": item.get("exit_order_id") or item.get("matched_exit_order_id"),
+                    "exit_order_id": exit_order_id,
                     "repair_scope": "approved_matched_exit_missing_snapshot",
+                    "auto_sell_decision": auto_sell_metadata,
                 },
             )
 

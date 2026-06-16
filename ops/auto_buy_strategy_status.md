@@ -112,4 +112,5 @@ Reopen only for one of these bounded cases:
 - A genuinely new, orthogonal data source or signal thesis is introduced.
 - A flat labeled feature table is built for cheaper offline research.
 - A materially wider independent-day sample is available and rerun through the
-  existing lift, regime, blocked-null, leakage, and net-cost framework.
+  existing lift, regime, blocked-null, multiple-testing, leakage, and net-cost
+  framework.

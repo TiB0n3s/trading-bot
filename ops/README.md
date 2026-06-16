@@ -7,7 +7,12 @@ This directory stores operational reference files for the trading bot.
 `auto_buy_strategy_status.md` records the current auto-buy research conclusion:
 the OHLCV-derived auto-buy stack has no demonstrated deployable edge and must
 remain in observe/research mode unless a future thesis clears the documented
-discrimination, blocked-null, leakage, net-cost, and independent-day checks.
+discrimination, blocked-null, multiple-testing, leakage, net-cost, and
+independent-day checks. The current research detector uses both blocked
+permutation nulls for within-test dependence and a max-statistic permutation
+null for feature-family selection. Additional observe-mode data should be
+treated as passive research substrate, not as evidence that the existing
+OHLCV-derived intelligence can bootstrap an edge.
 
 ## Cron
 

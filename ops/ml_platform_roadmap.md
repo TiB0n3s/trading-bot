@@ -9,6 +9,15 @@ becomes an ML-driven trading system.
 - Prediction outputs remain conservative and evidence-gated.
 - No model should place cash-live orders, loosen risk controls, or override
   broker/order safeguards.
+- The current OHLCV-derived auto-buy stack has no demonstrated deployable edge
+  and remains observe/research only. Additional authority requires the
+  promotion checklist in `ops/auto_buy_strategy_status.md`, including
+  blocked-null testing, feature-family multiple-testing correction, leakage
+  audit, net-of-costs review, and independent-day validation.
+- More model layers are not a roadmap priority until a new orthogonal signal or
+  interaction hypothesis survives the corrected research detector. Existing
+  unvalidated ensembles, meta-labels, and authority adapters should be treated
+  as research surfaces or cleanup candidates, not as latent edge.
 - Current prediction influence is limited to logged downside size caps for weak
   prediction evidence. Hard prediction blocking remains disabled unless
   explicitly promoted through paper-session validation.
@@ -20,13 +29,11 @@ becomes an ML-driven trading system.
 - Any future additional prediction influence must be paper-only,
   environment-controlled, logged, reversible, and limited to soft risk reduction
   until validated.
-- Paper learning authority is active by default for paper/dry-run only. After
-  hard blockers pass, strong canonical setup quality plus strong buy-opportunity
-  evidence can override a Claude low-confidence soft rejection into a capped
-  paper approval. This is intended to produce real paper execution evidence for
-  learning; it is not cash-live authority and cannot override stale,
-  broker/account, macro/regime, explicit override, or Claude infrastructure
-  failures.
+- Paper learning authority plumbing exists for paper/dry-run only, but it does
+  not supersede the current auto-buy freeze. Where enabled for validated paper
+  workflows, it can act only after hard blockers pass, remains capped and
+  logged, and cannot override stale, broker/account, macro/regime, explicit
+  override, or Claude infrastructure failures.
 - `ops_check.py paper-learning-authority YYYY-MM-DD` is the dedicated
   diagnostic surface for those overrides. It reports override coverage,
   lifecycle linkage, realized outcomes, MFE, and counterfactual availability

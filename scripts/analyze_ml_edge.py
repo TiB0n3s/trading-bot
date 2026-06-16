@@ -12,6 +12,12 @@ Sources:
     signal forward outcomes joined back to the candidate snapshot by id.
   * auto_buy_decision_snapshots + historical_signal_outcomes: older daily
     realized-outcome join, useful only when date ranges overlap.
+
+The feature lift scan is intentionally conservative: per-feature permutation
+tests can be block-shuffled by market date (or another supplied block field) to
+avoid treating same-session dependence as independent evidence, and the scan
+also applies a max-statistic permutation null across the tested feature family
+so "best feature by chance" selection does not look like edge.
 """
 
 from __future__ import annotations

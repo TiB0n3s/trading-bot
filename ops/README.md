@@ -150,8 +150,10 @@ Treat a positive detector result as a research lead only. A candidate still
 needs leakage review, independent validation, and a positive expected-value
 result at the intended account size before any promotion discussion.
 The binding pass/fail contract for the first slice is tracked in
-`ops/research/post_earnings_drift_v1_precommit.md`; archive completed results
-using `reports/post_earnings_drift/README.md`.
+`ops/research/post_earnings_drift_v1_precommit.md`; it requires at least `30`
+labeled rows, absolute decile lift `>= 8.0` percentage points, blocked and
+family-wise p-values `<= 0.05`, and net EV after costs `>= +0.25%`. Archive
+completed results using `reports/post_earnings_drift/README.md`.
 
 ## Cron
 

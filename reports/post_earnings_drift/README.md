@@ -20,11 +20,15 @@ Validation report:
 Scan report:
 Event rows:
 Labeled rows:
+Minimum labeled rows threshold: 30
 Point-in-time verdict: pass/fail
-Detector verdict: pass/fail
-Family-wise correction verdict: pass/fail
-Expected-value verdict: pass/fail
+Absolute decile lift: __ pct points; threshold: >= 8.0
+Blocked-null p-value: __; threshold: <= 0.05
+Family-wise p-value: __; threshold: <= 0.05
+Regime coherence verdict: pass/fail/provisional
+Net expected value after costs: __%; threshold: >= +0.25%
 Whole-share/account-size verdict: pass/fail
+Per-symbol cost verdict: pass/fail/provisional
 Final verdict: pass/fail
 Required action:
   - pass: reduce to simple paper-only rule/model

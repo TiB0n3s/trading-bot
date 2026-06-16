@@ -35,23 +35,35 @@ The thesis passes only if all of these are true:
    event data was knowable, not when it was later collected. The manual audit
    in `ops/research/post_earnings_drift_v1_pit_audit.md` must be complete and
    pass or be explicitly marked provisional before scan results are interpreted.
-2. The labeled event sample meets the preselected minimum row threshold.
-3. At least one earnings feature clears decile lift, blocked permutation null,
-   and family-wise max-statistic null.
-4. The result is directionally coherent across the configured regime split.
-5. Expected value is positive after spread, slippage, and whole-share
-   deployment constraints.
+2. The labeled event sample has at least `30` rows.
+3. At least one earnings feature has absolute decile lift of at least `8.0`
+   percentage points.
+4. That same feature has blocked-null p-value `<= 0.05`.
+5. That same feature has family-wise max-statistic p-value `<= 0.05`.
+6. The result is directionally coherent across the configured regime split:
+   same lift direction in any regime bucket with at least `30` rows, or no
+   qualifying regime bucket.
+7. Aggregate expected value is at least `+0.25%` after spread, slippage, and
+   commission assumptions.
+8. Whole-share deployment is feasible: at least `1` share deployable at the
+   reference price and no `cannot_deploy_whole_share` verdict.
+9. If per-symbol costs are available, the passing feature must also remain
+   positive-EV after symbol-specific spread/slippage overrides; otherwise the
+   result is provisional, not a pass.
 
 ## Fail Condition
 
 The thesis fails if any of these are true:
 
 - The event data cannot be represented point-in-time.
-- The sample is too small to run the detector.
-- The detector result is within noise.
-- Family-wise correction removes the apparent edge.
-- Net expected value is non-positive after costs.
+- Labeled sample size is `< 30`.
+- Absolute decile lift is `< 8.0` percentage points.
+- Blocked-null p-value is `> 0.05`.
+- Family-wise p-value is `> 0.05`.
+- Net expected value after costs is `< +0.25%`.
 - Whole-share deployment makes the signal uneconomic at the account size.
+- Per-symbol cost review, when available, drops the candidate below positive
+  net expected value.
 
 ## Actions
 

@@ -6,6 +6,7 @@ This directory is for research outputs from
 Before reading any scan output, compare it against:
 
 - `ops/research/post_earnings_drift_v1_precommit.md`
+- `ops/research/post_earnings_drift_v1_pit_audit.md`
 - the JSON report emitted by `validate-jsonl`
 - the scan report emitted by `scan`
 
@@ -14,6 +15,7 @@ Use this result-note template when archiving a completed slice:
 ```text
 Hypothesis: post-earnings drift over 5 sessions
 Input file:
+PIT audit file:
 Validation report:
 Scan report:
 Event rows:
@@ -32,4 +34,3 @@ Notes:
 
 Generated JSON reports may be local artifacts; commit only the summary note when
 it is useful as durable project evidence.
-

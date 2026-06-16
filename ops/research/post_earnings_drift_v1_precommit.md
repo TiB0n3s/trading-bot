@@ -32,7 +32,9 @@ authority.
 The thesis passes only if all of these are true:
 
 1. Point-in-time integrity is acceptable: `available_at` represents when the
-   event data was knowable, not when it was later collected.
+   event data was knowable, not when it was later collected. The manual audit
+   in `ops/research/post_earnings_drift_v1_pit_audit.md` must be complete and
+   pass or be explicitly marked provisional before scan results are interpreted.
 2. The labeled event sample meets the preselected minimum row threshold.
 3. At least one earnings feature clears decile lift, blocked permutation null,
    and family-wise max-statistic null.
@@ -71,4 +73,3 @@ If the ranked structural hypotheses above fail point-in-time validation and
 cost-aware expected-value review, conclude the accessible edge set is not
 currently viable for the account size and stop trying to make the intraday
 OHLCV stack profitable.
-

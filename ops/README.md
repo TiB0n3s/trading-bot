@@ -105,6 +105,11 @@ Input JSONL rows should contain at least `symbol`, `earnings_ts`,
 `eps_surprise_pct`, `revenue_surprise_pct`, or `guidance_surprise` are expanded
 into earnings features.
 
+Before interpreting any result, complete the manual point-in-time audit in
+`ops/research/post_earnings_drift_v1_pit_audit.md`. The validator can reject
+malformed rows, but it cannot prove that consensus estimates, announcement
+timestamps, BMO/AMC timing, or survivorship treatment are historically correct.
+
 Before ingesting, validate the point-in-time input contract:
 
 ```bash

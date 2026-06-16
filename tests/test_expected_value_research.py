@@ -23,6 +23,39 @@ def test_expected_value_subtracts_round_trip_costs():
     assert result["verdict"] == "positive_ev_after_costs"
 
 
+def test_expected_value_hand_worked_oracle():
+    assumptions = ExpectedValueAssumptions(
+        spread_pct=0.05,
+        slippage_pct=0.03,
+        slippage_turns=2.0,
+        commission_pct=0.0,
+        account_equity=531.0,
+        max_position_pct=1.0,
+        reference_price=100.0,
+    )
+
+    result = evaluate_expected_value([2.0, 1.0, -0.5, -1.5], assumptions=assumptions)
+
+    # Hand-worked oracle:
+    # wins=2/4 => 50%; avg win=(2.0+1.0)/2=1.5; avg loss=(-0.5-1.5)/2=-1.0
+    # gross EV=(2.0+1.0-0.5-1.5)/4=0.25
+    # round-trip cost=0.05 + (0.03*2.0) = 0.11
+    # net EV=0.25-0.11=0.14
+    # profit factor=(2.0+1.0)/(0.5+1.5)=1.5
+    # whole shares=floor(531/100)=5; deployed=500; cash drag=(31/531)=5.838%
+    assert result["win_rate_pct"] == 50.0
+    assert result["avg_win_pct"] == 1.5
+    assert result["avg_loss_pct"] == -1.0
+    assert result["gross_expected_return_pct"] == 0.25
+    assert result["round_trip_cost_pct"] == 0.11
+    assert result["net_expected_return_pct"] == 0.14
+    assert result["profit_factor"] == 1.5
+    assert result["shares"] == 5
+    assert result["deployed_notional"] == 500.0
+    assert result["whole_share_cash_drag_pct"] == 5.838
+    assert result["verdict"] == "positive_ev_after_costs"
+
+
 def test_expected_value_blocks_undeployable_whole_share():
     assumptions = ExpectedValueAssumptions(
         account_equity=100.0,

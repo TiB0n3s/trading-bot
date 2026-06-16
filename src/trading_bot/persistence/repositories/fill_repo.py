@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 from datetime import datetime
 from typing import Any
+from uuid import UUID
+from zoneinfo import ZoneInfo
 
 from db import DB_PATH, get_connection
 
@@ -121,17 +123,22 @@ def external_alpaca_order_summary_rows(target_date: str, db_path=DB_PATH):
 
 
 def record_fill_event(event: str, order: Any, db_path=DB_PATH) -> None:
-    order_id = order.get("id")
-    parent_order_id = order.get("parent_order_id")
-    client_order_id = order.get("client_order_id")
-    symbol = order.get("symbol")
-    side = order.get("side")
-    status = order.get("status")
-    filled_qty = order.get("filled_qty")
-    fill_price = order.get("filled_avg_price")
+    order_id = _order_value(order, "id")
+    parent_order_id = _order_value(order, "parent_order_id")
+    client_order_id = _order_value(order, "client_order_id")
+    symbol = _order_value(order, "symbol")
+    side = _order_value(order, "side")
+    status = _order_value(order, "status")
+    filled_qty = _order_value(order, "filled_qty")
+    fill_price = _order_value(order, "filled_avg_price")
+    event_timestamp = (
+        _order_value(order, "filled_at")
+        or _order_value(order, "submitted_at")
+        or datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    )
 
     try:
-        raw_json = json.dumps(dict(order))
+        raw_json = json.dumps(_order_payload(order), default=str)
     except Exception:
         raw_json = str(order)
 
@@ -144,7 +151,7 @@ def record_fill_event(event: str, order: Any, db_path=DB_PATH) -> None:
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
-                datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                _timestamp_text(event_timestamp),
                 event,
                 order_id,
                 parent_order_id,
@@ -157,6 +164,76 @@ def record_fill_event(event: str, order: Any, db_path=DB_PATH) -> None:
                 raw_json,
             ),
         )
+
+
+def _order_value(order: Any, key: str, default: Any = None) -> Any:
+    if isinstance(order, dict):
+        return _scalar_order_value(order.get(key, default))
+    if hasattr(order, "get"):
+        try:
+            return _scalar_order_value(order.get(key, default))
+        except Exception:
+            pass
+    return _scalar_order_value(getattr(order, key, default))
+
+
+def _scalar_order_value(value: Any) -> Any:
+    if hasattr(value, "value"):
+        return value.value
+    if isinstance(value, UUID):
+        return str(value)
+    if isinstance(value, datetime):
+        return value.isoformat()
+    return value
+
+
+def _timestamp_text(value: Any) -> str:
+    value = _scalar_order_value(value)
+    if isinstance(value, datetime):
+        dt = value
+        if dt.tzinfo is not None:
+            dt = dt.astimezone(ZoneInfo("America/New_York"))
+        return dt.replace(tzinfo=None).strftime("%Y-%m-%d %H:%M:%S")
+    text = str(value or "").strip()
+    if not text:
+        return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    try:
+        dt = datetime.fromisoformat(text.replace("Z", "+00:00"))
+        if dt.tzinfo is not None:
+            dt = dt.astimezone(ZoneInfo("America/New_York"))
+        return dt.replace(tzinfo=None).strftime("%Y-%m-%d %H:%M:%S")
+    except ValueError:
+        pass
+    return text.replace("T", " ")[:19]
+
+
+def _order_payload(order: Any) -> dict[str, Any]:
+    if isinstance(order, dict):
+        return dict(order)
+    if hasattr(order, "model_dump"):
+        payload = order.model_dump()
+        if isinstance(payload, dict):
+            return payload
+    if hasattr(order, "dict"):
+        payload = order.dict()
+        if isinstance(payload, dict):
+            return payload
+    try:
+        return dict(order)
+    except Exception:
+        return {
+            key: _order_value(order, key)
+            for key in (
+                "id",
+                "parent_order_id",
+                "client_order_id",
+                "symbol",
+                "side",
+                "status",
+                "filled_qty",
+                "filled_avg_price",
+            )
+        }
 
 
 def update_trade_fill(
@@ -269,12 +346,16 @@ def insert_synthetic_fill(
     filled_qty: float | str | None,
     fill_price: float | None,
     parent_order_id: str | None = None,
+    timestamp: Any | None = None,
     db_path=DB_PATH,
 ) -> bool:
     action = "sell" if side == "sell" else "buy"
-    synthetic_source = (
-        "synthetic_bracket_exit" if action == "sell" else "synthetic_unmatched_buy_fill"
-    )
+    if action == "sell":
+        synthetic_source = (
+            "synthetic_bracket_exit" if parent_order_id else "synthetic_unmatched_sell_fill"
+        )
+    else:
+        synthetic_source = "synthetic_unmatched_buy_fill"
 
     if trade_order_exists(order_id, db_path=db_path):
         return False
@@ -289,7 +370,7 @@ def insert_synthetic_fill(
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
-                datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                _timestamp_text(timestamp),
                 symbol,
                 action,
                 fill_price,

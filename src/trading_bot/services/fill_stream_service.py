@@ -7,6 +7,7 @@ import os
 import threading
 import time
 from datetime import datetime
+from uuid import UUID
 
 from alpaca.trading.stream import TradingStream
 from market_time import is_market_hours
@@ -18,6 +19,27 @@ from repositories import fill_repo
 PAPER_BASE_URL = "https://paper-api.alpaca.markets"
 RECONNECT_DELAY = 30
 DEFAULT_HEARTBEAT_SECONDS = 300
+
+
+def _order_value(order, key: str, default=None):
+    if isinstance(order, dict):
+        return _scalar_order_value(order.get(key, default))
+    if hasattr(order, "get"):
+        try:
+            return _scalar_order_value(order.get(key, default))
+        except Exception:
+            pass
+    return _scalar_order_value(getattr(order, key, default))
+
+
+def _scalar_order_value(value):
+    if hasattr(value, "value"):
+        return value.value
+    if isinstance(value, UUID):
+        return str(value)
+    if isinstance(value, datetime):
+        return value.isoformat()
+    return value
 
 
 class FillEventHandler:
@@ -78,6 +100,7 @@ class FillEventHandler:
         filled_qty,
         fill_price,
         parent_order_id=None,
+        timestamp=None,
     ) -> bool:
         """Insert synthetic trade row for unmatched bracket-leg fills."""
         try:
@@ -89,6 +112,7 @@ class FillEventHandler:
                 filled_qty=filled_qty,
                 fill_price=fill_price,
                 parent_order_id=parent_order_id,
+                timestamp=timestamp,
             )
             if not inserted:
                 self.logger.info(
@@ -114,6 +138,7 @@ class FillEventHandler:
         filled_qty,
         fill_price,
         parent_order_id=None,
+        timestamp=None,
     ) -> bool:
         """Insert synthetic trade row for unmatched buy fills.
 
@@ -129,6 +154,7 @@ class FillEventHandler:
                 filled_qty=filled_qty,
                 fill_price=fill_price,
                 parent_order_id=parent_order_id,
+                timestamp=timestamp,
             )
             if not inserted:
                 self.logger.info(
@@ -187,12 +213,12 @@ class FillEventHandler:
 
             self.record_fill_event(event, order)
 
-            order_id = order.get("id")
-            symbol = order.get("symbol")
-            side = order.get("side")
-            filled_qty = order.get("filled_qty")
-            status = order.get("status")
-            fill_price = order.get("filled_avg_price")
+            order_id = _order_value(order, "id")
+            symbol = _order_value(order, "symbol")
+            side = _order_value(order, "side")
+            filled_qty = _order_value(order, "filled_qty")
+            status = _order_value(order, "status")
+            fill_price = _order_value(order, "filled_avg_price")
             fill_price = float(fill_price) if fill_price else None
 
             if event not in ("fill", "partial_fill"):
@@ -210,7 +236,8 @@ class FillEventHandler:
                 )
                 self.capture_post_fill_learning(symbol=symbol, side=side)
             else:
-                parent_order_id = order.get("parent_order_id")
+                parent_order_id = _order_value(order, "parent_order_id")
+                filled_at = _order_value(order, "filled_at")
 
                 if side == "sell":
                     inserted = self.insert_synthetic_exit(
@@ -221,6 +248,7 @@ class FillEventHandler:
                         filled_qty=filled_qty,
                         fill_price=fill_price,
                         parent_order_id=parent_order_id,
+                        timestamp=filled_at,
                     )
                     if not inserted:
                         self.logger.warning(
@@ -237,6 +265,7 @@ class FillEventHandler:
                         filled_qty=filled_qty,
                         fill_price=fill_price,
                         parent_order_id=parent_order_id,
+                        timestamp=filled_at,
                     )
                     if not inserted:
                         self.logger.warning(

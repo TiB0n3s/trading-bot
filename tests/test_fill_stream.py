@@ -3,8 +3,10 @@ import os
 import sqlite3
 import sys
 import tempfile
+from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
+from uuid import UUID
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
@@ -17,6 +19,11 @@ from services.fill_stream_service import (
 )
 
 from repositories import fill_repo
+
+
+class ValueObject:
+    def __init__(self, value):
+        self.value = value
 
 
 class SimpleMonkeyPatch:
@@ -213,6 +220,46 @@ def test_update_db_refreshes_cumulative_filled_qty(tmp_path, monkeypatch):
     assert row[2] == 147.352
 
 
+def test_record_fill_event_accepts_sdk_order_object(tmp_path, monkeypatch):
+    db_path = make_test_db(tmp_path)
+    fill_repo.init_fill_events_table(db_path=db_path)
+    order = SimpleNamespace(
+        id=UUID("11111111-1111-4111-8111-111111111111"),
+        parent_order_id="parent-1",
+        client_order_id="client-1",
+        symbol="GE",
+        side=ValueObject("buy"),
+        status=ValueObject("filled"),
+        filled_qty="1",
+        filled_avg_price="346.70",
+        filled_at=datetime(2026, 6, 15, 16, 0, 37, tzinfo=timezone.utc),
+    )
+
+    fill_repo.record_fill_event("fill", order, db_path=db_path)
+
+    con = sqlite3.connect(db_path)
+    row = con.execute(
+        """
+        SELECT timestamp, event, order_id, parent_order_id, client_order_id, symbol, side,
+               status, filled_qty, fill_price, raw_json
+        FROM fill_events
+        """
+    ).fetchone()
+    con.close()
+
+    assert row[0] == "2026-06-15 12:00:37"
+    assert row[1] == "fill"
+    assert row[2] == "11111111-1111-4111-8111-111111111111"
+    assert row[3] == "parent-1"
+    assert row[4] == "client-1"
+    assert row[5] == "GE"
+    assert row[6] == "buy"
+    assert row[7] == "filled"
+    assert row[8] == 1
+    assert row[9] == 346.70
+    assert "11111111-1111-4111-8111-111111111111" in row[10]
+
+
 class FakeFillRepository:
     def __init__(self):
         self.events = []
@@ -317,11 +364,55 @@ def test_unmatched_buy_fill_inserts_synthetic_ledger_row(tmp_path, monkeypatch):
             "filled_qty": "1",
             "fill_price": 980.25,
             "parent_order_id": None,
+            "timestamp": None,
         }
     ]
     assert feedback.calls
     assert feedback.calls[0]["phase"] == "post_fill"
     assert feedback.calls[0]["trigger_symbol"] == "ASML"
+
+
+def test_trade_update_handler_accepts_sdk_order_object(tmp_path, monkeypatch):
+    repo = FakeFillRepository()
+    feedback = FakeFeedbackService()
+    handler = FillEventHandler(
+        repository=repo,
+        feedback_service=feedback,
+        market_hours_fn=lambda: True,
+        logger=SimpleNamespace(
+            info=lambda *a, **k: None, warning=lambda *a, **k: None, error=lambda *a, **k: None
+        ),
+    )
+    data = SimpleNamespace(
+        event="fill",
+        order=SimpleNamespace(
+            id=UUID("22222222-2222-4222-8222-222222222222"),
+            symbol="GE",
+            side=ValueObject("buy"),
+            status=ValueObject("filled"),
+            filled_qty="1",
+            filled_avg_price="346.70",
+            parent_order_id=None,
+        ),
+    )
+
+    asyncio.run(handler.trade_update_handler(data))
+
+    assert repo.events == [("fill", data.order)]
+    assert repo.updated == [("22222222-2222-4222-8222-222222222222", "filled", 346.70, "1")]
+    assert repo.synthetic == [
+        {
+            "order_id": "22222222-2222-4222-8222-222222222222",
+            "symbol": "GE",
+            "side": "buy",
+            "status": "filled",
+            "filled_qty": "1",
+            "fill_price": 346.70,
+            "parent_order_id": None,
+            "timestamp": None,
+        }
+    ]
+    assert feedback.calls
 
 
 def test_fill_stream_heartbeat_env_parser_falls_back_on_invalid_value(tmp_path, monkeypatch):
@@ -383,7 +474,9 @@ if __name__ == "__main__":
         test_insert_synthetic_buy_fill_is_idempotent_by_order_id,
         test_trade_order_exists_checks_order_id,
         test_update_db_refreshes_cumulative_filled_qty,
+        test_record_fill_event_accepts_sdk_order_object,
         test_unmatched_buy_fill_inserts_synthetic_ledger_row,
+        test_trade_update_handler_accepts_sdk_order_object,
         test_fill_stream_heartbeat_env_parser_falls_back_on_invalid_value,
         test_fill_stream_uses_alpaca_py_trading_stream_constructor,
     ]

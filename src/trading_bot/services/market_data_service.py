@@ -18,6 +18,59 @@ logger = logging.getLogger(__name__)
 DEFAULT_BAR_FEED = os.getenv("MARKET_DATA_BAR_FEED", "iex").strip().lower() or "iex"
 
 
+_BAR_NAME_PAIRS = (
+    ("t", "timestamp"),
+    ("o", "open"),
+    ("h", "high"),
+    ("l", "low"),
+    ("c", "close"),
+    ("v", "volume"),
+    ("n", "trade_count"),
+    ("vw", "vwap"),
+)
+_BAR_ALIAS: dict[str, str] = {}
+for _short, _full in _BAR_NAME_PAIRS:
+    _BAR_ALIAS[_short] = _full
+    _BAR_ALIAS[_full] = _short
+
+
+class _NormalizedBar:
+    """Expose Alpaca SDK bars through both short and full attribute names."""
+
+    __slots__ = ("_bar",)
+
+    def __init__(self, bar: Any) -> None:
+        self._bar = bar
+
+    def __getattr__(self, name: str) -> Any:
+        bar = object.__getattribute__(self, "_bar")
+        marker = object()
+
+        if isinstance(bar, dict):
+            value = bar.get(name, marker)
+        else:
+            value = getattr(bar, name, marker)
+        if value is not marker:
+            return value
+
+        alias = _BAR_ALIAS.get(name)
+        if alias is not None:
+            if isinstance(bar, dict):
+                value = bar.get(alias, marker)
+            else:
+                value = getattr(bar, alias, marker)
+            if value is not marker:
+                return value
+
+        raise AttributeError(name)
+
+
+def _normalize_bar(bar: Any) -> Any:
+    if isinstance(bar, (str, bytes, int, float, bool, type(None))):
+        return bar
+    return bar if isinstance(bar, _NormalizedBar) else _NormalizedBar(bar)
+
+
 def bar_to_dict(bar: Any) -> dict[str, Any]:
     """Convert an Alpaca bar object into the dict shape used by intelligence code."""
     return {
@@ -38,7 +91,7 @@ class MarketDataService:
 
     def get_bars_with_fallback(self, symbol: str, timeframe: str, **kwargs) -> list[Any]:
         barset = self.get_barset_with_fallback(symbol, timeframe, **kwargs)
-        return list(barset)
+        return [_normalize_bar(bar) for bar in barset]
 
     def get_barset_with_fallback(self, symbol: str, timeframe: str, **kwargs) -> Any:
         """Fetch bars using SIP first, with IEX fallback for subscription failures."""

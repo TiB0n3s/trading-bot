@@ -101,6 +101,7 @@ class EdgeRow:
     forward_return_pct: float | None
     forward_mfe_pct: float | None
     numeric_features: dict[str, float]
+    categorical_features: dict[str, str]
 
 
 def _columns(con: sqlite3.Connection, table: str) -> set[str]:
@@ -222,6 +223,37 @@ def _numeric_features(payload: dict[str, Any], candidate: dict[str, Any]) -> dic
     return features
 
 
+def _flatten_categorical_features(
+    value: Any,
+    *,
+    output: dict[str, str],
+    prefix: str = "",
+) -> None:
+    if isinstance(value, dict):
+        for key, child in value.items():
+            key_str = str(key)
+            if key_str in EXCLUDED_FEATURE_KEYS or key_str == "canonical_signal_candidate":
+                continue
+            name = f"{prefix}.{key_str}" if prefix else key_str
+            _flatten_categorical_features(child, output=output, prefix=name)
+        return
+    if isinstance(value, bool) or value in (None, ""):
+        return
+    if isinstance(value, (int, float)):
+        return
+    output[prefix] = str(value)
+
+
+def _categorical_features(payload: dict[str, Any], candidate: dict[str, Any]) -> dict[str, str]:
+    features: dict[str, str] = {}
+    _flatten_categorical_features(candidate, output=features)
+    for key, value in payload.items():
+        if key == "candidate" or key in EXCLUDED_FEATURE_KEYS:
+            continue
+        _flatten_categorical_features(value, output=features, prefix=str(key))
+    return features
+
+
 def _first_value(*sources: dict[str, Any], keys: Iterable[str]) -> Any:
     for key in keys:
         for source in sources:
@@ -315,6 +347,7 @@ def _edge_row_from_payload(
         forward_return_pct=forward_return,
         forward_mfe_pct=forward_mfe,
         numeric_features=_numeric_features(payload, candidate),
+        categorical_features=_categorical_features(payload, candidate),
     )
 
 
@@ -386,6 +419,7 @@ def _edge_row_from_raw_payload(
         forward_return_pct=forward_return,
         forward_mfe_pct=forward_mfe,
         numeric_features=_numeric_features(payload, candidate),
+        categorical_features=_categorical_features(payload, candidate),
     )
 
 
@@ -951,6 +985,54 @@ def feature_lift_scan(
     return usable
 
 
+def _regime_value(row: EdgeRow, field: str) -> str | None:
+    value = row.categorical_features.get(field)
+    if value not in (None, ""):
+        return value
+    numeric = row.numeric_features.get(field)
+    if numeric is not None:
+        return str(numeric)
+    return None
+
+
+def feature_lift_scan_by_regime(
+    rows: list[EdgeRow],
+    *,
+    regime_field: str,
+    n_buckets: int = 10,
+    min_rows: int = 100,
+) -> list[dict[str, Any]]:
+    grouped: dict[str, list[EdgeRow]] = defaultdict(list)
+    for row in rows:
+        if row.forward_return_pct is None:
+            continue
+        regime = _regime_value(row, regime_field)
+        if not regime:
+            continue
+        grouped[regime].append(row)
+
+    result = []
+    for regime, bucket in grouped.items():
+        if len(bucket) < min_rows:
+            continue
+        returns = [row.forward_return_pct for row in bucket if row.forward_return_pct is not None]
+        result.append(
+            {
+                "regime": regime,
+                "n": len(bucket),
+                "base_win_pct": _win_rate(returns),
+                "mean_return_pct": _avg(returns),
+                "features": feature_lift_scan(
+                    bucket,
+                    n_buckets=n_buckets,
+                    min_rows=min_rows,
+                ),
+            }
+        )
+    result.sort(key=lambda item: (-int(item["n"]), str(item["regime"])))
+    return result
+
+
 def score_window(rows: list[EdgeRow], min_score: float) -> list[dict[str, Any]]:
     grouped = {
         "below_window": [],
@@ -1061,6 +1143,44 @@ def _print_feature_scan(results: list[dict[str, Any]], *, limit: int) -> None:
         )
 
 
+def _print_regime_feature_scan(
+    results: list[dict[str, Any]],
+    *,
+    regime_field: str,
+    limit: int,
+) -> None:
+    print(f"\n  NUMERIC FEATURE LIFT BY REGIME: {regime_field}")
+    if not results:
+        print("  (no regime buckets with enough forward-outcome coverage)")
+        return
+    for group in results:
+        print(
+            f"\n  regime={group['regime']} n={group['n']} "
+            f"base_win%={_fmt(group['base_win_pct'])} "
+            f"mean_ret%={_fmt(group['mean_return_pct'])}"
+        )
+        features = group["features"]
+        if not features:
+            print("  (no numeric features with enough coverage inside this regime)")
+            continue
+        print(
+            f"  {'feature':<38}{'n':>8}{'lift':>10}{'mono%':>10}"
+            f"{'direction':>18}{'d1_ret%':>12}{'d10_ret%':>12}"
+        )
+        for item in features[:limit]:
+            buckets = item.get("buckets") or []
+            d1_ret = buckets[0]["mean_return_pct"] if buckets else None
+            d10_ret = buckets[-1]["mean_return_pct"] if buckets else None
+            print(
+                f"  {item['feature']:<38}{item['n']:>8}"
+                f"{_fmt(item['lift_pct']):>10}"
+                f"{100.0 * float(item['monotonicity']):>10.0f}"
+                f"{str(item.get('direction', '-')):>18}"
+                f"{_fmt(d1_ret):>12}"
+                f"{_fmt(d10_ret):>12}"
+            )
+
+
 def print_report(
     source: str,
     rows: list[EdgeRow],
@@ -1069,6 +1189,9 @@ def print_report(
     decile_buckets: int,
     feature_scan_limit: int,
     feature_scan_min_rows: int,
+    regime_field: str,
+    regime_scan_limit: int,
+    regime_scan_min_rows: int,
 ) -> None:
     total = len(rows)
     outcome_rows = [row for row in rows if row.forward_return_pct is not None]
@@ -1141,6 +1264,16 @@ def print_report(
         ),
         limit=feature_scan_limit,
     )
+    _print_regime_feature_scan(
+        feature_lift_scan_by_regime(
+            rows,
+            regime_field=regime_field,
+            n_buckets=decile_buckets,
+            min_rows=regime_scan_min_rows,
+        ),
+        regime_field=regime_field,
+        limit=regime_scan_limit,
+    )
 
     print("\n  INSTRUCTION EDGE")
     print(f"  {'class':<14}{'n':>8}{'win%':>10}{'mean_ret%':>12}{'avg_mfe%':>12}")
@@ -1172,6 +1305,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--decile-buckets", type=int, default=10)
     parser.add_argument("--feature-scan-limit", type=int, default=20)
     parser.add_argument("--feature-scan-min-rows", type=int, default=100)
+    parser.add_argument("--regime-field", default="session_trend_label")
+    parser.add_argument("--regime-scan-limit", type=int, default=8)
+    parser.add_argument("--regime-scan-min-rows", type=int, default=100)
     parser.add_argument(
         "--min-score", type=float, default=float(os.getenv("CONVICTION_MIN_SCORE", "23"))
     )
@@ -1234,6 +1370,9 @@ def main() -> int:
             args.decile_buckets,
             args.feature_scan_limit,
             args.feature_scan_min_rows,
+            args.regime_field,
+            args.regime_scan_limit,
+            args.regime_scan_min_rows,
         )
     return 0
 

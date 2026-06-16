@@ -8,6 +8,7 @@ from scripts.analyze_ml_edge import (
     decile_lift,
     edge_by_group,
     feature_lift_scan,
+    feature_lift_scan_by_regime,
     load_candidate_universe,
     load_rejected_outcomes,
     metric_decile_lift,
@@ -62,6 +63,7 @@ def test_analyze_ml_edge_loads_candidate_and_rejected_sources(tmp_path):
                 '{"candidate":{"conviction_score":22.0,"probability_pct":70.0,
                   "probability_source":"daily_symbol_predictions:probability_of_profit",
                   "layered_ml_final_instruction":"paper_approval",
+                  "session_trend_label":"strong_uptrend",
                   "setup_score":72.0,
                   "forward_return_pct":0.6,"forward_mfe_pct":1.2}}'
             )
@@ -110,6 +112,7 @@ def test_analyze_ml_edge_loads_candidate_and_rejected_sources(tmp_path):
     assert candidate_rows[0].probability_pct == 70.0
     assert candidate_rows[0].setup_score == 72.0
     assert candidate_rows[0].numeric_features["setup_score"] == 72.0
+    assert candidate_rows[0].categorical_features["session_trend_label"] == "strong_uptrend"
     assert candidate_rows[0].forward_return_pct == 0.6
     assert len(rejected_rows) == 1
     assert rejected_rows[0].instruction_class == "caution"
@@ -125,7 +128,12 @@ def test_analyze_ml_edge_loads_candidate_and_rejected_sources(tmp_path):
     assert windows["below_window"]["n"] == 1
 
 
-def _edge_row(probability: float, forward_return: float, source: str = "test") -> EdgeRow:
+def _edge_row(
+    probability: float,
+    forward_return: float,
+    source: str = "test",
+    regime: str = "test_regime",
+) -> EdgeRow:
     return EdgeRow(
         source="candidate_universe",
         symbol="TEST",
@@ -142,6 +150,7 @@ def _edge_row(probability: float, forward_return: float, source: str = "test") -
         forward_return_pct=forward_return,
         forward_mfe_pct=None,
         numeric_features={"test_feature": probability, "setup_score": probability},
+        categorical_features={"session_trend_label": regime},
     )
 
 
@@ -197,3 +206,26 @@ def test_feature_lift_scan_ranks_numeric_features():
     assert results[0]["feature"] in {"setup_score", "test_feature"}
     assert results[0]["lift_pct"] == 100.0
     assert results[0]["verdict"] == "rank_orders_outcomes"
+
+
+def test_feature_lift_scan_by_regime_groups_rows():
+    rows = []
+    for idx in range(100):
+        rows.append(
+            _edge_row(
+                float(idx),
+                1.0 if idx >= 50 else -1.0,
+                regime="strong_uptrend",
+            )
+        )
+    for idx in range(40):
+        rows.append(_edge_row(float(idx), -1.0, regime="thin_regime"))
+
+    results = feature_lift_scan_by_regime(
+        rows,
+        regime_field="session_trend_label",
+        min_rows=50,
+    )
+
+    assert [item["regime"] for item in results] == ["strong_uptrend"]
+    assert results[0]["features"][0]["verdict"] == "rank_orders_outcomes"

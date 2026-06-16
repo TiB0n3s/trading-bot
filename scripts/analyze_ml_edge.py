@@ -23,7 +23,7 @@ import re
 import sqlite3
 import statistics
 from collections import defaultdict
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, Iterable
 
@@ -319,6 +319,62 @@ def _edge_row_from_raw_payload(
     )
 
 
+def _load_prediction_map(
+    con: sqlite3.Connection,
+    start: str | None,
+    end: str | None,
+) -> dict[tuple[str, str], tuple[float, str]]:
+    if not _has_table(con, "daily_symbol_predictions"):
+        return {}
+    columns = _columns(con, "daily_symbol_predictions")
+    if not {"market_date", "symbol", "probability_of_profit"} <= columns:
+        return {}
+    source_expr = (
+        "probability_of_profit_source"
+        if "probability_of_profit_source" in columns
+        else "'legacy_unknown_profit_probability'"
+    )
+    where, params = _date_where(
+        "market_date", start[:10] if start else None, end[:10] if end else None
+    )
+    rows = con.execute(
+        f"""
+        SELECT market_date, symbol, probability_of_profit,
+               {source_expr} AS probability_of_profit_source
+        FROM daily_symbol_predictions
+        {where}
+          {"AND" if where else "WHERE"} probability_of_profit IS NOT NULL
+        """,
+        params,
+    ).fetchall()
+    result: dict[tuple[str, str], tuple[float, str]] = {}
+    for row in rows:
+        probability = _float(row["probability_of_profit"])
+        if probability is None:
+            continue
+        source = row["probability_of_profit_source"] or "legacy_unknown_profit_probability"
+        result[(str(row["market_date"])[:10], str(row["symbol"]).upper())] = (
+            probability,
+            f"daily_symbol_predictions:probability_of_profit:{source}",
+        )
+    return result
+
+
+def _with_prediction_fallback(
+    row: EdgeRow,
+    predictions: dict[tuple[str, str], tuple[float, str]],
+) -> EdgeRow:
+    if row.probability_pct is not None:
+        return row
+    if not row.market_date or not row.symbol:
+        return row
+    fallback = predictions.get((row.market_date[:10], row.symbol.upper()))
+    if fallback is None:
+        return row
+    probability, source = fallback
+    return replace(row, probability_pct=probability, probability_source=source)
+
+
 def _date_where(column: str, start: str | None, end: str | None) -> tuple[str, list[Any]]:
     clauses: list[str] = []
     params: list[Any] = []
@@ -339,6 +395,7 @@ def load_candidate_universe(
 ) -> list[EdgeRow]:
     if not _has_table(con, "candidate_universe"):
         return []
+    predictions = _load_prediction_map(con, start, end)
     where, params = _date_where("candidate_ts", start, end)
     sql = f"""
         SELECT candidate_ts, symbol, candidate_status, score, reason, candidate_json
@@ -351,17 +408,16 @@ def load_candidate_universe(
         params.append(limit)
     rows: list[EdgeRow] = []
     for row in con.execute(sql, params):
-        rows.append(
-            _edge_row_from_raw_payload(
-                source="candidate_universe",
-                symbol=row["symbol"],
-                market_date=row["candidate_ts"],
-                decision=row["candidate_status"],
-                score=row["score"],
-                reason=row["reason"],
-                raw_payload=row["candidate_json"],
-            )
+        edge_row = _edge_row_from_raw_payload(
+            source="candidate_universe",
+            symbol=row["symbol"],
+            market_date=row["candidate_ts"],
+            decision=row["candidate_status"],
+            score=row["score"],
+            reason=row["reason"],
+            raw_payload=row["candidate_json"],
         )
+        rows.append(_with_prediction_fallback(edge_row, predictions))
     return rows
 
 

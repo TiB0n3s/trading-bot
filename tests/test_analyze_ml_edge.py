@@ -9,6 +9,7 @@ from scripts.analyze_ml_edge import (
     edge_by_group,
     load_candidate_universe,
     load_rejected_outcomes,
+    metric_decile_lift,
     score_window,
 )
 
@@ -60,6 +61,7 @@ def test_analyze_ml_edge_loads_candidate_and_rejected_sources(tmp_path):
                 '{"candidate":{"conviction_score":22.0,"probability_pct":70.0,
                   "probability_source":"daily_symbol_predictions:probability_of_profit",
                   "layered_ml_final_instruction":"paper_approval",
+                  "setup_score":72.0,
                   "forward_return_pct":0.6,"forward_mfe_pct":1.2}}'
             )
             """
@@ -105,6 +107,7 @@ def test_analyze_ml_edge_loads_candidate_and_rejected_sources(tmp_path):
     assert len(candidate_rows) == 1
     assert candidate_rows[0].instruction_class == "approve"
     assert candidate_rows[0].probability_pct == 70.0
+    assert candidate_rows[0].setup_score == 72.0
     assert candidate_rows[0].forward_return_pct == 0.6
     assert len(rejected_rows) == 1
     assert rejected_rows[0].instruction_class == "caution"
@@ -129,6 +132,7 @@ def _edge_row(probability: float, forward_return: float, source: str = "test") -
         score=0.0,
         confluence_score=0.0,
         conviction_score=0.0,
+        setup_score=probability,
         probability_pct=probability,
         probability_source=source,
         instruction="none",
@@ -161,3 +165,18 @@ def test_decile_lift_requires_enough_rows():
 
     assert result["verdict"] == "too_few_rows"
     assert result["required_n"] == 30
+
+
+def test_metric_decile_lift_measures_setup_score_discrimination():
+    rows = []
+    for idx in range(100):
+        setup_score = float(idx)
+        forward_return = 1.0 if idx >= 50 else -1.0
+        rows.append(_edge_row(setup_score, forward_return))
+
+    result = metric_decile_lift(rows, metric="setup_score")
+
+    assert result["n"] == 100
+    assert result["base_win_pct"] == 50.0
+    assert result["lift_pct"] == 100.0
+    assert result["verdict"] == "rank_orders_outcomes"

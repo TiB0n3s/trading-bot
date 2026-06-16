@@ -65,6 +65,7 @@ class EdgeRow:
     score: float | None
     confluence_score: float | None
     conviction_score: float | None
+    setup_score: float | None
     probability_pct: float | None
     probability_source: str | None
     instruction: str
@@ -243,6 +244,7 @@ def _edge_row_from_payload(
         score=_raw_float(score),
         confluence_score=_raw_float(_first_value(candidate, payload, keys=("confluence_score",))),
         conviction_score=_raw_float(_first_value(candidate, payload, keys=("conviction_score",))),
+        setup_score=_raw_float(_first_value(candidate, payload, keys=("setup_score",))),
         probability_pct=probability_pct,
         probability_source=probability_source,
         instruction=instruction,
@@ -310,6 +312,7 @@ def _edge_row_from_raw_payload(
         score=_raw_float(score),
         confluence_score=_raw_float(_raw_json_value(raw_payload, ("confluence_score",))),
         conviction_score=_raw_float(_raw_json_value(raw_payload, ("conviction_score",))),
+        setup_score=_raw_float(_raw_json_value(raw_payload, ("setup_score",))),
         probability_pct=probability_pct,
         probability_source=probability_source,
         instruction=instruction,
@@ -699,6 +702,74 @@ def decile_lift(
     }
 
 
+def metric_decile_lift(
+    rows: list[EdgeRow],
+    *,
+    metric: str,
+    n_buckets: int = 10,
+) -> dict[str, Any]:
+    usable = [
+        row
+        for row in rows
+        if getattr(row, metric, None) is not None and row.forward_return_pct is not None
+    ]
+    usable.sort(key=lambda row: float(getattr(row, metric) or 0.0))
+    n = len(usable)
+    min_rows = n_buckets * 3
+    if n < min_rows:
+        return {
+            "metric": metric,
+            "n": n,
+            "required_n": min_rows,
+            "base_win_pct": None,
+            "buckets": [],
+            "lift_pct": None,
+            "monotonicity": None,
+            "verdict": "too_few_rows",
+        }
+
+    returns = [row.forward_return_pct for row in usable if row.forward_return_pct is not None]
+    base_win = _win_rate(returns)
+    size = n // n_buckets
+    buckets = []
+    wins_by_bucket = []
+    for idx in range(n_buckets):
+        lo = idx * size
+        hi = n if idx == n_buckets - 1 else (idx + 1) * size
+        bucket = usable[lo:hi]
+        bucket_returns = [
+            row.forward_return_pct for row in bucket if row.forward_return_pct is not None
+        ]
+        values = [float(getattr(row, metric)) for row in bucket if getattr(row, metric) is not None]
+        win = _win_rate(bucket_returns)
+        wins_by_bucket.append(win or 0.0)
+        buckets.append(
+            {
+                "bucket": f"D{idx + 1}",
+                "n": len(bucket),
+                "value_min": min(values) if values else None,
+                "value_max": max(values) if values else None,
+                "win_pct": win,
+                "mean_return_pct": _avg(bucket_returns),
+            }
+        )
+
+    lift = round(wins_by_bucket[-1] - wins_by_bucket[0], 1)
+    ups = sum(1 for idx in range(1, n_buckets) if wins_by_bucket[idx] >= wins_by_bucket[idx - 1])
+    monotonicity = round(ups / (n_buckets - 1), 4)
+    verdict = "rank_orders_outcomes" if lift >= 8.0 and monotonicity >= 0.6 else "weak_or_flat"
+    return {
+        "metric": metric,
+        "n": n,
+        "required_n": min_rows,
+        "base_win_pct": base_win,
+        "buckets": buckets,
+        "lift_pct": lift,
+        "monotonicity": monotonicity,
+        "verdict": verdict,
+    }
+
+
 def score_window(rows: list[EdgeRow], min_score: float) -> list[dict[str, Any]]:
     grouped = {
         "below_window": [],
@@ -749,6 +820,33 @@ def _print_decile_lift(title: str, result: dict[str, Any]) -> None:
         )
         print(
             f"  {item['bucket']:<8}{item['n']:>8}{prob_range:>18}"
+            f"{_fmt(item['win_pct']):>10}{_fmt(item['mean_return_pct']):>12}"
+        )
+    print(
+        f"  top-minus-bottom lift: {_fmt(result['lift_pct'])} pts"
+        f"   |   monotonicity: {100.0 * float(result['monotonicity']):.0f}%"
+        f"   |   verdict: {result['verdict']}"
+    )
+
+
+def _print_metric_lift(result: dict[str, Any]) -> None:
+    print(f"\n  METRIC DECILE LIFT: {result['metric']}")
+    print(
+        f"  n={result['n']} required_n={result['required_n']} "
+        f"base_win%={_fmt(result['base_win_pct'])}"
+    )
+    if result["verdict"] == "too_few_rows":
+        print("  (too few metric/outcome rows for stable bucket lift)")
+        return
+    print(f"  {'bucket':<8}{'n':>8}{'value_range':>18}{'win%':>10}{'mean_ret%':>12}")
+    for item in result["buckets"]:
+        value_range = (
+            "-"
+            if item["value_min"] is None or item["value_max"] is None
+            else f"{item['value_min']:.1f}-{item['value_max']:.1f}"
+        )
+        print(
+            f"  {item['bucket']:<8}{item['n']:>8}{value_range:>18}"
             f"{_fmt(item['win_pct']):>10}{_fmt(item['mean_return_pct']):>12}"
         )
     print(
@@ -824,6 +922,9 @@ def print_report(
                 probability_source=str(item["source"]),
             ),
         )
+
+    for metric in ("score", "confluence_score", "conviction_score", "setup_score"):
+        _print_metric_lift(metric_decile_lift(rows, metric=metric, n_buckets=decile_buckets))
 
     print("\n  INSTRUCTION EDGE")
     print(f"  {'class':<14}{'n':>8}{'win%':>10}{'mean_ret%':>12}{'avg_mfe%':>12}")

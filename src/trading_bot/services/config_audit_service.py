@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import ast
 import os
+from contextlib import contextmanager
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
@@ -134,6 +135,18 @@ def _factory_audit(name: str, loader) -> ConfigFactoryAudit:
     return ConfigFactoryAudit(name=name, status="ok", fields=fields)
 
 
+@contextmanager
+def _temporary_environ(env: dict[str, str]):
+    original = os.environ.copy()
+    try:
+        os.environ.clear()
+        os.environ.update(env)
+        yield
+    finally:
+        os.environ.clear()
+        os.environ.update(original)
+
+
 def _runtime_warnings(env: dict[str, str]) -> list[str]:
     warnings: list[str] = []
     execution_mode = env.get("EXECUTION_MODE", runtime_config.EXECUTION_MODE).strip().lower()
@@ -186,13 +199,14 @@ def build_config_audit_payload(
         "LIVE_TRADING_ENABLED",
         str(runtime_config.LIVE_TRADING_ENABLED),
     ).strip().lower() in {"1", "true", "yes", "on"}
-    factories = [
-        _factory_audit("signal", load_signal_config),
-        _factory_audit("risk", load_risk_config),
-        _factory_audit("auto_buy", load_auto_buy_config),
-        _factory_audit("position_manager", load_position_manager_config),
-        _factory_audit("ml", load_ml_config),
-    ]
+    with _temporary_environ(env):
+        factories = [
+            _factory_audit("signal", load_signal_config),
+            _factory_audit("risk", load_risk_config),
+            _factory_audit("auto_buy", load_auto_buy_config),
+            _factory_audit("position_manager", load_position_manager_config),
+            _factory_audit("ml", load_ml_config),
+        ]
     inventory = discover_env_var_references(base_dir)
     warnings = _runtime_warnings(env)
     safety_profile = build_runtime_safety_profile(env)

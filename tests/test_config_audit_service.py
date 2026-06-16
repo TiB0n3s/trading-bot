@@ -6,6 +6,7 @@ Run:
 
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
 
@@ -20,6 +21,7 @@ from services.config_audit_service import (  # noqa: E402
 from services.runtime_safety_profile_service import (  # noqa: E402
     validate_runtime_safety_profile,
 )
+
 from src.trading_bot.config.authority_modes import (  # noqa: E402
     authority_mode_to_legacy_prediction_gate,
     normalize_config_authority_mode,
@@ -81,17 +83,27 @@ def test_build_config_audit_payload_flags_unsafe_runtime_settings(tmp_path):
 
 
 def test_build_config_audit_payload_allows_safe_paper_defaults(tmp_path):
+    original_take_profit = os.environ.get("AUTO_BUY_TAKE_PROFIT_PCT")
+    os.environ["AUTO_BUY_TAKE_PROFIT_PCT"] = "0"
     env = {
         "WEBHOOK_SECRET": "not-default",
         "EXECUTION_MODE": "paper",
         "LIVE_TRADING_ENABLED": "false",
         "ML_AUTHORITY_MODE": "observe_only",
         "TRANSFORMER_AUTHORITY_ENABLED": "false",
+        "AUTO_BUY_TAKE_PROFIT_PCT": "2.0",
     }
 
-    payload = build_config_audit_payload(base_dir=tmp_path, env=env)
+    try:
+        payload = build_config_audit_payload(base_dir=tmp_path, env=env)
+    finally:
+        if original_take_profit is None:
+            os.environ.pop("AUTO_BUY_TAKE_PROFIT_PCT", None)
+        else:
+            os.environ["AUTO_BUY_TAKE_PROFIT_PCT"] = original_take_profit
 
     assert payload["warnings"] == []
+    assert payload["factory_failures"] == 0
     assert payload["ready"] is True
     assert payload["runtime_safety_profile"]["ready"] is True
 

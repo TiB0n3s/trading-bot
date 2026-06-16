@@ -7,6 +7,7 @@ of the full legacy suite. Full-suite runs remain available through run_tests.py.
 
 from __future__ import annotations
 
+import argparse
 import os
 import subprocess
 import sys
@@ -44,9 +45,6 @@ SAFETY_TESTS = [
     "tests/test_observability_health_checks.py",
     "tests/test_operational_readiness_service.py",
     "tests/test_external_readiness_services.py",
-    "tests/test_remaining_assessment_services.py",
-    "tests/test_local_load_probe_service.py",
-    "tests/test_paper_replay_load_probe_service.py",
     "tests/test_incident_workflow_service.py",
     "tests/test_architecture_surface_audit_service.py",
     "tests/test_deployment_reference_audit.py",
@@ -54,6 +52,13 @@ SAFETY_TESTS = [
     "tests/test_optional_dependency_service.py",
     "tests/test_ops_check_registry.py",
     "tests/test_architecture_boundaries.py",
+]
+
+FULL_SAFETY_TESTS = [
+    *SAFETY_TESTS,
+    "tests/test_remaining_assessment_services.py",
+    "tests/test_local_load_probe_service.py",
+    "tests/test_paper_replay_load_probe_service.py",
 ]
 
 
@@ -68,6 +73,15 @@ def reexec_under_venv_if_available() -> None:
 
 def main() -> int:
     reexec_under_venv_if_available()
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--full",
+        action="store_true",
+        help="Include heavier assessment/load-probe tests that are not suitable for pre-commit.",
+    )
+    args = parser.parse_args()
+
+    selected_tests = FULL_SAFETY_TESTS if args.full else SAFETY_TESTS
     env = os.environ.copy()
     pythonpath_parts = [str(ROOT / "scripts"), str(ROOT), str(ROOT / "src")]
     if env.get("PYTHONPATH"):
@@ -77,9 +91,14 @@ def main() -> int:
     print("  Trading Bot Fast Safety Checks")
     print("=" * 72)
     print("runtime_effect=none")
+    print(f"scope={'full' if args.full else 'pre_commit_fast'}")
+    if not args.full:
+        print(
+            "excluded_from_fast_hook=remaining_assessment,local_load_probe,paper_replay_load_probe"
+        )
 
     result = subprocess.run(
-        [sys.executable, "-m", "pytest", *SAFETY_TESTS],
+        [sys.executable, "-m", "pytest", *selected_tests],
         cwd=ROOT,
         env=env,
     )
@@ -89,7 +108,7 @@ def main() -> int:
     if result.returncode != 0:
         print("[FAIL] safety test run failed")
         return result.returncode
-    print(f"[OK] all {len(SAFETY_TESTS)} safety test file(s) passed")
+    print(f"[OK] all {len(selected_tests)} safety test file(s) passed")
     return 0
 
 

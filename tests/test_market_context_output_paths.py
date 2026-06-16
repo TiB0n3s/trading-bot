@@ -121,8 +121,8 @@ def test_scripts_directory_has_no_runtime_json_duplicates():
 def test_pre_market_pipeline_uses_root_relative_build_output():
     from pipeline.pre_market import _build_steps
 
-    research = _build_steps("2026-06-09")[0]
-    assert research.name == "research_data"
+    steps = _build_steps("2026-06-09")
+    research = next(step for step in steps if step.name == "research_data")
     build_output_index = research.argv.index("--build-output") + 1
     assert research.argv[build_output_index] == "market_context.json"
 

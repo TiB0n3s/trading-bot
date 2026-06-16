@@ -81,6 +81,7 @@ def conviction_entry_decision(
             defensively): ``symbol``, ``score`` (deterministic confluence score),
             ``probability_pct`` (learned 0-100), ``probability_source``,
             ``probability_percentile_pct`` (source-specific 0-100 rank),
+            ``probability_distribution_size`` (source-specific sample count),
             ``ml_veto`` (bool), ``market_context_ok`` (bool).
         account_state: ``open_positions`` (int).
         last_trade_state: ``minutes_since_last_entry`` (float|None). None means
@@ -104,6 +105,13 @@ def conviction_entry_decision(
     probability_percentile_pct = _to_float(
         candidate.get("probability_percentile_pct", candidate.get("probability_percentile")),
         None,
+    )
+    probability_distribution_size = _to_int(
+        candidate.get(
+            "probability_distribution_size",
+            candidate.get("probability_percentile_distribution_size"),
+        ),
+        0,
     )
     ml_veto = _bool(candidate.get("ml_veto"))
     market_context_ok = _bool(candidate.get("market_context_ok"))
@@ -146,17 +154,38 @@ def conviction_entry_decision(
         if is_system_probability
         else float(getattr(cfg, "min_probability_percentile_pct", 90.0))
     )
+    probability_floor_threshold = (
+        float(getattr(cfg, "min_system_probability_floor_pct", 50.0))
+        if is_system_probability
+        else float(getattr(cfg, "min_probability_floor_pct", 25.0))
+    )
+    probability_distribution_threshold = int(getattr(cfg, "min_probability_distribution_size", 30))
     if probability_pct is None:
-        checks["probability_ok"] = not bool(cfg.require_probability)
+        checks["probability_available_ok"] = not bool(cfg.require_probability)
+        checks["probability_floor_ok"] = True
+        checks["probability_distribution_ok"] = True
+        checks["probability_rank_ok"] = True
     elif probability_gate_mode == "percentile":
-        if probability_percentile_pct is None:
-            checks["probability_ok"] = False
-        else:
-            checks["probability_ok"] = (
-                probability_percentile_pct >= probability_percentile_threshold
-            )
+        checks["probability_available_ok"] = True
+        checks["probability_floor_ok"] = probability_pct >= probability_floor_threshold
+        checks["probability_distribution_ok"] = (
+            probability_distribution_size >= probability_distribution_threshold
+        )
+        checks["probability_rank_ok"] = (
+            probability_percentile_pct is not None
+            and probability_percentile_pct >= probability_percentile_threshold
+        )
     else:
-        checks["probability_ok"] = probability_pct >= probability_threshold
+        checks["probability_available_ok"] = True
+        checks["probability_floor_ok"] = True
+        checks["probability_distribution_ok"] = True
+        checks["probability_rank_ok"] = probability_pct >= probability_threshold
+    checks["probability_ok"] = (
+        checks["probability_available_ok"]
+        and checks["probability_floor_ok"]
+        and checks["probability_distribution_ok"]
+        and checks["probability_rank_ok"]
+    )
 
     # --- Risk: ML veto ------------------------------------------------------
     checks["ml_ok"] = not (bool(cfg.block_on_ml_veto) and ml_veto)
@@ -170,19 +199,18 @@ def conviction_entry_decision(
         ("capacity_ok", "max_concurrent_positions_reached"),
         ("cooldown_ok", "entry_cooldown_active"),
         ("score_ok", "score_below_conviction_bar"),
+        ("probability_available_ok", "probability_unavailable"),
+        ("probability_floor_ok", "probability_below_floor"),
+        ("probability_distribution_ok", "probability_distribution_too_small"),
         (
-            "probability_ok",
+            "probability_rank_ok",
             (
-                "probability_unavailable"
-                if probability_pct is None
+                "probability_percentile_unavailable"
+                if probability_gate_mode == "percentile" and probability_percentile_pct is None
                 else (
-                    "probability_percentile_unavailable"
-                    if probability_gate_mode == "percentile" and probability_percentile_pct is None
-                    else (
-                        "probability_below_percentile_bar"
-                        if probability_gate_mode == "percentile"
-                        else "probability_below_bar"
-                    )
+                    "probability_below_percentile_bar"
+                    if probability_gate_mode == "percentile"
+                    else "probability_below_bar"
                 )
             ),
         ),
@@ -207,8 +235,11 @@ def conviction_entry_decision(
         "probability_source": probability_source or None,
         "probability_gate_mode": probability_gate_mode,
         "probability_threshold_pct": probability_threshold,
+        "probability_floor_threshold_pct": probability_floor_threshold,
         "probability_percentile_pct": probability_percentile_pct,
         "probability_percentile_threshold_pct": probability_percentile_threshold,
+        "probability_distribution_size": probability_distribution_size,
+        "probability_distribution_threshold": probability_distribution_threshold,
         "checks": checks,
     }
 

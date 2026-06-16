@@ -29,8 +29,11 @@ def test_defaults_are_off_and_paper_only():
     assert cfg.min_probability_pct == 62.0
     assert cfg.min_system_probability_pct == 80.0
     assert cfg.probability_gate_mode == "absolute"
+    assert cfg.min_probability_floor_pct == 25.0
+    assert cfg.min_system_probability_floor_pct == 50.0
     assert cfg.min_probability_percentile_pct == 90.0
     assert cfg.min_system_probability_percentile_pct == 95.0
+    assert cfg.min_probability_distribution_size == 30
 
 
 def test_overrides_apply():
@@ -47,8 +50,11 @@ def test_overrides_apply():
         ("min_probability_pct", 150.0),
         ("min_system_probability_pct", 150.0),
         ("probability_gate_mode", "bad_mode"),
+        ("min_probability_floor_pct", 150.0),
+        ("min_system_probability_floor_pct", 150.0),
         ("min_probability_percentile_pct", 150.0),
         ("min_system_probability_percentile_pct", 150.0),
+        ("min_probability_distribution_size", 0),
         ("max_concurrent_positions", 0),
         ("position_size_pct", 0.0),
         ("position_size_pct", 120.0),
@@ -217,6 +223,7 @@ def test_entry_percentile_gate_accepts_underconfident_high_rank_probability():
             probability_pct=33.0,
             probability_source="daily_symbol_predictions:probability_of_profit:candidate_forward_outcomes",
             probability_percentile_pct=93.0,
+            probability_distribution_size=77,
         ),
         account_state=_flat_account(),
         last_trade_state=_no_recent_trade(),
@@ -224,13 +231,65 @@ def test_entry_percentile_gate_accepts_underconfident_high_rank_probability():
     )
     assert d["enter"] is True
     assert d["probability_gate_mode"] == "percentile"
+    assert d["probability_floor_threshold_pct"] == 25.0
     assert d["probability_percentile_threshold_pct"] == 90.0
+    assert d["probability_distribution_threshold"] == 30
+
+
+def test_entry_percentile_gate_blocks_below_absolute_floor():
+    cfg = load_conviction_config(
+        enabled=True,
+        probability_gate_mode="percentile",
+        min_probability_floor_pct=25.0,
+        min_probability_percentile_pct=90.0,
+    )
+    d = conviction_entry_decision(
+        candidate=_strong_candidate(
+            probability_pct=18.0,
+            probability_source="daily_symbol_predictions:probability_of_profit:candidate_forward_outcomes",
+            probability_percentile_pct=98.0,
+            probability_distribution_size=77,
+        ),
+        account_state=_flat_account(),
+        last_trade_state=_no_recent_trade(),
+        cfg=cfg,
+    )
+    assert d["enter"] is False
+    assert d["reason"] == "probability_below_floor"
+    assert d["checks"]["probability_floor_ok"] is False
+
+
+def test_entry_percentile_gate_blocks_small_distribution():
+    cfg = load_conviction_config(
+        enabled=True,
+        probability_gate_mode="percentile",
+        min_probability_floor_pct=25.0,
+        min_probability_distribution_size=30,
+    )
+    d = conviction_entry_decision(
+        candidate=_strong_candidate(
+            probability_pct=33.0,
+            probability_source="daily_symbol_predictions:probability_of_profit:candidate_forward_outcomes",
+            probability_percentile_pct=98.0,
+            probability_distribution_size=5,
+        ),
+        account_state=_flat_account(),
+        last_trade_state=_no_recent_trade(),
+        cfg=cfg,
+    )
+    assert d["enter"] is False
+    assert d["reason"] == "probability_distribution_too_small"
+    assert d["checks"]["probability_distribution_ok"] is False
 
 
 def test_entry_percentile_gate_blocks_missing_percentile():
     cfg = load_conviction_config(enabled=True, probability_gate_mode="percentile")
     d = conviction_entry_decision(
-        candidate=_strong_candidate(probability_pct=70.0, probability_percentile_pct=None),
+        candidate=_strong_candidate(
+            probability_pct=70.0,
+            probability_percentile_pct=None,
+            probability_distribution_size=77,
+        ),
         account_state=_flat_account(),
         last_trade_state=_no_recent_trade(),
         cfg=cfg,
@@ -251,6 +310,7 @@ def test_entry_percentile_gate_uses_stricter_system_percentile_bar():
             probability_pct=70.0,
             probability_source="daily_symbol_predictions:probability_of_order",
             probability_percentile_pct=92.0,
+            probability_distribution_size=77,
         ),
         account_state=_flat_account(),
         last_trade_state=_no_recent_trade(),
@@ -258,6 +318,7 @@ def test_entry_percentile_gate_uses_stricter_system_percentile_bar():
     )
     assert blocked["enter"] is False
     assert blocked["reason"] == "probability_below_percentile_bar"
+    assert blocked["probability_floor_threshold_pct"] == 50.0
     assert blocked["probability_percentile_threshold_pct"] == 95.0
 
     allowed = conviction_entry_decision(
@@ -265,6 +326,7 @@ def test_entry_percentile_gate_uses_stricter_system_percentile_bar():
             probability_pct=70.0,
             probability_source="daily_symbol_predictions:probability_of_order",
             probability_percentile_pct=96.0,
+            probability_distribution_size=77,
         ),
         account_state=_flat_account(),
         last_trade_state=_no_recent_trade(),

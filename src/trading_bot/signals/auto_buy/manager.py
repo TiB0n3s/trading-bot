@@ -2591,8 +2591,11 @@ def _render_scoring_details(candidates: list[dict[str, Any]]) -> None:
         f"probability_gate_mode={conviction_cfg.probability_gate_mode}; "
         f"profit_probability >= {conviction_cfg.min_probability_pct:.1f}%; "
         f"system_probability >= {conviction_cfg.min_system_probability_pct:.1f}%; "
+        f"profit_floor >= {conviction_cfg.min_probability_floor_pct:.1f}%; "
+        f"system_floor >= {conviction_cfg.min_system_probability_floor_pct:.1f}%; "
         f"profit_percentile >= {conviction_cfg.min_probability_percentile_pct:.1f}%; "
         f"system_percentile >= {conviction_cfg.min_system_probability_percentile_pct:.1f}%; "
+        f"min_dist_n={conviction_cfg.min_probability_distribution_size}; "
         f"require_probability={conviction_cfg.require_probability}; "
         f"max_positions={conviction_cfg.max_concurrent_positions}"
     )

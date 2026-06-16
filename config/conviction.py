@@ -46,8 +46,14 @@ class ConvictionConfig:
     # The default preserves current behavior; percentile mode is an explicit
     # paper calibration switch for under/over-confident probability scales.
     probability_gate_mode: str = "absolute"
+    # Hybrid guardrails for percentile mode. The rank gate adapts to a
+    # compressed probability scale, but these floors prevent the top decile of a
+    # uniformly weak day from qualifying as "conviction."
+    min_probability_floor_pct: float = 25.0
+    min_system_probability_floor_pct: float = 50.0
     min_probability_percentile_pct: float = 90.0
     min_system_probability_percentile_pct: float = 95.0
+    min_probability_distribution_size: int = 30
     # If True, a candidate with no learned probability is blocked rather than
     # waved through on the heuristic alone.
     require_probability: bool = True
@@ -119,6 +125,20 @@ class ConvictionConfig:
             "must be 'absolute' or 'percentile'",
         )
         _check(
+            0.0 <= self.min_probability_floor_pct <= 100.0,
+            "min_probability_floor_pct",
+            "CONVICTION_MIN_PROBABILITY_FLOOR_PCT",
+            self.min_probability_floor_pct,
+            "must be within [0, 100]",
+        )
+        _check(
+            0.0 <= self.min_system_probability_floor_pct <= 100.0,
+            "min_system_probability_floor_pct",
+            "CONVICTION_MIN_SYSTEM_PROBABILITY_FLOOR_PCT",
+            self.min_system_probability_floor_pct,
+            "must be within [0, 100]",
+        )
+        _check(
             0.0 <= self.min_probability_percentile_pct <= 100.0,
             "min_probability_percentile_pct",
             "CONVICTION_MIN_PROBABILITY_PERCENTILE_PCT",
@@ -131,6 +151,13 @@ class ConvictionConfig:
             "CONVICTION_MIN_SYSTEM_PROBABILITY_PERCENTILE_PCT",
             self.min_system_probability_percentile_pct,
             "must be within [0, 100]",
+        )
+        _check(
+            self.min_probability_distribution_size >= 1,
+            "min_probability_distribution_size",
+            "CONVICTION_MIN_PROBABILITY_DISTRIBUTION_SIZE",
+            self.min_probability_distribution_size,
+            "must be >= 1",
         )
         _check(
             self.max_concurrent_positions >= 1,
@@ -214,9 +241,16 @@ def load_conviction_config(**overrides) -> ConvictionConfig:
         min_probability_pct=env_float("CONVICTION_MIN_PROBABILITY_PCT", 62.0),
         min_system_probability_pct=env_float("CONVICTION_MIN_SYSTEM_PROBABILITY_PCT", 80.0),
         probability_gate_mode=env_str("CONVICTION_PROBABILITY_GATE_MODE", "absolute").lower(),
+        min_probability_floor_pct=env_float("CONVICTION_MIN_PROBABILITY_FLOOR_PCT", 25.0),
+        min_system_probability_floor_pct=env_float(
+            "CONVICTION_MIN_SYSTEM_PROBABILITY_FLOOR_PCT", 50.0
+        ),
         min_probability_percentile_pct=env_float("CONVICTION_MIN_PROBABILITY_PERCENTILE_PCT", 90.0),
         min_system_probability_percentile_pct=env_float(
             "CONVICTION_MIN_SYSTEM_PROBABILITY_PERCENTILE_PCT", 95.0
+        ),
+        min_probability_distribution_size=env_int(
+            "CONVICTION_MIN_PROBABILITY_DISTRIBUTION_SIZE", 30
         ),
         require_probability=env_bool("CONVICTION_REQUIRE_PROBABILITY", True),
         block_on_ml_veto=env_bool("CONVICTION_BLOCK_ON_ML_VETO", True),

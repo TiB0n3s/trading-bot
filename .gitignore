@@ -98,3 +98,7 @@ reports/historical_outcome_feedback/2026-06-12.json
 reports/intraday_learning/
 reports/historical_market_view/
 reports/historical_outcome_feedback/2026-06-15.json
+data/earnings_events/*.jsonl
+!data/earnings_events/*.example.jsonl
+reports/post_earnings_drift/*.json
+reports/post_earnings_drift/*.jsonl

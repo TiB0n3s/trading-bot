@@ -10,6 +10,7 @@ from scripts.post_earnings_drift_research import (
     build_post_earnings_drift_payload,
     earnings_payload_to_features,
     main,
+    validate_earnings_payloads,
 )
 
 
@@ -58,6 +59,40 @@ def test_earnings_payload_to_features_expands_scalar_fields():
     assert "report_timing" in names
     assert "eps_surprise_pct" in names
     assert {feature.symbol for feature in features} == {"AAPL"}
+
+
+def test_validate_earnings_payloads_requires_point_in_time_contract():
+    result = validate_earnings_payloads(
+        [
+            {
+                "symbol": "AAPL",
+                "earnings_ts": "2026-06-14T21:00:00Z",
+                "available_at": "2026-06-14T21:05:00Z",
+                "source": "fixture",
+                "eps_surprise_pct": 8.5,
+            },
+            {
+                "symbol": "MSFT",
+                "earnings_ts": "2026-06-14T21:00:00Z",
+                "available_at": "2026-06-14T20:55:00Z",
+                "source": "fixture",
+            },
+        ]
+    )
+
+    assert result["valid"] is False
+    assert result["rows"] == 2
+    assert result["rows_with_surprise_fields"] == 1
+    assert result["errors"][0]["errors"] == ["available_at_before_event_timestamp"]
+
+
+def test_validate_jsonl_command_fails_invalid_input(tmp_path):
+    input_path = tmp_path / "earnings.jsonl"
+    input_path.write_text(json.dumps({"symbol": "AAPL", "source": "fixture"}) + "\n")
+
+    rc = main(["validate-jsonl", "--input", str(input_path)])
+
+    assert rc == 1
 
 
 def test_post_earnings_drift_scan_labels_forward_sessions(tmp_path):

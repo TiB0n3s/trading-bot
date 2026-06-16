@@ -30,6 +30,8 @@ from trading_bot.research.expected_value import (  # noqa: E402
 
 REPORT_VERSION = "post_earnings_drift_research_v1"
 RUNTIME_EFFECT = "research_only_no_trade_authority"
+REQUIRED_EVENT_FIELDS = ("symbol", "available_at", "source")
+EVENT_TIMESTAMP_FIELDS = ("earnings_ts", "event_ts", "feature_ts")
 RESERVED_EVENT_FIELDS = {
     "symbol",
     "earnings_ts",
@@ -94,6 +96,65 @@ def _scalar_items(payload: dict[str, Any]) -> list[tuple[str, Any]]:
         if isinstance(value, str | int | float | bool):
             items.append((key, value))
     return items
+
+
+def validate_earnings_payloads(payloads: list[dict[str, Any]]) -> dict[str, Any]:
+    errors: list[dict[str, Any]] = []
+    warnings: list[dict[str, Any]] = []
+    symbols: set[str] = set()
+    sources: set[str] = set()
+    scalar_feature_names: set[str] = set()
+    rows_with_surprise = 0
+    for idx, payload in enumerate(payloads, start=1):
+        row_errors: list[str] = []
+        for field in REQUIRED_EVENT_FIELDS:
+            if str(payload.get(field) or "").strip() == "":
+                row_errors.append(f"missing_{field}")
+        if not any(str(payload.get(field) or "").strip() for field in EVENT_TIMESTAMP_FIELDS):
+            row_errors.append("missing_event_timestamp")
+        feature_ts = next(
+            (
+                str(payload.get(field) or "").strip()
+                for field in EVENT_TIMESTAMP_FIELDS
+                if str(payload.get(field) or "").strip()
+            ),
+            "",
+        )
+        available_at = str(payload.get("available_at") or "").strip()
+        revision_policy = str(payload.get("revision_policy") or "point_in_time_as_reported")
+        if (
+            feature_ts
+            and available_at
+            and available_at < feature_ts
+            and revision_policy
+            not in {"scheduled_known_before_event", "calendar_known_before_event"}
+        ):
+            row_errors.append("available_at_before_event_timestamp")
+        scalar_items = _scalar_items(payload)
+        if not scalar_items:
+            warnings.append({"row": idx, "warning": "no_scalar_earnings_features"})
+        if any("surprise" in key.lower() for key, _value in scalar_items):
+            rows_with_surprise += 1
+        scalar_feature_names.update(key for key, _value in scalar_items)
+        if payload.get("symbol"):
+            symbols.add(str(payload["symbol"]).upper())
+        if payload.get("source"):
+            sources.add(str(payload["source"]))
+        if row_errors:
+            errors.append({"row": idx, "errors": row_errors})
+
+    return {
+        "report_version": "post_earnings_drift_input_validation_v1",
+        "runtime_effect": RUNTIME_EFFECT,
+        "rows": len(payloads),
+        "valid": not errors,
+        "errors": errors,
+        "warnings": warnings,
+        "symbols": len(symbols),
+        "sources": sorted(sources),
+        "scalar_feature_names": sorted(scalar_feature_names),
+        "rows_with_surprise_fields": rows_with_surprise,
+    }
 
 
 def earnings_payload_to_features(payload: dict[str, Any]) -> list[ExternalSignalFeature]:
@@ -362,6 +423,10 @@ def main(argv: list[str] | None = None) -> int:
     ingest = sub.add_parser("ingest-jsonl")
     ingest.add_argument("--input", required=True)
 
+    validate = sub.add_parser("validate-jsonl")
+    validate.add_argument("--input", required=True)
+    validate.add_argument("--json-output")
+
     scan = sub.add_parser("scan")
     scan.add_argument("--start-date")
     scan.add_argument("--end-date")
@@ -376,8 +441,22 @@ def main(argv: list[str] | None = None) -> int:
 
     args = parser.parse_args(argv)
     repo = ExternalSignalFeatureRepository(args.db_path)
+    if args.command == "validate-jsonl":
+        payloads = _load_jsonl(Path(args.input))
+        result = validate_earnings_payloads(payloads)
+        if args.json_output:
+            output = Path(args.json_output)
+            output.parent.mkdir(parents=True, exist_ok=True)
+            output.write_text(json.dumps(result, indent=2, sort_keys=True) + "\n")
+        print(json.dumps(result, indent=2, sort_keys=True))
+        return 0 if result["valid"] else 1
+
     if args.command == "ingest-jsonl":
         payloads = _load_jsonl(Path(args.input))
+        validation = validate_earnings_payloads(payloads)
+        if not validation["valid"]:
+            print(json.dumps(validation, indent=2, sort_keys=True), file=sys.stderr)
+            return 1
         features = [
             feature for payload in payloads for feature in earnings_payload_to_features(payload)
         ]

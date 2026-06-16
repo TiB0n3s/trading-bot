@@ -105,6 +105,16 @@ Input JSONL rows should contain at least `symbol`, `earnings_ts`,
 `eps_surprise_pct`, `revenue_surprise_pct`, or `guidance_surprise` are expanded
 into earnings features.
 
+Before ingesting, validate the point-in-time input contract:
+
+```bash
+cd ~/trading-bot
+./venv/bin/python scripts/post_earnings_drift_research.py \
+  validate-jsonl \
+  --input data/earnings_events/post_earnings_drift_v1.jsonl \
+  --json-output reports/post_earnings_drift/input_validation_v1.json
+```
+
 ```bash
 cd ~/trading-bot
 ./venv/bin/python scripts/post_earnings_drift_research.py \
@@ -134,6 +144,9 @@ cd ~/trading-bot
 Treat a positive detector result as a research lead only. A candidate still
 needs leakage review, independent validation, and a positive expected-value
 result at the intended account size before any promotion discussion.
+The binding pass/fail contract for the first slice is tracked in
+`ops/research/post_earnings_drift_v1_precommit.md`; archive completed results
+using `reports/post_earnings_drift/README.md`.
 
 ## Cron
 

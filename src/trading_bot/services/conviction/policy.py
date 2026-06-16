@@ -49,6 +49,11 @@ def _bool(value: Any) -> bool:
     return bool(value)
 
 
+def _is_system_probability_source(probability_source: str) -> bool:
+    normalized = str(probability_source or "").strip().lower()
+    return "probability_of_approval" in normalized or "probability_of_order" in normalized
+
+
 def conviction_active_for_mode(cfg: "ConvictionConfig", execution_mode: str) -> bool:
     """Whether conviction mode should take authority under ``execution_mode``.
 
@@ -75,6 +80,7 @@ def conviction_entry_decision(
         candidate: ranked candidate. Recognized keys (all optional, read
             defensively): ``symbol``, ``score`` (deterministic confluence score),
             ``probability_pct`` (learned 0-100), ``probability_source``,
+            ``probability_percentile_pct`` (source-specific 0-100 rank),
             ``ml_veto`` (bool), ``market_context_ok`` (bool).
         account_state: ``open_positions`` (int).
         last_trade_state: ``minutes_since_last_entry`` (float|None). None means
@@ -95,6 +101,10 @@ def conviction_entry_decision(
     score = _to_float(candidate.get("score"), 0.0) or 0.0
     probability_pct = _to_float(candidate.get("probability_pct"), None)
     probability_source = str(candidate.get("probability_source") or "").strip().lower()
+    probability_percentile_pct = _to_float(
+        candidate.get("probability_percentile_pct", candidate.get("probability_percentile")),
+        None,
+    )
     ml_veto = _bool(candidate.get("ml_veto"))
     market_context_ok = _bool(candidate.get("market_context_ok"))
 
@@ -116,19 +126,35 @@ def conviction_entry_decision(
     checks["score_ok"] = score >= float(cfg.min_score)
 
     # --- Quality: learned probability bar ----------------------------------
-    system_probability_sources = {
-        "probability_of_approval",
-        "probability_of_order",
-        "daily_symbol_predictions:probability_of_approval",
-        "daily_symbol_predictions:probability_of_order",
-    }
+    probability_gate_mode = (
+        str(getattr(cfg, "probability_gate_mode", "absolute") or "absolute").strip().lower()
+    )
+    is_system_probability = _is_system_probability_source(probability_source)
     probability_threshold = (
         float(getattr(cfg, "min_system_probability_pct", cfg.min_probability_pct))
-        if probability_source in system_probability_sources
+        if is_system_probability
         else float(cfg.min_probability_pct)
+    )
+    probability_percentile_threshold = (
+        float(
+            getattr(
+                cfg,
+                "min_system_probability_percentile_pct",
+                getattr(cfg, "min_probability_percentile_pct", 90.0),
+            )
+        )
+        if is_system_probability
+        else float(getattr(cfg, "min_probability_percentile_pct", 90.0))
     )
     if probability_pct is None:
         checks["probability_ok"] = not bool(cfg.require_probability)
+    elif probability_gate_mode == "percentile":
+        if probability_percentile_pct is None:
+            checks["probability_ok"] = False
+        else:
+            checks["probability_ok"] = (
+                probability_percentile_pct >= probability_percentile_threshold
+            )
     else:
         checks["probability_ok"] = probability_pct >= probability_threshold
 
@@ -146,7 +172,19 @@ def conviction_entry_decision(
         ("score_ok", "score_below_conviction_bar"),
         (
             "probability_ok",
-            "probability_unavailable" if probability_pct is None else "probability_below_bar",
+            (
+                "probability_unavailable"
+                if probability_pct is None
+                else (
+                    "probability_percentile_unavailable"
+                    if probability_gate_mode == "percentile" and probability_percentile_pct is None
+                    else (
+                        "probability_below_percentile_bar"
+                        if probability_gate_mode == "percentile"
+                        else "probability_below_bar"
+                    )
+                )
+            ),
         ),
         ("ml_ok", "ml_veto"),
         ("market_ok", "market_context_unfavorable"),
@@ -167,7 +205,10 @@ def conviction_entry_decision(
         "conviction_score": round(score, 4),
         "probability_pct": probability_pct,
         "probability_source": probability_source or None,
+        "probability_gate_mode": probability_gate_mode,
         "probability_threshold_pct": probability_threshold,
+        "probability_percentile_pct": probability_percentile_pct,
+        "probability_percentile_threshold_pct": probability_percentile_threshold,
         "checks": checks,
     }
 

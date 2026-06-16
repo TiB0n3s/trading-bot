@@ -15,7 +15,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from config._env import _check, env_bool, env_float, env_int
+from config._env import _check, env_bool, env_float, env_int, env_str
 
 
 @dataclass(frozen=True)
@@ -39,6 +39,15 @@ class ConvictionConfig:
     # These are not profit probabilities, so they require a stricter threshold
     # when used only to avoid dropping otherwise rare score-qualified setups.
     min_system_probability_pct: float = 80.0
+    # Probability gate interpretation:
+    # - absolute: compare the raw probability to min_*_probability_pct.
+    # - percentile: compare the probability's source-specific rank within the
+    #   current serving distribution to min_*_probability_percentile_pct.
+    # The default preserves current behavior; percentile mode is an explicit
+    # paper calibration switch for under/over-confident probability scales.
+    probability_gate_mode: str = "absolute"
+    min_probability_percentile_pct: float = 90.0
+    min_system_probability_percentile_pct: float = 95.0
     # If True, a candidate with no learned probability is blocked rather than
     # waved through on the heuristic alone.
     require_probability: bool = True
@@ -100,6 +109,27 @@ class ConvictionConfig:
             "min_system_probability_pct",
             "CONVICTION_MIN_SYSTEM_PROBABILITY_PCT",
             self.min_system_probability_pct,
+            "must be within [0, 100]",
+        )
+        _check(
+            self.probability_gate_mode in {"absolute", "percentile"},
+            "probability_gate_mode",
+            "CONVICTION_PROBABILITY_GATE_MODE",
+            self.probability_gate_mode,
+            "must be 'absolute' or 'percentile'",
+        )
+        _check(
+            0.0 <= self.min_probability_percentile_pct <= 100.0,
+            "min_probability_percentile_pct",
+            "CONVICTION_MIN_PROBABILITY_PERCENTILE_PCT",
+            self.min_probability_percentile_pct,
+            "must be within [0, 100]",
+        )
+        _check(
+            0.0 <= self.min_system_probability_percentile_pct <= 100.0,
+            "min_system_probability_percentile_pct",
+            "CONVICTION_MIN_SYSTEM_PROBABILITY_PERCENTILE_PCT",
+            self.min_system_probability_percentile_pct,
             "must be within [0, 100]",
         )
         _check(
@@ -183,6 +213,11 @@ def load_conviction_config(**overrides) -> ConvictionConfig:
         min_score=env_float("CONVICTION_MIN_SCORE", 23.0),
         min_probability_pct=env_float("CONVICTION_MIN_PROBABILITY_PCT", 62.0),
         min_system_probability_pct=env_float("CONVICTION_MIN_SYSTEM_PROBABILITY_PCT", 80.0),
+        probability_gate_mode=env_str("CONVICTION_PROBABILITY_GATE_MODE", "absolute").lower(),
+        min_probability_percentile_pct=env_float("CONVICTION_MIN_PROBABILITY_PERCENTILE_PCT", 90.0),
+        min_system_probability_percentile_pct=env_float(
+            "CONVICTION_MIN_SYSTEM_PROBABILITY_PERCENTILE_PCT", 95.0
+        ),
         require_probability=env_bool("CONVICTION_REQUIRE_PROBABILITY", True),
         block_on_ml_veto=env_bool("CONVICTION_BLOCK_ON_ML_VETO", True),
         require_market_context_ok=env_bool("CONVICTION_REQUIRE_MARKET_CONTEXT_OK", True),

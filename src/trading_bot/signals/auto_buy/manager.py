@@ -17,6 +17,7 @@ import json
 import os
 import sys
 import time
+from bisect import bisect_right
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -303,6 +304,7 @@ PAPER_STRONG_EVIDENCE_SOFT_BLOCK_PREFIXES = (
 )
 
 _prediction_context_cache: dict[str, dict[str, Any]] = {}
+_prediction_probability_distribution_cache: dict[tuple[str, str], list[float]] = {}
 _learned_tiebreaker_cache: dict[tuple[str, str, str], dict[str, Any]] = {}
 _rolling_momentum_context_cache: dict[str, dict[str, Any]] | None = None
 _intraday_feedback_service: IntradayTradeFeedbackService | None = None
@@ -378,6 +380,49 @@ def _first_probability_pct_with_source(*items: tuple[str, Any]) -> tuple[float |
         if probability is not None:
             return probability, source
     return None, None
+
+
+def _probability_family(probability_source: Any) -> str:
+    normalized = str(probability_source or "").strip().lower()
+    if "probability_of_approval" in normalized:
+        return "probability_of_approval"
+    if "probability_of_order" in normalized:
+        return "probability_of_order"
+    return "probability_of_profit"
+
+
+def _prediction_probability_distribution(family: str) -> list[float]:
+    family = _probability_family(family)
+    cache_key = (_today(), family)
+    cached = _prediction_probability_distribution_cache.get(cache_key)
+    if cached is not None:
+        return cached
+    values: list[float] = []
+    try:
+        rows = PredictionRepository(DB_PATH).daily_predictions(_today())
+    except Exception:
+        rows = []
+    for row in rows:
+        probability = _probability_pct(row.get(family))
+        if probability is not None:
+            values.append(probability)
+    values.sort()
+    _prediction_probability_distribution_cache[cache_key] = values
+    return values
+
+
+def _prediction_probability_percentile(
+    probability_pct: Any,
+    probability_source: Any,
+) -> tuple[float | None, int]:
+    probability = _probability_pct(probability_pct)
+    if probability is None:
+        return None, 0
+    distribution = _prediction_probability_distribution(_probability_family(probability_source))
+    if not distribution:
+        return None, 0
+    percentile = bisect_right(distribution, probability) / len(distribution) * 100.0
+    return round(percentile, 4), len(distribution)
 
 
 def _historical_bar_intelligence() -> dict[str, Any]:
@@ -642,6 +687,9 @@ def auto_buy_prediction_context(symbol: str) -> dict[str, Any]:
             ("probability_of_approval", row.get("probability_of_approval")),
             ("probability_of_order", row.get("probability_of_order")),
         )
+        probability_percentile_pct, probability_distribution_size = (
+            _prediction_probability_percentile(probability_pct, probability_source)
+        )
         result.update(
             {
                 "available": True,
@@ -658,6 +706,8 @@ def auto_buy_prediction_context(symbol: str) -> dict[str, Any]:
                 "probability_of_order_pct": _probability_pct(row.get("probability_of_order")),
                 "probability_pct": probability_pct,
                 "probability_source": probability_source,
+                "probability_percentile_pct": probability_percentile_pct,
+                "probability_distribution_size": probability_distribution_size,
                 "ml_prediction_score": score,
                 "ml_prediction_bucket": ml_prediction_bucket(score),
                 "ml_prediction_confidence": row.get("confidence"),
@@ -1677,6 +1727,16 @@ def evaluate_auto_buy_candidate(
     if conviction_probability_pct is None:
         conviction_probability_pct = prediction_probability_pct
         conviction_probability_source = prediction_probability_source or "daily_symbol_predictions"
+    conviction_probability_percentile_pct = None
+    conviction_probability_distribution_size = 0
+    if (
+        conviction_probability_pct is not None
+        and conviction_probability_source == prediction_probability_source
+    ):
+        conviction_probability_percentile_pct = prediction_context.get("probability_percentile_pct")
+        conviction_probability_distribution_size = (
+            _to_float(prediction_context.get("probability_distribution_size"), 0) or 0
+        )
 
     # Conviction entry uses the deterministic candidate confluence score, not
     # later layered-ML score nudges. Layered ML remains a veto/probability input.
@@ -1901,8 +1961,16 @@ def evaluate_auto_buy_candidate(
         "probability_source": (
             conviction_probability_source if conviction_probability_pct is not None else None
         ),
+        "probability_percentile_pct": conviction_probability_percentile_pct,
+        "probability_distribution_size": int(conviction_probability_distribution_size),
         "prediction_probability_pct": prediction_probability_pct,
         "prediction_probability_source": prediction_probability_source,
+        "prediction_probability_percentile_pct": prediction_context.get(
+            "probability_percentile_pct"
+        ),
+        "prediction_probability_distribution_size": prediction_context.get(
+            "probability_distribution_size"
+        ),
         "prediction_probability_of_profit_pct": prediction_context.get("probability_of_profit_pct"),
         "prediction_probability_of_profit_source": prediction_context.get(
             "probability_of_profit_source"
@@ -2520,8 +2588,11 @@ def _render_scoring_details(candidates: list[dict[str, Any]]) -> None:
     print(
         "  Conviction gate: "
         f"confluence_score >= {conviction_cfg.min_score:.1f}; "
+        f"probability_gate_mode={conviction_cfg.probability_gate_mode}; "
         f"profit_probability >= {conviction_cfg.min_probability_pct:.1f}%; "
         f"system_probability >= {conviction_cfg.min_system_probability_pct:.1f}%; "
+        f"profit_percentile >= {conviction_cfg.min_probability_percentile_pct:.1f}%; "
+        f"system_percentile >= {conviction_cfg.min_system_probability_percentile_pct:.1f}%; "
         f"require_probability={conviction_cfg.require_probability}; "
         f"max_positions={conviction_cfg.max_concurrent_positions}"
     )
@@ -2539,8 +2610,12 @@ def _render_scoring_details(candidates: list[dict[str, Any]]) -> None:
             "    probability: "
             f"selected={_pct_text(c.get('probability_pct'))} "
             f"source={_log_value(c.get('probability_source'))} "
+            f"percentile={_pct_text(c.get('probability_percentile_pct'))} "
+            f"dist_n={_log_value(c.get('probability_distribution_size'))} "
             f"prediction={_pct_text(c.get('prediction_probability_pct'))} "
             f"prediction_source={_log_value(c.get('prediction_probability_source'))} "
+            f"prediction_percentile={_pct_text(c.get('prediction_probability_percentile_pct'))} "
+            f"prediction_dist_n={_log_value(c.get('prediction_probability_distribution_size'))} "
             f"profit={_pct_text(c.get('prediction_probability_of_profit_pct'))} "
             f"approval={_pct_text(c.get('prediction_probability_of_approval_pct'))} "
             f"order={_pct_text(c.get('prediction_probability_of_order_pct'))}"

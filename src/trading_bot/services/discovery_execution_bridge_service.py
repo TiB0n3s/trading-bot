@@ -388,6 +388,7 @@ class DiscoveryExecutionBridgeService:
                 "score": _candidate_conviction_score(candidate),
                 "probability_pct": _candidate_probability_pct(candidate),
                 "probability_source": candidate.get("probability_source"),
+                "probability_percentile_pct": _candidate_probability_percentile_pct(candidate),
                 "ml_veto": _candidate_ml_veto(candidate),
                 "market_context_ok": _candidate_market_context_ok(candidate),
             },
@@ -559,6 +560,17 @@ def _candidate_probability_pct(candidate: dict[str, Any]) -> float | None:
             if value not in (None, ""):
                 parsed = float(value)
                 return parsed * 100.0 if 0 <= parsed <= 1 else parsed
+        except (TypeError, ValueError):
+            continue
+    return None
+
+
+def _candidate_probability_percentile_pct(candidate: dict[str, Any]) -> float | None:
+    for key in ("probability_percentile_pct", "prediction_probability_percentile_pct"):
+        value = candidate.get(key)
+        try:
+            if value not in (None, ""):
+                return float(value)
         except (TypeError, ValueError):
             continue
     return None

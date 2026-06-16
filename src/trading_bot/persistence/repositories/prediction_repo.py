@@ -55,12 +55,16 @@ class PredictionRepository:
             probability_of_profit_sample_size_expr = _column_expr(
                 columns, "probability_of_profit_sample_size"
             )
+            probability_of_approval_expr = _column_expr(columns, "probability_of_approval")
+            probability_of_order_expr = _column_expr(columns, "probability_of_order")
             rows = con.execute(
                 f"""
                 SELECT market_date, symbol, prediction_score, probability_of_profit,
                        {probability_of_profit_source_expr},
                        {probability_of_profit_sample_size_expr},
-                       probability_of_order, expected_pnl, confidence, sample_size,
+                       {probability_of_approval_expr},
+                       {probability_of_order_expr},
+                       expected_pnl, confidence, sample_size,
                        reason, timing_score, recommended_entry_timing,
                        recommended_exit_timing, trend_score, trend_label,
                        trend_regime, trend_confidence, {updated_at_expr},

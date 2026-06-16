@@ -1076,6 +1076,121 @@ def _permutation_null(
     }
 
 
+def _apply_max_statistic_null(
+    *,
+    rows: list[EdgeRow],
+    results: list[dict[str, Any]],
+    n_buckets: int,
+    permutations: int,
+    permutation_seed: int,
+    permutation_block_field: str,
+) -> list[dict[str, Any]]:
+    tested = [
+        item
+        for item in results
+        if item.get("null_verdict") in {"beats_chance", "within_noise"}
+        and item.get("lift_pct") is not None
+    ]
+    if not tested:
+        return results
+
+    row_payloads = [
+        (idx, row) for idx, row in enumerate(rows) if row.forward_return_pct is not None
+    ]
+    return_by_idx = {
+        idx: float(row.forward_return_pct)
+        for idx, row in row_payloads
+        if row.forward_return_pct is not None
+    }
+    block_by_idx = {
+        idx: _permutation_block_value(row, permutation_block_field) for idx, row in row_payloads
+    }
+    block_indices: dict[str, list[int]] = defaultdict(list)
+    for idx, block in block_by_idx.items():
+        block_indices[block].append(idx)
+    is_iid = set(block_indices) == {"__iid__"}
+
+    feature_payloads: list[tuple[str, list[int], list[tuple[int, int]]]] = []
+    for item in tested:
+        feature = str(item["feature"])
+        usable = [
+            (idx, row)
+            for idx, row in enumerate(rows)
+            if feature in row.numeric_features and row.forward_return_pct is not None
+        ]
+        usable.sort(key=lambda item: item[1].numeric_features[feature])
+        ordered_indices = [idx for idx, _ in usable]
+        if len(ordered_indices) < n_buckets * 3:
+            continue
+        feature_payloads.append(
+            (feature, ordered_indices, _bucket_ranges(len(ordered_indices), n_buckets))
+        )
+
+    if not feature_payloads or permutations <= 0:
+        return [
+            {
+                **item,
+                "family_p_value": None,
+                "family_null_lift_p95": None,
+                "family_verdict": "not_run",
+                "family_tests": len(tested),
+            }
+            for item in results
+        ]
+
+    rng = random.Random(permutation_seed)
+    family_null_lifts: list[float] = []
+    shuffled_returns = dict(return_by_idx)
+
+    for _ in range(permutations):
+        if is_iid:
+            values = list(return_by_idx.values())
+            rng.shuffle(values)
+            shuffled_returns = dict(zip(return_by_idx.keys(), values))
+        else:
+            shuffled_returns = dict(return_by_idx)
+            for indices in block_indices.values():
+                values = [return_by_idx[idx] for idx in indices]
+                rng.shuffle(values)
+                for idx, value in zip(indices, values):
+                    shuffled_returns[idx] = value
+        best_lift = 0.0
+        for _, ordered_indices, ranges in feature_payloads:
+            shuffled = [shuffled_returns[idx] for idx in ordered_indices]
+            best_lift = max(best_lift, abs(_lift_from_ordered_returns(shuffled, ranges)))
+        family_null_lifts.append(best_lift)
+
+    sorted_lifts = sorted(family_null_lifts)
+    p95_idx = min(int(0.95 * (len(sorted_lifts) - 1)), len(sorted_lifts) - 1)
+    family_p95 = round(sorted_lifts[p95_idx], 1)
+    annotated = []
+    for item in results:
+        if item.get("null_verdict") not in {"beats_chance", "within_noise"}:
+            annotated.append(
+                {
+                    **item,
+                    "family_p_value": None,
+                    "family_null_lift_p95": None,
+                    "family_verdict": "not_run",
+                    "family_tests": len(tested),
+                }
+            )
+            continue
+        observed_abs = abs(float(item.get("lift_pct") or 0.0))
+        exceedances = sum(1 for value in family_null_lifts if value >= observed_abs)
+        p_value = (exceedances + 1) / (permutations + 1)
+        annotated.append(
+            {
+                **item,
+                "family_p_value": round(p_value, 4),
+                "family_null_lift_p95": family_p95,
+                "family_verdict": "beats_family_null" if p_value <= 0.05 else "within_family_noise",
+                "family_tests": len(tested),
+            }
+        )
+    return annotated
+
+
 def feature_lift_scan(
     rows: list[EdgeRow],
     *,
@@ -1112,8 +1227,17 @@ def feature_lift_scan(
         for result in results
         if result["verdict"] not in {"too_few_rows", "too_few_unique_values"}
     ]
+    usable = _apply_max_statistic_null(
+        rows=rows,
+        results=usable,
+        n_buckets=n_buckets,
+        permutations=permutations,
+        permutation_seed=permutation_seed,
+        permutation_block_field=permutation_block_field,
+    )
     usable.sort(
         key=lambda item: (
+            item.get("family_verdict") != "beats_family_null",
             item.get("null_verdict") != "beats_chance",
             item["verdict"] != "rank_orders_outcomes",
             -abs(float(item["lift_pct"] or 0.0)),
@@ -1273,8 +1397,9 @@ def _print_feature_scan(results: list[dict[str, Any]], *, limit: int) -> None:
         return
     print(
         f"  {'feature':<38}{'n':>8}{'lift':>10}{'mono%':>10}"
-        f"{'direction':>18}{'null_p':>10}{'null95':>10}"
-        f"{'chance':>14}{'block':>10}{'base_win%':>12}{'d1_ret%':>12}{'d10_ret%':>12}"
+        f"{'direction':>18}{'null_p':>10}{'fam_p':>10}"
+        f"{'null95':>10}{'fam95':>10}{'chance':>14}{'family':>20}"
+        f"{'block':>10}{'base_win%':>12}{'d1_ret%':>12}{'d10_ret%':>12}"
     )
     for item in results[:limit]:
         buckets = item.get("buckets") or []
@@ -1286,8 +1411,11 @@ def _print_feature_scan(results: list[dict[str, Any]], *, limit: int) -> None:
             f"{100.0 * float(item['monotonicity']):>10.0f}"
             f"{str(item.get('direction', '-')):>18}"
             f"{_fmt(item.get('null_p_value')):>10}"
+            f"{_fmt(item.get('family_p_value')):>10}"
             f"{_fmt(item.get('null_lift_p95')):>10}"
+            f"{_fmt(item.get('family_null_lift_p95')):>10}"
             f"{str(item.get('null_verdict', '-')):>14}"
+            f"{str(item.get('family_verdict', '-')):>20}"
             f"{str(item.get('null_block', '-')):>10}"
             f"{_fmt(item['base_win_pct']):>12}"
             f"{_fmt(d1_ret):>12}"
@@ -1317,8 +1445,9 @@ def _print_regime_feature_scan(
             continue
         print(
             f"  {'feature':<38}{'n':>8}{'lift':>10}{'mono%':>10}"
-            f"{'direction':>18}{'null_p':>10}{'null95':>10}"
-            f"{'chance':>14}{'block':>10}{'d1_ret%':>12}{'d10_ret%':>12}"
+            f"{'direction':>18}{'null_p':>10}{'fam_p':>10}"
+            f"{'null95':>10}{'fam95':>10}{'chance':>14}{'family':>20}"
+            f"{'block':>10}{'d1_ret%':>12}{'d10_ret%':>12}"
         )
         for item in features[:limit]:
             buckets = item.get("buckets") or []
@@ -1330,8 +1459,11 @@ def _print_regime_feature_scan(
                 f"{100.0 * float(item['monotonicity']):>10.0f}"
                 f"{str(item.get('direction', '-')):>18}"
                 f"{_fmt(item.get('null_p_value')):>10}"
+                f"{_fmt(item.get('family_p_value')):>10}"
                 f"{_fmt(item.get('null_lift_p95')):>10}"
+                f"{_fmt(item.get('family_null_lift_p95')):>10}"
                 f"{str(item.get('null_verdict', '-')):>14}"
+                f"{str(item.get('family_verdict', '-')):>20}"
                 f"{str(item.get('null_block', '-')):>10}"
                 f"{_fmt(d1_ret):>12}"
                 f"{_fmt(d10_ret):>12}"

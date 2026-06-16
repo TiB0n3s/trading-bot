@@ -18,6 +18,10 @@ path as currently built from price/volume-derived candidate features.
 - Narrow candidate scans produced provisional feature lift, but the strongest
   lead, `session_trend_score`, weakened to within-noise on the wider rejected
   forward-outcome sample.
+- Feature scans must account for multiple looks. Per-feature blocked-null
+  p-values are insufficient by themselves because scanning many features and
+  regimes will produce false leads by chance. The research harness now applies
+  a max-statistic permutation null across the scanned feature family.
 - The additive confluence score did not rank-order forward winners in the wider
   labeled sample.
 - Setup score did not show stable discrimination in the wider rejected-outcome
@@ -60,10 +64,11 @@ of the following, in order:
 1. Demonstrated discrimination before capital authority.
 2. Decile lift before calibration.
 3. Regime split before global conclusions.
-4. Blocked permutation null before trusting p-values.
-5. Leakage and circularity audit before trusting any survivor.
-6. Net-of-costs edge before capital authority.
-7. Wider independent days before deployment confidence.
+4. Blocked permutation null before trusting per-feature p-values.
+5. Multiple-testing correction before trusting the best feature in a scan.
+6. Leakage and circularity audit before trusting any survivor.
+7. Net-of-costs edge before capital authority.
+8. Wider independent days before deployment confidence.
 
 Net-of-costs review must include spread, slippage, order timing, missed fills,
 and whole-share sizing drag for the actual account size.
@@ -81,6 +86,24 @@ Until a new thesis clears the checklist:
 - Treat additional candidate captures as passive research data only.
 - Any future live or paper-authority promotion must include a new evidence note
   that explicitly supersedes this file.
+
+## Research Infrastructure Priorities
+
+The useful work is not more runtime intelligence. It is infrastructure that
+makes future intelligence harder to overfit or misread:
+
+1. Consolidate the detector into one reusable research harness: feature in,
+   verdict out, covering decile lift, regime splits, blocked nulls,
+   multiple-testing correction, leakage checks, and net-cost review.
+2. Make the net-of-cost hurdle concrete using actual fill data: spread,
+   slippage, timing, missed fills, and whole-share sizing drag should produce a
+   numeric expectancy gate before any capital authority.
+3. Prune or quarantine unvalidated layered ML, ensemble, and meta-label
+   machinery that has not earned a place through the harness. Complexity without
+   evidence is maintenance burden and a source of false confidence.
+4. Treat new orthogonal data sources as the primary frontier. More transforms of
+   the same OHLCV inputs are lower-priority unless they pass the corrected
+   research harness out of sample.
 
 ## Reason To Reopen
 

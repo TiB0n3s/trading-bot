@@ -209,6 +209,9 @@ def test_feature_lift_scan_ranks_numeric_features():
     assert results[0]["verdict"] == "rank_orders_outcomes"
     assert results[0]["null_verdict"] == "beats_chance"
     assert results[0]["null_p_value"] <= 0.05
+    assert results[0]["family_verdict"] == "beats_family_null"
+    assert results[0]["family_p_value"] <= 0.05
+    assert results[0]["family_tests"] >= 2
 
 
 def test_feature_lift_scan_by_regime_groups_rows():
@@ -273,6 +276,7 @@ def test_blocked_permutation_demotes_date_proxy_feature():
     iid_date = next(item for item in iid if item["feature"] == "date_proxy")
     assert blocked_date["null_verdict"] == "within_noise"
     assert blocked_date["null_block"] == "blocked"
+    assert blocked_date["family_verdict"] == "within_family_noise"
     assert iid_date["null_verdict"] == "beats_chance"
     assert iid_date["null_block"] == "iid"
 

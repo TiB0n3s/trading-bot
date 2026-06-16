@@ -2,6 +2,13 @@
 
 This directory stores operational reference files for the trading bot.
 
+## Strategy Authority Status
+
+`auto_buy_strategy_status.md` records the current auto-buy research conclusion:
+the OHLCV-derived auto-buy stack has no demonstrated deployable edge and must
+remain in observe/research mode unless a future thesis clears the documented
+discrimination, blocked-null, leakage, net-cost, and independent-day checks.
+
 ## Cron
 
 `crontab.tradingbot.current.txt` is a version-controlled snapshot of the

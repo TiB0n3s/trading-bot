@@ -42,6 +42,7 @@ def test_expected_value_hand_worked_oracle():
     # round-trip cost=0.05 + (0.03*2.0) = 0.11
     # net EV=0.25-0.11=0.14
     # profit factor=(2.0+1.0)/(0.5+1.5)=1.5
+    # Profit factor is intentionally gross by convention; net EV carries costs.
     # whole shares=floor(531/100)=5; deployed=500; cash drag=(31/531)=5.838%
     assert result["win_rate_pct"] == 50.0
     assert result["avg_win_pct"] == 1.5

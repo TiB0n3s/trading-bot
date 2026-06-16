@@ -53,6 +53,34 @@ FORWARD_RETURN_KEYS = (
     "return_eod",
     "realized_pnl_pct",
 )
+EXCLUDED_FEATURE_KEYS = {
+    "ask",
+    "bid",
+    "feature_snapshot_id",
+    "forward_mae_pct",
+    "forward_mfe_pct",
+    "forward_reference_price",
+    "forward_return_pct",
+    "last_price",
+    "max_favorable_30m",
+    "max_favorable_60m",
+    "max_adverse_60m",
+    "mid",
+    "probability_of_approval",
+    "probability_of_approval_pct",
+    "probability_of_order",
+    "probability_of_order_pct",
+    "probability_of_profit",
+    "probability_of_profit_pct",
+    "probability_pct",
+    "realized_pnl_pct",
+    "reference_price",
+    "return_30m",
+    "return_15m",
+    "return_5m",
+    "return_60m",
+    "return_eod",
+}
 _JSON_VALUE_RE_CACHE: dict[str, re.Pattern[str]] = {}
 
 
@@ -72,6 +100,7 @@ class EdgeRow:
     instruction_class: str
     forward_return_pct: float | None
     forward_mfe_pct: float | None
+    numeric_features: dict[str, float]
 
 
 def _columns(con: sqlite3.Connection, table: str) -> set[str]:
@@ -157,6 +186,40 @@ def _raw_json_value(raw_json: Any, keys: Iterable[str]) -> Any:
 def _candidate_payload(payload: dict[str, Any]) -> dict[str, Any]:
     candidate = payload.get("candidate")
     return candidate if isinstance(candidate, dict) else payload
+
+
+def _flatten_numeric_features(
+    value: Any,
+    *,
+    output: dict[str, float],
+    prefix: str = "",
+) -> None:
+    if isinstance(value, dict):
+        for key, child in value.items():
+            key_str = str(key)
+            if key_str in EXCLUDED_FEATURE_KEYS or key_str == "canonical_signal_candidate":
+                continue
+            name = f"{prefix}.{key_str}" if prefix else key_str
+            _flatten_numeric_features(child, output=output, prefix=name)
+        return
+    if isinstance(value, bool) or value in (None, ""):
+        return
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError):
+        return
+    if numeric == numeric:
+        output[prefix] = numeric
+
+
+def _numeric_features(payload: dict[str, Any], candidate: dict[str, Any]) -> dict[str, float]:
+    features: dict[str, float] = {}
+    _flatten_numeric_features(candidate, output=features)
+    for key, value in payload.items():
+        if key == "candidate" or key in EXCLUDED_FEATURE_KEYS:
+            continue
+        _flatten_numeric_features(value, output=features, prefix=str(key))
+    return features
 
 
 def _first_value(*sources: dict[str, Any], keys: Iterable[str]) -> Any:
@@ -251,6 +314,7 @@ def _edge_row_from_payload(
         instruction_class=instruction_class,
         forward_return_pct=forward_return,
         forward_mfe_pct=forward_mfe,
+        numeric_features=_numeric_features(payload, candidate),
     )
 
 
@@ -303,6 +367,8 @@ def _edge_row_from_raw_payload(
                 ("forward_mfe_pct", "max_favorable_60m", "max_favorable_30m"),
             )
         )
+    payload = _load_json(raw_payload)
+    candidate = _candidate_payload(payload)
 
     return EdgeRow(
         source=source,
@@ -319,6 +385,7 @@ def _edge_row_from_raw_payload(
         instruction_class=instruction_class,
         forward_return_pct=forward_return,
         forward_mfe_pct=forward_mfe,
+        numeric_features=_numeric_features(payload, candidate),
     )
 
 
@@ -770,6 +837,120 @@ def metric_decile_lift(
     }
 
 
+def feature_decile_lift(
+    rows: list[EdgeRow],
+    *,
+    feature: str,
+    n_buckets: int = 10,
+    min_rows: int | None = None,
+) -> dict[str, Any]:
+    usable = [
+        row
+        for row in rows
+        if feature in row.numeric_features and row.forward_return_pct is not None
+    ]
+    usable.sort(key=lambda row: row.numeric_features[feature])
+    n = len(usable)
+    required_n = min_rows or n_buckets * 3
+    if n < required_n:
+        return {
+            "feature": feature,
+            "n": n,
+            "required_n": required_n,
+            "base_win_pct": None,
+            "buckets": [],
+            "lift_pct": None,
+            "monotonicity": None,
+            "verdict": "too_few_rows",
+        }
+
+    returns = [row.forward_return_pct for row in usable if row.forward_return_pct is not None]
+    base_win = _win_rate(returns)
+    size = n // n_buckets
+    buckets = []
+    wins_by_bucket = []
+    for idx in range(n_buckets):
+        lo = idx * size
+        hi = n if idx == n_buckets - 1 else (idx + 1) * size
+        bucket = usable[lo:hi]
+        bucket_returns = [
+            row.forward_return_pct for row in bucket if row.forward_return_pct is not None
+        ]
+        values = [row.numeric_features[feature] for row in bucket]
+        win = _win_rate(bucket_returns)
+        wins_by_bucket.append(win or 0.0)
+        buckets.append(
+            {
+                "bucket": f"D{idx + 1}",
+                "n": len(bucket),
+                "value_min": min(values) if values else None,
+                "value_max": max(values) if values else None,
+                "win_pct": win,
+                "mean_return_pct": _avg(bucket_returns),
+            }
+        )
+
+    lift = round(wins_by_bucket[-1] - wins_by_bucket[0], 1)
+    if lift >= 0:
+        aligned_steps = sum(
+            1 for idx in range(1, n_buckets) if wins_by_bucket[idx] >= wins_by_bucket[idx - 1]
+        )
+        direction = "higher_is_better"
+    else:
+        aligned_steps = sum(
+            1 for idx in range(1, n_buckets) if wins_by_bucket[idx] <= wins_by_bucket[idx - 1]
+        )
+        direction = "lower_is_better"
+    monotonicity = round(aligned_steps / (n_buckets - 1), 4)
+    verdict = "rank_orders_outcomes" if abs(lift) >= 8.0 and monotonicity >= 0.6 else "weak_or_flat"
+    return {
+        "feature": feature,
+        "n": n,
+        "required_n": required_n,
+        "base_win_pct": base_win,
+        "buckets": buckets,
+        "lift_pct": lift,
+        "monotonicity": monotonicity,
+        "direction": direction,
+        "verdict": verdict,
+    }
+
+
+def feature_lift_scan(
+    rows: list[EdgeRow],
+    *,
+    n_buckets: int = 10,
+    min_rows: int = 100,
+) -> list[dict[str, Any]]:
+    features = sorted(
+        {
+            feature
+            for row in rows
+            if row.forward_return_pct is not None
+            for feature in row.numeric_features
+        }
+    )
+    results = [
+        feature_decile_lift(
+            rows,
+            feature=feature,
+            n_buckets=n_buckets,
+            min_rows=min_rows,
+        )
+        for feature in features
+    ]
+    usable = [result for result in results if result["verdict"] != "too_few_rows"]
+    usable.sort(
+        key=lambda item: (
+            item["verdict"] != "rank_orders_outcomes",
+            -abs(float(item["lift_pct"] or 0.0)),
+            -float(item["monotonicity"] or 0.0),
+            item["feature"],
+        )
+    )
+    return usable
+
+
 def score_window(rows: list[EdgeRow], min_score: float) -> list[dict[str, Any]]:
     grouped = {
         "below_window": [],
@@ -856,12 +1037,38 @@ def _print_metric_lift(result: dict[str, Any]) -> None:
     )
 
 
+def _print_feature_scan(results: list[dict[str, Any]], *, limit: int) -> None:
+    print("\n  NUMERIC FEATURE LIFT SCAN")
+    if not results:
+        print("  (no numeric features with enough forward-outcome coverage)")
+        return
+    print(
+        f"  {'feature':<38}{'n':>8}{'lift':>10}{'mono%':>10}"
+        f"{'direction':>18}{'base_win%':>12}{'d1_ret%':>12}{'d10_ret%':>12}"
+    )
+    for item in results[:limit]:
+        buckets = item.get("buckets") or []
+        d1_ret = buckets[0]["mean_return_pct"] if buckets else None
+        d10_ret = buckets[-1]["mean_return_pct"] if buckets else None
+        print(
+            f"  {item['feature']:<38}{item['n']:>8}"
+            f"{_fmt(item['lift_pct']):>10}"
+            f"{100.0 * float(item['monotonicity']):>10.0f}"
+            f"{str(item.get('direction', '-')):>18}"
+            f"{_fmt(item['base_win_pct']):>12}"
+            f"{_fmt(d1_ret):>12}"
+            f"{_fmt(d10_ret):>12}"
+        )
+
+
 def print_report(
     source: str,
     rows: list[EdgeRow],
     bins: int,
     min_score: float,
     decile_buckets: int,
+    feature_scan_limit: int,
+    feature_scan_min_rows: int,
 ) -> None:
     total = len(rows)
     outcome_rows = [row for row in rows if row.forward_return_pct is not None]
@@ -926,6 +1133,15 @@ def print_report(
     for metric in ("score", "confluence_score", "conviction_score", "setup_score"):
         _print_metric_lift(metric_decile_lift(rows, metric=metric, n_buckets=decile_buckets))
 
+    _print_feature_scan(
+        feature_lift_scan(
+            rows,
+            n_buckets=decile_buckets,
+            min_rows=feature_scan_min_rows,
+        ),
+        limit=feature_scan_limit,
+    )
+
     print("\n  INSTRUCTION EDGE")
     print(f"  {'class':<14}{'n':>8}{'win%':>10}{'mean_ret%':>12}{'avg_mfe%':>12}")
     for item in edge_by_group(rows, "instruction_class"):
@@ -954,6 +1170,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--end", default=None, help="exclusive timestamp/date upper bound")
     parser.add_argument("--bins", type=int, default=10)
     parser.add_argument("--decile-buckets", type=int, default=10)
+    parser.add_argument("--feature-scan-limit", type=int, default=20)
+    parser.add_argument("--feature-scan-min-rows", type=int, default=100)
     parser.add_argument(
         "--min-score", type=float, default=float(os.getenv("CONVICTION_MIN_SCORE", "23"))
     )
@@ -1008,7 +1226,15 @@ def main() -> int:
     print(f"  end                               : {args.end or '-'}")
     print(f"  conviction min score              : {args.min_score}")
     for title, rows in reports:
-        print_report(title, rows, args.bins, args.min_score, args.decile_buckets)
+        print_report(
+            title,
+            rows,
+            args.bins,
+            args.min_score,
+            args.decile_buckets,
+            args.feature_scan_limit,
+            args.feature_scan_min_rows,
+        )
     return 0
 
 

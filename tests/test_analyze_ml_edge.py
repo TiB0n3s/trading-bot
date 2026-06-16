@@ -7,6 +7,7 @@ from scripts.analyze_ml_edge import (
     calibration,
     decile_lift,
     edge_by_group,
+    feature_lift_scan,
     load_candidate_universe,
     load_rejected_outcomes,
     metric_decile_lift,
@@ -108,6 +109,7 @@ def test_analyze_ml_edge_loads_candidate_and_rejected_sources(tmp_path):
     assert candidate_rows[0].instruction_class == "approve"
     assert candidate_rows[0].probability_pct == 70.0
     assert candidate_rows[0].setup_score == 72.0
+    assert candidate_rows[0].numeric_features["setup_score"] == 72.0
     assert candidate_rows[0].forward_return_pct == 0.6
     assert len(rejected_rows) == 1
     assert rejected_rows[0].instruction_class == "caution"
@@ -139,6 +141,7 @@ def _edge_row(probability: float, forward_return: float, source: str = "test") -
         instruction_class="unknown",
         forward_return_pct=forward_return,
         forward_mfe_pct=None,
+        numeric_features={"test_feature": probability, "setup_score": probability},
     )
 
 
@@ -180,3 +183,17 @@ def test_metric_decile_lift_measures_setup_score_discrimination():
     assert result["base_win_pct"] == 50.0
     assert result["lift_pct"] == 100.0
     assert result["verdict"] == "rank_orders_outcomes"
+
+
+def test_feature_lift_scan_ranks_numeric_features():
+    rows = []
+    for idx in range(100):
+        feature = float(idx)
+        forward_return = 1.0 if idx >= 50 else -1.0
+        rows.append(_edge_row(feature, forward_return))
+
+    results = feature_lift_scan(rows, min_rows=30)
+
+    assert results[0]["feature"] in {"setup_score", "test_feature"}
+    assert results[0]["lift_pct"] == 100.0
+    assert results[0]["verdict"] == "rank_orders_outcomes"

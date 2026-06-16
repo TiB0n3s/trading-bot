@@ -33,6 +33,20 @@ The report audits coverage, regime/label breadth, baseline outcomes, and
 corrected feature-lift results over existing `bar_pattern_features` rows. It is
 read-only research infrastructure and cannot grant auto-buy authority.
 
+For large historical replays, keep generated feature rows out of the hot
+runtime database. The CSV repair job can target an isolated SQLite DB:
+
+```bash
+cd ~/trading-bot
+./venv/bin/python pipeline/historical_bar_feature_repair.py \
+  --start-date 2024-06-01 \
+  --end-date 2026-06-15 \
+  --all \
+  --db-path research_exports/historical_bar_features_2024-06-01_2026-06-15.db
+```
+
+Then point `historical_market_view.py --db-path` at that research DB.
+
 ## Cron
 
 `crontab.tradingbot.current.txt` is a version-controlled snapshot of the

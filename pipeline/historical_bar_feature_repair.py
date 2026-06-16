@@ -10,20 +10,19 @@ from __future__ import annotations
 
 import argparse
 import csv
-from datetime import date
-from datetime import datetime, timezone
 import json
-from pathlib import Path
 import sys
+from datetime import date, datetime, timezone
+from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 if str(BASE_DIR) not in sys.path:
     sys.path.insert(0, str(BASE_DIR))
 
-from services.historical_bar_archive_service import DEFAULT_HISTORICAL_BAR_DIR  # noqa: E402
+from repositories.bar_pattern_feature_repo import BarPatternFeatureRepository  # noqa: E402
 from services.bar_pattern_feature_service import BarPatternFeatureService  # noqa: E402
+from services.historical_bar_archive_service import DEFAULT_HISTORICAL_BAR_DIR  # noqa: E402
 from symbols_config import APPROVED_SYMBOLS_LIST  # noqa: E402
-
 
 FEATURE_REPAIR_VERSION = "historical_bar_feature_repair_v1"
 
@@ -51,7 +50,7 @@ def _cache_chunks(
         stem = path.stem
         if not stem.startswith(marker):
             continue
-        date_part = stem[len(marker):]
+        date_part = stem[len(marker) :]
         try:
             chunk_start, chunk_end = date_part.split("_", 1)
         except ValueError:
@@ -105,6 +104,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--symbol", action="append")
     parser.add_argument("--all", action="store_true")
     parser.add_argument("--cache-dir", default=str(BASE_DIR / DEFAULT_HISTORICAL_BAR_DIR))
+    parser.add_argument(
+        "--db-path",
+        default=str(BASE_DIR / "trades.db"),
+        help="SQLite target for repaired feature rows. Use an isolated research DB for large history.",
+    )
     parser.add_argument("--horizon-bars", type=int, default=20)
     parser.add_argument("--max-chunks", type=int, default=0)
     parser.add_argument("--chunks-per-symbol", type=int, default=0)
@@ -122,7 +126,7 @@ def main(argv: list[str] | None = None) -> int:
         parser.error("Provide --symbol SYMBOL or --all")
 
     cache_dir = Path(args.cache_dir)
-    service = BarPatternFeatureService()
+    service = BarPatternFeatureService(BarPatternFeatureRepository(Path(args.db_path)))
     chunks_attempted = 0
     chunks_found = 0
     bars_read = 0
@@ -185,6 +189,7 @@ def main(argv: list[str] | None = None) -> int:
     payload = {
         "report_version": FEATURE_REPAIR_VERSION,
         "runtime_effect": "offline_feature_repair_no_live_authority",
+        "db_path": str(Path(args.db_path)),
         "start_date": args.start_date,
         "end_date": args.end_date,
         "symbols_requested": len(symbols),

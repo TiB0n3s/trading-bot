@@ -206,6 +206,8 @@ def test_feature_lift_scan_ranks_numeric_features():
     assert results[0]["feature"] in {"setup_score", "test_feature"}
     assert results[0]["lift_pct"] == 100.0
     assert results[0]["verdict"] == "rank_orders_outcomes"
+    assert results[0]["null_verdict"] == "beats_chance"
+    assert results[0]["null_p_value"] <= 0.05
 
 
 def test_feature_lift_scan_by_regime_groups_rows():
@@ -229,3 +231,4 @@ def test_feature_lift_scan_by_regime_groups_rows():
 
     assert [item["regime"] for item in results] == ["strong_uptrend"]
     assert results[0]["features"][0]["verdict"] == "rank_orders_outcomes"
+    assert results[0]["features"][0]["null_verdict"] == "beats_chance"

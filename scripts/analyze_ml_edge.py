@@ -19,9 +19,11 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import random
 import re
 import sqlite3
 import statistics
+import zlib
 from collections import defaultdict
 from dataclasses import dataclass, replace
 from pathlib import Path
@@ -877,6 +879,8 @@ def feature_decile_lift(
     feature: str,
     n_buckets: int = 10,
     min_rows: int | None = None,
+    permutations: int = 200,
+    permutation_seed: int = 7,
 ) -> dict[str, Any]:
     usable = [
         row
@@ -895,6 +899,10 @@ def feature_decile_lift(
             "buckets": [],
             "lift_pct": None,
             "monotonicity": None,
+            "null_p_value": None,
+            "null_lift_p95": None,
+            "null_verdict": "not_run",
+            "permutations": permutations,
             "verdict": "too_few_rows",
         }
 
@@ -937,6 +945,15 @@ def feature_decile_lift(
         direction = "lower_is_better"
     monotonicity = round(aligned_steps / (n_buckets - 1), 4)
     verdict = "rank_orders_outcomes" if abs(lift) >= 8.0 and monotonicity >= 0.6 else "weak_or_flat"
+    null = _permutation_null(
+        returns=[
+            float(row.forward_return_pct) for row in usable if row.forward_return_pct is not None
+        ],
+        n_buckets=n_buckets,
+        observed_lift=lift,
+        permutations=permutations,
+        seed=permutation_seed + zlib.crc32(feature.encode("utf-8")),
+    )
     return {
         "feature": feature,
         "n": n,
@@ -946,7 +963,61 @@ def feature_decile_lift(
         "lift_pct": lift,
         "monotonicity": monotonicity,
         "direction": direction,
+        **null,
         "verdict": verdict,
+    }
+
+
+def _bucket_ranges(n: int, n_buckets: int) -> list[tuple[int, int]]:
+    size = n // n_buckets
+    return [
+        (idx * size, n if idx == n_buckets - 1 else (idx + 1) * size) for idx in range(n_buckets)
+    ]
+
+
+def _lift_from_ordered_returns(returns: list[float], ranges: list[tuple[int, int]]) -> float:
+    wins = []
+    for lo, hi in ranges:
+        chunk = returns[lo:hi]
+        if not chunk:
+            wins.append(0.0)
+            continue
+        wins.append(100.0 * sum(1 for value in chunk if value > 0) / len(chunk))
+    return wins[-1] - wins[0]
+
+
+def _permutation_null(
+    *,
+    returns: list[float],
+    n_buckets: int,
+    observed_lift: float,
+    permutations: int,
+    seed: int,
+) -> dict[str, Any]:
+    if permutations <= 0 or len(returns) < n_buckets * 3:
+        return {
+            "null_p_value": None,
+            "null_lift_p95": None,
+            "null_verdict": "not_run",
+            "permutations": permutations,
+        }
+    ranges = _bucket_ranges(len(returns), n_buckets)
+    rng = random.Random(seed)
+    null_lifts = []
+    shuffled = list(returns)
+    for _ in range(permutations):
+        rng.shuffle(shuffled)
+        null_lifts.append(abs(_lift_from_ordered_returns(shuffled, ranges)))
+    observed_abs = abs(float(observed_lift or 0.0))
+    exceedances = sum(1 for value in null_lifts if value >= observed_abs)
+    p_value = (exceedances + 1) / (permutations + 1)
+    sorted_lifts = sorted(null_lifts)
+    p95_idx = min(int(0.95 * (len(sorted_lifts) - 1)), len(sorted_lifts) - 1)
+    return {
+        "null_p_value": round(p_value, 4),
+        "null_lift_p95": round(sorted_lifts[p95_idx], 1),
+        "null_verdict": "beats_chance" if p_value <= 0.05 else "within_noise",
+        "permutations": permutations,
     }
 
 
@@ -955,6 +1026,8 @@ def feature_lift_scan(
     *,
     n_buckets: int = 10,
     min_rows: int = 100,
+    permutations: int = 200,
+    permutation_seed: int = 7,
 ) -> list[dict[str, Any]]:
     features = sorted(
         {
@@ -970,12 +1043,15 @@ def feature_lift_scan(
             feature=feature,
             n_buckets=n_buckets,
             min_rows=min_rows,
+            permutations=permutations,
+            permutation_seed=permutation_seed,
         )
         for feature in features
     ]
     usable = [result for result in results if result["verdict"] != "too_few_rows"]
     usable.sort(
         key=lambda item: (
+            item.get("null_verdict") != "beats_chance",
             item["verdict"] != "rank_orders_outcomes",
             -abs(float(item["lift_pct"] or 0.0)),
             -float(item["monotonicity"] or 0.0),
@@ -1001,6 +1077,8 @@ def feature_lift_scan_by_regime(
     regime_field: str,
     n_buckets: int = 10,
     min_rows: int = 100,
+    permutations: int = 200,
+    permutation_seed: int = 7,
 ) -> list[dict[str, Any]]:
     grouped: dict[str, list[EdgeRow]] = defaultdict(list)
     for row in rows:
@@ -1026,6 +1104,8 @@ def feature_lift_scan_by_regime(
                     bucket,
                     n_buckets=n_buckets,
                     min_rows=min_rows,
+                    permutations=permutations,
+                    permutation_seed=permutation_seed + zlib.crc32(str(regime).encode("utf-8")),
                 ),
             }
         )
@@ -1126,7 +1206,8 @@ def _print_feature_scan(results: list[dict[str, Any]], *, limit: int) -> None:
         return
     print(
         f"  {'feature':<38}{'n':>8}{'lift':>10}{'mono%':>10}"
-        f"{'direction':>18}{'base_win%':>12}{'d1_ret%':>12}{'d10_ret%':>12}"
+        f"{'direction':>18}{'null_p':>10}{'null95':>10}"
+        f"{'chance':>14}{'base_win%':>12}{'d1_ret%':>12}{'d10_ret%':>12}"
     )
     for item in results[:limit]:
         buckets = item.get("buckets") or []
@@ -1137,6 +1218,9 @@ def _print_feature_scan(results: list[dict[str, Any]], *, limit: int) -> None:
             f"{_fmt(item['lift_pct']):>10}"
             f"{100.0 * float(item['monotonicity']):>10.0f}"
             f"{str(item.get('direction', '-')):>18}"
+            f"{_fmt(item.get('null_p_value')):>10}"
+            f"{_fmt(item.get('null_lift_p95')):>10}"
+            f"{str(item.get('null_verdict', '-')):>14}"
             f"{_fmt(item['base_win_pct']):>12}"
             f"{_fmt(d1_ret):>12}"
             f"{_fmt(d10_ret):>12}"
@@ -1165,7 +1249,8 @@ def _print_regime_feature_scan(
             continue
         print(
             f"  {'feature':<38}{'n':>8}{'lift':>10}{'mono%':>10}"
-            f"{'direction':>18}{'d1_ret%':>12}{'d10_ret%':>12}"
+            f"{'direction':>18}{'null_p':>10}{'null95':>10}"
+            f"{'chance':>14}{'d1_ret%':>12}{'d10_ret%':>12}"
         )
         for item in features[:limit]:
             buckets = item.get("buckets") or []
@@ -1176,6 +1261,9 @@ def _print_regime_feature_scan(
                 f"{_fmt(item['lift_pct']):>10}"
                 f"{100.0 * float(item['monotonicity']):>10.0f}"
                 f"{str(item.get('direction', '-')):>18}"
+                f"{_fmt(item.get('null_p_value')):>10}"
+                f"{_fmt(item.get('null_lift_p95')):>10}"
+                f"{str(item.get('null_verdict', '-')):>14}"
                 f"{_fmt(d1_ret):>12}"
                 f"{_fmt(d10_ret):>12}"
             )
@@ -1192,6 +1280,8 @@ def print_report(
     regime_field: str,
     regime_scan_limit: int,
     regime_scan_min_rows: int,
+    permutations: int,
+    permutation_seed: int,
 ) -> None:
     total = len(rows)
     outcome_rows = [row for row in rows if row.forward_return_pct is not None]
@@ -1261,6 +1351,8 @@ def print_report(
             rows,
             n_buckets=decile_buckets,
             min_rows=feature_scan_min_rows,
+            permutations=permutations,
+            permutation_seed=permutation_seed,
         ),
         limit=feature_scan_limit,
     )
@@ -1270,6 +1362,8 @@ def print_report(
             regime_field=regime_field,
             n_buckets=decile_buckets,
             min_rows=regime_scan_min_rows,
+            permutations=permutations,
+            permutation_seed=permutation_seed,
         ),
         regime_field=regime_field,
         limit=regime_scan_limit,
@@ -1308,6 +1402,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--regime-field", default="session_trend_label")
     parser.add_argument("--regime-scan-limit", type=int, default=8)
     parser.add_argument("--regime-scan-min-rows", type=int, default=100)
+    parser.add_argument("--permutations", type=int, default=200)
+    parser.add_argument("--permutation-seed", type=int, default=7)
     parser.add_argument(
         "--min-score", type=float, default=float(os.getenv("CONVICTION_MIN_SCORE", "23"))
     )
@@ -1373,6 +1469,8 @@ def main() -> int:
             args.regime_field,
             args.regime_scan_limit,
             args.regime_scan_min_rows,
+            args.permutations,
+            args.permutation_seed,
         )
     return 0
 

@@ -53,6 +53,7 @@ def reset_auto_buy_runtime_defaults():
 def setup_function(_):
     reset_auto_buy_runtime_defaults()
     auto_buy_manager._initialized_auto_buy_db_paths.clear()
+    auto_buy_manager._candidate_universe_services.clear()
     auto_buy_manager.memory_for_signal = lambda symbol, context: {"available": False}
     auto_buy_manager.auto_buy_prediction_context = lambda symbol: {
         "available": True,
@@ -1286,6 +1287,43 @@ def test_log_candidate_mirrors_to_candidate_universe():
         )
 
 
+def test_log_candidate_tolerates_locked_primary_snapshot_write():
+    class CandidateReferenceService:
+        def candidate_reference_snapshot(self, symbol):
+            return {"reference_capture_status": "unavailable"}
+
+    with tempfile.TemporaryDirectory() as tmp:
+        db_path = Path(tmp) / "test.db"
+        old_path = auto_buy_manager.DB_PATH
+        old_reference_service = auto_buy_manager.candidate_reference_service
+        old_insert = auto_buy_manager.auto_buy_repo.insert_candidate_and_snapshot
+        auto_buy_manager.DB_PATH = db_path
+        auto_buy_manager.candidate_reference_service = CandidateReferenceService()
+        auto_buy_manager.auto_buy_repo.insert_candidate_and_snapshot = lambda **_kwargs: (
+            _ for _ in ()
+        ).throw(sqlite3.OperationalError("database is locked"))
+        try:
+            auto_buy_manager.log_candidate(
+                {
+                    "symbol": "SOFI",
+                    "decision": "watch",
+                    "score": auto_buy_manager.AUTO_BUY_MIN_SCORE - 0.5,
+                    "reason": "primary snapshot locked",
+                },
+                live_buy_enabled=False,
+            )
+        finally:
+            auto_buy_manager.DB_PATH = old_path
+            auto_buy_manager.candidate_reference_service = old_reference_service
+            auto_buy_manager.auto_buy_repo.insert_candidate_and_snapshot = old_insert
+
+        with sqlite3.connect(db_path) as con:
+            row = con.execute("SELECT symbol, decision FROM candidate_universe").fetchone()
+
+        assert_equal(row[0], "SOFI", "symbol")
+        assert_equal(row[1], "watch", "decision")
+
+
 def test_bucking_fading_tape_does_not_hard_block():
     old_prediction_context = auto_buy_manager.auto_buy_prediction_context
     auto_buy_manager.auto_buy_prediction_context = lambda symbol: {
@@ -1893,6 +1931,7 @@ def main():
         test_log_auto_buy_order_writes_canonical_trade_row,
         test_auto_buy_candidate_attaches_canonical_decision_trace,
         test_log_candidate_mirrors_to_candidate_universe,
+        test_log_candidate_tolerates_locked_primary_snapshot_write,
     ]
 
     for test in tests:

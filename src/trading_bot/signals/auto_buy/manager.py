@@ -115,7 +115,7 @@ from config.conviction import load_conviction_config
 from repositories import auto_buy_repo
 from risk.exposure import any_cluster_limit_hit, cluster_exposure
 
-_candidate_universe_service = CandidateUniverseService(CandidateUniverseRepository(DB_PATH))
+_candidate_universe_services: dict[str, CandidateUniverseService] = {}
 
 AUTO_BUY_LIVE_BUYS = os.getenv("AUTO_BUY_LIVE_BUYS", "false").lower() in ("1", "true", "yes", "on")
 AUTO_BUY_ALLOW_TRADINGVIEW_LIVE = os.getenv("AUTO_BUY_ALLOW_TRADINGVIEW_LIVE", "false").lower() in (
@@ -823,6 +823,15 @@ def ensure_auto_buy_tables_initialized() -> None:
     if db_key in _initialized_auto_buy_db_paths:
         return
     init_auto_buy_table()
+
+
+def candidate_universe_service() -> CandidateUniverseService:
+    db_key = str(DB_PATH)
+    service = _candidate_universe_services.get(db_key)
+    if service is None:
+        service = CandidateUniverseService(CandidateUniverseRepository(DB_PATH))
+        _candidate_universe_services[db_key] = service
+    return service
 
 
 def latest_session(symbol: str) -> dict[str, Any]:
@@ -2236,16 +2245,25 @@ def log_candidate(
     candidate = enrich_candidate_with_reference_snapshot(candidate)
     candidate = attach_canonical_decision_metadata(candidate)
     ensure_auto_buy_tables_initialized()
-    auto_buy_repo.insert_candidate_and_snapshot(
-        timestamp=timestamp,
-        created_at=now_et().isoformat(),
-        candidate=candidate,
-        live_buy_enabled=live_buy_enabled,
-        order=order,
-        candidate_json=json.dumps(candidate, sort_keys=True, default=str),
-        order_json=json.dumps(order, sort_keys=True, default=str),
-        db_path=DB_PATH,
-    )
+    try:
+        auto_buy_repo.insert_candidate_and_snapshot(
+            timestamp=timestamp,
+            created_at=now_et().isoformat(),
+            candidate=candidate,
+            live_buy_enabled=live_buy_enabled,
+            order=order,
+            candidate_json=json.dumps(candidate, sort_keys=True, default=str),
+            order_json=json.dumps(order, sort_keys=True, default=str),
+            db_path=DB_PATH,
+        )
+    except Exception as exc:
+        if not auto_buy_repo.is_database_locked_error(exc):
+            raise
+        print(
+            f"[WARN] auto-buy candidate snapshot skipped for {candidate.get('symbol')}: "
+            "database is locked",
+            file=sys.stderr,
+        )
     feedback_status = str(candidate.get("intraday_feedback_status") or "neutral")
     if feedback_status not in {"neutral", "disabled"}:
         try:
@@ -2275,7 +2293,7 @@ def log_candidate(
                 file=sys.stderr,
             )
     try:
-        _candidate_universe_service.persist_scored_candidate(
+        candidate_universe_service().persist_scored_candidate(
             candidate_ts=timestamp,
             symbol=candidate["symbol"],
             action="buy",

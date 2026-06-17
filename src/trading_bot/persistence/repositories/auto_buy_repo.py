@@ -262,6 +262,73 @@ def top_candidate_rows(target_date: str, db_path=DB_PATH):
         ).fetchall()
 
 
+def strategy_memory_hard_block_candidate_rows(
+    target_date: str,
+    *,
+    symbol: str | None = None,
+    db_path=DB_PATH,
+) -> list[dict[str, Any]]:
+    clauses = [
+        "substr(timestamp, 1, 10) = ?",
+        "hard_block_reason LIKE 'strategy_memory_avoid%'",
+    ]
+    params: list[Any] = [target_date]
+    if symbol:
+        clauses.append("UPPER(symbol) = ?")
+        params.append(symbol.upper())
+
+    with get_connection(db_path) as con:
+        if not table_exists("auto_buy_candidates", db_path=db_path):
+            return []
+        rows = con.execute(
+            f"""
+            SELECT
+                timestamp AS candidate_ts,
+                symbol,
+                'buy' AS action,
+                'entry' AS candidate_kind,
+                'scored_not_taken' AS candidate_status,
+                score,
+                decision,
+                reason,
+                setup_label,
+                hard_block_reason,
+                NULL AS candidate_json
+            FROM auto_buy_candidates
+            WHERE {" AND ".join(clauses)}
+            ORDER BY score DESC, timestamp ASC, id ASC
+            """,
+            params,
+        ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def enrich_candidate_universe_json(
+    rows: list[dict[str, Any]],
+    *,
+    db_path=DB_PATH,
+) -> list[dict[str, Any]]:
+    if not rows:
+        return rows
+    with get_connection(db_path) as con:
+        if not table_exists("candidate_universe", db_path=db_path):
+            return rows
+        for row in rows:
+            payload_row = con.execute(
+                """
+                SELECT candidate_json
+                FROM candidate_universe
+                WHERE symbol = ?
+                  AND candidate_ts = ?
+                LIMIT 1
+                """,
+                (row.get("symbol"), row.get("candidate_ts")),
+            ).fetchone()
+            if payload_row is not None:
+                row["candidate_json"] = payload_row["candidate_json"]
+    return rows
+
+
 def signal_source_decision_rows(target_date: str, db_path=DB_PATH):
     with get_connection(db_path) as con:
         return con.execute(

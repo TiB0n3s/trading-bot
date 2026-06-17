@@ -64,6 +64,7 @@ _LAZY_HANDLER_REFS = {
     "run_calibration_buckets": "trading_bot.ops_checks.commands.calibration_bucket_checks:run_calibration_buckets",
     "run_candidate_outcome_backfill": "trading_bot.ops_checks.commands.candidate_outcome_backfill_checks:run_candidate_outcome_backfill",
     "run_candidate_universe_report": "trading_bot.ops_checks.commands.candidate_universe_checks:run_candidate_universe_report",
+    "run_strategy_memory_hard_blocks": "trading_bot.ops_checks.commands.strategy_memory_hard_block_checks:run_strategy_memory_hard_blocks",
     "run_config_audit_report": "trading_bot.ops_checks.commands.config_audit_checks:run_config_audit_report",
     "run_context_freshness": "trading_bot.ops_checks.commands.context_freshness_checks:run_context_freshness",
     "run_data_freshness_gate": "trading_bot.ops_checks.commands.context_freshness_checks:run_data_freshness_gate",
@@ -1020,6 +1021,20 @@ def candidate_outcome_backfill(target_date):
         limit=_int_option("--limit", 0) or None,
         dry_run="--dry-run" in sys.argv,
         overwrite="--overwrite" in sys.argv,
+    )
+
+
+def strategy_memory_hard_blocks(target_date):
+    symbol = None
+    if "--symbol" in sys.argv:
+        idx = sys.argv.index("--symbol")
+        if idx + 1 < len(sys.argv):
+            symbol = sys.argv[idx + 1]
+    return run_strategy_memory_hard_blocks(
+        target_date,
+        base_dir=BASE_DIR,
+        symbol=symbol,
+        samples=_int_option("--samples", 20),
     )
 
 

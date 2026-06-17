@@ -92,12 +92,10 @@ manual_polygon_backfill_v4_*.log
 portfolio_replacement_memory.json
 position_manager_state.json
 strategy_memory.json
-reports/historical_outcome_feedback/2026-06-11.json
-reports/historical_outcome_feedback/2026-06-12.json
+reports/historical_outcome_feedback/*.json
 .gitignore
 reports/intraday_learning/
 reports/historical_market_view/
-reports/historical_outcome_feedback/2026-06-15.json
 data/earnings_events/*.jsonl
 !data/earnings_events/*.example.jsonl
 reports/post_earnings_drift/*.json

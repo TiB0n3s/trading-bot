@@ -2796,11 +2796,21 @@ def main() -> int:
 
     submitted = 0
     for candidate in candidates:
+        candidate_started = time.monotonic()
         order = None
         if submitted < AUTO_BUY_MAX_ORDERS_PER_RUN:
+            execution_started = time.monotonic()
             order = maybe_execute_auto_buy(
                 candidate, market_open=market_open, live_requested=args.live
             )
+            if AUTO_BUY_TIMING_LOG_ENABLED:
+                execution_elapsed = time.monotonic() - execution_started
+                if execution_elapsed >= 0.25:
+                    print(
+                        "[TIMING] auto_buy.post_build.maybe_execute "
+                        f"symbol={candidate.get('symbol')} elapsed={execution_elapsed:.2f}s",
+                        flush=True,
+                    )
             if order:
                 submitted += 1
         else:
@@ -2808,7 +2818,17 @@ def main() -> int:
                 f"per-run auto-buy order cap reached: {submitted} >= {AUTO_BUY_MAX_ORDERS_PER_RUN}"
             )
 
+        log_candidate_started = time.monotonic()
         log_candidate(candidate, live_buy_enabled=args.live and AUTO_BUY_LIVE_BUYS, order=order)
+        if AUTO_BUY_TIMING_LOG_ENABLED:
+            log_candidate_elapsed = time.monotonic() - log_candidate_started
+            if log_candidate_elapsed >= 0.25:
+                print(
+                    "[TIMING] auto_buy.post_build.log_candidate "
+                    f"symbol={candidate.get('symbol')} elapsed={log_candidate_elapsed:.2f}s",
+                    flush=True,
+                )
+        log_event_started = time.monotonic()
         log_event(
             event_type="AUTO_BUY_CANDIDATE",
             symbol=candidate.get("symbol"),
@@ -2819,6 +2839,21 @@ def main() -> int:
             source="auto_buy_manager.py",
             payload={"candidate": candidate, "order": order},
         )
+        if AUTO_BUY_TIMING_LOG_ENABLED:
+            log_event_elapsed = time.monotonic() - log_event_started
+            if log_event_elapsed >= 0.25:
+                print(
+                    "[TIMING] auto_buy.post_build.log_event "
+                    f"symbol={candidate.get('symbol')} elapsed={log_event_elapsed:.2f}s",
+                    flush=True,
+                )
+            candidate_elapsed = time.monotonic() - candidate_started
+            if candidate_elapsed >= 1.0:
+                print(
+                    "[TIMING] auto_buy.post_build.candidate "
+                    f"symbol={candidate.get('symbol')} elapsed={candidate_elapsed:.2f}s",
+                    flush=True,
+                )
 
     bridge_results = []
     if args.live and AUTO_BUY_LIVE_BUYS and market_open and bridge_enabled_from_env():

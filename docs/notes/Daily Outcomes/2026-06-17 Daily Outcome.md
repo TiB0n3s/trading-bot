@@ -85,7 +85,9 @@ Note: `would_be_strong` is counterfactual after removing hard blocks. `strong_bu
 ## Strategy-Memory Read
 - Strategy-memory remained the most important high-score blocker family.
 - `strategy_memory_avoid_weak_evidence` blocked more would-be strong candidates than plain `strategy_memory_avoid`.
+- `strategy_memory_avoid_weak_evidence` was the top blocker by would-be-strong count: 167, ahead of `setup_avoid` at 148 and about 2.5x plain `strategy_memory_avoid` at 67.
 - TSM and ASML were the main weak-evidence cold-start names at the top of the missed-strong list.
+- TSM hit max score four consecutive times, which raises the priority of the controlled-exploration question, but this remains one session with `sample_with_outcome=0`.
 - OKTA remained the main plain avoid-memory name.
 - The strategy-memory hard-block review had `sample_with_outcome=0`, so today's high-score blocker verdicts should not be changed from this session alone.
 
@@ -105,22 +107,14 @@ Key operational read:
 - Best-effort audit persistence needs bounded lock waits and should not terminate candidate discovery.
 
 ## Follow-Ups
-- [x] Pull signal counts and hard-block audit from `auto_buy.log` and `trades.db` to complete this log.
-- [ ] Watch the next market-hours auto-buy run after `8230be2`: expected no crash on locked audit writes, no 5-second-per-row waits.
-- [ ] Add DB workload report to flag long-running writer overlap with auto-buy windows.
-- [ ] Run candidate outcome backfill for `2026-06-17`.
-  - Command: `python3 ops_check.py candidate-outcome-backfill 2026-06-17`
+- [ ] Watch the next market-hours auto-buy run after `8230be2`.
+- [ ] Run candidate outcome backfill for 2026-06-17: `python3 ops_check.py candidate-outcome-backfill 2026-06-17`
 - [ ] Re-run strategy-memory hard-block review once forward outcomes are available.
 - [ ] Review TSM, ASML, and OKTA forward outcomes before changing any hard block.
+- [ ] Continue tracking SQLite writer overlap from `run_label_features` and `session_momentum`.
 
 ## Related
 - [[2026-06-17 Auto-Buy Lock Contention]]
-- [[strategy_memory]]
 - [[strategy_memory_avoid]]
 - [[strategy_memory_avoid_weak_evidence]]
-- [[auto_buy_manager]]
-- [[candidate_universe]]
-- [[SQLite lock contention]]
-- [[TSM]]
-- [[ASML]]
-- [[OKTA]]
+- [[sqlite_lock_contention]]

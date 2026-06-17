@@ -16,8 +16,28 @@ from services.learned_auto_buy_tiebreaker_service import (
 class FakeRepo:
     def __init__(self, rows):
         self.rows = rows
+        self.calls = []
 
-    def rows_between(self, start_date, end_date, *, symbol=None, candidate_kind=None):
+    def rows_between(
+        self,
+        start_date,
+        end_date,
+        *,
+        symbol=None,
+        candidate_kind=None,
+        candidate_statuses=None,
+        limit=None,
+    ):
+        self.calls.append(
+            {
+                "start_date": start_date,
+                "end_date": end_date,
+                "symbol": symbol,
+                "candidate_kind": candidate_kind,
+                "candidate_statuses": candidate_statuses,
+                "limit": limit,
+            }
+        )
         return list(self.rows)
 
 
@@ -77,7 +97,24 @@ def test_learned_tiebreaker_rejects_thin_or_negative_bucket():
     assert decision.reason == "historical_bucket_below_thresholds"
 
 
+def test_learned_tiebreaker_passes_historical_row_limit_to_repository():
+    repo = FakeRepo([_row("AAPL", "trend_reclaim", 0.6, 1.4)])
+    service = LearnedAutoBuyTiebreakerService(
+        repo,
+        LearnedAutoBuyThresholds(min_sample_size=10, max_historical_rows=123),
+    )
+
+    service.decide(
+        {"symbol": "AAPL", "symbol_pattern": "trend_reclaim"},
+        target_date="2026-06-03",
+    )
+
+    assert repo.calls[0]["limit"] == 123
+    assert repo.calls[0]["candidate_statuses"] == ("near_threshold", "taken")
+
+
 if __name__ == "__main__":
     test_learned_tiebreaker_qualifies_symbol_pattern_bucket()
     test_learned_tiebreaker_rejects_thin_or_negative_bucket()
+    test_learned_tiebreaker_passes_historical_row_limit_to_repository()
     print("learned auto-buy tiebreaker service tests passed")

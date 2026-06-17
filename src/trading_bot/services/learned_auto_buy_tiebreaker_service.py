@@ -29,6 +29,7 @@ class LearnedAutoBuyThresholds:
     min_avg_mfe_pct: float = 1.00
     max_avg_mae_pct: float = -1.50
     lookback_days: int = 10
+    max_historical_rows: int = 2000
 
 
 @dataclass(frozen=True)
@@ -181,6 +182,7 @@ class LearnedAutoBuyTiebreakerService:
                 end.isoformat(),
                 candidate_kind="entry",
                 candidate_statuses=LEARNED_AUTO_BUY_TIEBREAKER_STATUSES,
+                limit=self.thresholds.max_historical_rows,
             )
         except TypeError:
             raw_rows = self.repository.rows_between(
@@ -192,6 +194,32 @@ class LearnedAutoBuyTiebreakerService:
         self._historical_rows_cache[target_date] = [dict(row) for row in rows]
         return rows
 
+    def _historical_stats(
+        self,
+        *,
+        symbol: str,
+        pattern: str,
+        target_date: str,
+    ) -> dict[str, dict[str, Any]] | None:
+        stats_func = getattr(self.repository, "learned_tiebreaker_stats", None)
+        if not callable(stats_func):
+            return None
+        try:
+            end = date.fromisoformat(target_date) - timedelta(days=1)
+            start = end - timedelta(days=max(1, self.thresholds.lookback_days - 1))
+        except Exception:
+            return None
+        if start > end:
+            return None
+        return stats_func(
+            start.isoformat(),
+            end.isoformat(),
+            symbol=symbol,
+            pattern=pattern,
+            candidate_statuses=LEARNED_AUTO_BUY_TIEBREAKER_STATUSES,
+            limit=self.thresholds.max_historical_rows,
+        )
+
     def decide(self, candidate: dict[str, Any], *, target_date: str) -> LearnedAutoBuyDecision:
         symbol = str(candidate.get("symbol") or "").upper()
         pattern = str(candidate.get("symbol_pattern") or candidate.get("setup_label") or "unknown")
@@ -202,31 +230,51 @@ class LearnedAutoBuyTiebreakerService:
                 False, "missing_pattern", {"symbol": symbol, "pattern": pattern}
             )
 
-        historical_rows = self._historical_rows(target_date)
-        if not historical_rows:
-            return LearnedAutoBuyDecision(
-                False,
-                "no_prior_candidate_outcomes",
-                {
-                    "version": LEARNED_AUTO_BUY_TIEBREAKER_VERSION,
-                    "runtime_effect": LEARNED_AUTO_BUY_TIEBREAKER_RUNTIME_EFFECT,
-                    "symbol": symbol,
-                    "pattern": pattern,
-                },
-            )
+        aggregate_stats = self._historical_stats(
+            symbol=symbol,
+            pattern=pattern,
+            target_date=target_date,
+        )
+        if aggregate_stats is None:
+            historical_rows = self._historical_rows(target_date)
+            if not historical_rows:
+                return LearnedAutoBuyDecision(
+                    False,
+                    "no_prior_candidate_outcomes",
+                    {
+                        "version": LEARNED_AUTO_BUY_TIEBREAKER_VERSION,
+                        "runtime_effect": LEARNED_AUTO_BUY_TIEBREAKER_RUNTIME_EFFECT,
+                        "symbol": symbol,
+                        "pattern": pattern,
+                    },
+                )
 
-        symbol_pattern_rows: list[dict[str, Any]] = []
-        pattern_rows: list[dict[str, Any]] = []
-        for row in historical_rows:
-            payload = _load_json(row.get("candidate_json"))
-            row_pattern = _pattern_from(row, payload)
-            if row_pattern == pattern:
-                pattern_rows.append(row)
-                if str(row.get("symbol") or "").upper() == symbol:
-                    symbol_pattern_rows.append(row)
+            symbol_pattern_rows: list[dict[str, Any]] = []
+            pattern_rows: list[dict[str, Any]] = []
+            for row in historical_rows:
+                payload = _load_json(row.get("candidate_json"))
+                row_pattern = _pattern_from(row, payload)
+                if row_pattern == pattern:
+                    pattern_rows.append(row)
+                    if str(row.get("symbol") or "").upper() == symbol:
+                        symbol_pattern_rows.append(row)
 
-        symbol_pattern_stats = _stats(symbol_pattern_rows)
-        pattern_stats = _stats(pattern_rows)
+            symbol_pattern_stats = _stats(symbol_pattern_rows)
+            pattern_stats = _stats(pattern_rows)
+        else:
+            symbol_pattern_stats = aggregate_stats.get("symbol_pattern_stats") or {}
+            pattern_stats = aggregate_stats.get("pattern_stats") or {}
+            if not symbol_pattern_stats.get("sample_size") and not pattern_stats.get("sample_size"):
+                return LearnedAutoBuyDecision(
+                    False,
+                    "no_prior_candidate_outcomes",
+                    {
+                        "version": LEARNED_AUTO_BUY_TIEBREAKER_VERSION,
+                        "runtime_effect": LEARNED_AUTO_BUY_TIEBREAKER_RUNTIME_EFFECT,
+                        "symbol": symbol,
+                        "pattern": pattern,
+                    },
+                )
         evidence = {
             "version": LEARNED_AUTO_BUY_TIEBREAKER_VERSION,
             "runtime_effect": LEARNED_AUTO_BUY_TIEBREAKER_RUNTIME_EFFECT,
@@ -239,6 +287,7 @@ class LearnedAutoBuyTiebreakerService:
                 "min_avg_mfe_pct": self.thresholds.min_avg_mfe_pct,
                 "max_avg_mae_pct": self.thresholds.max_avg_mae_pct,
                 "lookback_days": self.thresholds.lookback_days,
+                "max_historical_rows": self.thresholds.max_historical_rows,
             },
             "symbol_pattern_stats": symbol_pattern_stats,
             "pattern_stats": pattern_stats,

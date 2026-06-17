@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 # ruff: noqa: E402
+import sqlite3
 import sys
 import tempfile
 from pathlib import Path
@@ -46,8 +47,42 @@ def test_latest_feature_uses_latest_inserted_snapshot():
         assert row["last_price"] == 101.0
 
 
+def test_insert_candidate_and_snapshot_retries_transient_database_lock():
+    calls = {"n": 0}
+    original_insert_once = auto_buy_repo._insert_candidate_and_snapshot_once
+    original_sleep = auto_buy_repo.time.sleep
+
+    def flaky_insert_once(**kwargs):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise sqlite3.OperationalError("database is locked")
+        return None
+
+    try:
+        auto_buy_repo._insert_candidate_and_snapshot_once = flaky_insert_once
+        auto_buy_repo.time.sleep = lambda _seconds: None
+        auto_buy_repo.insert_candidate_and_snapshot(
+            timestamp="2026-06-17T10:00:00-04:00",
+            created_at="2026-06-17T10:00:00-04:00",
+            candidate={"symbol": "AAPL", "decision": "skip"},
+            live_buy_enabled=False,
+            order={},
+            candidate_json="{}",
+            order_json="{}",
+            db_path="unused.db",
+        )
+    finally:
+        auto_buy_repo._insert_candidate_and_snapshot_once = original_insert_once
+        auto_buy_repo.time.sleep = original_sleep
+
+    assert calls["n"] == 2
+
+
 def main():
-    tests = [test_latest_feature_uses_latest_inserted_snapshot]
+    tests = [
+        test_latest_feature_uses_latest_inserted_snapshot,
+        test_insert_candidate_and_snapshot_retries_transient_database_lock,
+    ]
     for test in tests:
         test()
         print(f"[OK] {test.__name__}")

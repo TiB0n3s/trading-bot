@@ -216,6 +216,9 @@ AUTO_BUY_LEARNED_TIEBREAKER_MAX_AVG_MAE_PCT = float(
 AUTO_BUY_LEARNED_TIEBREAKER_LOOKBACK_DAYS = int(
     os.getenv("AUTO_BUY_LEARNED_TIEBREAKER_LOOKBACK_DAYS", "10")
 )
+AUTO_BUY_LEARNED_TIEBREAKER_MAX_HISTORICAL_ROWS = int(
+    os.getenv("AUTO_BUY_LEARNED_TIEBREAKER_MAX_HISTORICAL_ROWS", "2000")
+)
 AUTO_BUY_LEARNED_TIEBREAKER_MAX_THRESHOLD_GAP = float(
     os.getenv(
         "AUTO_BUY_LEARNED_TIEBREAKER_MAX_THRESHOLD_GAP",
@@ -338,6 +341,7 @@ def learned_auto_buy_tiebreaker_service() -> LearnedAutoBuyTiebreakerService:
             min_avg_mfe_pct=AUTO_BUY_LEARNED_TIEBREAKER_MIN_AVG_MFE_PCT,
             max_avg_mae_pct=AUTO_BUY_LEARNED_TIEBREAKER_MAX_AVG_MAE_PCT,
             lookback_days=AUTO_BUY_LEARNED_TIEBREAKER_LOOKBACK_DAYS,
+            max_historical_rows=AUTO_BUY_LEARNED_TIEBREAKER_MAX_HISTORICAL_ROWS,
         )
         _learned_tiebreaker_service = LearnedAutoBuyTiebreakerService(
             CandidateUniverseRepository(DB_PATH),

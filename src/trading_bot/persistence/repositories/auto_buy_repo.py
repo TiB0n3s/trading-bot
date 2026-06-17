@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import time
 from typing import Any
 
 from db import DB_PATH, get_connection
@@ -873,6 +874,44 @@ def write_app_buy_cooldown(symbol: str, timestamp: str, db_path=DB_PATH) -> None
 
 
 def insert_candidate_and_snapshot(
+    *,
+    timestamp: str,
+    created_at: str,
+    candidate: dict[str, Any],
+    live_buy_enabled: bool,
+    order: dict[str, Any],
+    candidate_json: str,
+    order_json: str,
+    db_path=DB_PATH,
+) -> None:
+    max_attempts = 3
+    delay_seconds = 0.25
+    last_lock_error: sqlite3.OperationalError | None = None
+    for attempt in range(max_attempts):
+        try:
+            _insert_candidate_and_snapshot_once(
+                timestamp=timestamp,
+                created_at=created_at,
+                candidate=candidate,
+                live_buy_enabled=live_buy_enabled,
+                order=order,
+                candidate_json=candidate_json,
+                order_json=order_json,
+                db_path=db_path,
+            )
+            return
+        except sqlite3.OperationalError as exc:
+            if not is_database_locked_error(exc):
+                raise
+            last_lock_error = exc
+            if attempt == max_attempts - 1:
+                break
+            time.sleep(delay_seconds * (attempt + 1))
+    if last_lock_error is not None:
+        raise last_lock_error
+
+
+def _insert_candidate_and_snapshot_once(
     *,
     timestamp: str,
     created_at: str,

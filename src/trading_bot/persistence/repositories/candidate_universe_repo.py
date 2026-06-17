@@ -184,6 +184,7 @@ class CandidateUniverseRepository:
         symbol: str | None = None,
         candidate_kind: str | None = None,
         candidate_statuses: tuple[str, ...] | None = None,
+        limit: int | None = None,
     ) -> list[Any]:
         if not Path(self.db_path).exists():
             return []
@@ -208,6 +209,7 @@ class CandidateUniverseRepository:
                 FROM candidate_universe
                 WHERE {" AND ".join(clauses)}
                 ORDER BY candidate_ts ASC, id ASC
+                {f"LIMIT {int(limit)}" if limit and limit > 0 else ""}
                 """,
                 params,
             ).fetchall()
@@ -323,6 +325,128 @@ class CandidateUniverseRepository:
                 round(non_taken_forward / non_taken, 4) if non_taken else None
             ),
         }
+
+    def learned_tiebreaker_stats(
+        self,
+        start_date: str,
+        end_date: str,
+        *,
+        symbol: str,
+        pattern: str,
+        candidate_statuses: tuple[str, ...],
+        limit: int | None = None,
+    ) -> dict[str, dict[str, Any]]:
+        empty_stats = {
+            "sample_size": 0,
+            "win_rate": None,
+            "avg_return_pct": None,
+            "avg_mfe_pct": None,
+            "avg_mae_pct": None,
+        }
+        if not Path(self.db_path).exists():
+            return {"symbol_pattern_stats": dict(empty_stats), "pattern_stats": dict(empty_stats)}
+        status_placeholders = ", ".join("?" for _ in candidate_statuses)
+        limit_sql = f"LIMIT {int(limit)}" if limit and limit > 0 else ""
+        base_params: list[Any] = [start_date, end_date, *candidate_statuses]
+
+        sql = f"""
+            WITH base AS (
+                SELECT symbol, setup_label, candidate_json
+                FROM candidate_universe
+                WHERE substr(candidate_ts, 1, 10) BETWEEN ? AND ?
+                  AND candidate_kind = 'entry'
+                  AND candidate_status IN ({status_placeholders})
+                ORDER BY candidate_ts ASC, id ASC
+                {limit_sql}
+            ),
+            features AS (
+                SELECT
+                    UPPER(symbol) AS symbol,
+                    COALESCE(
+                        json_extract(candidate_json, '$.candidate.symbol_pattern'),
+                        json_extract(candidate_json, '$.symbol_pattern'),
+                        json_extract(candidate_json, '$.candidate.pattern_label'),
+                        setup_label,
+                        'unknown'
+                    ) AS pattern,
+                    COALESCE(
+                        json_extract(candidate_json, '$.forward_return_pct'),
+                        json_extract(candidate_json, '$.return_60m'),
+                        json_extract(candidate_json, '$.return_30m'),
+                        json_extract(candidate_json, '$.return_eod')
+                    ) AS ret,
+                    COALESCE(
+                        json_extract(candidate_json, '$.forward_mfe_pct'),
+                        json_extract(candidate_json, '$.max_favorable_60m'),
+                        json_extract(candidate_json, '$.max_favorable_30m'),
+                        json_extract(candidate_json, '$.max_favorable_eod')
+                    ) AS mfe,
+                    COALESCE(
+                        json_extract(candidate_json, '$.forward_mae_pct'),
+                        json_extract(candidate_json, '$.max_adverse_60m'),
+                        json_extract(candidate_json, '$.max_adverse_30m'),
+                        json_extract(candidate_json, '$.max_adverse_eod')
+                    ) AS mae
+                FROM base
+            )
+            SELECT
+                'symbol_pattern_stats' AS bucket,
+                COUNT(ret) AS sample_size,
+                AVG(CASE WHEN ret IS NOT NULL THEN CASE WHEN ret > 0 THEN 1.0 ELSE 0.0 END END)
+                    AS win_rate,
+                AVG(ret) AS avg_return_pct,
+                AVG(mfe) AS avg_mfe_pct,
+                AVG(mae) AS avg_mae_pct
+            FROM features
+            WHERE pattern = ?
+              AND symbol = ?
+            UNION ALL
+            SELECT
+                'pattern_stats' AS bucket,
+                COUNT(ret) AS sample_size,
+                AVG(CASE WHEN ret IS NOT NULL THEN CASE WHEN ret > 0 THEN 1.0 ELSE 0.0 END END)
+                    AS win_rate,
+                AVG(ret) AS avg_return_pct,
+                AVG(mfe) AS avg_mfe_pct,
+                AVG(mae) AS avg_mae_pct
+            FROM features
+            WHERE pattern = ?
+        """
+        symbol_upper = str(symbol or "").upper()
+        with get_read_connection(self.db_path) as con:
+            if not self._table_exists(con, "candidate_universe"):
+                return {
+                    "symbol_pattern_stats": dict(empty_stats),
+                    "pattern_stats": dict(empty_stats),
+                }
+            rows = con.execute(
+                sql,
+                [
+                    *base_params,
+                    pattern,
+                    symbol_upper,
+                    pattern,
+                ],
+            ).fetchall()
+
+        result = {"symbol_pattern_stats": dict(empty_stats), "pattern_stats": dict(empty_stats)}
+        for row in rows:
+            result[str(row["bucket"])] = {
+                "sample_size": int(row["sample_size"] or 0),
+                "win_rate": round(float(row["win_rate"]), 4)
+                if row["win_rate"] is not None
+                else None,
+                "avg_return_pct": round(float(row["avg_return_pct"]), 4)
+                if row["avg_return_pct"] is not None
+                else None,
+                "avg_mfe_pct": round(float(row["avg_mfe_pct"]), 4)
+                if row["avg_mfe_pct"] is not None
+                else None,
+                "avg_mae_pct": round(float(row["avg_mae_pct"]), 4)
+                if row["avg_mae_pct"] is not None
+                else None,
+            }
+        return result
 
     def update_candidate_json(self, candidate_id: int, payload: dict[str, Any]) -> None:
         self.init_table()

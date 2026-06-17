@@ -131,6 +131,76 @@ def test_candidate_summary_between_uses_forward_outcome_payloads():
         assert_equal(summary["by_kind"]["entry"], 3, "kind count")
 
 
+def test_rows_between_honors_limit():
+    with tempfile.TemporaryDirectory() as tmp:
+        db_path = Path(tmp) / "test.db"
+        service = CandidateUniverseService(CandidateUniverseRepository(db_path))
+
+        for idx in range(5):
+            service.persist_scored_candidate(
+                candidate_ts=f"2026-06-01T14:3{idx}:00+00:00",
+                symbol=f"SYM{idx}",
+                action="buy",
+                score=50 + idx,
+                threshold=100,
+                taken=False,
+                payload={"idx": idx},
+            )
+
+        rows = CandidateUniverseRepository(db_path).rows_between(
+            "2026-06-01",
+            "2026-06-01",
+            candidate_kind="entry",
+            limit=2,
+        )
+
+        assert_equal(len(rows), 2, "limited rows")
+        assert_equal(rows[0]["symbol"], "SYM0", "first row")
+        assert_equal(rows[1]["symbol"], "SYM1", "second row")
+
+
+def test_learned_tiebreaker_stats_splits_symbol_and_pattern_buckets():
+    with tempfile.TemporaryDirectory() as tmp:
+        db_path = Path(tmp) / "test.db"
+        service = CandidateUniverseService(CandidateUniverseRepository(db_path))
+
+        for idx, (symbol, ret) in enumerate(
+            [
+                ("AAPL", 0.6),
+                ("AAPL", 0.4),
+                ("MSFT", -0.2),
+            ]
+        ):
+            service.persist_scored_candidate(
+                candidate_ts=f"2026-06-01T14:3{idx}:00+00:00",
+                symbol=symbol,
+                action="buy",
+                score=99,
+                threshold=100,
+                taken=False,
+                setup_label="trend_reclaim",
+                payload={
+                    "candidate": {"symbol_pattern": "trend_reclaim"},
+                    "forward_return_pct": ret,
+                    "forward_mfe_pct": 1.2,
+                    "forward_mae_pct": -0.3,
+                },
+            )
+
+        stats = CandidateUniverseRepository(db_path).learned_tiebreaker_stats(
+            "2026-06-01",
+            "2026-06-01",
+            symbol="AAPL",
+            pattern="trend_reclaim",
+            candidate_statuses=("near_threshold", "taken"),
+        )
+
+        assert_equal(stats["symbol_pattern_stats"]["sample_size"], 2, "symbol-pattern sample size")
+        assert_equal(stats["symbol_pattern_stats"]["win_rate"], 1.0, "symbol win rate")
+        assert_equal(stats["pattern_stats"]["sample_size"], 3, "pattern sample size")
+        assert_equal(stats["pattern_stats"]["win_rate"], 0.6667, "pattern win rate")
+
+
 def test_invalid_candidate_contract_values_are_rejected():
     service = CandidateUniverseService(CandidateUniverseRepository(":memory:"))
     try:
@@ -154,6 +224,8 @@ def main():
         test_persist_entry_candidates_and_near_threshold_status,
         test_persist_exit_candidate_considered_not_taken,
         test_candidate_summary_between_uses_forward_outcome_payloads,
+        test_rows_between_honors_limit,
+        test_learned_tiebreaker_stats_splits_symbol_and_pattern_buckets,
         test_invalid_candidate_contract_values_are_rejected,
     ]
     for test in tests:

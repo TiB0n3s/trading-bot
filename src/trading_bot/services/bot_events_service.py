@@ -18,9 +18,13 @@ def now_s() -> str:
 class BotEventsService:
     def __init__(self, repository: BotEventsRepository):
         self.repository = repository
+        self._initialized = False
 
     def init_table(self) -> None:
+        if self._initialized:
+            return
         self.repository.init_table()
+        self._initialized = True
 
     def log_event(
         self,
@@ -35,7 +39,7 @@ class BotEventsService:
     ) -> bool:
         """Insert one event into bot_events. Fail-open."""
         try:
-            self.repository.init_table()
+            self.init_table()
 
             payload_json = None
             if payload is not None:

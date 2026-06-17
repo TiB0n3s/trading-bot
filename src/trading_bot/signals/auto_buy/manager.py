@@ -115,6 +115,8 @@ from config.conviction import load_conviction_config
 from repositories import auto_buy_repo
 from risk.exposure import any_cluster_limit_hit, cluster_exposure
 
+_candidate_universe_service = CandidateUniverseService(CandidateUniverseRepository(DB_PATH))
+
 AUTO_BUY_LIVE_BUYS = os.getenv("AUTO_BUY_LIVE_BUYS", "false").lower() in ("1", "true", "yes", "on")
 AUTO_BUY_ALLOW_TRADINGVIEW_LIVE = os.getenv("AUTO_BUY_ALLOW_TRADINGVIEW_LIVE", "false").lower() in (
     "1",
@@ -2273,7 +2275,7 @@ def log_candidate(
                 file=sys.stderr,
             )
     try:
-        CandidateUniverseService(CandidateUniverseRepository(DB_PATH)).persist_scored_candidate(
+        _candidate_universe_service.persist_scored_candidate(
             candidate_ts=timestamp,
             symbol=candidate["symbol"],
             action="buy",

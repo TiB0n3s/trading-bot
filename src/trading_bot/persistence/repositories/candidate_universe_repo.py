@@ -19,8 +19,11 @@ class CandidateUniverseRepository:
 
     def __init__(self, db_path: Path | str | None = None):
         self.db_path = db_path or DB_PATH
+        self._initialized = False
 
     def init_table(self) -> None:
+        if self._initialized:
+            return
         with get_connection(self.db_path) as con:
             con.execute(
                 """
@@ -78,6 +81,7 @@ class CandidateUniverseRepository:
                 ON candidate_universe(candidate_kind, candidate_status, substr(candidate_ts, 1, 10))
                 """
             )
+        self._initialized = True
 
     @staticmethod
     def _table_exists(con, table: str) -> bool:

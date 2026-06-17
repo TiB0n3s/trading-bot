@@ -11,8 +11,11 @@ from db import DB_PATH, get_connection
 class BotEventsRepository:
     def __init__(self, db_path: Path | str = DB_PATH):
         self.db_path = db_path
+        self._initialized = False
 
     def init_table(self) -> None:
+        if self._initialized:
+            return
         with get_connection(self.db_path) as con:
             con.execute("""
                 CREATE TABLE IF NOT EXISTS bot_events (
@@ -38,6 +41,7 @@ class BotEventsRepository:
                 CREATE INDEX IF NOT EXISTS idx_bot_events_type_symbol
                 ON bot_events(event_type, symbol)
             """)
+        self._initialized = True
 
     def insert_event(self, event: dict[str, Any]) -> None:
         with get_connection(self.db_path) as con:

@@ -55,6 +55,17 @@ def test_log_event_serializes_payload_and_delegates_insert():
     assert event["timestamp"]
 
 
+def test_log_event_reuses_initialization():
+    repo = FakeRepository()
+    service = BotEventsService(repo)
+
+    assert service.log_event(event_type="TEST_ONE") is True
+    assert service.log_event(event_type="TEST_TWO") is True
+
+    assert repo.init_calls == 1
+    assert len(repo.inserted) == 2
+
+
 def test_log_event_is_fail_open():
     service = BotEventsService(FakeRepository(raises=True))
 
@@ -81,6 +92,7 @@ def test_fetch_events_initializes_and_delegates_filters():
 if __name__ == "__main__":
     tests = [
         test_log_event_serializes_payload_and_delegates_insert,
+        test_log_event_reuses_initialization,
         test_log_event_is_fail_open,
         test_fetch_events_initializes_and_delegates_filters,
     ]

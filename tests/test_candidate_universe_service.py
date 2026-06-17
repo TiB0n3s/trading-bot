@@ -159,6 +159,34 @@ def test_rows_between_honors_limit():
         assert_equal(rows[1]["symbol"], "SYM1", "second row")
 
 
+def test_persist_reuses_repository_initialization():
+    with tempfile.TemporaryDirectory() as tmp:
+        db_path = Path(tmp) / "test.db"
+        repository = CandidateUniverseRepository(db_path)
+        service = CandidateUniverseService(repository)
+
+        service.persist_scored_candidate(
+            candidate_ts="2026-06-01T14:30:00+00:00",
+            symbol="AAPL",
+            action="buy",
+            score=50,
+            threshold=100,
+            taken=False,
+        )
+        service.persist_scored_candidate(
+            candidate_ts="2026-06-01T14:31:00+00:00",
+            symbol="MSFT",
+            action="buy",
+            score=51,
+            threshold=100,
+            taken=False,
+        )
+
+        assert_true(repository._initialized, "repository initialized")
+        rows = service.rows_for_date("2026-06-01")
+        assert_equal(len(rows), 2, "row count")
+
+
 def test_learned_tiebreaker_stats_splits_symbol_and_pattern_buckets():
     with tempfile.TemporaryDirectory() as tmp:
         db_path = Path(tmp) / "test.db"
@@ -225,6 +253,7 @@ def main():
         test_persist_exit_candidate_considered_not_taken,
         test_candidate_summary_between_uses_forward_outcome_payloads,
         test_rows_between_honors_limit,
+        test_persist_reuses_repository_initialization,
         test_learned_tiebreaker_stats_splits_symbol_and_pattern_buckets,
         test_invalid_candidate_contract_values_are_rejected,
     ]

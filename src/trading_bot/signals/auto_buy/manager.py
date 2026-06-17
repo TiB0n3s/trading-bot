@@ -1433,6 +1433,7 @@ def evaluate_auto_buy_candidate(
 
     phase_started = time.monotonic()
     bar_pattern_features_for_memory = latest_bar_pattern_features(symbol, feature)
+    phase_started = _timed("bar_pattern_features", phase_started)
     strategy_memory = memory_for_signal(
         symbol,
         {

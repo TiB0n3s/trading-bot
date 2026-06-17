@@ -911,7 +911,7 @@ class BarPatternFeatureRepository:
                 row = con.execute(
                     f"""
                     SELECT *
-                    FROM bar_pattern_features
+                    FROM bar_pattern_features INDEXED BY idx_bar_pattern_features_symbol_ts
                     WHERE symbol = ?
                       AND timeframe = ?
                       {extra}

@@ -7,7 +7,7 @@ import sqlite3
 import time
 from typing import Any
 
-from db import DB_PATH, get_connection
+from db import DB_PATH, get_connection, get_read_connection
 
 
 def is_database_locked_error(exc: BaseException) -> bool:
@@ -752,7 +752,7 @@ def decision_snapshot_summary(target_date: str, db_path=DB_PATH):
 
 
 def latest_session(symbol: str, db_path=DB_PATH) -> dict[str, Any]:
-    with get_connection(db_path) as con:
+    with get_read_connection(db_path) as con:
         row = con.execute(
             "SELECT * FROM session_momentum WHERE symbol = ?",
             (symbol,),
@@ -761,7 +761,7 @@ def latest_session(symbol: str, db_path=DB_PATH) -> dict[str, Any]:
 
 
 def latest_feature(symbol: str, db_path=DB_PATH) -> dict[str, Any]:
-    with get_connection(db_path) as con:
+    with get_read_connection(db_path) as con:
         row = con.execute(
             """
             SELECT *

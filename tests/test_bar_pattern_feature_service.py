@@ -186,6 +186,28 @@ def test_bar_pattern_repository_persists_and_summarizes(tmp_path: Path):
     assert any(row["opportunity_action"] == "buy_candidate" for row in summary["opportunities"])
 
 
+def test_bar_pattern_latest_for_symbol_is_read_only_when_table_missing(tmp_path: Path):
+    db_path = tmp_path / "trades.db"
+    with sqlite3.connect(db_path) as con:
+        con.execute("CREATE TABLE unrelated_table (id INTEGER PRIMARY KEY)")
+
+    repo = BarPatternFeatureRepository(db_path)
+
+    assert repo.latest_for_symbol("JNPR", timeframe="1m") is None
+
+    with sqlite3.connect(db_path) as con:
+        table = con.execute(
+            """
+            SELECT 1
+            FROM sqlite_master
+            WHERE type = 'table'
+              AND name = 'bar_pattern_features'
+            """
+        ).fetchone()
+
+    assert table is None
+
+
 def test_bar_pattern_service_preserves_source_feed_adjustment_and_trade_count():
     bars = []
     for idx, bar in enumerate(_fixture_bars()):
@@ -283,10 +305,14 @@ def main():
         print("[OK] test_bar_pattern_repository_persists_and_summarizes")
 
     with tempfile.TemporaryDirectory() as tmp:
+        test_bar_pattern_latest_for_symbol_is_read_only_when_table_missing(Path(tmp))
+        print("[OK] test_bar_pattern_latest_for_symbol_is_read_only_when_table_missing")
+
+    with tempfile.TemporaryDirectory() as tmp:
         test_bar_pattern_ops_backfill_uses_polygon_and_reports(Path(tmp))
         print("[OK] test_bar_pattern_ops_backfill_uses_polygon_and_reports")
 
-    print("\nAll 3 bar-pattern feature service tests passed.")
+    print("\nAll 4 bar-pattern feature service tests passed.")
 
 
 if __name__ == "__main__":

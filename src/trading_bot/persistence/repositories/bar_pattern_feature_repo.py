@@ -7,7 +7,7 @@ from datetime import date, timedelta
 from pathlib import Path
 from typing import Any
 
-from db import DB_PATH, get_connection
+from db import DB_PATH, get_connection, get_read_connection
 
 VOLUME_PROFILE_COLUMNS = (
     "volume_profile_poc_dist_pct",
@@ -889,13 +889,16 @@ class BarPatternFeatureRepository:
         feature_version: str | None = None,
     ) -> dict[str, Any] | None:
         """Return the latest persisted bar-pattern feature row for a symbol."""
-        self.init_table()
+        if not Path(self.db_path).exists():
+            return None
         params: list[Any] = [symbol.upper(), timeframe]
         extra = ""
         if feature_version:
             extra = " AND feature_version = ?"
             params.append(feature_version)
-        with get_connection(self.db_path) as con:
+        with get_read_connection(self.db_path) as con:
+            if not self._table_exists(con):
+                return None
             row = con.execute(
                 f"""
                 SELECT *

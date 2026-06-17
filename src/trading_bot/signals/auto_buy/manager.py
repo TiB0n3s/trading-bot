@@ -2529,6 +2529,8 @@ def build_candidates(scope: str) -> list[dict[str, Any]]:
     phase_started = _phase("load_symbols_for_scope", phase_started)
     for symbol in symbols:
         symbol_started = time.monotonic()
+        if AUTO_BUY_TIMING_LOG_ENABLED:
+            print(f"[TIMING] auto_buy.evaluate_symbol_start symbol={symbol}", flush=True)
         session_started = time.monotonic()
         session = latest_session(symbol)
         if AUTO_BUY_TIMING_LOG_ENABLED:

@@ -883,6 +883,7 @@ def insert_candidate_and_snapshot(
     candidate_json: str,
     order_json: str,
     db_path=DB_PATH,
+    busy_timeout_ms: int | None = None,
 ) -> None:
     max_attempts = 3
     delay_seconds = 0.25
@@ -898,6 +899,7 @@ def insert_candidate_and_snapshot(
                 candidate_json=candidate_json,
                 order_json=order_json,
                 db_path=db_path,
+                busy_timeout_ms=busy_timeout_ms,
             )
             return
         except sqlite3.OperationalError as exc:
@@ -921,8 +923,9 @@ def _insert_candidate_and_snapshot_once(
     candidate_json: str,
     order_json: str,
     db_path=DB_PATH,
+    busy_timeout_ms: int | None = None,
 ) -> None:
-    with get_connection(db_path) as con:
+    with get_connection(db_path, busy_timeout_ms=busy_timeout_ms) as con:
         con.execute(
             """
             INSERT INTO auto_buy_candidates (

@@ -47,12 +47,15 @@ def _configure_runtime_pragmas(con: sqlite3.Connection) -> None:
         con.execute(f"PRAGMA journal_size_limit={SQLITE_JOURNAL_SIZE_LIMIT}")
 
 
-def get_connection(db_path: Path | str = DB_PATH) -> sqlite3.Connection:
+def get_connection(
+    db_path: Path | str = DB_PATH, *, busy_timeout_ms: int | None = None
+) -> sqlite3.Connection:
     """Return a configured SQLite connection."""
-    con = sqlite3.connect(db_path, timeout=BUSY_TIMEOUT_MS / 1000)
+    effective_busy_timeout_ms = BUSY_TIMEOUT_MS if busy_timeout_ms is None else busy_timeout_ms
+    con = sqlite3.connect(db_path, timeout=effective_busy_timeout_ms / 1000)
     con.row_factory = sqlite3.Row
 
-    con.execute(f"PRAGMA busy_timeout={BUSY_TIMEOUT_MS}")
+    con.execute(f"PRAGMA busy_timeout={effective_busy_timeout_ms}")
     _configure_journal_mode(con)
     _configure_runtime_pragmas(con)
     con.execute("PRAGMA foreign_keys=ON")

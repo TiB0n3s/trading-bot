@@ -71,13 +71,14 @@ def load_env_file(path: Path = ENV_FILE) -> bool:
 
 load_env_file()
 
-from bot_events import log_event
 from market_time import ET, is_market_hours, now_et
 from repositories.bar_pattern_feature_repo import BarPatternFeatureRepository
+from repositories.bot_events_repo import BotEventsRepository
 from repositories.candidate_universe_repo import CandidateUniverseRepository
 from repositories.prediction_repo import PredictionRepository
 from runtime_config import is_cash_mode
 from services.ai_momentum_pattern_service import deterministic_momentum_pattern
+from services.bot_events_service import BotEventsService
 from services.broker_service import get_default_broker_service
 from services.decision import CapitalAllocator, DecisionEngine
 from services.decision.adapters import auto_buy_candidate_from_raw
@@ -116,6 +117,7 @@ from repositories import auto_buy_repo
 from risk.exposure import any_cluster_limit_hit, cluster_exposure
 
 _candidate_universe_services: dict[str, CandidateUniverseService] = {}
+_bot_events_services: dict[str, BotEventsService] = {}
 
 AUTO_BUY_LIVE_BUYS = os.getenv("AUTO_BUY_LIVE_BUYS", "false").lower() in ("1", "true", "yes", "on")
 AUTO_BUY_ALLOW_TRADINGVIEW_LIVE = os.getenv("AUTO_BUY_ALLOW_TRADINGVIEW_LIVE", "false").lower() in (
@@ -129,6 +131,7 @@ TRADINGVIEW_ALERTS_DEPRECATED = os.getenv(
     "TRADINGVIEW_ALERTS_DEPRECATED", "false"
 ).strip().lower() in ("1", "true", "yes", "on")
 AUTO_BUY_MIN_SCORE = float(os.getenv("AUTO_BUY_MIN_SCORE", "13"))
+AUTO_BUY_AUDIT_WRITE_BUSY_TIMEOUT_MS = int(os.getenv("AUTO_BUY_AUDIT_WRITE_BUSY_TIMEOUT_MS", "250"))
 AUTO_BUY_WATCH_SCORE = float(os.getenv("AUTO_BUY_WATCH_SCORE", "7"))
 AUTO_BUY_POSITION_SIZE_PCT = float(os.getenv("AUTO_BUY_POSITION_SIZE_PCT", "0.50"))
 AUTO_BUY_STOP_LOSS_PCT = float(os.getenv("AUTO_BUY_STOP_LOSS_PCT", "1.00"))
@@ -829,8 +832,23 @@ def candidate_universe_service() -> CandidateUniverseService:
     db_key = str(DB_PATH)
     service = _candidate_universe_services.get(db_key)
     if service is None:
-        service = CandidateUniverseService(CandidateUniverseRepository(DB_PATH))
+        service = CandidateUniverseService(
+            CandidateUniverseRepository(
+                DB_PATH, busy_timeout_ms=AUTO_BUY_AUDIT_WRITE_BUSY_TIMEOUT_MS
+            )
+        )
         _candidate_universe_services[db_key] = service
+    return service
+
+
+def bot_events_service() -> BotEventsService:
+    db_key = str(DB_PATH)
+    service = _bot_events_services.get(db_key)
+    if service is None:
+        service = BotEventsService(
+            BotEventsRepository(DB_PATH, busy_timeout_ms=AUTO_BUY_AUDIT_WRITE_BUSY_TIMEOUT_MS)
+        )
+        _bot_events_services[db_key] = service
     return service
 
 
@@ -2255,6 +2273,7 @@ def log_candidate(
             candidate_json=json.dumps(candidate, sort_keys=True, default=str),
             order_json=json.dumps(order, sort_keys=True, default=str),
             db_path=DB_PATH,
+            busy_timeout_ms=AUTO_BUY_AUDIT_WRITE_BUSY_TIMEOUT_MS,
         )
     except Exception as exc:
         if not auto_buy_repo.is_database_locked_error(exc):
@@ -2849,7 +2868,7 @@ def main() -> int:
                     flush=True,
                 )
         log_event_started = time.monotonic()
-        log_event(
+        bot_events_service().log_event(
             event_type="AUTO_BUY_CANDIDATE",
             symbol=candidate.get("symbol"),
             action="buy_candidate",

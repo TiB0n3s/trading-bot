@@ -17,14 +17,15 @@ class CandidateUniverseRepository:
     but not taken so downstream training is less biased toward acted-on paths.
     """
 
-    def __init__(self, db_path: Path | str | None = None):
+    def __init__(self, db_path: Path | str | None = None, *, busy_timeout_ms: int | None = None):
         self.db_path = db_path or DB_PATH
+        self.busy_timeout_ms = busy_timeout_ms
         self._initialized = False
 
     def init_table(self) -> None:
         if self._initialized:
             return
-        with get_connection(self.db_path) as con:
+        with get_connection(self.db_path, busy_timeout_ms=self.busy_timeout_ms) as con:
             con.execute(
                 """
                 CREATE TABLE IF NOT EXISTS candidate_universe (
@@ -140,7 +141,7 @@ class CandidateUniverseRepository:
         self.init_table()
         columns = list(row.keys())
         placeholders = ", ".join(["?"] * len(columns))
-        with get_connection(self.db_path) as con:
+        with get_connection(self.db_path, busy_timeout_ms=self.busy_timeout_ms) as con:
             cur = con.execute(
                 f"""
                 INSERT INTO candidate_universe ({", ".join(columns)})

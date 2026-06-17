@@ -9,14 +9,15 @@ from db import DB_PATH, get_connection
 
 
 class BotEventsRepository:
-    def __init__(self, db_path: Path | str = DB_PATH):
+    def __init__(self, db_path: Path | str = DB_PATH, *, busy_timeout_ms: int | None = None):
         self.db_path = db_path
+        self.busy_timeout_ms = busy_timeout_ms
         self._initialized = False
 
     def init_table(self) -> None:
         if self._initialized:
             return
-        with get_connection(self.db_path) as con:
+        with get_connection(self.db_path, busy_timeout_ms=self.busy_timeout_ms) as con:
             con.execute("""
                 CREATE TABLE IF NOT EXISTS bot_events (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -44,7 +45,7 @@ class BotEventsRepository:
         self._initialized = True
 
     def insert_event(self, event: dict[str, Any]) -> None:
-        with get_connection(self.db_path) as con:
+        with get_connection(self.db_path, busy_timeout_ms=self.busy_timeout_ms) as con:
             con.execute(
                 """
                 INSERT INTO bot_events (
@@ -97,7 +98,7 @@ class BotEventsRepository:
 
         params.append(limit)
 
-        with get_connection(self.db_path) as con:
+        with get_connection(self.db_path, busy_timeout_ms=self.busy_timeout_ms) as con:
             return con.execute(
                 f"""
                 SELECT

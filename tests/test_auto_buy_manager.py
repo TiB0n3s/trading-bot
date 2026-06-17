@@ -54,6 +54,7 @@ def setup_function(_):
     reset_auto_buy_runtime_defaults()
     auto_buy_manager._initialized_auto_buy_db_paths.clear()
     auto_buy_manager._candidate_universe_services.clear()
+    auto_buy_manager._bot_events_services.clear()
     auto_buy_manager.memory_for_signal = lambda symbol, context: {"available": False}
     auto_buy_manager.auto_buy_prediction_context = lambda symbol: {
         "available": True,

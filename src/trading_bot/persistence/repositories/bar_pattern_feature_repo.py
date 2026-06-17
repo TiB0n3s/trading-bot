@@ -3,11 +3,15 @@
 from __future__ import annotations
 
 import json
+import os
+import sqlite3
 from datetime import date, timedelta
 from pathlib import Path
 from typing import Any
 
-from db import DB_PATH, get_connection, get_read_connection
+from db import DB_PATH, get_connection
+
+BAR_PATTERN_LIVE_READ_TIMEOUT_MS = int(os.getenv("BAR_PATTERN_LIVE_READ_TIMEOUT_MS", "250"))
 
 VOLUME_PROFILE_COLUMNS = (
     "volume_profile_poc_dist_pct",
@@ -889,28 +893,38 @@ class BarPatternFeatureRepository:
         feature_version: str | None = None,
     ) -> dict[str, Any] | None:
         """Return the latest persisted bar-pattern feature row for a symbol."""
-        if not Path(self.db_path).exists():
+        db_path = Path(self.db_path)
+        if not db_path.exists():
             return None
         params: list[Any] = [symbol.upper(), timeframe]
         extra = ""
         if feature_version:
             extra = " AND feature_version = ?"
             params.append(feature_version)
-        with get_read_connection(self.db_path) as con:
-            if not self._table_exists(con):
+        timeout_seconds = max(0, BAR_PATTERN_LIVE_READ_TIMEOUT_MS) / 1000
+        uri = f"file:{db_path}?mode=ro"
+        try:
+            with sqlite3.connect(uri, timeout=timeout_seconds, uri=True) as con:
+                con.row_factory = sqlite3.Row
+                con.execute(f"PRAGMA busy_timeout={BAR_PATTERN_LIVE_READ_TIMEOUT_MS}")
+                con.execute("PRAGMA query_only=ON")
+                row = con.execute(
+                    f"""
+                    SELECT *
+                    FROM bar_pattern_features
+                    WHERE symbol = ?
+                      AND timeframe = ?
+                      {extra}
+                    ORDER BY bar_timestamp DESC, id DESC
+                    LIMIT 1
+                    """,
+                    params,
+                ).fetchone()
+        except sqlite3.OperationalError as exc:
+            message = str(exc).lower()
+            if "locked" in message or "no such table" in message:
                 return None
-            row = con.execute(
-                f"""
-                SELECT *
-                FROM bar_pattern_features
-                WHERE symbol = ?
-                  AND timeframe = ?
-                  {extra}
-                ORDER BY bar_timestamp DESC, id DESC
-                LIMIT 1
-                """,
-                params,
-            ).fetchone()
+            raise
         if not row:
             return None
         payload = dict(row)

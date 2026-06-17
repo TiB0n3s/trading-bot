@@ -7,6 +7,7 @@ import io
 import sqlite3
 import sys
 import tempfile
+import time
 from contextlib import redirect_stdout
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -20,6 +21,7 @@ from services.bar_pattern_feature_service import (  # noqa: E402
     BarPatternFeatureService,
 )
 
+from repositories import bar_pattern_feature_repo  # noqa: E402
 from trading_bot.ops_checks.commands.bar_pattern_checks import (
     run_bar_pattern_backfill,  # noqa: E402
 )
@@ -208,6 +210,37 @@ def test_bar_pattern_latest_for_symbol_is_read_only_when_table_missing(tmp_path:
     assert table is None
 
 
+def test_bar_pattern_latest_for_symbol_fails_fast_when_database_locked(tmp_path: Path):
+    db_path = tmp_path / "trades.db"
+    with sqlite3.connect(db_path) as con:
+        con.execute(
+            """
+            CREATE TABLE bar_pattern_features (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                symbol TEXT NOT NULL,
+                bar_timestamp TEXT NOT NULL,
+                timeframe TEXT NOT NULL
+            )
+            """
+        )
+
+    original_timeout = bar_pattern_feature_repo.BAR_PATTERN_LIVE_READ_TIMEOUT_MS
+    lock_con = sqlite3.connect(db_path, timeout=1)
+    try:
+        bar_pattern_feature_repo.BAR_PATTERN_LIVE_READ_TIMEOUT_MS = 1
+        lock_con.execute("BEGIN EXCLUSIVE")
+        started = time.monotonic()
+
+        row = BarPatternFeatureRepository(db_path).latest_for_symbol("JNPR", timeframe="1m")
+
+        assert row is None
+        assert time.monotonic() - started < 1.0
+    finally:
+        lock_con.rollback()
+        lock_con.close()
+        bar_pattern_feature_repo.BAR_PATTERN_LIVE_READ_TIMEOUT_MS = original_timeout
+
+
 def test_bar_pattern_service_preserves_source_feed_adjustment_and_trade_count():
     bars = []
     for idx, bar in enumerate(_fixture_bars()):
@@ -309,10 +342,14 @@ def main():
         print("[OK] test_bar_pattern_latest_for_symbol_is_read_only_when_table_missing")
 
     with tempfile.TemporaryDirectory() as tmp:
+        test_bar_pattern_latest_for_symbol_fails_fast_when_database_locked(Path(tmp))
+        print("[OK] test_bar_pattern_latest_for_symbol_fails_fast_when_database_locked")
+
+    with tempfile.TemporaryDirectory() as tmp:
         test_bar_pattern_ops_backfill_uses_polygon_and_reports(Path(tmp))
         print("[OK] test_bar_pattern_ops_backfill_uses_polygon_and_reports")
 
-    print("\nAll 4 bar-pattern feature service tests passed.")
+    print("\nAll 5 bar-pattern feature service tests passed.")
 
 
 if __name__ == "__main__":

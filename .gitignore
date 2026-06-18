@@ -86,6 +86,7 @@ data/webull/morning_brief_*.json
 data/webull/market_evidence_*.json
 data/historical_bars/
 data/historical_ticks/
+data/benchmark_cache/
 manual_polygon_backfill_v4_*.log
 
 # Generated portfolio replacement intelligence

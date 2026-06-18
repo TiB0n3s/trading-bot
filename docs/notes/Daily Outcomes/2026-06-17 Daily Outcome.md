@@ -87,9 +87,13 @@ Note: `would_be_strong` is counterfactual after removing hard blocks. `strong_bu
 - `strategy_memory_avoid_weak_evidence` blocked more would-be strong candidates than plain `strategy_memory_avoid`.
 - `strategy_memory_avoid_weak_evidence` was the top blocker by would-be-strong count: 167, ahead of `setup_avoid` at 148 and about 2.5x plain `strategy_memory_avoid` at 67.
 - TSM and ASML were the main weak-evidence cold-start names at the top of the missed-strong list.
-- TSM hit max score four consecutive times, which raises the priority of the controlled-exploration question, but this remains one session with `sample_with_outcome=0`.
+- TSM hit max score four consecutive times, which raises the priority of the controlled-exploration question, but this remains one session and should not change hard blocks by itself.
 - OKTA remained the main plain avoid-memory name.
-- The strategy-memory hard-block review had `sample_with_outcome=0`, so today's high-score blocker verdicts should not be changed from this session alone.
+- After outcome backfill, the strategy-memory hard-block review moved from no forward grounding to `sample_with_outcome=30` out of `31` displayed rows.
+- Keep the denominator straight: `452` is the counterfactual would-be-strong universe; `30` is the current outcomed evidence sample from the review display set. Today's high-score blocker verdicts still should not be changed from this session alone.
+- The review is capped/sample-oriented: `candidate_rows=1000` and `strategy_memory_rows=1000` come from `auto_buy_candidates`, while only `31` selected rows were enriched from `candidate_universe`.
+- The one missing displayed outcome was `AMD` at `2026-06-17T11:40:30.348149-04:00`; no matching `candidate_universe` row was found near that timestamp, so this looks like an enrichment/key mismatch rather than a no-forward-bars case.
+- Targeted coverage check for the named symbols was healthy: `TSM 79/79`, `ASML 86/86`, and `OKTA 74/74` candidate-universe rows had forward outcomes.
 
 ## Operational Incident
 See [[2026-06-17 Auto-Buy Lock Contention]].
@@ -108,9 +112,11 @@ Key operational read:
 
 ## Follow-Ups
 - [ ] Watch the next market-hours auto-buy run after `8230be2`.
-- [ ] Run candidate outcome backfill for 2026-06-17: `python3 ops_check.py candidate-outcome-backfill 2026-06-17`
-- [ ] Re-run strategy-memory hard-block review once forward outcomes are available.
-- [ ] Review TSM, ASML, and OKTA forward outcomes before changing any hard block.
+- [x] Run candidate outcome backfill for 2026-06-17: `python3 ops_check.py candidate-outcome-backfill 2026-06-17`
+- [x] Re-run strategy-memory hard-block review once forward outcomes are available.
+  - Result: `candidate_rows=1000`, `strategy_memory_rows=1000`, `sample_rows_enriched=31`, `sample_with_outcome=30`, `sample_missing_outcome=1`, `weak_evidence_rows=766`.
+- [x] Review TSM, ASML, and OKTA forward outcomes before changing any hard block.
+  - Result: raw forward returns were extracted for the top high-score rows; evaluative net/excess aggregation remains a separate analysis step.
 - [ ] Continue tracking SQLite writer overlap from `run_label_features` and `session_momentum`.
 
 ## Related

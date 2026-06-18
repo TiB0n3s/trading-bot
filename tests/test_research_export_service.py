@@ -86,6 +86,7 @@ def test_research_export_writes_manifest_parquet_and_duckdb(tmp_path):
     service = ResearchExportService(
         ResearchExportRepository(db_path),
         output_root=tmp_path / "exports",
+        chunk_size=1,
     )
     result = service.export_daily("2026-06-02")
 
@@ -99,6 +100,7 @@ def test_research_export_writes_manifest_parquet_and_duckdb(tmp_path):
     assert manifest["runtime_effect"] == RESEARCH_EXPORT_RUNTIME_EFFECT
     exported = {row["name"]: row for row in manifest["datasets"]}
     assert exported["decision_snapshots"]["rows"] == 1
+    assert exported["decision_snapshots"]["chunk_size"] == 1
     assert exported["candidate_universe"]["rows"] == 1
     assert Path(exported["decision_snapshots"]["parquet_path"]).exists()
 

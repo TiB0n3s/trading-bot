@@ -47,8 +47,8 @@ log_event(
 PY2
 
 echo
-echo "---- after-close quant learning pipeline ----"
-python3 pipeline/after_close_learning.py --date "$(date +%F)"
+echo "---- after-close daily learning pipeline ----"
+python3 pipeline/after_close_learning.py --lane daily --date "$(date +%F)"
 
 python3 - <<'PY2'
 from bot_events import log_event

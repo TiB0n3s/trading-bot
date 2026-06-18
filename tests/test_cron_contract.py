@@ -7,6 +7,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 CRONTAB = ROOT / "ops" / "crontab.tradingbot.current.txt"
+SQLITE_WRITER_LOCK = "/tmp/tradingbot_sqlite_writer.lock"
 
 
 def _cron_command_lines() -> list[str]:
@@ -53,10 +54,16 @@ def test_after_close_and_post_session_share_lock():
     lines = _cron_command_lines()
     after_close = [line for line in lines if "run_after_close_learning.sh" in line]
     post_session = [line for line in lines if "run_post_session_review.sh" in line]
+    research = [line for line in lines if "--job-name after_close_research_batch" in line]
     assert len(after_close) == 1, after_close
     assert len(post_session) == 1, post_session
+    assert len(research) == 1, research
     assert "/tmp/tradingbot_after_close.lock" in after_close[0]
     assert "/tmp/tradingbot_after_close.lock" in post_session[0]
+    assert "/tmp/tradingbot_after_close.lock" in research[0]
+    assert research[0].startswith("30 4 * * 6"), research
+    assert "pipeline/after_close_learning.py --lane research" in research[0]
+    assert "--timeout-seconds 14400" in research[0]
 
 
 def test_job_runner_lines_have_job_name():
@@ -83,6 +90,7 @@ def test_auto_buy_is_regular_session_only():
     assert len(lines) == 2, lines
     assert any(line.startswith("30-59/2 8 * * 1-5") for line in lines), lines
     assert any(line.startswith("*/2 9-14 * * 1-5") for line in lines), lines
+    assert all(f"--writer-lock-file {SQLITE_WRITER_LOCK}" in line for line in lines), lines
     assert not any(line.startswith("*/2 8-15") for line in lines), lines
 
 
@@ -102,15 +110,21 @@ def test_live_and_label_features_are_regular_session_only():
     ]
     assert len(live_lines) == 2, live_lines
     assert len(label_lines) == 2, label_lines
-    assert any(line.startswith("31-59/2 8 * * 1-5") for line in live_lines), live_lines
-    assert any(line.startswith("1-59/2 9-14 * * 1-5") for line in live_lines), live_lines
+    assert any(line.startswith("31-59/5 8 * * 1-5") for line in live_lines), live_lines
+    assert any(line.startswith("1-59/5 9-14 * * 1-5") for line in live_lines), live_lines
     assert all("--ionice-idle --nice 10" in line for line in live_lines), live_lines
+    assert all(f"--writer-lock-file {SQLITE_WRITER_LOCK}" in line for line in live_lines), (
+        live_lines
+    )
     assert all(
         "--defer-while-locked /tmp/tradingbot_auto_buy_manager.lock" in line for line in live_lines
     ), live_lines
-    assert any(line.startswith("30-59/5 8 * * 1-5") for line in label_lines), label_lines
-    assert any(line.startswith("*/5 9-14 * * 1-5") for line in label_lines), label_lines
+    assert any(line.startswith("34-59/10 8 * * 1-5") for line in label_lines), label_lines
+    assert any(line.startswith("4-59/10 9-14 * * 1-5") for line in label_lines), label_lines
     assert all("--ionice-idle --nice 10" in line for line in label_lines), label_lines
+    assert all(f"--writer-lock-file {SQLITE_WRITER_LOCK}" in line for line in label_lines), (
+        label_lines
+    )
     assert all(
         "--defer-while-locked /tmp/tradingbot_auto_buy_manager.lock" in line for line in label_lines
     ), label_lines
@@ -127,12 +141,15 @@ def test_intraday_evidence_writers_are_staggered_and_deprioritized():
     assert len(rolling_lines) == 2, rolling_lines
     assert len(session_lines) == 2, session_lines
     assert len(checkpoint_lines) == 1, checkpoint_lines
-    assert any(line.startswith("31-59/4 8 * * 1-5") for line in rolling_lines), rolling_lines
-    assert any(line.startswith("1-59/4 9-14 * * 1-5") for line in rolling_lines), rolling_lines
-    assert any(line.startswith("33-59/4 8 * * 1-5") for line in session_lines), session_lines
-    assert any(line.startswith("3-59/4 9-14 * * 1-5") for line in session_lines), session_lines
+    assert any(line.startswith("32-59/10 8 * * 1-5") for line in rolling_lines), rolling_lines
+    assert any(line.startswith("2-59/10 9-14 * * 1-5") for line in rolling_lines), rolling_lines
+    assert any(line.startswith("36-59/10 8 * * 1-5") for line in session_lines), session_lines
+    assert any(line.startswith("6-59/10 9-14 * * 1-5") for line in session_lines), session_lines
     assert all("--ionice-idle --nice 10" in line for line in rolling_lines)
     assert all("--ionice-idle --nice 10" in line for line in session_lines)
+    assert all(
+        f"--writer-lock-file {SQLITE_WRITER_LOCK}" in line for line in rolling_lines + session_lines
+    )
     assert all(
         "--defer-while-locked /tmp/tradingbot_auto_buy_manager.lock" in line
         for line in rolling_lines
@@ -144,6 +161,7 @@ def test_intraday_evidence_writers_are_staggered_and_deprioritized():
     assert checkpoint_lines[0].startswith("7,22,37,52 9-14 * * 1-5"), checkpoint_lines
     assert "scripts/sqlite_checkpoint.py" in checkpoint_lines[0]
     assert "--defer-while-locked /tmp/tradingbot_auto_buy_manager.lock" in checkpoint_lines[0]
+    assert f"--writer-lock-file {SQLITE_WRITER_LOCK}" in checkpoint_lines[0]
 
 
 def test_position_management_jobs_are_regular_session_only():
@@ -155,12 +173,16 @@ def test_position_management_jobs_are_regular_session_only():
     assert len(monitor_lines) == 2, monitor_lines
     assert len(manager_lines) == 2, manager_lines
     assert len(rotation_lines) == 2, rotation_lines
-    assert any(line.startswith("31-59/2 8 * * 1-5") for line in monitor_lines), monitor_lines
-    assert any(line.startswith("1-59/2 9-14 * * 1-5") for line in monitor_lines), monitor_lines
+    assert any(line.startswith("31-59/5 8 * * 1-5") for line in monitor_lines), monitor_lines
+    assert any(line.startswith("1-59/5 9-14 * * 1-5") for line in monitor_lines), monitor_lines
     assert any(line.startswith("30-59/2 8 * * 1-5") for line in manager_lines), manager_lines
     assert any(line.startswith("*/2 9-14 * * 1-5") for line in manager_lines), manager_lines
-    assert any(line.startswith("30-59/2 8 * * 1-5") for line in rotation_lines), rotation_lines
-    assert any(line.startswith("*/2 9-14 * * 1-5") for line in rotation_lines), rotation_lines
+    assert any(line.startswith("30,45 8 * * 1-5") for line in rotation_lines), rotation_lines
+    assert any(line.startswith("*/15 9-14 * * 1-5") for line in rotation_lines), rotation_lines
+    assert all(
+        f"--writer-lock-file {SQLITE_WRITER_LOCK}" in line
+        for line in monitor_lines + manager_lines + rotation_lines
+    )
     offenders = monitor_lines + manager_lines + rotation_lines
     assert not any(line.startswith("*/2 8-15") for line in offenders), offenders
     assert not any(line.startswith("1-59/2 8-15") for line in offenders), offenders
@@ -239,6 +261,22 @@ def test_database_backups_use_safe_gfs_tiers():
     assert not offenders, offenders
 
 
+def test_db_right_size_runs_dark_hours_with_rollback_pruning():
+    lines = [
+        line for line in _cron_command_lines() if "--job-name db_right_size_maintenance" in line
+    ]
+    assert len(lines) == 1, lines
+    line = lines[0]
+    assert line.startswith("30 3 * * 2-6"), line
+    assert "pipeline/db_right_size_maintenance.py" in line
+    assert "--execute-archive" in line
+    assert "--checkpoint" in line
+    assert "--prune-rollbacks" in line
+    assert "--rollback-retention-days 2" in line
+    assert "--rollback-min-keep 0" in line
+    assert "--max-chunks 20" in line
+
+
 def main():
     tests = [
         test_no_raw_flock_jobs_remain,
@@ -256,6 +294,7 @@ def main():
         test_live_service_watchdog_is_regular_session_only,
         test_premarket_dependency_chain_uses_single_pipeline,
         test_database_backups_use_safe_gfs_tiers,
+        test_db_right_size_runs_dark_hours_with_rollback_pruning,
     ]
     for test in tests:
         test()

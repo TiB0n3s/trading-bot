@@ -226,6 +226,18 @@ def _is_lock_busy(lock_file: str) -> bool:
         _release_lock(lock_handle)
 
 
+def _try_acquire_lock(lock_file: str) -> object | None:
+    lock_path = Path(lock_file)
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    lock_handle = lock_path.open("w")
+    try:
+        fcntl.flock(lock_handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        lock_handle.close()
+        return None
+    return lock_handle
+
+
 def _record_run_best_effort(
     service: JobRunsService,
     record,
@@ -257,6 +269,10 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
         action="append",
         default=[],
         help="Skip this job when another lock file is currently held.",
+    )
+    parser.add_argument(
+        "--writer-lock-file",
+        help="Acquire this shared SQLite writer lock before starting the child command.",
     )
     parser.add_argument(
         "--nice",
@@ -293,19 +309,26 @@ def main(argv: list[str] | None = None) -> int:
             return 0
 
     lock_handle = None
+    writer_lock_handle = None
     if args.lock_file:
-        lock_path = Path(args.lock_file)
-        lock_path.parent.mkdir(parents=True, exist_ok=True)
-        lock_handle = lock_path.open("w")
-        try:
-            fcntl.flock(lock_handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except BlockingIOError:
+        lock_handle = _try_acquire_lock(args.lock_file)
+        if lock_handle is None:
             message = f"{_now_iso()} lock-busy: {args.job_name} skipped"
             _append_log(args.log_file, message)
             # Do not touch the SQLite job ledger on lock-busy skips. During
             # market hours these skips can happen every minute, and opening the
             # DB before the lock is acquired increases WAL pressure precisely
             # when a previous job is already slow or blocked.
+            return 0
+
+    if args.writer_lock_file:
+        writer_lock_handle = _try_acquire_lock(args.writer_lock_file)
+        if writer_lock_handle is None:
+            _append_log(
+                args.log_file,
+                f"{_now_iso()} writer-lock-busy: {args.job_name} skipped lock={args.writer_lock_file}",
+            )
+            _release_lock(lock_handle)
             return 0
 
     service = (
@@ -353,12 +376,16 @@ def main(argv: list[str] | None = None) -> int:
         )
         _release_lock(lock_handle)
         lock_handle = None
+        _release_lock(writer_lock_handle)
+        writer_lock_handle = None
         _record_run_best_effort(
             service,
             record,
             log_file=args.log_file,
             job_name=args.job_name,
         )
+        if writer_lock_handle is not None:
+            _release_lock(writer_lock_handle)
         if lock_handle is not None:
             _release_lock(lock_handle)
 

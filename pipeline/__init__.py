@@ -9,12 +9,16 @@ critical failures.
 from __future__ import annotations
 
 import importlib
+import json
+import os
+import resource
+import signal
 import sys
 import time
 from contextlib import contextmanager
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import Callable
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
@@ -41,6 +45,28 @@ class Step:
     argv: list[str]
     critical: bool = True
     description: str = ""
+    memory_limit_mb: int = 0
+    timeout_seconds: int = 0
+    marker_path: Path | None = None
+
+    def should_skip(self) -> bool:
+        return self.marker_path is not None and self.marker_path.exists()
+
+    def write_marker(self, *, pipeline_name: str, target_date: str, duration_sec: float) -> None:
+        if self.marker_path is None:
+            return
+        self.marker_path.parent.mkdir(parents=True, exist_ok=True)
+        payload = {
+            "version": "pipeline_step_marker_v1",
+            "pipeline_name": pipeline_name,
+            "target_date": target_date,
+            "step_name": self.name,
+            "module": self.module,
+            "argv": self.argv,
+            "completed_at": datetime.now(timezone.utc).isoformat(),
+            "duration_sec": duration_sec,
+        }
+        self.marker_path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
 
     def run(self) -> bool:
         _ensure_base_on_path()
@@ -62,6 +88,7 @@ class StepResult:
     ok: bool
     duration_sec: float
     critical: bool
+    skipped: bool = False
 
 
 @dataclass
@@ -103,22 +130,45 @@ def run_pipeline(
         print(label)
         print("-" * 72)
 
+        if step.should_skip():
+            print(f"[SKIP] {step.name} already completed: {step.marker_path}")
+            result.steps.append(
+                StepResult(
+                    name=step.name,
+                    ok=True,
+                    duration_sec=0.0,
+                    critical=step.critical,
+                    skipped=True,
+                )
+            )
+            continue
+
         t0 = time.monotonic()
         try:
-            ok = step.run()
+            with _resource_limits(step.memory_limit_mb, step.timeout_seconds):
+                ok = step.run()
         except Exception as exc:
             print(f"[ERROR] {step.name} raised an unhandled exception: {exc}")
             ok = False
         duration = round(time.monotonic() - t0, 2)
 
+        if ok:
+            step.write_marker(
+                pipeline_name=name,
+                target_date=target_date,
+                duration_sec=duration,
+            )
+
         status = "[OK]" if ok else ("[FAIL]" if step.critical else "[WARN]")
         print(f"{status} {step.name} completed in {duration}s")
-        result.steps.append(StepResult(
-            name=step.name,
-            ok=ok,
-            duration_sec=duration,
-            critical=step.critical,
-        ))
+        result.steps.append(
+            StepResult(
+                name=step.name,
+                ok=ok,
+                duration_sec=duration,
+                critical=step.critical,
+            )
+        )
 
         if not ok and step.critical and stop_on_critical_failure:
             print(f"\n[PIPELINE HALTED] critical step '{step.name}' failed")
@@ -134,3 +184,47 @@ def run_pipeline(
         print(f"[FAIL] {name} pipeline failed — steps: {', '.join(failed)} (total {total:.1f}s)")
 
     return result
+
+
+class StepTimeout(Exception):
+    pass
+
+
+@contextmanager
+def _resource_limits(memory_limit_mb: int = 0, timeout_seconds: int = 0):
+    old_limits = None
+    old_alarm = None
+    old_handler = None
+
+    def _handle_timeout(signum, frame):  # noqa: ARG001
+        raise StepTimeout(f"step exceeded timeout_seconds={timeout_seconds}")
+
+    try:
+        if memory_limit_mb and memory_limit_mb > 0:
+            bytes_limit = int(memory_limit_mb) * 1024 * 1024
+            old_limits = resource.getrlimit(resource.RLIMIT_AS)
+            old_soft, old_hard = old_limits
+            hard = old_hard
+            if hard in (-1, resource.RLIM_INFINITY):
+                hard = resource.RLIM_INFINITY
+            soft = bytes_limit if hard in (-1, resource.RLIM_INFINITY) else min(bytes_limit, hard)
+            resource.setrlimit(resource.RLIMIT_AS, (soft, old_hard))
+            os.environ["PIPELINE_STEP_MEMORY_LIMIT_MB"] = str(memory_limit_mb)
+
+        if timeout_seconds and timeout_seconds > 0:
+            old_handler = signal.getsignal(signal.SIGALRM)
+            old_alarm = signal.alarm(0)
+            signal.signal(signal.SIGALRM, _handle_timeout)
+            signal.alarm(int(timeout_seconds))
+
+        yield
+    finally:
+        if timeout_seconds and timeout_seconds > 0:
+            signal.alarm(0)
+            if old_handler is not None:
+                signal.signal(signal.SIGALRM, old_handler)
+            if old_alarm:
+                signal.alarm(old_alarm)
+        if old_limits is not None:
+            resource.setrlimit(resource.RLIMIT_AS, old_limits)
+        os.environ.pop("PIPELINE_STEP_MEMORY_LIMIT_MB", None)

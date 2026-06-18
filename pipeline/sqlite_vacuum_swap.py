@@ -13,6 +13,7 @@ import json
 import shutil
 import sqlite3
 import subprocess
+import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -194,6 +195,68 @@ def _sidecar_paths(db_path: Path) -> list[Path]:
         db_path.with_name(db_path.name + "-shm"),
         db_path.with_suffix(db_path.suffix + "-journal"),
     ]
+
+
+def _rollback_candidates(db_path: Path) -> list[Path]:
+    prefix = f"{db_path.name}.rollback_"
+    return sorted(
+        (path for path in db_path.parent.glob(f"{prefix}*") if path.is_file()),
+        key=lambda path: path.stat().st_mtime,
+        reverse=True,
+    )
+
+
+def prune_rollback_files(
+    *,
+    db_path: Path,
+    retention_days: int,
+    min_keep: int,
+    dry_run: bool = False,
+) -> dict[str, Any]:
+    cutoff_ts = time.time() - (max(0, int(retention_days)) * 86400)
+    min_keep = max(0, int(min_keep))
+    candidates = _rollback_candidates(db_path)
+    base_rollbacks = [
+        path
+        for path in candidates
+        if path.name.startswith(f"{db_path.name}.rollback_")
+        and "." not in path.name.removeprefix(f"{db_path.name}.rollback_")
+    ]
+    protected_bases = {path.name for path in base_rollbacks[:min_keep]}
+    pruned: list[dict[str, Any]] = []
+    retained: list[dict[str, Any]] = []
+
+    for path in candidates:
+        stat = path.stat()
+        protected = any(
+            path.name == base or path.name.startswith(f"{base}.") for base in protected_bases
+        )
+        row = {
+            "path": str(path),
+            "size_bytes": stat.st_size,
+            "mtime": datetime.fromtimestamp(stat.st_mtime, timezone.utc).isoformat(),
+        }
+        if stat.st_mtime >= cutoff_ts or protected:
+            row["reason"] = "protected_min_keep" if protected else "within_retention"
+            retained.append(row)
+            continue
+        row["dry_run"] = dry_run
+        pruned.append(row)
+        if not dry_run:
+            path.unlink()
+
+    return {
+        "retention_days": int(retention_days),
+        "min_keep": min_keep,
+        "dry_run": dry_run,
+        "candidate_count": len(candidates),
+        "pruned_count": len(pruned),
+        "pruned_bytes": sum(int(row["size_bytes"]) for row in pruned),
+        "retained_count": len(retained),
+        "retained_bytes": sum(int(row["size_bytes"]) for row in retained),
+        "pruned": pruned,
+        "retained": retained,
+    }
 
 
 def _swap_compact_copy(

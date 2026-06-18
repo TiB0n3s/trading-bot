@@ -21,6 +21,7 @@ import argparse
 import csv
 import json
 from pathlib import Path
+from typing import Any, Callable
 
 from repositories.ml_export_repo import MlExportRepository
 
@@ -183,6 +184,7 @@ def parse_args() -> argparse.Namespace:
         default="fixed_horizon",
         help="Default fixed_horizon keeps realized-PnL labels out of the export surface.",
     )
+    parser.add_argument("--chunk-size", type=int, default=1000)
     args = parser.parse_args()
 
     if args.date and (args.start_date or args.end_date):
@@ -203,6 +205,17 @@ def fetch_rows(args: argparse.Namespace) -> list:
     db_path = Path(args.db_path)
     where_sql, params = date_filter(args)
     return MlExportRepository(db_path).fetch_rows(where_sql, params)
+
+
+def stream_rows(args: argparse.Namespace, row_callback: Callable[[Any], None]) -> None:
+    db_path = Path(args.db_path)
+    where_sql, params = date_filter(args)
+    MlExportRepository(db_path).fetch_rows(
+        where_sql,
+        params,
+        row_callback=row_callback,
+        chunk_size=args.chunk_size,
+    )
 
 
 def write_csv(rows: list, output: str) -> Path:
@@ -233,12 +246,59 @@ def training_rows(rows: list, include_incomplete_labels: bool) -> list:
     return [r for r in rows if (r["label_horizon_status"] or "unlabeled") == "complete"]
 
 
+def _status(row: Any) -> str:
+    return row["label_horizon_status"] or "unlabeled"
+
+
+def _include_row(row: Any, include_incomplete_labels: bool) -> bool:
+    return include_incomplete_labels or _status(row) == "complete"
+
+
+def write_csv_streaming(args: argparse.Namespace) -> tuple[Path, dict[str, Any]]:
+    path = Path(args.output)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    stats: dict[str, Any] = {
+        "source_rows": 0,
+        "export_rows": 0,
+        "complete_horizon_rows": 0,
+        "labeled_rows": 0,
+        "symbols": set(),
+        "included_label_horizon_statuses": set(),
+        "exclusion_counts": {},
+    }
+
+    with path.open("w", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=BASE_COLUMNS)
+        writer.writeheader()
+
+        def handle_row(row: Any) -> None:
+            stats["source_rows"] += 1
+            status = _status(row)
+            if status == "complete":
+                stats["complete_horizon_rows"] += 1
+            else:
+                counts = stats["exclusion_counts"]
+                counts[status] = counts.get(status, 0) + 1
+            if not _include_row(row, args.include_incomplete_labels):
+                return
+            writer.writerow({col: row[col] for col in BASE_COLUMNS})
+            stats["export_rows"] += 1
+            if row["outcome_label"] is not None:
+                stats["labeled_rows"] += 1
+            stats["symbols"].add(row["symbol"])
+            stats["included_label_horizon_statuses"].add(status)
+
+        stream_rows(args, handle_row)
+
+    stats["symbols"] = sorted(stats["symbols"])
+    stats["included_label_horizon_statuses"] = sorted(stats["included_label_horizon_statuses"])
+    return path, stats
+
+
 def main() -> int:
     args = parse_args()
-    rows = fetch_rows(args)
-    exclusion_counts = _exclusion_counts(rows)
-    export_rows = training_rows(rows, args.include_incomplete_labels)
-    path = write_csv(export_rows, args.output)
+    path, stats = write_csv_streaming(args)
+    exclusion_counts = stats["exclusion_counts"]
     manifest_path = None
     if args.manifest_output:
         _start = args.date or args.start_date
@@ -262,14 +322,11 @@ def main() -> int:
             pit_coverage=pit_cov,
         )
         manifest["source_row_count"] = manifest.get("row_count")
-        manifest["export_row_count"] = len(export_rows)
-        manifest["complete_horizon_rows"] = sum(
-            1 for r in rows if (r["label_horizon_status"] or "unlabeled") == "complete"
-        )
+        manifest["export_row_count"] = stats["export_rows"]
+        manifest["complete_horizon_rows"] = stats["complete_horizon_rows"]
         manifest["training_default_complete_horizon_only"] = not args.include_incomplete_labels
-        manifest["included_label_horizon_statuses"] = sorted(
-            {r["label_horizon_status"] or "unlabeled" for r in export_rows}
-        )
+        manifest["included_label_horizon_statuses"] = stats["included_label_horizon_statuses"]
+        manifest["streaming_export_chunk_size"] = args.chunk_size
         manifest["label_scope"] = args.label_scope
         manifest["realized_exit_labels_included"] = False
         manifest["realized_exit_label_policy"] = (
@@ -284,15 +341,12 @@ def main() -> int:
         manifest_path.parent.mkdir(parents=True, exist_ok=True)
         manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n")
 
-    labeled = sum(1 for r in export_rows if r["outcome_label"] is not None)
-    symbols = {r["symbol"] for r in export_rows}
-
     print("=== ML dataset export ===")
     print(f"output       : {path}")
-    print(f"source_rows  : {len(rows)}")
-    print(f"export_rows  : {len(export_rows)}")
-    print(f"labeled_rows : {labeled}")
-    print(f"symbols      : {len(symbols)}")
+    print(f"source_rows  : {stats['source_rows']}")
+    print(f"export_rows  : {stats['export_rows']}")
+    print(f"labeled_rows : {stats['labeled_rows']}")
+    print(f"symbols      : {len(stats['symbols'])}")
     print(f"label_scope  : {args.label_scope}")
     print(f"complete_only: {not args.include_incomplete_labels}")
     for reason, n in sorted(exclusion_counts.items()):
@@ -300,7 +354,7 @@ def main() -> int:
     if manifest_path:
         print(f"manifest     : {manifest_path}")
 
-    if not rows:
+    if not stats["source_rows"]:
         print("[WARN] no feature_snapshots matched the requested date range")
 
     return 0

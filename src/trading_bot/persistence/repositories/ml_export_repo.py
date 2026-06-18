@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import sqlite3
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 
 def _table_exists(con: sqlite3.Connection, table: str) -> bool:
@@ -39,7 +39,14 @@ class MlExportRepository:
     def __init__(self, db_path: Path | str):
         self.db_path = Path(db_path)
 
-    def fetch_rows(self, where_sql: str, params: tuple[Any, ...]) -> list[sqlite3.Row]:
+    def fetch_rows(
+        self,
+        where_sql: str,
+        params: tuple[Any, ...],
+        *,
+        row_callback: Callable[[sqlite3.Row], None] | None = None,
+        chunk_size: int = 1000,
+    ) -> list[sqlite3.Row]:
         with sqlite3.connect(f"file:{self.db_path}?mode=ro", uri=True) as con:
             con.row_factory = sqlite3.Row
             required = ("feature_snapshots", "labeled_setups")
@@ -303,4 +310,13 @@ class MlExportRepository:
                 WHERE {where_sql}
                 ORDER BY fs.timestamp, fs.symbol, fs.id
             """
-            return con.execute(query, params).fetchall()
+            cursor = con.execute(query, params)
+            if row_callback is not None:
+                while True:
+                    rows = cursor.fetchmany(max(1, int(chunk_size)))
+                    if not rows:
+                        break
+                    for row in rows:
+                        row_callback(row)
+                return []
+            return cursor.fetchall()

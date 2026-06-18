@@ -49,7 +49,15 @@ As of the latest roadmap work:
 - `ml_platform` remains a staged, ahead-of-live research lane with read-only readiness, replay, governance, manifest, and retraining reports.
 - `ml/models/similarity_v0/` remains a research-only metadata placeholder, while optional supervised and HMM artifacts can be trained under `ml/models/` for offline review only.
 - Research export support now includes DuckDB and Parquet/PyArrow so daily review datasets can be exported without changing live trading behavior.
-- `pipeline/after_close_learning.py` runs the recurring after-close quant learning loop: trade matching, rejected-signal outcome completion, automated learning-evidence repair, report-memory refresh, DuckDB/PyArrow research export, pattern/feature/post-trade/readiness reports, paper-learning authority outcome audit, guarded retraining, policy artifact registration, and point-in-time archival. `run_after_close_learning.sh` is now a scheduler wrapper only.
+- `pipeline/after_close_learning.py` is split into bounded lanes. The daily
+  after-close lane runs trade matching, rejected-signal outcome completion,
+  bounded learning-evidence repair, report-memory refresh, learning-readiness
+  checks, paper-learning authority audit, policy artifact registration, and
+  point-in-time archival. The heavier research lane owns DuckDB/PyArrow export,
+  pattern/feature/post-trade reports, historical-bar validation, adversarial
+  simulation, and guarded observe-only retraining. Each step has a memory/time
+  cap and a completion marker so reruns skip already-completed work.
+  `run_after_close_learning.sh` is now a scheduler wrapper for the daily lane.
 - `pipeline/learning_backfill_repair.py` is the automated post-session repair step for learning evidence. It loops candidate-universe forward-outcome backfill in bounded chunks until coverage reaches the configured target, then repairs approved matched exits that are missing canonical exit snapshots. It is analysis-only and cannot approve, size, or route orders.
 - `pipeline/post_session_review.py` owns post-session diagnostics and learning-evidence review with explicit warn-only report semantics, so ordinary review warnings no longer make the scheduled wrapper look like a hard runtime failure.
 - Optional TimescaleDB storage can mirror compact live feature ticks into `stock_ticks` when `TIMESCALE_DB_URI` is configured. This storage path has no trade authority.
@@ -573,13 +581,14 @@ when you want it to launch the focused retry backfill. Header-only/empty cache
 CSVs do not count toward coverage, and `--skip-existing-cache` retries them
 rather than treating them as complete.
 
-The after-close learning loop also runs
+The after-close research lane also runs
 `pipeline/historical_bar_completion_hook.py`. This hook watches the cache/
 manifest readiness fingerprint and triggers guarded observe-only retraining only
 once a new historical-bar coverage floor is crossed. It stores state under
 `runtime_state/historical_bar_training_hook_state.json`, skips repeated training
 for the same readiness fingerprint, and still cannot promote or alter live
-authority.
+authority. After-close lane step markers live under
+`runtime_state/pipeline_step_markers/after_close_learning/`.
 
 Build or inspect the canonical ML training export after coverage is acceptable:
 
@@ -1540,7 +1549,8 @@ Current major cron categories:
 8:30-14:59 Mon-Fri  live_features / label_features
 8:30-14:59 Mon-Fri  rolling/session/position momentum jobs
 8:30-14:59 Mon-Fri  position manager / portfolio rotation
-30 16 * * 1-5        after-close learning
+30 16 * * 1-5        after-close daily learning lane
+30 04 * * 6          after-close bounded research lane
 0 18 * * 1-4         after-hours event collection for next session
 0 18 * * 5           Friday after-hours event collection
 0 10,18 * * 6,0      weekend event collection
@@ -1654,12 +1664,15 @@ WAL, and writes a manifest under `data_archive/manifests/`. Mutating modes are
 blocked during regular market hours and while known runtime services are active
 unless explicitly forced.
 
-Weekly scheduled maintenance should use the conservative form:
+Scheduled dark-hours maintenance should use the conservative form:
 
 ```bash
 /home/tradingbot/trading-bot/venv/bin/python pipeline/db_right_size_maintenance.py \
   --execute-archive \
   --checkpoint \
+  --prune-rollbacks \
+  --rollback-retention-days 2 \
+  --rollback-min-keep 0 \
   --chunk-size 5000
 ```
 
@@ -1678,9 +1691,11 @@ sudo systemctl stop trading-bot fill-stream fill-poller live-bar-stream
 sudo systemctl start trading-bot fill-stream fill-poller live-bar-stream
 ```
 
-The tracked cron reference schedules the conservative weekly archive/checkpoint
-path at `03:30` Saturday. It intentionally does not schedule `--compact --swap`
-because `VACUUM INTO` can be long-running on large databases and should remain a
+The tracked cron reference schedules the conservative archive/checkpoint/rollback
+prune path at `03:30` Tuesday through Saturday. Rollback files older than two
+days are removed because verified database backups are the durable recovery path.
+It intentionally does not schedule `--compact --swap` because `VACUUM INTO` can
+be long-running on large databases and replacing the live DB should remain a
 planned downtime action.
 
 Downtime-safe SQLite compaction:

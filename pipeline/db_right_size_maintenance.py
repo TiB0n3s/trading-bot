@@ -79,11 +79,14 @@ def run(
     build_compact: bool,
     swap_compact: bool,
     checkpoint: bool,
+    prune_rollbacks: bool,
     compact_path: Path | None,
     archive_root: Path,
     manifest_dir: Path,
     chunk_size: int,
     max_chunks: int,
+    rollback_retention_days: int,
+    rollback_min_keep: int,
     skip_training_evidence: bool,
     force: bool,
     skip_market_hours_check: bool,
@@ -94,7 +97,7 @@ def run(
 ) -> dict[str, Any]:
     session = market_session()
     regular_session = is_market_hours()
-    mutating = execute_archive or build_compact or swap_compact or checkpoint
+    mutating = execute_archive or build_compact or swap_compact or checkpoint or prune_rollbacks
     active_services = _active_services(service_names)
     compact_path = compact_path or (
         sqlite_vacuum_swap.DEFAULT_COMPACT_DIR / f"{db_path.name}.compact"
@@ -109,6 +112,9 @@ def run(
         "build_compact": build_compact,
         "swap_compact": swap_compact,
         "checkpoint": checkpoint,
+        "prune_rollbacks": prune_rollbacks,
+        "rollback_retention_days": rollback_retention_days,
+        "rollback_min_keep": rollback_min_keep,
         "compact_path": str(compact_path),
         "archive_root": str(archive_root),
         "market_session": session,
@@ -127,7 +133,7 @@ def run(
         _write_manifest(manifest, manifest_dir)
         return manifest
 
-    if mutating and active_services and not skip_service_check and not force:
+    if swap_compact and active_services and not skip_service_check and not force:
         manifest["status"] = "blocked_active_services"
         manifest["blocked_services"] = active_services
         manifest["finished_at"] = _now_iso()
@@ -163,17 +169,8 @@ def run(
     )
 
     blocked = _blocked_archive_rows(archive_manifest)
-    if blocked and execute_archive and not force:
-        manifest["status"] = "blocked_archive_training_evidence"
+    if blocked and execute_archive:
         manifest["blocked_tables"] = blocked
-        manifest["source_report_after"] = build_report(
-            db_path,
-            dbstat_limit=0,
-            dbstat_timeout_sec=dbstat_timeout_sec,
-        )
-        manifest["finished_at"] = _now_iso()
-        _write_manifest(manifest, manifest_dir)
-        return manifest
 
     if build_compact or swap_compact:
         vacuum_manifest = sqlite_vacuum_swap.run(
@@ -227,13 +224,28 @@ def run(
             }
         )
 
+    if prune_rollbacks:
+        prune_result = sqlite_vacuum_swap.prune_rollback_files(
+            db_path=db_path,
+            retention_days=rollback_retention_days,
+            min_keep=rollback_min_keep,
+            dry_run=False,
+        )
+        manifest["actions"].append(
+            {
+                "action": "sqlite_rollback_prune",
+                "status": "complete",
+                "result": prune_result,
+            }
+        )
+
     after = build_report(
         db_path,
         dbstat_limit=dbstat_limit,
         dbstat_timeout_sec=dbstat_timeout_sec,
     )
     manifest["source_report_after"] = after
-    manifest["status"] = "complete"
+    manifest["status"] = "complete_with_warnings" if blocked and execute_archive else "complete"
     manifest["finished_at"] = _now_iso()
     _write_manifest(manifest, manifest_dir)
     return manifest
@@ -254,6 +266,9 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--swap", action="store_true", help="Swap compact copy into live db path")
     parser.add_argument("--compact-path")
     parser.add_argument("--checkpoint", action="store_true")
+    parser.add_argument("--prune-rollbacks", action="store_true")
+    parser.add_argument("--rollback-retention-days", type=int, default=2)
+    parser.add_argument("--rollback-min-keep", type=int, default=0)
     parser.add_argument("--skip-training-evidence", action="store_true")
     parser.add_argument("--skip-market-hours-check", action="store_true")
     parser.add_argument("--skip-service-check", action="store_true")
@@ -278,11 +293,14 @@ def main(argv: list[str] | None = None) -> int:
         build_compact=bool(args.compact),
         swap_compact=bool(args.swap),
         checkpoint=bool(args.checkpoint),
+        prune_rollbacks=bool(args.prune_rollbacks),
         compact_path=Path(args.compact_path) if args.compact_path else None,
         archive_root=Path(args.archive_root),
         manifest_dir=Path(args.manifest_dir),
         chunk_size=max(1, int(args.chunk_size)),
         max_chunks=max(0, int(args.max_chunks)),
+        rollback_retention_days=max(0, int(args.rollback_retention_days)),
+        rollback_min_keep=max(0, int(args.rollback_min_keep)),
         skip_training_evidence=bool(args.skip_training_evidence),
         force=bool(args.force),
         skip_market_hours_check=bool(args.skip_market_hours_check),
@@ -292,7 +310,7 @@ def main(argv: list[str] | None = None) -> int:
         dbstat_timeout_sec=max(0.1, float(args.dbstat_timeout_sec)),
     )
     print(json.dumps(manifest, indent=2, sort_keys=True))
-    return 0 if manifest.get("status") == "complete" else 2
+    return 0 if manifest.get("status") in {"complete", "complete_with_warnings"} else 2
 
 
 if __name__ == "__main__":

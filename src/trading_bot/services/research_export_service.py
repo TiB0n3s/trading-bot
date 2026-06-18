@@ -6,7 +6,7 @@ import json
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterable
 
 from repositories.research_export_repo import ResearchExportRepository
 
@@ -106,16 +106,31 @@ class ResearchExportService:
         *,
         output_root: Path | str,
         datasets: tuple[ResearchDatasetSpec, ...] = DEFAULT_RESEARCH_DATASETS,
+        chunk_size: int = 1000,
     ):
         self.repository = repository
         self.output_root = Path(output_root)
         self.datasets = datasets
+        self.chunk_size = max(1, int(chunk_size))
 
     @staticmethod
-    def _write_parquet(rows: list[dict[str, Any]], path: Path) -> None:
+    def _write_parquet_chunks(chunks: Iterable[list[dict[str, Any]]], path: Path) -> int:
         pa, pq = _import_pyarrow()
-        table = pa.Table.from_pylist(rows)
-        pq.write_table(table, path)
+        writer = None
+        row_count = 0
+        try:
+            for rows in chunks:
+                if not rows:
+                    continue
+                table = pa.Table.from_pylist(rows, schema=writer.schema if writer else None)
+                if writer is None:
+                    writer = pq.ParquetWriter(path, table.schema)
+                writer.write_table(table)
+                row_count += len(rows)
+        finally:
+            if writer is not None:
+                writer.close()
+        return row_count
 
     @staticmethod
     def _create_duckdb_views(duckdb_path: Path, dataset_entries: list[dict[str, Any]]) -> None:
@@ -146,24 +161,29 @@ class ResearchExportService:
 
         dataset_entries: list[dict[str, Any]] = []
         for spec in self.datasets:
-            rows, date_columns = self.repository.rows_for_date(
+            chunk_iter, date_columns = self.repository.iter_rows_for_date(
                 table=spec.table,
                 target_date=target_date,
                 date_columns=spec.date_columns,
                 limit=limit,
+                chunk_size=self.chunk_size,
+            )
+            parquet_path = output_dir / f"{spec.name}.parquet"
+            if parquet_path.exists():
+                parquet_path.unlink()
+            total_rows = self._write_parquet_chunks(
+                (chunk for chunk, _date_columns in chunk_iter),
+                parquet_path,
             )
             entry: dict[str, Any] = {
                 "name": spec.name,
                 "table": spec.table,
-                "rows": len(rows),
+                "rows": total_rows,
                 "date_columns": date_columns,
-                "parquet_path": None,
-                "status": "empty" if not rows else "exported",
+                "parquet_path": str(parquet_path) if total_rows else None,
+                "chunk_size": self.chunk_size,
+                "status": "empty" if not total_rows else "exported",
             }
-            if rows:
-                parquet_path = output_dir / f"{spec.name}.parquet"
-                self._write_parquet(rows, parquet_path)
-                entry["parquet_path"] = str(parquet_path)
             dataset_entries.append(entry)
 
         duckdb_path = output_dir / "research.duckdb"

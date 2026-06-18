@@ -54,7 +54,8 @@
 
 ## Follow-Ups
 - [ ] Watch the next market-hours auto-buy run after `8230be2`; expected result is no crash on locked audit writes and no 5-second-per-row audit waits.
-- [ ] Add a DB workload report or ops check that flags long-running writer overlap with auto-buy windows.
+- [x] Add a DB workload report or ops check that flags long-running writer overlap with auto-buy windows.
+  - Result: `python3 scripts/db_workload_report.py --writer-overlap-date YYYY-MM-DD --writer-overlap-duration-threshold-sec 60` flags long `run_label_features` / `session_momentum` overlaps with `auto_buy_manager`.
 - [ ] Consider batching auto-buy audit writes into one transaction when the DB is available.
 - [ ] Consider moving best-effort audit/event streams to a separate SQLite database or append-only queue if writer contention persists.
 - [ ] Review `run_label_features` and `session_momentum` write batches; they are the current lock-pressure sources.

@@ -131,7 +131,10 @@ Key operational read:
 - [x] Run full outcomed-set net/excess machinery check with episode collapse.
   - Result: `5,756` outcomed rows collapsed to `460` non-overlapping 60-minute symbol episodes; spread guard removed raw spread distortion; SPY/QQQ/SOXX excess computed where applicable.
 - [ ] Continue tracking SQLite writer overlap from `run_label_features` and `session_momentum`.
-- [ ] Add DB workload report flagging long-running writer overlap with auto-buy windows.
+  - Current command: `python3 scripts/db_workload_report.py --writer-overlap-date YYYY-MM-DD --writer-overlap-duration-threshold-sec 60`.
+  - 2026-06-17 baseline: `auto_buy_runs=181`, `watched_runs=32`, `overlap_count=124`, `long_running_overlap_count=124`.
+- [x] Add DB workload report flagging long-running writer overlap with auto-buy windows.
+  - Result: `scripts/db_workload_report.py` now reads the `job_runs` ledger and flags long `run_label_features` / `session_momentum` overlaps against `auto_buy_manager`.
 - [ ] Consider batching auto-buy audit writes into one transaction.
 - [ ] Consider moving best-effort audit/event streams to a separate SQLite DB or append-only queue.
 

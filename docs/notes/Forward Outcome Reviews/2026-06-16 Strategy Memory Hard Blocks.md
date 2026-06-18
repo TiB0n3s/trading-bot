@@ -52,9 +52,21 @@ Question: is the gate preventing cold-start learning?
 - Near-close rows need explicit partial labeling because 60-minute outcomes are unavailable.
 - Captured spreads can dominate the verdict. OKTA's late rows require quote-quality review before treating gross upside as missed EV.
 
+## Full-Set Machinery Check
+- Candidate outcome backfill for 2026-06-16 completed with `rows=7600`, `skipped_existing=7501`, `updated=99`, `no_bars=99`, and coverage unchanged at `7501 / 7600` (`98.7%`).
+- Spread capture existed for this day: all `7,501` outcomed `candidate_universe` rows had raw spread fields.
+- Spread-quality issue was already present: using the same `0 <= spread_pct <= 2.0` guard excluded `3,459 / 7,501` rows from net-cost subtraction.
+- Full outcomed set: `7,501` rows across `76` symbols collapsed into `532` non-overlapping 60-minute symbol episodes; average rows per episode was `14.10`, median `16`, max `17`.
+- Benchmark coverage: SPY and QQQ same-window local bars were available; SOXX 1-minute bars were pulled for semiconductor excess.
+- There were no `score >= 29` episodes on 2026-06-16, so the 6/17 high-score episode cut has no direct same-cut comparison.
+- Episode-level `score >= 25`: `6` episodes, `6` symbols, hit rate `40.0%`, average `return_60m=-0.869%`, guarded `net_return_60m=-0.149%`, guarded `net_excess_spy_60m=0.025%`, guarded `net_excess_soxx_60m=0.847%`; `45` underlying rows were spread-guarded.
+- Semiconductor-only episode `score >= 20`: `1` episode, `1` symbol, hit rate `0.0%`, average `return_60m=-3.880%`, guarded `net_return_60m=-3.951%`, guarded `net_excess_soxx_60m=-2.562%`.
+- Discipline: this is one-day data-quality and drift validation, not edge evidence. A bad read is consistent with the no-edge prior; a good read would still be one independent day in one regime.
+
 ## Follow-Ups
 - [x] Add a report that decomposes `strategy_memory` hard blocks into symbol, context, and bar-pattern contributors.
   - Command: `python3 ops_check.py strategy-memory-hard-blocks 2026-06-16 --samples 20`
+- [x] Run 2026-06-16 candidate outcome backfill and guarded full-set net/excess machinery check.
 - [ ] Add full-day forward-outcome tracking for all hard-blocked candidates so the next audit closes the loop automatically.
 - [ ] Add or locate a per-symbol slippage model; current net review only subtracts captured spread.
 - [ ] Consider paper or size-limited probes for `strategy_memory_avoid_weak_evidence` rows.

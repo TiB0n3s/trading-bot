@@ -52,6 +52,8 @@ SAFETY_TESTS = [
     "tests/test_optional_dependency_service.py",
     "tests/test_ops_check_registry.py",
     "tests/test_architecture_boundaries.py",
+    "tests/test_audit_write_integrity_service.py",
+    "tests/test_audit_write_integrity_checks.py",
 ]
 
 FULL_SAFETY_TESTS = [

@@ -14,6 +14,9 @@ auto_buy_hard_blocked: 5691
 would_be_strong: 452
 would_be_watch: 519
 primary_incident: "[[2026-06-17 Auto-Buy Lock Contention]]"
+data_integrity: contended
+dropped_audit_writes: unknown
+frozen_logic_commit: 8230be2fe37396e0b27c11bbd0e4b5c6b47c860e
 ---
 
 # Daily Outcome - 2026-06-17
@@ -114,6 +117,11 @@ Key operational read:
 - SQLite write contention caused audit persistence failures/timeouts.
 - Fixes were committed to fail open on locked audit writes and shorten audit-write lock waits.
 - Production validation rolls to the next market-hours run after `8230be2`.
+
+### Data Integrity
+- `data_integrity: contended`. Lock contention occurred and fail-open audit writes were active under `8230be2`, but this run predates audit-write-loss instrumentation, so the dropped-write count is unrecoverable: `dropped_audit_writes: unknown`.
+- This means the headline counts (`auto_buy_snapshots=5869`, `auto_buy_hard_blocked=5691`, `would_be_strong=452`, `would_be_watch=519`) cannot be distinguished from a lossy capture. Treat them as a possible undercount, not a confirmed total.
+- Going forward, `python3 ops_check.py audit-write-integrity YYYY-MM-DD` reconciles rows-written against durably-recorded dropped writes and emits the `data_integrity` / `dropped_audit_writes` / `frozen_logic_commit` frontmatter for this note. A day with instrumentation present classifies as `clean`, `contended`, `lossy`, or `intrasession-logic-change`.
 
 ## Lessons
 - Do not interpret a post-build timeout as scorer slowness without checking `build_candidates`.

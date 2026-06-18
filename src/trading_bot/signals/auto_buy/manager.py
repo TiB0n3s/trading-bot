@@ -115,6 +115,7 @@ from symbols_config import (
 from config.conviction import load_conviction_config
 from repositories import auto_buy_repo
 from risk.exposure import any_cluster_limit_hit, cluster_exposure
+from services import audit_write_integrity
 
 _candidate_universe_services: dict[str, CandidateUniverseService] = {}
 _bot_events_services: dict[str, BotEventsService] = {}
@@ -2263,6 +2264,10 @@ def log_candidate(
     candidate = enrich_candidate_with_reference_snapshot(candidate)
     candidate = attach_canonical_decision_metadata(candidate)
     ensure_auto_buy_tables_initialized()
+    audit_date = timestamp[:10]
+    audit_write_integrity.record_attempt(
+        audit_write_integrity.STREAM_AUTO_BUY_SNAPSHOT, target_date=audit_date
+    )
     try:
         auto_buy_repo.insert_candidate_and_snapshot(
             timestamp=timestamp,
@@ -2278,6 +2283,13 @@ def log_candidate(
     except Exception as exc:
         if not auto_buy_repo.is_database_locked_error(exc):
             raise
+        # Fail-open: keep candidate discovery alive, but record the dropped
+        # write durably so the session's counts are not a silent undercount.
+        audit_write_integrity.record_drop(
+            audit_write_integrity.STREAM_AUTO_BUY_SNAPSHOT,
+            symbol=candidate.get("symbol"),
+            target_date=audit_date,
+        )
         print(
             f"[WARN] auto-buy candidate snapshot skipped for {candidate.get('symbol')}: "
             "database is locked",
@@ -2285,6 +2297,9 @@ def log_candidate(
         )
     feedback_status = str(candidate.get("intraday_feedback_status") or "neutral")
     if feedback_status not in {"neutral", "disabled"}:
+        audit_write_integrity.record_attempt(
+            audit_write_integrity.STREAM_INTRADAY_FEEDBACK, target_date=audit_date
+        )
         try:
             auto_buy_repo.insert_intraday_feedback_event(
                 created_at=now_et().isoformat(),
@@ -2307,10 +2322,23 @@ def log_candidate(
                 db_path=DB_PATH,
             )
         except Exception as exc:
+            audit_write_integrity.record_drop(
+                audit_write_integrity.STREAM_INTRADAY_FEEDBACK,
+                symbol=candidate.get("symbol"),
+                target_date=audit_date,
+                reason=(
+                    "database_locked"
+                    if auto_buy_repo.is_database_locked_error(exc)
+                    else type(exc).__name__
+                ),
+            )
             print(
                 f"[WARN] intraday feedback capture failed for {candidate.get('symbol')}: {exc}",
                 file=sys.stderr,
             )
+    audit_write_integrity.record_attempt(
+        audit_write_integrity.STREAM_CANDIDATE_UNIVERSE, target_date=audit_date
+    )
     try:
         candidate_universe_service().persist_scored_candidate(
             candidate_ts=timestamp,
@@ -2332,6 +2360,16 @@ def log_candidate(
             },
         )
     except Exception as exc:
+        audit_write_integrity.record_drop(
+            audit_write_integrity.STREAM_CANDIDATE_UNIVERSE,
+            symbol=candidate.get("symbol"),
+            target_date=audit_date,
+            reason=(
+                "database_locked"
+                if auto_buy_repo.is_database_locked_error(exc)
+                else type(exc).__name__
+            ),
+        )
         print(
             f"[WARN] candidate universe capture failed for {candidate.get('symbol')}: {exc}",
             file=sys.stderr,
@@ -2868,7 +2906,8 @@ def main() -> int:
                     flush=True,
                 )
         log_event_started = time.monotonic()
-        bot_events_service().log_event(
+        audit_write_integrity.record_attempt(audit_write_integrity.STREAM_BOT_EVENT)
+        bot_event_logged = bot_events_service().log_event(
             event_type="AUTO_BUY_CANDIDATE",
             symbol=candidate.get("symbol"),
             action="buy_candidate",
@@ -2878,6 +2917,14 @@ def main() -> int:
             source="auto_buy_manager.py",
             payload={"candidate": candidate, "order": order},
         )
+        if not bot_event_logged:
+            # log_event is fail-open and returns False on any error (including
+            # lock contention); record the dropped event so the session tally
+            # reflects it.
+            audit_write_integrity.record_drop(
+                audit_write_integrity.STREAM_BOT_EVENT,
+                symbol=candidate.get("symbol"),
+            )
         if AUTO_BUY_TIMING_LOG_ENABLED:
             log_event_elapsed = time.monotonic() - log_event_started
             if log_event_elapsed >= 0.25:
@@ -2926,7 +2973,34 @@ def main() -> int:
                     f"reason={getattr(result, 'reason', None) or '-'}"
                 )
 
+    _emit_audit_write_reconciliation()
     return 0
+
+
+def _emit_audit_write_reconciliation() -> None:
+    """Print a machine-readable per-run audit-write tally.
+
+    Fail-open and captured by job_runner output; makes a contended run's
+    dropped-write count visible without depending on the contended database.
+    """
+    try:
+        tally = audit_write_integrity.session_tally()
+        attempts = sum(counts.get("attempts", 0) for counts in tally.values())
+        dropped = sum(counts.get("dropped", 0) for counts in tally.values())
+        written = max(attempts - dropped, 0)
+        by_stream = ",".join(
+            f"{stream}:{counts.get('dropped', 0)}/{counts.get('attempts', 0)}"
+            for stream, counts in sorted(tally.items())
+        )
+        print(
+            "AUDIT_WRITE_RECONCILIATION "
+            f"attempts={attempts} written={written} dropped={dropped} "
+            f"git_sha={audit_write_integrity.current_git_sha() or 'unknown'} "
+            f"by_stream={by_stream or 'none'}",
+            flush=True,
+        )
+    except Exception:
+        return
 
 
 if __name__ == "__main__":

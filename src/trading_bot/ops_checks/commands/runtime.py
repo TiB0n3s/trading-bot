@@ -13,6 +13,7 @@ COMMAND_SPECS: dict[str, OpsCommandSpec] = {
     "feature-health": spec("feature-health"),
     "feature-watch": spec("feature-watch"),
     "decision-snapshots": spec("decision-snapshots", "decision_snapshot_health"),
+    "audit-write-integrity": spec("audit-write-integrity", "audit_write_integrity"),
     "policy-artifacts": noarg("policy-artifacts", "policy_artifact_health"),
     "retention": noarg("retention", "retention_health"),
     "order-health": spec("order-health"),

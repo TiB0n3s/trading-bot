@@ -7,6 +7,7 @@ Run:
 # ruff: noqa: E402, I001
 
 import json
+import os
 import sys
 import sqlite3
 import tempfile
@@ -25,6 +26,7 @@ from auto_buy_manager import should_collect_candidates
 from auto_buy_manager import symbol_window_summary
 from auto_buy_manager import window_symbols_for_run
 import auto_buy_manager
+from services import audit_write_integrity
 
 
 AUTO_BUY_RUNTIME_DEFAULTS = {
@@ -1295,15 +1297,20 @@ def test_log_candidate_tolerates_locked_primary_snapshot_write():
 
     with tempfile.TemporaryDirectory() as tmp:
         db_path = Path(tmp) / "test.db"
+        sidecar = Path(tmp) / "audit_write_integrity.jsonl"
         old_path = auto_buy_manager.DB_PATH
         old_reference_service = auto_buy_manager.candidate_reference_service
         old_insert = auto_buy_manager.auto_buy_repo.insert_candidate_and_snapshot
+        old_sidecar_env = os.environ.get("AUDIT_WRITE_INTEGRITY_LOG")
+        os.environ["AUDIT_WRITE_INTEGRITY_LOG"] = str(sidecar)
+        audit_write_integrity.reset_for_tests(sidecar_path=sidecar)
         auto_buy_manager.DB_PATH = db_path
         auto_buy_manager.candidate_reference_service = CandidateReferenceService()
         auto_buy_manager.auto_buy_repo.insert_candidate_and_snapshot = lambda **_kwargs: (
             _ for _ in ()
         ).throw(sqlite3.OperationalError("database is locked"))
         try:
+            # Fail-open: a locked primary snapshot write must not raise.
             auto_buy_manager.log_candidate(
                 {
                     "symbol": "SOFI",
@@ -1317,12 +1324,34 @@ def test_log_candidate_tolerates_locked_primary_snapshot_write():
             auto_buy_manager.DB_PATH = old_path
             auto_buy_manager.candidate_reference_service = old_reference_service
             auto_buy_manager.auto_buy_repo.insert_candidate_and_snapshot = old_insert
+            if old_sidecar_env is None:
+                os.environ.pop("AUDIT_WRITE_INTEGRITY_LOG", None)
+            else:
+                os.environ["AUDIT_WRITE_INTEGRITY_LOG"] = old_sidecar_env
 
         with sqlite3.connect(db_path) as con:
             row = con.execute("SELECT symbol, decision FROM candidate_universe").fetchone()
 
         assert_equal(row[0], "SOFI", "symbol")
         assert_equal(row[1], "watch", "decision")
+
+        # The dropped snapshot write is now observable: tallied in-process and
+        # recorded durably in the sidecar instead of being silently lost.
+        tally = audit_write_integrity.session_tally()
+        assert_equal(
+            tally.get(audit_write_integrity.STREAM_AUTO_BUY_SNAPSHOT, {}).get("dropped"),
+            1,
+            "dropped snapshot tally",
+        )
+        drops = [
+            record
+            for record in audit_write_integrity.read_records(
+                auto_buy_manager.now_et().date().isoformat(), sidecar_path=sidecar
+            )
+            if record.get("kind") == "drop"
+        ]
+        assert_equal(len(drops), 1, "durable drop record count")
+        assert_equal(drops[0]["symbol"], "SOFI", "durable drop symbol")
 
 
 def test_bucking_fading_tape_does_not_hard_block():

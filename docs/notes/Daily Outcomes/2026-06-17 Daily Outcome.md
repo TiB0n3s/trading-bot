@@ -92,8 +92,17 @@ Note: `would_be_strong` is counterfactual after removing hard blocks. `strong_bu
 - After outcome backfill, the strategy-memory hard-block review moved from no forward grounding to `sample_with_outcome=30` out of `31` displayed rows.
 - Keep the denominator straight: `452` is the counterfactual would-be-strong universe; `30` is the current outcomed evidence sample from the review display set. Today's high-score blocker verdicts still should not be changed from this session alone.
 - The review is capped/sample-oriented: `candidate_rows=1000` and `strategy_memory_rows=1000` come from `auto_buy_candidates`, while only `31` selected rows were enriched from `candidate_universe`.
-- The one missing displayed outcome was `AMD` at `2026-06-17T11:40:30.348149-04:00`; no matching `candidate_universe` row was found near that timestamp, so this looks like an enrichment/key mismatch rather than a no-forward-bars case.
+- The one missing displayed outcome was `AMD` at `2026-06-17T11:40:30.348149-04:00`; `auto_buy_candidates` has that row, while `candidate_universe` has nearby AMD rows at `11:36:10` and `11:44:12` but no exact `11:40:30` row. This is an enrichment/key absence rather than a no-forward-bars case.
 - Targeted coverage check for the named symbols was healthy: `TSM 79/79`, `ASML 86/86`, and `OKTA 74/74` candidate-universe rows had forward outcomes.
+
+## Net/Excess Machinery Check
+- Scope: full outcomed `candidate_universe` set for 2026-06-17, not the 31-row strategy-memory review display sample.
+- Coverage: `5,756` outcomed candidate rows across `76` symbols.
+- Effective-n collapse: 60-minute non-overlapping symbol episodes produced `460` episodes; average rows per episode was `12.51`, median `13`, max `17`.
+- Benchmark coverage: SPY and QQQ same-window minute bars were available; SOXX was not available locally for this date, so SOXX excess was not computed.
+- Row-level score cut `score >= 29`: `11` rows, `3` symbols, average `return_60m=0.312%`, average `net_return_60m_after_spread=-3.611%`, average `net_excess_spy_60m=-3.469%`.
+- Episode-level score cut `score >= 29`: `4` episodes, `3` symbols, average `return_60m=-0.228%`, hit rate `25.0%`, average `net_return_60m_after_spread=-4.244%`, average `net_excess_spy_60m=-4.225%`.
+- Concentration for the top episode cut: TSM, ASML, and two OKTA episodes. This validates the analysis machinery and denominator handling; it is not an edge readout.
 
 ## Operational Incident
 See [[2026-06-17 Auto-Buy Lock Contention]].
@@ -116,7 +125,9 @@ Key operational read:
 - [x] Re-run strategy-memory hard-block review once forward outcomes are available.
   - Result: `candidate_rows=1000`, `strategy_memory_rows=1000`, `sample_rows_enriched=31`, `sample_with_outcome=30`, `sample_missing_outcome=1`, `weak_evidence_rows=766`.
 - [x] Review TSM, ASML, and OKTA forward outcomes before changing any hard block.
-  - Result: raw forward returns were extracted for the top high-score rows; evaluative net/excess aggregation remains a separate analysis step.
+  - Result: raw forward returns were extracted for the top high-score rows.
+- [x] Run full outcomed-set net/excess machinery check with episode collapse.
+  - Result: `5,756` outcomed rows collapsed to `460` non-overlapping 60-minute symbol episodes; SPY/QQQ excess available, SOXX unavailable locally.
 - [ ] Continue tracking SQLite writer overlap from `run_label_features` and `session_momentum`.
 
 ## Related

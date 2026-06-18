@@ -99,10 +99,12 @@ Note: `would_be_strong` is counterfactual after removing hard blocks. `strong_bu
 - Scope: full outcomed `candidate_universe` set for 2026-06-17, not the 31-row strategy-memory review display sample.
 - Coverage: `5,756` outcomed candidate rows across `76` symbols.
 - Effective-n collapse: 60-minute non-overlapping symbol episodes produced `460` episodes; average rows per episode was `12.51`, median `13`, max `17`.
-- Benchmark coverage: SPY and QQQ same-window minute bars were available; SOXX was not available locally for this date, so SOXX excess was not computed.
-- Row-level score cut `score >= 29`: `11` rows, `3` symbols, average `return_60m=0.312%`, average `net_return_60m_after_spread=-3.611%`, average `net_excess_spy_60m=-3.469%`.
-- Episode-level score cut `score >= 29`: `4` episodes, `3` symbols, average `return_60m=-0.228%`, hit rate `25.0%`, average `net_return_60m_after_spread=-4.244%`, average `net_excess_spy_60m=-4.225%`.
-- Concentration for the top episode cut: TSM, ASML, and two OKTA episodes. This validates the analysis machinery and denominator handling; it is not an edge readout.
+- Spread guard: treat captured spread as usable for net-cost subtraction only when `0 <= spread_pct <= 2.0`. Wider values are excluded from net fields, not capped. This guarded out `2,731 / 5,756` rows, confirming the raw spread field was dominating the unguarded net result.
+- Benchmark coverage: SPY and QQQ same-window local bars were available; SOXX 1-minute bars were pulled for semiconductor excess.
+- Row-level score cut `score >= 29`: `11` rows, `3` symbols, average `return_60m=0.312%`, average guarded `net_return_60m=-0.647%`, average guarded `net_excess_spy_60m=-0.478%`, average guarded `net_excess_soxx_60m=-0.763%`; `4` rows were spread-guarded out for net fields.
+- Episode-level score cut `score >= 29`: `4` episodes, `3` symbols, average `return_60m=-0.228%`, hit rate `25.0%`, average guarded `net_return_60m=-0.981%`, average guarded `net_excess_spy_60m=-0.914%`, average guarded `net_excess_soxx_60m=-0.663%`; `29` underlying rows were spread-guarded.
+- Semiconductor-only episode cut `score >= 29`: `2` episodes, `2` symbols, average `return_60m=-0.185%`, hit rate `0.0%`, average guarded `net_return_60m=-0.981%`, average guarded `net_excess_soxx_60m=-0.663%`.
+- Concentration for the top episode cut: TSM, ASML, and two OKTA episodes. Conclusion: the pipeline works and the spread-quality issue is quantified, but this is still one-day machinery validation, not an edge readout. No edge shown; blocks do not look costly; a score of `30` is not tradeable by itself.
 
 ## Operational Incident
 See [[2026-06-17 Auto-Buy Lock Contention]].
@@ -127,7 +129,7 @@ Key operational read:
 - [x] Review TSM, ASML, and OKTA forward outcomes before changing any hard block.
   - Result: raw forward returns were extracted for the top high-score rows.
 - [x] Run full outcomed-set net/excess machinery check with episode collapse.
-  - Result: `5,756` outcomed rows collapsed to `460` non-overlapping 60-minute symbol episodes; SPY/QQQ excess available, SOXX unavailable locally.
+  - Result: `5,756` outcomed rows collapsed to `460` non-overlapping 60-minute symbol episodes; spread guard removed raw spread distortion; SPY/QQQ/SOXX excess computed where applicable.
 - [ ] Continue tracking SQLite writer overlap from `run_label_features` and `session_momentum`.
 
 ## Related

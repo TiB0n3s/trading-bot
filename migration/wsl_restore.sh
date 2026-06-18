@@ -113,13 +113,13 @@ rsync -a --info=progress2 --partial \
 log "5/8  Placing the secrets file at $ENV_DEST"
 if [ -f "$LOCAL_PROJECT_DIR/migration/_capture/trading-bot.env" ]; then
   sudo cp "$LOCAL_PROJECT_DIR/migration/_capture/trading-bot.env" "$ENV_DEST"
-  sudo chown root:root "$ENV_DEST"
+  sudo chown "$USER:$USER" "$ENV_DEST"
   sudo chmod 600 "$ENV_DEST"
   echo "    installed from captured copy"
 else
   echo "    captured env not found; pulling directly from the VM"
   rsync -a "$VM_SSH:$ENV_DEST" /tmp/trading-bot.env
-  sudo cp /tmp/trading-bot.env "$ENV_DEST"; sudo chown root:root "$ENV_DEST"; sudo chmod 600 "$ENV_DEST"
+  sudo cp /tmp/trading-bot.env "$ENV_DEST"; sudo chown "$USER:$USER" "$ENV_DEST"; sudo chmod 600 "$ENV_DEST"
   rm -f /tmp/trading-bot.env
 fi
 
@@ -129,16 +129,18 @@ uv venv venv --python "$PYTHON"
 # shellcheck disable=SC1091
 source venv/bin/activate
 uv pip install -r requirements-base.txt
-uv pip install --no-deps -e .          # mirrors the Dockerfile's `pip install --no-deps .`
+uv pip install -r requirements-dev.txt         # pytest/ruff/mypy — needed by run_safety_checks.py
+uv pip install -r requirements-research.txt    # torch/sklearn/xgboost — needed by the ML learning pipelines (heavy)
+uv pip install --no-deps -e .                  # mirrors the Dockerfile's `pip install --no-deps .`
 
 log "7/8  Verifying: DB migrations + databases + safety checks"
 set -a; source "$ENV_DEST"; set +a
 export PYTHONPATH="$LOCAL_PROJECT_DIR:$LOCAL_PROJECT_DIR/scripts:$LOCAL_PROJECT_DIR/src${PYTHONPATH:+:$PYTHONPATH}"
 
-echo "--- integrity_check on each DB ---"
+echo "--- quick_check on each DB (quick_check, not full integrity_check, so a 60GB DB finishes) ---"
 for db in "$LOCAL_PROJECT_DIR"/*.db; do
   [ -e "$db" ] || continue
-  echo -n "  $(basename "$db"): "; sqlite3 "$db" "PRAGMA integrity_check;" | head -1
+  echo -n "  $(basename "$db"): "; sqlite3 "$db" "PRAGMA quick_check;" | head -1
 done
 
 echo "--- migration status ---"

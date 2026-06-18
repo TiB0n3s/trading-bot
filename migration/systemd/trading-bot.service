@@ -1,0 +1,23 @@
+[Unit]
+Description=Trading Bot Flask/Gunicorn Service
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+# Adapted for WSL: original VM unit used User/Group=tradingbot, which does not
+# exist on this machine. Everything else is identical to the VM unit.
+User=tibones
+Group=tibones
+WorkingDirectory=/home/tradingbot/trading-bot
+EnvironmentFile=/etc/trading-bot.env
+ExecStartPre=/home/tradingbot/trading-bot/venv/bin/python /home/tradingbot/trading-bot/db_migrations.py apply
+ExecStart=/home/tradingbot/trading-bot/venv/bin/gunicorn \
+  --workers 3 \
+  --bind 127.0.0.1:5000 \
+  --timeout 120 \
+  app:app
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

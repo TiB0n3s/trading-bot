@@ -131,6 +131,9 @@ Key operational read:
 - [x] Run full outcomed-set net/excess machinery check with episode collapse.
   - Result: `5,756` outcomed rows collapsed to `460` non-overlapping 60-minute symbol episodes; spread guard removed raw spread distortion; SPY/QQQ/SOXX excess computed where applicable.
 - [ ] Continue tracking SQLite writer overlap from `run_label_features` and `session_momentum`.
+- [ ] Add DB workload report flagging long-running writer overlap with auto-buy windows.
+- [ ] Consider batching auto-buy audit writes into one transaction.
+- [ ] Consider moving best-effort audit/event streams to a separate SQLite DB or append-only queue.
 
 ## Related
 - [[2026-06-17 Auto-Buy Lock Contention]]

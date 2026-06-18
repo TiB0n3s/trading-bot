@@ -1,16 +1,16 @@
 # setup_wsl_on_d.ps1
 #
-# STEP 0 of the migration — run this in a Windows Terminal (PowerShell) on the
+# STEP 0 of the migration - run this in a Windows Terminal (PowerShell) on the
 # LOCAL PC, BEFORE migration/wsl_restore.sh.
 #
 # It relocates the Ubuntu WSL distro's virtual disk onto the 8TB D: drive and
 # sizes WSL to use a generous share of this 32-CPU / 64GB host. After this, the
-# ENTIRE Linux filesystem — code, the ~60GB SQLite DB, all runtime state —
+# ENTIRE Linux filesystem - code, the ~60GB SQLite DB, all runtime state -
 # physically lives on D: and runs at native ext4 speed.
 #
 # Why not just point the project at D:\ (/mnt/d)? Because WSL reaches Windows
 # drives through a slow translation layer that is unreliable for SQLite file
-# locking + WAL — a real corruption risk for trades.db. The DB must live on
+# locking + WAL - a real corruption risk for trades.db. The DB must live on
 # ext4. Relocating the vhdx puts ext4 *on D:*, which is what we want.
 
 $ErrorActionPreference = 'Stop'
@@ -36,7 +36,7 @@ Write-Host "`n==> Creating target dir $TargetDir" -ForegroundColor Cyan
 New-Item -ItemType Directory -Force -Path $TargetDir | Out-Null
 New-Item -ItemType Directory -Force -Path (Split-Path $SwapPath) | Out-Null
 
-Write-Host "`n==> Relocating '$Distro' onto D: (copies the vhdx — may take a while)" -ForegroundColor Cyan
+Write-Host "`n==> Relocating '$Distro' onto D: (copies the vhdx, may take a while)" -ForegroundColor Cyan
 # In-place move; preserves the distro registration, users, and default user.
 wsl --manage $Distro --move $TargetDir
 

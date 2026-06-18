@@ -12,11 +12,11 @@
 set -euo pipefail
 
 # ---- adjust these for your setup ------------------------------------------
-VM_SSH="tradingbot@VM-HOST-OR-IP"               # ssh target for the Ubuntu VM
+VM_SSH="tradingbot@192.168.99.28"               # ssh target for the Ubuntu VM
 VM_PROJECT_DIR="/home/tradingbot/trading-bot"   # path on the VM
 LOCAL_PROJECT_DIR="/home/tradingbot/trading-bot" # MUST match VM path — the run_*.sh scripts hardcode it
 ENV_DEST="/etc/trading-bot.env"
-PYTHON="python3.12"
+PYTHON="3.12"          # CPython version; provided by uv, not apt (matches the VM's python:3.12)
 # ---------------------------------------------------------------------------
 
 log() { printf '\n\033[1;36m==> %s\033[0m\n' "$*"; }
@@ -86,14 +86,17 @@ fi
 
 log "1/8  Installing system prerequisites"
 sudo apt-get update
+# NOTE: Python itself is NOT installed via apt — this distro may not ship 3.12.
+# uv provides a standalone CPython 3.12 below, matching the VM.
 sudo apt-get install -y build-essential ca-certificates sqlite3 rsync openssh-client \
-                        "${PYTHON}" "${PYTHON}-venv" git curl
+                        git curl
 
-log "2/8  Installing uv (fast Python package manager; matches uv.lock)"
+log "2/8  Installing uv + CPython $PYTHON (matches uv.lock and the VM)"
 if ! command -v uv >/dev/null 2>&1; then
   curl -LsSf https://astral.sh/uv/install.sh | sh
-  export PATH="$HOME/.local/bin:$PATH"
 fi
+export PATH="$HOME/.local/bin:$PATH"   # ensure uv is on PATH even if already installed
+uv python install "$PYTHON"
 
 log "3/8  Creating the project path (matching the VM so hardcoded paths work)"
 sudo mkdir -p "$LOCAL_PROJECT_DIR"

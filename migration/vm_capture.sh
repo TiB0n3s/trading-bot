@@ -119,4 +119,4 @@ Next:
 To RE-ENABLE this VM later (if you need to roll back):
     crontab "$OUT/crontab.bak"
     while read -r u; do sudo systemctl start "\$u"; done < "$OUT/stopped_services.txt"
-EOF
+

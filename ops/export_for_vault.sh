@@ -43,6 +43,7 @@ export PYTHONPATH="$BOT_DIR:$BOT_DIR/scripts:$BOT_DIR/src${PYTHONPATH:+:${PYTHON
 # shellcheck disable=SC1091
 source "$BOT_DIR/venv/bin/activate"
 
+<<<<<<< Updated upstream
 # --- staging --------------------------------------------------------------
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
@@ -58,6 +59,12 @@ python3 scripts/bot_events.py --since "$DATE" --json --limit "$LIMIT" > "$RAW"
 
 python3 - "$RAW" "$DATE" "$LIMIT" "$STAGE/bot_events_${DATE}.json" "$STAGE/manifest.json" <<'PY'
 import json, sys, socket, subprocess
+=======
+# 1. slimmed ledger for the day (read-only; WAL-safe; stdlib only)
+python3 - "$DB" "$DATE" "$STAGE/bot_events_${DATE}.json" "$STAGE/manifest.json" "$BOT_DIR" <<'PY'
+import json, sqlite3, sys, socket, subprocess
+from collections import Counter
+>>>>>>> Stashed changes
 from datetime import datetime, timezone
 
 raw_path, date, limit, out_path, manifest_path = sys.argv[1:6]
@@ -84,10 +91,21 @@ manifest = {
     "generated_at_utc": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
     "hostname": socket.gethostname(),
     "git_commit": git_commit(),
+<<<<<<< Updated upstream
     "event_query_limit": limit,
     "events_returned_by_query": raw_count,
     "events_for_date": len(same_day),
     "possibly_truncated": raw_count >= limit,
+=======
+    "events_for_date": len(events),
+    "event_counts_by_type": dict(
+        sorted(Counter(e["event_type"] for e in events).items(), key=lambda kv: -kv[1])
+    ),
+    "payload_handling": "slimmed: scalar candidate fields only; nested feature/trace dicts dropped (full payloads remain in trades.db)",
+    "run_logs": ("attached for this date"
+                 if datetime.now().strftime("%Y-%m-%d") == date
+                 else "omitted — rolling logs reflect only the latest run; export on the target date to capture its digest"),
+>>>>>>> Stashed changes
     "source": "ops/export_for_vault.sh",
 }
 with open(manifest_path, "w") as f:
@@ -97,6 +115,7 @@ if manifest["possibly_truncated"]:
     print(f"WARNING: query hit limit {limit}; ledger may be truncated", file=sys.stderr)
 PY
 
+<<<<<<< Updated upstream
 # --- 2. run-log snapshots (genuine stdout records; copied as-is) ---------
 for logname in after_close_learning post_session_review; do
   src="$BOT_DIR/${logname}.log"
@@ -104,6 +123,18 @@ for logname in after_close_learning post_session_review; do
     cp "$src" "$STAGE/${logname}_${DATE}.log"
   fi
 done
+=======
+# 2. run-log snapshots — these are ROLLING files (latest run only), so they only
+#    correspond to the date they were produced (today). Attach only when exporting
+#    today; for a historical date they'd mislabel the wrong day's digest.
+TODAY="$(date +%F)"
+if [[ "$DATE" == "$TODAY" ]]; then
+  for logname in daily_summary after_close_learning post_session_review; do
+    src="$BOT_DIR/${logname}.log"
+    if [[ -s "$src" ]]; then cp "$src" "$STAGE/${logname}_${DATE}.log"; fi
+  done
+fi
+>>>>>>> Stashed changes
 
 # --- 3. stream the bundle to stdout (pure tar; warnings went to stderr) --
 tar -C "$WORK" -czf - "bot-export-$DATE"

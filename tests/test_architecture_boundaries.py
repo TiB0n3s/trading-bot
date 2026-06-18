@@ -87,6 +87,7 @@ APPROVED_DB_BOUNDARIES = {
     "scripts/db_workload_report.py",
     "scripts/analyze_ml_edge.py",
     "scripts/backfill_candidate_ml_outcomes.py",
+    "scripts/benchmark_report.py",
     "scripts/external_signal_features.py",
     "scripts/post_earnings_drift_research.py",
     "scripts/sqlite_checkpoint.py",

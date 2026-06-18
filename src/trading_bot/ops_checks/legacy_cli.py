@@ -148,6 +148,7 @@ _LAZY_HANDLER_REFS = {
     "run_setup_breakdown": "trading_bot.ops_checks.commands.setup_breakdown:run_setup_breakdown",
     "run_shadow_prediction_report": "trading_bot.ops_checks.commands.shadow_prediction_checks:run_shadow_prediction_report",
     "run_signal_source_readiness": "trading_bot.ops_checks.commands.signal_source_checks:run_signal_source_readiness",
+    "run_audit_write_integrity": "trading_bot.ops_checks.commands.audit_write_integrity_checks:run_audit_write_integrity",
     "run_decision_snapshot_health": "trading_bot.ops_checks.commands.snapshot_checks:run_decision_snapshot_health",
     "run_sqlite_ownership_report": "trading_bot.ops_checks.commands.sqlite_ownership_checks:run_sqlite_ownership_report",
     "run_symbol_pattern_outcomes": "trading_bot.ops_checks.commands.symbol_pattern_checks:run_symbol_pattern_outcomes",
@@ -530,6 +531,10 @@ def signal_source_readiness(target_date):
 
 def decision_snapshot_health(target_date):
     return run_decision_snapshot_health(target_date, base_dir=BASE_DIR)
+
+
+def audit_write_integrity(target_date):
+    return run_audit_write_integrity(target_date, base_dir=BASE_DIR)
 
 
 def policy_artifact_health():

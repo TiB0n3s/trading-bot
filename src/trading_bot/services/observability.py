@@ -17,6 +17,7 @@ _metrics = {
     "setup_quality_degradation_frequency": {},
     "policy_disagreement_rates": {},
     "policy_kill_switches": {},
+    "audit_write_failopen": {},
 }
 
 
@@ -88,6 +89,28 @@ def setup_quality_degradation_category(source: str | None) -> str:
     return "other_fallback"
 
 
+def record_audit_write(stream: str, *, attempt: bool = True, dropped: bool = False) -> None:
+    """Tally best-effort (fail-open) audit-write attempts and drops per stream.
+
+    Each logical write records exactly one ``attempt`` and, if it was dropped
+    under lock contention, one ``dropped``.  A non-zero ``dropped`` count means
+    rows were silently lost, so a session's observation counts may be an
+    undercount.  This surfaces that on the live metrics snapshot / dashboard
+    path; the durable cross-session record lives in
+    :mod:`trading_bot.services.audit_write_integrity`.
+    """
+    key = stream or "unknown"
+    with _lock:
+        item = _metrics["audit_write_failopen"].setdefault(
+            key,
+            {"attempts": 0, "dropped": 0},
+        )
+        if attempt:
+            item["attempts"] += 1
+        if dropped:
+            item["dropped"] += 1
+
+
 def record_policy_comparison(policy: str, primary: str | None, secondary: str | None) -> None:
     if secondary is None:
         return
@@ -131,5 +154,10 @@ def metrics_snapshot() -> dict:
         comparisons = item.get("comparisons") or 0
         disagreements = item.get("disagreements") or 0
         item["disagreement_rate"] = round(disagreements / comparisons, 4) if comparisons else 0.0
+
+    for item in snapshot["audit_write_failopen"].values():
+        attempts = item.get("attempts") or 0
+        dropped = item.get("dropped") or 0
+        item["drop_rate"] = round(dropped / attempts, 4) if attempts else 0.0
 
     return snapshot

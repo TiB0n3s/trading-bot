@@ -67,9 +67,13 @@ Question: is the gate preventing cold-start learning?
 - [x] Add a report that decomposes `strategy_memory` hard blocks into symbol, context, and bar-pattern contributors.
   - Command: `python3 ops_check.py strategy-memory-hard-blocks 2026-06-16 --samples 20`
 - [x] Run 2026-06-16 candidate outcome backfill and guarded full-set net/excess machinery check.
-- [ ] Add full-day forward-outcome tracking for all hard-blocked candidates so the next audit closes the loop automatically.
-- [ ] Add or locate a per-symbol slippage model; current net review only subtracts captured spread.
+- [x] Add full-day forward-outcome tracking for all hard-blocked candidates so the next audit closes the loop automatically.
+  - Command: `python3 ops_check.py strategy-memory-hard-blocks YYYY-MM-DD --full-day`
+  - 2026-06-16 smoke result: `full_day_rows_enriched=1177`, `full_day_with_outcome=1078`, `full_day_missing_outcome=99`, `full_day_missing_join=0`.
+- [x] Add or locate a per-symbol slippage model; current net review only subtracts captured spread.
+  - Located `ops/model_promotion_evidence/cost_slippage_exit_analysis.json`, but it is evidence-only and not a per-symbol slippage model. The report now prints this distinction.
 - [ ] Consider paper or size-limited probes for `strategy_memory_avoid_weak_evidence` rows.
+  - The report surfaces weak-evidence probe candidates from the full-day reviewed set; actual paper/size-limited authority remains a separate approval decision.
 - [ ] Re-run this review over multiple sessions before changing any hard block.
 
 ## Related

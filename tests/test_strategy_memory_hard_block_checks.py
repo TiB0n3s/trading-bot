@@ -64,6 +64,8 @@ def test_build_strategy_memory_hard_block_rows_decomposes_bar_pattern_and_costs(
     assert row["bar_pattern_key"] == "unknown|insufficient_forward_bars"
     assert row["has_forward_outcome"] is True
     assert row["spread_cost_pct"] == 0.1617
+    assert row["spread_cost_guarded_pct"] == 0.1617
+    assert row["spread_guarded_out"] is False
     assert row["net_return_60m_after_spread"] == 0.0883
 
 
@@ -114,6 +116,40 @@ def test_build_strategy_memory_hard_block_rows_flags_weak_evidence_probe_candida
     assert row["has_forward_outcome"] is True
 
 
+def test_build_strategy_memory_hard_block_rows_guards_unusable_spreads():
+    rows = [
+        {
+            "candidate_ts": "2026-06-16T15:30:06.110388-04:00",
+            "symbol": "OKTA",
+            "score": 26.0,
+            "decision": "skip",
+            "candidate_json": json.dumps(
+                {
+                    "candidate": {
+                        "bid": 110.0,
+                        "ask": 122.0,
+                        "hard_block_reason": "strategy_memory_avoid:wide_spread",
+                        "reason": "strategy_memory:avoid:min_setup=70:trades=5",
+                    },
+                    "forward_reference_price": 116.0,
+                    "return_60m": 0.75,
+                    "label_status": "labeled",
+                }
+            ),
+        }
+    ]
+
+    review_rows = build_strategy_memory_hard_block_rows(rows)
+
+    assert len(review_rows) == 1
+    row = review_rows[0]
+    assert row["spread_cost_pct"] == 10.3448
+    assert row["spread_cost_guarded_pct"] is None
+    assert row["spread_guarded_out"] is True
+    assert row["net_return_60m_after_spread"] is None
+
+
 if __name__ == "__main__":
     test_build_strategy_memory_hard_block_rows_decomposes_bar_pattern_and_costs()
     test_build_strategy_memory_hard_block_rows_flags_weak_evidence_probe_candidates()
+    test_build_strategy_memory_hard_block_rows_guards_unusable_spreads()

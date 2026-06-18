@@ -1035,6 +1035,7 @@ def strategy_memory_hard_blocks(target_date):
         base_dir=BASE_DIR,
         symbol=symbol,
         samples=_int_option("--samples", 20),
+        full_day="--full-day" in sys.argv,
     )
 
 

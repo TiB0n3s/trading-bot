@@ -11,6 +11,7 @@ from typing import Any
 from repositories import auto_buy_repo
 
 REPORT_VERSION = "strategy_memory_hard_block_review_v1"
+SPREAD_GUARD_MAX_PCT = 2.0
 
 
 def _load_json(raw: Any) -> dict[str, Any]:
@@ -121,6 +122,30 @@ def _spread_cost_pct(payload: dict[str, Any]) -> float | None:
     return round((ask - bid) / reference * 100.0, 4)
 
 
+def _guarded_spread_cost_pct(spread_cost: float | None) -> float | None:
+    if spread_cost is None or spread_cost < 0 or spread_cost > SPREAD_GUARD_MAX_PCT:
+        return None
+    return spread_cost
+
+
+def _slippage_artifact_status(base_dir: Path) -> dict[str, Any]:
+    artifact = base_dir / "ops" / "model_promotion_evidence" / "cost_slippage_exit_analysis.json"
+    payload: dict[str, Any] = {}
+    if artifact.exists():
+        try:
+            loaded = json.loads(artifact.read_text(encoding="utf-8"))
+            payload = loaded if isinstance(loaded, dict) else {}
+        except Exception:
+            payload = {}
+    return {
+        "artifact_path": str(artifact),
+        "artifact_exists": artifact.exists(),
+        "artifact_ready": payload.get("ready") is True,
+        "source": payload.get("source"),
+        "per_symbol_model_available": False,
+    }
+
+
 def build_strategy_memory_hard_block_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     out: list[dict[str, Any]] = []
     for row in rows:
@@ -150,9 +175,10 @@ def build_strategy_memory_hard_block_rows(rows: list[dict[str, Any]]) -> list[di
         max_adverse_60m = _float(payload.get("max_adverse_60m") or payload.get("forward_mae_pct"))
         return_eod = _float(payload.get("return_eod"))
         spread_cost = _spread_cost_pct(payload)
+        guarded_spread_cost = _guarded_spread_cost_pct(spread_cost)
         net_60m = (
-            round(return_60m - spread_cost, 4)
-            if return_60m is not None and spread_cost is not None
+            round(return_60m - guarded_spread_cost, 4)
+            if return_60m is not None and guarded_spread_cost is not None
             else None
         )
 
@@ -176,6 +202,8 @@ def build_strategy_memory_hard_block_rows(rows: list[dict[str, Any]]) -> list[di
                 "max_favorable_60m": max_favorable_60m,
                 "max_adverse_60m": max_adverse_60m,
                 "spread_cost_pct": spread_cost,
+                "spread_cost_guarded_pct": guarded_spread_cost,
+                "spread_guarded_out": spread_cost is not None and guarded_spread_cost is None,
                 "net_return_60m_after_spread": net_60m,
                 "label_status": payload.get("label_status"),
                 "partial_reason": payload.get("partial_reason"),
@@ -198,6 +226,7 @@ def _print_group_summary(review_rows: list[dict[str, Any]]) -> None:
             "score_count": 0,
             "return_60m_values": [],
             "net_60m_values": [],
+            "spread_guarded_out": 0,
         }
     )
     for row in review_rows:
@@ -218,11 +247,13 @@ def _print_group_summary(review_rows: list[dict[str, Any]]) -> None:
             group["return_60m_values"].append(float(row["return_60m"]))
         if row.get("net_return_60m_after_spread") is not None:
             group["net_60m_values"].append(float(row["net_return_60m_after_spread"]))
+        if row.get("spread_guarded_out"):
+            group["spread_guarded_out"] += 1
 
     print()
     print("By blocker/component")
     print(
-        "  blocker                            bar_pattern                  key                         rows smp avgScore smp60 smpNet"
+        "  blocker                            bar_pattern                  key                         rows smp avgScore smp60 smpNet sprGuard"
     )
     for (blocker, label, key), group in sorted(
         groups.items(), key=lambda item: (-item[1]["rows"], item[0])
@@ -239,7 +270,8 @@ def _print_group_summary(review_rows: list[dict[str, Any]]) -> None:
             f"{_short(key, 27):<27} "
             f"{group['rows']:>4} {group['with_outcome']:>3} "
             f"{avg_score_s:>8} "
-            f"{_fmt_pct(avg_return):>7} {_fmt_pct(avg_net):>7}"
+            f"{_fmt_pct(avg_return):>7} {_fmt_pct(avg_net):>7} "
+            f"{group['spread_guarded_out']:>8}"
         )
 
 
@@ -269,7 +301,7 @@ def _print_top_rows(review_rows: list[dict[str, Any]], samples: int) -> None:
             f"{_fmt_pct(row.get('return_60m')):>7} "
             f"{_fmt_pct(row.get('max_favorable_60m')):>7} "
             f"{_fmt_pct(row.get('max_adverse_60m')):>7} "
-            f"{_fmt_pct(row.get('spread_cost_pct')):>6} "
+            f"{_fmt_pct(row.get('spread_cost_guarded_pct')):>6} "
             f"{_fmt_pct(row.get('net_return_60m_after_spread')):>7} "
             f"{_short(status, 18)}"
         )
@@ -296,12 +328,65 @@ def _print_probe_candidates(review_rows: list[dict[str, Any]], samples: int) -> 
         )
 
 
+def _print_coverage_summary(
+    *,
+    review_rows: list[dict[str, Any]],
+    enriched_rows: list[dict[str, Any]],
+    sample_keys: set[tuple[str, str]],
+    full_day: bool,
+) -> None:
+    scoped_rows = (
+        review_rows
+        if full_day
+        else [
+            row
+            for row in review_rows
+            if (str(row.get("symbol")), str(row.get("candidate_ts"))) in sample_keys
+        ]
+    )
+    with_outcome = sum(1 for row in scoped_rows if row.get("has_forward_outcome"))
+    missing = len(scoped_rows) - with_outcome
+    spread_rows = sum(1 for row in scoped_rows if row.get("spread_cost_pct") is not None)
+    spread_guarded = sum(1 for row in scoped_rows if row.get("spread_guarded_out"))
+    missing_join = sum(1 for row in enriched_rows if not row.get("candidate_json"))
+    label = "full_day" if full_day else "sample"
+    print(f"{label}_rows_enriched : {len(scoped_rows)}")
+    print(f"{label}_with_outcome  : {with_outcome}")
+    print(f"{label}_missing_outcome: {missing}")
+    print(f"{label}_spread_rows   : {spread_rows}")
+    print(f"{label}_spread_guarded: {spread_guarded}")
+    print(f"{label}_missing_join  : {missing_join}")
+
+
+def _print_slippage_status(base_dir: Path) -> None:
+    status = _slippage_artifact_status(base_dir)
+    print()
+    print("Slippage evidence")
+    print(f"  cost_slippage_artifact : {status['artifact_exists']}")
+    print(f"  artifact_ready         : {status['artifact_ready']}")
+    print(f"  artifact_source        : {status.get('source') or '-'}")
+    print(f"  per_symbol_model       : {status['per_symbol_model_available']}")
+    if status["artifact_exists"] and not status["per_symbol_model_available"]:
+        print("  note                   : existing artifact is evidence, not per-symbol slippage")
+
+
+def _print_review_guardrails(*, full_day: bool) -> None:
+    print()
+    print("Review guardrails")
+    print("  independent_days       : 1")
+    print("  minimum_before_policy  : multiple independent sessions")
+    print("  runtime_effect         : analysis_only_no_trade_authority")
+    if not full_day:
+        print("  next_audit             : rerun with --full-day after outcome backfill")
+
+
 def run_strategy_memory_hard_blocks(
     target_date: str,
     *,
     base_dir: Path,
     symbol: str | None = None,
     samples: int = 20,
+    full_day: bool = False,
 ) -> bool:
     print()
     print("=" * 72)
@@ -338,14 +423,16 @@ def run_strategy_memory_hard_blocks(
         if row.get("weak_evidence")
     ]
     sample_keys = top_keys | set(weak_keys[:samples])
-    auto_buy_repo.enrich_candidate_universe_json(
-        [
+    rows_to_enrich = (
+        rows
+        if full_day
+        else [
             row
             for row in rows
             if (str(row.get("symbol")), str(row.get("candidate_ts"))) in sample_keys
-        ],
-        db_path=db_path,
+        ]
     )
+    auto_buy_repo.enrich_candidate_universe_json(rows_to_enrich, db_path=db_path)
     review_rows = build_strategy_memory_hard_block_rows(rows)
     if symbol:
         print(f"symbol               : {symbol.upper()}")
@@ -356,24 +443,31 @@ def run_strategy_memory_hard_blocks(
         print("[WARN] no strategy-memory hard-block rows found")
         return False
 
-    sample_rows = [
-        row
-        for row in review_rows
-        if (str(row.get("symbol")), str(row.get("candidate_ts"))) in sample_keys
-    ]
-    with_outcome = sum(1 for row in sample_rows if row.get("has_forward_outcome"))
     weak = sum(1 for row in review_rows if row.get("weak_evidence"))
-    missing = len(sample_rows) - with_outcome
-    print(f"sample_rows_enriched : {len(sample_rows)}")
-    print(f"sample_with_outcome  : {with_outcome}")
-    print(f"sample_missing_outcome: {missing}")
     print(f"weak_evidence_rows   : {weak}")
-    print("cost_model           : spread_only_from_captured_bid_ask; slippage_not_applied")
+    print(
+        "cost_model           : guarded_spread_only_from_captured_bid_ask; "
+        f"spread_guard_max_pct={SPREAD_GUARD_MAX_PCT}; slippage_not_applied"
+    )
+    _print_coverage_summary(
+        review_rows=review_rows,
+        enriched_rows=rows_to_enrich,
+        sample_keys=sample_keys,
+        full_day=full_day,
+    )
 
     _print_group_summary(review_rows)
     _print_top_rows(review_rows, samples=samples)
     _print_probe_candidates(review_rows, samples=samples)
+    _print_slippage_status(base_dir)
+    _print_review_guardrails(full_day=full_day)
 
+    missing = sum(
+        1
+        for row in review_rows
+        if (full_day or (str(row.get("symbol")), str(row.get("candidate_ts"))) in sample_keys)
+        and not row.get("has_forward_outcome")
+    )
     if missing:
         print()
         print("[WARN] some displayed strategy-memory hard blocks are missing forward outcomes")

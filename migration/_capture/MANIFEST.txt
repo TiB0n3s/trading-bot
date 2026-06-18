@@ -1,0 +1,10 @@
+captured_from   : trading-bot-prod
+project_dir     : /home/tradingbot/trading-bot
+env_file        : /etc/trading-bot.env
+
+database sizes:
+  jobs.db                  0
+  trades.db                23G
+
+total project tree size (excl. venv):
+77G

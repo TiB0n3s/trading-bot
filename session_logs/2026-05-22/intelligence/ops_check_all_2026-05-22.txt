@@ -1,0 +1,1116 @@
+2026-05-22 15:07:22,175 - INFO - DB performance indexes initialized
+2026-05-22 15:07:22,317 - WARNING - Startup reconciliation: AAPL held in Alpaca but no open position tracked in trades.db
+2026-05-22 15:07:22,317 - WARNING - Startup reconciliation: IWM held in Alpaca but no open position tracked in trades.db
+2026-05-22 15:07:22,317 - WARNING - Startup reconciliation: LLY held in Alpaca but no open position tracked in trades.db
+2026-05-22 15:07:22,317 - WARNING - Startup reconciliation: MA held in Alpaca but no open position tracked in trades.db
+2026-05-22 15:07:22,317 - WARNING - Startup reconciliation: SPY held in Alpaca but no open position tracked in trades.db
+2026-05-22 15:07:22,317 - INFO - Startup reconciliation: 6 positions in Alpaca, 1 tracked in DB, 5 discrepancies
+2026-05-22 15:07:22,317 - INFO - Symbol overrides loaded: disabled=0, buy_disabled=0, sell_only=0
+2026-05-22 15:07:22,323 - INFO - Trend table built for 41/41 approved symbols
+2026-05-22 15:07:22,323 - INFO - Hydrated 0 active cooldowns from cooldowns table (of 3 total)
+2026-05-22 15:07:22,325 - INFO - Hydrated 0 recent sells from recent_sells table (of 0 total)
+2026-05-22 15:07:22,325 - INFO - Market bias loaded for 41 symbols (buy=6, avoid=0, neutral=35, macro=mixed)
+====================================================================================================================================
+  Market Alignment Report
+====================================================================================================================================
+  market_date       : 2026-05-22
+  macro_sentiment   : mixed
+  source            : pre_market_research
+  context_freshness : fresh (market_date matches today (2026-05-22))
+  trend_source      : bot signal history, not live index market data
+  gate_readiness    : observe_only_weak_benchmark_data
+
+Sym    Cluster              Bench   SymBias   Risk       Entry              BenchBias  BenchTrend         Cnt   Aligned  Reason                      
+------ -------------------- ------- --------- ---------- ------------------ ---------- ------------------ ----- -------- ----------------------------
+AAPL   mega_cap_tech        QQQ     neutral   medium     good_if_breadth_h… neutral    neutral/weak       1     yes      benchmark neutral/weak      
+ABBV   large_cap_healthcare SPY     neutral   medium     good_on_pullbacks  neutral    neutral/weak       0     yes      benchmark neutral/weak      
+AMD    semiconductors       QQQ     neutral   -          -                  neutral    neutral/weak       1     yes      benchmark neutral/weak      
+ASML   semiconductors       QQQ     neutral   medium     good_on_pullbacks  neutral    neutral/weak       1     yes      benchmark neutral/weak      
+AVGO   semiconductors       QQQ     neutral   -          -                  neutral    neutral/weak       1     yes      benchmark neutral/weak      
+BE     ai_power             SPY     neutral   high       tactical_only      neutral    neutral/weak       0     yes      benchmark neutral/weak      
+CAT    industrials          SPY     buy       medium     good_on_pullbacks  neutral    neutral/weak       0     yes      benchmark neutral/weak      
+COST   consumer_retail      SPY     neutral   low        good_on_pullbacks  neutral    neutral/weak       0     yes      benchmark neutral/weak      
+CRDO   ai_infrastructure    QQQ     neutral   high       good_on_pullbacks  neutral    neutral/weak       1     yes      benchmark neutral/weak      
+CRM    enterprise_software  QQQ     neutral   high       conditional        neutral    neutral/weak       1     yes      benchmark neutral/weak      
+CRSP   biotech_speculative  IWM     neutral   very_high  tactical_only      neutral    neutral/weak       0     yes      benchmark neutral/weak      
+CVX    energy               SPY     neutral   -          -                  neutral    neutral/weak       0     yes      benchmark neutral/weak      
+GE     aerospace_industria… SPY     buy       medium     good_on_pullbacks  neutral    neutral/weak       0     yes      benchmark neutral/weak      
+GEV    ai_power             SPY     buy       medium     good_on_pullbacks  neutral    neutral/weak       0     yes      benchmark neutral/weak      
+GLD    gold_hedge           GLD     neutral   -          -                  neutral    bullish/weak       2     yes      aligned                     
+GOOGL  mega_cap_tech        QQQ     neutral   -          -                  neutral    neutral/weak       1     yes      benchmark neutral/weak      
+HWM    defense_industrial   SPY     neutral   medium     good_on_pullbacks  neutral    neutral/weak       0     yes      benchmark neutral/weak      
+IWM    small_caps           IWM     neutral   -          -                  neutral    neutral/weak       0     yes      benchmark neutral/weak      
+KO     consumer_staples     SPY     neutral   low        good_on_pullbacks  neutral    neutral/weak       0     yes      benchmark neutral/weak      
+LIN    industrials          SPY     neutral   low        good_on_pullbacks  neutral    neutral/weak       0     yes      benchmark neutral/weak      
+LLY    large_cap_healthcare SPY     neutral   medium     good_on_pullbacks  neutral    neutral/weak       0     yes      benchmark neutral/weak      
+LMT    defense              SPY     neutral   medium     good_on_pullbacks  neutral    neutral/weak       0     yes      benchmark neutral/weak      
+MA     payments             SPY     neutral   low        good_on_pullbacks  neutral    neutral/weak       0     yes      benchmark neutral/weak      
+META   mega_cap_tech        QQQ     neutral   -          -                  neutral    neutral/weak       1     yes      benchmark neutral/weak      
+MRK    large_cap_healthcare SPY     neutral   medium     good_on_pullbacks  neutral    neutral/weak       0     yes      benchmark neutral/weak      
+MRNA   biotech_speculative  IWM     neutral   high       tactical_only      neutral    neutral/weak       0     yes      benchmark neutral/weak      
+MSFT   mega_cap_tech        QQQ     neutral   medium     good_on_pullbacks  neutral    neutral/weak       1     yes      benchmark neutral/weak      
+NFLX   high_beta_growth     QQQ     buy       medium     good_if_holds_gap  neutral    neutral/weak       1     yes      benchmark neutral/weak      
+NVDA   semiconductors       QQQ     buy       high       good_on_pullbacks  neutral    neutral/weak       1     yes      benchmark neutral/weak      
+ORCL   enterprise_software  QQQ     neutral   medium     conditional        neutral    neutral/weak       1     yes      benchmark neutral/weak      
+QQQ    mega_cap_tech        QQQ     neutral   medium     good_if_holds_gap  neutral    neutral/weak       1     yes      benchmark neutral/weak      
+RKLB   space_defense        SPY     neutral   very_high  good_on_pullbacks  neutral    neutral/weak       0     yes      benchmark neutral/weak      
+RTX    defense              SPY     neutral   medium     good_on_pullbacks  neutral    neutral/weak       0     yes      benchmark neutral/weak      
+SPY    broad_index          SPY     neutral   low        good_if_breadth_h… neutral    neutral/weak       0     yes      benchmark neutral/weak      
+TSCO   consumer_retail      SPY     neutral   medium     good_on_pullbacks  neutral    neutral/weak       0     yes      benchmark neutral/weak      
+TSLA   high_beta_growth     QQQ     neutral   high       tactical_only      neutral    neutral/weak       1     yes      benchmark neutral/weak      
+UNH    large_cap_healthcare SPY     neutral   high       conditional        neutral    neutral/weak       0     yes      benchmark neutral/weak      
+V      payments             SPY     neutral   low        good_on_pullbacks  neutral    neutral/weak       0     yes      benchmark neutral/weak      
+VRT    ai_infrastructure    QQQ     buy       medium     good_on_pullbacks  neutral    neutral/weak       1     yes      benchmark neutral/weak      
+VRTX   biotech_quality      SPY     neutral   medium     good_on_pullbacks  neutral    neutral/weak       0     yes      benchmark neutral/weak      
+XOM    energy               SPY     neutral   -          -                  neutral    neutral/weak       0     yes      benchmark neutral/weak      
+
+Aligned for BUY context : 41
+Not aligned / avoid     : 0
+
+Observe-only: this report does not block trades.
+Do not promote to a hard gate unless context_freshness is fresh and gate_readiness is reviewed.
+================================================================
+  Morning Readiness Check
+================================================================
+
+── Market Context ─────────────────────────────────────
+[OK]   market_date is today: 2026-05-22
+[OK]   all approved symbols present: 41/41
+macro_sentiment : mixed
+source          : pre_market_research
+format          : batched_normalized_approved_symbols
+bias counts     : {'neutral': 35, 'buy': 6}
+[OK]   market bias entries appear populated
+
+── Rolling Momentum Context ─────────────────────────
+generated_at  : 2026-05-22T15:06:15.188573
+market_time_et: 2026-05-22T16:06:15.188578-04:00
+mode          : observe_only
+symbols       : 41/41
+errors        : 0
+[OK]   rolling momentum contains all approved symbols
+[OK]   rolling momentum has no symbol errors
+
+── Market Alignment Report ───────────────────────────
+[OK]   Market alignment report completed
+
+── Services ───────────────────────────────────────────
+[OK]   trading-bot active
+[OK]   fill-stream active
+[OK]   cloudflared active
+[OK]   nginx active
+
+── Alpaca Account ─────────────────────────────────────
+[OK]   Alpaca reachable; status=ACTIVE
+balance         : 96049.93
+portfolio_value : 100365.5
+buying_power    : 392517.63
+
+── Local Debug Endpoint ───────────────────────────────
+[OK]   /debug/symbol/QQQ reachable
+QQQ market_bias : neutral
+QQQ trend       : None
+QQQ buy blocks  : ['market_hours']
+
+================================================================
+[OK]   Morning readiness check passed
+====================================================================================================================================
+  Position Review
+====================================================================================================================================
+  Positions        : 6/8
+  Account balance  : $96,049.93
+  Daily P&L %      : 0.01
+  Market date      : 2026-05-22
+  Macro sentiment  : mixed
+
+Symbol Qty     Value        uP&L         uP&L%    Exp%    HoldHr   NowTrend         NowBias   EntryBias  Risk       EntryQual         
+------ ------- ------------ ------------ -------- ------- -------- ---------------- --------- ---------- ---------- ------------------
+LLY    1.00    $1,065.00    +$1.89       +0.18%   1.11    -        bullish/confirm… neutral   -          -          -                 
+IWM    3.00    $854.79      +$2.69       +0.32%   0.89    -        bearish/confirm… neutral   -          -          -                 
+SPY    1.00    $745.64      $-1.67       -0.22%   0.78    -        bearish/confirm… neutral   -          -          -                 
+AAPL   2.00    $618.02      +$0.85       +0.14%   0.64    -        bearish/confirm… neutral   -          -          -                 
+LMT    1.00    $533.57      +$4.99       +0.94%   0.56    4.5      neutral/weak     neutral   neutral    medium     good_on_pullbacks 
+MA     1.00    $498.54      $-1.52       -0.30%   0.52    -        bearish/develop… neutral   -          -          -                 
+------ ------- ------------ ------------ -------- ------- -------- ---------------- --------- ---------- ---------- ------------------
+TOTAL          $4,315.56    +$7.23      
+
+Notes:
+  NowTrend/NowBias are current state.
+  EntryBias/Risk/EntryQual come from the oldest currently-open FIFO lot.
+  Null/blank entry fields usually mean the lot predates attribution tracking.
+2026-05-22 15:07:25,088 - INFO - DB performance indexes initialized
+2026-05-22 15:07:25,207 - WARNING - Startup reconciliation: AAPL held in Alpaca but no open position tracked in trades.db
+2026-05-22 15:07:25,207 - WARNING - Startup reconciliation: IWM held in Alpaca but no open position tracked in trades.db
+2026-05-22 15:07:25,207 - WARNING - Startup reconciliation: LLY held in Alpaca but no open position tracked in trades.db
+2026-05-22 15:07:25,207 - WARNING - Startup reconciliation: MA held in Alpaca but no open position tracked in trades.db
+2026-05-22 15:07:25,207 - WARNING - Startup reconciliation: SPY held in Alpaca but no open position tracked in trades.db
+2026-05-22 15:07:25,207 - INFO - Startup reconciliation: 6 positions in Alpaca, 1 tracked in DB, 5 discrepancies
+2026-05-22 15:07:25,208 - INFO - Symbol overrides loaded: disabled=0, buy_disabled=0, sell_only=0
+2026-05-22 15:07:25,212 - INFO - Trend table built for 41/41 approved symbols
+2026-05-22 15:07:25,213 - INFO - Hydrated 0 active cooldowns from cooldowns table (of 3 total)
+2026-05-22 15:07:25,213 - INFO - Hydrated 0 recent sells from recent_sells table (of 0 total)
+2026-05-22 15:07:25,213 - INFO - Market bias loaded for 41 symbols (buy=6, avoid=0, neutral=35, macro=mixed)
+====================================================================================================================================
+  Market Alignment Report
+====================================================================================================================================
+  market_date       : 2026-05-22
+  macro_sentiment   : mixed
+  source            : pre_market_research
+  context_freshness : fresh (market_date matches today (2026-05-22))
+  trend_source      : bot signal history, not live index market data
+  gate_readiness    : observe_only_weak_benchmark_data
+
+Sym    Cluster              Bench   SymBias   Risk       Entry              BenchBias  BenchTrend         Cnt   Aligned  Reason                      
+------ -------------------- ------- --------- ---------- ------------------ ---------- ------------------ ----- -------- ----------------------------
+AAPL   mega_cap_tech        QQQ     neutral   medium     good_if_breadth_h… neutral    neutral/weak       1     yes      benchmark neutral/weak      
+ABBV   large_cap_healthcare SPY     neutral   medium     good_on_pullbacks  neutral    neutral/weak       0     yes      benchmark neutral/weak      
+AMD    semiconductors       QQQ     neutral   -          -                  neutral    neutral/weak       1     yes      benchmark neutral/weak      
+ASML   semiconductors       QQQ     neutral   medium     good_on_pullbacks  neutral    neutral/weak       1     yes      benchmark neutral/weak      
+AVGO   semiconductors       QQQ     neutral   -          -                  neutral    neutral/weak       1     yes      benchmark neutral/weak      
+BE     ai_power             SPY     neutral   high       tactical_only      neutral    neutral/weak       0     yes      benchmark neutral/weak      
+CAT    industrials          SPY     buy       medium     good_on_pullbacks  neutral    neutral/weak       0     yes      benchmark neutral/weak      
+COST   consumer_retail      SPY     neutral   low        good_on_pullbacks  neutral    neutral/weak       0     yes      benchmark neutral/weak      
+CRDO   ai_infrastructure    QQQ     neutral   high       good_on_pullbacks  neutral    neutral/weak       1     yes      benchmark neutral/weak      
+CRM    enterprise_software  QQQ     neutral   high       conditional        neutral    neutral/weak       1     yes      benchmark neutral/weak      
+CRSP   biotech_speculative  IWM     neutral   very_high  tactical_only      neutral    neutral/weak       0     yes      benchmark neutral/weak      
+CVX    energy               SPY     neutral   -          -                  neutral    neutral/weak       0     yes      benchmark neutral/weak      
+GE     aerospace_industria… SPY     buy       medium     good_on_pullbacks  neutral    neutral/weak       0     yes      benchmark neutral/weak      
+GEV    ai_power             SPY     buy       medium     good_on_pullbacks  neutral    neutral/weak       0     yes      benchmark neutral/weak      
+GLD    gold_hedge           GLD     neutral   -          -                  neutral    bullish/weak       2     yes      aligned                     
+GOOGL  mega_cap_tech        QQQ     neutral   -          -                  neutral    neutral/weak       1     yes      benchmark neutral/weak      
+HWM    defense_industrial   SPY     neutral   medium     good_on_pullbacks  neutral    neutral/weak       0     yes      benchmark neutral/weak      
+IWM    small_caps           IWM     neutral   -          -                  neutral    neutral/weak       0     yes      benchmark neutral/weak      
+KO     consumer_staples     SPY     neutral   low        good_on_pullbacks  neutral    neutral/weak       0     yes      benchmark neutral/weak      
+LIN    industrials          SPY     neutral   low        good_on_pullbacks  neutral    neutral/weak       0     yes      benchmark neutral/weak      
+LLY    large_cap_healthcare SPY     neutral   medium     good_on_pullbacks  neutral    neutral/weak       0     yes      benchmark neutral/weak      
+LMT    defense              SPY     neutral   medium     good_on_pullbacks  neutral    neutral/weak       0     yes      benchmark neutral/weak      
+MA     payments             SPY     neutral   low        good_on_pullbacks  neutral    neutral/weak       0     yes      benchmark neutral/weak      
+META   mega_cap_tech        QQQ     neutral   -          -                  neutral    neutral/weak       1     yes      benchmark neutral/weak      
+MRK    large_cap_healthcare SPY     neutral   medium     good_on_pullbacks  neutral    neutral/weak       0     yes      benchmark neutral/weak      
+MRNA   biotech_speculative  IWM     neutral   high       tactical_only      neutral    neutral/weak       0     yes      benchmark neutral/weak      
+MSFT   mega_cap_tech        QQQ     neutral   medium     good_on_pullbacks  neutral    neutral/weak       1     yes      benchmark neutral/weak      
+NFLX   high_beta_growth     QQQ     buy       medium     good_if_holds_gap  neutral    neutral/weak       1     yes      benchmark neutral/weak      
+NVDA   semiconductors       QQQ     buy       high       good_on_pullbacks  neutral    neutral/weak       1     yes      benchmark neutral/weak      
+ORCL   enterprise_software  QQQ     neutral   medium     conditional        neutral    neutral/weak       1     yes      benchmark neutral/weak      
+QQQ    mega_cap_tech        QQQ     neutral   medium     good_if_holds_gap  neutral    neutral/weak       1     yes      benchmark neutral/weak      
+RKLB   space_defense        SPY     neutral   very_high  good_on_pullbacks  neutral    neutral/weak       0     yes      benchmark neutral/weak      
+RTX    defense              SPY     neutral   medium     good_on_pullbacks  neutral    neutral/weak       0     yes      benchmark neutral/weak      
+SPY    broad_index          SPY     neutral   low        good_if_breadth_h… neutral    neutral/weak       0     yes      benchmark neutral/weak      
+TSCO   consumer_retail      SPY     neutral   medium     good_on_pullbacks  neutral    neutral/weak       0     yes      benchmark neutral/weak      
+TSLA   high_beta_growth     QQQ     neutral   high       tactical_only      neutral    neutral/weak       1     yes      benchmark neutral/weak      
+UNH    large_cap_healthcare SPY     neutral   high       conditional        neutral    neutral/weak       0     yes      benchmark neutral/weak      
+V      payments             SPY     neutral   low        good_on_pullbacks  neutral    neutral/weak       0     yes      benchmark neutral/weak      
+VRT    ai_infrastructure    QQQ     buy       medium     good_on_pullbacks  neutral    neutral/weak       1     yes      benchmark neutral/weak      
+VRTX   biotech_quality      SPY     neutral   medium     good_on_pullbacks  neutral    neutral/weak       0     yes      benchmark neutral/weak      
+XOM    energy               SPY     neutral   -          -                  neutral    neutral/weak       0     yes      benchmark neutral/weak      
+
+Aligned for BUY context : 41
+Not aligned / avoid     : 0
+
+Observe-only: this report does not block trades.
+Do not promote to a hard gate unless context_freshness is fresh and gate_readiness is reviewed.
+AAPL   label=fading               score= -2 session=-0.538% 5m=-0.003% 15m=0.12% 30m=0.01% vwap_dist=-0.131% bars=232 reason=session_return_negative
+SPY    label=rangebound           score=  0 session=-0.246% 5m=-0.009% 15m=0.038% 30m=0.028% vwap_dist=-0.138% bars=232 reason=mixed_or_flat
+QQQ    label=rangebound           score= -1 session=-0.422% 5m=-0.075% 15m=0.021% 30m=-0.033% vwap_dist=-0.202% bars=230 reason=below_vwap
+MSFT   label=rangebound           score=  0 session=-0.39% 5m=-0.073% 15m=-0.026% 30m=0.08% vwap_dist=-0.08% bars=232 reason=mixed_or_flat
+NVDA   label=fading               score= -3 session=-0.717% 5m=-0.028% 15m=-0.051% 30m=0.037% vwap_dist=-0.437% bars=232 reason=session_return_negative,below_vwap
+ORCL   label=rangebound           score=  0 session=-0.441% 5m=-0.016% 15m=0.052% 30m=0.076% vwap_dist=-0.12% bars=144 reason=mixed_or_flat
+TSCO   label=rangebound           score=  0 session=-0.016% 5m=0.016% 15m=0.0% 30m=0.174% vwap_dist=-0.02% bars=216 reason=mixed_or_flat
+TSLA   label=fading               score= -3 session=-0.785% 5m=0.033% 15m=0.176% 30m=0.134% vwap_dist=-0.446% bars=232 reason=session_return_negative,below_vwap
+META   label=rangebound           score= -1 session=0.09% 5m=-0.116% 15m=-0.056% 30m=0.09% vwap_dist=0.017% bars=226 reason=5m_falling
+AMD    label=fading               score= -3 session=-0.523% 5m=0.076% 15m=0.075% 30m=0.111% vwap_dist=-0.486% bars=224 reason=session_return_negative,below_vwap
+CVX    label=rangebound           score=  2 session=0.335% 5m=0.173% 15m=-0.031% 30m=-0.149% vwap_dist=0.17% bars=172 reason=5m_rising,above_vwap
+XOM    label=rangebound           score=  2 session=0.409% 5m=0.285% 15m=-0.029% 30m=-0.238% vwap_dist=0.246% bars=212 reason=5m_rising,above_vwap
+GOOGL  label=rangebound           score= -1 session=-0.952% 5m=0.01% 15m=0.217% 30m=0.158% vwap_dist=-0.359% bars=231 reason=session_return_negative,15m_rising,below_vwap
+GLD    label=rangebound           score=  0 session=-0.253% 5m=0.007% 15m=-0.018% 30m=0.018% vwap_dist=-0.129% bars=167 reason=mixed_or_flat
+IWM    label=rangebound           score=  0 session=0.023% 5m=0.075% 15m=0.172% 30m=0.163% vwap_dist=-0.053% bars=229 reason=mixed_or_flat
+AVGO   label=strong_uptrend       score=  6 session=0.32% 5m=0.133% 15m=0.567% 30m=0.405% vwap_dist=0.212% bars=232 reason=5m_rising,15m_rising,30m_rising,above_vwap
+CRDO   label=strong_uptrend       score=  7 session=4.512% 5m=0.05% 15m=0.789% 30m=1.638% vwap_dist=1.374% bars=203 reason=session_return_positive,15m_rising,30m_rising,above_vwap
+GEV    label=fading               score= -3 session=-1.041% 5m=0.047% 15m=-0.047% 30m=-0.125% vwap_dist=-0.585% bars=150 reason=session_return_negative,below_vwap
+BE     label=downtrend            score= -8 session=-1.57% 5m=-0.241% 15m=-0.234% 30m=-0.351% vwap_dist=-0.839% bars=190 reason=session_return_negative,5m_falling,15m_falling,30m_falling,below_vwap
+CAT    label=downtrend            score= -7 session=-0.733% 5m=0.071% 15m=-0.376% 30m=-0.586% vwap_dist=-0.646% bars=154 reason=session_return_negative,15m_falling,30m_falling,below_vwap
+VRT    label=developing_uptrend   score=  5 session=-0.046% 5m=0.202% 15m=0.53% 30m=0.377% vwap_dist=-0.111% bars=189 reason=5m_rising,15m_rising,30m_rising
+RKLB   label=rangebound           score=  2 session=-1.366% 5m=-0.191% 15m=0.66% 30m=0.735% vwap_dist=0.308% bars=213 reason=session_return_negative,5m_falling,15m_rising,30m_rising,above_vwap
+RTX    label=rangebound           score=  1 session=0.386% 5m=0.147% 15m=0.107% 30m=-0.116% vwap_dist=0.022% bars=91 reason=5m_rising
+LMT    label=developing_uptrend   score=  4 session=1.149% 5m=0.103% 15m=0.077% 30m=-0.082% vwap_dist=0.186% bars=132 reason=session_return_positive,5m_rising,above_vwap
+HWM    label=fading               score= -2 session=-0.381% 5m=0.246% 15m=-0.125% 30m=-0.568% vwap_dist=-0.323% bars=91 reason=5m_rising,30m_falling,below_vwap
+VRTX   label=reversal_attempt     score=  1 session=-0.365% 5m=0.265% 15m=0.19% 30m=0.048% vwap_dist=0.022% bars=163 reason=5m_rising
+MRNA   label=rangebound           score= -1 session=-0.319% 5m=0.043% 15m=-0.107% 30m=-0.213% vwap_dist=-0.315% bars=141 reason=below_vwap
+CRSP   label=rangebound           score=  0 session=0.189% 5m=0.01% 15m=0.139% 30m=-0.04% vwap_dist=-0.092% bars=67 reason=mixed_or_flat
+V      label=rangebound           score= -1 session=-0.357% 5m=-0.038% 15m=-0.176% 30m=-0.064% vwap_dist=-0.208% bars=229 reason=below_vwap
+MA     label=rangebound           score=  0 session=-0.118% 5m=0.082% 15m=-0.126% 30m=-0.028% vwap_dist=-0.1% bars=190 reason=mixed_or_flat
+LLY    label=fading               score= -3 session=0.164% 5m=-0.171% 15m=-0.209% 30m=-0.327% vwap_dist=-0.036% bars=194 reason=5m_falling,15m_falling
+LIN    label=rangebound           score=  0 session=0.056% 5m=-0.037% 15m=-0.014% 30m=-0.239% vwap_dist=0.005% bars=121 reason=mixed_or_flat
+GE     label=developing_uptrend   score=  3 session=0.185% 5m=0.36% 15m=0.388% 30m=0.18% vwap_dist=0.021% bars=184 reason=5m_rising,15m_rising
+ASML   label=rangebound           score= -1 session=-0.176% 5m=-0.067% 15m=0.005% 30m=-0.043% vwap_dist=-0.349% bars=206 reason=below_vwap
+NFLX   label=developing_uptrend   score=  3 session=-0.073% 5m=0.051% 15m=0.221% 30m=0.187% vwap_dist=0.17% bars=232 reason=15m_rising,above_vwap
+CRM    label=fading               score= -2 session=0.502% 5m=0.031% 15m=-0.409% 30m=-0.393% vwap_dist=-0.146% bars=204 reason=session_return_positive,15m_falling,30m_falling
+COST   label=rangebound           score= -1 session=-0.22% 5m=-0.207% 15m=-0.177% 30m=-0.143% vwap_dist=-0.085% bars=139 reason=5m_falling
+KO     label=rangebound           score= -1 session=0.4% 5m=-0.202% 15m=-0.061% 30m=-0.104% vwap_dist=0.071% bars=225 reason=5m_falling
+ABBV   label=downtrend            score= -6 session=-0.386% 5m=-0.287% 15m=-0.537% 30m=-0.587% vwap_dist=-0.417% bars=114 reason=5m_falling,15m_falling,30m_falling,below_vwap
+MRK    label=developing_uptrend   score=  3 session=0.728% 5m=-0.057% 15m=0.012% 30m=0.127% vwap_dist=0.192% bars=212 reason=session_return_positive,above_vwap
+UNH    label=developing_uptrend   score=  4 session=-0.298% 5m=0.014% 15m=0.319% 30m=0.358% vwap_dist=0.138% bars=190 reason=15m_rising,30m_rising
+2026-05-22 15:07:29,468 - WARNING - POSITION MOMENTUM AUTO-SELL skipped for AAPL: market is closed
+2026-05-22 15:07:29,477 - WARNING - POSITION MOMENTUM AUTO-SELL skipped for IWM: market is closed
+2026-05-22 15:07:29,488 - WARNING - POSITION MOMENTUM AUTO-SELL skipped for LLY: market is closed
+2026-05-22 15:07:29,495 - WARNING - POSITION MOMENTUM AUTO-SELL skipped for LMT: market is closed
+2026-05-22 15:07:29,505 - WARNING - POSITION MOMENTUM AUTO-SELL skipped for MA: market is closed
+2026-05-22 15:07:29,512 - WARNING - POSITION MOMENTUM AUTO-SELL skipped for SPY: market is closed
+================================================================================
+  Position Momentum Monitor — AUTO-SELL ENABLED
+================================================================================
+  market_time_et : 2026-05-22 16:07:29 EDT
+  market_open    : False
+  auto_sell      : True
+  candidates_only: True
+
+Symbol Action          Severity         Label            Score SPress SRec                      Sess%     15m%     30m%    VWAP%
+------ --------------- ---------------- ---------------- ----- ------ ---------------------- -------- -------- -------- --------
+AAPL   hold            pass             fading              -2      6 watch                    -0.538     0.12     0.01   -0.131
+IWM    hold            pass             rangebound           0      3 watch                     0.023    0.172    0.163   -0.053
+LLY    hold            pass             fading              -3     11 watch                     0.164   -0.209   -0.327   -0.036
+LMT    hold            pass             developing_uptrend     4     -2 hold                      1.149    0.077   -0.082    0.186
+MA     hold            pass             rangebound           0      2 hold                     -0.118   -0.126   -0.028     -0.1
+SPY    hold            pass             rangebound           0      2 hold                     -0.246    0.038    0.028   -0.138
+
+Details:
+  AAPL   hold            label=fading score=-2 session=-0.538% 5m=-0.003% 15m=0.12% 30m=0.01% vwap_dist=-0.131% unrealized_pl=$0.47 unrealized_plpc=0.08% sell_pressure=6/watch
+  IWM    hold            label=rangebound score=0 session=0.023% 5m=0.075% 15m=0.172% 30m=0.163% vwap_dist=-0.053% unrealized_pl=$2.69 unrealized_plpc=0.32% sell_pressure=3/watch
+  LLY    hold            label=fading score=-3 session=0.164% 5m=-0.171% 15m=-0.209% 30m=-0.327% vwap_dist=-0.036% unrealized_pl=$1.89 unrealized_plpc=0.18% sell_pressure=11/watch
+  LMT    hold            label=developing_uptrend score=4 session=1.149% 5m=0.103% 15m=0.077% 30m=-0.082% vwap_dist=0.186% unrealized_pl=$4.99 unrealized_plpc=0.94% sell_pressure=-2/hold
+  MA     hold            label=rangebound score=0 session=-0.118% 5m=0.082% 15m=-0.126% 30m=-0.028% vwap_dist=-0.1% unrealized_pl=$-1.52 unrealized_plpc=-0.30% sell_pressure=2/hold
+  SPY    hold            label=rangebound score=0 session=-0.246% 5m=-0.009% 15m=0.038% 30m=0.028% vwap_dist=-0.138% unrealized_pl=$-1.67 unrealized_plpc=-0.22% sell_pressure=2/hold
+2026-05-22 15:07:31,070 - INFO - DB performance indexes initialized
+2026-05-22 15:07:31,209 - WARNING - Startup reconciliation: AAPL held in Alpaca but no open position tracked in trades.db
+2026-05-22 15:07:31,209 - WARNING - Startup reconciliation: IWM held in Alpaca but no open position tracked in trades.db
+2026-05-22 15:07:31,209 - WARNING - Startup reconciliation: LLY held in Alpaca but no open position tracked in trades.db
+2026-05-22 15:07:31,209 - WARNING - Startup reconciliation: MA held in Alpaca but no open position tracked in trades.db
+2026-05-22 15:07:31,209 - WARNING - Startup reconciliation: SPY held in Alpaca but no open position tracked in trades.db
+2026-05-22 15:07:31,209 - INFO - Startup reconciliation: 6 positions in Alpaca, 1 tracked in DB, 5 discrepancies
+2026-05-22 15:07:31,210 - INFO - Symbol overrides loaded: disabled=0, buy_disabled=0, sell_only=0
+2026-05-22 15:07:31,213 - INFO - Trend table built for 41/41 approved symbols
+2026-05-22 15:07:31,214 - INFO - Hydrated 0 active cooldowns from cooldowns table (of 3 total)
+2026-05-22 15:07:31,215 - INFO - Hydrated 0 recent sells from recent_sells table (of 0 total)
+2026-05-22 15:07:31,215 - INFO - Market bias loaded for 41 symbols (buy=6, avoid=0, neutral=35, macro=mixed)
+======================================================================================================================================================
+  Adaptive BUY Confirmation Report — observe-only
+======================================================================================================================================================
+  macro_regime : mixed
+  risk_mult    : 0.75
+
+  Live rule: adaptive BUY confirmation is ENABLED.
+  BUY signals below the Adapt requirement will be rejected.
+
+Sym    Trend              Cnt   Fixed   Adapt   Bias      Risk       Entry              Aligned   Benchmark  Reason                                       
+------ ------------------ ----- ------- ------- --------- ---------- ------------------ --------- ---------- ---------------------------------------------
+AAPL   neutral/weak       0     3       3       neutral   medium     good_if_breadth_h… no        QQQ        base requirement is 3 BUY confirmations; kep…
+ABBV   neutral/weak       0     3       3       neutral   medium     good_on_pullbacks  no        SPY        base requirement is 3 BUY confirmations; kep…
+AMD    bullish/weak       2     3       3       neutral   -          -                  no        QQQ        base requirement is 3 BUY confirmations; kep…
+ASML   bullish/developing 4     3       3       neutral   medium     good_on_pullbacks  no        QQQ        base requirement is 3 BUY confirmations; kep…
+AVGO   neutral/weak       0     3       3       neutral   -          -                  no        QQQ        base requirement is 3 BUY confirmations; kep…
+BE     neutral/weak       0     3       4       neutral   high       tactical_only      no        SPY        base requirement is 3 BUY confirmations; min…
+CAT    neutral/weak       1     3       2       buy       medium     good_on_pullbacks  no        SPY        base requirement is 3 BUY confirmations; red…
+COST   bullish/weak       2     3       3       neutral   low        good_on_pullbacks  no        SPY        base requirement is 3 BUY confirmations; kep…
+CRDO   bullish/developing 3     3       4       neutral   high       good_on_pullbacks  no        QQQ        base requirement is 3 BUY confirmations; rai…
+CRM    neutral/weak       1     3       4       neutral   high       conditional        no        QQQ        base requirement is 3 BUY confirmations; min…
+CRSP   neutral/weak       0     3       4       neutral   very_high  tactical_only      no        IWM        base requirement is 3 BUY confirmations; rai…
+CVX    neutral/weak       0     3       3       neutral   -          -                  no        SPY        base requirement is 3 BUY confirmations; kep…
+GE     neutral/weak       1     3       2       buy       medium     good_on_pullbacks  no        SPY        base requirement is 3 BUY confirmations; red…
+GEV    neutral/weak       1     3       2       buy       medium     good_on_pullbacks  no        SPY        base requirement is 3 BUY confirmations; red…
+GLD    bullish/weak       2     3       3       neutral   -          -                  yes       GLD        base requirement is 3 BUY confirmations      
+GOOGL  neutral/weak       0     3       3       neutral   -          -                  no        QQQ        base requirement is 3 BUY confirmations; kep…
+HWM    neutral/weak       0     3       3       neutral   medium     good_on_pullbacks  no        SPY        base requirement is 3 BUY confirmations; kep…
+IWM    neutral/weak       0     3       3       neutral   -          -                  yes       IWM        base requirement is 3 BUY confirmations      
+KO     neutral/weak       0     3       3       neutral   low        good_on_pullbacks  no        SPY        base requirement is 3 BUY confirmations; kep…
+LIN    bullish/weak       2     3       3       neutral   low        good_on_pullbacks  no        SPY        base requirement is 3 BUY confirmations; kep…
+LLY    bullish/developing 3     3       3       neutral   medium     good_on_pullbacks  no        SPY        base requirement is 3 BUY confirmations; kep…
+LMT    neutral/weak       1     3       3       neutral   medium     good_on_pullbacks  no        SPY        base requirement is 3 BUY confirmations; kep…
+MA     neutral/weak       0     3       3       neutral   low        good_on_pullbacks  no        SPY        base requirement is 3 BUY confirmations; kep…
+META   neutral/weak       0     3       3       neutral   -          -                  no        QQQ        base requirement is 3 BUY confirmations; kep…
+MRK    neutral/weak       0     3       3       neutral   medium     good_on_pullbacks  no        SPY        base requirement is 3 BUY confirmations; kep…
+MRNA   neutral/weak       0     3       3       neutral   high       tactical_only      yes       IWM        base requirement is 3 BUY confirmations; min…
+MSFT   neutral/weak       1     3       3       neutral   medium     good_on_pullbacks  no        QQQ        base requirement is 3 BUY confirmations; kep…
+NFLX   neutral/weak       0     3       2       buy       medium     good_if_holds_gap  no        QQQ        base requirement is 3 BUY confirmations; red…
+NVDA   neutral/weak       0     3       4       buy       high       good_on_pullbacks  no        QQQ        base requirement is 3 BUY confirmations; rai…
+ORCL   neutral/weak       0     3       4       neutral   medium     conditional        no        QQQ        base requirement is 3 BUY confirmations; min…
+QQQ    neutral/weak       1     3       3       neutral   medium     good_if_holds_gap  yes       QQQ        base requirement is 3 BUY confirmations      
+RKLB   bullish/developing 3     3       4       neutral   very_high  good_on_pullbacks  no        SPY        base requirement is 3 BUY confirmations; rai…
+RTX    neutral/weak       0     3       3       neutral   medium     good_on_pullbacks  no        SPY        base requirement is 3 BUY confirmations; kep…
+SPY    neutral/weak       0     3       3       neutral   low        good_if_breadth_h… yes       SPY        base requirement is 3 BUY confirmations      
+TSCO   neutral/weak       0     3       3       neutral   medium     good_on_pullbacks  yes       SPY        base requirement is 3 BUY confirmations      
+TSLA   bullish/weak       2     3       3       neutral   high       tactical_only      yes       QQQ        base requirement is 3 BUY confirmations; min…
+UNH    bullish/weak       2     3       3       neutral   high       conditional        yes       SPY        base requirement is 3 BUY confirmations; min…
+V      neutral/weak       0     3       3       neutral   low        good_on_pullbacks  yes       SPY        base requirement is 3 BUY confirmations      
+VRT    neutral/weak       0     3       2       buy       medium     good_on_pullbacks  yes       QQQ        base requirement is 3 BUY confirmations; red…
+VRTX   neutral/weak       0     3       3       neutral   medium     good_on_pullbacks  yes       SPY        base requirement is 3 BUY confirmations      
+XOM    neutral/weak       0     3       3       neutral   -          -                  yes       SPY        base requirement is 3 BUY confirmations      
+
+Adaptive would lower requirement : 5
+Adaptive would keep requirement  : 29
+Adaptive would raise requirement : 7
+
+Live mode: adaptive BUY confirmation is active.
+================================================================================
+  Adaptive Impact Report — 2026-05-22
+================================================================================
+
+── Summary ───────────────────────────────────────────────────────────────
+  BUY signals                 : 293
+  BUY approved                : 5
+  BUY rejected                : 288
+  Trend-confirmation rejects  : 31
+  Adaptive required=4 rejects : 4
+  Churn-price rejects         : 0
+  Churn not-strong-enough     : 0
+  Churn disabled/invalid      : 0
+
+── Trend confirmation rejects by symbol ──────────────────────────────────
+  RKLB      3
+  CRDO      3
+  LMT       3
+  TSLA      2
+  ASML      2
+  AMD       2
+  UNH       2
+  LIN       2
+  LLY       2
+  CRM       2
+  GLD       2
+  COST      2
+  MSFT      1
+  CAT       1
+  GEV       1
+  GE        1
+
+── Adaptive required=4 rejects by symbol ─────────────────────────────────
+  RKLB      3
+  CRDO      1
+
+── Churn-price rejects by symbol ─────────────────────────────────────────
+  None
+
+── Recent adaptive/churn samples ─────────────────────────────────────────
+  Time                Sym    Appr  Trend              Setup                            Reason
+  ------------------- ------ ----- ------------------ -------------------------------- ------------------------------------------------------------
+  2026-05-22 11:20:07 CRM    0     neutral/weak       above_vwap_neutral_continuation  trend_confirmation: consecutive_buy_count=1 < required=3 strength=weak flip_event=none ...
+  2026-05-22 11:30:13 LMT    0     bullish/weak       near_vwap_neutral_fade_risk      trend_confirmation: consecutive_buy_count=2 < required=3 strength=weak flip_event=none ...
+  2026-05-22 11:30:16 GLD    0     neutral/weak       near_vwap_neutral_fade_risk      trend_confirmation: consecutive_buy_count=1 < required=3 strength=weak flip_event=none ...
+  2026-05-22 11:35:09 CRM    0     bullish/weak       above_vwap_neutral_continuation  trend_confirmation: consecutive_buy_count=2 < required=3 strength=weak flip_event=none ...
+  2026-05-22 11:35:12 GLD    0     bullish/weak       near_vwap_neutral_fade_risk      trend_confirmation: consecutive_buy_count=2 < required=3 strength=weak flip_event=none ...
+  2026-05-22 14:40:09 CRDO   0     bullish/developing above_vwap_neutral_continuation  trend_confirmation: consecutive_buy_count=3 < required=4 strength=developing flip_event...
+  2026-05-22 14:45:27 COST   0     neutral/weak       above_vwap_neutral_continuation  trend_confirmation: consecutive_buy_count=1 < required=3 strength=weak flip_event=none ...
+  2026-05-22 14:50:03 COST   0     bullish/weak       above_vwap_neutral_continuation  trend_confirmation: consecutive_buy_count=2 < required=3 strength=weak flip_event=none ...
+  2026-05-22 14:50:09 LMT    0     neutral/weak       near_vwap_neutral_fade_risk      trend_confirmation: consecutive_buy_count=1 < required=3 strength=weak flip_event=none ...
+  2026-05-22 14:55:02 RKLB   0     bullish/developing unclassified_transition          trend_confirmation: consecutive_buy_count=3 < required=4 strength=developing flip_event...
+
+========================================================================
+  Filter Effectiveness Report
+========================================================================
+  Total signals      : 724
+  Approved signals   : 9
+  Rejected signals   : 715
+  Rejection rate     : 98.8%
+
+── Top rejection categories ────────────────────────────────────────
+  Category                     Label                         Count
+  ---------------------------- ---------------------------- ------
+  ghost_sell                   Ghost sell                      366
+  macro_position_limit         Macro position limit            208
+  trend_confirmation           Trend confirmation               31
+  sell_profit_threshold        Other / Claude                   26
+  sell_discipline              Other / Claude                   21
+  affordability                Other / Claude                   21
+  market_hours                 Outside trading hours            18
+  cooldown                     Cooldown                          8
+  second_look                  Second-look market check          7
+  strategy_memory              Strategy memory gate              3
+  setup_policy                 Entry quality / setup policy      2
+  opportunity_score            Other / Claude                    1
+  confidence_gate              Low confidence gate               1
+  prediction_gate              Prediction gate                   1
+  session_momentum_gate        Session momentum gate             1
+
+── Top rejected symbols ────────────────────────────────────────────
+  Symbol   Rejected
+  -------- --------
+  ASML           46
+  AMD            43
+  LLY            43
+  GEV            42
+  CAT            41
+  CRDO           40
+  BE             38
+  LMT            34
+  GOOGL          30
+  COST           30
+  RKLB           28
+  TSLA           26
+  GE             26
+  LIN            24
+  VRTX           23
+  CRM            20
+  META           20
+  VRT            18
+  UNH            17
+  HWM            17
+
+── Category × top symbols ──────────────────────────────────────────
+  ghost_sell                   BE:37, GOOGL:29, GEV:28, COST:26, VRTX:22, CAT:22, AMD:22, ASML:21
+  macro_position_limit         CRDO:26, LLY:25, LMT:23, ASML:19, AMD:17, LIN:15, CRM:15, CAT:14
+  trend_confirmation           RKLB:3, LMT:3, CRDO:3, COST:2, GLD:2, CRM:2, LIN:2, ASML:2
+  sell_profit_threshold        IWM:12, AAPL:6, QQQ:6, GE:2
+  sell_discipline              SPY:11, MA:5, LLY:3, AAPL:2
+  affordability                LLY:9, LMT:5, ASML:3, GEV:2, CAT:2
+  market_hours                 UNH:1, HWM:1, LIN:1, GEV:1, CAT:1, CRDO:1, CRM:1, AMD:1
+  cooldown                     GE:3, LMT:3, CRM:2
+  second_look                  CRDO:4, CAT:1, TSLA:1, AMD:1
+  strategy_memory              CRDO:3
+  setup_policy                 CRDO:2
+  opportunity_score            LLY:1
+  confidence_gate              LLY:1
+  prediction_gate              LLY:1
+  session_momentum_gate        GE:1
+
+── Recent rejection samples ────────────────────────────────────────
+     ID Time                Sym    Act   Category                 Reason
+  ----- ------------------- ------ ----- ------------------------ ----------------------------------------
+    724 2026-05-22 15:01:21 UNH    buy   market_hours             outside market hours: 2026-05-22 16:01:21 EDT
+    723 2026-05-22 15:01:12 HWM    sell  market_hours             outside market hours: 2026-05-22 16:01:12 EDT
+    722 2026-05-22 15:01:10 LIN    sell  market_hours             outside market hours: 2026-05-22 16:01:10 EDT
+    721 2026-05-22 15:00:53 GEV    sell  market_hours             outside market hours: 2026-05-22 16:00:53 EDT
+    720 2026-05-22 15:00:49 CAT    sell  market_hours             outside market hours: 2026-05-22 16:00:49 EDT
+    719 2026-05-22 15:00:33 CRDO   buy   market_hours             outside market hours: 2026-05-22 16:00:33 EDT
+    718 2026-05-22 15:00:23 CRM    sell  market_hours             outside market hours: 2026-05-22 16:00:23 EDT
+    717 2026-05-22 15:00:21 AMD    sell  market_hours             outside market hours: 2026-05-22 16:00:21 EDT
+    716 2026-05-22 15:00:20 TSLA   sell  market_hours             outside market hours: 2026-05-22 16:00:20 EDT
+    715 2026-05-22 15:00:10 ABBV   sell  market_hours             outside market hours: 2026-05-22 16:00:10 EDT
+    714 2026-05-22 15:00:10 SPY    sell  market_hours             outside market hours: 2026-05-22 16:00:10 EDT
+    713 2026-05-22 15:00:09 BE     sell  market_hours             outside market hours: 2026-05-22 16:00:09 EDT
+    712 2026-05-22 15:00:07 QQQ    sell  market_hours             outside market hours: 2026-05-22 16:00:07 EDT
+    711 2026-05-22 15:00:06 ASML   sell  market_hours             outside market hours: 2026-05-22 16:00:06 EDT
+    710 2026-05-22 15:00:06 LLY    sell  market_hours             outside market hours: 2026-05-22 16:00:06 EDT
+    709 2026-05-22 15:00:04 AVGO   buy   market_hours             outside market hours: 2026-05-22 16:00:04 EDT
+    708 2026-05-22 15:00:04 GE     buy   market_hours             outside market hours: 2026-05-22 16:00:04 EDT
+    707 2026-05-22 15:00:02 GOOGL  sell  market_hours             outside market hours: 2026-05-22 16:00:02 EDT
+    705 2026-05-22 14:55:07 LLY    buy   opportunity_score        score=0 bucket=blocked decision=block reasons=trend_bullish_developing,momentum_
+    704 2026-05-22 14:55:06 GE     sell  ghost_sell               no open Alpaca position
+
+================================================================================
+  Blocked Signal Outcome Report — DB Context
+================================================================================
+  Blocked BUY rows : 288
+
+── By rejection category ───────────────────────────────────────────────────
+  Category                      Count  AvgPred  Top symbols
+  ---------------------------- ------ --------  ----------------------------------
+  macro_position_limit            208        -  CRDO:26, LLY:25, LMT:23, ASML:19, AMD:17, LIN:15
+  trend_confirmation               31        -  RKLB:3, LMT:3, CRDO:3, COST:2, GLD:2, CRM:2
+  affordability                    21     5.52  LLY:9, LMT:5, ASML:3, GEV:2, CAT:2
+  cooldown                          8        -  GE:3, LMT:3, CRM:2
+  second_look                       7     5.71  CRDO:4, CAT:1, TSLA:1, AMD:1
+  market_hours                      4        -  UNH:1, CRDO:1, AVGO:1, GE:1
+  strategy_memory                   3     5.33  CRDO:3
+  setup_policy                      2        -  CRDO:2
+  opportunity_score                 1     5.00  LLY:1
+  confidence_gate                   1     5.00  LLY:1
+  prediction_gate                   1     3.00  LLY:1
+  session_momentum_gate             1     4.00  GE:1
+
+── By symbol ───────────────────────────────────────────────────────────────
+  Symbol    Count  AvgPred  Top categories
+  -------- ------ --------  --------------------------------------
+  CRDO         39     5.71  macro_position_limit:26, second_look:4, strategy_memory:3, trend_confirmation:3, setup_policy:2
+  LLY          39     5.00  macro_position_limit:25, affordability:9, trend_confirmation:2, opportunity_score:1, confidence_gate:1
+  LMT          34     5.00  macro_position_limit:23, affordability:5, trend_confirmation:3, cooldown:3
+  ASML         24     6.67  macro_position_limit:19, affordability:3, trend_confirmation:2
+  AMD          20     5.00  macro_position_limit:17, trend_confirmation:2, second_look:1
+  CRM          19        -  macro_position_limit:15, cooldown:2, trend_confirmation:2
+  GE           18     4.00  macro_position_limit:12, cooldown:3, market_hours:1, session_momentum_gate:1, trend_confirmation:1
+  CAT          18     5.33  macro_position_limit:14, affordability:2, second_look:1, trend_confirmation:1
+  LIN          17        -  macro_position_limit:15, trend_confirmation:2
+  GEV          13     7.00  macro_position_limit:10, affordability:2, trend_confirmation:1
+  META          8        -  macro_position_limit:8
+  TSLA          8     5.00  macro_position_limit:5, trend_confirmation:2, second_look:1
+  RKLB          7        -  macro_position_limit:4, trend_confirmation:3
+  UNH           4        -  trend_confirmation:2, market_hours:1, macro_position_limit:1
+  COST          4        -  trend_confirmation:2, macro_position_limit:2
+  GLD           3        -  trend_confirmation:2, macro_position_limit:1
+  MA            2        -  macro_position_limit:2
+  VRT           2        -  macro_position_limit:2
+  AVGO          1        -  market_hours:1
+  ABBV          1        -  macro_position_limit:1
+  VRTX          1        -  macro_position_limit:1
+  HWM           1        -  macro_position_limit:1
+  V             1        -  macro_position_limit:1
+  IWM           1        -  macro_position_limit:1
+  SPY           1        -  macro_position_limit:1
+
+── Top prediction reasons ──────────────────────────────────────────────────
+     21  bullish_trend,developing_trend,three_plus_consecutive_buys
+      3  bullish_trend,developing_trend,rising_momentum,positive_momentum_pct,three_plus_consecutive_bu…
+      2  bullish_trend,confirmed_trend,three_plus_consecutive_buys
+      2  bullish_trend,weak_trend,market_bias_buy,rising_momentum,two_consecutive_buys
+      2  bullish_trend,weak_trend,market_bias_buy,rising_momentum,positive_momentum_pct,two_consecutive…
+      1  bullish_trend,developing_trend,rising_momentum,three_plus_consecutive_buys
+      1  bullish_trend,weak_trend,market_bias_buy,setup_policy_boost,rising_momentum,positive_momentum_…
+      1  bullish_trend,confirmed_trend,rising_momentum,positive_momentum_pct,three_plus_consecutive_buys
+      1  bullish_trend,developing_trend,falling_momentum,negative_momentum_pct,three_plus_consecutive_b…
+      1  bullish_trend,weak_trend,market_bias_buy,two_consecutive_buys
+
+── Top setup labels ────────────────────────────────────────────────────────
+    105  near_vwap_neutral_fade_risk
+     70  balanced_transition_state
+     49  above_vwap_neutral_continuation
+     30  above_vwap_strength_continuation
+     26  unclassified_transition
+      4  below_vwap_neutral_drift_risk
+      2  avoid_below_vwap_weak_drift
+      1  near_vwap_weak_strength_followthrough
+      1  neutral_near_vwap_balanced
+
+── Top setup policy actions ────────────────────────────────────────────────
+    254  neutral
+     31  boost
+      2  block
+      1  allow
+
+── Effective market bias ───────────────────────────────────────────────────
+    253  unknown
+     29  neutral
+      6  buy
+
+── Original market bias ────────────────────────────────────────────────────
+    237  neutral
+     51  buy
+
+── Recent blocked BUY samples ──────────────────────────────────────────────
+     ID Time                Sym    Cat                       Pred Trend              Mom        Setup                             
+  ----- ------------------- ------ ------------------------ ----- ------------------ ---------- ----------------------------------
+    724 2026-05-22 15:01:21 UNH    market_hours                 - bullish/developing -          above_vwap_neutral_continuation   
+    719 2026-05-22 15:00:33 CRDO   market_hours                 - bullish/developing -          unclassified_transition           
+    709 2026-05-22 15:00:04 AVGO   market_hours                 - neutral/weak       -          above_vwap_strength_continuation  
+    708 2026-05-22 15:00:04 GE     market_hours                 - neutral/weak       -          near_vwap_neutral_fade_risk       
+    705 2026-05-22 14:55:07 LLY    opportunity_score          5.0 bullish/developing flat:-0.093 balanced_transition_state         
+    695 2026-05-22 14:55:03 CRDO   strategy_memory            6.0 bullish/developing rising:0.115 unclassified_transition           
+    692 2026-05-22 14:55:02 RKLB   trend_confirmation           - bullish/developing -          unclassified_transition           
+    686 2026-05-22 14:50:09 LMT    trend_confirmation           - neutral/weak       -          near_vwap_neutral_fade_risk       
+    677 2026-05-22 14:50:05 LLY    affordability              5.0 bullish/developing flat:0.086 balanced_transition_state         
+    675 2026-05-22 14:50:03 CRDO   strategy_memory            5.0 bullish/developing flat:-0.009 unclassified_transition           
+    672 2026-05-22 14:50:03 COST   trend_confirmation           - bullish/weak       -          above_vwap_neutral_continuation   
+    664 2026-05-22 14:45:27 COST   trend_confirmation           - neutral/weak       -          above_vwap_neutral_continuation   
+    663 2026-05-22 14:45:15 LLY    affordability              5.0 bullish/developing flat:0.036 balanced_transition_state         
+    650 2026-05-22 14:45:02 LMT    affordability              5.0 bullish/developing flat:-0.035 balanced_transition_state         
+    642 2026-05-22 14:40:10 LMT    affordability              5.0 bullish/developing flat:0.092 balanced_transition_state         
+    641 2026-05-22 14:40:09 CRDO   trend_confirmation           - bullish/developing -          above_vwap_neutral_continuation   
+    640 2026-05-22 14:40:07 LLY    affordability              5.0 bullish/developing flat:0.015 balanced_transition_state         
+    629 2026-05-22 14:35:12 LLY    affordability              5.0 bullish/developing flat:-0.007 balanced_transition_state         
+    625 2026-05-22 14:35:07 LMT    affordability              5.0 bullish/developing flat:-0.017 balanced_transition_state         
+    609 2026-05-22 14:30:21 LMT    affordability              5.0 bullish/developing flat:0.023 balanced_transition_state         
+========================================================================
+  Drawdown Attribution Report — 2026-05-22
+========================================================================
+
+── Realized P&L by Symbol ─────────────────────────────
+  CRM          $-4.95
+  GE           $-1.41
+  QQQ          +$0.59
+  LMT          +$4.20
+  TOTAL        $-1.57
+
+── Worst Closed Trades ────────────────────────────────
+  CRM    qty=5.0   181.07 → 180.08 P&L=    $-4.95 trend=bullish/developing bias=neutral risk=high entry=conditional
+  GE     qty=3.0   302.60 → 302.13 P&L=    $-1.41 trend=bullish/weak bias=buy risk=medium entry=good_on_pullbacks
+  QQQ    qty=2.0   717.45 → 717.74 P&L=    +$0.59 trend=None/None bias=None risk=None entry=None
+  LMT    qty=1.0   528.58 → 532.78 P&L=    +$4.20 trend=bullish/developing bias=neutral risk=medium entry=good_on_pullbacks
+
+── Current Unrealized P&L by Alpaca Position ──────────
+  SPY    qty=1.00    avg=747.31    cur=745.67    uP&L=      $-1.64 (-0.22%) value=$745.67
+  MA     qty=1.00    avg=500.06    cur=498.54    uP&L=      $-1.52 (-0.30%) value=$498.54
+  AAPL   qty=2.00    avg=308.59    cur=309.00    uP&L=      +$0.83 (+0.13%) value=$618.00
+  LLY    qty=1.00    avg=1063.11   cur=1065.00   uP&L=      +$1.89 (+0.18%) value=$1,065.00
+  IWM    qty=3.00    avg=284.03    cur=284.93    uP&L=      +$2.69 (+0.32%) value=$854.79
+  LMT    qty=1.00    avg=528.58    cur=533.57    uP&L=      +$4.99 (+0.94%) value=$533.57
+  TOTAL                                       uP&L=      +$7.24
+
+── Daily P&L Attribution ──────────────────────────────
+  Realized P&L   : $-1.57
+  Unrealized P&L : +$7.24
+  Estimated total: +$5.67
+
+── Notes ──────────────────────────────────────────────
+  Realized P&L comes from matched_trades FIFO exits for the target date.
+  Unrealized P&L comes live from Alpaca current positions.
+  This report is read-only and does not place/cancel/modify orders.
+================================================================
+  Post-Session Check — 2026-05-22
+================================================================
+
+── Signal Counts ───────────────────────────────────
+Total signals : 724
+Approved      : 9
+Rejected      : 715
+Orders        : 7
+[OK]   Signal counts loaded
+
+── Missing Fill Prices ─────────────────────────────
+[OK]   No approved order rows missing fill_price for target date
+
+── Matched Trades Rebuild ──────────────────────────
+[OK]   matched_trades rebuilt; matched=3 open_symbols=1
+
+── Alpaca vs DB Reconciliation ─────────────────────
+Alpaca open symbols : 6
+DB open symbols     : 1
+[WARN] Held in Alpaca but not open in DB: ['AAPL', 'IWM', 'LLY', 'MA', 'SPY']
+
+── Fill Events ─────────────────────────────────────
+  canceled     CRM    sell  canceled              2
+  canceled     GE     sell  canceled              2
+  canceled     LMT    sell  canceled              2
+  canceled     QQQ    sell  canceled              2
+  held         CRM    sell  held                  2
+  held         GE     sell  held                  2
+  held         LMT    sell  held                  2
+  new          CRM    sell  new                   2
+  new          GE     sell  new                   2
+  new          LMT    sell  new                   2
+  partial_fill CRM    buy   partially_filled      2
+  partial_fill CRM    sell  partially_filled      2
+  accepted     CRM    sell  accepted              1
+  accepted     GE     sell  accepted              1
+  accepted     LMT    sell  accepted              1
+  canceled     IWM    sell  canceled              1
+  canceled     LLY    sell  canceled              1
+  canceled     SPY    sell  canceled              1
+  expired      IWM    sell  expired               1
+  expired      LLY    sell  expired               1
+[OK]   Fill events present
+
+── Daily Summary ─────────────────────────────────────────
+
+============================================================
+  DAILY SUMMARY — 2026-05-22
+============================================================
+
+── SIGNALS ──────────────────────────────────────────────
+  Total received : 724
+  Approved       : 9  (1%)
+  Rejected       : 715  (99%)
+
+  Rejection breakdown:
+     366  Ghost sell (no Alpaca position)
+     208  Macro position limit
+      68  Other (Claude verbose)
+      31  Trend confirmation
+      18  Outside trading hours
+       8  Cooldown active
+       7  Second-look market check
+       3  Strategy memory gate
+       2  Entry quality / setup policy
+       1  Session momentum gate
+       1  Prediction gate
+       1  Low confidence (Claude)
+       1  Entry quality / pullback requirement
+
+── ACTIONABLE SIGNALS ───────────────────────────────────
+  Total actionable : 340
+  Approved         : 9  (2.6%)
+  Rejected         : 331  (97.4%)
+
+  Excluded noise:
+     366  Ghost sell (no Alpaca position)
+      18  Outside trading hours
+
+── SESSION MOMENTUM GATE ─────────────────────────────────
+  By session label:
+       1  fading
+  By symbol:
+       1  GE
+
+── ORDERS BY SYMBOL ─────────────────────────────────────
+  Symbol  Approved   Orders    Null
+  ------  --------  -------    ----
+  ASML           2        0       2
+  CRM            2        2       0
+  GE             2        2       0
+  LMT            2        2       0
+  QQQ            1        1       0
+
+── REALIZED P&L (from matched_trades) ───────────────────
+  Symbol         P&L  Trades
+  ------  ----------  ------
+  LMT     +     4.20       1
+  QQQ     +     0.59       1
+  GE          -1.41       1
+  CRM         -4.95       1
+  ------  ----------  ------
+  TOTAL       -1.57       4
+
+── WIN RATE & PROFIT FACTOR ─────────────────────────────
+  Matched trades : 4
+  Wins           : 2  (50%)
+  Losses         : 2
+  Flat           : 0
+  Gross profit   : $4.79
+  Gross loss     : $6.36
+  Profit factor  : 0.75
+  Expectancy     : $-0.39 per matched trade
+
+── BEST / WORST TRADES ───────────────────────────────────
+  Best  : LMT  1.0 shares  buy=528.58 sell=532.78  P&L=+4.20
+  Worst : CRM  5.0 shares  buy=181.07 sell=180.08  P&L=-4.95
+
+── CLAUDE API USAGE (est.) ───────────────────────────────
+  Est. API calls : 724
+  Est. tokens    : 398,200 in / 90,500 out
+  Est. cost      : $0.6806  (Haiku @ $0.80/$4.00 per MTok)
+
+── LIVE EXECUTION ───────────────────────────────────────
+  Trade rows        : 724
+  Approved          : 9
+  Rejected          : 715
+  Approval rate     : 1.2%
+  BUY rows          : 293
+  BUY approved      : 5
+  BUY rejected      : 288
+  BUY approval rate : 1.7%
+
+── Live BUYs by Setup Label ──────────────────────────────────────────────
+Group                                      Count   Approved  Rejected  Approval% 
+------------------------------------------ ------- --------- --------- ----------
+near_vwap_neutral_fade_risk                107     2         105       1.9%      
+balanced_transition_state                  71      1         70        1.4%      
+above_vwap_neutral_continuation            49      0         49        0.0%      
+above_vwap_strength_continuation           32      2         30        6.2%      
+unclassified_transition                    26      0         26        0.0%      
+below_vwap_neutral_drift_risk              4       0         4         0.0%      
+avoid_below_vwap_weak_drift                2       0         2         0.0%      
+neutral_near_vwap_balanced                 1       0         1         0.0%      
+near_vwap_weak_strength_followthrough      1       0         1         0.0%      
+
+── Live BUYs by Setup Policy Action ──────────────────────────────────────
+Group                                      Count   Approved  Rejected  Approval% 
+------------------------------------------ ------- --------- --------- ----------
+neutral                                    257     3         254       1.2%      
+boost                                      33      2         31        6.1%      
+block                                      2       0         2         0.0%      
+allow                                      1       0         1         0.0%      
+
+── Live BUYs by Rejection Category ───────────────────────────────────────
+Group                                      Count   Approved  Rejected  Approval% 
+------------------------------------------ ------- --------- --------- ----------
+Macro position limit                       208     0         208       0.0%      
+Trend confirmation                         31      0         31        0.0%      
+Other (Claude verbose)                     21      0         21        0.0%      
+Cooldown active                            8       0         8         0.0%      
+Second-look market check                   7       0         7         0.0%      
+approved                                   5       5         0         100.0%    
+Outside trading hours                      4       0         4         0.0%      
+Strategy memory gate                       3       0         3         0.0%      
+Entry quality / setup policy               2       0         2         0.0%      
+Session momentum gate                      1       0         1         0.0%      
+
+── Setup Policy Blocks by Setup Label ────────────────────────────────────
+Group                                      Count   Approved  Rejected  Approval% 
+------------------------------------------ ------- --------- --------- ----------
+avoid_below_vwap_weak_drift                2       0         2         0.0%      
+
+── Setup Policy Blocks by Policy Reason ──────────────────────────────────
+Group                                      Count   Approved  Rejected  Approval% 
+------------------------------------------ ------- --------- --------- ----------
+setup_policy:block:avoid_below_vwap_weak_d 2       0         2         0.0%      
+
+============================================================
+[OK]   Daily Summary completed
+
+── Filter Report ─────────────────────────────────────────
+
+========================================================================
+  Filter Effectiveness Report
+========================================================================
+  Total signals      : 724
+  Approved signals   : 9
+  Rejected signals   : 715
+  Rejection rate     : 98.8%
+
+── Top rejection categories ────────────────────────────────────────
+  Category                     Label                         Count
+  ---------------------------- ---------------------------- ------
+  ghost_sell                   Ghost sell                      366
+  macro_position_limit         Macro position limit            208
+  trend_confirmation           Trend confirmation               31
+  sell_profit_threshold        Other / Claude                   26
+  sell_discipline              Other / Claude                   21
+  affordability                Other / Claude                   21
+  market_hours                 Outside trading hours            18
+  cooldown                     Cooldown                          8
+  second_look                  Second-look market check          7
+  strategy_memory              Strategy memory gate              3
+  setup_policy                 Entry quality / setup policy      2
+  opportunity_score            Other / Claude                    1
+  confidence_gate              Low confidence gate               1
+  prediction_gate              Prediction gate                   1
+  session_momentum_gate        Session momentum gate             1
+
+── Top rejected symbols ────────────────────────────────────────────
+  Symbol   Rejected
+  -------- --------
+  ASML           46
+  AMD            43
+  LLY            43
+  GEV            42
+  CAT            41
+  CRDO           40
+  BE             38
+  LMT            34
+  GOOGL          30
+  COST           30
+  RKLB           28
+  TSLA           26
+  GE             26
+  LIN            24
+  VRTX           23
+  CRM            20
+  META           20
+  VRT            18
+  UNH            17
+  HWM            17
+
+── Category × top symbols ──────────────────────────────────────────
+  ghost_sell                   BE:37, GOOGL:29, GEV:28, COST:26, VRTX:22, CAT:22, AMD:22, ASML:21
+  macro_position_limit         CRDO:26, LLY:25, LMT:23, ASML:19, AMD:17, LIN:15, CRM:15, CAT:14
+  trend_confirmation           RKLB:3, LMT:3, CRDO:3, COST:2, GLD:2, CRM:2, LIN:2, ASML:2
+  sell_profit_threshold        IWM:12, AAPL:6, QQQ:6, GE:2
+  sell_discipline              SPY:11, MA:5, LLY:3, AAPL:2
+  affordability                LLY:9, LMT:5, ASML:3, GEV:2, CAT:2
+  market_hours                 UNH:1, HWM:1, LIN:1, GEV:1, CAT:1, CRDO:1, CRM:1, AMD:1
+  cooldown                     GE:3, LMT:3, CRM:2
+  second_look                  CRDO:4, CAT:1, TSLA:1, AMD:1
+  strategy_memory              CRDO:3
+  setup_policy                 CRDO:2
+  opportunity_score            LLY:1
+  confidence_gate              LLY:1
+  prediction_gate              LLY:1
+  session_momentum_gate        GE:1
+
+── Recent rejection samples ────────────────────────────────────────
+     ID Time                Sym    Act   Category                 Reason
+  ----- ------------------- ------ ----- ------------------------ ----------------------------------------
+    724 2026-05-22 15:01:21 UNH    buy   market_hours             outside market hours: 2026-05-22 16:01:21 EDT
+    723 2026-05-22 15:01:12 HWM    sell  market_hours             outside market hours: 2026-05-22 16:01:12 EDT
+    722 2026-05-22 15:01:10 LIN    sell  market_hours             outside market hours: 2026-05-22 16:01:10 EDT
+    721 2026-05-22 15:00:53 GEV    sell  market_hours             outside market hours: 2026-05-22 16:00:53 EDT
+    720 2026-05-22 15:00:49 CAT    sell  market_hours             outside market hours: 2026-05-22 16:00:49 EDT
+    719 2026-05-22 15:00:33 CRDO   buy   market_hours             outside market hours: 2026-05-22 16:00:33 EDT
+    718 2026-05-22 15:00:23 CRM    sell  market_hours             outside market hours: 2026-05-22 16:00:23 EDT
+    717 2026-05-22 15:00:21 AMD    sell  market_hours             outside market hours: 2026-05-22 16:00:21 EDT
+    716 2026-05-22 15:00:20 TSLA   sell  market_hours             outside market hours: 2026-05-22 16:00:20 EDT
+    715 2026-05-22 15:00:10 ABBV   sell  market_hours             outside market hours: 2026-05-22 16:00:10 EDT
+    714 2026-05-22 15:00:10 SPY    sell  market_hours             outside market hours: 2026-05-22 16:00:10 EDT
+    713 2026-05-22 15:00:09 BE     sell  market_hours             outside market hours: 2026-05-22 16:00:09 EDT
+    712 2026-05-22 15:00:07 QQQ    sell  market_hours             outside market hours: 2026-05-22 16:00:07 EDT
+    711 2026-05-22 15:00:06 ASML   sell  market_hours             outside market hours: 2026-05-22 16:00:06 EDT
+    710 2026-05-22 15:00:06 LLY    sell  market_hours             outside market hours: 2026-05-22 16:00:06 EDT
+    709 2026-05-22 15:00:04 AVGO   buy   market_hours             outside market hours: 2026-05-22 16:00:04 EDT
+    708 2026-05-22 15:00:04 GE     buy   market_hours             outside market hours: 2026-05-22 16:00:04 EDT
+    707 2026-05-22 15:00:02 GOOGL  sell  market_hours             outside market hours: 2026-05-22 16:00:02 EDT
+    705 2026-05-22 14:55:07 LLY    buy   opportunity_score        score=0 bucket=blocked decision=block reasons=trend_bullish_developing,momentum_
+    704 2026-05-22 14:55:06 GE     sell  ghost_sell               no open Alpaca position
+[OK]   Filter Report completed
+
+── Position Review ─────────────────────────────────────────
+====================================================================================================================================
+  Position Review
+====================================================================================================================================
+  Positions        : 6/8
+  Account balance  : $96,049.93
+  Daily P&L %      : 0.01
+  Market date      : 2026-05-22
+  Macro sentiment  : mixed
+
+Symbol Qty     Value        uP&L         uP&L%    Exp%    HoldHr   NowTrend         NowBias   EntryBias  Risk       EntryQual         
+------ ------- ------------ ------------ -------- ------- -------- ---------------- --------- ---------- ---------- ------------------
+LLY    1.00    $1,065.00    +$1.89       +0.18%   1.11    -        bullish/confirm… neutral   -          -          -                 
+IWM    3.00    $854.79      +$2.69       +0.32%   0.89    -        bearish/confirm… neutral   -          -          -                 
+SPY    1.00    $745.67      $-1.64       -0.22%   0.78    -        bearish/confirm… neutral   -          -          -                 
+AAPL   2.00    $618.00      +$0.83       +0.13%   0.64    -        bearish/confirm… neutral   -          -          -                 
+LMT    1.00    $533.57      +$4.99       +0.94%   0.56    4.5      neutral/weak     neutral   neutral    medium     good_on_pullbacks 
+MA     1.00    $498.54      $-1.52       -0.30%   0.52    -        bearish/develop… neutral   -          -          -                 
+------ ------- ------------ ------------ -------- ------- -------- ---------------- --------- ---------- ---------- ------------------
+TOTAL          $4,315.57    +$7.24      
+
+Notes:
+  NowTrend/NowBias are current state.
+  EntryBias/Risk/EntryQual come from the oldest currently-open FIFO lot.
+  Null/blank entry fields usually mean the lot predates attribution tracking.
+[OK]   Position Review completed
+
+── Drawdown Report ─────────────────────────────────────────
+========================================================================
+  Drawdown Attribution Report — 2026-05-22
+========================================================================
+
+── Realized P&L by Symbol ─────────────────────────────
+  CRM          $-4.95
+  GE           $-1.41
+  LMT          +$4.20
+  TOTAL        $-2.16
+
+── Worst Closed Trades ────────────────────────────────
+  CRM    qty=5.0   181.07 → 180.08 P&L=    $-4.95 trend=bullish/developing bias=neutral risk=high entry=conditional
+  GE     qty=3.0   302.60 → 302.13 P&L=    $-1.41 trend=bullish/weak bias=buy risk=medium entry=good_on_pullbacks
+  LMT    qty=1.0   528.58 → 532.78 P&L=    +$4.20 trend=bullish/developing bias=neutral risk=medium entry=good_on_pullbacks
+
+── Current Unrealized P&L by Alpaca Position ──────────
+  SPY    qty=1.00    avg=747.31    cur=745.67    uP&L=      $-1.64 (-0.22%) value=$745.67
+  MA     qty=1.00    avg=500.06    cur=498.54    uP&L=      $-1.52 (-0.30%) value=$498.54
+  AAPL   qty=2.00    avg=308.59    cur=309.00    uP&L=      +$0.83 (+0.13%) value=$618.00
+  LLY    qty=1.00    avg=1063.11   cur=1065.00   uP&L=      +$1.89 (+0.18%) value=$1,065.00
+  IWM    qty=3.00    avg=284.03    cur=284.93    uP&L=      +$2.69 (+0.32%) value=$854.79
+  LMT    qty=1.00    avg=528.58    cur=533.57    uP&L=      +$4.99 (+0.94%) value=$533.57
+  TOTAL                                       uP&L=      +$7.24
+
+── Daily P&L Attribution ──────────────────────────────
+  Realized P&L   : $-2.16
+  Unrealized P&L : +$7.24
+  Estimated total: +$5.08
+
+── Notes ──────────────────────────────────────────────
+  Realized P&L comes from matched_trades FIFO exits for the target date.
+  Unrealized P&L comes live from Alpaca current positions.
+  This report is read-only and does not place/cancel/modify orders.
+[OK]   Drawdown Report completed
+
+── Analytics Report ─────────────────────────────────────────
+
+============================================================
+  Trading Bot Analytics Report — DATE 2026-05-22
+============================================================
+
+── EXECUTION ───────────────────────────────────────────────
+  Filled buys              : 3
+  Filled sells             : 4
+  Synthetic exits          : 0
+  Open tracked positions   : 1 (LMT)
+  Fill events captured     : 55
+
+── RISK FILTERS ────────────────────────────────────────────
+  market_hours              : 18
+  ghost_sell                : 366
+  cooldown                  : 8
+  trend_confirmation        : 31
+  macro_position_limit      : 208
+  setup_policy              : 2
+  session_momentum_gate     : 1
+  prediction_gate           : 1
+  confidence_gate           : 1
+  second_look               : 7
+  claude_rejection          : 72
+  TOTAL                     : 715
+
+── SESSION MOMENTUM ATTRIBUTION ────────────────────────────
+  Label                   Total  Approved  Rejected Approval%
+  ---------------------- ------ --------- --------- ---------
+  developing_uptrend        104         3       101      2.9%
+  strong_uptrend             73         0        73      0.0%
+  rangebound                 62         2        60      3.2%
+  unknown                    45         0        45      0.0%
+  reversal_attempt            6         0         6      0.0%
+  fading                      3         0         3      0.0%
+
+── PERFORMANCE ─────────────────────────────────────────────
+  Realized P&L             : $-2.16
+  Closed trades            : 3 (1W / 2L / 0F)
+  Win rate                 : 33.3%
+  Avg win                  : $+4.20
+  Avg loss                 : $-3.18
+  Profit factor            : 0.66
+  Expectancy per trade     : $-0.72
+
+── PER-SYMBOL PERFORMANCE ──────────────────────────────────
+  Symbol         P&L  Closed       W/L/F    Qty
+  ------- ----------  ------  ----------  -----
+  LMT     $    +4.20       1       1/0/0    1.0
+  GE      $    -1.41       1       0/1/0    3.0
+  CRM     $    -4.95       1       0/1/0    5.0
+
+── MATCHED-TRADE ATTRIBUTION ───────────────────────────────
+  Trades                   : 3
+  Realized P&L             : $-2.16
+  Expectancy               : $-0.72
+  Win rate                 : 33.3%
+  Gross profit / loss      : $4.20 / $6.36
+  Profit factor            : 0.66
+
+  Per-symbol (from matched_trades):
+    Symbol  Trades         P&L     Expect    Win%
+    ------- ------  ----------  ---------  ------
+    LMT          1  $    +4.20  $   +4.20  100.0%
+    GE           1  $    -1.41  $   -1.41    0.0%
+    CRM          1  $    -4.95  $   -4.95    0.0%
+
+  By macro_regime:
+    mixed                  n=  3  P&L=$    -2.16  expect=$  -0.72
+
+  By trend (direction/strength):
+    bullish/developing     n=  2  P&L=$    -0.75  expect=$  -0.38
+    bullish/weak           n=  1  P&L=$    -1.41  expect=$  -1.41
+
+── DATA QUALITY ────────────────────────────────────────────
+  Confirmed-fill trades    : 3
+  Best-effort FIFO trades  : 3
+  Confirmed P&L            : $-2.16
+  Best-effort P&L          : $-2.16
+  P&L gap                  : 0.0%
+  Trade-count gap          : 0.0%
+[OK]   Analytics Report completed
+
+================================================================
+[WARN] Post-session check completed with warnings/issues
+
+========================================================================
+  Morning Check
+========================================================================
+
+========================================================================
+  Position Review
+========================================================================
+
+========================================================================
+  Market Alignment Report
+========================================================================
+
+========================================================================
+  Session Momentum Refresh
+========================================================================
+
+========================================================================
+  Position Momentum Monitor
+========================================================================
+
+========================================================================
+  Adaptive Confirmation Report
+========================================================================
+
+========================================================================
+  Adaptive Impact Report
+========================================================================
+
+========================================================================
+  Filter Report
+========================================================================
+
+========================================================================
+  Blocked Signal Outcome Report
+========================================================================
+
+========================================================================
+  Drawdown Report
+========================================================================
+
+========================================================================
+  Post-Session Check
+========================================================================
+
+========================================================================
+[WARN] one or more checks reported issues

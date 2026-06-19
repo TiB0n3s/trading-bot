@@ -1,0 +1,384 @@
+{
+  "market_date": "2026-05-22",
+  "generated_at": "2026-05-22T08:31:59.539285",
+  "macro_sentiment": "mixed",
+  "macro_summary": "May 22 brings a packed macro calendar including Jobless Claims, Philly Fed, Housing Starts, and Preliminary PMI data, creating a mixed risk environment with NVDA's blowout post-earnings move dominating tech sentiment but slight dip on China supply concerns. | Markets showing mixed signals as industrial and AI-infrastructure names remain near multi-month highs on strong earnings beats, while rising Treasury yields and lingering inflation concerns weigh on high-beta and growth names. | Live web search unavailable due to persistent timeouts; macro context unconfirmed for today, resulting in mixed/uncertain market sentiment across all symbols.",
+  "symbols": {
+    "AAPL": {
+      "bias": "neutral",
+      "reason": "No confirmed earnings, upgrade/downgrade, or significant pre-market catalyst found for May 22; stock likely tracking broader tech/macro tape.",
+      "confidence": "low",
+      "fundamental_score": "neutral",
+      "risk_level": "medium",
+      "entry_quality": "good_if_breadth_holds",
+      "avoid_type": null
+    },
+    "SPY": {
+      "bias": "neutral",
+      "reason": "Heavy macro data day (Jobless Claims, Philly Fed, PMI) creates mixed signals for broad market; no decisive directional pre-market catalyst confirmed.",
+      "confidence": "medium",
+      "fundamental_score": "neutral",
+      "risk_level": "low",
+      "entry_quality": "good_if_breadth_holds",
+      "avoid_type": null
+    },
+    "QQQ": {
+      "bias": "neutral",
+      "reason": "Tech-heavy ETF buoyed by NVDA's record earnings beat but tempered by macro data risk and NVDA's slight post-earnings pullback on supply/China concerns.",
+      "confidence": "medium",
+      "fundamental_score": "bullish",
+      "risk_level": "medium",
+      "entry_quality": "good_if_holds_gap",
+      "avoid_type": null
+    },
+    "MSFT": {
+      "bias": "neutral",
+      "reason": "No confirmed earnings, upgrade/downgrade, or pre-market catalyst found for May 22; stable large-cap AI-adjacent name with no specific edge identified today.",
+      "confidence": "low",
+      "fundamental_score": "neutral",
+      "risk_level": "medium",
+      "entry_quality": "good_on_pullbacks",
+      "avoid_type": null
+    },
+    "NVDA": {
+      "bias": "buy",
+      "reason": "NVDA reported record Q1 FY2027 revenue of $81.6B (+85% YoY) on May 20 with Q2 guidance of $91B, an $80B buyback authorization, and a massive dividend hike; slight post-earnings dip on China/supply concerns offers a tactical re-entry opportunity.",
+      "confidence": "high",
+      "fundamental_score": "strong_bullish",
+      "risk_level": "high",
+      "entry_quality": "good_on_pullbacks",
+      "avoid_type": null
+    },
+    "ORCL": {
+      "bias": "neutral",
+      "reason": "No confirmed earnings date, analyst action, or significant pre-market catalyst found for May 22; insufficient edge to establish directional bias.",
+      "confidence": "low",
+      "fundamental_score": "neutral",
+      "risk_level": "medium",
+      "entry_quality": "conditional",
+      "avoid_type": null
+    },
+    "TSCO": {
+      "bias": "neutral",
+      "reason": "No significant pre-market signals found for Tractor Supply on May 22; consumer discretionary/retail name with no confirmed catalyst today.",
+      "confidence": "low",
+      "fundamental_score": "neutral",
+      "risk_level": "medium",
+      "entry_quality": "good_on_pullbacks",
+      "avoid_type": null
+    },
+    "TSLA": {
+      "bias": "neutral",
+      "reason": "No confirmed earnings, major news, or pre-market catalyst found for May 22; high-beta EV name tracking macro and sentiment without a specific edge today.",
+      "confidence": "low",
+      "fundamental_score": "neutral",
+      "risk_level": "high",
+      "entry_quality": "tactical_only",
+      "avoid_type": null
+    },
+    "META": {
+      "bias": "neutral",
+      "reason": "no significant pre-market signals found",
+      "confidence": "low",
+      "fundamental_score": null,
+      "risk_level": null,
+      "entry_quality": null,
+      "avoid_type": null
+    },
+    "AMD": {
+      "bias": "neutral",
+      "reason": "no significant pre-market signals found",
+      "confidence": "low",
+      "fundamental_score": null,
+      "risk_level": null,
+      "entry_quality": null,
+      "avoid_type": null
+    },
+    "CVX": {
+      "bias": "neutral",
+      "reason": "no significant pre-market signals found",
+      "confidence": "low",
+      "fundamental_score": null,
+      "risk_level": null,
+      "entry_quality": null,
+      "avoid_type": null
+    },
+    "XOM": {
+      "bias": "neutral",
+      "reason": "no significant pre-market signals found",
+      "confidence": "low",
+      "fundamental_score": null,
+      "risk_level": null,
+      "entry_quality": null,
+      "avoid_type": null
+    },
+    "GOOGL": {
+      "bias": "neutral",
+      "reason": "no significant pre-market signals found",
+      "confidence": "low",
+      "fundamental_score": null,
+      "risk_level": null,
+      "entry_quality": null,
+      "avoid_type": null
+    },
+    "GLD": {
+      "bias": "neutral",
+      "reason": "no significant pre-market signals found",
+      "confidence": "low",
+      "fundamental_score": null,
+      "risk_level": null,
+      "entry_quality": null,
+      "avoid_type": null
+    },
+    "IWM": {
+      "bias": "neutral",
+      "reason": "no significant pre-market signals found",
+      "confidence": "low",
+      "fundamental_score": null,
+      "risk_level": null,
+      "entry_quality": null,
+      "avoid_type": null
+    },
+    "AVGO": {
+      "bias": "neutral",
+      "reason": "no significant pre-market signals found",
+      "confidence": "low",
+      "fundamental_score": null,
+      "risk_level": null,
+      "entry_quality": null,
+      "avoid_type": null
+    },
+    "CRDO": {
+      "bias": "neutral",
+      "reason": "Credo reported strong Q3 FY2026 earnings (200% YoY growth) but stock sold off sharply post-print and has only partially recovered; Susquehanna cut PT to $170 (March 2026), Seeking Alpha downgrade warns of further consolidation, while AI connectivity tailwind and oversold RSI (~44) offer a potential floor near $130\u2013$169 range.",
+      "confidence": "medium",
+      "fundamental_score": "bullish",
+      "risk_level": "high",
+      "entry_quality": "good_on_pullbacks",
+      "avoid_type": null
+    },
+    "GEV": {
+      "bias": "buy",
+      "reason": "GE Vernova is up ~65% YTD through early May near record highs with Argus raising PT to $1,300 (Buy), Q1 2026 earnings call signaling broad-based momentum, and strong AI power infrastructure tailwind continuing to drive institutional demand.",
+      "confidence": "high",
+      "fundamental_score": "strong_bullish",
+      "risk_level": "medium",
+      "entry_quality": "good_on_pullbacks",
+      "avoid_type": null
+    },
+    "BE": {
+      "bias": "neutral",
+      "reason": "No significant pre-market signals found for Bloom Energy on this date; clean energy / fuel cell sector maintains macro tailwind but no specific catalyst or analyst action identified today.",
+      "confidence": "low",
+      "fundamental_score": "neutral",
+      "risk_level": "high",
+      "entry_quality": "tactical_only",
+      "avoid_type": null
+    },
+    "CAT": {
+      "bias": "buy",
+      "reason": "Caterpillar reported a strong Q1 2026 earnings beat (sales +22% to $17.4B, adj EPS $5.54) and is up ~53% YTD near record highs with broad industrial and infrastructure spending tailwinds intact.",
+      "confidence": "high",
+      "fundamental_score": "strong_bullish",
+      "risk_level": "medium",
+      "entry_quality": "good_on_pullbacks",
+      "avoid_type": null
+    },
+    "VRT": {
+      "bias": "buy",
+      "reason": "Vertiv posted Q1 2026 net sales of $2.65B (+30% YoY) and raised full-year guidance to $13.25\u201313.75B with organic growth of 27\u201329% and adj EPS +43% YoY, underpinned by secular AI data center infrastructure demand.",
+      "confidence": "high",
+      "fundamental_score": "strong_bullish",
+      "risk_level": "medium",
+      "entry_quality": "good_on_pullbacks",
+      "avoid_type": null
+    },
+    "RKLB": {
+      "bias": "neutral",
+      "reason": "Rocket Lab posted Q1 2026 revenue of $200M with a narrowing net loss, but Cathie Wood has been trimming into strength, stock pulled back from May 11 highs amid profit-taking, and inflation/yield concerns add headwinds to this high-beta speculative space name.",
+      "confidence": "medium",
+      "fundamental_score": "bullish",
+      "risk_level": "very_high",
+      "entry_quality": "good_on_pullbacks",
+      "avoid_type": null
+    },
+    "RTX": {
+      "bias": "neutral",
+      "reason": "No significant pre-market signals found for RTX on this date; defense sector maintains stable macro backdrop from elevated global defense spending, but no specific catalyst, upgrade, or earnings event identified today.",
+      "confidence": "low",
+      "fundamental_score": "neutral",
+      "risk_level": "medium",
+      "entry_quality": "good_on_pullbacks",
+      "avoid_type": null
+    },
+    "LMT": {
+      "bias": "neutral",
+      "reason": "No significant pre-market signals found for Lockheed Martin on this date; defense spending tailwind remains supportive but no specific catalyst, analyst action, or earnings event identified today.",
+      "confidence": "low",
+      "fundamental_score": "neutral",
+      "risk_level": "medium",
+      "entry_quality": "good_on_pullbacks",
+      "avoid_type": null
+    },
+    "HWM": {
+      "bias": "neutral",
+      "reason": "No live data retrieved; HWM has benefited from aerospace/defense sector tailwinds in recent quarters but no confirmed earnings event, upgrade, or premarket catalyst verified for today.",
+      "confidence": "low",
+      "fundamental_score": "bullish",
+      "risk_level": "medium",
+      "entry_quality": "good_on_pullbacks",
+      "avoid_type": null
+    },
+    "VRTX": {
+      "bias": "neutral",
+      "reason": "No live data retrieved; Vertex holds a strong CF franchise with pipeline optionality (pain, AATD) but no confirmed catalyst, earnings beat, or premarket move verified for today.",
+      "confidence": "low",
+      "fundamental_score": "bullish",
+      "risk_level": "medium",
+      "entry_quality": "good_on_pullbacks",
+      "avoid_type": null
+    },
+    "MRNA": {
+      "bias": "neutral",
+      "reason": "No live data retrieved; Moderna faces persistent revenue headwinds post-COVID with high R&D burn and speculative pipeline, no confirmed near-term catalyst verified today.",
+      "confidence": "low",
+      "fundamental_score": "bearish",
+      "risk_level": "high",
+      "entry_quality": "tactical_only",
+      "avoid_type": null
+    },
+    "CRSP": {
+      "bias": "neutral",
+      "reason": "No live data retrieved; CRSP is a speculative biotech with Casgevy commercial ramp ongoing but elevated volatility and no confirmed catalyst or premarket signal for today.",
+      "confidence": "low",
+      "fundamental_score": "neutral",
+      "risk_level": "very_high",
+      "entry_quality": "tactical_only",
+      "avoid_type": null
+    },
+    "V": {
+      "bias": "neutral",
+      "reason": "No live data retrieved; Visa is a high-quality payments compounder with consistent earnings but no confirmed upgrade, beat, or significant premarket move verified for today.",
+      "confidence": "low",
+      "fundamental_score": "bullish",
+      "risk_level": "low",
+      "entry_quality": "good_on_pullbacks",
+      "avoid_type": null
+    },
+    "MA": {
+      "bias": "neutral",
+      "reason": "No live data retrieved; Mastercard mirrors Visa in payments network quality and sector strength but no specific confirmed catalyst or premarket signal available for today.",
+      "confidence": "low",
+      "fundamental_score": "bullish",
+      "risk_level": "low",
+      "entry_quality": "good_on_pullbacks",
+      "avoid_type": null
+    },
+    "LLY": {
+      "bias": "neutral",
+      "reason": "No live data retrieved; Eli Lilly has dominant GLP-1 tailwind via Mounjaro and Zepbound with strong institutional support, but no confirmed catalyst or premarket move verified today.",
+      "confidence": "low",
+      "fundamental_score": "strong_bullish",
+      "risk_level": "medium",
+      "entry_quality": "good_on_pullbacks",
+      "avoid_type": null
+    },
+    "LIN": {
+      "bias": "neutral",
+      "reason": "No live data retrieved; Linde is a best-in-class industrial gas compounder with stable earnings and low volatility, but no confirmed catalyst or premarket signal available today.",
+      "confidence": "low",
+      "fundamental_score": "bullish",
+      "risk_level": "low",
+      "entry_quality": "good_on_pullbacks",
+      "avoid_type": null
+    },
+    "GE": {
+      "bias": "buy",
+      "reason": "Susquehanna issued a Buy rating on May 22, consensus Strong Buy from 21 analysts with avg PT $349.1 (~+15% upside), recent Air Force contract win, flat pre-market after mild -0.10% close, no earnings risk today.",
+      "confidence": "high",
+      "fundamental_score": "strong_bullish",
+      "risk_level": "medium",
+      "entry_quality": "good_on_pullbacks",
+      "avoid_type": null
+    },
+    "ASML": {
+      "bias": "neutral",
+      "reason": "No significant pre-market signals or fresh analyst actions found for May 22; ASML remains a strong long-term semiconductor equipment name but no clear near-term catalyst identified today.",
+      "confidence": "low",
+      "fundamental_score": "bullish",
+      "risk_level": "medium",
+      "entry_quality": "good_on_pullbacks",
+      "avoid_type": null
+    },
+    "NFLX": {
+      "bias": "buy",
+      "reason": "Pre-market May 22 showing intraday range $87.52\u2013$90.37 with price at $89.65, recovering from a prior-month dip; strong Q1 earnings already reported ($12.25B revenue), Raymond James positive on ads business growth, no earnings event today.",
+      "confidence": "medium",
+      "fundamental_score": "bullish",
+      "risk_level": "medium",
+      "entry_quality": "good_if_holds_gap",
+      "avoid_type": null
+    },
+    "CRM": {
+      "bias": "neutral",
+      "reason": "Q1 earnings scheduled May 27, 2026 create near-term event risk; analysts expect 20.9% YoY EPS growth to $3.12 and outlook is broadly positive, but recent -2.03% price action and pre-earnings uncertainty warrant caution ahead of the report.",
+      "confidence": "medium",
+      "fundamental_score": "bullish",
+      "risk_level": "high",
+      "entry_quality": "conditional",
+      "avoid_type": null
+    },
+    "COST": {
+      "bias": "neutral",
+      "reason": "No significant pre-market signals or fresh analyst actions found for May 22; Costco remains a fundamentally strong defensive consumer staples name but no clear near-term catalyst identified today.",
+      "confidence": "low",
+      "fundamental_score": "bullish",
+      "risk_level": "low",
+      "entry_quality": "good_on_pullbacks",
+      "avoid_type": null
+    },
+    "KO": {
+      "bias": "neutral",
+      "reason": "No significant pre-market signals or fresh analyst actions found for May 22; Coca-Cola is a stable defensive large-cap with no identified catalyst or negative news today.",
+      "confidence": "low",
+      "fundamental_score": "neutral",
+      "risk_level": "low",
+      "entry_quality": "good_on_pullbacks",
+      "avoid_type": null
+    },
+    "ABBV": {
+      "bias": "neutral",
+      "reason": "No significant pre-market signals or fresh analyst actions found for May 22; AbbVie is a stable pharma large-cap but no clear directional catalyst identified today.",
+      "confidence": "low",
+      "fundamental_score": "neutral",
+      "risk_level": "medium",
+      "entry_quality": "good_on_pullbacks",
+      "avoid_type": null
+    },
+    "MRK": {
+      "bias": "neutral",
+      "reason": "May 21 close $114.23 with tight intraday range ($112.14\u2013$114.49) indicating stable price action; last analyst rating was May 6, 2026 with no confirmed fresh upgrades or downgrades found for today, mixed signals overall.",
+      "confidence": "low",
+      "fundamental_score": "neutral",
+      "risk_level": "medium",
+      "entry_quality": "good_on_pullbacks",
+      "avoid_type": null
+    },
+    "UNH": {
+      "bias": "neutral",
+      "reason": "UNH has recovered ~47% from March lows with a Q1 earnings beat and multiple analyst price target upgrades (UBS to $460, Mizuho to $440, BofA to $420), but remains weighed down by an unresolved DOJ criminal and civil investigation into Medicare Advantage billing, Berkshire Hathaway's full liquidation of its UNH stake, and contracting membership \u2014 creating too many conflicting signals for a directional bias.",
+      "confidence": "medium",
+      "fundamental_score": "bearish",
+      "risk_level": "high",
+      "entry_quality": "conditional",
+      "avoid_type": null
+    }
+  },
+  "source": "pre_market_research",
+  "format": "batched_normalized_approved_symbols",
+  "batch_count": 6,
+  "batch_size": 8,
+  "batch_errors": [
+    "batch 2/6 failed for ['META', 'AMD', 'CVX', 'XOM', 'GOOGL', 'GLD', 'IWM', 'AVGO']: Extra data: line 80 column 1 (char 3406)"
+  ]
+}

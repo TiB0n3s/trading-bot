@@ -1,0 +1,35 @@
+========================================================================
+  Drawdown Attribution Report — 2026-05-22
+========================================================================
+
+── Realized P&L by Symbol ─────────────────────────────
+  CRM          $-4.95
+  GE           $-1.41
+  QQQ          +$0.59
+  LMT          +$4.20
+  TOTAL        $-1.57
+
+── Worst Closed Trades ────────────────────────────────
+  CRM    qty=5.0   181.07 → 180.08 P&L=    $-4.95 trend=bullish/developing bias=neutral risk=high entry=conditional
+  GE     qty=3.0   302.60 → 302.13 P&L=    $-1.41 trend=bullish/weak bias=buy risk=medium entry=good_on_pullbacks
+  QQQ    qty=2.0   717.45 → 717.74 P&L=    +$0.59 trend=None/None bias=None risk=None entry=None
+  LMT    qty=1.0   528.58 → 532.78 P&L=    +$4.20 trend=bullish/developing bias=neutral risk=medium entry=good_on_pullbacks
+
+── Current Unrealized P&L by Alpaca Position ──────────
+  SPY    qty=1.00    avg=747.31    cur=745.66    uP&L=      $-1.65 (-0.22%) value=$745.66
+  MA     qty=1.00    avg=500.06    cur=498.54    uP&L=      $-1.52 (-0.30%) value=$498.54
+  AAPL   qty=2.00    avg=308.59    cur=309.00    uP&L=      +$0.83 (+0.13%) value=$618.00
+  LLY    qty=1.00    avg=1063.11   cur=1065.00   uP&L=      +$1.89 (+0.18%) value=$1,065.00
+  IWM    qty=3.00    avg=284.03    cur=284.95    uP&L=      +$2.75 (+0.32%) value=$854.85
+  LMT    qty=1.00    avg=528.58    cur=533.57    uP&L=      +$4.99 (+0.94%) value=$533.57
+  TOTAL                                       uP&L=      +$7.29
+
+── Daily P&L Attribution ──────────────────────────────
+  Realized P&L   : $-1.57
+  Unrealized P&L : +$7.29
+  Estimated total: +$5.72
+
+── Notes ──────────────────────────────────────────────
+  Realized P&L comes from matched_trades FIFO exits for the target date.
+  Unrealized P&L comes live from Alpaca current positions.
+  This report is read-only and does not place/cancel/modify orders.

@@ -24,6 +24,7 @@ in-review build). Example, 02:00 Tue-Sat:
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 import time
 from datetime import datetime, timezone
@@ -45,14 +46,41 @@ from trading_bot.services.model_promotion_evidence_service import (  # noqa: E40
 )
 
 
+def _env_int(name: str, default: int) -> int:
+    try:
+        return int(os.environ.get(name, ""))
+    except ValueError:
+        return default
+
+
+def _bounded_caps() -> tuple[int, int, int]:
+    """Row caps that keep the historical-bar validation from crawling the
+    23.6 GB trades.db. Small defaults so the build finishes in its slot; raise
+    the env vars to widen coverage once sourced from columnar exports."""
+    return (
+        _env_int("MODEL_EVIDENCE_ROWS_PER_SYMBOL", 50),
+        _env_int("MODEL_EVIDENCE_MAX_ROWS", 4000),
+        _env_int("MODEL_EVIDENCE_MIN_BUCKET_ROWS", 25),
+    )
+
+
 def run(date: str, *, write: bool = True) -> dict[str, Any]:
     start_date, end_date = historical_window(date)
+    rows_per_symbol, limit, min_bucket_rows = _bounded_caps()
+    print(
+        f"[model-evidence-payload-export] scope window={start_date}..{end_date} "
+        f"rows_per_symbol={rows_per_symbol} limit={limit} min_bucket_rows={min_bucket_rows}",
+        flush=True,
+    )
     t0 = time.monotonic()
     diagnostics = build_model_promotion_evidence_payload(
         base_dir=BASE_DIR,
         write=False,
         start_date=start_date,
         end_date=end_date,
+        rows_per_symbol=rows_per_symbol,
+        limit=limit,
+        min_bucket_rows=min_bucket_rows,
     )
     duration = round(time.monotonic() - t0, 2)
 
@@ -60,6 +88,11 @@ def run(date: str, *, write: bool = True) -> dict[str, Any]:
         "runtime_effect": CACHE_RUNTIME_EFFECT,
         "target_date": date,
         "window": [start_date, end_date],
+        "caps": {
+            "rows_per_symbol": rows_per_symbol,
+            "limit": limit,
+            "min_bucket_rows": min_bucket_rows,
+        },
         "build_duration_seconds": duration,
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "ready_count": diagnostics.get("ready_count"),

@@ -87,6 +87,8 @@ data/webull/market_evidence_*.json
 data/historical_bars/
 data/historical_ticks/
 data/benchmark_cache/
+data/bar_pattern_archive/
+data/earnings_events/benzinga_pit/
 manual_polygon_backfill_v4_*.log
 
 # Generated portfolio replacement intelligence

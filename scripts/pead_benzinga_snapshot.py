@@ -199,7 +199,15 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--end-date", help="Override window end (YYYY-MM-DD).")
     parser.add_argument("--limit", type=int, default=1000, help="Page size (max 50000).")
     parser.add_argument("--max-pages", type=int, default=50)
-    parser.add_argument("--db-path", default=str(ROOT / "trades.db"))
+    parser.add_argument(
+        "--db-path",
+        default=str(ROOT / "data" / "pead_research" / "pead_research.db"),
+        help=(
+            "PEAD research DB. Deliberately NOT trades.db: the live bot actively "
+            "manages trades.db (observed dropping research tables), and bars can't "
+            "share the production bar_pattern_features (20+ readers). Self-contained."
+        ),
+    )
     parser.add_argument("--out-dir", default=str(ROOT / "data" / "earnings_events" / "benzinga_pit"))
     parser.add_argument("--dry-run", action="store_true",
                         help="Fetch + write the JSONL artifact, but skip the ingest into the DB.")
@@ -247,6 +255,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     # Reuse the validated ingest path (validation + leakage check + upsert).
+    Path(args.db_path).parent.mkdir(parents=True, exist_ok=True)
     cmd = [
         sys.executable,
         str(ROOT / "scripts" / "post_earnings_drift_research.py"),

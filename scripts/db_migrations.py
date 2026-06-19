@@ -683,6 +683,24 @@ MIGRATIONS: tuple[Migration, ...] = (
             """,
         ),
     ),
+    Migration(
+        migration_id="20260619_029_bar_pattern_symbol_tf_fv_index",
+        description=(
+            "Add covering index for per-symbol historical-bar validation scans. "
+            "The observe-only model-evidence build filters bar_pattern_features by "
+            "symbol+timeframe+feature_version with an ORDER BY bar_timestamp LIMIT, "
+            "but the existing (symbol, bar_timestamp) index leaves timeframe and "
+            "feature_version as residual filters, forcing a full per-symbol window "
+            "scan (~168s/call, build timed out). This composite index makes the "
+            "seek tight (read-optimizing only; no data or trading-logic change)."
+        ),
+        statements=(
+            """
+            CREATE INDEX IF NOT EXISTS idx_bar_pattern_features_symbol_tf_fv_ts
+            ON bar_pattern_features(symbol, timeframe, feature_version, bar_timestamp)
+            """,
+        ),
+    ),
 )
 
 

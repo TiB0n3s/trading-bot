@@ -63,7 +63,18 @@ def build_model_promotion_evidence_payload(
     replay_symbols: tuple[str, ...] = ("AAPL",),
     execute_replay: bool = False,
     max_replay_requests: int = 1000,
+    start_date: str = "2024-06-01",
+    end_date: str = "2026-06-04",
+    rows_per_symbol: int = 250,
+    limit: int = 20000,
+    min_bucket_rows: int = 50,
 ) -> dict[str, Any]:
+    # rows_per_symbol/limit/min_bucket_rows bound the historical-bar validation
+    # scans against the large trades.db. Defaults preserve prior behavior; the
+    # observe-only payload-export job lowers them so the build completes in its
+    # slot instead of crawling the 23.6 GB SQLite. Smaller scopes simply report
+    # lower row counts (and honestly fail the >=5000-row readiness gates) — they
+    # never inflate evidence.
     evidence_dir = base_dir / "ops" / "model_promotion_evidence"
     generated_at = _utc_now()
     governance = build_model_validation_governance_payload(
@@ -86,39 +97,39 @@ def build_model_promotion_evidence_payload(
     )
     triple_validation = build_historical_bar_validation_payload(
         db_path=base_dir / "trades.db",
-        start_date="2024-06-01",
-        end_date="2026-06-04",
+        start_date=start_date,
+        end_date=end_date,
         label_target="triple_barrier_label",
-        rows_per_symbol=250,
-        limit=20000,
-        min_bucket_rows=50,
+        rows_per_symbol=rows_per_symbol,
+        limit=limit,
+        min_bucket_rows=min_bucket_rows,
     )
     trend_validation = build_historical_bar_validation_payload(
         db_path=base_dir / "trades.db",
-        start_date="2024-06-01",
-        end_date="2026-06-04",
+        start_date=start_date,
+        end_date=end_date,
         label_target="trend_scan_label",
-        rows_per_symbol=250,
-        limit=20000,
-        min_bucket_rows=50,
+        rows_per_symbol=rows_per_symbol,
+        limit=limit,
+        min_bucket_rows=min_bucket_rows,
     )
     paper_validation = build_historical_bar_paper_validation_payload(
         base_dir=base_dir,
-        start_date="2024-06-01",
-        end_date="2026-06-04",
+        start_date=start_date,
+        end_date=end_date,
         label_target="triple_barrier_label",
-        rows_per_symbol=250,
-        limit=20000,
+        rows_per_symbol=rows_per_symbol,
+        limit=limit,
         threshold=55.0,
         thresholds=[50.0, 55.0, 60.0, 65.0],
     )
     purged_walk_forward = build_historical_bar_walk_forward_payload(
         base_dir=base_dir,
-        start_date="2024-06-01",
-        end_date="2026-06-04",
+        start_date=start_date,
+        end_date=end_date,
         label_target="triple_barrier_label",
-        rows_per_symbol=250,
-        limit=20000,
+        rows_per_symbol=rows_per_symbol,
+        limit=limit,
         threshold=55.0,
         folds=5,
         purge_bars=60,
@@ -126,12 +137,12 @@ def build_model_promotion_evidence_payload(
     )
     promotion_metrics = build_ml_promotion_metrics_payload(
         PromotionMetricsConfig(
-            start_date="2024-06-01",
-            end_date="2026-06-04",
+            start_date=start_date,
+            end_date=end_date,
             db_path=base_dir / "trades.db",
         )
     )
-    shadow_health_date = "2026-06-04"
+    shadow_health_date = end_date
     shadow_health = ShadowPredictionService(
         repository=ShadowPredictionRepository(base_dir / "trades.db")
     ).health_report(

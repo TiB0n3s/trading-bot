@@ -62,12 +62,19 @@ def historical_window(date: str) -> tuple[str, str]:
     """Recent window for the historical-bar validation inside the payload build.
 
     The full 2-year default in the service is impractical against the 23.6 GB
-    live DB; cap it here (shared by the export build and recorded by the review).
+    live DB. The validation query is ``ORDER BY bar_timestamp ASC LIMIT n`` per
+    symbol, so it reads from the OLDEST date forward; old bars are sparse on the
+    current ``feature_version``/labels, so a wide window scans months to collect
+    each symbol's sample (measured: 90d ~= 168s per call, ~11min for the build;
+    14d ~= 0.1s). A short recent window keeps the build in its slot at the cost
+    of shallower (fewer-than-5000-row) coverage — honestly reported as not-ready,
+    never inflated. Raise MODEL_EVIDENCE_HISTORICAL_DAYS to widen coverage once
+    the validation is sourced from columnar exports instead of the live DB.
     """
     try:
-        days = int(os.environ.get("MODEL_EVIDENCE_HISTORICAL_DAYS", "90"))
+        days = int(os.environ.get("MODEL_EVIDENCE_HISTORICAL_DAYS", "14"))
     except ValueError:
-        days = 90
+        days = 14
     try:
         end = datetime.strptime(date, "%Y-%m-%d").date()
     except ValueError:

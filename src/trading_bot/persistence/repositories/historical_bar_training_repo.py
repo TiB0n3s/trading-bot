@@ -203,11 +203,17 @@ def _fetch_historical_bar_training_rows_from_db(
             return []
         if label_target not in columns:
             return []
-        table_ref = (
-            "bar_pattern_features INDEXED BY idx_bar_pattern_features_symbol_ts"
-            if _index_exists(con, "bar_pattern_features", "idx_bar_pattern_features_symbol_ts")
-            else "bar_pattern_features"
-        )
+        # Prefer the covering (symbol, timeframe, feature_version, bar_timestamp)
+        # index when present: the per-symbol query filters on all of those plus a
+        # bar_timestamp range and ORDER BY bar_timestamp, so this turns a full
+        # per-symbol window scan (~168s/call) into a tight seek. Fall back to the
+        # narrower (symbol, bar_timestamp) index, then to no hint.
+        if _index_exists(con, "bar_pattern_features", "idx_bar_pattern_features_symbol_tf_fv_ts"):
+            table_ref = "bar_pattern_features INDEXED BY idx_bar_pattern_features_symbol_tf_fv_ts"
+        elif _index_exists(con, "bar_pattern_features", "idx_bar_pattern_features_symbol_ts"):
+            table_ref = "bar_pattern_features INDEXED BY idx_bar_pattern_features_symbol_ts"
+        else:
+            table_ref = "bar_pattern_features"
 
         where = ["timeframe = '1m'" if "timeframe" in columns else "1=1"]
         params: list[Any] = []

@@ -5,8 +5,10 @@ from __future__ import annotations
 
 import argparse
 import json
+import random
 import sqlite3
 import sys
+import zlib
 from collections import defaultdict
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -19,7 +21,14 @@ for path in (ROOT, ROOT / "scripts", ROOT / "src"):
     if path_text not in sys.path:
         sys.path.insert(0, path_text)
 
-from analyze_ml_edge import EdgeRow, feature_lift_scan, feature_lift_scan_by_regime  # noqa: E402
+from analyze_ml_edge import (  # noqa: E402
+    EdgeRow,
+    _bucket_ranges,
+    _lift_from_ordered_returns,
+    _regime_value,
+    feature_lift_scan,
+    feature_lift_scan_by_regime,
+)
 from repositories.external_signal_feature_repo import (  # noqa: E402
     ExternalSignalFeature,
     ExternalSignalFeatureRepository,
@@ -33,6 +42,21 @@ from trading_bot.research.expected_value import (  # noqa: E402
 REPORT_VERSION = "post_earnings_drift_research_v1"
 RUNTIME_EFFECT = "research_only_no_trade_authority"
 MARKET_TZ = ZoneInfo("America/New_York")
+
+# Power floors for the precommit pass conditions. The aggregate floor (condition 2
+# / EV read) stays at 30, but conditions 3 and 6 are under-powered at 30 rows, so
+# they get their own, higher floors. See ops/research/post_earnings_drift_v1_precommit.md
+# Amendment A1. These sub-floors are always clamped to be at least the aggregate
+# floor, so they can only ever STRENGTHEN, never loosen, the contract.
+AGGREGATE_MIN_ROWS_DEFAULT = 30
+DECILE_MIN_ROWS_DEFAULT = 100  # >= 10 names/decile for the magnitude read (condition 3)
+REGIME_MIN_ROWS_DEFAULT = 60  # >= 2x the aggregate floor for the direction read (condition 6)
+# Bootstrap interval gate: the precommit bar is on the absolute decile lift; the
+# interval (not just the point estimate) must clear it.
+LIFT_BAR_PCT = 8.0
+BOOTSTRAP_RESAMPLES_DEFAULT = 1000
+BOOTSTRAP_SEED_DEFAULT = 11
+BOOTSTRAP_CI_LEVEL = 0.95
 REQUIRED_EVENT_FIELDS = ("symbol", "available_at", "source")
 EVENT_TIMESTAMP_FIELDS = ("earnings_ts", "event_ts", "feature_ts")
 RESERVED_EVENT_FIELDS = {
@@ -524,6 +548,147 @@ def _edge_row_for_event(
     )
 
 
+def _feature_pairs(rows: list[EdgeRow], feature: str) -> list[tuple[float, float]]:
+    """(feature_value, forward_return) pairs usable for a decile-lift bootstrap."""
+    return [
+        (float(row.numeric_features[feature]), float(row.forward_return_pct))
+        for row in rows
+        if feature in row.numeric_features and row.forward_return_pct is not None
+    ]
+
+
+def _lift_from_pairs(pairs: list[tuple[float, float]], n_buckets: int) -> float:
+    """Signed top-minus-bottom win-rate lift, matching feature_decile_lift semantics."""
+    ordered = [ret for _value, ret in sorted(pairs, key=lambda item: item[0])]
+    ranges = _bucket_ranges(len(ordered), n_buckets)
+    return _lift_from_ordered_returns(ordered, ranges)
+
+
+def _bootstrap_lift_ci(
+    pairs: list[tuple[float, float]],
+    *,
+    n_buckets: int,
+    resamples: int,
+    seed: int,
+    ci_level: float = BOOTSTRAP_CI_LEVEL,
+    lift_bar_pct: float = LIFT_BAR_PCT,
+) -> dict[str, Any] | None:
+    """Bootstrap CI for the decile lift of a single feature.
+
+    Resamples the (feature_value, return) pairs with replacement, recomputes the
+    same signed top-minus-bottom win-rate lift, and reports the percentile interval.
+    Returns ``None`` when there are too few rows to form deciles (same floor the
+    point-estimate scan uses), so a thin sample cannot manufacture a CI verdict.
+    """
+    n = len(pairs)
+    if resamples <= 0 or n < n_buckets * 3:
+        return None
+    point_lift = _lift_from_pairs(pairs, n_buckets)
+    rng = random.Random(seed)
+    lifts: list[float] = []
+    for _ in range(resamples):
+        sample = [pairs[rng.randrange(n)] for _ in range(n)]
+        lifts.append(_lift_from_pairs(sample, n_buckets))
+    lifts.sort()
+    alpha = 1.0 - ci_level
+    lo_idx = max(0, int(round((alpha / 2.0) * (resamples - 1))))
+    hi_idx = min(resamples - 1, int(round((1.0 - alpha / 2.0) * (resamples - 1))))
+    ci_low = lifts[lo_idx]
+    ci_high = lifts[hi_idx]
+    if point_lift > 0:
+        same_sign = sum(1 for value in lifts if value > 0)
+    elif point_lift < 0:
+        same_sign = sum(1 for value in lifts if value < 0)
+    else:
+        same_sign = 0
+    return {
+        "point_lift_pct": round(point_lift, 1),
+        "ci_level": ci_level,
+        "ci_low_pct": round(ci_low, 1),
+        "ci_high_pct": round(ci_high, 1),
+        "resamples": resamples,
+        "same_sign_frac": round(same_sign / resamples, 4),
+        # Condition 3: the whole interval clears the absolute-lift bar on one side.
+        "ci_clears_bar": bool(ci_low >= lift_bar_pct or ci_high <= -lift_bar_pct),
+        # Condition 6: the interval does not straddle zero, so the sign is stable.
+        "direction_stable": bool(ci_low > 0.0 or ci_high < 0.0),
+    }
+
+
+def _top_lift_feature(scan_results: list[dict[str, Any]]) -> str | None:
+    """The feature the scan would cite for the decile-lift conditions (highest |lift|)."""
+    for result in scan_results:
+        if result.get("lift_pct") is not None:
+            return str(result["feature"])
+    return None
+
+
+def _decile_lift_ci(
+    rows: list[EdgeRow],
+    feature_scan_results: list[dict[str, Any]],
+    *,
+    n_buckets: int,
+    resamples: int,
+    seed: int,
+) -> dict[str, Any] | None:
+    """Bootstrap CI for the aggregate decile lift (precommit condition 3)."""
+    feature = _top_lift_feature(feature_scan_results)
+    if feature is None:
+        return None
+    ci = _bootstrap_lift_ci(
+        _feature_pairs(rows, feature),
+        n_buckets=n_buckets,
+        resamples=resamples,
+        seed=seed,
+    )
+    if ci is None:
+        return None
+    return {"feature": feature, **ci}
+
+
+def _regime_direction_ci(
+    rows: list[EdgeRow],
+    regime_scan_results: list[dict[str, Any]],
+    *,
+    regime_field: str,
+    n_buckets: int,
+    resamples: int,
+    seed: int,
+) -> list[dict[str, Any]]:
+    """Bootstrap direction CI per qualifying regime bucket (precommit condition 6)."""
+    grouped: dict[str, list[EdgeRow]] = defaultdict(list)
+    for row in rows:
+        if row.forward_return_pct is None:
+            continue
+        regime = _regime_value(row, regime_field)
+        if regime:
+            grouped[regime].append(row)
+    out: list[dict[str, Any]] = []
+    for regime_result in regime_scan_results:
+        regime = str(regime_result.get("regime") or "")
+        feature = _top_lift_feature(regime_result.get("features") or [])
+        if not regime or feature is None:
+            continue
+        ci = _bootstrap_lift_ci(
+            _feature_pairs(grouped.get(regime, []), feature),
+            n_buckets=n_buckets,
+            # Vary the seed per regime so buckets are not correlated resamples.
+            seed=seed + (zlib.crc32(regime.encode("utf-8")) if regime else 0),
+            resamples=resamples,
+        )
+        if ci is None:
+            continue
+        out.append(
+            {
+                "regime": regime,
+                "n": regime_result.get("n"),
+                "feature": feature,
+                **ci,
+            }
+        )
+    return out
+
+
 def build_post_earnings_drift_payload(
     *,
     db_path: Path | str,
@@ -537,7 +702,22 @@ def build_post_earnings_drift_payload(
     account_equity: float | None,
     max_position_pct: float,
     symbol_costs: dict[str, dict[str, Any]] | None = None,
+    decile_min_rows: int | None = None,
+    regime_min_rows: int | None = None,
+    bootstrap_resamples: int = 0,
+    bootstrap_seed: int = BOOTSTRAP_SEED_DEFAULT,
 ) -> tuple[dict[str, Any], list[EdgeRow]]:
+    # Sub-floors for the two under-powered conditions. Clamped to be at least the
+    # aggregate floor so they can only strengthen (never loosen) the contract.
+    effective_decile_min_rows = max(
+        min_rows,
+        DECILE_MIN_ROWS_DEFAULT if decile_min_rows is None else decile_min_rows,
+    )
+    effective_regime_min_rows = max(
+        min_rows,
+        REGIME_MIN_ROWS_DEFAULT if regime_min_rows is None else regime_min_rows,
+    )
+
     repo = ExternalSignalFeatureRepository(db_path)
     groups = _event_groups(repo, start, end)
     edge_rows: list[EdgeRow] = []
@@ -563,12 +743,33 @@ def build_post_earnings_drift_payload(
         ),
     )
     returns = [row.forward_return_pct for row in edge_rows]
+    feature_scan = feature_lift_scan(
+        edge_rows,
+        min_rows=effective_decile_min_rows,
+        permutations=permutations,
+        permutation_block_field="market_date",
+        min_unique_values=2,
+    )
+    regime_scan = feature_lift_scan_by_regime(
+        edge_rows,
+        regime_field="earnings.report_timing",
+        min_rows=effective_regime_min_rows,
+        permutations=permutations,
+        permutation_block_field="market_date",
+        min_unique_values=2,
+    )
     payload = {
         "report_version": REPORT_VERSION,
         "runtime_effect": RUNTIME_EFFECT,
         "horizon_sessions": horizon_sessions,
         "events_seen": len(groups),
         "events_labeled": len(edge_rows),
+        "power_floors": {
+            "aggregate_min_rows": min_rows,
+            "decile_min_rows": effective_decile_min_rows,
+            "regime_min_rows": effective_regime_min_rows,
+            "lift_bar_pct": LIFT_BAR_PCT,
+        },
         "ev": evaluate_expected_value(returns, assumptions=assumptions),
         "symbol_cost_review": _symbol_cost_review(
             edge_rows,
@@ -578,20 +779,22 @@ def build_post_earnings_drift_payload(
             account_equity=account_equity,
             max_position_pct=max_position_pct,
         ),
-        "feature_scan": feature_lift_scan(
+        "feature_scan": feature_scan,
+        "regime_scan": regime_scan,
+        "decile_lift_ci": _decile_lift_ci(
             edge_rows,
-            min_rows=min_rows,
-            permutations=permutations,
-            permutation_block_field="market_date",
-            min_unique_values=2,
+            feature_scan,
+            n_buckets=10,
+            resamples=bootstrap_resamples,
+            seed=bootstrap_seed,
         ),
-        "regime_scan": feature_lift_scan_by_regime(
+        "regime_direction_ci": _regime_direction_ci(
             edge_rows,
+            regime_scan,
             regime_field="earnings.report_timing",
-            min_rows=min_rows,
-            permutations=permutations,
-            permutation_block_field="market_date",
-            min_unique_values=2,
+            n_buckets=10,
+            resamples=bootstrap_resamples,
+            seed=bootstrap_seed,
         ),
     }
     return payload, edge_rows
@@ -613,7 +816,43 @@ def main(argv: list[str] | None = None) -> int:
     scan.add_argument("--start-date")
     scan.add_argument("--end-date")
     scan.add_argument("--horizon-sessions", type=int, default=5)
-    scan.add_argument("--min-rows", type=int, default=30)
+    scan.add_argument(
+        "--min-rows",
+        type=int,
+        default=AGGREGATE_MIN_ROWS_DEFAULT,
+        help="Aggregate labeled-sample floor (precommit condition 2 / EV read).",
+    )
+    scan.add_argument(
+        "--decile-min-rows",
+        type=int,
+        default=DECILE_MIN_ROWS_DEFAULT,
+        help=(
+            "Minimum labeled rows before the decile-lift magnitude (condition 3) is "
+            "computed at all. Clamped up to --min-rows so it can never loosen the "
+            f"contract. Default {DECILE_MIN_ROWS_DEFAULT} (~10 names/decile)."
+        ),
+    )
+    scan.add_argument(
+        "--regime-min-rows",
+        type=int,
+        default=REGIME_MIN_ROWS_DEFAULT,
+        help=(
+            "Minimum rows a regime bucket must have to qualify for the directional-"
+            "coherence check (condition 6). Clamped up to --min-rows. Default "
+            f"{REGIME_MIN_ROWS_DEFAULT}."
+        ),
+    )
+    scan.add_argument(
+        "--bootstrap-resamples",
+        type=int,
+        default=BOOTSTRAP_RESAMPLES_DEFAULT,
+        help=(
+            "Bootstrap resamples for the decile-lift and regime-direction confidence "
+            "intervals. 0 disables the interval gates (point estimates only). Default "
+            f"{BOOTSTRAP_RESAMPLES_DEFAULT}."
+        ),
+    )
+    scan.add_argument("--bootstrap-seed", type=int, default=BOOTSTRAP_SEED_DEFAULT)
     scan.add_argument("--permutations", type=int, default=200)
     scan.add_argument("--spread-pct", type=float, default=0.05)
     scan.add_argument("--slippage-pct", type=float, default=0.03)
@@ -677,6 +916,10 @@ def main(argv: list[str] | None = None) -> int:
         account_equity=args.account_equity,
         max_position_pct=args.max_position_pct,
         symbol_costs=_load_symbol_costs(args.symbol_costs_json),
+        decile_min_rows=args.decile_min_rows,
+        regime_min_rows=args.regime_min_rows,
+        bootstrap_resamples=args.bootstrap_resamples,
+        bootstrap_seed=args.bootstrap_seed,
     )
     if args.json_output:
         output = Path(args.json_output)

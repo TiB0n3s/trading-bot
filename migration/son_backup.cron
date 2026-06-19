@@ -1,0 +1,5 @@
+# Daily "son" GFS backup tier (7-day retention). Replaces the daily recovery
+# that VM nightly snapshots used to provide. Online SQLite backup API — safe
+# while the runtime is active. Runs 20:30 CT on weekdays (after the 18:00
+# event-collection / post-session jobs, before overnight maintenance).
+30 20 * * 1-5 cd /home/tradingbot/trading-bot && PYTHONPATH=/home/tradingbot/trading-bot:/home/tradingbot/trading-bot/scripts:/home/tradingbot/trading-bot/src /home/tradingbot/trading-bot/venv/bin/python scripts/job_runner.py --job-name daily_db_backup_son --lock-file /tmp/tradingbot_daily_db_backup.lock --log-file /home/tradingbot/trading-bot/backups/backup.log -- bash -lc '/home/tradingbot/trading-bot/venv/bin/python pipeline/database_backup.py --backup-tier son --retention-days 7'

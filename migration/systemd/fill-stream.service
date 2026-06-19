@@ -1,0 +1,18 @@
+[Unit]
+Description=Trading Bot Alpaca Fill Stream
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+# Adapted for WSL: original VM unit used User/Group=tradingbot, which does not
+# exist on this machine. Everything else is identical to the VM unit.
+User=tibones
+Group=tibones
+WorkingDirectory=/home/tradingbot/trading-bot
+EnvironmentFile=/etc/trading-bot.env
+ExecStart=/home/tradingbot/trading-bot/venv/bin/python /home/tradingbot/trading-bot/scripts/fill_stream.py
+Restart=always
+RestartSec=30
+
+[Install]
+WantedBy=multi-user.target

@@ -6,6 +6,44 @@ The project is an automated AI-assisted trading bot. It currently runs in paper 
 
 ---
 
+## Agent Operating Rules
+
+Any agent working in this repo — subagent, workflow, scheduled routine, or
+background task — operates under the project's current authority state:
+**auto-buy is FROZEN in observe/research mode.** The binding documents are
+`ops/auto_buy_strategy_status.md` and
+`ops/research/post_earnings_drift_v1_precommit.md`; reconcile against them
+before relying on any claim.
+
+Agents are research and bookkeeping labor. They find, measure, verify, and
+file — they do not hold authority. Specifically:
+
+- **No agent grants trade or execution authority**, and no agent modifies
+  execution, sizing, risk-gate, broker, webhook-routing, or market-hours code.
+  Those changes are human-only and require explicit instruction.
+- **No agent loosens, disables, weakens, or bypasses any gate, blocker, or
+  veto.** Threshold and gate changes are human promotion decisions recorded in
+  the knowledge-base `30-decisions/`. Conservatism is the correct state.
+- **The bar is EV after costs, per-name deployable** (net EV ≥ +0.25% at the
+  actual account size) — not score, not probability, not win rate. The
+  promotion spine is: validated information → calibrated probability → EV after
+  costs → action/no action.
+- **Adversarial verification is mandatory.** Every finding (a lift, a PEAD
+  pass, a PIT "clean" verdict) must survive an independent attempt to refute it
+  before it is written down. Agents report evidence; humans decide promotion.
+- **PIT integrity is make-or-break**: "passes `validate-jsonl`" means
+  well-formed, not clean. Hand-check sampled rows against primary filings.
+- **The observation record may be lossy**: audit writes fail open under SQLite
+  contention, so session counts can be silent undercounts. Treat contended-day
+  counts as a lower bound; never invent forward outcomes.
+
+Default research/observation work to the `research-analyst` subagent
+(`.claude/agents/research-analyst.md`), whose system prompt encodes these rules.
+Market-intelligence modules (COT, dealer gamma, prime-brokerage flows,
+news/event) remain UNVALIDATED candidate signals, not edge.
+
+---
+
 ## Current Project Status
 
 The bot is operational in paper trading.

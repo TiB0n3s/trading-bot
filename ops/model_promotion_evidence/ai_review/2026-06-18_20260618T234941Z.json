@@ -1,0 +1,84 @@
+{
+  "agent": "deterministic_fallback",
+  "generated_at": "2026-06-18T23:49:41.516472+00:00",
+  "retrain": {
+    "ran": false,
+    "skipped": true
+  },
+  "review": {
+    "evidence": {
+      "candidate_id": "unknown",
+      "gates": {
+        "discrimination": {
+          "claim": "",
+          "numeric_support": "",
+          "sample_size": "",
+          "status": "insufficient"
+        },
+        "enough_days": {
+          "claim": "",
+          "numeric_support": "",
+          "sample_size": "",
+          "status": "insufficient"
+        },
+        "leakage_clean": {
+          "claim": "",
+          "numeric_support": "",
+          "sample_size": "",
+          "status": "insufficient"
+        },
+        "net_cost_ev": {
+          "claim": "",
+          "numeric_support": "",
+          "sample_size": "",
+          "status": "insufficient"
+        },
+        "regime_robust": {
+          "claim": "",
+          "numeric_support": "",
+          "sample_size": "",
+          "status": "insufficient"
+        }
+      },
+      "provider": "deterministic_fallback",
+      "runtime_effect": "observe_only_no_live_authority",
+      "summary": "AI review unavailable: could not build diagnostics: diagnostics build exceeded 900s. Inspect numeric diagnostics directly.",
+      "version": "model_evidence_agent_v1"
+    },
+    "graduated": false,
+    "graduation_reason": "no AI review performed (could not build diagnostics: diagnostics build exceeded 900s)",
+    "red_team": {
+      "confidence": "none",
+      "gates": {
+        "discrimination": {
+          "reason": "no red-team run",
+          "refuted": true
+        },
+        "enough_days": {
+          "reason": "no red-team run",
+          "refuted": true
+        },
+        "leakage_clean": {
+          "reason": "no red-team run",
+          "refuted": true
+        },
+        "net_cost_ev": {
+          "reason": "no red-team run",
+          "refuted": true
+        },
+        "regime_robust": {
+          "reason": "no red-team run",
+          "refuted": true
+        }
+      },
+      "provider": "deterministic_fallback",
+      "recommendation": "rejected",
+      "runtime_effect": "observe_only_no_live_authority",
+      "version": "model_evidence_agent_v1"
+    },
+    "runtime_effect": "observe_only_no_live_authority",
+    "version": "model_evidence_agent_v1"
+  },
+  "runtime_effect": "observe_only_no_live_authority",
+  "target_date": "2026-06-18"
+}

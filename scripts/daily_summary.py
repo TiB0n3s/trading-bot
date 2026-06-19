@@ -4,6 +4,10 @@ from pathlib import Path
 
 from services.daily_summary_service import build_default_daily_summary_service
 
+BASE_DIR = Path(__file__).resolve().parent.parent
+if str(BASE_DIR / "src") not in sys.path:
+    sys.path.insert(0, str(BASE_DIR / "src"))
+
 LOG_PATH = Path(__file__).parent / "daily_summary.log"
 
 # claude-haiku-4-5-20251001 pricing (per million tokens)
@@ -523,6 +527,39 @@ def _render(rows, matched, header, trade_rows=None, auto_buy_hard_block_audit=No
         f.write("\n".join(lines) + "\n")
 
 
+def print_model_evidence_health(target_date: str = None):
+    """Surface the observe-only model-evidence pipeline's health so a scheduled
+    run that produced no artifact is visible, not silent. Best-effort and
+    read-only; never breaks the daily summary."""
+    try:
+        from trading_bot.services.model_evidence_payload_cache_service import (
+            model_evidence_review_health,
+        )
+
+        health = model_evidence_review_health(BASE_DIR, as_of_date=target_date)
+    except Exception as exc:  # noqa: BLE001 — diagnostic surface, never fatal
+        print("\n── MODEL EVIDENCE PIPELINE (observe-only) ───────────────")
+        print(f"  health check unavailable: {str(exc)[:160]}")
+        return
+
+    print("\n── MODEL EVIDENCE PIPELINE (observe-only) ───────────────")
+    if health.get("ok"):
+        cache = health.get("cache", {})
+        age = cache.get("age_hours")
+        age_str = f"{age:.1f}h" if isinstance(age, (int, float)) else "n/a"
+        print(
+            f"  OK  artifact for {health.get('expected_review_date')} present; "
+            f"payload cache fresh ({age_str})."
+        )
+    else:
+        for warning in health.get("warnings", []):
+            print(f"  [WARN] {warning}")
+        print(
+            "  Action: check model_evidence_payload_export.log / "
+            "model_evidence_review.log and the 02:00/03:50 cron slots."
+        )
+
+
 def run(target_date: str = None):
     payload = build_default_daily_summary_service(warning_sink=print).daily_payload(target_date)
     _render(
@@ -532,6 +569,7 @@ def run(target_date: str = None):
         trade_rows=payload.trade_rows,
         auto_buy_hard_block_audit=payload.auto_buy_hard_block_audit,
     )
+    print_model_evidence_health(target_date)
 
 
 def run_week(target_date: str = None):

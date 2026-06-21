@@ -16,7 +16,6 @@ Safe defaults:
 
 import argparse
 import json
-import os
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -33,255 +32,162 @@ from services.broker_service import broker_service
 from services.position_market_data_service import position_market_data_service
 from session_momentum import get_latest_session_momentum
 
+from config.position_manager import load_position_manager_config
 from repositories import position_repo
 
 STATE_FILE = BASE_DIR / "position_manager_state.json"
 ET = pytz.timezone("America/New_York")
 
+_POSITION_MANAGER_CFG = load_position_manager_config()
 
-LIVE_SELLS = os.getenv("POSITION_MANAGER_LIVE_SELLS", "false").lower() in ("1", "true", "yes", "on")
-PARTIAL_SELL_PCT = float(os.getenv("POSITION_MANAGER_PARTIAL_SELL_PCT", "0.50"))
-PROMOTE_UNEXECUTABLE_PARTIALS = os.getenv(
-    "POSITION_MANAGER_PROMOTE_UNEXECUTABLE_PARTIALS", "true"
-).lower() in ("1", "true", "yes", "on")
-MIN_PROFIT_PARTIAL_PCT = float(os.getenv("POSITION_MANAGER_MIN_PROFIT_PARTIAL_PCT", "0.75"))
-PROFIT_GIVEBACK_TRIGGER_PCT = float(os.getenv("POSITION_MANAGER_PROFIT_GIVEBACK_TRIGGER_PCT", "50"))
+
+LIVE_SELLS = _POSITION_MANAGER_CFG.live_sells
+PARTIAL_SELL_PCT = _POSITION_MANAGER_CFG.partial_sell_pct
+PROMOTE_UNEXECUTABLE_PARTIALS = _POSITION_MANAGER_CFG.promote_unexecutable_partials
+MIN_PROFIT_PARTIAL_PCT = _POSITION_MANAGER_CFG.min_profit_partial_pct
+PROFIT_GIVEBACK_TRIGGER_PCT = _POSITION_MANAGER_CFG.profit_giveback_trigger_pct
 
 # Breakeven/profit-lock protection:
 # Prevent winner_became_loser patterns where a trade reaches profit,
 # gives it all back, then exits red.
-BREAKEVEN_LOCK_TRIGGER_PCT = float(os.getenv("BREAKEVEN_LOCK_TRIGGER_PCT", "0.50"))
-BREAKEVEN_LOCK_FLOOR_PCT = float(os.getenv("BREAKEVEN_LOCK_FLOOR_PCT", "0.05"))
+BREAKEVEN_LOCK_TRIGGER_PCT = _POSITION_MANAGER_CFG.breakeven_lock_trigger_pct
+BREAKEVEN_LOCK_FLOOR_PCT = _POSITION_MANAGER_CFG.breakeven_lock_floor_pct
 
 # Tighter lock for lower-quality entries such as fade-risk/watch/small-buy setups.
-WEAK_SETUP_BREAKEVEN_LOCK_TRIGGER_PCT = float(
-    os.getenv("WEAK_SETUP_BREAKEVEN_LOCK_TRIGGER_PCT", "0.35")
-)
-WEAK_SETUP_BREAKEVEN_LOCK_FLOOR_PCT = float(
-    os.getenv("WEAK_SETUP_BREAKEVEN_LOCK_FLOOR_PCT", "0.02")
-)
-FULL_EXIT_LOSS_PCT = float(os.getenv("POSITION_MANAGER_FULL_EXIT_LOSS_PCT", "-1.25"))
-VWAP_LOSS_EXIT_PCT = float(os.getenv("POSITION_MANAGER_VWAP_LOSS_EXIT_PCT", "-0.35"))
-CONTINUATION_EXIT_CHECK_ENABLED = os.getenv(
-    "POSITION_MANAGER_CONTINUATION_EXIT_CHECK_ENABLED", "true"
-).lower() in ("1", "true", "yes", "on")
-CONTINUATION_EXIT_HARD_LOSS_FLOOR_PCT = float(
-    os.getenv("POSITION_MANAGER_CONTINUATION_HARD_LOSS_FLOOR_PCT", "-0.75")
-)
-CONTINUATION_EXIT_MIN_MOMENTUM_PCT = float(
-    os.getenv("POSITION_MANAGER_CONTINUATION_MIN_MOMENTUM_PCT", "0.05")
-)
-CONTINUATION_EXIT_MIN_VWAP_DIST_PCT = float(
-    os.getenv("POSITION_MANAGER_CONTINUATION_MIN_VWAP_DIST_PCT", "0.05")
-)
+WEAK_SETUP_BREAKEVEN_LOCK_TRIGGER_PCT = _POSITION_MANAGER_CFG.weak_setup_breakeven_lock_trigger_pct
+WEAK_SETUP_BREAKEVEN_LOCK_FLOOR_PCT = _POSITION_MANAGER_CFG.weak_setup_breakeven_lock_floor_pct
+FULL_EXIT_LOSS_PCT = _POSITION_MANAGER_CFG.full_exit_loss_pct
+VWAP_LOSS_EXIT_PCT = _POSITION_MANAGER_CFG.vwap_loss_exit_pct
+CONTINUATION_EXIT_CHECK_ENABLED = _POSITION_MANAGER_CFG.continuation_exit_check_enabled
+CONTINUATION_EXIT_HARD_LOSS_FLOOR_PCT = _POSITION_MANAGER_CFG.continuation_hard_loss_floor_pct
+CONTINUATION_EXIT_MIN_MOMENTUM_PCT = _POSITION_MANAGER_CFG.continuation_min_momentum_pct
+CONTINUATION_EXIT_MIN_VWAP_DIST_PCT = _POSITION_MANAGER_CFG.continuation_min_vwap_dist_pct
 
-POSITION_MOMENTUM_SESSION_CONTEXT_ENABLED = os.getenv(
-    "POSITION_MOMENTUM_SESSION_CONTEXT_ENABLED", "true"
-).lower() in ("1", "true", "yes", "on")
-POSITION_MOMENTUM_RETAINED_STRENGTH_ENABLED = os.getenv(
-    "POSITION_MOMENTUM_RETAINED_STRENGTH_ENABLED", "true"
-).lower() in ("1", "true", "yes", "on")
-POSITION_MOMENTUM_STRONG_SCORE_MIN = float(os.getenv("POSITION_MOMENTUM_STRONG_SCORE_MIN", "6"))
-POSITION_MOMENTUM_STRONG_RETURN_MIN_PCT = float(
-    os.getenv("POSITION_MOMENTUM_STRONG_RETURN_MIN_PCT", "1.0")
+POSITION_MOMENTUM_SESSION_CONTEXT_ENABLED = (
+    _POSITION_MANAGER_CFG.position_momentum_session_context_enabled
 )
-POSITION_MOMENTUM_STRONG_MINUTES_MIN = float(
-    os.getenv("POSITION_MOMENTUM_STRONG_MINUTES_MIN", "20")
+POSITION_MOMENTUM_RETAINED_STRENGTH_ENABLED = (
+    _POSITION_MANAGER_CFG.position_momentum_retained_strength_enabled
 )
-POSITION_MOMENTUM_RETAINED_MIN_SCORE = float(os.getenv("POSITION_MOMENTUM_RETAINED_MIN_SCORE", "3"))
-POSITION_MOMENTUM_RETAINED_MIN_RETURN_PCT = float(
-    os.getenv("POSITION_MOMENTUM_RETAINED_MIN_RETURN_PCT", "0.25")
+POSITION_MOMENTUM_STRONG_SCORE_MIN = _POSITION_MANAGER_CFG.momentum_strong_score_min
+POSITION_MOMENTUM_STRONG_RETURN_MIN_PCT = _POSITION_MANAGER_CFG.momentum_strong_return_min_pct
+POSITION_MOMENTUM_STRONG_MINUTES_MIN = _POSITION_MANAGER_CFG.momentum_strong_minutes_min
+POSITION_MOMENTUM_RETAINED_MIN_SCORE = _POSITION_MANAGER_CFG.momentum_retained_min_score
+POSITION_MOMENTUM_RETAINED_MIN_RETURN_PCT = _POSITION_MANAGER_CFG.momentum_retained_min_return_pct
+POSITION_MOMENTUM_RETAINED_MIN_VWAP_DIST_PCT = (
+    _POSITION_MANAGER_CFG.momentum_retained_min_vwap_dist_pct
 )
-POSITION_MOMENTUM_RETAINED_MIN_VWAP_DIST_PCT = float(
-    os.getenv("POSITION_MOMENTUM_RETAINED_MIN_VWAP_DIST_PCT", "-0.25")
-)
-POSITION_MOMENTUM_BREAK_PULLBACK_PCT = float(
-    os.getenv("POSITION_MOMENTUM_BREAK_PULLBACK_PCT", "-0.75")
-)
-POSITION_MOMENTUM_BREAK_VWAP_DIST_PCT = float(
-    os.getenv("POSITION_MOMENTUM_BREAK_VWAP_DIST_PCT", "-0.35")
-)
-POSITION_MOMENTUM_BREAK_15M_PCT = float(os.getenv("POSITION_MOMENTUM_BREAK_15M_PCT", "-0.35"))
-POSITION_MOMENTUM_BREAK_30M_PCT = float(os.getenv("POSITION_MOMENTUM_BREAK_30M_PCT", "-0.50"))
+POSITION_MOMENTUM_BREAK_PULLBACK_PCT = _POSITION_MANAGER_CFG.momentum_break_pullback_pct
+POSITION_MOMENTUM_BREAK_VWAP_DIST_PCT = _POSITION_MANAGER_CFG.momentum_break_vwap_dist_pct
+POSITION_MOMENTUM_BREAK_15M_PCT = _POSITION_MANAGER_CFG.momentum_break_15m_pct
+POSITION_MOMENTUM_BREAK_30M_PCT = _POSITION_MANAGER_CFG.momentum_break_30m_pct
 
 # Profit-capture tuning:
 # Live in paper only through position_manager. This does not buy, increase size,
 # or weaken hard-loss exits. It only adjusts profitable soft exits.
-POSITION_MANAGER_PROFIT_CAPTURE_ENABLED = os.getenv(
-    "POSITION_MANAGER_PROFIT_CAPTURE_ENABLED", "true"
-).lower() in ("1", "true", "yes", "on")
+POSITION_MANAGER_PROFIT_CAPTURE_ENABLED = _POSITION_MANAGER_CFG.profit_capture_enabled
 
-POSITION_MANAGER_TIER2_PEAK_PCT = float(os.getenv("POSITION_MANAGER_TIER2_PEAK_PCT", "1.50"))
-POSITION_MANAGER_TIER3_PEAK_PCT = float(os.getenv("POSITION_MANAGER_TIER3_PEAK_PCT", "3.00"))
+POSITION_MANAGER_TIER2_PEAK_PCT = _POSITION_MANAGER_CFG.tier2_peak_pct
+POSITION_MANAGER_TIER3_PEAK_PCT = _POSITION_MANAGER_CFG.tier3_peak_pct
 
 # If retained session strength is intact, require more giveback before selling
 # stronger winners. These are percent-of-peak giveback values, not price pct.
-POSITION_MANAGER_RETAINED_TIER2_GIVEBACK_PCT = float(
-    os.getenv("POSITION_MANAGER_RETAINED_TIER2_GIVEBACK_PCT", "60")
-)
-POSITION_MANAGER_RETAINED_TIER3_GIVEBACK_PCT = float(
-    os.getenv("POSITION_MANAGER_RETAINED_TIER3_GIVEBACK_PCT", "45")
-)
+POSITION_MANAGER_RETAINED_TIER2_GIVEBACK_PCT = _POSITION_MANAGER_CFG.retained_tier2_giveback_pct
+POSITION_MANAGER_RETAINED_TIER3_GIVEBACK_PCT = _POSITION_MANAGER_CFG.retained_tier3_giveback_pct
 
 # Avoid selling strong retained-session winners on tiny short-term wiggles.
-POSITION_MANAGER_RETAINED_MIN_PROFIT_TO_PROTECT_PCT = float(
-    os.getenv("POSITION_MANAGER_RETAINED_MIN_PROFIT_TO_PROTECT_PCT", "0.40")
+POSITION_MANAGER_RETAINED_MIN_PROFIT_TO_PROTECT_PCT = (
+    _POSITION_MANAGER_CFG.retained_min_profit_to_protect_pct
 )
 
 # High-gain lock:
 # Protects already-earned open-position profit from excessive giveback.
 # Does not affect buys, sizing, hard-loss exits, or red-position exits.
-POSITION_MANAGER_HIGH_GAIN_LOCK_ENABLED = os.getenv(
-    "POSITION_MANAGER_HIGH_GAIN_LOCK_ENABLED", "true"
-).lower() in ("1", "true", "yes", "on")
+POSITION_MANAGER_HIGH_GAIN_LOCK_ENABLED = _POSITION_MANAGER_CFG.high_gain_lock_enabled
 
-POSITION_MANAGER_LOCK_TIER1_PEAK_PCT = float(
-    os.getenv("POSITION_MANAGER_LOCK_TIER1_PEAK_PCT", "1.00")
-)
-POSITION_MANAGER_LOCK_TIER1_FLOOR_PCT = float(
-    os.getenv("POSITION_MANAGER_LOCK_TIER1_FLOOR_PCT", "0.30")
-)
+POSITION_MANAGER_LOCK_TIER1_PEAK_PCT = _POSITION_MANAGER_CFG.lock_tier1_peak_pct
+POSITION_MANAGER_LOCK_TIER1_FLOOR_PCT = _POSITION_MANAGER_CFG.lock_tier1_floor_pct
 
-POSITION_MANAGER_LOCK_TIER2_PEAK_PCT = float(
-    os.getenv("POSITION_MANAGER_LOCK_TIER2_PEAK_PCT", "1.50")
-)
-POSITION_MANAGER_LOCK_TIER2_FLOOR_PCT = float(
-    os.getenv("POSITION_MANAGER_LOCK_TIER2_FLOOR_PCT", "0.60")
-)
+POSITION_MANAGER_LOCK_TIER2_PEAK_PCT = _POSITION_MANAGER_CFG.lock_tier2_peak_pct
+POSITION_MANAGER_LOCK_TIER2_FLOOR_PCT = _POSITION_MANAGER_CFG.lock_tier2_floor_pct
 
-POSITION_MANAGER_LOCK_TIER3_PEAK_PCT = float(
-    os.getenv("POSITION_MANAGER_LOCK_TIER3_PEAK_PCT", "2.50")
-)
-POSITION_MANAGER_LOCK_TIER3_FLOOR_PCT = float(
-    os.getenv("POSITION_MANAGER_LOCK_TIER3_FLOOR_PCT", "1.00")
-)
+POSITION_MANAGER_LOCK_TIER3_PEAK_PCT = _POSITION_MANAGER_CFG.lock_tier3_peak_pct
+POSITION_MANAGER_LOCK_TIER3_FLOOR_PCT = _POSITION_MANAGER_CFG.lock_tier3_floor_pct
 
-POSITION_MANAGER_LOCK_TIER4_PEAK_PCT = float(
-    os.getenv("POSITION_MANAGER_LOCK_TIER4_PEAK_PCT", "4.00")
-)
-POSITION_MANAGER_LOCK_TIER4_FLOOR_PCT = float(
-    os.getenv("POSITION_MANAGER_LOCK_TIER4_FLOOR_PCT", "1.75")
-)
+POSITION_MANAGER_LOCK_TIER4_PEAK_PCT = _POSITION_MANAGER_CFG.lock_tier4_peak_pct
+POSITION_MANAGER_LOCK_TIER4_FLOOR_PCT = _POSITION_MANAGER_CFG.lock_tier4_floor_pct
 
 # Bad-entry containment: tighter hard stop for weak entries (error/null setup
 # or weak ML bucket) that never showed constructive follow-through. Exits at
 # BAD_ENTRY_CONTAINMENT_LOSS_PCT instead of FULL_EXIT_LOSS_PCT when peak
 # favorable excursion never exceeded BAD_ENTRY_CONTAINMENT_MAX_PEAK_PCT.
-BAD_ENTRY_CONTAINMENT_ENABLED = os.getenv(
-    "POSITION_MANAGER_BAD_ENTRY_CONTAINMENT_ENABLED", "true"
-).lower() in ("1", "true", "yes", "on")
-BAD_ENTRY_CONTAINMENT_LOSS_PCT = float(
-    os.getenv("POSITION_MANAGER_BAD_ENTRY_CONTAINMENT_LOSS_PCT", "-0.65")
-)
-BAD_ENTRY_CONTAINMENT_MAX_PEAK_PCT = float(
-    os.getenv("POSITION_MANAGER_BAD_ENTRY_CONTAINMENT_MAX_PEAK_PCT", "0.15")
-)
+BAD_ENTRY_CONTAINMENT_ENABLED = _POSITION_MANAGER_CFG.bad_entry_containment_enabled
+BAD_ENTRY_CONTAINMENT_LOSS_PCT = _POSITION_MANAGER_CFG.bad_entry_containment_loss_pct
+BAD_ENTRY_CONTAINMENT_MAX_PEAK_PCT = _POSITION_MANAGER_CFG.bad_entry_containment_max_peak_pct
 
 # Peak-aware breakeven lock.
 # The floor that the current P&L must not fall below rises with the peak,
 # so trades that have demonstrated real profit cannot fully round-trip.
 # Strong entries (3 tiers): more room at each level.
-PEAK_LOCK_TIER1_PEAK_PCT = float(os.getenv("POSITION_MANAGER_PEAK_LOCK_TIER1_PEAK_PCT", "0.30"))
-PEAK_LOCK_TIER1_FLOOR_PCT = float(os.getenv("POSITION_MANAGER_PEAK_LOCK_TIER1_FLOOR_PCT", "0.10"))
-PEAK_LOCK_TIER2_PEAK_PCT = float(os.getenv("POSITION_MANAGER_PEAK_LOCK_TIER2_PEAK_PCT", "0.60"))
-PEAK_LOCK_TIER2_FLOOR_PCT = float(os.getenv("POSITION_MANAGER_PEAK_LOCK_TIER2_FLOOR_PCT", "0.30"))
-PEAK_LOCK_TIER3_PEAK_PCT = float(os.getenv("POSITION_MANAGER_PEAK_LOCK_TIER3_PEAK_PCT", "1.00"))
-PEAK_LOCK_TIER3_FLOOR_PCT = float(os.getenv("POSITION_MANAGER_PEAK_LOCK_TIER3_FLOOR_PCT", "0.45"))
+PEAK_LOCK_TIER1_PEAK_PCT = _POSITION_MANAGER_CFG.peak_lock_tier1_peak_pct
+PEAK_LOCK_TIER1_FLOOR_PCT = _POSITION_MANAGER_CFG.peak_lock_tier1_floor_pct
+PEAK_LOCK_TIER2_PEAK_PCT = _POSITION_MANAGER_CFG.peak_lock_tier2_peak_pct
+PEAK_LOCK_TIER2_FLOOR_PCT = _POSITION_MANAGER_CFG.peak_lock_tier2_floor_pct
+PEAK_LOCK_TIER3_PEAK_PCT = _POSITION_MANAGER_CFG.peak_lock_tier3_peak_pct
+PEAK_LOCK_TIER3_FLOOR_PCT = _POSITION_MANAGER_CFG.peak_lock_tier3_floor_pct
 # Weak entries (2 tiers): faster ratchet once meaningfully green.
-WEAK_PEAK_LOCK_TIER1_PEAK_PCT = float(
-    os.getenv("POSITION_MANAGER_WEAK_PEAK_LOCK_TIER1_PEAK_PCT", "0.30")
-)
-WEAK_PEAK_LOCK_TIER1_FLOOR_PCT = float(
-    os.getenv("POSITION_MANAGER_WEAK_PEAK_LOCK_TIER1_FLOOR_PCT", "0.15")
-)
-WEAK_PEAK_LOCK_TIER2_PEAK_PCT = float(
-    os.getenv("POSITION_MANAGER_WEAK_PEAK_LOCK_TIER2_PEAK_PCT", "0.50")
-)
-WEAK_PEAK_LOCK_TIER2_FLOOR_PCT = float(
-    os.getenv("POSITION_MANAGER_WEAK_PEAK_LOCK_TIER2_FLOOR_PCT", "0.35")
-)
+WEAK_PEAK_LOCK_TIER1_PEAK_PCT = _POSITION_MANAGER_CFG.weak_peak_lock_tier1_peak_pct
+WEAK_PEAK_LOCK_TIER1_FLOOR_PCT = _POSITION_MANAGER_CFG.weak_peak_lock_tier1_floor_pct
+WEAK_PEAK_LOCK_TIER2_PEAK_PCT = _POSITION_MANAGER_CFG.weak_peak_lock_tier2_peak_pct
+WEAK_PEAK_LOCK_TIER2_FLOOR_PCT = _POSITION_MANAGER_CFG.weak_peak_lock_tier2_floor_pct
 
 # Quality-split exit thresholds — three tiers:
 # Strong conviction: looser giveback tolerance, higher min-profit bar before partial exit.
 # Normal strong: standard room (60% giveback, 0.75% min).
 # Weak: managed tightly once green (35% giveback, 0.35% min).
-STRONG_CONVICTION_PROFIT_GIVEBACK_TRIGGER_PCT = float(
-    os.getenv("POSITION_MANAGER_STRONG_CONVICTION_GIVEBACK_TRIGGER_PCT", "70")
+STRONG_CONVICTION_PROFIT_GIVEBACK_TRIGGER_PCT = (
+    _POSITION_MANAGER_CFG.strong_conviction_profit_giveback_trigger_pct
 )
-STRONG_CONVICTION_MIN_PROFIT_PARTIAL_PCT = float(
-    os.getenv("POSITION_MANAGER_STRONG_CONVICTION_MIN_PROFIT_PARTIAL_PCT", "1.0")
+STRONG_CONVICTION_MIN_PROFIT_PARTIAL_PCT = (
+    _POSITION_MANAGER_CFG.strong_conviction_min_profit_partial_pct
 )
-STRONG_ENTRY_PROFIT_GIVEBACK_TRIGGER_PCT = float(
-    os.getenv("POSITION_MANAGER_STRONG_ENTRY_PROFIT_GIVEBACK_PCT", "60")
+STRONG_ENTRY_PROFIT_GIVEBACK_TRIGGER_PCT = (
+    _POSITION_MANAGER_CFG.strong_entry_profit_giveback_trigger_pct
 )
-WEAK_ENTRY_PROFIT_GIVEBACK_TRIGGER_PCT = float(
-    os.getenv("POSITION_MANAGER_WEAK_ENTRY_PROFIT_GIVEBACK_PCT", "35")
+WEAK_ENTRY_PROFIT_GIVEBACK_TRIGGER_PCT = (
+    _POSITION_MANAGER_CFG.weak_entry_profit_giveback_trigger_pct
 )
-WEAK_ENTRY_MIN_PROFIT_PARTIAL_PCT = float(
-    os.getenv("POSITION_MANAGER_WEAK_ENTRY_MIN_PROFIT_PARTIAL_PCT", "0.35")
-)
+WEAK_ENTRY_MIN_PROFIT_PARTIAL_PCT = _POSITION_MANAGER_CFG.weak_entry_min_profit_partial_pct
 
-PROACTIVE_PROFIT_CAPTURE_ENABLED = os.getenv(
-    "POSITION_MANAGER_PROACTIVE_PROFIT_CAPTURE_ENABLED", "true"
-).lower() in ("1", "true", "yes", "on")
-PROACTIVE_STRONG_MIN_PEAK_PCT = float(
-    os.getenv("POSITION_MANAGER_PROACTIVE_STRONG_MIN_PEAK_PCT", "0.45")
-)
-PROACTIVE_STRONG_MIN_CURRENT_PCT = float(
-    os.getenv("POSITION_MANAGER_PROACTIVE_STRONG_MIN_CURRENT_PCT", "0.20")
-)
-PROACTIVE_STRONG_GIVEBACK_PCT = float(
-    os.getenv("POSITION_MANAGER_PROACTIVE_STRONG_GIVEBACK_PCT", "45")
-)
-PROACTIVE_WEAK_MIN_PEAK_PCT = float(
-    os.getenv("POSITION_MANAGER_PROACTIVE_WEAK_MIN_PEAK_PCT", "0.30")
-)
-PROACTIVE_WEAK_MIN_CURRENT_PCT = float(
-    os.getenv("POSITION_MANAGER_PROACTIVE_WEAK_MIN_CURRENT_PCT", "0.15")
-)
-PROACTIVE_WEAK_GIVEBACK_PCT = float(os.getenv("POSITION_MANAGER_PROACTIVE_WEAK_GIVEBACK_PCT", "30"))
+PROACTIVE_PROFIT_CAPTURE_ENABLED = _POSITION_MANAGER_CFG.proactive_profit_capture_enabled
+PROACTIVE_STRONG_MIN_PEAK_PCT = _POSITION_MANAGER_CFG.proactive_strong_min_peak_pct
+PROACTIVE_STRONG_MIN_CURRENT_PCT = _POSITION_MANAGER_CFG.proactive_strong_min_current_pct
+PROACTIVE_STRONG_GIVEBACK_PCT = _POSITION_MANAGER_CFG.proactive_strong_giveback_pct
+PROACTIVE_WEAK_MIN_PEAK_PCT = _POSITION_MANAGER_CFG.proactive_weak_min_peak_pct
+PROACTIVE_WEAK_MIN_CURRENT_PCT = _POSITION_MANAGER_CFG.proactive_weak_min_current_pct
+PROACTIVE_WEAK_GIVEBACK_PCT = _POSITION_MANAGER_CFG.proactive_weak_giveback_pct
 
 # Exit-pattern pressure:
 # A bounded profit-protection layer for positions that are already green.
 # It does not buy, increase size, weaken hard stops, or turn a red position into
 # a hold. It can only trigger a partial profit capture when live momentum/VWAP
 # pattern evidence suggests a winner is starting to fail.
-EXIT_PATTERN_PROFIT_CAPTURE_ENABLED = os.getenv(
-    "POSITION_MANAGER_EXIT_PATTERN_PROFIT_CAPTURE_ENABLED", "true"
-).lower() in ("1", "true", "yes", "on")
-EXIT_PATTERN_STRONG_MIN_PEAK_PCT = float(
-    os.getenv("POSITION_MANAGER_EXIT_PATTERN_STRONG_MIN_PEAK_PCT", "0.40")
-)
-EXIT_PATTERN_STRONG_MIN_CURRENT_PCT = float(
-    os.getenv("POSITION_MANAGER_EXIT_PATTERN_STRONG_MIN_CURRENT_PCT", "0.18")
-)
-EXIT_PATTERN_WEAK_MIN_PEAK_PCT = float(
-    os.getenv("POSITION_MANAGER_EXIT_PATTERN_WEAK_MIN_PEAK_PCT", "0.25")
-)
-EXIT_PATTERN_WEAK_MIN_CURRENT_PCT = float(
-    os.getenv("POSITION_MANAGER_EXIT_PATTERN_WEAK_MIN_CURRENT_PCT", "0.10")
-)
-EXIT_PATTERN_MIN_ADVERSE_SIGNALS = int(
-    os.getenv("POSITION_MANAGER_EXIT_PATTERN_MIN_ADVERSE_SIGNALS", "2")
-)
-EXIT_PATTERN_WEAK_GIVEBACK_PCT = float(
-    os.getenv("POSITION_MANAGER_EXIT_PATTERN_WEAK_GIVEBACK_PCT", "20")
-)
+EXIT_PATTERN_PROFIT_CAPTURE_ENABLED = _POSITION_MANAGER_CFG.exit_pattern_profit_capture_enabled
+EXIT_PATTERN_STRONG_MIN_PEAK_PCT = _POSITION_MANAGER_CFG.exit_pattern_strong_min_peak_pct
+EXIT_PATTERN_STRONG_MIN_CURRENT_PCT = _POSITION_MANAGER_CFG.exit_pattern_strong_min_current_pct
+EXIT_PATTERN_WEAK_MIN_PEAK_PCT = _POSITION_MANAGER_CFG.exit_pattern_weak_min_peak_pct
+EXIT_PATTERN_WEAK_MIN_CURRENT_PCT = _POSITION_MANAGER_CFG.exit_pattern_weak_min_current_pct
+EXIT_PATTERN_MIN_ADVERSE_SIGNALS = _POSITION_MANAGER_CFG.exit_pattern_min_adverse_signals
+EXIT_PATTERN_WEAK_GIVEBACK_PCT = _POSITION_MANAGER_CFG.exit_pattern_weak_giveback_pct
 
 # Auto-buy coordination:
 # The buy engine and exit engine run independently. A fresh auto-buy position
 # should not be immediately closed by soft profit locks before the entry thesis
 # has had time to play out. Severe loss/risk exits remain active.
-AUTO_BUY_MIN_HOLD_MINUTES = float(os.getenv("POSITION_MANAGER_AUTO_BUY_MIN_HOLD_MINUTES", "6"))
-AUTO_BUY_MIN_HOLD_HARD_LOSS_PCT = float(
-    os.getenv("POSITION_MANAGER_AUTO_BUY_MIN_HOLD_HARD_LOSS_PCT", "-0.75")
-)
-AUTO_BUY_STRONG_ENTRY_ML_MIN = float(
-    os.getenv("POSITION_MANAGER_AUTO_BUY_STRONG_ENTRY_ML_MIN", "55")
-)
-AUTO_BUY_STRONG_ENTRY_OPPORTUNITY_MIN = float(
-    os.getenv("POSITION_MANAGER_AUTO_BUY_STRONG_ENTRY_OPPORTUNITY_MIN", "8")
-)
+AUTO_BUY_MIN_HOLD_MINUTES = _POSITION_MANAGER_CFG.auto_buy_min_hold_minutes
+AUTO_BUY_MIN_HOLD_HARD_LOSS_PCT = _POSITION_MANAGER_CFG.auto_buy_min_hold_hard_loss_pct
+AUTO_BUY_STRONG_ENTRY_ML_MIN = _POSITION_MANAGER_CFG.auto_buy_strong_entry_ml_min
+AUTO_BUY_STRONG_ENTRY_OPPORTUNITY_MIN = _POSITION_MANAGER_CFG.auto_buy_strong_entry_opportunity_min
 
 
 def now_utc():

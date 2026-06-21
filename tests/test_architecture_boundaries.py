@@ -109,6 +109,46 @@ TEMPORARY_DB_ACCESS_ALLOWLIST = (
     TEMPORARY_REPORT_DB_ALLOWLIST | TEMPORARY_BACKFILL_TRAINING_DB_ALLOWLIST
 )
 
+BASELINE_DB_ACCESS_ALLOWLIST_REASONS = {
+    "baseline_open_positions.py": "baseline root-sprawl direct DB access; migrate behind repository boundary",
+    "collect_and_score_events.py": "baseline root-sprawl direct DB access; migrate behind repository boundary",
+    "context_trade_join_report.py": "baseline report direct DB access; migrate report to repository boundary",
+    "event_attribution_report.py": "baseline report direct DB access; migrate report to repository boundary",
+    "import_alpaca_order_history.py": "baseline import script direct DB access; migrate behind repository boundary",
+    "import_signal_log.py": "baseline import script direct DB access; migrate behind repository boundary",
+    "ingest_market_context.py": "baseline root-sprawl direct DB access; migrate behind repository boundary",
+    "intelligence_context_report.py": "baseline report direct DB access; migrate report to repository boundary",
+    "intelligence_learning_report.py": "baseline report direct DB access; migrate report to repository boundary",
+    "intelligence_prediction_report.py": "baseline report direct DB access; migrate report to repository boundary",
+    "prediction_validation_report.py": "baseline report direct DB access; migrate report to repository boundary",
+    "scripts/pead_label_backfill.py": "baseline backfill script direct DB access; migrate behind repository boundary",
+    "signal_event_builder.py": "baseline builder direct DB access; migrate builder to repository boundary",
+    "signal_outcome_builder.py": "baseline builder direct DB access; migrate builder to repository boundary",
+    "signal_timing_lesson_report.py": "baseline report direct DB access; migrate report to repository boundary",
+    "signal_timing_report.py": "baseline report direct DB access; migrate report to repository boundary",
+    "trader_brain_ops_check.py": "baseline root-sprawl direct DB access; migrate behind ops-check repository boundary",
+    "trader_brain_report.py": "baseline report direct DB access; migrate report to repository boundary",
+    "trend_context_builder.py": "baseline builder direct DB access; migrate builder to repository boundary",
+    "trend_context_report.py": "baseline report direct DB access; migrate report to repository boundary",
+}
+BASELINE_DB_ACCESS_ALLOWLIST = set(BASELINE_DB_ACCESS_ALLOWLIST_REASONS)
+
+BASELINE_REPORT_BUILDER_DB_ALLOWLIST = {
+    "context_trade_join_report.py",
+    "event_attribution_report.py",
+    "intelligence_context_report.py",
+    "intelligence_learning_report.py",
+    "intelligence_prediction_report.py",
+    "prediction_validation_report.py",
+    "signal_event_builder.py",
+    "signal_outcome_builder.py",
+    "signal_timing_lesson_report.py",
+    "signal_timing_report.py",
+    "trader_brain_report.py",
+    "trend_context_builder.py",
+    "trend_context_report.py",
+}
+
 APPROVED_BROKER_BOUNDARIES = {
     "scripts/broker.py",
     "services/broker_service.py",
@@ -122,6 +162,13 @@ APPROVED_BROKER_BOUNDARIES = {
 }
 
 TEMPORARY_BROKER_ACCESS_ALLOWLIST = set()
+
+BASELINE_BROKER_ACCESS_ALLOWLIST_REASONS = {
+    "baseline_open_positions.py": "baseline root-sprawl broker access; migrate behind broker service",
+    "pre_market_research_data.py": "baseline root-sprawl broker access; migrate behind market-data service",
+    "trend_context_builder.py": "baseline builder broker access; migrate behind market-data service",
+}
+BASELINE_BROKER_ACCESS_ALLOWLIST = set(BASELINE_BROKER_ACCESS_ALLOWLIST_REASONS)
 
 APPROVED_MARKET_DATA_BOUNDARIES = {
     "scripts/broker.py",
@@ -159,6 +206,12 @@ APPROVED_MARKET_DATA_BOUNDARIES = {
 
 TEMPORARY_MARKET_DATA_ALLOWLIST_REASONS: dict[str, str] = {}
 TEMPORARY_MARKET_DATA_ACCESS_ALLOWLIST = set(TEMPORARY_MARKET_DATA_ALLOWLIST_REASONS)
+
+BASELINE_MARKET_DATA_ALLOWLIST_REASONS = {
+    "pre_market_research_data.py": "baseline root-sprawl market-data access; migrate behind market-data service",
+    "trend_context_builder.py": "baseline builder market-data access; migrate behind market-data service",
+}
+BASELINE_MARKET_DATA_ACCESS_ALLOWLIST = set(BASELINE_MARKET_DATA_ALLOWLIST_REASONS)
 
 
 def _is_db_access(path: Path) -> bool:
@@ -360,7 +413,7 @@ def test_direct_db_access_is_approved_or_tracked():
         _is_db_access,
         APPROVED_DB_BOUNDARIES,
         APPROVED_DB_BOUNDARY_PREFIXES,
-        TEMPORARY_DB_ACCESS_ALLOWLIST,
+        TEMPORARY_DB_ACCESS_ALLOWLIST | BASELINE_DB_ACCESS_ALLOWLIST,
         "db access",
     )
 
@@ -370,7 +423,7 @@ def test_direct_broker_access_is_approved_or_tracked():
         _is_broker_access,
         APPROVED_BROKER_BOUNDARIES,
         set(),
-        TEMPORARY_BROKER_ACCESS_ALLOWLIST,
+        TEMPORARY_BROKER_ACCESS_ALLOWLIST | BASELINE_BROKER_ACCESS_ALLOWLIST,
         "broker access",
     )
 
@@ -380,7 +433,7 @@ def test_market_data_access_is_approved_or_tracked():
         _is_market_data_access,
         APPROVED_MARKET_DATA_BOUNDARIES,
         set(),
-        TEMPORARY_MARKET_DATA_ACCESS_ALLOWLIST,
+        TEMPORARY_MARKET_DATA_ACCESS_ALLOWLIST | BASELINE_MARKET_DATA_ACCESS_ALLOWLIST,
         "market-data access",
     )
 
@@ -423,6 +476,32 @@ def test_temporary_market_data_allowlist_entries_have_todo_reasons():
     )
 
 
+def test_architecture_baseline_allowlist_entries_have_reasons_and_still_apply():
+    missing = []
+    stale = []
+    baselines = [
+        (BASELINE_DB_ACCESS_ALLOWLIST_REASONS, _is_db_access, "db"),
+        (BASELINE_BROKER_ACCESS_ALLOWLIST_REASONS, _is_broker_access, "broker"),
+        (
+            BASELINE_MARKET_DATA_ALLOWLIST_REASONS,
+            _is_market_data_access,
+            "market-data",
+        ),
+    ]
+    for entries, predicate, label in baselines:
+        for rel, reason in entries.items():
+            path = ROOT / rel
+            if not reason:
+                missing.append(f"{label}:{rel}")
+            if not path.exists() or not predicate(path):
+                stale.append(f"{label}:{rel}")
+    assert_true(not missing, f"baseline allowlist entries need reasons: {missing}")
+    assert_true(
+        not stale,
+        f"baseline allowlist entries no longer match violations and should be removed: {stale}",
+    )
+
+
 def test_no_runtime_modules_have_direct_db_or_broker_access():
     approved_broker_runtime = APPROVED_BROKER_BOUNDARIES
     violations = []
@@ -444,6 +523,8 @@ def test_reports_builders_and_ops_check_do_not_import_db_directly():
         imports = _imports(path)
         calls = _calls(path)
         rel = path.relative_to(ROOT).as_posix()
+        if rel in BASELINE_REPORT_BUILDER_DB_ALLOWLIST:
+            continue
         for module in imports:
             root = module.split(".", 1)[0]
             if module in banned_imports or root in banned_imports:

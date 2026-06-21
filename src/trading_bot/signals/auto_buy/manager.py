@@ -112,6 +112,7 @@ from symbols_config import (
     SYMBOL_SIGNAL_SOURCE,
 )
 
+from config.auto_buy import load_auto_buy_config
 from config.conviction import load_conviction_config
 from repositories import auto_buy_repo
 from risk.exposure import any_cluster_limit_hit, cluster_exposure
@@ -119,184 +120,85 @@ from services import audit_write_integrity
 
 _candidate_universe_services: dict[str, CandidateUniverseService] = {}
 _bot_events_services: dict[str, BotEventsService] = {}
+_AUTO_BUY_CFG = load_auto_buy_config()
 
-AUTO_BUY_LIVE_BUYS = os.getenv("AUTO_BUY_LIVE_BUYS", "false").lower() in ("1", "true", "yes", "on")
+AUTO_BUY_LIVE_BUYS = _AUTO_BUY_CFG.live_buys
 AUTO_BUY_ALLOW_TRADINGVIEW_LIVE = os.getenv("AUTO_BUY_ALLOW_TRADINGVIEW_LIVE", "false").lower() in (
     "1",
     "true",
     "yes",
     "on",
 )
-AUTO_BUY_SIGNAL_MODE = os.getenv("AUTO_BUY_SIGNAL_MODE", "legacy_source_gate").strip().lower()
-TRADINGVIEW_ALERTS_DEPRECATED = os.getenv(
-    "TRADINGVIEW_ALERTS_DEPRECATED", "false"
-).strip().lower() in ("1", "true", "yes", "on")
-AUTO_BUY_MIN_SCORE = float(os.getenv("AUTO_BUY_MIN_SCORE", "13"))
+AUTO_BUY_SIGNAL_MODE = _AUTO_BUY_CFG.signal_mode
+TRADINGVIEW_ALERTS_DEPRECATED = _AUTO_BUY_CFG.tradingview_alerts_deprecated
+AUTO_BUY_MIN_SCORE = _AUTO_BUY_CFG.min_score
 AUTO_BUY_AUDIT_WRITE_BUSY_TIMEOUT_MS = int(os.getenv("AUTO_BUY_AUDIT_WRITE_BUSY_TIMEOUT_MS", "250"))
-AUTO_BUY_WATCH_SCORE = float(os.getenv("AUTO_BUY_WATCH_SCORE", "7"))
-AUTO_BUY_POSITION_SIZE_PCT = float(os.getenv("AUTO_BUY_POSITION_SIZE_PCT", "0.50"))
-AUTO_BUY_STOP_LOSS_PCT = float(os.getenv("AUTO_BUY_STOP_LOSS_PCT", "1.00"))
-AUTO_BUY_TAKE_PROFIT_PCT = float(os.getenv("AUTO_BUY_TAKE_PROFIT_PCT", "2.00"))
-AUTO_BUY_MAX_ORDERS_PER_RUN = int(
-    os.getenv("AUTO_BUY_MAX_ORDERS_PER_RUN", _paper_runtime_default("3", "1"))
+AUTO_BUY_WATCH_SCORE = _AUTO_BUY_CFG.watch_score
+AUTO_BUY_POSITION_SIZE_PCT = _AUTO_BUY_CFG.position_size_pct
+AUTO_BUY_STOP_LOSS_PCT = _AUTO_BUY_CFG.stop_loss_pct
+AUTO_BUY_TAKE_PROFIT_PCT = _AUTO_BUY_CFG.take_profit_pct
+AUTO_BUY_MAX_ORDERS_PER_RUN = _AUTO_BUY_CFG.max_orders_per_run
+AUTO_BUY_MAX_ACTIVE_POSITIONS = _AUTO_BUY_CFG.max_active_positions
+AUTO_BUY_MAX_DAILY_ORDERS = _AUTO_BUY_CFG.max_daily_orders
+AUTO_BUY_COOLDOWN_MINUTES = _AUTO_BUY_CFG.cooldown_minutes
+AUTO_BUY_SESSION_BUFFER_MINUTES = _AUTO_BUY_CFG.session_buffer_minutes
+APP_BUY_COOLDOWN_MINUTES = _AUTO_BUY_CFG.app_buy_cooldown_minutes
+APP_RECENT_SELL_COOLDOWN_MINUTES = _AUTO_BUY_CFG.app_recent_sell_cooldown_minutes
+CASH_SAFE_MAX_NEW_BUYS_PER_SYMBOL_PER_DAY = _AUTO_BUY_CFG.cash_safe_max_new_buys_per_symbol_per_day
+AUTO_BUY_EXTENDED_VWAP_CAUTION_PCT = _AUTO_BUY_CFG.extended_vwap_caution_pct
+AUTO_BUY_UNCLASSIFIED_EXTENDED_BLOCK_PCT = _AUTO_BUY_CFG.unclassified_extended_block_pct
+AUTO_BUY_ML_WEAK_BLOCK_ENABLED = _AUTO_BUY_CFG.ml_weak_block_enabled
+AUTO_BUY_ML_WEAK_BLOCK_SCORE = _AUTO_BUY_CFG.ml_weak_block_score
+AUTO_BUY_ML_WEAK_BLOCK_MIN_SAMPLE_SIZE = _AUTO_BUY_CFG.ml_weak_block_min_sample_size
+AUTO_BUY_ML_WEAK_BUCKET_BLOCK_ENABLED = _AUTO_BUY_CFG.ml_weak_bucket_block_enabled
+AUTO_BUY_WATCH_SETUP_STRONG_BUY_ENABLED = _AUTO_BUY_CFG.watch_setup_strong_buy_enabled
+AUTO_BUY_EARLY_BUILD_ENABLED = _AUTO_BUY_CFG.early_build_enabled
+AUTO_BUY_EARLY_BUILD_MAX_SESSION_RETURN_PCT = _AUTO_BUY_CFG.early_build_max_session_return_pct
+AUTO_BUY_EARLY_BUILD_MAX_VWAP_DIST_PCT = _AUTO_BUY_CFG.early_build_max_vwap_dist_pct
+AUTO_BUY_EARLY_BUILD_MIN_SETUP_SCORE = _AUTO_BUY_CFG.early_build_min_setup_score
+AUTO_BUY_MATURE_CHASE_ENABLED = _AUTO_BUY_CFG.mature_chase_enabled
+AUTO_BUY_MATURE_CHASE_SESSION_RETURN_PCT = _AUTO_BUY_CFG.mature_chase_session_return_pct
+AUTO_BUY_MATURE_CHASE_VWAP_DIST_PCT = _AUTO_BUY_CFG.mature_chase_vwap_dist_pct
+AUTO_BUY_EXTREME_CHASE_BLOCK_SESSION_RETURN_PCT = (
+    _AUTO_BUY_CFG.extreme_chase_block_session_return_pct
 )
-AUTO_BUY_MAX_ACTIVE_POSITIONS = int(
-    os.getenv("AUTO_BUY_MAX_ACTIVE_POSITIONS", _paper_runtime_default("8", "3"))
+AUTO_BUY_EXTREME_CHASE_BLOCK_VWAP_DIST_PCT = _AUTO_BUY_CFG.extreme_chase_block_vwap_dist_pct
+AUTO_BUY_LEARNED_TIEBREAKER_ENABLED = _AUTO_BUY_CFG.learned_tiebreaker_enabled
+AUTO_BUY_LEARNED_TIEBREAKER_MIN_SAMPLE_SIZE = _AUTO_BUY_CFG.learned_tiebreaker_min_sample_size
+AUTO_BUY_LEARNED_TIEBREAKER_MIN_WIN_RATE = _AUTO_BUY_CFG.learned_tiebreaker_min_win_rate
+AUTO_BUY_LEARNED_TIEBREAKER_MIN_AVG_RETURN_PCT = _AUTO_BUY_CFG.learned_tiebreaker_min_avg_return_pct
+AUTO_BUY_LEARNED_TIEBREAKER_MIN_AVG_MFE_PCT = _AUTO_BUY_CFG.learned_tiebreaker_min_avg_mfe_pct
+AUTO_BUY_LEARNED_TIEBREAKER_MAX_AVG_MAE_PCT = _AUTO_BUY_CFG.learned_tiebreaker_max_avg_mae_pct
+AUTO_BUY_LEARNED_TIEBREAKER_LOOKBACK_DAYS = _AUTO_BUY_CFG.learned_tiebreaker_lookback_days
+AUTO_BUY_LEARNED_TIEBREAKER_MAX_HISTORICAL_ROWS = (
+    _AUTO_BUY_CFG.learned_tiebreaker_max_historical_rows
 )
-AUTO_BUY_MAX_DAILY_ORDERS = int(
-    os.getenv("AUTO_BUY_MAX_DAILY_ORDERS", _paper_runtime_default("30", "12"))
+AUTO_BUY_LEARNED_TIEBREAKER_MAX_THRESHOLD_GAP = _AUTO_BUY_CFG.learned_tiebreaker_max_threshold_gap
+AUTO_BUY_INTRADAY_FEEDBACK_ENABLED = _AUTO_BUY_CFG.intraday_feedback_enabled
+AUTO_BUY_PAPER_STRONG_EVIDENCE_PROMOTION_ENABLED = (
+    _AUTO_BUY_CFG.paper_strong_evidence_promotion_enabled
 )
-AUTO_BUY_COOLDOWN_MINUTES = int(os.getenv("AUTO_BUY_COOLDOWN_MINUTES", "60"))
-AUTO_BUY_SESSION_BUFFER_MINUTES = int(os.getenv("AUTO_BUY_SESSION_BUFFER_MINUTES", "10"))
-APP_BUY_COOLDOWN_MINUTES = int(os.getenv("ORDER_COOLDOWN_MINUTES", "15"))
-APP_RECENT_SELL_COOLDOWN_MINUTES = int(os.getenv("RECENT_SELL_COOLDOWN_MINUTES", "30"))
-CASH_SAFE_MAX_NEW_BUYS_PER_SYMBOL_PER_DAY = int(
-    os.getenv("CASH_SAFE_MAX_NEW_BUYS_PER_SYMBOL_PER_DAY", "1")
+AUTO_BUY_PAPER_STRONG_EVIDENCE_SCORE_BUFFER = _AUTO_BUY_CFG.paper_strong_evidence_score_buffer
+AUTO_BUY_PAPER_STRONG_EVIDENCE_MIN_SETUP_SCORE = _AUTO_BUY_CFG.paper_strong_evidence_min_setup_score
+AUTO_BUY_PAPER_STRONG_EVIDENCE_MIN_ML_SCORE = _AUTO_BUY_CFG.paper_strong_evidence_min_ml_score
+AUTO_BUY_PAPER_STRONG_EVIDENCE_MIN_SESSION_SCORE = (
+    _AUTO_BUY_CFG.paper_strong_evidence_min_session_score
 )
-AUTO_BUY_EXTENDED_VWAP_CAUTION_PCT = float(os.getenv("AUTO_BUY_EXTENDED_VWAP_CAUTION_PCT", "1.50"))
-AUTO_BUY_UNCLASSIFIED_EXTENDED_BLOCK_PCT = float(
-    os.getenv("AUTO_BUY_UNCLASSIFIED_EXTENDED_BLOCK_PCT", "1.50")
-)
-AUTO_BUY_ML_WEAK_BLOCK_ENABLED = os.getenv(
-    "AUTO_BUY_ML_WEAK_BLOCK_ENABLED", "true"
-).strip().lower() in ("1", "true", "yes", "on")
-AUTO_BUY_ML_WEAK_BLOCK_SCORE = float(os.getenv("AUTO_BUY_ML_WEAK_BLOCK_SCORE", "45"))
-AUTO_BUY_ML_WEAK_BLOCK_MIN_SAMPLE_SIZE = int(
-    os.getenv("AUTO_BUY_ML_WEAK_BLOCK_MIN_SAMPLE_SIZE", "20")
-)
-AUTO_BUY_ML_WEAK_BUCKET_BLOCK_ENABLED = os.getenv(
-    "AUTO_BUY_ML_WEAK_BUCKET_BLOCK_ENABLED", "true"
-).strip().lower() in ("1", "true", "yes", "on")
-AUTO_BUY_WATCH_SETUP_STRONG_BUY_ENABLED = os.getenv(
-    "AUTO_BUY_WATCH_SETUP_STRONG_BUY_ENABLED",
-    _paper_runtime_default("true", "false"),
-).strip().lower() in ("1", "true", "yes", "on")
-AUTO_BUY_EARLY_BUILD_ENABLED = os.getenv(
-    "AUTO_BUY_EARLY_BUILD_ENABLED", "true"
-).strip().lower() in ("1", "true", "yes", "on")
-AUTO_BUY_EARLY_BUILD_MAX_SESSION_RETURN_PCT = float(
-    os.getenv("AUTO_BUY_EARLY_BUILD_MAX_SESSION_RETURN_PCT", "0.90")
-)
-AUTO_BUY_EARLY_BUILD_MAX_VWAP_DIST_PCT = float(
-    os.getenv("AUTO_BUY_EARLY_BUILD_MAX_VWAP_DIST_PCT", "0.70")
-)
-AUTO_BUY_EARLY_BUILD_MIN_SETUP_SCORE = float(
-    os.getenv("AUTO_BUY_EARLY_BUILD_MIN_SETUP_SCORE", "50")
-)
-AUTO_BUY_MATURE_CHASE_ENABLED = os.getenv(
-    "AUTO_BUY_MATURE_CHASE_ENABLED", "true"
-).strip().lower() in ("1", "true", "yes", "on")
-AUTO_BUY_MATURE_CHASE_SESSION_RETURN_PCT = float(
-    os.getenv("AUTO_BUY_MATURE_CHASE_SESSION_RETURN_PCT", "1.50")
-)
-AUTO_BUY_MATURE_CHASE_VWAP_DIST_PCT = float(
-    os.getenv("AUTO_BUY_MATURE_CHASE_VWAP_DIST_PCT", "1.00")
-)
-AUTO_BUY_EXTREME_CHASE_BLOCK_SESSION_RETURN_PCT = float(
-    os.getenv("AUTO_BUY_EXTREME_CHASE_BLOCK_SESSION_RETURN_PCT", "2.50")
-)
-AUTO_BUY_EXTREME_CHASE_BLOCK_VWAP_DIST_PCT = float(
-    os.getenv("AUTO_BUY_EXTREME_CHASE_BLOCK_VWAP_DIST_PCT", "1.25")
-)
-AUTO_BUY_LEARNED_TIEBREAKER_ENABLED = os.getenv(
-    "AUTO_BUY_LEARNED_TIEBREAKER_ENABLED", "true"
-).strip().lower() in ("1", "true", "yes", "on")
-AUTO_BUY_LEARNED_TIEBREAKER_MIN_SAMPLE_SIZE = int(
-    os.getenv(
-        "AUTO_BUY_LEARNED_TIEBREAKER_MIN_SAMPLE_SIZE",
-        _paper_runtime_default("10", "25"),
-    )
-)
-AUTO_BUY_LEARNED_TIEBREAKER_MIN_WIN_RATE = float(
-    os.getenv("AUTO_BUY_LEARNED_TIEBREAKER_MIN_WIN_RATE", "0.55")
-)
-AUTO_BUY_LEARNED_TIEBREAKER_MIN_AVG_RETURN_PCT = float(
-    os.getenv("AUTO_BUY_LEARNED_TIEBREAKER_MIN_AVG_RETURN_PCT", "0.20")
-)
-AUTO_BUY_LEARNED_TIEBREAKER_MIN_AVG_MFE_PCT = float(
-    os.getenv("AUTO_BUY_LEARNED_TIEBREAKER_MIN_AVG_MFE_PCT", "1.00")
-)
-AUTO_BUY_LEARNED_TIEBREAKER_MAX_AVG_MAE_PCT = float(
-    os.getenv("AUTO_BUY_LEARNED_TIEBREAKER_MAX_AVG_MAE_PCT", "-1.50")
-)
-AUTO_BUY_LEARNED_TIEBREAKER_LOOKBACK_DAYS = int(
-    os.getenv("AUTO_BUY_LEARNED_TIEBREAKER_LOOKBACK_DAYS", "10")
-)
-AUTO_BUY_LEARNED_TIEBREAKER_MAX_HISTORICAL_ROWS = int(
-    os.getenv("AUTO_BUY_LEARNED_TIEBREAKER_MAX_HISTORICAL_ROWS", "2000")
-)
-AUTO_BUY_LEARNED_TIEBREAKER_MAX_THRESHOLD_GAP = float(
-    os.getenv(
-        "AUTO_BUY_LEARNED_TIEBREAKER_MAX_THRESHOLD_GAP",
-        _paper_runtime_default("6.0", "4.0"),
-    )
-)
-AUTO_BUY_INTRADAY_FEEDBACK_ENABLED = os.getenv(
-    "AUTO_BUY_INTRADAY_FEEDBACK_ENABLED", "true"
-).strip().lower() in ("1", "true", "yes", "on")
-AUTO_BUY_PAPER_STRONG_EVIDENCE_PROMOTION_ENABLED = os.getenv(
-    "AUTO_BUY_PAPER_STRONG_EVIDENCE_PROMOTION_ENABLED",
-    _paper_runtime_default("true", "false"),
-).strip().lower() in ("1", "true", "yes", "on")
-AUTO_BUY_PAPER_STRONG_EVIDENCE_SCORE_BUFFER = float(
-    os.getenv("AUTO_BUY_PAPER_STRONG_EVIDENCE_SCORE_BUFFER", "3.0")
-)
-AUTO_BUY_PAPER_STRONG_EVIDENCE_MIN_SETUP_SCORE = float(
-    os.getenv("AUTO_BUY_PAPER_STRONG_EVIDENCE_MIN_SETUP_SCORE", "50.0")
-)
-AUTO_BUY_PAPER_STRONG_EVIDENCE_MIN_ML_SCORE = float(
-    os.getenv("AUTO_BUY_PAPER_STRONG_EVIDENCE_MIN_ML_SCORE", "50.0")
-)
-AUTO_BUY_PAPER_STRONG_EVIDENCE_MIN_SESSION_SCORE = float(
-    os.getenv("AUTO_BUY_PAPER_STRONG_EVIDENCE_MIN_SESSION_SCORE", "5.0")
-)
-AUTO_BUY_PAPER_EXPLORATION_FALLBACK_ENABLED = os.getenv(
-    "AUTO_BUY_PAPER_EXPLORATION_FALLBACK_ENABLED",
-    _paper_runtime_default("true", "false"),
-).strip().lower() in ("1", "true", "yes", "on")
-AUTO_BUY_PAPER_EXPLORATION_MIN_SCORE = float(
-    os.getenv("AUTO_BUY_PAPER_EXPLORATION_MIN_SCORE", "10.0")
-)
-AUTO_BUY_PAPER_EXPLORATION_MIN_SETUP_SCORE = float(
-    os.getenv("AUTO_BUY_PAPER_EXPLORATION_MIN_SETUP_SCORE", "50.0")
-)
-AUTO_BUY_PAPER_EXPLORATION_MIN_SESSION_SCORE = float(
-    os.getenv("AUTO_BUY_PAPER_EXPLORATION_MIN_SESSION_SCORE", "5.0")
-)
-AUTO_BUY_PAPER_EXPLORATION_MIN_ML_SCORE = float(
-    os.getenv("AUTO_BUY_PAPER_EXPLORATION_MIN_ML_SCORE", "50.0")
-)
-AUTO_BUY_LAYERED_ML_ENABLED = os.getenv(
-    "AUTO_BUY_LAYERED_ML_ENABLED",
-    _paper_runtime_default("true", "false"),
-).strip().lower() in ("1", "true", "yes", "on")
-AUTO_BUY_LAYERED_ML_PROMOTION_ENABLED = os.getenv(
-    "AUTO_BUY_LAYERED_ML_PROMOTION_ENABLED",
-    _paper_runtime_default("true", "false"),
-).strip().lower() in ("1", "true", "yes", "on")
-AUTO_BUY_LAYERED_ML_VETO_HARD_BLOCK_ENABLED = os.getenv(
-    "AUTO_BUY_LAYERED_ML_VETO_HARD_BLOCK_ENABLED",
-    _paper_runtime_default("true", "false"),
-).strip().lower() in ("1", "true", "yes", "on")
-AUTO_BUY_LAYERED_ML_MIN_PROMOTION_CONFIDENCE = float(
-    os.getenv("AUTO_BUY_LAYERED_ML_MIN_PROMOTION_CONFIDENCE", "65.0")
-)
-AUTO_BUY_LAYERED_ML_MIN_VETO_CONFIDENCE = float(
-    os.getenv("AUTO_BUY_LAYERED_ML_MIN_VETO_CONFIDENCE", "55.0")
-)
-AUTO_BUY_LAYERED_ML_SCORE_BOOST = float(os.getenv("AUTO_BUY_LAYERED_ML_SCORE_BOOST", "3.0"))
-AUTO_BUY_LAYERED_ML_PASS_SCORE_BOOST = float(
-    os.getenv("AUTO_BUY_LAYERED_ML_PASS_SCORE_BOOST", "1.0")
-)
-AUTO_BUY_LAYERED_ML_WATCH_SCORE_PENALTY = float(
-    os.getenv("AUTO_BUY_LAYERED_ML_WATCH_SCORE_PENALTY", "2.0")
-)
-AUTO_BUY_LAYERED_ML_VETO_SCORE_PENALTY = float(
-    os.getenv("AUTO_BUY_LAYERED_ML_VETO_SCORE_PENALTY", "8.0")
-)
-AUTO_BUY_LAYERED_ML_MAX_THRESHOLD_GAP = float(
-    os.getenv("AUTO_BUY_LAYERED_ML_MAX_THRESHOLD_GAP", "6.0")
-)
+AUTO_BUY_PAPER_EXPLORATION_FALLBACK_ENABLED = _AUTO_BUY_CFG.paper_exploration_fallback_enabled
+AUTO_BUY_PAPER_EXPLORATION_MIN_SCORE = _AUTO_BUY_CFG.paper_exploration_min_score
+AUTO_BUY_PAPER_EXPLORATION_MIN_SETUP_SCORE = _AUTO_BUY_CFG.paper_exploration_min_setup_score
+AUTO_BUY_PAPER_EXPLORATION_MIN_SESSION_SCORE = _AUTO_BUY_CFG.paper_exploration_min_session_score
+AUTO_BUY_PAPER_EXPLORATION_MIN_ML_SCORE = _AUTO_BUY_CFG.paper_exploration_min_ml_score
+AUTO_BUY_LAYERED_ML_ENABLED = _AUTO_BUY_CFG.layered_ml_enabled
+AUTO_BUY_LAYERED_ML_PROMOTION_ENABLED = _AUTO_BUY_CFG.layered_ml_promotion_enabled
+AUTO_BUY_LAYERED_ML_VETO_HARD_BLOCK_ENABLED = _AUTO_BUY_CFG.layered_ml_veto_hard_block_enabled
+AUTO_BUY_LAYERED_ML_MIN_PROMOTION_CONFIDENCE = _AUTO_BUY_CFG.layered_ml_min_promotion_confidence
+AUTO_BUY_LAYERED_ML_MIN_VETO_CONFIDENCE = _AUTO_BUY_CFG.layered_ml_min_veto_confidence
+AUTO_BUY_LAYERED_ML_SCORE_BOOST = _AUTO_BUY_CFG.layered_ml_score_boost
+AUTO_BUY_LAYERED_ML_PASS_SCORE_BOOST = _AUTO_BUY_CFG.layered_ml_pass_score_boost
+AUTO_BUY_LAYERED_ML_WATCH_SCORE_PENALTY = _AUTO_BUY_CFG.layered_ml_watch_score_penalty
+AUTO_BUY_LAYERED_ML_VETO_SCORE_PENALTY = _AUTO_BUY_CFG.layered_ml_veto_score_penalty
+AUTO_BUY_LAYERED_ML_MAX_THRESHOLD_GAP = _AUTO_BUY_CFG.layered_ml_max_threshold_gap
 LEARNED_TIEBREAKER_SOFT_BLOCK_PREFIXES = (
     "bias_avoid",
     "setup_avoid",
@@ -2530,37 +2432,17 @@ def symbol_window_summary(scope: str, evaluated_count: int) -> dict[str, Any]:
     }
 
 
-AUTO_BUY_MAX_SIGNALS_PER_SYMBOL = int(os.getenv("AUTO_BUY_MAX_SIGNALS_PER_SYMBOL", "2"))
-AUTO_BUY_MAX_SYMBOLS_PER_RUN = int(os.getenv("AUTO_BUY_MAX_SYMBOLS_PER_RUN", "20"))
-AUTO_BUY_TIMING_LOG_ENABLED = os.getenv("AUTO_BUY_TIMING_LOG_ENABLED", "true").lower() in (
-    "1",
-    "true",
-    "yes",
-    "on",
-)
-AUTO_BUY_SCORE_DETAIL_LOG_ENABLED = os.getenv(
-    "AUTO_BUY_SCORE_DETAIL_LOG_ENABLED", "true"
-).lower() in (
-    "1",
-    "true",
-    "yes",
-    "on",
-)
+AUTO_BUY_MAX_SIGNALS_PER_SYMBOL = _AUTO_BUY_CFG.max_signals_per_symbol
+AUTO_BUY_MAX_SYMBOLS_PER_RUN = _AUTO_BUY_CFG.max_symbols_per_run
+AUTO_BUY_TIMING_LOG_ENABLED = _AUTO_BUY_CFG.timing_log_enabled
+AUTO_BUY_SCORE_DETAIL_LOG_ENABLED = _AUTO_BUY_CFG.score_detail_log_enabled
 
-AUTO_BUY_BUCKING_TAPE_MIN_SESSION_RETURN_PCT = float(
-    os.getenv("AUTO_BUY_BUCKING_TAPE_MIN_SESSION_RETURN_PCT", "2.0")
-)
-AUTO_BUY_BUCKING_TAPE_MIN_RELATIVE_STRENGTH = float(
-    os.getenv("AUTO_BUY_BUCKING_TAPE_MIN_RELATIVE_STRENGTH", "0.30")
-)
-AUTO_BUY_BUCKING_TAPE_MIN_ACCEL_PCT = float(
-    os.getenv("AUTO_BUY_BUCKING_TAPE_MIN_ACCEL_PCT", "0.04")
-)
-AUTO_BUY_BUCKING_TAPE_MIN_VOLUME_RATIO = float(
-    os.getenv("AUTO_BUY_BUCKING_TAPE_MIN_VOLUME_RATIO", "1.8")
-)
-AUTO_BUY_BUCKING_TAPE_MIN_EARLY_SESSION_RETURN_PCT = float(
-    os.getenv("AUTO_BUY_BUCKING_TAPE_MIN_EARLY_SESSION_RETURN_PCT", "0.75")
+AUTO_BUY_BUCKING_TAPE_MIN_SESSION_RETURN_PCT = _AUTO_BUY_CFG.bucking_tape_min_session_return_pct
+AUTO_BUY_BUCKING_TAPE_MIN_RELATIVE_STRENGTH = _AUTO_BUY_CFG.bucking_tape_min_relative_strength
+AUTO_BUY_BUCKING_TAPE_MIN_ACCEL_PCT = _AUTO_BUY_CFG.bucking_tape_min_accel_pct
+AUTO_BUY_BUCKING_TAPE_MIN_VOLUME_RATIO = _AUTO_BUY_CFG.bucking_tape_min_volume_ratio
+AUTO_BUY_BUCKING_TAPE_MIN_EARLY_SESSION_RETURN_PCT = (
+    _AUTO_BUY_CFG.bucking_tape_min_early_session_return_pct
 )
 
 

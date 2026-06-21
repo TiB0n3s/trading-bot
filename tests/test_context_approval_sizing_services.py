@@ -547,6 +547,108 @@ def test_paper_exploration_authority_does_not_run_in_cash_mode():
     assert_equal("paper_exploration_authority" in account_state, False, "no paper marker")
 
 
+def test_paper_learning_authority_overrides_inside_neutral_bias_gate():
+    """Characterization: medium-confidence neutral-bias gate honors paper learning override.
+
+    Pins the paper-authority promotion behavior at the neutral_bias gate site so the
+    Phase 2 dedup (single helper for all four sites) stays behavior-preserving.
+    confidence='medium' skips the low-confidence gate and reaches the neutral-bias gate.
+    """
+    account_state = {
+        "setup_quality": {"recommendation": "buy", "policy_action": "allow", "score": 80},
+        "buy_opportunity": {
+            "buy_opportunity_recommendation": "strong_buy_candidate",
+            "buy_opportunity_score": 11,
+        },
+        "prediction_gate": {"deterministic_signal_quality_decision": "pass"},
+        "session_momentum_gate": {"severity": "pass"},
+    }
+    result = evaluate_approval_decision(
+        signal={"symbol": "AAPL", "action": "buy"},
+        action="buy",
+        claude_account_state={},
+        evaluate_signal=lambda *_: {
+            "approved": False,
+            "confidence": "medium",
+            "reason": "Claude is cautious",
+            "position_size_pct": 2.5,
+        },
+        cash_safe_mode=False,
+        market_bias={"bias": "neutral"},
+        account_state=account_state,
+        medium_confidence_override=lambda **_: (False, "no override"),
+        tape_exception_enabled=False,
+        execution_mode="paper",
+        ml_authority_config={
+            "paper_learning_authority": {
+                "enabled": True,
+                "min_setup_score": 65,
+                "min_buy_opportunity_score": 8,
+                "max_position_size_pct": 0.75,
+            }
+        },
+    )
+
+    assert_equal(result.approved, True, "approved")
+    assert_equal(result.source, "paper_learning_authority", "source")
+    assert_equal(result.category, None, "category")
+    assert_equal(result.claude_payload["position_size_pct"], 0.75, "size cap")
+    assert_equal(
+        account_state["paper_learning_authority_override"]["allowed"], True, "override marker"
+    )
+
+
+def test_paper_learning_authority_overrides_inside_conditional_entry_quality_gate():
+    """Characterization: conditional entry-quality gate honors paper learning override.
+
+    Pins the paper-authority promotion behavior at the conditional_entry_quality gate
+    site. market_bias has no 'bias' key (so the neutral-bias gate is skipped) and
+    entry_quality='conditional' with confidence='medium' to reach this gate.
+    """
+    account_state = {
+        "setup_quality": {"recommendation": "buy", "policy_action": "allow", "score": 80},
+        "buy_opportunity": {
+            "buy_opportunity_recommendation": "strong_buy_candidate",
+            "buy_opportunity_score": 11,
+        },
+        "prediction_gate": {"deterministic_signal_quality_decision": "pass"},
+        "session_momentum_gate": {"severity": "pass"},
+    }
+    result = evaluate_approval_decision(
+        signal={"symbol": "AAPL", "action": "buy"},
+        action="buy",
+        claude_account_state={},
+        evaluate_signal=lambda *_: {
+            "approved": False,
+            "confidence": "medium",
+            "reason": "Claude is cautious",
+            "position_size_pct": 2.5,
+        },
+        cash_safe_mode=False,
+        market_bias={"entry_quality": "conditional"},
+        account_state=account_state,
+        medium_confidence_override=lambda **_: (False, "no override"),
+        tape_exception_enabled=False,
+        execution_mode="paper",
+        ml_authority_config={
+            "paper_learning_authority": {
+                "enabled": True,
+                "min_setup_score": 65,
+                "min_buy_opportunity_score": 8,
+                "max_position_size_pct": 0.75,
+            }
+        },
+    )
+
+    assert_equal(result.approved, True, "approved")
+    assert_equal(result.source, "paper_learning_authority", "source")
+    assert_equal(result.category, None, "category")
+    assert_equal(result.claude_payload["position_size_pct"], 0.75, "size cap")
+    assert_equal(
+        account_state["paper_learning_authority_override"]["allowed"], True, "override marker"
+    )
+
+
 def _historical_bar_strategy(**overrides):
     strategy = {
         "status": "paper_ready",

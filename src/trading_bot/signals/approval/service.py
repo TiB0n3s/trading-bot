@@ -642,6 +642,92 @@ def _approval_from_historical_bar_meta_label(
     return None
 
 
+def _paper_authority_promotion(
+    *,
+    action: str,
+    decision: dict[str, Any],
+    account_state: dict[str, Any],
+    execution_mode: str,
+    ml_authority_config: dict[str, Any] | None,
+    raw_decision: dict[str, Any],
+) -> ApprovalDecision | None:
+    """Shared paper-only promotion: try exploration authority, then learning override.
+
+    Returns an approved ApprovalDecision if either paper authority allows the trade,
+    or None so the caller applies its own site-specific fall-through. Single source of
+    truth for promotion logic previously duplicated verbatim across the low-confidence,
+    neutral-bias, conditional-entry-quality, and unapproved-soft gate sites.
+    """
+    exploration = _paper_exploration_authority_decision(
+        action=action,
+        decision=decision,
+        account_state=account_state,
+        execution_mode=execution_mode,
+        ml_authority_config=ml_authority_config,
+    )
+    if exploration.get("allowed"):
+        adjusted = dict(decision)
+        adjusted["approved"] = True
+        adjusted["confidence"] = "medium"
+        adjusted["position_size_pct"] = exploration["position_size_pct"]
+        adjusted["reason"] = exploration["reason"]
+        adjusted["paper_exploration_authority"] = exploration
+        account_state["paper_exploration_authority"] = exploration
+        _store_decision_trace(
+            account_state=account_state,
+            decision=adjusted,
+            source="paper_exploration_authority",
+            execution_mode=execution_mode,
+            exploration=exploration,
+        )
+        return ApprovalDecision(
+            approved=True,
+            source="paper_exploration_authority",
+            confidence="medium",
+            reason=exploration["reason"],
+            category=None,
+            claude_payload=adjusted,
+            metadata={
+                "raw_decision": raw_decision,
+                "paper_exploration_authority": exploration,
+            },
+        )
+    paper_override = _paper_learning_override_decision(
+        action=action,
+        decision=decision,
+        account_state=account_state,
+        execution_mode=execution_mode,
+        ml_authority_config=ml_authority_config,
+    )
+    if paper_override.get("allowed"):
+        adjusted = dict(decision)
+        adjusted["approved"] = True
+        adjusted["confidence"] = "medium"
+        adjusted["position_size_pct"] = paper_override["position_size_pct"]
+        adjusted["reason"] = paper_override["reason"]
+        adjusted["paper_learning_authority_override"] = paper_override
+        account_state["paper_learning_authority_override"] = paper_override
+        _store_decision_trace(
+            account_state=account_state,
+            decision=adjusted,
+            source="paper_learning_authority",
+            execution_mode=execution_mode,
+        )
+        return ApprovalDecision(
+            approved=True,
+            source="paper_learning_authority",
+            confidence="medium",
+            reason=paper_override["reason"],
+            category=None,
+            claude_payload=adjusted,
+            metadata={
+                "raw_decision": raw_decision,
+                "paper_learning_authority_override": paper_override,
+            },
+        )
+    return None
+
+
 def evaluate_approval_decision(
     *,
     signal: dict[str, Any],
@@ -728,73 +814,16 @@ def evaluate_approval_decision(
             return meta_label_result
 
     if action == "buy" and confidence == "low":
-        exploration = _paper_exploration_authority_decision(
+        promoted = _paper_authority_promotion(
             action=action,
             decision=decision,
             account_state=account_state,
             execution_mode=execution_mode,
             ml_authority_config=ml_authority_config,
+            raw_decision=raw_decision,
         )
-        if exploration.get("allowed"):
-            adjusted = dict(decision)
-            adjusted["approved"] = True
-            adjusted["confidence"] = "medium"
-            adjusted["position_size_pct"] = exploration["position_size_pct"]
-            adjusted["reason"] = exploration["reason"]
-            adjusted["paper_exploration_authority"] = exploration
-            account_state["paper_exploration_authority"] = exploration
-            _store_decision_trace(
-                account_state=account_state,
-                decision=adjusted,
-                source="paper_exploration_authority",
-                execution_mode=execution_mode,
-                exploration=exploration,
-            )
-            return ApprovalDecision(
-                approved=True,
-                source="paper_exploration_authority",
-                confidence="medium",
-                reason=exploration["reason"],
-                category=None,
-                claude_payload=adjusted,
-                metadata={
-                    "raw_decision": raw_decision,
-                    "paper_exploration_authority": exploration,
-                },
-            )
-        paper_override = _paper_learning_override_decision(
-            action=action,
-            decision=decision,
-            account_state=account_state,
-            execution_mode=execution_mode,
-            ml_authority_config=ml_authority_config,
-        )
-        if paper_override.get("allowed"):
-            adjusted = dict(decision)
-            adjusted["approved"] = True
-            adjusted["confidence"] = "medium"
-            adjusted["position_size_pct"] = paper_override["position_size_pct"]
-            adjusted["reason"] = paper_override["reason"]
-            adjusted["paper_learning_authority_override"] = paper_override
-            account_state["paper_learning_authority_override"] = paper_override
-            _store_decision_trace(
-                account_state=account_state,
-                decision=adjusted,
-                source="paper_learning_authority",
-                execution_mode=execution_mode,
-            )
-            return ApprovalDecision(
-                approved=True,
-                source="paper_learning_authority",
-                confidence="medium",
-                reason=paper_override["reason"],
-                category=None,
-                claude_payload=adjusted,
-                metadata={
-                    "raw_decision": raw_decision,
-                    "paper_learning_authority_override": paper_override,
-                },
-            )
+        if promoted is not None:
+            return promoted
         _store_decision_trace(
             account_state=account_state,
             decision=decision,
@@ -829,73 +858,16 @@ def evaluate_approval_decision(
                 account_state=account_state,
             )
             if not medium_ok:
-                exploration = _paper_exploration_authority_decision(
+                promoted = _paper_authority_promotion(
                     action=action,
                     decision=decision,
                     account_state=account_state,
                     execution_mode=execution_mode,
                     ml_authority_config=ml_authority_config,
+                    raw_decision=raw_decision,
                 )
-                if exploration.get("allowed"):
-                    adjusted = dict(decision)
-                    adjusted["approved"] = True
-                    adjusted["confidence"] = "medium"
-                    adjusted["position_size_pct"] = exploration["position_size_pct"]
-                    adjusted["reason"] = exploration["reason"]
-                    adjusted["paper_exploration_authority"] = exploration
-                    account_state["paper_exploration_authority"] = exploration
-                    _store_decision_trace(
-                        account_state=account_state,
-                        decision=adjusted,
-                        source="paper_exploration_authority",
-                        execution_mode=execution_mode,
-                        exploration=exploration,
-                    )
-                    return ApprovalDecision(
-                        approved=True,
-                        source="paper_exploration_authority",
-                        confidence="medium",
-                        reason=exploration["reason"],
-                        category=None,
-                        claude_payload=adjusted,
-                        metadata={
-                            "raw_decision": raw_decision,
-                            "paper_exploration_authority": exploration,
-                        },
-                    )
-                paper_override = _paper_learning_override_decision(
-                    action=action,
-                    decision=decision,
-                    account_state=account_state,
-                    execution_mode=execution_mode,
-                    ml_authority_config=ml_authority_config,
-                )
-                if paper_override.get("allowed"):
-                    adjusted = dict(decision)
-                    adjusted["approved"] = True
-                    adjusted["confidence"] = "medium"
-                    adjusted["position_size_pct"] = paper_override["position_size_pct"]
-                    adjusted["reason"] = paper_override["reason"]
-                    adjusted["paper_learning_authority_override"] = paper_override
-                    account_state["paper_learning_authority_override"] = paper_override
-                    _store_decision_trace(
-                        account_state=account_state,
-                        decision=adjusted,
-                        source="paper_learning_authority",
-                        execution_mode=execution_mode,
-                    )
-                    return ApprovalDecision(
-                        approved=True,
-                        source="paper_learning_authority",
-                        confidence="medium",
-                        reason=paper_override["reason"],
-                        category=None,
-                        claude_payload=adjusted,
-                        metadata={
-                            "raw_decision": raw_decision,
-                            "paper_learning_authority_override": paper_override,
-                        },
-                    )
+                if promoted is not None:
+                    return promoted
                 _store_decision_trace(
                     account_state=account_state,
                     decision=decision,
@@ -935,73 +907,16 @@ def evaluate_approval_decision(
             account_state=account_state,
         )
         if not medium_ok:
-            exploration = _paper_exploration_authority_decision(
+            promoted = _paper_authority_promotion(
                 action=action,
                 decision=decision,
                 account_state=account_state,
                 execution_mode=execution_mode,
                 ml_authority_config=ml_authority_config,
+                raw_decision=raw_decision,
             )
-            if exploration.get("allowed"):
-                adjusted = dict(decision)
-                adjusted["approved"] = True
-                adjusted["confidence"] = "medium"
-                adjusted["position_size_pct"] = exploration["position_size_pct"]
-                adjusted["reason"] = exploration["reason"]
-                adjusted["paper_exploration_authority"] = exploration
-                account_state["paper_exploration_authority"] = exploration
-                _store_decision_trace(
-                    account_state=account_state,
-                    decision=adjusted,
-                    source="paper_exploration_authority",
-                    execution_mode=execution_mode,
-                    exploration=exploration,
-                )
-                return ApprovalDecision(
-                    approved=True,
-                    source="paper_exploration_authority",
-                    confidence="medium",
-                    reason=exploration["reason"],
-                    category=None,
-                    claude_payload=adjusted,
-                    metadata={
-                        "raw_decision": raw_decision,
-                        "paper_exploration_authority": exploration,
-                    },
-                )
-            paper_override = _paper_learning_override_decision(
-                action=action,
-                decision=decision,
-                account_state=account_state,
-                execution_mode=execution_mode,
-                ml_authority_config=ml_authority_config,
-            )
-            if paper_override.get("allowed"):
-                adjusted = dict(decision)
-                adjusted["approved"] = True
-                adjusted["confidence"] = "medium"
-                adjusted["position_size_pct"] = paper_override["position_size_pct"]
-                adjusted["reason"] = paper_override["reason"]
-                adjusted["paper_learning_authority_override"] = paper_override
-                account_state["paper_learning_authority_override"] = paper_override
-                _store_decision_trace(
-                    account_state=account_state,
-                    decision=adjusted,
-                    source="paper_learning_authority",
-                    execution_mode=execution_mode,
-                )
-                return ApprovalDecision(
-                    approved=True,
-                    source="paper_learning_authority",
-                    confidence="medium",
-                    reason=paper_override["reason"],
-                    category=None,
-                    claude_payload=adjusted,
-                    metadata={
-                        "raw_decision": raw_decision,
-                        "paper_learning_authority_override": paper_override,
-                    },
-                )
+            if promoted is not None:
+                return promoted
             _store_decision_trace(
                 account_state=account_state,
                 decision=decision,
@@ -1029,73 +944,16 @@ def evaluate_approval_decision(
         }
 
     if action == "buy" and not bool(decision.get("approved")):
-        exploration = _paper_exploration_authority_decision(
+        promoted = _paper_authority_promotion(
             action=action,
             decision=decision,
             account_state=account_state,
             execution_mode=execution_mode,
             ml_authority_config=ml_authority_config,
+            raw_decision=raw_decision,
         )
-        if exploration.get("allowed"):
-            adjusted = dict(decision)
-            adjusted["approved"] = True
-            adjusted["confidence"] = "medium"
-            adjusted["position_size_pct"] = exploration["position_size_pct"]
-            adjusted["reason"] = exploration["reason"]
-            adjusted["paper_exploration_authority"] = exploration
-            account_state["paper_exploration_authority"] = exploration
-            _store_decision_trace(
-                account_state=account_state,
-                decision=adjusted,
-                source="paper_exploration_authority",
-                execution_mode=execution_mode,
-                exploration=exploration,
-            )
-            return ApprovalDecision(
-                approved=True,
-                source="paper_exploration_authority",
-                confidence="medium",
-                reason=exploration["reason"],
-                category=None,
-                claude_payload=adjusted,
-                metadata={
-                    "raw_decision": raw_decision,
-                    "paper_exploration_authority": exploration,
-                },
-            )
-        paper_override = _paper_learning_override_decision(
-            action=action,
-            decision=decision,
-            account_state=account_state,
-            execution_mode=execution_mode,
-            ml_authority_config=ml_authority_config,
-        )
-        if paper_override.get("allowed"):
-            adjusted = dict(decision)
-            adjusted["approved"] = True
-            adjusted["confidence"] = "medium"
-            adjusted["position_size_pct"] = paper_override["position_size_pct"]
-            adjusted["reason"] = paper_override["reason"]
-            adjusted["paper_learning_authority_override"] = paper_override
-            account_state["paper_learning_authority_override"] = paper_override
-            _store_decision_trace(
-                account_state=account_state,
-                decision=adjusted,
-                source="paper_learning_authority",
-                execution_mode=execution_mode,
-            )
-            return ApprovalDecision(
-                approved=True,
-                source="paper_learning_authority",
-                confidence="medium",
-                reason=paper_override["reason"],
-                category=None,
-                claude_payload=adjusted,
-                metadata={
-                    "raw_decision": raw_decision,
-                    "paper_learning_authority_override": paper_override,
-                },
-            )
+        if promoted is not None:
+            return promoted
 
     if action == "buy" and bool(decision.get("approved")):
         exploration = _paper_exploration_authority_decision(

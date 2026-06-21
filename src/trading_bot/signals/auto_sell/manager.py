@@ -31,6 +31,7 @@ from services.historical_bar_paper_strategy_service import build_historical_bar_
 from services.layered_model_decision_service import build_layered_model_decision
 from session_momentum import get_latest_session_momentum
 
+from config.auto_sell import load_auto_sell_config
 from config.conviction import load_conviction_config
 from repositories import auto_sell_repo, position_momentum_repo
 from trading_bot.signals.conviction.policy import (
@@ -46,52 +47,30 @@ logging.basicConfig(
 logger = logging.getLogger("position_momentum_monitor")
 
 _CONVICTION_CFG = load_conviction_config()
-
-
-def _env_bool(name: str, default: bool = False) -> bool:
-    raw = os.environ.get(name)
-    if raw is None:
-        return default
-    return raw.strip().lower() in ("1", "true", "yes", "on")
+_AUTO_SELL_CFG = load_auto_sell_config()
 
 
 MAX_MOMENTUM_AGE_MINUTES = 5
 MIN_BARS_FOR_ACTION = 15
-AUTO_SELL_COOLDOWN_MINUTES = 30
-MIN_HOLD_MINUTES_BEFORE_AUTO_SELL = 15
+AUTO_SELL_COOLDOWN_MINUTES = _AUTO_SELL_CFG.cooldown_minutes
+MIN_HOLD_MINUTES_BEFORE_AUTO_SELL = _AUTO_SELL_CFG.min_hold_minutes_before_auto_sell
 
-POSITION_MOMENTUM_AUTO_SELL = _env_bool("POSITION_MOMENTUM_AUTO_SELL", False)
-POSITION_MOMENTUM_SELL_CANDIDATES_ONLY = _env_bool("POSITION_MOMENTUM_SELL_CANDIDATES_ONLY", True)
+POSITION_MOMENTUM_AUTO_SELL = _AUTO_SELL_CFG.auto_sell
+POSITION_MOMENTUM_SELL_CANDIDATES_ONLY = _AUTO_SELL_CFG.sell_candidates_only
 
 # When enabled, extreme observe-only sell pressure can promote watch/hold
 # decisions into sell_candidate decisions.
-POSITION_MOMENTUM_USE_SELL_PRESSURE = _env_bool("POSITION_MOMENTUM_USE_SELL_PRESSURE", False)
+POSITION_MOMENTUM_USE_SELL_PRESSURE = _AUTO_SELL_CFG.use_sell_pressure
 
 
-def _paper_runtime_default(paper_value: str, live_value: str) -> str:
-    mode = os.getenv("EXECUTION_MODE", "paper").strip().lower()
-    return paper_value if mode in {"paper", "dry_run"} else live_value
-
-
-POSITION_MOMENTUM_LAYERED_ML_ENABLED = _env_bool(
-    "POSITION_MOMENTUM_LAYERED_ML_ENABLED",
-    _paper_runtime_default("true", "false").lower() == "true",
+POSITION_MOMENTUM_LAYERED_ML_ENABLED = _AUTO_SELL_CFG.layered_ml_enabled
+POSITION_MOMENTUM_LAYERED_ML_MIN_EXIT_CONFIDENCE = _AUTO_SELL_CFG.layered_ml_min_exit_confidence
+POSITION_MOMENTUM_LAYERED_ML_STRONG_EXIT_CONFIDENCE = (
+    _AUTO_SELL_CFG.layered_ml_strong_exit_confidence
 )
-POSITION_MOMENTUM_LAYERED_ML_MIN_EXIT_CONFIDENCE = float(
-    os.getenv("POSITION_MOMENTUM_LAYERED_ML_MIN_EXIT_CONFIDENCE", "70.0")
-)
-POSITION_MOMENTUM_LAYERED_ML_STRONG_EXIT_CONFIDENCE = float(
-    os.getenv("POSITION_MOMENTUM_LAYERED_ML_STRONG_EXIT_CONFIDENCE", "78.0")
-)
-POSITION_MOMENTUM_LAYERED_ML_MAX_LOSS_PCT = float(
-    os.getenv("POSITION_MOMENTUM_LAYERED_ML_MAX_LOSS_PCT", "-0.75")
-)
-POSITION_MOMENTUM_LAYERED_ML_MIN_SELL_PRESSURE = float(
-    os.getenv("POSITION_MOMENTUM_LAYERED_ML_MIN_SELL_PRESSURE", "5.0")
-)
-POSITION_MOMENTUM_LAYERED_ML_LOW_CONFIDENCE = float(
-    os.getenv("POSITION_MOMENTUM_LAYERED_ML_LOW_CONFIDENCE", "45.0")
-)
+POSITION_MOMENTUM_LAYERED_ML_MAX_LOSS_PCT = _AUTO_SELL_CFG.layered_ml_max_loss_pct
+POSITION_MOMENTUM_LAYERED_ML_MIN_SELL_PRESSURE = _AUTO_SELL_CFG.layered_ml_min_sell_pressure
+POSITION_MOMENTUM_LAYERED_ML_LOW_CONFIDENCE = _AUTO_SELL_CFG.layered_ml_low_confidence
 
 _bar_pattern_feature_repo: BarPatternFeatureRepository | None = None
 _historical_bar_intelligence_cache: dict[str, Any] | None = None
@@ -538,7 +517,7 @@ def evaluate_position_momentum(position: Any, session: dict[str, Any] | None) ->
             "reason": f"qty={qty} is not a long position",
         }
 
-    emergency_loss_pct = float(os.getenv("POSITION_MOMENTUM_EMERGENCY_LOSS_PCT", "-1.25"))
+    emergency_loss_pct = _AUTO_SELL_CFG.emergency_loss_pct
     if unrealized_plpc <= emergency_loss_pct:
         return {
             "symbol": symbol,
@@ -619,15 +598,11 @@ def evaluate_position_momentum(position: Any, session: dict[str, Any] | None) ->
     # - Our position is red
     # - Trend score has deteriorated
     # - 15m/30m momentum are both negative
-    failed_high_run_session_pct = float(
-        os.getenv("POSITION_MOMENTUM_FAILED_HIGH_RUN_SESSION_PCT", "4.0")
-    )
-    failed_high_run_loss_pct = float(
-        os.getenv("POSITION_MOMENTUM_FAILED_HIGH_RUN_LOSS_PCT", "-0.60")
-    )
-    failed_high_run_score = float(os.getenv("POSITION_MOMENTUM_FAILED_HIGH_RUN_SCORE", "-4"))
-    failed_high_run_15m_pct = float(os.getenv("POSITION_MOMENTUM_FAILED_HIGH_RUN_15M_PCT", "-0.50"))
-    failed_high_run_30m_pct = float(os.getenv("POSITION_MOMENTUM_FAILED_HIGH_RUN_30M_PCT", "-0.50"))
+    failed_high_run_session_pct = _AUTO_SELL_CFG.failed_high_run_session_pct
+    failed_high_run_loss_pct = _AUTO_SELL_CFG.failed_high_run_loss_pct
+    failed_high_run_score = _AUTO_SELL_CFG.failed_high_run_score
+    failed_high_run_15m_pct = _AUTO_SELL_CFG.failed_high_run_15m_pct
+    failed_high_run_30m_pct = _AUTO_SELL_CFG.failed_high_run_30m_pct
 
     if (
         session_return >= failed_high_run_session_pct
@@ -664,11 +639,9 @@ def evaluate_position_momentum(position: Any, session: dict[str, Any] | None) ->
     high_water_plpc = sell_pressure.get("high_water_plpc", unrealized_plpc)
     giveback_plpc = sell_pressure.get("giveback_plpc", 0.0)
 
-    trailing_profit_min_pct = float(os.getenv("POSITION_MOMENTUM_TRAILING_PROFIT_MIN_PCT", "0.75"))
-    trailing_giveback_pct = float(os.getenv("POSITION_MOMENTUM_TRAILING_GIVEBACK_PCT", "0.50"))
-    trailing_current_floor_pct = float(
-        os.getenv("POSITION_MOMENTUM_TRAILING_CURRENT_FLOOR_PCT", "-0.25")
-    )
+    trailing_profit_min_pct = _AUTO_SELL_CFG.trailing_profit_min_pct
+    trailing_giveback_pct = _AUTO_SELL_CFG.trailing_giveback_pct
+    trailing_current_floor_pct = _AUTO_SELL_CFG.trailing_current_floor_pct
 
     if (
         high_water_plpc >= trailing_profit_min_pct
@@ -700,9 +673,7 @@ def evaluate_position_momentum(position: Any, session: dict[str, Any] | None) ->
         (label == "downtrend" or score <= -5) and m15 < -0.20 and m30 < -0.30 and vwap_dist < -0.15
     )
 
-    hard_negative_loss_floor_pct = float(
-        os.getenv("POSITION_MOMENTUM_HARD_NEGATIVE_LOSS_FLOOR_PCT", "-0.50")
-    )
+    hard_negative_loss_floor_pct = _AUTO_SELL_CFG.hard_negative_loss_floor_pct
 
     hard_negative_actionable = (
         unrealized_plpc <= hard_negative_loss_floor_pct or profit_giveback_risk
@@ -737,13 +708,13 @@ def evaluate_position_momentum(position: Any, session: dict[str, Any] | None) ->
     # Tiered live profit-protection sell:
     # The more profit is available, the less score deterioration we require
     # before allowing the position momentum monitor to protect gains.
-    profit_tier_1_pct = float(os.getenv("POSITION_MOMENTUM_PROFIT_TIER_1_PCT", "0.75"))
-    profit_tier_1_score = float(os.getenv("POSITION_MOMENTUM_PROFIT_TIER_1_SCORE", "-4"))
+    profit_tier_1_pct = _AUTO_SELL_CFG.profit_tier_1_pct
+    profit_tier_1_score = _AUTO_SELL_CFG.profit_tier_1_score
 
-    profit_tier_2_pct = float(os.getenv("POSITION_MOMENTUM_PROFIT_TIER_2_PCT", "1.50"))
-    profit_tier_2_score = float(os.getenv("POSITION_MOMENTUM_PROFIT_TIER_2_SCORE", "-2"))
+    profit_tier_2_pct = _AUTO_SELL_CFG.profit_tier_2_pct
+    profit_tier_2_score = _AUTO_SELL_CFG.profit_tier_2_score
 
-    profit_tier_3_pct = float(os.getenv("POSITION_MOMENTUM_PROFIT_TIER_3_PCT", "3.00"))
+    profit_tier_3_pct = _AUTO_SELL_CFG.profit_tier_3_pct
 
     profit_protection_tier = None
 
@@ -841,8 +812,8 @@ def maybe_promote_sell_pressure(decision: dict[str, Any], unrealized_plpc: float
     score = _to_float(decision.get("sell_pressure_score"), 0)
     rec = decision.get("sell_pressure_recommendation")
 
-    min_score = float(os.getenv("POSITION_MOMENTUM_SELL_PRESSURE_FULL_SCORE", "12"))
-    max_loss = float(os.getenv("POSITION_MOMENTUM_SELL_PRESSURE_MAX_LOSS_PCT", "-0.75"))
+    min_score = _AUTO_SELL_CFG.sell_pressure_full_score
+    max_loss = _AUTO_SELL_CFG.sell_pressure_max_loss_pct
 
     if rec == "full_sell_candidate" and score >= min_score and unrealized_plpc <= max_loss:
         promoted = dict(decision)
@@ -1060,8 +1031,8 @@ def maybe_execute_auto_sell(position, decision, market_open: bool) -> dict[str, 
     # Do not auto-sell small red positions or tiny green positions.
     # Allow auto-sell only when profit is worth taking or loss is large enough
     # to justify risk control.
-    min_profit_to_auto_sell_pct = float(os.getenv("POSITION_MOMENTUM_MIN_PROFIT_SELL_PCT", "0.50"))
-    max_loss_to_auto_sell_pct = float(os.getenv("POSITION_MOMENTUM_MAX_LOSS_SELL_PCT", "-1.00"))
+    min_profit_to_auto_sell_pct = _AUTO_SELL_CFG.min_profit_sell_pct
+    max_loss_to_auto_sell_pct = _AUTO_SELL_CFG.max_loss_sell_pct
 
     unrealized_plpc = _to_float(getattr(position, "unrealized_plpc", 0)) * 100
 
@@ -1086,8 +1057,8 @@ def maybe_execute_auto_sell(position, decision, market_open: bool) -> dict[str, 
     # Auto-sell is allowed only when:
     #   1) profit is worth protecting and momentum has rolled over, or
     #   2) loss is large enough and breakdown is severe.
-    hard_exit_max_loss_pct = float(os.getenv("POSITION_MOMENTUM_HARD_EXIT_MAX_LOSS_PCT", "-1.00"))
-    hard_exit_score = float(os.getenv("POSITION_MOMENTUM_HARD_EXIT_SCORE", "-6"))
+    hard_exit_max_loss_pct = _AUTO_SELL_CFG.hard_exit_max_loss_pct
+    hard_exit_score = _AUTO_SELL_CFG.hard_exit_score
 
     unrealized_plpc = _to_float(getattr(position, "unrealized_plpc", 0)) * 100
     trend_score = _to_float(decision.get("trend_score", decision.get("score", 0)))
@@ -1096,25 +1067,25 @@ def maybe_execute_auto_sell(position, decision, market_open: bool) -> dict[str, 
 
     profit_protection_exit = severity == "profit_protection"
 
-    emergency_loss_exit = severity == "emergency_loss" and unrealized_plpc <= float(
-        os.getenv("POSITION_MOMENTUM_EMERGENCY_LOSS_PCT", "-1.25")
+    emergency_loss_exit = (
+        severity == "emergency_loss" and unrealized_plpc <= _AUTO_SELL_CFG.emergency_loss_pct
     )
 
     severe_breakdown_exit = (
         severity == "hard_negative"
-        and unrealized_plpc
-        <= float(os.getenv("POSITION_MOMENTUM_SEVERE_BREAKDOWN_LOSS_PCT", "-0.75"))
-        and trend_score <= float(os.getenv("POSITION_MOMENTUM_SEVERE_BREAKDOWN_SCORE", "-5"))
+        and unrealized_plpc <= _AUTO_SELL_CFG.severe_breakdown_loss_pct
+        and trend_score <= _AUTO_SELL_CFG.severe_breakdown_score
         and _to_float(decision.get("momentum_15m_pct", decision.get("m15", 0)))
-        < float(os.getenv("POSITION_MOMENTUM_SEVERE_BREAKDOWN_15M_PCT", "-0.50"))
+        < _AUTO_SELL_CFG.severe_breakdown_15m_pct
         and _to_float(decision.get("momentum_30m_pct", decision.get("m30", 0)))
-        < float(os.getenv("POSITION_MOMENTUM_SEVERE_BREAKDOWN_30M_PCT", "-1.00"))
+        < _AUTO_SELL_CFG.severe_breakdown_30m_pct
         and _to_float(decision.get("distance_from_vwap_pct", decision.get("vwap_dist", 0)))
-        < float(os.getenv("POSITION_MOMENTUM_SEVERE_BREAKDOWN_VWAP_PCT", "-0.75"))
+        < _AUTO_SELL_CFG.severe_breakdown_vwap_pct
     )
 
-    failed_continuation_exit = severity == "failed_continuation" and unrealized_plpc <= float(
-        os.getenv("POSITION_MOMENTUM_FAILED_HIGH_RUN_LOSS_PCT", "-0.60")
+    failed_continuation_exit = (
+        severity == "failed_continuation"
+        and unrealized_plpc <= _AUTO_SELL_CFG.failed_high_run_loss_pct
     )
 
     layered_ml_exit = (

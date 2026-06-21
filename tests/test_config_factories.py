@@ -81,6 +81,7 @@ def _raises(exc_type, fn, *args, **kwargs) -> Exception:
 # ---------------------------------------------------------------------------
 
 from config.auto_buy import AutoBuyConfig, load_auto_buy_config  # noqa: E402
+from config.auto_sell import AutoSellConfig, load_auto_sell_config  # noqa: E402
 from config.ml import MLConfig, load_ml_config  # noqa: E402
 from config.position_manager import (  # noqa: E402
     PositionManagerConfig,
@@ -99,8 +100,12 @@ RISK_ENV_VARS = [
     "ENFORCE_ADAPTIVE_CHURN_REENTRY",
 ]
 AUTO_BUY_ENV_VARS = [
+    "EXECUTION_MODE",
     "AUTO_BUY_LIVE_BUYS",
     "AUTO_BUY_MIN_SCORE",
+    "AUTO_BUY_POSITION_SIZE_PCT",
+    "AUTO_BUY_STOP_LOSS_PCT",
+    "AUTO_BUY_TAKE_PROFIT_PCT",
     "AUTO_BUY_MAX_ACTIVE_POSITIONS",
     "AUTO_BUY_MAX_DAILY_ORDERS",
     "AUTO_BUY_COOLDOWN_MINUTES",
@@ -114,6 +119,60 @@ AUTO_BUY_ENV_VARS = [
     "AUTO_BUY_PAPER_STRONG_EVIDENCE_MIN_SETUP_SCORE",
     "AUTO_BUY_PAPER_STRONG_EVIDENCE_MIN_ML_SCORE",
     "AUTO_BUY_PAPER_STRONG_EVIDENCE_MIN_SESSION_SCORE",
+    "AUTO_BUY_PAPER_EXPLORATION_FALLBACK_ENABLED",
+    "AUTO_BUY_PAPER_EXPLORATION_MIN_SCORE",
+    "AUTO_BUY_PAPER_EXPLORATION_MIN_SETUP_SCORE",
+    "AUTO_BUY_PAPER_EXPLORATION_MIN_SESSION_SCORE",
+    "AUTO_BUY_PAPER_EXPLORATION_MIN_ML_SCORE",
+    "AUTO_BUY_EXTENDED_VWAP_CAUTION_PCT",
+    "AUTO_BUY_UNCLASSIFIED_EXTENDED_BLOCK_PCT",
+    "AUTO_BUY_WATCH_SETUP_STRONG_BUY_ENABLED",
+    "AUTO_BUY_EARLY_BUILD_ENABLED",
+    "AUTO_BUY_EARLY_BUILD_MAX_SESSION_RETURN_PCT",
+    "AUTO_BUY_EARLY_BUILD_MAX_VWAP_DIST_PCT",
+    "AUTO_BUY_EARLY_BUILD_MIN_SETUP_SCORE",
+    "AUTO_BUY_MATURE_CHASE_ENABLED",
+    "AUTO_BUY_MATURE_CHASE_SESSION_RETURN_PCT",
+    "AUTO_BUY_MATURE_CHASE_VWAP_DIST_PCT",
+    "AUTO_BUY_EXTREME_CHASE_BLOCK_SESSION_RETURN_PCT",
+    "AUTO_BUY_EXTREME_CHASE_BLOCK_VWAP_DIST_PCT",
+    "AUTO_BUY_ML_WEAK_BLOCK_ENABLED",
+    "AUTO_BUY_ML_WEAK_BLOCK_SCORE",
+    "AUTO_BUY_ML_WEAK_BLOCK_MIN_SAMPLE_SIZE",
+    "AUTO_BUY_ML_WEAK_BUCKET_BLOCK_ENABLED",
+    "AUTO_BUY_LEARNED_TIEBREAKER_ENABLED",
+    "AUTO_BUY_LEARNED_TIEBREAKER_MIN_SAMPLE_SIZE",
+    "AUTO_BUY_LEARNED_TIEBREAKER_MIN_WIN_RATE",
+    "AUTO_BUY_LEARNED_TIEBREAKER_MIN_AVG_RETURN_PCT",
+    "AUTO_BUY_LEARNED_TIEBREAKER_MIN_AVG_MFE_PCT",
+    "AUTO_BUY_LEARNED_TIEBREAKER_MAX_AVG_MAE_PCT",
+    "AUTO_BUY_LEARNED_TIEBREAKER_LOOKBACK_DAYS",
+    "AUTO_BUY_LEARNED_TIEBREAKER_MAX_HISTORICAL_ROWS",
+    "AUTO_BUY_LEARNED_TIEBREAKER_MAX_THRESHOLD_GAP",
+    "AUTO_BUY_INTRADAY_FEEDBACK_ENABLED",
+    "AUTO_BUY_LAYERED_ML_ENABLED",
+    "AUTO_BUY_LAYERED_ML_PROMOTION_ENABLED",
+    "AUTO_BUY_LAYERED_ML_VETO_HARD_BLOCK_ENABLED",
+    "AUTO_BUY_LAYERED_ML_MIN_PROMOTION_CONFIDENCE",
+    "AUTO_BUY_LAYERED_ML_MIN_VETO_CONFIDENCE",
+    "AUTO_BUY_LAYERED_ML_SCORE_BOOST",
+    "AUTO_BUY_LAYERED_ML_PASS_SCORE_BOOST",
+    "AUTO_BUY_LAYERED_ML_WATCH_SCORE_PENALTY",
+    "AUTO_BUY_LAYERED_ML_VETO_SCORE_PENALTY",
+    "AUTO_BUY_LAYERED_ML_MAX_THRESHOLD_GAP",
+    "AUTO_BUY_MAX_SYMBOLS_PER_RUN",
+    "AUTO_BUY_TIMING_LOG_ENABLED",
+    "AUTO_BUY_SCORE_DETAIL_LOG_ENABLED",
+]
+AUTO_SELL_ENV_VARS = [
+    "EXECUTION_MODE",
+    "POSITION_MOMENTUM_AUTO_SELL",
+    "POSITION_MOMENTUM_LAYERED_ML_ENABLED",
+    "POSITION_MOMENTUM_LAYERED_ML_MIN_EXIT_CONFIDENCE",
+    "POSITION_MOMENTUM_EMERGENCY_LOSS_PCT",
+    "POSITION_MOMENTUM_FAILED_HIGH_RUN_LOSS_PCT",
+    "POSITION_MOMENTUM_MIN_PROFIT_SELL_PCT",
+    "POSITION_MOMENTUM_SEVERE_BREAKDOWN_SCORE",
 ]
 
 
@@ -261,8 +320,9 @@ def test_risk_circuit_breaker_env_var_is_read_when_no_override():
 
 
 def test_auto_buy_override_bypasses_env():
-    with _PatchEnv(AUTO_BUY_MIN_SCORE="13.0"):
-        cfg = load_auto_buy_config(min_score=20.0)
+    with _CleanEnv(*AUTO_BUY_ENV_VARS):
+        with _PatchEnv(AUTO_BUY_MIN_SCORE="13.0"):
+            cfg = load_auto_buy_config(min_score=20.0)
     assert cfg.min_score == 20.0
 
 
@@ -281,11 +341,17 @@ def test_auto_buy_negative_position_size_rejected():
     assert "> 0" in str(exc)
 
 
+def test_auto_buy_zero_take_profit_matches_legacy_env_parse():
+    with _CleanEnv(*AUTO_BUY_ENV_VARS):
+        cfg = load_auto_buy_config(take_profit_pct=0.0)
+    assert cfg.take_profit_pct == 0.0
+
+
 def test_auto_buy_partial_override_preserves_defaults():
     with _CleanEnv(*AUTO_BUY_ENV_VARS):
         cfg = load_auto_buy_config(max_daily_orders=5)
     assert cfg.max_daily_orders == 5
-    assert cfg.max_active_positions == AutoBuyConfig.max_active_positions
+    assert cfg.max_active_positions == 8
     assert cfg.signal_mode == AutoBuyConfig.signal_mode
     assert cfg.min_score == AutoBuyConfig.min_score
     assert cfg.cooldown_minutes == AutoBuyConfig.cooldown_minutes
@@ -300,8 +366,9 @@ def test_auto_buy_no_env_dependency():
         cfg = load_auto_buy_config()
     assert cfg.live_buys is False
     assert cfg.min_score == 13.0
-    assert cfg.max_active_positions == 3
-    assert cfg.max_daily_orders == 12
+    assert cfg.max_orders_per_run == 3
+    assert cfg.max_active_positions == 8
+    assert cfg.max_daily_orders == 30
     assert cfg.bucking_tape_min_volume_ratio == 1.8
     assert cfg.signal_mode == "legacy_source_gate"
     assert cfg.tradingview_alerts_deprecated is False
@@ -310,17 +377,44 @@ def test_auto_buy_no_env_dependency():
     assert cfg.paper_strong_evidence_min_setup_score == 50.0
     assert cfg.paper_strong_evidence_min_ml_score == 50.0
     assert cfg.paper_strong_evidence_min_session_score == 5.0
+    assert cfg.paper_exploration_fallback_enabled is True
+    assert cfg.watch_setup_strong_buy_enabled is True
+    assert cfg.learned_tiebreaker_min_sample_size == 10
+    assert cfg.learned_tiebreaker_max_threshold_gap == 6.0
+    assert cfg.layered_ml_enabled is True
+    assert cfg.layered_ml_promotion_enabled is True
+    assert cfg.max_symbols_per_run == 20
+    assert cfg.timing_log_enabled is True
+    assert cfg.score_detail_log_enabled is True
+
+
+def test_auto_buy_live_runtime_defaults_match_legacy_manager():
+    with _CleanEnv(*AUTO_BUY_ENV_VARS):
+        with _PatchEnv(EXECUTION_MODE="live"):
+            cfg = load_auto_buy_config()
+    assert cfg.max_orders_per_run == 1
+    assert cfg.max_active_positions == 3
+    assert cfg.max_daily_orders == 12
+    assert cfg.paper_strong_evidence_promotion_enabled is False
+    assert cfg.paper_exploration_fallback_enabled is False
+    assert cfg.watch_setup_strong_buy_enabled is False
+    assert cfg.learned_tiebreaker_min_sample_size == 25
+    assert cfg.learned_tiebreaker_max_threshold_gap == 4.0
+    assert cfg.layered_ml_enabled is False
+    assert cfg.layered_ml_promotion_enabled is False
+    assert cfg.layered_ml_veto_hard_block_enabled is False
 
 
 def test_auto_buy_paper_strong_evidence_env_vars_are_read():
-    with _PatchEnv(
-        AUTO_BUY_PAPER_STRONG_EVIDENCE_PROMOTION_ENABLED="false",
-        AUTO_BUY_PAPER_STRONG_EVIDENCE_SCORE_BUFFER="4.5",
-        AUTO_BUY_PAPER_STRONG_EVIDENCE_MIN_SETUP_SCORE="60",
-        AUTO_BUY_PAPER_STRONG_EVIDENCE_MIN_ML_SCORE="52",
-        AUTO_BUY_PAPER_STRONG_EVIDENCE_MIN_SESSION_SCORE="6",
-    ):
-        cfg = load_auto_buy_config()
+    with _CleanEnv(*AUTO_BUY_ENV_VARS):
+        with _PatchEnv(
+            AUTO_BUY_PAPER_STRONG_EVIDENCE_PROMOTION_ENABLED="false",
+            AUTO_BUY_PAPER_STRONG_EVIDENCE_SCORE_BUFFER="4.5",
+            AUTO_BUY_PAPER_STRONG_EVIDENCE_MIN_SETUP_SCORE="60",
+            AUTO_BUY_PAPER_STRONG_EVIDENCE_MIN_ML_SCORE="52",
+            AUTO_BUY_PAPER_STRONG_EVIDENCE_MIN_SESSION_SCORE="6",
+        ):
+            cfg = load_auto_buy_config()
     assert cfg.paper_strong_evidence_promotion_enabled is False
     assert cfg.paper_strong_evidence_score_buffer == 4.5
     assert cfg.paper_strong_evidence_min_setup_score == 60.0
@@ -328,17 +422,101 @@ def test_auto_buy_paper_strong_evidence_env_vars_are_read():
     assert cfg.paper_strong_evidence_min_session_score == 6.0
 
 
+def test_auto_buy_remaining_threshold_env_vars_are_read():
+    with _CleanEnv(*AUTO_BUY_ENV_VARS):
+        with _PatchEnv(
+            AUTO_BUY_PAPER_EXPLORATION_FALLBACK_ENABLED="false",
+            AUTO_BUY_PAPER_EXPLORATION_MIN_SCORE="11.5",
+            AUTO_BUY_ML_WEAK_BLOCK_ENABLED="false",
+            AUTO_BUY_ML_WEAK_BLOCK_SCORE="42",
+            AUTO_BUY_LEARNED_TIEBREAKER_MIN_SAMPLE_SIZE="15",
+            AUTO_BUY_LEARNED_TIEBREAKER_MAX_THRESHOLD_GAP="3.5",
+            AUTO_BUY_LAYERED_ML_ENABLED="false",
+            AUTO_BUY_LAYERED_ML_SCORE_BOOST="2.25",
+            AUTO_BUY_MAX_SYMBOLS_PER_RUN="9",
+            AUTO_BUY_TIMING_LOG_ENABLED="false",
+            AUTO_BUY_SCORE_DETAIL_LOG_ENABLED="false",
+            AUTO_BUY_EARLY_BUILD_MAX_SESSION_RETURN_PCT="0.8",
+            AUTO_BUY_MATURE_CHASE_VWAP_DIST_PCT="1.2",
+            AUTO_BUY_EXTREME_CHASE_BLOCK_VWAP_DIST_PCT="1.4",
+        ):
+            cfg = load_auto_buy_config()
+    assert cfg.paper_exploration_fallback_enabled is False
+    assert cfg.paper_exploration_min_score == 11.5
+    assert cfg.ml_weak_block_enabled is False
+    assert cfg.ml_weak_block_score == 42.0
+    assert cfg.learned_tiebreaker_min_sample_size == 15
+    assert cfg.learned_tiebreaker_max_threshold_gap == 3.5
+    assert cfg.layered_ml_enabled is False
+    assert cfg.layered_ml_score_boost == 2.25
+    assert cfg.max_symbols_per_run == 9
+    assert cfg.timing_log_enabled is False
+    assert cfg.score_detail_log_enabled is False
+    assert cfg.early_build_max_session_return_pct == 0.8
+    assert cfg.mature_chase_vwap_dist_pct == 1.2
+    assert cfg.extreme_chase_block_vwap_dist_pct == 1.4
+
+
 def test_auto_buy_signal_mode_env_var_is_read():
-    with _PatchEnv(AUTO_BUY_SIGNAL_MODE="internal_all", TRADINGVIEW_ALERTS_DEPRECATED="true"):
-        cfg = load_auto_buy_config()
+    with _CleanEnv(*AUTO_BUY_ENV_VARS):
+        with _PatchEnv(AUTO_BUY_SIGNAL_MODE="internal_all", TRADINGVIEW_ALERTS_DEPRECATED="true"):
+            cfg = load_auto_buy_config()
     assert cfg.signal_mode == "internal_all"
     assert cfg.tradingview_alerts_deprecated is True
 
 
 def test_auto_buy_invalid_signal_mode_is_rejected():
-    exc = _raises(ValueError, load_auto_buy_config, signal_mode="surprise")
+    with _CleanEnv(*AUTO_BUY_ENV_VARS):
+        exc = _raises(ValueError, load_auto_buy_config, signal_mode="surprise")
     assert "AUTO_BUY_SIGNAL_MODE" in str(exc)
     assert "legacy_source_gate" in str(exc)
+
+
+# ===========================================================================
+# AutoSellConfig
+# ===========================================================================
+
+
+def test_auto_sell_override_bypasses_env():
+    with _PatchEnv(POSITION_MOMENTUM_AUTO_SELL="false"):
+        cfg = load_auto_sell_config(auto_sell=True)
+    assert cfg.auto_sell is True
+
+
+def test_auto_sell_partial_override_preserves_defaults():
+    with _CleanEnv(*AUTO_SELL_ENV_VARS):
+        cfg = load_auto_sell_config(emergency_loss_pct=-2.0)
+    assert cfg.emergency_loss_pct == -2.0
+    assert cfg.layered_ml_min_exit_confidence == (AutoSellConfig.layered_ml_min_exit_confidence)
+    assert cfg.failed_high_run_loss_pct == AutoSellConfig.failed_high_run_loss_pct
+
+
+def test_auto_sell_no_env_dependency_paper_defaults():
+    with _CleanEnv(*AUTO_SELL_ENV_VARS):
+        cfg = load_auto_sell_config()
+    assert cfg.auto_sell is False
+    assert cfg.layered_ml_enabled is True
+    assert cfg.emergency_loss_pct == -1.25
+    assert cfg.min_profit_sell_pct == 0.50
+
+
+def test_auto_sell_live_runtime_default_disables_layered_ml():
+    with _CleanEnv(*AUTO_SELL_ENV_VARS):
+        with _PatchEnv(EXECUTION_MODE="live"):
+            cfg = load_auto_sell_config()
+    assert cfg.layered_ml_enabled is False
+
+
+def test_auto_sell_env_vars_are_read_when_no_override():
+    with _PatchEnv(
+        POSITION_MOMENTUM_AUTO_SELL="true",
+        POSITION_MOMENTUM_EMERGENCY_LOSS_PCT="-2.5",
+        POSITION_MOMENTUM_SEVERE_BREAKDOWN_SCORE="-8",
+    ):
+        cfg = load_auto_sell_config()
+    assert cfg.auto_sell is True
+    assert cfg.emergency_loss_pct == -2.5
+    assert cfg.severe_breakdown_score == -8.0
 
 
 # ===========================================================================
@@ -413,6 +591,81 @@ def test_pm_no_env_dependency():
     assert cfg.partial_sell_pct == 0.50
 
 
+def test_pm_extended_threshold_defaults():
+    cfg = load_position_manager_config()
+    assert cfg.bad_entry_containment_enabled is True
+    assert cfg.bad_entry_containment_loss_pct == -0.65
+    assert cfg.peak_lock_tier1_peak_pct == 0.30
+    assert cfg.weak_peak_lock_tier2_floor_pct == 0.35
+    assert cfg.strong_conviction_profit_giveback_trigger_pct == 70.0
+    assert cfg.proactive_profit_capture_enabled is True
+    assert cfg.proactive_strong_min_peak_pct == 0.45
+    assert cfg.exit_pattern_profit_capture_enabled is True
+    assert cfg.exit_pattern_min_adverse_signals == 2
+    assert cfg.auto_buy_min_hold_minutes == 6.0
+    assert cfg.auto_buy_min_hold_hard_loss_pct == -0.75
+
+
+def test_pm_extended_threshold_env_vars_are_read():
+    env_vars = [
+        "POSITION_MANAGER_BAD_ENTRY_CONTAINMENT_ENABLED",
+        "POSITION_MANAGER_BAD_ENTRY_CONTAINMENT_LOSS_PCT",
+        "POSITION_MANAGER_PEAK_LOCK_TIER2_FLOOR_PCT",
+        "POSITION_MANAGER_WEAK_PEAK_LOCK_TIER2_FLOOR_PCT",
+        "POSITION_MANAGER_STRONG_CONVICTION_GIVEBACK_TRIGGER_PCT",
+        "POSITION_MANAGER_PROACTIVE_STRONG_MIN_PEAK_PCT",
+        "POSITION_MANAGER_EXIT_PATTERN_MIN_ADVERSE_SIGNALS",
+        "POSITION_MANAGER_AUTO_BUY_MIN_HOLD_MINUTES",
+        "POSITION_MANAGER_AUTO_BUY_MIN_HOLD_HARD_LOSS_PCT",
+    ]
+    with _CleanEnv(*env_vars):
+        with _PatchEnv(
+            POSITION_MANAGER_BAD_ENTRY_CONTAINMENT_ENABLED="false",
+            POSITION_MANAGER_BAD_ENTRY_CONTAINMENT_LOSS_PCT="-0.8",
+            POSITION_MANAGER_PEAK_LOCK_TIER2_FLOOR_PCT="0.33",
+            POSITION_MANAGER_WEAK_PEAK_LOCK_TIER2_FLOOR_PCT="0.44",
+            POSITION_MANAGER_STRONG_CONVICTION_GIVEBACK_TRIGGER_PCT="75",
+            POSITION_MANAGER_PROACTIVE_STRONG_MIN_PEAK_PCT="0.55",
+            POSITION_MANAGER_EXIT_PATTERN_MIN_ADVERSE_SIGNALS="3",
+            POSITION_MANAGER_AUTO_BUY_MIN_HOLD_MINUTES="7",
+            POSITION_MANAGER_AUTO_BUY_MIN_HOLD_HARD_LOSS_PCT="-0.9",
+        ):
+            cfg = load_position_manager_config()
+    assert cfg.bad_entry_containment_enabled is False
+    assert cfg.bad_entry_containment_loss_pct == -0.8
+    assert cfg.peak_lock_tier2_floor_pct == 0.33
+    assert cfg.weak_peak_lock_tier2_floor_pct == 0.44
+    assert cfg.strong_conviction_profit_giveback_trigger_pct == 75.0
+    assert cfg.proactive_strong_min_peak_pct == 0.55
+    assert cfg.exit_pattern_min_adverse_signals == 3
+    assert cfg.auto_buy_min_hold_minutes == 7.0
+    assert cfg.auto_buy_min_hold_hard_loss_pct == -0.9
+
+
+def test_pm_operator_flag_env_names_keep_position_manager_prefix():
+    """Guard against silently renaming operator-facing env knobs.
+
+    These two flags were historically read with the ``POSITION_MANAGER_``
+    prefix. Dropping the prefix would silently ignore operator overrides in
+    /etc/trading-bot.env (both default True), re-enabling position-exit
+    behavior an operator had disabled. Pin the original env var names.
+    """
+    clean = [
+        "POSITION_MANAGER_PROMOTE_UNEXECUTABLE_PARTIALS",
+        "POSITION_MANAGER_CONTINUATION_EXIT_CHECK_ENABLED",
+        "PROMOTE_UNEXECUTABLE_PARTIALS",
+        "CONTINUATION_EXIT_CHECK_ENABLED",
+    ]
+    with _CleanEnv(*clean):
+        with _PatchEnv(
+            POSITION_MANAGER_PROMOTE_UNEXECUTABLE_PARTIALS="false",
+            POSITION_MANAGER_CONTINUATION_EXIT_CHECK_ENABLED="false",
+        ):
+            cfg = load_position_manager_config()
+    assert cfg.promote_unexecutable_partials is False
+    assert cfg.continuation_exit_check_enabled is False
+
+
 # ===========================================================================
 # MLConfig
 # ===========================================================================
@@ -470,7 +723,15 @@ def test_ml_env_var_is_read_when_no_override():
 def test_config_package_exports_no_singletons():
     import config
 
-    for name in ("signal_cfg", "risk_cfg", "auto_buy_cfg", "position_manager_cfg", "ml_cfg"):
+    for name in (
+        "signal_cfg",
+        "risk_cfg",
+        "auto_buy_cfg",
+        "auto_sell_cfg",
+        "position_manager_cfg",
+        "positions_cfg",
+        "ml_cfg",
+    ):
         assert not hasattr(config, name), (
             f"config.{name} should not exist — singletons belong at the callsite"
         )
@@ -479,8 +740,10 @@ def test_config_package_exports_no_singletons():
 def test_config_package_exports_all_factories():
     from config import (  # noqa: F401
         load_auto_buy_config,
+        load_auto_sell_config,
         load_ml_config,
         load_position_manager_config,
+        load_positions_config,
         load_risk_config,
         load_signal_config,
     )
@@ -489,8 +752,10 @@ def test_config_package_exports_all_factories():
 def test_config_package_exports_all_types():
     from config import (  # noqa: F401
         AutoBuyConfig,
+        AutoSellConfig,
         MLConfig,
         PositionManagerConfig,
+        PositionsConfig,
         RiskConfig,
         SignalConfig,
     )
@@ -523,11 +788,20 @@ def main():
         test_auto_buy_override_bypasses_env,
         test_auto_buy_override_goes_through_validation,
         test_auto_buy_negative_position_size_rejected,
+        test_auto_buy_zero_take_profit_matches_legacy_env_parse,
         test_auto_buy_partial_override_preserves_defaults,
         test_auto_buy_no_env_dependency,
+        test_auto_buy_live_runtime_defaults_match_legacy_manager,
         test_auto_buy_paper_strong_evidence_env_vars_are_read,
+        test_auto_buy_remaining_threshold_env_vars_are_read,
         test_auto_buy_signal_mode_env_var_is_read,
         test_auto_buy_invalid_signal_mode_is_rejected,
+        # AutoSellConfig
+        test_auto_sell_override_bypasses_env,
+        test_auto_sell_partial_override_preserves_defaults,
+        test_auto_sell_no_env_dependency_paper_defaults,
+        test_auto_sell_live_runtime_default_disables_layered_ml,
+        test_auto_sell_env_vars_are_read_when_no_override,
         # PositionManagerConfig
         test_pm_override_bypasses_env,
         test_pm_positive_loss_pct_rejected,
@@ -536,6 +810,8 @@ def main():
         test_pm_lock_floor_must_be_below_peak,
         test_pm_partial_override_preserves_defaults,
         test_pm_no_env_dependency,
+        test_pm_extended_threshold_defaults,
+        test_pm_extended_threshold_env_vars_are_read,
         # MLConfig
         test_ml_override_bypasses_env,
         test_ml_bad_strategy_mode_rejected,

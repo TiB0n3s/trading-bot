@@ -74,7 +74,15 @@ def _logger():
     )
 
 
-def test_fill_stream_handler_noops_outside_market_hours():
+def test_fill_stream_handler_records_fills_outside_market_hours():
+    """Forensic recording and ledger repair MUST run regardless of market hours.
+
+    A bracket take-profit/stop-loss or market-on-close fill can be delivered at
+    or after 16:00 ET. Dropping it would lose cost basis / create phantom
+    positions, so the fill event is recorded and the trade row updated even
+    outside 9:30-16:00. Only the optional intraday-learning capture is skipped
+    after hours (it adds no signal).
+    """
     repo = FakeFillRepository()
     feedback = FakeFeedbackService()
     handler = FillEventHandler(
@@ -86,9 +94,10 @@ def test_fill_stream_handler_noops_outside_market_hours():
 
     asyncio.run(handler.trade_update_handler(_event()))
 
-    assert repo.events == []
-    assert repo.updates == []
-    assert repo.synthetic == []
+    # Forensic + repair paths run unconditionally.
+    assert len(repo.events) == 1
+    assert repo.updates == [("order-1", "filled", 101.25, "1")]
+    # Learning is the only thing gated to regular hours.
     assert feedback.snapshots == []
 
 
@@ -112,7 +121,7 @@ def test_fill_stream_handler_records_fill_during_market_hours():
 
 if __name__ == "__main__":
     tests = [
-        test_fill_stream_handler_noops_outside_market_hours,
+        test_fill_stream_handler_records_fills_outside_market_hours,
         test_fill_stream_handler_records_fill_during_market_hours,
     ]
     for test in tests:

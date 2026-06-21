@@ -995,6 +995,10 @@ Use these docs and checks to decide what to improve next:
 
 - `ops/module_inventory.md`: active vs scheduled vs research-only module map.
 - `ops/ml_platform_roadmap.md`: staged ML/research-platform direction.
+- `ops/account_state_decomposition_plan.md`: sequenced, test-gated plan to retire
+  the mutable `account_state` god-dict (GateContext + DecisionTrace +
+  SignalIntelligence + write-ownership map) and unblock the live-processor
+  `Gate[]` extraction.
 
 Ahead-of-live integration work should use the staged test lane. These tests
 exercise observe-only contracts without changing live webhook, broker, order, or

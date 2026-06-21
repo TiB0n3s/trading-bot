@@ -74,6 +74,20 @@ class PreflightService:
             )
 
         daily_pnl_pct = account_state.get("daily_pnl_pct", 0.0)
+        data_health = str(account_state.get("data_health") or "").strip().lower()
+        if action == "buy" and (data_health == "degraded" or daily_pnl_pct is None):
+            # Fail CLOSED: cannot evaluate the daily-loss circuit breaker when
+            # broker account/position data is unavailable. Also guards the
+            # comparison below against a None daily_pnl_pct.
+            return PreflightResult(
+                allowed=False,
+                rejection_category="circuit_breaker",
+                rejection_reason=(
+                    "account data degraded/unavailable; failing closed on buy "
+                    "(daily-loss limit cannot be evaluated)"
+                ),
+                metadata=metadata,
+            )
         if action == "buy" and daily_pnl_pct < self.deps.daily_loss_limit_pct:
             return PreflightResult(
                 allowed=False,

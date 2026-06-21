@@ -208,8 +208,14 @@ class FillEventHandler:
             event = data.event
             order = data.order
 
-            if not self.market_hours_fn():
-                return
+            # The fill handler is forensic: it records fill events and repairs the
+            # trade ledger (incl. synthetic exit/buy rows). It MUST run regardless
+            # of market hours, because bracket TP/SL and market-on-close fills can
+            # be delivered at or after 16:00 ET (or during clock-skew windows).
+            # Dropping them here permanently loses cost basis / creates phantom
+            # positions. Only the optional intraday-learning capture is gated to
+            # regular hours, since after-hours snapshots add no signal.
+            within_market_hours = self.market_hours_fn()
 
             self.record_fill_event(event, order)
 
@@ -234,7 +240,8 @@ class FillEventHandler:
                     f"FILL: {symbol} {side.upper()} {filled_qty} shares @ ${fill_price} "
                     f"| status={status} order={order_id}"
                 )
-                self.capture_post_fill_learning(symbol=symbol, side=side)
+                if within_market_hours:
+                    self.capture_post_fill_learning(symbol=symbol, side=side)
             else:
                 parent_order_id = _order_value(order, "parent_order_id")
                 filled_at = _order_value(order, "filled_at")
@@ -255,7 +262,7 @@ class FillEventHandler:
                             f"Fill received for order {order_id} ({symbol}) but no matching row in trades.db "
                             f"and synthetic insert failed - fill_price={fill_price} status={status}"
                         )
-                    else:
+                    elif within_market_hours:
                         self.capture_post_fill_learning(symbol=symbol, side=side)
                 else:
                     inserted = self.insert_synthetic_buy_fill(

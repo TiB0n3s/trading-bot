@@ -32,6 +32,8 @@ from services.signal_models import (
 )
 
 from services import signal_stage_guards
+from trading_bot.signals.context.account_state_view import AccountStateView
+from trading_bot.signals.live.gate_context import DecisionTrace, GateContext
 
 
 def build_runtime_state(
@@ -198,6 +200,15 @@ class LiveSignalProcessor:
             account_state=account_state,
             dedupe_key=dedupe_key,
         )
+        ctx = GateContext(
+            intelligence=AccountStateView.from_account_state(account_state),
+            trace=DecisionTrace(),
+            symbol=symbol,
+            action=action,
+            price=price,
+            dedupe_key=dedupe_key,
+            rejection_adapter=rejection_adapter,
+        )
 
         stale_result = self.check_stale_signal(
             data=data,
@@ -216,6 +227,7 @@ class LiveSignalProcessor:
             price=price,
             account_state=account_state,
             dedupe_key=dedupe_key,
+            trace=ctx.trace,
         )
         if circuit_result.rejected:
             return self._result(context, status="rejected")
@@ -227,6 +239,7 @@ class LiveSignalProcessor:
             account_state=account_state,
             dedupe_key=dedupe_key,
             setup_obs=setup_obs,
+            trace=ctx.trace,
         )
         if setup_stage_result.rejected:
             return self._result(context, status="rejected")
@@ -261,6 +274,8 @@ class LiveSignalProcessor:
             if preflight_result is not None
             else None
         )
+        ctx.current_et = current_et
+        ctx.existing_position = existing_position
 
         sell_discipline_result = self.check_sell_discipline(
             symbol=symbol,
@@ -279,6 +294,7 @@ class LiveSignalProcessor:
             account_state=account_state,
             context_runtime=context_runtime,
         )
+        ctx.macro_risk = macro_risk
 
         macro_gate_result = self.run_macro_position_gate(
             symbol=symbol,
@@ -306,6 +322,7 @@ class LiveSignalProcessor:
             return self._result(context, status="rejected")
 
         bias_entry = self.deps.market_bias.get(symbol) or {}
+        ctx.bias_entry = bias_entry
         entry_sanity_result = self.run_entry_sanity_gates(
             symbol=symbol,
             action=action,
@@ -402,6 +419,7 @@ class LiveSignalProcessor:
         if claude_result.rejected:
             return self._result(context, status="rejected")
         decision = dict(claude_result.decision or {})
+        ctx.decision = decision
         order_path_result = self.run_approved_order_path(
             data=data,
             symbol=symbol,
@@ -575,7 +593,9 @@ class LiveSignalProcessor:
 
         return StageResult()
 
-    def check_regime_circuit_breaker(self, *, symbol, action, price, account_state, dedupe_key):
+    def check_regime_circuit_breaker(
+        self, *, symbol, action, price, account_state, dedupe_key, trace: DecisionTrace | None = None
+    ):
         try:
             decision = check_circuit_breaker(
                 signal_action=action,
@@ -591,6 +611,8 @@ class LiveSignalProcessor:
         payload = decision.to_dict()
         if decision.action in {"warn", "block"} or decision.mode in {"observe", "warn", "block"}:
             account_state["regime_circuit_breaker"] = payload
+            if trace is not None:
+                trace.record("regime_circuit_breaker", payload)
 
         if decision.action == "warn":
             self.deps.log.warning(
@@ -637,7 +659,17 @@ class LiveSignalProcessor:
 
         return StageResult()
 
-    def apply_setup_stage(self, *, symbol, action, price, account_state, dedupe_key, setup_obs):
+    def apply_setup_stage(
+        self,
+        *,
+        symbol,
+        action,
+        price,
+        account_state,
+        dedupe_key,
+        setup_obs,
+        trace: DecisionTrace | None = None,
+    ):
         if (
             action == "buy"
             and self.deps.enforce_setup_policy_blocks
@@ -664,7 +696,7 @@ class LiveSignalProcessor:
             )
 
             if stretched_but_confirmed:
-                account_state["setup_policy_override"] = {
+                _override = {
                     "from": "block",
                     "to": "allow_reduced_size",
                     "reason": (
@@ -674,6 +706,9 @@ class LiveSignalProcessor:
                         f"30m={session_m30:.3f}% vwap={session_vwap:.3f}%"
                     ),
                 }
+                account_state["setup_policy_override"] = _override
+                if trace is not None:
+                    trace.record("setup_policy_override", _override)
                 self.deps.apply_size_cap(
                     account_state,
                     cap_pct=0.75,
@@ -682,8 +717,7 @@ class LiveSignalProcessor:
                 )
 
                 self.deps.log.warning(
-                    f"Setup policy override for {symbol}: "
-                    f"{account_state['setup_policy_override']['reason']}"
+                    f"Setup policy override for {symbol}: {_override['reason']}"
                 )
             else:
                 return self._reject_approval_decision(

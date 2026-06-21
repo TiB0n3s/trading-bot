@@ -72,7 +72,30 @@ def evaluate_live_circuit_breaker(
             inputs={"action": action_l},
         )
 
+    # Fail CLOSED: if the account/position data is degraded (broker fetch
+    # failed) we cannot evaluate the daily-loss limit, so block new buys rather
+    # than letting a synthetic/zero P&L silently clear the breaker. This is the
+    # scenario the breaker most needs to fire in.
+    data_health = str(_nested(account_state, "data_health") or "").strip().lower()
     daily_pnl_pct = _float(_nested(account_state, "daily_pnl_pct"))
+    if data_health == "degraded" or (data_health and daily_pnl_pct is None):
+        return GateResult(
+            gate_id="live_circuit_breaker",
+            layer="risk",
+            decision="block",
+            authority="live",
+            enforced=True,
+            reason=(
+                "account data degraded/unavailable; failing closed on buy "
+                "(daily-loss limit cannot be evaluated)"
+            ),
+            inputs={
+                "action": action_l,
+                "data_health": data_health or "unknown",
+                "daily_pnl_pct": daily_pnl_pct,
+            },
+        )
+
     if daily_pnl_pct is not None and daily_pnl_pct <= daily_loss_limit_pct:
         return GateResult(
             gate_id="live_circuit_breaker",

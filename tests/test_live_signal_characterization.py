@@ -146,6 +146,112 @@ def test_successful_approved_buy_submits_order_and_logs_trade():
     assert_equal(logged_state["dominant_limiter"], "uncapped", "account-state limiter")
 
 
+# Golden pin of the decision-context surface emitted onto account_state for an
+# approved BUY at the audit boundary. This is the contract the account_state
+# decomposition (ops/account_state_decomposition_plan.md) must preserve: when
+# Phase 4 routes OUTPUT keys through DecisionTrace, the audited snapshot must
+# still expose the same keys (mirror-then-drop). A diff here is intentional-change
+# detection, not a bug by itself — update consciously when the plan moves a key.
+_APPROVED_BUY_AUDIT_KEYS = {
+    "action",
+    "adaptive_buy_confirmation",
+    "advisory_feature_size_gate",
+    "balance",
+    "buy_opportunity",
+    "buy_opportunity_sizing",
+    "buying_power",
+    "canonical_decision_trace",
+    "conviction_stack",
+    "daily_pnl_pct",
+    "decision_policy",
+    "decision_policy_authority",
+    "decision_policy_outcome",
+    "decision_trace",
+    "dominant_limiter",
+    "downside_asymmetry",
+    "execution_mode",
+    "execution_quality",
+    "exit_decision_quality",
+    "fast_lane_buy_flip",
+    "final_sizing",
+    "intelligence_adjudication",
+    "intelligence_context",
+    "intra_session_tape_degradation",
+    "late_chase_entry_gate",
+    "live_order_gates",
+    "macro_risk",
+    "market_alignment",
+    "market_bias_effective",
+    "market_bias_override_reason",
+    "market_microstructure",
+    "market_participation",
+    "market_regime",
+    "ml_authority",
+    "ml_authority_mode",
+    "ml_authority_reason",
+    "ml_authority_triggered",
+    "ml_outcome",
+    "ml_prediction",
+    "one_bar_confirmation_hold",
+    "open_momentum_fast_lane",
+    "open_position_count",
+    "opportunity_score",
+    "opportunity_score_0_100",
+    "portfolio_decision",
+    "portfolio_value",
+    "prediction_gate",
+    "regime_observation",
+    "regime_observation_context",
+    "regime_routing_decision",
+    "session_gate_outcome",
+    "session_momentum",
+    "session_momentum_gate",
+    "setup_observation",
+    "signal_age_seconds",
+    "slippage_kelly_sizing",
+    "strategy_memory",
+    "strategy_observation",
+    "symbol",
+    "tape",
+    "trend_table",
+    "volatility_normalization",
+    "weak_prediction_setup_gate",
+    "weekly_symbol_performance",
+}
+
+
+def test_approved_buy_emits_expected_decision_output_keys():
+    order = {"order_id": "order-1", "status": "submitted", "qty": 1, "fill_price": None}
+    log_trade = MagicMock()
+    with _Env(
+        **_approved_downstream(
+            **{
+                "app.evaluate_signal": MagicMock(
+                    return_value={
+                        "approved": True,
+                        "reason": "approved",
+                        "confidence": "high",
+                        "position_size_pct": 1.0,
+                        "stop_loss_pct": 0.5,
+                        "take_profit_pct": 1.5,
+                    }
+                ),
+                "app.broker_service.place_order": MagicMock(return_value=order),
+                "services.trade_audit_service.TradeAuditService.record_execution": log_trade,
+                "app._write_cooldown": MagicMock(),
+            }
+        )
+    ):
+        _process_live(_buy(_dedupe_key="emit-keys"))
+
+    assert_true(log_trade.called, "trade logged")
+    emitted = set(log_trade.call_args.kwargs["account_state"].keys())
+    missing = _APPROVED_BUY_AUDIT_KEYS - emitted
+    added = emitted - _APPROVED_BUY_AUDIT_KEYS
+    assert_equal(missing, set(), "decision-output keys dropped from audited account_state")
+    assert_equal(added, set(), "unexpected new keys on audited account_state")
+
+
 def test_stale_signal_rejection_stops_before_approval():
     evaluate_signal = MagicMock()
     with _Env(

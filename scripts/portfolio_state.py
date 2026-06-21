@@ -23,12 +23,20 @@ def _session_time_context():
 
 
 def get_account_snapshot(broker_client, get_account_func):
-    """Return canonical account snapshot from Alpaca."""
+    """Return canonical account snapshot from Alpaca.
+
+    ``data_ok`` is False whenever the account could not be fetched (exception
+    or empty response). Callers MUST treat a degraded snapshot as a fail-closed
+    condition for new buys: the synthetic ``balance`` default below must never
+    be used to compute a daily-loss percentage that silently clears the
+    circuit breaker.
+    """
     snapshot = {
         "balance": 10000.00,
         "portfolio_value": None,
         "buying_power": None,
         "account_status": None,
+        "data_ok": False,
     }
 
     try:
@@ -38,6 +46,7 @@ def get_account_snapshot(broker_client, get_account_func):
             snapshot["portfolio_value"] = account.get("portfolio_value")
             snapshot["buying_power"] = account.get("buying_power")
             snapshot["account_status"] = account.get("status")
+            snapshot["data_ok"] = True
     except Exception as e:
         logger.error(f"portfolio_state: failed to fetch account: {e}")
 
@@ -45,12 +54,19 @@ def get_account_snapshot(broker_client, get_account_func):
 
 
 def get_open_positions(broker_client):
-    """Return canonical open-position list and unrealized P&L."""
+    """Return canonical open-position list, unrealized P&L, and a fetch-ok flag.
+
+    ``positions_ok`` is False when the position list could not be retrieved, so
+    that an empty list caused by a broker failure is not mistaken for a flat
+    account (which would understate intraday drawdown).
+    """
     positions_out = []
     unrealized_pnl = 0.0
+    positions_ok = False
 
     try:
         positions = broker_client.list_positions()
+        positions_ok = True
         for p in positions:
             try:
                 qty = float(p.qty)
@@ -77,7 +93,7 @@ def get_open_positions(broker_client):
     except Exception as e:
         logger.error(f"portfolio_state: failed to fetch positions: {e}")
 
-    return positions_out, unrealized_pnl
+    return positions_out, unrealized_pnl, positions_ok
 
 
 def get_realized_pnl_today(db_path=None, target_date=None):
@@ -130,24 +146,33 @@ def build_account_state(broker_client=None, get_account_func=None, db_path=None,
     if broker_client is None:
         broker_client = kwargs.get("api")
     account = get_account_snapshot(broker_client, get_account_func)
-    positions, unrealized_pnl = get_open_positions(broker_client)
+    positions, unrealized_pnl, positions_ok = get_open_positions(broker_client)
     realized_pnl = get_realized_pnl_today(db_path=db_path)
+
+    # Health gate: if either the account or the position list could not be
+    # fetched, we cannot trust daily_pnl_pct. Emit None + data_health="degraded"
+    # so the live circuit breaker and preflight fail CLOSED for new buys rather
+    # than reading the synthetic 10000 balance as a 0% (passing) day.
+    data_health = "ok" if (account.get("data_ok") and positions_ok) else "degraded"
 
     portfolio_value = account.get("portfolio_value") or account.get("balance") or 0
     daily_pnl = unrealized_pnl + realized_pnl
     start_of_day = portfolio_value - daily_pnl
 
-    daily_pnl_pct = 0.0
-    if start_of_day > 0:
-        daily_pnl_pct = daily_pnl / start_of_day * 100
+    daily_pnl_pct: float | None
+    if data_health != "ok" or start_of_day <= 0:
+        daily_pnl_pct = None
+    else:
+        daily_pnl_pct = round(daily_pnl / start_of_day * 100, 2)
 
     return {
         "balance": account.get("balance", 10000.00),
         "portfolio_value": account.get("portfolio_value"),
         "buying_power": account.get("buying_power"),
         "account_status": account.get("account_status"),
+        "data_health": data_health,
         "daily_pnl": round(daily_pnl, 2),
-        "daily_pnl_pct": round(daily_pnl_pct, 2),
+        "daily_pnl_pct": daily_pnl_pct,
         "realized_pnl": round(realized_pnl, 2),
         "unrealized_pnl": round(unrealized_pnl, 2),
         "open_positions": [

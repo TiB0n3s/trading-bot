@@ -752,6 +752,7 @@ def evaluate_approval_decision(
     decision = normalize_claude_decision(action=action, decision=raw_decision)
     confidence = decision.get("confidence")
     reason = str(decision.get("reason", ""))
+    view = AccountStateView.from_account_state(account_state)
 
     if action == "buy":
         infrastructure_rejection = _claude_infrastructure_rejection(reason)
@@ -848,8 +849,8 @@ def evaluate_approval_decision(
 
     bias_entry = market_bias or {}
     if action == "buy" and confidence != "high" and bias_entry.get("bias") == "neutral":
-        momentum_ctx = account_state.get("momentum") or {}
-        tape = account_state.get("tape") or {}
+        momentum_ctx = view.momentum
+        tape = view.tape
         tape_label = tape.get("label")
         vol_state = momentum_ctx.get("volume_state")
         momentum_state = momentum_ctx.get("momentum_state")

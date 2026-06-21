@@ -7,7 +7,7 @@ from datetime import date, timedelta
 from pathlib import Path
 from typing import Any
 
-from db import DB_PATH
+from db import DB_PATH, get_read_connection
 from symbols_config import APPROVED_SYMBOLS_LIST
 
 
@@ -19,9 +19,7 @@ class HistoricalBarQualityRepository:
         return self.db_path.exists()
 
     def _connect(self):
-        con = sqlite3.connect(f"file:{self.db_path}?mode=ro", uri=True)
-        con.row_factory = sqlite3.Row
-        return con
+        return get_read_connection(self.db_path)
 
     @staticmethod
     def _table_columns(con: sqlite3.Connection, table: str) -> set[str]:

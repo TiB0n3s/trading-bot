@@ -6,7 +6,7 @@ import sqlite3
 from pathlib import Path
 from typing import Any
 
-from db import DB_PATH
+from db import DB_PATH, get_read_connection
 
 
 class HistoricalBarCoverageRepository:
@@ -17,9 +17,7 @@ class HistoricalBarCoverageRepository:
         return self.db_path.exists()
 
     def _connect(self):
-        con = sqlite3.connect(f"file:{self.db_path}?mode=ro", uri=True)
-        con.row_factory = sqlite3.Row
-        return con
+        return get_read_connection(self.db_path)
 
     @staticmethod
     def _table_exists(con: sqlite3.Connection, table: str) -> bool:

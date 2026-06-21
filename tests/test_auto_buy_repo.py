@@ -14,6 +14,7 @@ sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "scripts"))
 sys.path.insert(0, str(ROOT / "src"))
 
+import db
 from db import get_connection, init_prediction_tables
 
 from repositories import auto_buy_repo
@@ -50,7 +51,8 @@ def test_latest_feature_uses_latest_inserted_snapshot():
 def test_insert_candidate_and_snapshot_retries_transient_database_lock():
     calls = {"n": 0}
     original_insert_once = auto_buy_repo._insert_candidate_and_snapshot_once
-    original_sleep = auto_buy_repo.time.sleep
+    # Retry/backoff now lives in db.retry_on_locked; patch the sleep there.
+    original_sleep = db.time.sleep
 
     def flaky_insert_once(**kwargs):
         calls["n"] += 1
@@ -60,7 +62,7 @@ def test_insert_candidate_and_snapshot_retries_transient_database_lock():
 
     try:
         auto_buy_repo._insert_candidate_and_snapshot_once = flaky_insert_once
-        auto_buy_repo.time.sleep = lambda _seconds: None
+        db.time.sleep = lambda _seconds: None
         auto_buy_repo.insert_candidate_and_snapshot(
             timestamp="2026-06-17T10:00:00-04:00",
             created_at="2026-06-17T10:00:00-04:00",
@@ -73,7 +75,7 @@ def test_insert_candidate_and_snapshot_retries_transient_database_lock():
         )
     finally:
         auto_buy_repo._insert_candidate_and_snapshot_once = original_insert_once
-        auto_buy_repo.time.sleep = original_sleep
+        db.time.sleep = original_sleep
 
     assert calls["n"] == 2
 

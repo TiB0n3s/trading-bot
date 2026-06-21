@@ -100,3 +100,11 @@ class AccountStateView:
     @property
     def setup_observation(self) -> dict[str, Any]:
         return self.raw.get("setup_observation") or {}
+
+    @property
+    def execution_quality(self) -> dict[str, Any]:
+        return self.raw.get("execution_quality") or {}
+
+    @property
+    def macro_risk(self) -> dict[str, Any]:
+        return self.raw.get("macro_risk") or {}

@@ -3,15 +3,20 @@
 from __future__ import annotations
 
 import json
-import sqlite3
-import time
 from typing import Any
 
-from db import DB_PATH, get_connection, get_read_connection
+from db import (
+    DB_PATH,
+    get_connection,
+    get_read_connection,
+    is_database_locked_error,
+    retry_on_locked,
+)
 
-
-def is_database_locked_error(exc: BaseException) -> bool:
-    return isinstance(exc, sqlite3.OperationalError) and "database is locked" in str(exc).lower()
+# Re-exported for backward compatibility: callers reference
+# ``auto_buy_repo.is_database_locked_error``. Canonical definition now lives in
+# the shared ``db`` module alongside ``retry_on_locked``.
+__all__ = ["is_database_locked_error", "retry_on_locked"]
 
 
 def init_tables(db_path=DB_PATH) -> None:
@@ -885,32 +890,21 @@ def insert_candidate_and_snapshot(
     db_path=DB_PATH,
     busy_timeout_ms: int | None = None,
 ) -> None:
-    max_attempts = 3
-    delay_seconds = 0.25
-    last_lock_error: sqlite3.OperationalError | None = None
-    for attempt in range(max_attempts):
-        try:
-            _insert_candidate_and_snapshot_once(
-                timestamp=timestamp,
-                created_at=created_at,
-                candidate=candidate,
-                live_buy_enabled=live_buy_enabled,
-                order=order,
-                candidate_json=candidate_json,
-                order_json=order_json,
-                db_path=db_path,
-                busy_timeout_ms=busy_timeout_ms,
-            )
-            return
-        except sqlite3.OperationalError as exc:
-            if not is_database_locked_error(exc):
-                raise
-            last_lock_error = exc
-            if attempt == max_attempts - 1:
-                break
-            time.sleep(delay_seconds * (attempt + 1))
-    if last_lock_error is not None:
-        raise last_lock_error
+    retry_on_locked(
+        lambda: _insert_candidate_and_snapshot_once(
+            timestamp=timestamp,
+            created_at=created_at,
+            candidate=candidate,
+            live_buy_enabled=live_buy_enabled,
+            order=order,
+            candidate_json=candidate_json,
+            order_json=order_json,
+            db_path=db_path,
+            busy_timeout_ms=busy_timeout_ms,
+        ),
+        max_attempts=3,
+        delay_seconds=0.25,
+    )
 
 
 def _insert_candidate_and_snapshot_once(

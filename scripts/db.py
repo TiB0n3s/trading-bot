@@ -14,7 +14,9 @@ Goals:
 
 import os
 import sqlite3
+import time
 from pathlib import Path
+from typing import Any, Callable
 
 DB_PATH = Path(__file__).resolve().parents[1] / "trades.db"
 
@@ -79,6 +81,43 @@ def get_read_connection(db_path: Path | str = DB_PATH) -> sqlite3.Connection:
     con.execute("PRAGMA query_only=ON")
     con.execute("PRAGMA foreign_keys=ON")
     return con
+
+
+def is_database_locked_error(exc: BaseException) -> bool:
+    """True if ``exc`` is a transient SQLite 'database is locked' error."""
+    return isinstance(exc, sqlite3.OperationalError) and "database is locked" in str(exc).lower()
+
+
+def retry_on_locked(
+    fn: "Callable[[], Any]",
+    *,
+    max_attempts: int = 3,
+    delay_seconds: float = 0.25,
+) -> Any:
+    """Run ``fn`` with bounded retry on transient SQLite lock contention.
+
+    Retries only on 'database is locked' errors, with linear backoff
+    (``delay_seconds * (attempt + 1)``). Any other ``OperationalError`` (or other
+    exception) propagates immediately. After ``max_attempts`` the last lock error
+    is re-raised so the caller can decide to fail-open. Returns ``fn``'s result.
+
+    Centralizes the retry pattern previously inlined in the auto-buy write path so
+    other best-effort write paths can reuse identical semantics.
+    """
+    last_lock_error: sqlite3.OperationalError | None = None
+    for attempt in range(max_attempts):
+        try:
+            return fn()
+        except sqlite3.OperationalError as exc:
+            if not is_database_locked_error(exc):
+                raise
+            last_lock_error = exc
+            if attempt == max_attempts - 1:
+                break
+            time.sleep(delay_seconds * (attempt + 1))
+    if last_lock_error is not None:
+        raise last_lock_error
+    return None
 
 
 def ensure_recent_favorable_setups_table() -> None:

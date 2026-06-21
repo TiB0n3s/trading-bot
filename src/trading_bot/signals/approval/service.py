@@ -272,19 +272,20 @@ def _paper_exploration_authority_decision(
         }
     authority_matrix = AuthorityMatrix()
 
-    setup_quality = account_state.get("setup_quality") or {}
-    buy_opportunity = account_state.get("buy_opportunity") or {}
-    prediction_gate = account_state.get("prediction_gate") or {}
-    session_gate = account_state.get("session_momentum_gate") or {}
-    execution_quality = account_state.get("execution_quality") or {}
-    macro_risk = account_state.get("macro_risk") or {}
+    view = AccountStateView.from_account_state(account_state)
+    setup_quality = view.setup_quality
+    buy_opportunity = view.buy_opportunity
+    prediction_gate = view.prediction_gate
+    session_gate = view.session_momentum_gate
+    execution_quality = view.execution_quality
+    macro_risk = view.macro_risk
 
     setup_score = _float_or_none(setup_quality.get("score"))
     buy_score = _float_or_none(buy_opportunity.get("buy_opportunity_score"))
     prediction_score = _float_or_none(
         prediction_gate.get("prediction_score")
         or prediction_gate.get("ml_prediction_score")
-        or account_state.get("prediction_score")
+        or view.get("prediction_score")
     )
 
     min_setup = float(config.get("min_setup_score") or 78.0)

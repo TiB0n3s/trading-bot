@@ -2,11 +2,10 @@
 
 from __future__ import annotations
 
-import sqlite3
 from pathlib import Path
 from typing import Any
 
-from db import DB_PATH
+from db import DB_PATH, get_read_connection
 from services.bar_pattern_feature_service import BAR_PATTERN_FEATURE_VERSION
 from services.spacex_value_chain_service import build_spacex_value_chain_feature
 from services.value_chain_eco_cluster_service import (
@@ -64,8 +63,7 @@ def fetch_training_rows(
     symbol_sql = ""
     params: list[Any] = []
     limit_param = int(limit)
-    with sqlite3.connect(f"file:{path}?mode=ro", uri=True) as con:
-        con.row_factory = sqlite3.Row
+    with get_read_connection(path) as con:
         exists = con.execute(
             "SELECT 1 FROM sqlite_master WHERE type='table' AND name='feature_snapshots'"
         ).fetchone()

@@ -24,6 +24,8 @@ SECTION_FIELDS = [
     "conviction_stack",
     "market_alignment",
     "setup_observation",
+    "execution_quality",
+    "macro_risk",
 ]
 SCALAR_FIELDS = ["symbol", "action", "max_position_size_pct_override"]
 
@@ -42,6 +44,8 @@ def _populated_state():
         "conviction_stack": {"dominant_limiter": "none"},
         "market_alignment": {"bias": "neutral"},
         "setup_observation": {"policy_action": "allow"},
+        "execution_quality": {"spread_pct": 0.02},
+        "macro_risk": {"regime": "normal"},
     }
 
 

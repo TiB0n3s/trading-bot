@@ -105,3 +105,6 @@ reports/post_earnings_drift/*.json
 reports/post_earnings_drift/*.jsonl
 # Best-effort audit-write loss sidecar (runtime operational data, not source)
 logs/audit_write_integrity.jsonl
+
+# Local Claude/Codex workspace settings
+.claude/settings.local.json

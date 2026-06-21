@@ -6,7 +6,7 @@ import sqlite3
 from pathlib import Path
 from typing import Any
 
-from db import DB_PATH
+from db import DB_PATH, get_read_connection
 from services.bar_pattern_feature_service import BAR_PATTERN_FEATURE_VERSION
 
 SNAPSHOT_JOIN_FEATURE_VERSION_ALIASES = (
@@ -22,9 +22,10 @@ class TrainingDataRepository:
         self.db_path = Path(db_path)
 
     def _connect(self):
-        con = sqlite3.connect(f"file:{self.db_path}?mode=ro", uri=True)
-        con.row_factory = sqlite3.Row
-        return con
+        # Centralized read-only connection: adds busy_timeout, query_only, and
+        # consistent pragmas so retraining reads survive lock contention instead
+        # of failing instantly (was a bare sqlite3.connect with no busy_timeout).
+        return get_read_connection(self.db_path)
 
     @staticmethod
     def _table_exists(con: sqlite3.Connection, table: str) -> bool:

@@ -42,6 +42,7 @@ from services.signal_models import ApprovalResult, DecisionContext
 
 from services import rejection_categories as categories
 from src.trading_bot.runtime.authority import AuthorityMatrix
+from trading_bot.signals.context.account_state_view import AccountStateView
 
 __all__ = [
     "ApprovalDecision",
@@ -186,10 +187,14 @@ def _paper_learning_override_decision(
     ):
         return {"allowed": False, "reason": "paper learning authority disabled or not applicable"}
 
-    setup_quality = account_state.get("setup_quality") or {}
-    buy_opportunity = account_state.get("buy_opportunity") or {}
-    prediction_gate = account_state.get("prediction_gate") or {}
-    session_gate = account_state.get("session_momentum_gate") or {}
+    # First adopter of the typed read-view over account_state. Accessor semantics
+    # mirror `account_state.get(key) or {}` exactly, so this is behavior-preserving;
+    # the signature is unchanged so callers are unaffected.
+    view = AccountStateView.from_account_state(account_state)
+    setup_quality = view.setup_quality
+    buy_opportunity = view.buy_opportunity
+    prediction_gate = view.prediction_gate
+    session_gate = view.session_momentum_gate
 
     setup_score = _float_or_none(setup_quality.get("score"))
     buy_score = _float_or_none(buy_opportunity.get("buy_opportunity_score"))

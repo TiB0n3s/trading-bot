@@ -4,6 +4,7 @@ import sqlite3
 from pathlib import Path
 from typing import Any
 
+from db import get_read_connection
 from repositories.ops_check_conviction_queries import OpsCheckConvictionQueriesMixin
 from repositories.ops_check_excursion_queries import OpsCheckExcursionQueriesMixin
 from repositories.ops_check_intelligence_queries import OpsCheckIntelligenceQueriesMixin
@@ -51,11 +52,9 @@ class OpsCheckRepository(
         return int(row["n"] or 0) if row else 0
 
     def _fetchall(self, sql: str, params: tuple[Any, ...] = ()) -> list[sqlite3.Row]:
-        with sqlite3.connect(f"file:{self.db_path}?mode=ro", uri=True) as con:
-            con.row_factory = sqlite3.Row
+        with get_read_connection(self.db_path) as con:
             return con.execute(sql, params).fetchall()
 
     def _fetchone(self, sql: str, params: tuple[Any, ...] = ()) -> sqlite3.Row | None:
-        with sqlite3.connect(f"file:{self.db_path}?mode=ro", uri=True) as con:
-            con.row_factory = sqlite3.Row
+        with get_read_connection(self.db_path) as con:
             return con.execute(sql, params).fetchone()

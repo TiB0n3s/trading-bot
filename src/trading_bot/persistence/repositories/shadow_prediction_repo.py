@@ -2,11 +2,10 @@
 
 from __future__ import annotations
 
-import sqlite3
 from pathlib import Path
 from typing import Any
 
-from db import DB_PATH
+from db import DB_PATH, get_connection, get_read_connection
 
 
 class ShadowPredictionRepository:
@@ -14,7 +13,10 @@ class ShadowPredictionRepository:
         self.db_path = Path(db_path or DB_PATH)
 
     def _connect(self):
-        return sqlite3.connect(self.db_path)
+        # Observe-only shadow-prediction writes (offline pre-market pipeline):
+        # centralized write connection adds busy_timeout and consistent pragmas
+        # so writes survive lock contention instead of failing instantly.
+        return get_connection(self.db_path)
 
     def init_table(self) -> None:
         with self._connect() as con:
@@ -53,8 +55,7 @@ class ShadowPredictionRepository:
     ) -> list[dict[str, Any]]:
         if not self.db_path.exists():
             return []
-        with sqlite3.connect(f"file:{self.db_path}?mode=ro", uri=True) as con:
-            con.row_factory = sqlite3.Row
+        with get_read_connection(self.db_path) as con:
             exists = con.execute(
                 "SELECT 1 FROM sqlite_master WHERE type='table' AND name='feature_snapshots'"
             ).fetchone()
@@ -147,8 +148,7 @@ class ShadowPredictionRepository:
     def load_shadow_prediction_outcomes(self, market_date: str) -> list[dict[str, Any]]:
         if not self.db_path.exists():
             return []
-        with sqlite3.connect(f"file:{self.db_path}?mode=ro", uri=True) as con:
-            con.row_factory = sqlite3.Row
+        with get_read_connection(self.db_path) as con:
             tables = {
                 row["name"]
                 for row in con.execute(
@@ -225,8 +225,7 @@ class ShadowPredictionRepository:
         """Compare latest shadow model posture with latest runtime decision per symbol."""
         if not self.db_path.exists():
             return []
-        with sqlite3.connect(f"file:{self.db_path}?mode=ro", uri=True) as con:
-            con.row_factory = sqlite3.Row
+        with get_read_connection(self.db_path) as con:
             tables = {
                 row["name"]
                 for row in con.execute(

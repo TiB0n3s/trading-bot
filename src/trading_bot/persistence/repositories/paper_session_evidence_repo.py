@@ -7,6 +7,8 @@ import sqlite3
 from pathlib import Path
 from typing import Any
 
+from db import get_read_connection
+
 
 class PaperSessionEvidenceRepository:
     def __init__(self, db_path: Path | str):
@@ -114,9 +116,10 @@ class PaperSessionEvidenceRepository:
         return {str(row["name"]) for row in con.execute(f"PRAGMA table_info({table})").fetchall()}
 
     def _connect(self) -> sqlite3.Connection:
-        con = sqlite3.connect(self.db_path)
-        con.row_factory = sqlite3.Row
-        return con
+        # Read-only diagnostics repo: centralized read connection adds busy_timeout
+        # and query_only so evidence reads survive lock contention instead of
+        # failing instantly (was a bare sqlite3.connect with no busy_timeout).
+        return get_read_connection(self.db_path)
 
     @staticmethod
     def _load_json(raw: Any) -> dict[str, Any]:

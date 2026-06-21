@@ -4,6 +4,8 @@ import sqlite3
 from pathlib import Path
 from typing import Any, Callable
 
+from db import get_read_connection
+
 
 def _table_exists(con: sqlite3.Connection, table: str) -> bool:
     row = con.execute(
@@ -47,8 +49,7 @@ class MlExportRepository:
         row_callback: Callable[[sqlite3.Row], None] | None = None,
         chunk_size: int = 1000,
     ) -> list[sqlite3.Row]:
-        with sqlite3.connect(f"file:{self.db_path}?mode=ro", uri=True) as con:
-            con.row_factory = sqlite3.Row
+        with get_read_connection(self.db_path) as con:
             required = ("feature_snapshots", "labeled_setups")
             missing = [t for t in required if not _table_exists(con, t)]
             if missing:

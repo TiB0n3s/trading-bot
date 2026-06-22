@@ -362,6 +362,39 @@ Recent completed roadmap items:
   to the prior last-trade behavior until an operator explicitly enables them.
   This is human-owned execution policy; keep `tests/test_broker.py` coverage when
   changing order logic.
+- `train_supervised_prediction_model()` auto-fits a `BinnedCalibrator` after
+  training and writes it beside the model artifact as `*.calibrator.json`. The
+  artifact `validation_method` field now reflects the actual split used (purged
+  walk-forward or row-index fallback) instead of a hardcoded string. Both
+  remain observe-only until calibrated buckets, re-baselined accuracies, and
+  explicit operator review support promotion.
+- `ops_check.py model-accuracy-baseline DATE` reports OOS accuracy, validation
+  method, Brier score, calibration MAE, and EV proxy for the configured
+  supervised model using up to 5 000 training rows as of DATE.
+- `ops_check.py broker-buffer-status` reports the resolved state of
+  `BROKER_USE_QUOTE_ANCHOR` and `BROKER_ENTRY_SLIPPAGE_PCT` without touching
+  broker state or live orders.
+- `ops_check.py calibration-buckets DATE` reports per-bucket win rate, EV, MFE,
+  MAE, false-positive/negative rates, and readiness (min 5 rows per bucket) for
+  lifecycle rows from DATE onward. As of 2026-06-01, 1 845 rows with outcome and
+  64 ready buckets are available; hour-based patterns are clear (pre-open and
+  afternoon slots show positive EV; 9–11 am mixed/negative). Setup classifier
+  does not yet map to named buckets, which is the current blocker for bucket-level
+  promotion planning. Report is diagnostic-only and has no live authority.
+- Phase 5 `account_state` mirror-drop is complete. The following keys were
+  removed from the `account_state` dict and now live in `gate_trace` only:
+  `canonical_orchestration_status`, `canonical_orchestration_delegate`,
+  `canonical_decision_trace`, `intelligence_adjudication`. The surviving dict
+  key is `decision_trace`. Tests and the golden contract in
+  `tests/test_live_signal_characterization.py` have been updated (61 approved
+  keys). The `auto_buy/manager.py` enriched-candidate write for
+  `intelligence_adjudication` is kept — it is a fresh computation, not an
+  account_state mirror.
+- SQLite fail-open swallow audit: all 17 bare `except: pass` blocks across
+  write-adjacent files are in read/parse paths (datetime parsing, JSON
+  deserialization, type coercion, ROLLBACK recovery). No write-path swallows
+  exist; bounded retry is not needed. Write integrity is handled by WAL mode,
+  busy_timeout, and the `data_health` flag.
 - The current operational focus is performance validation on clean-feed live
   paper sessions before further policy tuning.
 
@@ -1138,6 +1171,9 @@ python3 ops_check.py resource-readiness
 python3 ops_check.py historical-bar-coverage START_DATE --end-date END_DATE
 python3 ops_check.py historical-bar-progress START_DATE --end-date END_DATE
 python3 ops_check.py historical-bar-readiness START_DATE --end-date END_DATE --include-db-quality
+python3 ops_check.py calibration-buckets DATE
+python3 ops_check.py model-accuracy-baseline DATE
+python3 ops_check.py broker-buffer-status
 python3 ops_check.py all
 
 Next-session readiness:
@@ -1501,6 +1537,13 @@ model-promotion evidence generation through `ops_check.py model-promotion-eviden
 packaged entrypoint validation through `ops_check.py packaged-entrypoints`
 external observability readiness through `ops_check.py external-observability-readiness`
 external secrets manager readiness through `ops_check.py secrets-manager-readiness`
+OOS model accuracy baseline through `ops_check.py model-accuracy-baseline DATE`
+broker buffer state report through `ops_check.py broker-buffer-status`
+lifecycle calibration buckets through `ops_check.py calibration-buckets DATE`
+BinnedCalibrator auto-fit wired into `train_supervised_prediction_model()`
+`validation_method` artifact field now reports actual split used
+Phase 5 account_state mirror-drop: canonical_orchestration_status, canonical_orchestration_delegate, canonical_decision_trace, intelligence_adjudication removed from dict
+SQLite fail-open swallow audit: no write-path swallows found; bounded retry not needed
 
 External items still open before any cash-live promotion:
 

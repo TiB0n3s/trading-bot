@@ -175,7 +175,6 @@ _APPROVED_BUY_AUDIT_KEYS = {
     "exit_decision_quality",
     "fast_lane_buy_flip",
     "final_sizing",
-    "intelligence_adjudication",
     "intelligence_context",
     "intra_session_tape_degradation",
     "late_chase_entry_gate",

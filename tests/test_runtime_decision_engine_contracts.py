@@ -250,7 +250,7 @@ def test_decision_engine_stores_canonical_trace_directly():
         "stored source",
     )
     assert_equal(
-        account_state["intelligence_adjudication"]["recommended_effect"],
+        evaluation.adjudication.recommended_effect,
         "approve",
         "stored adjudication",
     )
@@ -465,7 +465,6 @@ def test_approval_path_stores_canonical_trace_for_paper_authority():
 
     assert_equal(result.approved, True, "approved")
     assert_equal(result.source, "paper_exploration_authority", "source")
-    assert_true(account_state.get("intelligence_adjudication"), "adjudication stored")
     trace = account_state["decision_trace"]
     assert_equal(trace["trace_version"], "decision_trace_v1", "trace version")
     assert_equal(trace["final_decision"], "approved", "trace final")

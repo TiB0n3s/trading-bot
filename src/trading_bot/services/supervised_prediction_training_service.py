@@ -156,6 +156,7 @@ class SupervisedTrainingResult:
     runtime_effect: str
     dependency_status: dict[str, Any]
     artifact_path: str | None = None
+    calibrator_artifact_path: str | None = None
     validation_method: str = "chronological_80_20_observe_only"
     promotion_eligible: bool = False
     promotion_metrics: dict[str, Any] = field(default_factory=dict)
@@ -493,7 +494,27 @@ def train_supervised_prediction_model(
                 if y_test
                 else {}
             )
+
+            # Calibrator: fit from probability scores vs realized outcomes.
+            proba_scores: list[float] = []
+            if x_test:
+                try:
+                    proba_scores = [float(v) for v in model.predict_proba(x_test)[:, 1]]
+                except Exception:
+                    proba_scores = []
+
+            if proba_scores and y_test:
+                from services.calibration import fit_binned_calibration
+
+                calibrator = fit_binned_calibration(proba_scores, y_test)
+                cal_mae = sum(abs(p - a) for p, a in zip(proba_scores, y_test)) / len(y_test)
+                promotion_metrics = dict(promotion_metrics)
+                promotion_metrics["calibration_error"] = round(cal_mae, 6)
+            else:
+                calibrator = None
+
             written_artifact = None
+            calibrator_json_path: str | None = None
             if artifact_path:
                 try:
                     import joblib
@@ -519,6 +540,17 @@ def train_supervised_prediction_model(
                     written_artifact = str(path)
                 except Exception:
                     written_artifact = None
+
+                if calibrator is not None and written_artifact is not None:
+                    try:
+                        cal_path = Path(artifact_path).with_suffix(
+                            Path(artifact_path).suffix + ".calibrator.json"
+                        )
+                        atomic_write_json(cal_path, asdict(calibrator))
+                        calibrator_json_path = str(cal_path)
+                    except Exception:
+                        calibrator_json_path = None
+
             return SupervisedTrainingResult(
                 version=SUPERVISED_MODEL_VERSION,
                 provider="sklearn_random_forest",
@@ -532,7 +564,8 @@ def train_supervised_prediction_model(
                 runtime_effect="observe_only_no_live_authority",
                 dependency_status=deps,
                 artifact_path=written_artifact,
-                validation_method="chronological_80_20_observe_only",
+                calibrator_artifact_path=calibrator_json_path,
+                validation_method=validation_method,
                 promotion_eligible=False,
                 promotion_metrics=promotion_metrics,
             )

@@ -9,4 +9,6 @@ COMMAND_SPECS: dict[str, OpsCommandSpec] = {
     "shadow-predictions": spec("shadow-predictions"),
     "prediction-coverage": spec("prediction-coverage"),
     "symbol-affordability": noarg("symbol-affordability"),
+    "model-accuracy-baseline": spec("model-accuracy-baseline"),
+    "broker-buffer-status": noarg("broker-buffer-status"),
 }

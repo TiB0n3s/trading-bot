@@ -31,6 +31,17 @@ if EXECUTION_POLICY_MODE not in ("off", "compare"):
 SELL_CANCEL_POLL_ATTEMPTS = int(os.getenv("SELL_CANCEL_POLL_ATTEMPTS", "5"))
 SELL_CANCEL_POLL_SLEEP_SECONDS = float(os.getenv("SELL_CANCEL_POLL_SLEEP_SECONDS", "0.5"))
 
+# #16: conservative BUY-entry fill assumption for sizing and bracket anchoring.
+# Both default OFF, so order math is byte-identical to the prior last-trade
+# behaviour until an operator explicitly enables them.
+BROKER_ENTRY_SLIPPAGE_PCT = float(os.getenv("BROKER_ENTRY_SLIPPAGE_PCT", "0.0"))
+BROKER_USE_QUOTE_ANCHOR = os.getenv("BROKER_USE_QUOTE_ANCHOR", "false").strip().lower() in {
+    "1",
+    "true",
+    "yes",
+    "on",
+}
+
 
 def _record_order_failure(reason: str) -> None:
     global LAST_ORDER_FAILURE_REASON
@@ -198,6 +209,33 @@ def get_position(symbol: str) -> dict[str, Any] | None:
         return None
 
 
+def _buy_entry_reference_price(symbol: str, last_price: float) -> float:
+    """Conservative assumed BUY fill price for sizing and bracket anchoring (#16).
+
+    Default behaviour is unchanged: with BROKER_ENTRY_SLIPPAGE_PCT=0 and
+    BROKER_USE_QUOTE_ANCHOR off, returns ``last_price`` exactly. When enabled it
+    anchors on the ask (buys fill at/above the ask) and adds a slippage buffer,
+    so recorded R:R and quantity reflect a realistic entry rather than an
+    optimistic last trade. Buys only — sells reduce exposure and should fill
+    promptly off the last trade.
+    """
+    if not BROKER_USE_QUOTE_ANCHOR and BROKER_ENTRY_SLIPPAGE_PCT == 0.0:
+        return last_price
+    reference = last_price
+    if BROKER_USE_QUOTE_ANCHOR:
+        try:
+            quote = api.get_latest_quote(symbol)
+            ask = float(getattr(quote, "ask_price", None) or getattr(quote, "ap", None) or 0)
+            if ask > 0:
+                reference = ask
+        except Exception as exc:
+            logger.warning(
+                f"quote anchor unavailable for {symbol}; using last trade: "
+                f"{_classify_broker_exception(exc)}"
+            )
+    return round(reference * (1 + BROKER_ENTRY_SLIPPAGE_PCT / 100.0), 4)
+
+
 def place_order(
     symbol: str,
     action: str,
@@ -241,6 +279,14 @@ def place_order(
         balance = account["balance"]
         quote = api.get_latest_trade(symbol)
         current_price = float(quote.price)
+        # #16: BUY sizing and bracket legs anchor on a conservative assumed fill
+        # (ask + slippage buffer when enabled); identical to current_price by
+        # default. Sells continue to use the last trade.
+        entry_reference_price = (
+            _buy_entry_reference_price(symbol, current_price)
+            if action == "buy"
+            else current_price
+        )
         side = "buy" if action == "buy" else "sell"
         if side == "sell":
             try:
@@ -318,7 +364,7 @@ def place_order(
                 return None
         else:
             risk_amount = balance * (position_size_pct / 100)
-            qty = int(risk_amount / current_price)
+            qty = int(risk_amount / entry_reference_price)
             if risk_level == "very_high" and qty >= 2:
                 original_qty = qty
                 qty = qty // 2
@@ -391,10 +437,10 @@ def place_order(
                     _record_order_failure(f"live_notional_cap:{order_notional:.2f}>{cap:.2f}")
                     return None
         if side == "buy":
-            stop_price = round(current_price * (1 - stop_loss_pct / 100), 2)
+            stop_price = round(entry_reference_price * (1 - stop_loss_pct / 100), 2)
             # take_profit_pct=0 means position_manager owns exits; only SL backstop needed.
             take_price = (
-                round(current_price * (1 + take_profit_pct / 100), 2)
+                round(entry_reference_price * (1 + take_profit_pct / 100), 2)
                 if take_profit_pct > 0
                 else None
             )

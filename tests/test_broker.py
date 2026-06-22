@@ -51,6 +51,9 @@ class FakeApi:
     def get_latest_trade(self, symbol):
         return Obj(price="100")
 
+    def get_latest_quote(self, symbol):
+        return Obj(ask_price="101", bid_price="99")
+
     def get_position(self, symbol):
         return Obj(
             qty=str(self.position_qty),
@@ -173,6 +176,61 @@ def test_place_order_sell_closes_existing_position_without_bracket():
     with_fake_api(run)
 
 
+def _with_broker_flags(**overrides):
+    """Temporarily set broker module-level #16 flags."""
+    saved = {key: getattr(broker, key) for key in overrides}
+
+    def restore():
+        for key, value in saved.items():
+            setattr(broker, key, value)
+
+    for key, value in overrides.items():
+        setattr(broker, key, value)
+    return restore
+
+
+def test_buy_entry_reference_default_is_unchanged():
+    # Flags off: assumed entry == last trade exactly (no behavior change). (#16)
+    restore = _with_broker_flags(BROKER_ENTRY_SLIPPAGE_PCT=0.0, BROKER_USE_QUOTE_ANCHOR=False)
+    try:
+        assert_equal(broker._buy_entry_reference_price("AAPL", 100.0), 100.0, "default entry ref")
+    finally:
+        restore()
+
+
+def test_buy_slippage_buffer_anchors_qty_and_brackets():
+    # 0.10% buffer -> assumed entry 100.10; qty int(200/100.1)=1; brackets off 100.10. (#16)
+    def run(fake):
+        restore = _with_broker_flags(BROKER_ENTRY_SLIPPAGE_PCT=0.10, BROKER_USE_QUOTE_ANCHOR=False)
+        try:
+            result = broker.place_order("AAPL", "buy", 2.0, 1.0, 3.0)
+        finally:
+            restore()
+        assert_equal(result["qty"], 1, "buffered qty")
+        submitted = fake.submitted[0]
+        assert_equal(submitted["stop_loss"], {"stop_price": 99.1}, "buffered stop")
+        assert_equal(submitted["take_profit"], {"limit_price": 103.1}, "buffered take")
+
+    with_fake_api(run)
+
+
+def test_buy_quote_anchor_uses_ask():
+    # Quote anchor on, slippage 0 -> assumed entry == ask (101); brackets off 101. (#16)
+    def run(fake):
+        restore = _with_broker_flags(BROKER_ENTRY_SLIPPAGE_PCT=0.0, BROKER_USE_QUOTE_ANCHOR=True)
+        try:
+            result = broker.place_order("AAPL", "buy", 4.0, 1.0, 3.0)
+        finally:
+            restore()
+        # risk_amount=400 at ask 101 -> qty int(400/101)=3
+        assert_equal(result["qty"], 3, "ask-anchored qty")
+        submitted = fake.submitted[0]
+        assert_equal(submitted["stop_loss"], {"stop_price": 99.99}, "ask-anchored stop")
+        assert_equal(submitted["take_profit"], {"limit_price": 104.03}, "ask-anchored take")
+
+    with_fake_api(run)
+
+
 def main():
     tests = [
         test_validate_order_request_normalizes_inputs,
@@ -182,6 +240,9 @@ def main():
         test_place_order_buy_too_small_does_not_submit,
         test_place_order_very_high_risk_halves_buy_qty,
         test_place_order_sell_closes_existing_position_without_bracket,
+        test_buy_entry_reference_default_is_unchanged,
+        test_buy_slippage_buffer_anchors_qty_and_brackets,
+        test_buy_quote_anchor_uses_ask,
     ]
 
     for test in tests:

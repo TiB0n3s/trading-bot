@@ -149,6 +149,8 @@ _LAZY_HANDLER_REFS = {
     "run_shadow_prediction_report": "trading_bot.ops_checks.commands.shadow_prediction_checks:run_shadow_prediction_report",
     "run_prediction_coverage_report": "trading_bot.ops_checks.commands.symbol_universe_checks:run_prediction_coverage_report",
     "run_symbol_affordability_report": "trading_bot.ops_checks.commands.symbol_universe_checks:run_symbol_affordability_report",
+    "run_model_accuracy_baseline": "trading_bot.ops_checks.commands.model_accuracy_checks:run_model_accuracy_baseline",
+    "run_broker_buffer_status": "trading_bot.ops_checks.commands.model_accuracy_checks:run_broker_buffer_status",
     "run_signal_source_readiness": "trading_bot.ops_checks.commands.signal_source_checks:run_signal_source_readiness",
     "run_audit_write_integrity": "trading_bot.ops_checks.commands.audit_write_integrity_checks:run_audit_write_integrity",
     "run_decision_snapshot_health": "trading_bot.ops_checks.commands.snapshot_checks:run_decision_snapshot_health",
@@ -1528,6 +1530,14 @@ def prediction_coverage(target_date: str) -> bool:
 
 def symbol_affordability() -> bool:
     return run_symbol_affordability_report()
+
+
+def model_accuracy_baseline(target_date: str) -> bool:
+    return run_model_accuracy_baseline(target_date, base_dir=BASE_DIR)
+
+
+def broker_buffer_status() -> bool:
+    return run_broker_buffer_status()
 
 
 def database_backups() -> bool:

@@ -316,6 +316,52 @@ Recent completed roadmap items:
   signal-quality gate fields. Actual ML prediction values must use
   `ml_prediction_*` names; weak buckets may reduce size only through explicit
   cap logic.
+- Quant/technical audit hardening (applied, paper-safe). Read-only diagnostics:
+  `ops_check.py symbol-affordability` flags approved symbols whose integer-share
+  sizing rounds to qty<1 at the default size (override with
+  `OPS_AFFORDABILITY_BALANCE` / `OPS_AFFORDABILITY_POSITION_SIZE_PCT`);
+  `ops_check.py prediction-coverage DATE` flags approved symbols that have
+  intelligence context but no ML prediction (a deterministic-only blind spot)
+  and whole-universe prediction failures. Behavior changes:
+  the fill-stream handler now records fills and repairs the ledger regardless of
+  market hours (only intraday-learning is gated to RTH); the daily-loss circuit
+  breaker and preflight fail CLOSED for buys when broker account/position data is
+  degraded (`account_state.data_health`); the Alpaca `client_order_id` is derived
+  only from the stable `_dedupe_key` (never `now()`); the cooldown slot is claimed
+  atomically before submit and released on non-submit (`cooldown_repo.claim_cooldown`)
+  to close the check-then-act race across gunicorn workers; the prediction cache
+  fails open to "no prediction" when stale (TTL×2). Sizing invariants in
+  `apply_final_sizing`: a hard `MAX_POSITION_SIZE_PCT` ceiling (default 5.0) and a
+  projected per-symbol exposure cap (`PER_SYMBOL_EXPOSURE_CAP_PCT`, default 4.0,
+  applied even on first entry); the macro `risk_multiplier` is clamped to [0,1]
+  (may only tighten). Governance: label-tier authority is enforced in code —
+  Tier-4 `observe_only_ranking` labels (triple_barrier/trend_scan) may not drive
+  paper veto/approve/size, so the historical-bar meta-label and layered-model
+  authority are observe-only until retrained on higher-tier labels (a caller can
+  declare `training_labels`); `live_buy_enabled` is cash-mode gated;
+  `AUTHORITY_MATRIX_CONFIG` cannot raise ML layers' trade-enabling permissions
+  above `paper_block` without `allow_ml_live_promotion`; auto-buy paper promotions
+  record `hard_block_overridden_by`. The discovery-execution bridge reclaims rows
+  stranded in `ROUTING` at the start of each run
+  (`DISCOVERY_EXECUTION_BRIDGE_ROUTING_STALE_SECONDS`). Live-bar gap-fill triggers
+  on any gap > 1 minute and flags `discontinuity_minutes`.
+- EV-after-costs bar is now encoded, not just documented: slippage-Kelly zeroes a
+  BUY whose net EV after modeled round-trip slippage plus residual fees is below
+  `EV_AFTER_COST_MIN_PCT` (default +0.25%; `EV_AFTER_COST_FEES_PCT` default 0).
+  `services/ev_after_costs.py` holds the pure estimator. Supervised training uses
+  a purged walk-forward time split with an embargo >= the label horizon
+  (`services/model_validation.py`) instead of a row-index split; the artifact
+  `validation_method` is now honest. `services/calibration.py` provides a
+  dependency-free monotone reliability calibrator to replace uncalibrated
+  score-as-probability once fitted on realized outcomes. These remain observe-only;
+  promotion still requires calibrated buckets, re-baselined accuracies, and
+  explicit operator review.
+- `broker.py` BUY sizing and bracket legs can anchor on a conservative assumed
+  fill (ask + slippage buffer) via `BROKER_USE_QUOTE_ANCHOR` and
+  `BROKER_ENTRY_SLIPPAGE_PCT`. Both default OFF, so order math is byte-identical
+  to the prior last-trade behavior until an operator explicitly enables them.
+  This is human-owned execution policy; keep `tests/test_broker.py` coverage when
+  changing order logic.
 - The current operational focus is performance validation on clean-feed live
   paper sessions before further policy tuning.
 

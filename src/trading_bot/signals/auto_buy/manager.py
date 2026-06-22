@@ -2161,7 +2161,6 @@ def attach_canonical_decision_metadata(candidate: dict[str, Any]) -> dict[str, A
     enriched["capital_allocation"] = allocation.to_dict()
     enriched["effective_size_cap_pct"] = allocation.allocated_size_pct
     enriched["decision_trace"] = evaluation.trace.to_dict()
-    enriched["canonical_decision_trace"] = enriched["decision_trace"]
     enriched["decision_engine_runtime_effect"] = "canonical_auto_buy_trace_and_authority_metadata"
     return enriched
 

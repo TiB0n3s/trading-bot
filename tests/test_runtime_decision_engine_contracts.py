@@ -245,7 +245,7 @@ def test_decision_engine_stores_canonical_trace_directly():
     )
     assert_equal(evaluation.trace.final_decision, "approved", "evaluation final")
     assert_equal(
-        account_state["canonical_decision_trace"]["shadow"]["approval_source"],
+        account_state["decision_trace"]["shadow"]["approval_source"],
         "claude",
         "stored source",
     )
@@ -254,7 +254,7 @@ def test_decision_engine_stores_canonical_trace_directly():
         "approve",
         "stored adjudication",
     )
-    gate_ids = [row["gate_id"] for row in account_state["canonical_decision_trace"]["gate_results"]]
+    gate_ids = [row["gate_id"] for row in account_state["decision_trace"]["gate_results"]]
     for expected in (
         "preflight",
         "cash_safe",
@@ -295,13 +295,13 @@ def test_decision_engine_marks_execution_quality_block_as_enforced():
 
     execution_gate = next(
         row
-        for row in account_state["canonical_decision_trace"]["gate_results"]
+        for row in account_state["decision_trace"]["gate_results"]
         if row["gate_id"] == "execution_quality"
     )
     assert_equal(execution_gate["decision"], "block", "execution gate decision")
     assert_equal(execution_gate["enforced"], True, "execution gate enforced")
     assert_equal(
-        account_state["canonical_decision_trace"]["blocking_gate"],
+        account_state["decision_trace"]["blocking_gate"],
         "execution_quality",
         "blocking gate",
     )
@@ -337,13 +337,13 @@ def test_decision_engine_marks_layered_model_veto_as_enforced_ml_authority():
 
     ml_gate = next(
         row
-        for row in account_state["canonical_decision_trace"]["gate_results"]
+        for row in account_state["decision_trace"]["gate_results"]
         if row["gate_id"] == "ml_authority"
     )
     assert_equal(ml_gate["decision"], "block", "ml gate decision")
     assert_equal(ml_gate["enforced"], True, "ml gate enforced")
     assert_equal(
-        account_state["canonical_decision_trace"]["blocking_gate"],
+        account_state["decision_trace"]["blocking_gate"],
         "ml_authority",
         "blocking gate",
     )
@@ -362,7 +362,7 @@ def test_canonical_orchestrator_owns_live_signal_handoff():
                     "context_runtime": context_runtime,
                     "preflight_result": preflight_result,
                     "trace_present": bool(
-                        runtime_state.account_state.get("canonical_decision_trace")
+                        runtime_state.account_state.get("decision_trace")
                     ),
                 }
             )
@@ -397,11 +397,6 @@ def test_canonical_orchestrator_owns_live_signal_handoff():
     assert_equal(result.execution.status, "compatibility_delegate", "delegate status")
     assert_true(processor.calls[0]["trace_present"], "trace before delegate")
     assert_equal(
-        runtime_state.account_state["canonical_orchestration_status"],
-        "handled",
-        "orchestration status",
-    )
-    assert_equal(
         runtime_state.decision_context["canonical_orchestrator"]["status"],
         "pre_trace_recorded",
         "decision context status",
@@ -432,7 +427,7 @@ def test_claude_cannot_approve_cash_buy_without_authority():
     assert_equal(result.source, "authority_matrix", "source")
     assert_true("AuthorityMatrix denied claude approve authority" in result.reason, "reason")
     assert_equal(
-        account_state["canonical_decision_trace"]["shadow"]["approval_source"],
+        account_state["decision_trace"]["shadow"]["approval_source"],
         "authority_matrix",
         "trace source",
     )
@@ -471,7 +466,7 @@ def test_approval_path_stores_canonical_trace_for_paper_authority():
     assert_equal(result.approved, True, "approved")
     assert_equal(result.source, "paper_exploration_authority", "source")
     assert_true(account_state.get("intelligence_adjudication"), "adjudication stored")
-    trace = account_state["canonical_decision_trace"]
+    trace = account_state["decision_trace"]
     assert_equal(trace["trace_version"], "decision_trace_v1", "trace version")
     assert_equal(trace["final_decision"], "approved", "trace final")
     gate_ids = [row["gate_id"] for row in trace["gate_results"]]

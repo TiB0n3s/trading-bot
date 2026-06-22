@@ -95,8 +95,6 @@ class CanonicalDecisionOrchestrator:
             result.execution.status = "handled_by_canonical_decision_orchestrator"
 
         _delegate = type(self.compatibility_processor).__name__
-        runtime_state.account_state["canonical_orchestration_status"] = "handled"
-        runtime_state.account_state["canonical_orchestration_delegate"] = _delegate
         gate_trace.record("canonical_orchestration_status", "handled")
         gate_trace.record("canonical_orchestration_delegate", _delegate)
         return result

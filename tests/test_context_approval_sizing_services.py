@@ -755,7 +755,7 @@ def test_layered_model_authority_approves_low_confidence_paper_candidate():
         "layered instruction",
     )
     assert_equal(
-        account_state["canonical_decision_trace"]["shadow"]["approval_source"],
+        account_state["decision_trace"]["shadow"]["approval_source"],
         "layered_model_authority",
         "trace source",
     )
@@ -795,7 +795,7 @@ def test_layered_model_authority_vetoes_weak_paper_candidate():
     assert_equal(result.category, "layered_model_authority_veto", "category")
     assert_equal(account_state["layered_model_decision"]["final_instruction"], "veto", "final")
     assert_equal(
-        account_state["canonical_decision_trace"]["blocking_gate"],
+        account_state["decision_trace"]["blocking_gate"],
         "ml_authority",
         "blocking gate",
     )

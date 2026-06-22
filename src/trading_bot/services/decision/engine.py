@@ -201,7 +201,6 @@ class DecisionEngine:
         adjudication_payload = evaluation.adjudication.to_dict()
         account_state["intelligence_adjudication"] = adjudication_payload
         account_state["decision_trace"] = trace_payload
-        account_state["canonical_decision_trace"] = trace_payload
         if gate_trace is not None:
             gate_trace.record("intelligence_adjudication", adjudication_payload)
             gate_trace.record("decision_trace", trace_payload)

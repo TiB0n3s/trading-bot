@@ -162,7 +162,6 @@ _APPROVED_BUY_AUDIT_KEYS = {
     "buy_opportunity",
     "buy_opportunity_sizing",
     "buying_power",
-    "canonical_decision_trace",
     "conviction_stack",
     "daily_pnl_pct",
     "decision_policy",

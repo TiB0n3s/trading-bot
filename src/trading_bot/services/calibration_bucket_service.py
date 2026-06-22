@@ -52,7 +52,7 @@ def _mae(row: dict[str, Any]) -> float | None:
 
 
 def _bucket(row: dict[str, Any]) -> str:
-    setup = row.get("setup_label") or "unknown_setup"
+    setup = row.get("setup_label") or row.get("setup_policy_action") or "unknown_setup"
     regime = row.get("market_regime") or "unknown_regime"
     hour = row.get("decision_hour") or "unknown_hour"
     vol = row.get("volatility_chase_risk") or "unknown_volatility"

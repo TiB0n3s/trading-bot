@@ -124,6 +124,10 @@ class LiveBarIngestResult:
     trend_score: int | None
     latest_price: float | None
     persisted: bool
+    # Minutes between the previous and current bar when a discontinuity (a gap
+    # larger than the 1-minute bar interval) was detected, else None. Lets
+    # momentum/trend consumers discount a series computed across a hole.
+    discontinuity_minutes: float | None = None
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -138,6 +142,7 @@ class LiveBarIngestResult:
             "trend_score": self.trend_score,
             "latest_price": self.latest_price,
             "persisted": self.persisted,
+            "discontinuity_minutes": self.discontinuity_minutes,
         }
 
 
@@ -207,12 +212,25 @@ class LiveBarStreamService:
         previous_ts = self._last_bar_ts.get(symbol)
         gap_fill_attempted = False
         gap_fill_rows = 0
+        discontinuity_minutes: float | None = None
 
-        if symbol not in self._bars_by_symbol or (
+        # A discontinuity is any gap larger than the 1-minute bar interval, i.e.
+        # at least one missing bar (prev 10:00 -> next 10:02 == one drop). The
+        # old `> 2 minutes` threshold silently skipped single-bar drops.
+        if (
             current_ts is not None
             and previous_ts is not None
-            and current_ts - previous_ts > timedelta(minutes=2)
+            and current_ts - previous_ts > timedelta(minutes=1)
         ):
+            discontinuity_minutes = (current_ts - previous_ts).total_seconds() / 60.0
+            self.logger.warning(
+                "live bar discontinuity for %s feed=%s: %.1f min gap (>1m interval)",
+                symbol,
+                self.feed,
+                discontinuity_minutes,
+            )
+
+        if symbol not in self._bars_by_symbol or discontinuity_minutes is not None:
             gap_fill_attempted = True
             fill_rows = self._gap_fill(symbol)
             for row in fill_rows:
@@ -251,6 +269,7 @@ class LiveBarStreamService:
             trend_score=row.get("trend_score"),
             latest_price=row.get("latest_price"),
             persisted=True,
+            discontinuity_minutes=discontinuity_minutes,
         )
 
     async def handle_bar(self, bar: Any) -> None:

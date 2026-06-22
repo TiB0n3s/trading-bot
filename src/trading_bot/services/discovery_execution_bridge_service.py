@@ -7,7 +7,7 @@ import logging
 import os
 import sys
 from dataclasses import dataclass, replace
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -64,6 +64,10 @@ class DiscoveryBridgeConfig:
     symbol_cooldown_minutes: int = 45
     min_trade_qty: float = 1.0
     allow_fractional_shares: bool = False
+    # Rows in ROUTING older than this are treated as stranded (a crash between
+    # claim and mark_routed) and reconciled by the reclaim sweeper. Default is
+    # well beyond a normal claim->submit->mark_routed window (sub-second).
+    routing_stale_seconds: int = 300
 
 
 @dataclass(frozen=True)
@@ -92,6 +96,9 @@ def bridge_config_from_env(*, target_date: str | None = None) -> DiscoveryBridge
         target_date=target_date,
         max_candidate_age_seconds=int(
             os.getenv("DISCOVERY_EXECUTION_BRIDGE_MAX_AGE_SECONDS", "180")
+        ),
+        routing_stale_seconds=int(
+            os.getenv("DISCOVERY_EXECUTION_BRIDGE_ROUTING_STALE_SECONDS", "300")
         ),
         symbol_cooldown_minutes=int(
             os.getenv("DISCOVERY_EXECUTION_BRIDGE_SYMBOL_COOLDOWN_MINUTES", "45")
@@ -145,6 +152,11 @@ class DiscoveryExecutionBridgeService:
                 )
             ]
 
+        # Reclaim rows stranded in ROUTING by a prior crashed run before
+        # claiming new candidates, so stranded paper positions are reconciled
+        # and stuck capacity is freed.
+        self.reclaim_stranded_routing()
+
         claimed = self.repository.claim_candidates(
             min_score=self.config.min_score,
             max_candidates=self.config.max_candidates_per_run,
@@ -158,6 +170,116 @@ class DiscoveryExecutionBridgeService:
             result = self._route_claimed_candidate(row)
             results.append(result)
         return results
+
+    def reclaim_stranded_routing(self) -> list[DiscoveryBridgeResult]:
+        """Reconcile rows stranded in ROUTING by a crash before mark_routed.
+
+        For each stale ROUTING row, look up the deterministic client_order_id
+        (``auto-bridge-{id}-{symbol}``) among the broker's OPEN orders:
+          * found  -> the order really submitted; mark_routed + record the trade
+            idempotently (reconciles the phantom paper position into the ledger).
+          * not found -> ambiguous (never submitted, or already filled and gone
+            from open orders). We do NOT auto-retry, because re-submitting a
+            stranded order that actually filled would create a duplicate. The
+            row is marked FAILED for operator review, which unsticks it.
+
+        Definitive reconciliation of a *filled* stranded order would need a
+        broker get_order_by_client_order_id lookup (a human-owned broker change).
+        Paper-only; never submits, sizes, or cancels an order.
+        """
+        if not _paper_only_mode(self.config.execution_mode):
+            return []
+        cutoff = (
+            datetime.now(UTC) - timedelta(seconds=self.config.routing_stale_seconds)
+        ).isoformat()
+        try:
+            stale = self.repository.stale_routing_rows(stale_cutoff=cutoff)
+        except Exception as exc:
+            self.logger.error("reclaim_stranded_routing query failed: %s", exc)
+            return []
+
+        results: list[DiscoveryBridgeResult] = []
+        for row in stale:
+            candidate_id = int(row["id"])
+            symbol = str(row["symbol"])
+            client_order_id = f"auto-bridge-{candidate_id}-{symbol}"
+            order = self._open_order_for_client_id(symbol, client_order_id)
+            if order is not None:
+                order_id = _order_identifier(order)
+                self.repository.mark_routed(
+                    candidate_id=candidate_id,
+                    symbol=symbol,
+                    order_id=order_id,
+                    order=order,
+                )
+                self._record_routed_trade(
+                    candidate_id=candidate_id,
+                    symbol=symbol,
+                    candidate=_safe_decode_candidate(row.get("candidate_json"), symbol),
+                    order=order,
+                    position_size_pct=self.config.default_position_size_pct,
+                    stop_loss_pct=self.config.stop_loss_pct,
+                    take_profit_pct=self.config.take_profit_pct,
+                )
+                self.logger.warning(
+                    "reclaimed stranded ROUTING -> ROUTED candidate_id=%s symbol=%s order=%s",
+                    candidate_id,
+                    symbol,
+                    order_id,
+                )
+                results.append(
+                    DiscoveryBridgeResult(
+                        candidate_id=candidate_id,
+                        symbol=symbol,
+                        status=ROUTED,
+                        routed_order_id=order_id,
+                        reason="reclaimed_stranded_routing",
+                    )
+                )
+            else:
+                reason = "routing_stranded_unconfirmed_at_broker_needs_review"
+                self.repository.mark_failed(candidate_id=candidate_id, reason=reason)
+                self.logger.warning(
+                    "stranded ROUTING unconfirmed -> FAILED(review) candidate_id=%s symbol=%s",
+                    candidate_id,
+                    symbol,
+                )
+                results.append(
+                    DiscoveryBridgeResult(
+                        candidate_id=candidate_id,
+                        symbol=symbol,
+                        status=FAILED,
+                        reason=reason,
+                        reason_code="routing_stranded_review",
+                    )
+                )
+        return results
+
+    def _open_order_for_client_id(
+        self, symbol: str, client_order_id: str
+    ) -> dict[str, Any] | None:
+        order_lister = getattr(self.broker, "list_open_orders", None)
+        if not callable(order_lister):
+            return None
+        try:
+            open_orders = order_lister(symbol) or []
+        except Exception as exc:
+            self.logger.warning(
+                "reclaim open-order lookup failed for %s: %s: %s",
+                symbol,
+                type(exc).__name__,
+                exc,
+            )
+            return None
+        for order in open_orders:
+            coid = (
+                order.get("client_order_id")
+                if isinstance(order, dict)
+                else getattr(order, "client_order_id", None)
+            )
+            if coid and str(coid) == client_order_id:
+                return _order_to_dict(order)
+        return None
 
     def _route_claimed_candidate(self, row: dict[str, Any]) -> DiscoveryBridgeResult:
         candidate_id = int(row["id"])
@@ -509,6 +631,44 @@ def _order_identifier(order: dict[str, Any]) -> str | None:
         if value:
             return str(value)
     return None
+
+
+def _safe_decode_candidate(candidate_json: Any, symbol: str) -> dict[str, Any]:
+    """Decode a snapshot's candidate_json, falling back to a minimal candidate."""
+    if isinstance(candidate_json, dict):
+        return candidate_json
+    if candidate_json:
+        try:
+            decoded = json.loads(candidate_json)
+            if isinstance(decoded, dict):
+                return decoded
+        except (TypeError, ValueError):
+            pass
+    return {"symbol": symbol}
+
+
+def _order_to_dict(order: Any) -> dict[str, Any]:
+    """Normalize a broker order (Alpaca object or dict) to a plain dict."""
+    if isinstance(order, dict):
+        out = dict(order)
+    else:
+        out = {}
+        for key in (
+            "id",
+            "client_order_id",
+            "symbol",
+            "qty",
+            "filled_qty",
+            "status",
+            "filled_avg_price",
+            "limit_price",
+            "stop_price",
+        ):
+            value = getattr(order, key, None)
+            if value is not None:
+                out[key] = value
+    out.setdefault("order_id", out.get("id") or out.get("client_order_id"))
+    return out
 
 
 def _position_has_qty(position: Any) -> bool:

@@ -88,6 +88,28 @@ class DiscoveryExecutionBridgeRepository:
             con.commit()
         return [dict(row) for row in rows]
 
+    def stale_routing_rows(self, *, stale_cutoff: str) -> list[dict[str, Any]]:
+        """Rows stuck in ROUTING whose claim is older than ``stale_cutoff``.
+
+        A crash between claim_candidates (which commits ROUTING) and mark_routed
+        leaves a row in ROUTING permanently. These are candidates for the
+        reclaim sweeper to reconcile against the broker.
+        """
+        with get_connection(self.db_path) as con:
+            rows = con.execute(
+                """
+                SELECT id, symbol, candidate_timestamp, score, candidate_json,
+                       execution_attempted_at
+                FROM auto_buy_decision_snapshots
+                WHERE execution_status = ?
+                  AND execution_attempted_at IS NOT NULL
+                  AND execution_attempted_at < ?
+                ORDER BY execution_attempted_at ASC
+                """,
+                (ROUTING, stale_cutoff),
+            ).fetchall()
+        return [dict(row) for row in rows]
+
     def latest_recent_routed_candidate(
         self,
         *,

@@ -149,6 +149,41 @@ def test_ingest_bar_gap_fills_again_after_stream_gap():
     assert second.rolling_bars == 2
 
 
+def test_single_minute_drop_flags_discontinuity_and_gap_fills():
+    # One missing bar (minute 2) produces a 2-minute gap, which the old
+    # ">2 minutes" threshold silently skipped. It must now be flagged. (#21)
+    session = FakeSessionMomentum()
+    market_data = FakeMarketData([])
+    service = LiveBarStreamService(
+        session_momentum_service=session,
+        market_data=market_data,
+        api_key="key",
+        secret_key="secret",
+    )
+
+    service.ingest_bar(_bar(minute=1))  # 13:31
+    result = service.ingest_bar(_bar(minute=3))  # 13:33 -> 2 min gap (minute 2 missing)
+
+    assert result.discontinuity_minutes == 2.0
+    assert result.gap_fill_attempted is True
+
+
+def test_consecutive_bars_have_no_discontinuity():
+    session = FakeSessionMomentum()
+    market_data = FakeMarketData([])
+    service = LiveBarStreamService(
+        session_momentum_service=session,
+        market_data=market_data,
+        api_key="key",
+        secret_key="secret",
+    )
+
+    service.ingest_bar(_bar(minute=1))
+    result = service.ingest_bar(_bar(minute=2))  # normal 1-minute cadence
+
+    assert result.discontinuity_minutes is None
+
+
 def test_run_stream_once_subscribes_symbols_with_injected_stream():
     FakeStream.instances = []
     service = LiveBarStreamService(

@@ -131,7 +131,7 @@ def train_transformer_authority_model(
     learning_rate: float = 0.003,
 ) -> TransformerTrainingResult:
     feature_columns = list(feature_columns or DEFAULT_FEATURE_COLUMNS)
-    features, labels = _build_labeled_matrix(
+    features, labels, _row_timestamps = _build_labeled_matrix(
         rows,
         horizon=horizon,
         feature_columns=feature_columns,

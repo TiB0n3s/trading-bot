@@ -35,6 +35,35 @@ def _temporary_env(**updates):
 
 
 def test_slippage_kelly_caps_size_when_edge_is_positive_but_thinner():
+    # prob=0.55 clears the +0.25% net-EV bar (net EV ~0.33%), and the Kelly
+    # fraction caps the large requested size.
+    with _temporary_env(
+        SLIPPAGE_KELLY_SIZING_ENABLED="true",
+        SLIPPAGE_KELLY_FRACTION="0.25",
+        SLIPPAGE_KELLY_MAX_FRICTION_RATIO="0.20",
+    ):
+        decision = calculate_slippage_adjusted_kelly_cap(
+            action="buy",
+            requested_size_pct=10.0,
+            account_state={
+                "prediction_gate": {"ml_prediction_score": 0.55},
+                "atr_20_pct": 1.0,
+                "execution_quality": {"slippage_estimate_pct": 0.05},
+            },
+        )
+
+    data = decision.to_dict()
+    assert data["enabled"] is True
+    assert data["runtime_effect"] == "size_cap_only_no_approval_authority"
+    assert data["action"] == "cap"
+    assert 0 < data["cap_pct"] < 10.0
+    assert data["adjusted_risk_reward_ratio"] < 2.0 / 1.5
+    assert data["net_ev_after_cost_pct"] >= 0.25
+
+
+def test_slippage_kelly_zeroes_when_net_ev_below_bar():
+    # prob=0.50 with this reward/risk yields net EV ~0.15%, below the +0.25%
+    # per-name deployability bar (#11), so the size is zeroed.
     with _temporary_env(
         SLIPPAGE_KELLY_SIZING_ENABLED="true",
         SLIPPAGE_KELLY_FRACTION="0.25",
@@ -51,11 +80,10 @@ def test_slippage_kelly_caps_size_when_edge_is_positive_but_thinner():
         )
 
     data = decision.to_dict()
-    assert data["enabled"] is True
-    assert data["runtime_effect"] == "size_cap_only_no_approval_authority"
-    assert data["action"] == "cap"
-    assert 0 < data["cap_pct"] < 2.0
-    assert data["adjusted_risk_reward_ratio"] < 2.0 / 1.5
+    assert data["action"] == "zero"
+    assert data["cap_pct"] == 0.0
+    assert "net_ev_after_cost" in data["reason"]
+    assert data["net_ev_after_cost_pct"] < 0.25
 
 
 def test_slippage_kelly_zeroes_trade_when_friction_exceeds_threshold():

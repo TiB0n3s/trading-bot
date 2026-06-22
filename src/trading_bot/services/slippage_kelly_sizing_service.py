@@ -12,6 +12,10 @@ import os
 from dataclasses import asdict, dataclass
 from typing import Any
 
+from services.ev_after_costs import (
+    DEFAULT_EV_AFTER_COST_MIN_PCT,
+    estimate_net_ev_after_cost_pct,
+)
 from services.policy_controls import policy_family_enabled
 
 SLIPPAGE_KELLY_VERSION = "slippage_adjusted_kelly_v1"
@@ -42,6 +46,7 @@ class SlippageKellyDecision:
     cap_pct: float | None
     action: str
     reason: str
+    net_ev_after_cost_pct: float | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -352,6 +357,7 @@ def _decision(
     kelly_fraction: float | None = None,
     fractional_kelly_pct: float | None = None,
     cap_pct: float | None = None,
+    net_ev_after_cost_pct: float | None = None,
 ) -> SlippageKellyDecision:
     return SlippageKellyDecision(
         enabled=enabled,
@@ -396,6 +402,9 @@ def _decision(
         cap_pct=round(cap_pct, 4) if cap_pct is not None else None,
         action=action,
         reason=reason,
+        net_ev_after_cost_pct=(
+            round(net_ev_after_cost_pct, 4) if net_ev_after_cost_pct is not None else None
+        ),
     )
 
 
@@ -530,6 +539,42 @@ def calculate_slippage_adjusted_kelly_cap(
             cap_pct=0.0,
         )
 
+    # EV-after-costs bar (#11): a BUY may not size up unless its net expected
+    # value after modeled round-trip slippage (already in adjusted_reward/risk)
+    # plus residual fees clears the per-name deployability bar (default +0.25%).
+    # This is a downside-only zero-gate, consistent with this module's role.
+    ev_min_pct = _env_float("EV_AFTER_COST_MIN_PCT", DEFAULT_EV_AFTER_COST_MIN_PCT)
+    ev_fees_pct = _env_float("EV_AFTER_COST_FEES_PCT", 0.0)
+    net_ev_after_cost_pct = estimate_net_ev_after_cost_pct(
+        prob_win=model_prob,
+        reward_pct=adjusted_reward_pct,
+        risk_pct=adjusted_risk_pct,
+        extra_cost_pct=ev_fees_pct,
+    )
+    if net_ev_after_cost_pct < ev_min_pct:
+        return _decision(
+            enabled=True,
+            action="zero",
+            reason=(
+                f"net_ev_after_cost {net_ev_after_cost_pct:.3f}% < min {ev_min_pct:.2f}%"
+            ),
+            model_prob=model_prob,
+            raw_reward_pct=raw_reward_pct,
+            raw_risk_pct=raw_risk_pct,
+            adjusted_reward_pct=adjusted_reward_pct,
+            adjusted_risk_pct=adjusted_risk_pct,
+            adjusted_risk_reward_ratio=adjusted_r,
+            predicted_slippage_pct=predicted_slippage_pct,
+            friction_ratio=friction_ratio,
+            alpha_friction_ratio=alpha_friction_ratio,
+            quote_instability_multiplier=quote_multiplier,
+            liquidity_stress_score=lsi_score,
+            liquidity_stress_bucket=lsi_bucket,
+            liquidity_stress_size_multiplier=lsi_multiplier,
+            cap_pct=0.0,
+            net_ev_after_cost_pct=net_ev_after_cost_pct,
+        )
+
     # Kelly fraction for b:1 payoff odds is p - q / b.
     loss_prob = 1.0 - model_prob
     kelly_fraction = model_prob - (loss_prob / adjusted_r)
@@ -589,4 +634,5 @@ def calculate_slippage_adjusted_kelly_cap(
         kelly_fraction=kelly_fraction,
         fractional_kelly_pct=fractional_kelly_pct,
         cap_pct=cap_pct,
+        net_ev_after_cost_pct=net_ev_after_cost_pct,
     )

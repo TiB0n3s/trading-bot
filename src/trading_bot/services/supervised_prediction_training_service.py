@@ -17,6 +17,10 @@ from policy_artifacts import atomic_write_json
 from repositories.supervised_prediction_training_repo import (
     fetch_training_rows as repo_fetch_training_rows,
 )
+from services.model_validation import (
+    horizon_embargo_seconds,
+    purged_time_split_indices,
+)
 from services.optional_dependency_service import optional_dependency_status
 
 from ml_platform.lifecycle import REQUIRED_PROMOTION_METRICS
@@ -219,21 +223,37 @@ def _label(row: dict[str, Any], horizon: str) -> int | None:
         return None
 
 
+def _row_timestamp(row: dict[str, Any]) -> Any:
+    for key in (
+        "bar_timestamp",
+        "timestamp",
+        "feature_available_at",
+        "prediction_time_cutoff",
+        "created_at",
+    ):
+        value = row.get(key)
+        if value not in (None, ""):
+            return value
+    return None
+
+
 def _build_labeled_matrix(
     rows: list[dict[str, Any]],
     *,
     horizon: str,
     feature_columns: list[str],
-) -> tuple[list[list[float]], list[int]]:
+) -> tuple[list[list[float]], list[int], list[Any]]:
     labels = []
     features = []
+    timestamps: list[Any] = []
     for row in rows:
         label = _label(row, horizon)
         if label is None:
             continue
         labels.append(label)
         features.append(_row_features(row, feature_columns))
-    return features, labels
+        timestamps.append(_row_timestamp(row))
+    return features, labels, timestamps
 
 
 def _chronological_split(
@@ -413,7 +433,7 @@ def train_supervised_prediction_model(
     artifact_path: Path | str | None = None,
 ) -> SupervisedTrainingResult:
     feature_columns = list(feature_columns or DEFAULT_FEATURE_COLUMNS)
-    features, labels = _build_labeled_matrix(
+    features, labels, row_timestamps = _build_labeled_matrix(
         rows,
         horizon=horizon,
         feature_columns=feature_columns,
@@ -442,9 +462,25 @@ def train_supervised_prediction_model(
             from sklearn.ensemble import RandomForestClassifier
             from sklearn.metrics import accuracy_score
 
-            split = max(1, int(sample_size * 0.8))
-            x_train, x_test = features[:split], features[split:]
-            y_train, y_test = labels[:split], labels[split:]
+            train_idx, test_idx = purged_time_split_indices(
+                row_timestamps,
+                test_fraction=0.2,
+                embargo_seconds=horizon_embargo_seconds(horizon),
+            )
+            if train_idx and test_idx:
+                x_train = [features[i] for i in train_idx]
+                y_train = [labels[i] for i in train_idx]
+                x_test = [features[i] for i in test_idx]
+                y_test = [labels[i] for i in test_idx]
+                validation_method = "purged_walk_forward_observe_only"
+            else:
+                # Fallback when row timestamps are missing/unparseable: an index
+                # split is NOT a forward holdout; label it honestly so the
+                # accuracy is not mistaken for out-of-sample skill.
+                split = max(1, int(sample_size * 0.8))
+                x_train, x_test = features[:split], features[split:]
+                y_train, y_test = labels[:split], labels[split:]
+                validation_method = "row_index_split_no_time_holdout_observe_only"
             model = RandomForestClassifier(n_estimators=100, max_depth=5, random_state=42)
             model.fit(x_train, y_train)
             predictions = model.predict(x_test) if x_test else []
@@ -470,7 +506,7 @@ def train_supervised_prediction_model(
                         "sample_size": sample_size,
                         "baseline_positive_rate": _positive_rate(labels),
                         "accuracy": round(float(accuracy), 4) if accuracy is not None else None,
-                        "validation_method": "chronological_80_20_observe_only",
+                        "validation_method": validation_method,
                         "promotion_eligible": False,
                         "promotion_metrics": promotion_metrics,
                         "generated_at": _now(),
@@ -542,7 +578,7 @@ def train_quant_model_suite(
 ) -> QuantModelSuiteResult:
     """Train optional quant models side by side for observe-only comparison."""
     feature_columns = list(feature_columns or DEFAULT_FEATURE_COLUMNS)
-    features, labels = _build_labeled_matrix(
+    features, labels, _row_timestamps = _build_labeled_matrix(
         rows,
         horizon=horizon,
         feature_columns=feature_columns,

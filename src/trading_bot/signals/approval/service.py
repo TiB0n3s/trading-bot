@@ -7,7 +7,10 @@ rows; callers own persistence and side effects.
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from typing import Any, Callable
+from typing import TYPE_CHECKING, Any, Callable
+
+if TYPE_CHECKING:
+    from trading_bot.signals.live.gate_context import DecisionTrace as OutputTrace
 
 from services.approval_models import (
     ApprovalDecision,
@@ -41,7 +44,7 @@ from services.ml_authority_service import (
 from services.signal_models import ApprovalResult, DecisionContext
 
 from services import rejection_categories as categories
-from src.trading_bot.runtime.authority import AuthorityMatrix
+from trading_bot.runtime.authority import AuthorityMatrix
 from trading_bot.signals.context.account_state_view import AccountStateView
 
 __all__ = [
@@ -490,6 +493,7 @@ def _approval_from_layered_model_authority(
     ml_authority_config: dict[str, Any] | None,
     raw_decision: dict[str, Any],
     confidence: Any,
+    gate_trace: OutputTrace | None = None,
 ) -> ApprovalDecision | None:
     layered = _layered_model_authority_decision(
         signal=signal,
@@ -509,6 +513,9 @@ def _approval_from_layered_model_authority(
             "final_instruction": payload.get("final_instruction"),
             "final_size_pct": payload.get("final_size_pct"),
         }
+        if gate_trace is not None:
+            gate_trace.record("layered_model_decision", payload)
+            gate_trace.record("ml_authority", account_state["ml_authority"])
     if not layered.get("allowed"):
         return None
 
@@ -579,6 +586,7 @@ def _approval_from_historical_bar_meta_label(
     ml_authority_config: dict[str, Any] | None,
     raw_decision: dict[str, Any],
     confidence: Any,
+    gate_trace: OutputTrace | None = None,
 ) -> ApprovalDecision | None:
     meta_label = _historical_bar_meta_label_authority_decision(
         signal=signal,
@@ -592,6 +600,8 @@ def _approval_from_historical_bar_meta_label(
         return None
 
     account_state["historical_bar_meta_label_authority"] = meta_label
+    if gate_trace is not None:
+        gate_trace.record("historical_bar_meta_label_authority", meta_label)
     effect = meta_label.get("effect")
     adjusted = dict(decision)
     adjusted["historical_bar_meta_label_authority"] = meta_label
@@ -656,6 +666,7 @@ def _paper_authority_promotion(
     execution_mode: str,
     ml_authority_config: dict[str, Any] | None,
     raw_decision: dict[str, Any],
+    gate_trace: OutputTrace | None = None,
 ) -> ApprovalDecision | None:
     """Shared paper-only promotion: try exploration authority, then learning override.
 
@@ -679,6 +690,8 @@ def _paper_authority_promotion(
         adjusted["reason"] = exploration["reason"]
         adjusted["paper_exploration_authority"] = exploration
         account_state["paper_exploration_authority"] = exploration
+        if gate_trace is not None:
+            gate_trace.record("paper_exploration_authority", exploration)
         _store_decision_trace(
             account_state=account_state,
             decision=adjusted,
@@ -713,6 +726,8 @@ def _paper_authority_promotion(
         adjusted["reason"] = paper_override["reason"]
         adjusted["paper_learning_authority_override"] = paper_override
         account_state["paper_learning_authority_override"] = paper_override
+        if gate_trace is not None:
+            gate_trace.record("paper_learning_authority_override", paper_override)
         _store_decision_trace(
             account_state=account_state,
             decision=adjusted,
@@ -747,6 +762,7 @@ def evaluate_approval_decision(
     tape_exception_enabled: bool,
     execution_mode: str = "paper",
     ml_authority_config: dict[str, Any] | None = None,
+    gate_trace: OutputTrace | None = None,
 ) -> ApprovalDecision:
     raw_decision = evaluate_signal(signal, claude_account_state)
     decision = normalize_claude_decision(action=action, decision=raw_decision)
@@ -804,6 +820,7 @@ def evaluate_approval_decision(
             ml_authority_config=ml_authority_config,
             raw_decision=raw_decision,
             confidence=confidence,
+            gate_trace=gate_trace,
         )
         if layered_result is not None:
             return layered_result
@@ -816,6 +833,7 @@ def evaluate_approval_decision(
             ml_authority_config=ml_authority_config,
             raw_decision=raw_decision,
             confidence=confidence,
+            gate_trace=gate_trace,
         )
         if meta_label_result is not None:
             return meta_label_result
@@ -828,6 +846,7 @@ def evaluate_approval_decision(
             execution_mode=execution_mode,
             ml_authority_config=ml_authority_config,
             raw_decision=raw_decision,
+            gate_trace=gate_trace,
         )
         if promoted is not None:
             return promoted
@@ -872,6 +891,7 @@ def evaluate_approval_decision(
                     execution_mode=execution_mode,
                     ml_authority_config=ml_authority_config,
                     raw_decision=raw_decision,
+                    gate_trace=gate_trace,
                 )
                 if promoted is not None:
                     return promoted
@@ -903,6 +923,8 @@ def evaluate_approval_decision(
                 "gate": "neutral_bias",
                 "reason": medium_reason,
             }
+            if gate_trace is not None:
+                gate_trace.record("confidence_gate_medium_override", account_state["confidence_gate_medium_override"])
 
     if (
         action == "buy"
@@ -921,6 +943,7 @@ def evaluate_approval_decision(
                 execution_mode=execution_mode,
                 ml_authority_config=ml_authority_config,
                 raw_decision=raw_decision,
+                gate_trace=gate_trace,
             )
             if promoted is not None:
                 return promoted
@@ -949,6 +972,8 @@ def evaluate_approval_decision(
             "gate": "conditional_entry_quality",
             "reason": medium_reason,
         }
+        if gate_trace is not None:
+            gate_trace.record("confidence_gate_medium_override", account_state["confidence_gate_medium_override"])
 
     if action == "buy" and not bool(decision.get("approved")):
         promoted = _paper_authority_promotion(
@@ -958,6 +983,7 @@ def evaluate_approval_decision(
             execution_mode=execution_mode,
             ml_authority_config=ml_authority_config,
             raw_decision=raw_decision,
+            gate_trace=gate_trace,
         )
         if promoted is not None:
             return promoted
@@ -975,6 +1001,8 @@ def evaluate_approval_decision(
             adjusted["position_size_pct"] = exploration["position_size_pct"]
             adjusted["paper_exploration_authority"] = exploration
             account_state["paper_exploration_authority"] = exploration
+            if gate_trace is not None:
+                gate_trace.record("paper_exploration_authority", exploration)
             _store_decision_trace(
                 account_state=account_state,
                 decision=adjusted,
@@ -1061,10 +1089,13 @@ def run_claude_and_confidence(
     log: Any,
     execution_mode: str = "paper",
     ml_authority_config: dict[str, Any] | None = None,
+    gate_trace: OutputTrace | None = None,
 ) -> ClaudeOutcome:
     weekly_perf = weekly_symbol_performance(symbol)
     account_state["weekly_symbol_performance"] = weekly_perf
     claude_account_state["weekly_symbol_performance"] = weekly_perf
+    if gate_trace is not None:
+        gate_trace.record("weekly_symbol_performance", weekly_perf)
 
     approval_decision = evaluate_approval_decision(
         signal=signal,
@@ -1078,6 +1109,7 @@ def run_claude_and_confidence(
         tape_exception_enabled=tape_exception_enabled,
         execution_mode=execution_mode,
         ml_authority_config=ml_authority_config,
+        gate_trace=gate_trace,
     )
     decision = dict(approval_decision.claude_payload or {})
 
@@ -1114,6 +1146,7 @@ def run_macro_position_gate(
     get_account_state: Callable[[], dict[str, Any]],
     sleep: Callable[[float], None],
     log: Any,
+    gate_trace: OutputTrace | None = None,
 ) -> StageOutcome:
     if action != "buy":
         return StageOutcome()
@@ -1154,6 +1187,8 @@ def run_macro_position_gate(
 
     if candidate_session:
         account_state["session_momentum"] = candidate_session
+        if gate_trace is not None:
+            gate_trace.record("session_momentum", candidate_session)
 
     def session_value(key: str, fallback_key: str | None = None):
         if candidate_session and candidate_session.get(key) is not None:
@@ -1214,6 +1249,8 @@ def run_macro_position_gate(
 
     if rotated:
         account_state["portfolio_rotation"] = rotation_info
+        if gate_trace is not None:
+            gate_trace.record("portfolio_rotation", rotation_info)
         log.warning(
             f"Portfolio rotation submitted for {symbol}: {rotation_reason}; "
             "waiting briefly for Alpaca position state to refresh"
@@ -1500,6 +1537,7 @@ def run_prediction_session_tape_gates(
     enforce_session_momentum_gate: bool,
     is_degraded_setup: Callable[[dict[str, Any]], bool],
     log: Any,
+    gate_trace: OutputTrace | None = None,
 ) -> StageOutcome:
     if action != "buy":
         return StageOutcome()
@@ -1536,20 +1574,24 @@ def run_prediction_session_tape_gates(
             f"setup_policy_action={setup_action}; "
             f"setup_label={setup_label!r}"
         )
+        _wpsig_payload = {
+            "triggered": True,
+            "ml_score": ml_score_raw,
+            "ml_sample_size": ml_sample,
+            "setup_action": setup_action,
+            "setup_label": setup_label,
+            "size_cap_pct": 0.5,
+            "reason": reason,
+        }
         apply_size_cap(
             account_state,
             cap_pct=0.5,
             state_key="weak_prediction_setup_gate",
-            payload={
-                "triggered": True,
-                "ml_score": ml_score_raw,
-                "ml_sample_size": ml_sample,
-                "setup_action": setup_action,
-                "setup_label": setup_label,
-                "size_cap_pct": 0.5,
-                "reason": reason,
-            },
+            payload=_wpsig_payload,
         )
+        if gate_trace is not None:
+            gate_trace.record("weak_prediction_setup_gate", _wpsig_payload)
+            gate_trace.record("max_position_size_pct_override", account_state.get("max_position_size_pct_override"))
         log.warning(
             f"Weak-prediction + degraded-setup gate for {symbol}: size capped at 0.5%; {reason}"
         )
@@ -1561,6 +1603,8 @@ def run_prediction_session_tape_gates(
             "is_weak_ml": is_weak_ml_bucket,
             "is_degraded_setup": is_degraded_setup_now,
         }
+        if gate_trace is not None:
+            gate_trace.record("weak_prediction_setup_gate", account_state["weak_prediction_setup_gate"])
 
     ml_confidence = prediction_gate.get("ml_prediction_confidence") or ""
     is_confident_weak_prediction = (
@@ -1571,16 +1615,20 @@ def run_prediction_session_tape_gates(
     )
     if is_confident_weak_prediction:
         pred_only_cap = env_float("PREDICTION_CONFIDENT_WEAK_SIZE_CAP_PCT", 0.80)
+        _pcwcap_payload = {
+            "ml_score": ml_score_raw,
+            "ml_confidence": ml_confidence,
+            "cap_pct": pred_only_cap,
+        }
         apply_size_cap(
             account_state,
             cap_pct=pred_only_cap,
             state_key="prediction_confident_weak_cap",
-            payload={
-                "ml_score": ml_score_raw,
-                "ml_confidence": ml_confidence,
-                "cap_pct": pred_only_cap,
-            },
+            payload=_pcwcap_payload,
         )
+        if gate_trace is not None:
+            gate_trace.record("prediction_confident_weak_cap", _pcwcap_payload)
+            gate_trace.record("max_position_size_pct_override", account_state.get("max_position_size_pct_override"))
         log.info(
             f"Prediction confident-weak size cap for {symbol}: "
             f"score={ml_score_raw} confidence={ml_confidence} → {pred_only_cap}%"
@@ -1615,6 +1663,12 @@ def run_prediction_session_tape_gates(
     account_state["ml_authority_mode"] = ml_authority.mode
     account_state["ml_authority_triggered"] = ml_authority.enforced
     account_state["ml_authority_reason"] = ml_authority.reason
+    if gate_trace is not None:
+        gate_trace.record("ml_outcome", account_state["ml_outcome"])
+        gate_trace.record("ml_authority", ml_authority_payload)
+        gate_trace.record("ml_authority_mode", ml_authority.mode)
+        gate_trace.record("ml_authority_triggered", ml_authority.enforced)
+        gate_trace.record("ml_authority_reason", ml_authority.reason)
 
     if ml_authority.enforced and ml_authority.effect_on_size == "cap":
         apply_size_cap(
@@ -1623,6 +1677,9 @@ def run_prediction_session_tape_gates(
             state_key="ml_authority_size_cap",
             payload=ml_authority_payload,
         )
+        if gate_trace is not None:
+            gate_trace.record("ml_authority_size_cap", ml_authority_payload)
+            gate_trace.record("max_position_size_pct_override", account_state.get("max_position_size_pct_override"))
         log.warning(
             f"ML authority size-down for {symbol}: mode={ml_authority.mode} "
             f"compare={ml_authority.advisory_decision} cap={ml_authority.size_cap_pct} "
@@ -1670,6 +1727,9 @@ def run_prediction_session_tape_gates(
 
     account_state["market_bias_effective"] = bias_override.get("effective_bias")
     account_state["market_bias_override_reason"] = bias_override.get("reason")
+    if gate_trace is not None:
+        gate_trace.record("market_bias_effective", account_state["market_bias_effective"])
+        gate_trace.record("market_bias_override_reason", account_state["market_bias_override_reason"])
 
     effective_bias = bias_override.get("effective_bias")
     allow_buy_from_bias = bool(bias_override.get("allow_buy"))
@@ -1716,6 +1776,9 @@ def run_prediction_session_tape_gates(
         log.warning(f"Soft-avoid prediction gate not enforced for {symbol}: {reason}")
         account_state["soft_avoid_prediction_gate_bypassed"] = True
         account_state["soft_avoid_prediction_gate_bypass_reason"] = reason
+        if gate_trace is not None:
+            gate_trace.record("soft_avoid_prediction_gate_bypassed", True)
+            gate_trace.record("soft_avoid_prediction_gate_bypass_reason", reason)
 
     if effective_bias == "live_override_neutral" and not allow_buy_from_bias:
         reason = (
@@ -1789,6 +1852,9 @@ def run_prediction_session_tape_gates(
         else "none",
         "reason": session_gate.get("reason"),
     }
+    if gate_trace is not None:
+        gate_trace.record("session_momentum_gate", session_gate)
+        gate_trace.record("session_gate_outcome", account_state["session_gate_outcome"])
 
     if session_gate.get("would_block"):
         reason = session_gate.get("reason", "session momentum gate")
@@ -1807,12 +1873,16 @@ def run_prediction_session_tape_gates(
             f"{session_gate.get('reason')}"
         )
         account_state["session_gate_size_hint"] = "reduce"
+        if gate_trace is not None:
+            gate_trace.record("session_gate_size_hint", "reduce")
     elif session_gate.get("severity") == "mature_chase_caution":
         log.info(
             f"Mature long-horizon chase caution for {symbol} BUY — reduced sizing flagged: "
             f"{session_gate.get('reason')}"
         )
         account_state["session_gate_size_hint"] = "reduce"
+        if gate_trace is not None:
+            gate_trace.record("session_gate_size_hint", "reduce")
 
     severity = session_gate.get("severity")
     session_cap = None
@@ -1825,12 +1895,16 @@ def run_prediction_session_tape_gates(
     elif severity == "hard_negative" and not enforce_session_momentum_gate:
         session_cap = env_float("SESSION_HARD_NEGATIVE_SIZE_CAP_PCT", 0.65)
     if session_cap is not None:
+        _smc_payload = {"severity": severity, "cap_pct": session_cap}
         apply_size_cap(
             account_state,
             cap_pct=session_cap,
             state_key="session_momentum_size_cap",
-            payload={"severity": severity, "cap_pct": session_cap},
+            payload=_smc_payload,
         )
+        if gate_trace is not None:
+            gate_trace.record("session_momentum_size_cap", _smc_payload)
+            gate_trace.record("max_position_size_pct_override", account_state.get("max_position_size_pct_override"))
         log.info(f"Session momentum size cap for {symbol}: severity={severity} → {session_cap}%")
 
     late_chase_gate = _late_chase_entry_risk(
@@ -1838,6 +1912,8 @@ def run_prediction_session_tape_gates(
         setup_obs=setup_obs,
     )
     account_state["late_chase_entry_gate"] = late_chase_gate
+    if gate_trace is not None:
+        gate_trace.record("late_chase_entry_gate", late_chase_gate)
     unclassified_extended = (
         str(late_chase_gate.get("setup_label") or "").lower() == "unclassified_transition"
         and late_chase_gate.get("session_distance_from_vwap_pct") is not None
@@ -1846,12 +1922,16 @@ def run_prediction_session_tape_gates(
     )
     if late_chase_gate.get("triggered"):
         cap_pct = float(late_chase_gate.get("cap_pct") or 0.50)
+        _lcsc_payload = {**late_chase_gate, "cap_pct": cap_pct}
         apply_size_cap(
             account_state,
             cap_pct=cap_pct,
             state_key="late_chase_size_cap",
-            payload={**late_chase_gate, "cap_pct": cap_pct},
+            payload=_lcsc_payload,
         )
+        if gate_trace is not None:
+            gate_trace.record("late_chase_size_cap", _lcsc_payload)
+            gate_trace.record("max_position_size_pct_override", account_state.get("max_position_size_pct_override"))
         log.warning(
             f"Late-chase entry cap for {symbol}: cap={cap_pct}% "
             f"reason={late_chase_gate.get('reason')} "
@@ -1862,16 +1942,20 @@ def run_prediction_session_tape_gates(
 
     if unclassified_extended:
         cap_pct = env_float("UNCLASSIFIED_EXTENDED_SIZE_CAP_PCT", 0.35)
+        _uesc_payload = {
+            **late_chase_gate,
+            "cap_pct": cap_pct,
+            "reason": "unclassified_transition extended above VWAP",
+        }
         apply_size_cap(
             account_state,
             cap_pct=cap_pct,
             state_key="unclassified_extended_size_cap",
-            payload={
-                **late_chase_gate,
-                "cap_pct": cap_pct,
-                "reason": "unclassified_transition extended above VWAP",
-            },
+            payload=_uesc_payload,
         )
+        if gate_trace is not None:
+            gate_trace.record("unclassified_extended_size_cap", _uesc_payload)
+            gate_trace.record("max_position_size_pct_override", account_state.get("max_position_size_pct_override"))
         log.warning(
             f"Unclassified extended entry cap for {symbol}: cap={cap_pct}% "
             f"vwap={late_chase_gate.get('session_distance_from_vwap_pct')}"
@@ -1926,6 +2010,7 @@ def run_intra_session_tape_degradation_gate(
     min_setup_score: float,
     et_timezone: Any,
     log: Any,
+    gate_trace: OutputTrace | None = None,
 ) -> StageOutcome:
     if action != "buy" or not enabled:
         return StageOutcome()
@@ -1948,13 +2033,16 @@ def run_intra_session_tape_degradation_gate(
                 f"min_setup_score={min_setup_score}; "
                 f"start_hour_et={start_hour_et}"
             )
-            account_state["intra_session_tape_degradation"] = {
+            _istd_block_payload = {
                 "would_block": True,
                 "reason": reason,
                 "setup_score": setup_score,
                 "min_setup_score": min_setup_score,
                 "session_label": session_label,
             }
+            account_state["intra_session_tape_degradation"] = _istd_block_payload
+            if gate_trace is not None:
+                gate_trace.record("intra_session_tape_degradation", _istd_block_payload)
             return StageOutcome(
                 rejected=True,
                 approval=deterministic_rejection(
@@ -1964,15 +2052,20 @@ def run_intra_session_tape_degradation_gate(
                 ),
             )
 
-        account_state["intra_session_tape_degradation"] = {
+        _istd_pass_payload = {
             "would_block": False,
             "setup_score": setup_score,
             "min_setup_score": min_setup_score,
             "session_label": session_label,
         }
+        account_state["intra_session_tape_degradation"] = _istd_pass_payload
+        if gate_trace is not None:
+            gate_trace.record("intra_session_tape_degradation", _istd_pass_payload)
     except Exception as exc:
         log.warning(f"Intra-session tape degradation gate skipped for {symbol}: {exc}")
         account_state["intra_session_tape_degradation_error"] = str(exc)
+        if gate_trace is not None:
+            gate_trace.record("intra_session_tape_degradation_error", str(exc))
 
     return StageOutcome()
 
@@ -1998,6 +2091,7 @@ def run_final_approval_gates(
     compute_dominant_limiter: Callable[..., Any],
     log_event: Callable[..., Any],
     log: Any,
+    gate_trace: OutputTrace | None = None,
 ) -> ApprovalGateOutcome:
     claude_account_state = dict(account_state)
 
@@ -2037,6 +2131,9 @@ def run_final_approval_gates(
         account_state["opportunity_score_0_100"] = opportunity
         claude_account_state["opportunity_score"] = opportunity
         claude_account_state["opportunity_score_0_100"] = opportunity
+        if gate_trace is not None:
+            gate_trace.record("opportunity_score", opportunity)
+            gate_trace.record("opportunity_score_0_100", opportunity)
 
         strategy_memory = memory_for_signal(
             symbol,
@@ -2053,6 +2150,8 @@ def run_final_approval_gates(
         )
         account_state["strategy_memory"] = strategy_memory
         claude_account_state["strategy_memory"] = strategy_memory
+        if gate_trace is not None:
+            gate_trace.record("strategy_memory", strategy_memory)
 
         learned_min_score = strategy_memory.get("min_setup_score")
         if isinstance(learned_min_score, int):
@@ -2121,6 +2220,8 @@ def run_final_approval_gates(
     )
     account_state["intelligence_context"] = intelligence_context
     claude_account_state["intelligence_context"] = intelligence_context
+    if gate_trace is not None:
+        gate_trace.record("intelligence_context", intelligence_context)
 
     summary = intelligence_context.get("summary") or {}
     log.info(
@@ -2136,6 +2237,8 @@ def run_final_approval_gates(
         advisory_cap = _advisory_feature_size_cap(account_state)
         account_state["advisory_feature_size_gate"] = advisory_cap
         claude_account_state["advisory_feature_size_gate"] = advisory_cap
+        if gate_trace is not None:
+            gate_trace.record("advisory_feature_size_gate", advisory_cap)
         if advisory_cap.get("triggered"):
             cap_pct = float(advisory_cap.get("cap_pct") or 1.0)
             existing = account_state.get("max_position_size_pct_override")
@@ -2147,6 +2250,9 @@ def run_final_approval_gates(
             claude_account_state["advisory_feature_max_position_size_pct"] = account_state[
                 "max_position_size_pct_override"
             ]
+            if gate_trace is not None:
+                gate_trace.record("advisory_feature_size_cap", advisory_cap)
+                gate_trace.record("max_position_size_pct_override", account_state["max_position_size_pct_override"])
             log.warning(
                 f"Advisory feature size cap for {symbol}: "
                 f"source={advisory_cap.get('source')} cap={cap_pct}% "
@@ -2164,6 +2270,9 @@ def run_final_approval_gates(
     decision_policy_config = public_decision_policy_config()
     account_state["decision_policy_authority"] = decision_policy_config
     claude_account_state["decision_policy_authority"] = decision_policy_config
+    if gate_trace is not None:
+        gate_trace.record("decision_policy", decision_policy)
+        gate_trace.record("decision_policy_authority", decision_policy_config)
 
     log.info(
         f"DECISION_POLICY {symbol} {action.upper()}: "
@@ -2190,6 +2299,8 @@ def run_final_approval_gates(
         "reason": decision_policy.get("reason"),
     }
     claude_account_state["decision_policy_outcome"] = account_state["decision_policy_outcome"]
+    if gate_trace is not None:
+        gate_trace.record("decision_policy_outcome", account_state["decision_policy_outcome"])
 
     if (
         action == "buy"
@@ -2199,6 +2310,8 @@ def run_final_approval_gates(
         account_state["decision_policy_outcome"]["enforced"] = True
         account_state["decision_policy_outcome"]["effect_on_execution"] = "block"
         claude_account_state["decision_policy_outcome"] = account_state["decision_policy_outcome"]
+        if gate_trace is not None:
+            gate_trace.record("decision_policy_outcome", account_state["decision_policy_outcome"])
         reason = decision_policy.get("reason", "decision policy blocked setup")
         log.warning(f"Decision policy gate blocked {symbol} BUY before Claude: {reason}")
         return ApprovalGateOutcome(
@@ -2255,6 +2368,9 @@ def run_final_approval_gates(
         account_state["decision_policy_outcome"]["enforced"] = True
         account_state["decision_policy_outcome"]["effect_on_size"] = "size_down"
         claude_account_state["decision_policy_outcome"] = account_state["decision_policy_outcome"]
+        if gate_trace is not None:
+            gate_trace.record("decision_policy_size_down", account_state["decision_policy_size_down"])
+            gate_trace.record("decision_policy_outcome", account_state["decision_policy_outcome"])
         claude_account_state["max_position_size_pct"] = reduced_limit
         claude_account_state["decision_policy_max_position_size_pct"] = reduced_limit
 
@@ -2296,6 +2412,7 @@ def run_final_approval_gates(
             account_state=account_state,
             ml_prediction_bucket=ml_prediction_bucket,
             compute_dominant_limiter=compute_dominant_limiter,
+            gate_trace=gate_trace,
         )
 
     built_context = context_runtime.refresh(

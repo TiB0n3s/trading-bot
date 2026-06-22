@@ -82,3 +82,40 @@ def authority_for_label(label_name: str) -> str:
         if label_name in tier.labels:
             return tier.allowed_authority
     return "unknown_label_observe_only"
+
+
+_LABEL_TO_TIER: dict[str, int] = {
+    label: tier.tier for tier in LABEL_TIERS for label in tier.labels
+}
+
+# Paper meta-label trade authority (veto / approve / size) requires the model's
+# WEAKEST primary training label to be Tier <= 3 (paper_only_candidate_review).
+# Tier 4+ (observe_only_ranking / diagnostic_only) grant ranking/observation
+# only, never trade authority. Enforces the label-hierarchy rule in code, not
+# just documentation.
+META_LABEL_AUTHORITY_MIN_TIER = 3
+
+# Labels the historical-bar ensemble actually trains on today (all Tier 4),
+# used as the default when a caller does not declare its training labels.
+DEFAULT_HISTORICAL_BAR_TRAINING_LABELS: tuple[str, ...] = (
+    "triple_barrier_label",
+    "trend_scan_label",
+)
+
+
+def tier_for_label(label_name: str) -> int:
+    """Return the tier number for a label (higher = weaker; 99 = unknown)."""
+    return _LABEL_TO_TIER.get(str(label_name or ""), 99)
+
+
+def labels_support_meta_label_authority(label_names: Any) -> bool:
+    """True only if EVERY training label is Tier <= META_LABEL_AUTHORITY_MIN_TIER.
+
+    A single Tier-4+ (observe-only / diagnostic) label restricts the model to
+    ranking/observation, so it may not veto, approve, or size a trade.
+    """
+    labels = [str(x) for x in (label_names or []) if str(x)]
+    if not labels:
+        return False
+    weakest_tier = max(tier_for_label(name) for name in labels)
+    return weakest_tier <= META_LABEL_AUTHORITY_MIN_TIER

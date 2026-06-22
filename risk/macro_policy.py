@@ -94,8 +94,15 @@ def apply_macro_overrides(
 
     risk_multiplier = context.get("risk_multiplier")
     if isinstance(risk_multiplier, (int, float)) and not isinstance(risk_multiplier, bool):
-        out["risk_multiplier"] = float(risk_multiplier)
-        applied.append(f"risk_multiplier={risk_multiplier}")
+        # Clamp to [0.0, 1.0]: a market_context.json override (authored by the
+        # intelligence pipeline) may only TIGHTEN position sizing, never amplify
+        # it. An unbounded multiplier (e.g. 3.0) would silently scale every BUY.
+        clamped = max(0.0, min(1.0, float(risk_multiplier)))
+        out["risk_multiplier"] = clamped
+        if clamped != float(risk_multiplier):
+            applied.append(f"risk_multiplier={risk_multiplier}->clamped {clamped}")
+        else:
+            applied.append(f"risk_multiplier={clamped}")
 
     if isinstance(context.get("block_new_buys"), bool):
         out["block_new_buys"] = context["block_new_buys"]

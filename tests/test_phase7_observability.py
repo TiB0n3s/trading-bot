@@ -54,14 +54,17 @@ def test_sizing_kill_switch_returns_uncapped_adjusted_size():
     os.environ["POLICY_SIZING_ENABLED"] = "false"
     try:
         account_state = {"buy_opportunity": {"buy_opportunity_recommendation": "avoid"}}
+        # The macro risk_multiplier may only tighten size (clamped to [0, 1]),
+        # so a 0.75 multiplier still demonstrates the kill-switch passthrough
+        # (base * multiplier, uncapped by the opportunity buckets).
         final_pct = sizing_policy.apply_buy_opportunity_sizing(
             symbol="AAPL",
             action="buy",
             base_position_size_pct=1.0,
-            risk_multiplier=1.25,
+            risk_multiplier=0.75,
             account_state=account_state,
         )
-        assert_equal(final_pct, 1.25, "disabled sizing returns adjusted base size")
+        assert_equal(final_pct, 0.75, "disabled sizing returns adjusted base size")
         assert_equal(account_state["buy_opportunity_sizing"]["enabled"], False, "disabled sizing noted")
     finally:
         if previous is None:

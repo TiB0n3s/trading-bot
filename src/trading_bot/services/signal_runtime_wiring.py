@@ -162,6 +162,8 @@ def build_live_signal_processor(*, container: Any, runtime: Any) -> LiveSignalPr
             write_recent_sell=runtime._write_recent_sell,
             last_order=runtime._last_order,
             last_sell=runtime._last_sell,
+            claim_cooldown=runtime._claim_cooldown,
+            release_cooldown=runtime._release_cooldown,
         )
     )
 

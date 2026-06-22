@@ -207,6 +207,14 @@ class PredictionCacheService:
         with self._lock:
             if target_date != self._cache_market_date:
                 return None
+            # Staleness gate: if the background loader is wedged or was never
+            # started, do NOT serve hours-old predictions. Fail open to "no
+            # prediction" (None) so the downstream gate treats ML as absent
+            # rather than authoritative. Threshold mirrors status().
+            if self._last_loaded_at is None or (
+                time.time() - self._last_loaded_at
+            ) > self.ttl_seconds * 2:
+                return None
             prediction = self._cache.get(symbol)
             return dict(prediction) if prediction else None
 

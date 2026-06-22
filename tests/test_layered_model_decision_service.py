@@ -37,6 +37,10 @@ def _meta_config(**overrides):
         "min_baseline_delta": 0.0,
         "max_position_size_pct": 1.5,
         "can_veto": True,
+        # Opt into trade authority with a Tier-3 training label so these tests
+        # exercise the meta-label veto/approve/size logic. Production trains on
+        # Tier-4 labels, which are restricted to observe-only (#10).
+        "training_labels": ["return_15m"],
     }
     config.update(overrides)
     return {"historical_bar_meta_label_authority": config}

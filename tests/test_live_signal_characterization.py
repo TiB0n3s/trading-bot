@@ -105,6 +105,8 @@ def _approved_downstream(**overrides):
         "app.evaluate_strategy_observe_only": MagicMock(return_value=_StrategyResult()),
         "app._pre_order_safety_check": MagicMock(return_value=(True, "second-look ok")),
         "app._one_bar_confirmation_hold": MagicMock(return_value=(True, "one-bar ok")),
+        "app._claim_cooldown": MagicMock(return_value=True),
+        "app._release_cooldown": MagicMock(),
     }
     base.update(overrides)
     return base

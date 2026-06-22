@@ -55,11 +55,33 @@ class RiskConfig:
     # off=no effect (default); observe=log only; warn=annotate; block=reject buys
     regime_circuit_breaker_mode: str = "off"
 
+    # Final sizing invariants (applied post-sizing, before order submission)
+    # Absolute hard ceiling on any single order's position_size_pct. Backstops a
+    # malformed/hallucinated Claude size or an uncapped sizing bucket. (#6)
+    max_position_size_pct: float = 5.0
+    # Per-symbol projected exposure cap: (existing position value + this order's
+    # notional) / balance must not exceed this. Applied even on first entry. (#5)
+    per_symbol_exposure_cap_pct: float = 4.0
+
     # Misc signal-level risk gates
     enforce_session_momentum_gate: bool = True
     enforce_adaptive_churn_reentry: bool = True
 
     def __post_init__(self) -> None:
+        _check(
+            self.max_position_size_pct > 0,
+            "max_position_size_pct",
+            "MAX_POSITION_SIZE_PCT",
+            self.max_position_size_pct,
+            "must be > 0",
+        )
+        _check(
+            self.per_symbol_exposure_cap_pct > 0,
+            "per_symbol_exposure_cap_pct",
+            "PER_SYMBOL_EXPOSURE_CAP_PCT",
+            self.per_symbol_exposure_cap_pct,
+            "must be > 0",
+        )
         _check(
             self.macro_position_count_floor >= 0,
             "macro_position_count_floor",
@@ -178,6 +200,8 @@ def load_risk_config(**overrides) -> RiskConfig:
         regime_circuit_breaker_mode=env_str("REGIME_CIRCUIT_BREAKER_MODE", "off").lower(),
         enforce_session_momentum_gate=env_bool("ENFORCE_SESSION_MOMENTUM_GATE", True),
         enforce_adaptive_churn_reentry=env_bool("ENFORCE_ADAPTIVE_CHURN_REENTRY", True),
+        max_position_size_pct=env_float("MAX_POSITION_SIZE_PCT", 5.0),
+        per_symbol_exposure_cap_pct=env_float("PER_SYMBOL_EXPOSURE_CAP_PCT", 4.0),
     )
     kwargs.update(overrides)
     return RiskConfig(**kwargs)

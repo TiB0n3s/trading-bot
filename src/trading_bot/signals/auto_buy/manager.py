@@ -1757,6 +1757,10 @@ def evaluate_auto_buy_candidate(
         decision = "skip"
         severity = "low"
 
+    # Records which paper promotion (if any) overrode an original hard block, so
+    # the operative hard_block_reason can stay nulled (no behavior change) while
+    # the override remains explicitly auditable alongside hard_block_audit_*. (#23)
+    hard_block_overridden_by: str | None = None
     paper_promotion_applied = False
     paper_promotion_reason = None
     paper_promotion_soft_blocks_only = paper_strong_evidence_soft_block_only(hard_block_reasons)
@@ -1782,6 +1786,7 @@ def evaluate_auto_buy_candidate(
         paper_promotion_applied = True
         if hard_block_reasons:
             hard_block_reason = None
+            hard_block_overridden_by = "paper_strong_evidence"
         paper_promotion_reason = (
             "paper_strong_evidence:"
             f"score={score:.2f}>={strong_threshold + AUTO_BUY_PAPER_STRONG_EVIDENCE_SCORE_BUFFER:.2f};"
@@ -1816,6 +1821,7 @@ def evaluate_auto_buy_candidate(
         paper_exploration_fallback_applied = True
         if hard_block_reasons:
             hard_block_reason = None
+            hard_block_overridden_by = "paper_exploration_fallback"
         paper_exploration_fallback_reason = (
             "paper_exploration_fallback:"
             f"score={score:.2f}>={AUTO_BUY_PAPER_EXPLORATION_MIN_SCORE:.2f};"
@@ -1892,6 +1898,7 @@ def evaluate_auto_buy_candidate(
             if hard_block_reasons:
                 learned_tiebreaker_overrode_soft_blocks = True
                 hard_block_reason = None
+                hard_block_overridden_by = "learned_tiebreaker"
             reasons.append(
                 f"learned_tiebreaker_promoted:{learned_tiebreaker_reason}:gap={threshold_gap:.2f}"
             )
@@ -1910,6 +1917,7 @@ def evaluate_auto_buy_candidate(
         "strong_buy_threshold": strong_threshold,
         "reason": "; ".join(reasons) if reasons else "no positive auto-buy evidence",
         "hard_block_reason": hard_block_reason,
+        "hard_block_overridden_by": hard_block_overridden_by,
         "hard_block_audit_active": bool(hard_block_audit_reasons),
         "hard_block_audit_reason": hard_block_audit_reason,
         "hard_block_audit_reasons": hard_block_audit_reasons,
@@ -2778,7 +2786,14 @@ def main() -> int:
             )
 
         log_candidate_started = time.monotonic()
-        log_candidate(candidate, live_buy_enabled=args.live and AUTO_BUY_LIVE_BUYS, order=order)
+        # Gate the durable "executable" marker on cash-mode too, so the
+        # persisted snapshot flag can never be 1 in cash modes regardless of the
+        # bridge's separate runtime check. (#17)
+        log_candidate(
+            candidate,
+            live_buy_enabled=args.live and AUTO_BUY_LIVE_BUYS and not is_cash_mode(),
+            order=order,
+        )
         if AUTO_BUY_TIMING_LOG_ENABLED:
             log_candidate_elapsed = time.monotonic() - log_candidate_started
             if log_candidate_elapsed >= 0.25:

@@ -3,11 +3,17 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Callable
+from typing import TYPE_CHECKING, Any, Callable
 
+if TYPE_CHECKING:
+    from trading_bot.signals.live.gate_context import DecisionTrace as OutputTrace
+
+from config.risk import load_risk_config
 from services.signal_models import ApprovalResult
 from services.signal_models import SizingDecision as PipelineSizingDecision
 from services.slippage_kelly_sizing_service import calculate_slippage_adjusted_kelly_cap
+
+_risk_cfg = load_risk_config()
 
 
 @dataclass(frozen=True)
@@ -129,6 +135,7 @@ def apply_size_cap(
     cap_pct: float,
     state_key: str,
     payload: dict[str, Any],
+    gate_trace: OutputTrace | None = None,
 ) -> float:
     existing = account_state.get("max_position_size_pct_override")
     cap_pct = float(cap_pct)
@@ -136,6 +143,9 @@ def apply_size_cap(
         min(float(existing), cap_pct) if existing is not None else cap_pct
     )
     account_state[state_key] = payload
+    if gate_trace is not None:
+        gate_trace.record(state_key, payload)
+        gate_trace.record("max_position_size_pct_override", account_state["max_position_size_pct_override"])
     return account_state["max_position_size_pct_override"]
 
 
@@ -145,6 +155,7 @@ def build_conviction_stack(
     account_state: dict[str, Any],
     ml_prediction_bucket: Callable[[Any], str],
     compute_dominant_limiter: Callable[[dict[str, Any]], str],
+    gate_trace: OutputTrace | None = None,
 ) -> dict[str, Any]:
     if action != "buy":
         return {}
@@ -163,7 +174,76 @@ def build_conviction_stack(
     }
     account_state["conviction_stack"] = conviction_stack
     account_state["dominant_limiter"] = compute_dominant_limiter(account_state)
+    if gate_trace is not None:
+        gate_trace.record("conviction_stack", conviction_stack)
+        gate_trace.record("dominant_limiter", account_state["dominant_limiter"])
     return conviction_stack
+
+
+def _apply_final_sizing_invariants(
+    *,
+    symbol: str,
+    action: str,
+    final_pct: float,
+    account_state: dict[str, Any],
+    log: Any = None,
+) -> list[SizeCap]:
+    """Hard sizing invariants applied independently of per-condition caps.
+
+    Returns SizeCap entries the caller folds into the final size:
+      * ``absolute_ceiling`` (#6): MAX_POSITION_SIZE_PCT backstop against a
+        malformed/hallucinated Claude size or an uncapped sizing bucket.
+      * ``projected_exposure`` (#5, buys only): caps so that
+        (existing position value + this order's notional) does not exceed the
+        per-symbol exposure cap — applied even on a first entry.
+    """
+    caps: list[SizeCap] = []
+
+    ceiling = float(_risk_cfg.max_position_size_pct)
+    if final_pct > ceiling:
+        caps.append(SizeCap("absolute_ceiling", ceiling, f"hard ceiling {ceiling:.2f}%"))
+        if log:
+            log.warning(
+                f"Position size ceiling for {symbol}: "
+                f"{final_pct:.2f}% -> {ceiling:.2f}% (MAX_POSITION_SIZE_PCT)"
+            )
+
+    if action == "buy":
+        balance = float(account_state.get("balance") or 0)
+        existing = account_state.get("current_symbol_position") or {}
+        try:
+            existing_value = float(existing.get("qty") or 0) * float(
+                existing.get("current_price") or 0
+            )
+        except Exception:
+            existing_value = 0.0
+        if balance > 0:
+            cap_pct = float(_risk_cfg.per_symbol_exposure_cap_pct)
+            existing_pct = existing_value / balance * 100.0
+            headroom = max(0.0, cap_pct - existing_pct)
+            if final_pct > headroom:
+                caps.append(
+                    SizeCap(
+                        "projected_exposure",
+                        round(headroom, 4),
+                        (
+                            f"per-symbol exposure cap {cap_pct:.2f}%: existing "
+                            f"{existing_pct:.2f}% leaves {headroom:.2f}% headroom"
+                        ),
+                    )
+                )
+                account_state["projected_exposure_cap"] = {
+                    "cap_pct": cap_pct,
+                    "existing_pct": round(existing_pct, 4),
+                    "headroom_pct": round(headroom, 4),
+                }
+                if log:
+                    log.warning(
+                        f"Projected per-symbol exposure cap for {symbol}: "
+                        f"{final_pct:.2f}% -> {headroom:.2f}% "
+                        f"(existing {existing_pct:.2f}% + order, cap {cap_pct:.2f}%)"
+                    )
+    return caps
 
 
 def apply_final_sizing(
@@ -175,6 +255,7 @@ def apply_final_sizing(
     account_state: dict[str, Any],
     apply_buy_opportunity_sizing: Callable[..., float],
     log: Any = None,
+    gate_trace: OutputTrace | None = None,
 ) -> SizingDecision:
     requested = float(decision.get("position_size_pct") or 1.0)
     capped_request = requested
@@ -186,6 +267,8 @@ def apply_final_sizing(
             requested_size_pct=requested,
         )
         account_state["slippage_kelly_sizing"] = slippage_kelly.to_dict()
+        if gate_trace is not None:
+            gate_trace.record("slippage_kelly_sizing", account_state["slippage_kelly_sizing"])
         if slippage_kelly.action in {"cap", "zero"} and slippage_kelly.cap_pct is not None:
             apply_size_cap(
                 account_state,
@@ -228,7 +311,19 @@ def apply_final_sizing(
         risk_multiplier=risk_multiplier,
         account_state=account_state,
     )
+
+    invariant_caps = _apply_final_sizing_invariants(
+        symbol=symbol,
+        action=action,
+        final_pct=final_pct,
+        account_state=account_state,
+        log=log,
+    )
+    if invariant_caps:
+        final_pct = min(final_pct, *[cap.cap_pct for cap in invariant_caps])
+
     active_caps = collect_active_caps(account_state)
+    active_caps.extend(invariant_caps)
     tightest_cap = min(active_caps, key=lambda cap: cap.cap_pct) if active_caps else None
     dominant_limiter = (
         tightest_cap.source
@@ -245,6 +340,9 @@ def apply_final_sizing(
                 else account_state.get("max_position_size_pct_override")
             )
             account_state["conviction_stack"] = conviction_stack
+        if gate_trace is not None:
+            gate_trace.record("dominant_limiter", dominant_limiter)
+            gate_trace.record("conviction_stack", account_state.get("conviction_stack") or {})
     else:
         conviction_stack = account_state.get("conviction_stack") or {}
 

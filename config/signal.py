@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from config._env import _check, env_bool, env_float, env_int, env_str
-from src.trading_bot.config.authority_modes import (
+from trading_bot.config.authority_modes import (
     authority_mode_to_legacy_prediction_gate,
     normalize_config_authority_mode,
 )

@@ -243,12 +243,22 @@ def execute_approved_order(
     last_order: dict,
     last_sell: dict,
     log: logging.Logger,
+    claim_cooldown: Callable[[str, str, Any], bool] | None = None,
+    release_cooldown: Callable[[str, str], Any] | None = None,
 ) -> ExecutionOutcome:
     """Run the approved/rejected post-Claude order path.
 
     Returns a normalized execution outcome for reporting/learning.
+
+    When ``claim_cooldown``/``release_cooldown`` are supplied (live webhook
+    path), the cooldown slot is reserved atomically immediately before the
+    broker submit and released if no order is placed. This closes the
+    check-then-act race between the preflight cooldown read and the post-submit
+    cooldown write across gunicorn worker processes. When they are omitted
+    (e.g. portfolio rotation / tests) behavior is unchanged.
     """
     order_result = None
+    claimed_cooldown = False
 
     if decision.get("approved"):
         try:
@@ -301,6 +311,31 @@ def execute_approved_order(
                     account_state_updates={"order_path_blocked": "slippage_kelly"},
                 )
             else:
+                if claim_cooldown is not None and execution_mode != "dry_run":
+                    # Atomic cross-process admission control: reserve the
+                    # cooldown slot BEFORE submitting. If a concurrent order for
+                    # this symbol/action already claimed it (or an active
+                    # cooldown exists), fail closed rather than double-submit.
+                    claimed_cooldown = bool(claim_cooldown(symbol, action, current_et))
+                    if not claimed_cooldown:
+                        reason = (
+                            "cooldown_inflight: a concurrent order for "
+                            f"{symbol}/{action} already holds the cooldown slot"
+                        )
+                        log.warning(reason)
+                        if dedupe_key:
+                            record_webhook_status(
+                                dedupe_key=dedupe_key,
+                                status="rejected",
+                                failure_reason=reason,
+                            )
+                        return ExecutionOutcome(
+                            submitted=False,
+                            status="not_submitted",
+                            rejection_category="cooldown",
+                            rejection_reason=reason,
+                            failure_reason=reason,
+                        )
                 execution = execute_order_func(
                     symbol=symbol,
                     action=action,
@@ -322,6 +357,8 @@ def execute_approved_order(
                 order_result = execution.order_result
 
                 if execution.rejection_category:
+                    if claimed_cooldown and release_cooldown is not None:
+                        release_cooldown(symbol, action)
                     rejection_adapter.reject_approval_decision(
                         execution_rejection_decision(execution)
                     )
@@ -340,6 +377,10 @@ def execute_approved_order(
                             write_recent_sell(symbol, current_et, price)
                 else:
                     log.error(f"Order placement failed for {symbol}")
+                    if claimed_cooldown and release_cooldown is not None:
+                        # No order placed; release the reservation so a
+                        # legitimate retry is not blocked for the full window.
+                        release_cooldown(symbol, action)
                     if dedupe_key:
                         record_webhook_status(
                             dedupe_key=dedupe_key,
@@ -351,6 +392,11 @@ def execute_approved_order(
 
         except Exception as exc:
             log.exception(f"APPROVED ORDER PATH CRASHED for {symbol} {action.upper()}: {exc}")
+            if claimed_cooldown and release_cooldown is not None:
+                try:
+                    release_cooldown(symbol, action)
+                except Exception:
+                    log.exception(f"cooldown release failed for {symbol} {action}")
             rejection_adapter.reject_approval_decision(
                 deterministic_rejection(
                     category="order_path_exception",

@@ -41,6 +41,11 @@ def _config(**overrides):
         "min_baseline_delta": 0.0,
         "max_position_size_pct": 1.5,
         "can_veto": True,
+        # Opt into trade authority with a Tier-3 (paper_only) training label so
+        # these tests exercise the veto/approve/size logic. Production uses the
+        # default Tier-4 labels, which are restricted to observe-only (see
+        # test_meta_label_observe_only_with_tier4_default_labels).
+        "training_labels": ["return_15m"],
     }
     config.update(overrides)
     return config
@@ -115,12 +120,34 @@ def test_meta_label_does_not_apply_outside_paper():
     assert_equal(outcome["effect"], "none", "effect")
 
 
+def test_meta_label_observe_only_with_tier4_default_labels():
+    # With the default (Tier-4 observe_only_ranking) training labels, the
+    # meta-label may NOT veto/approve/size even though the strategy is paper_ready
+    # and would otherwise approve. Label-tier authority is enforced (#10).
+    account_state = {"historical_bar_paper_strategy": _strategy()}
+    config = _config()
+    config.pop("training_labels")  # fall back to the default Tier-4 labels
+    outcome = evaluate_historical_bar_meta_label_authority(
+        symbol="AAPL",
+        action="buy",
+        decision={"approved": False, "position_size_pct": 1.0},
+        account_state=account_state,
+        execution_mode="paper",
+        config=config,
+    )
+
+    assert_equal(outcome["allowed"], False, "allowed")
+    assert_equal(outcome["effect"], "none", "effect")
+    assert_equal(outcome["label_tier_enforced"], True, "label_tier_enforced")
+
+
 def main():
     tests = [
         test_meta_label_approves_rejected_layer_one_candidate,
         test_meta_label_increases_size_for_approved_candidate,
         test_meta_label_vetoes_weak_candidate,
         test_meta_label_does_not_apply_outside_paper,
+        test_meta_label_observe_only_with_tier4_default_labels,
     ]
     for test in tests:
         test()

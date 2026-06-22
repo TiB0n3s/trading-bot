@@ -171,6 +171,8 @@ class LiveSignalProcessorDeps:
     write_recent_sell: Callable[[str, Any, Any], Any]
     last_order: dict
     last_sell: dict
+    claim_cooldown: Callable[[str, str, Any], bool] | None = None
+    release_cooldown: Callable[[str, str], Any] | None = None
 
 
 class LiveSignalProcessor:
@@ -305,6 +307,7 @@ class LiveSignalProcessor:
             current_et=current_et,
             macro_risk=macro_risk,
             rejection_adapter=rejection_adapter,
+            gate_trace=ctx.trace,
         )
         if macro_gate_result.rejected:
             return self._result(context, status="rejected")
@@ -373,6 +376,7 @@ class LiveSignalProcessor:
             account_state=account_state,
             context_runtime=context_runtime,
             rejection_adapter=rejection_adapter,
+            gate_trace=ctx.trace,
         )
         if prediction_gate_result.rejected:
             return self._result(context, status="rejected")
@@ -383,6 +387,7 @@ class LiveSignalProcessor:
             price=price,
             account_state=account_state,
             rejection_adapter=rejection_adapter,
+            gate_trace=ctx.trace,
         )
         if tape_degradation_result.rejected:
             return self._result(context, status="rejected")
@@ -402,6 +407,7 @@ class LiveSignalProcessor:
             account_state=account_state,
             context_runtime=context_runtime,
             rejection_adapter=rejection_adapter,
+            gate_trace=ctx.trace,
         )
         if final_gate_result.rejected:
             return self._result(context, status="rejected")
@@ -415,6 +421,7 @@ class LiveSignalProcessor:
             account_state=account_state,
             claude_account_state=claude_account_state,
             rejection_adapter=rejection_adapter,
+            gate_trace=ctx.trace,
         )
         if claude_result.rejected:
             return self._result(context, status="rejected")
@@ -1076,6 +1083,7 @@ class LiveSignalProcessor:
             compute_dominant_limiter=self.deps.compute_dominant_limiter,
             log_event=self.deps.log_event,
             log=self.deps.log,
+            gate_trace=kwargs.get("gate_trace"),
         )
         if outcome.rejected and outcome.approval:
             return ApprovalGateResult(
@@ -1111,6 +1119,7 @@ class LiveSignalProcessor:
             execution_mode=self.deps.execution_mode,
             ml_authority_config=self.deps.ml_authority_config,
             log=self.deps.log,
+            gate_trace=kwargs.get("gate_trace"),
         )
         if outcome.rejected and outcome.approval:
             return ClaudeStageResult(
@@ -1146,6 +1155,8 @@ class LiveSignalProcessor:
             last_order=self.deps.last_order,
             last_sell=self.deps.last_sell,
             log=self.deps.log,
+            claim_cooldown=self.deps.claim_cooldown,
+            release_cooldown=self.deps.release_cooldown,
         )
         execution = ExecutionResult(
             submitted=bool(outcome.submitted),

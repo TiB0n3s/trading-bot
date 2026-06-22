@@ -17,6 +17,7 @@ from trading_bot.services.signal_models import (
     SignalContext,
     SignalRuntimeState,
 )
+from trading_bot.signals.live.gate_context import DecisionTrace as OutputTrace
 
 from .engine import DecisionEngine
 
@@ -55,12 +56,14 @@ class CanonicalDecisionOrchestrator:
         context_runtime: Any,
         preflight_result: Any | None = None,
     ) -> PipelineResult:
+        gate_trace = OutputTrace()
         engine = self.decision_engine or DecisionEngine()
         evaluation = engine.store_to_account_state(
             account_state=runtime_state.account_state,
             decision=_pre_decision(context),
             source="canonical_signal_orchestrator",
             execution_mode=_execution_mode(runtime_state),
+            gate_trace=gate_trace,
         )
         runtime_state.decision_context["canonical_orchestrator"] = {
             "status": "pre_trace_recorded",
@@ -91,8 +94,9 @@ class CanonicalDecisionOrchestrator:
         elif not result.execution.status:
             result.execution.status = "handled_by_canonical_decision_orchestrator"
 
+        _delegate = type(self.compatibility_processor).__name__
         runtime_state.account_state["canonical_orchestration_status"] = "handled"
-        runtime_state.account_state["canonical_orchestration_delegate"] = type(
-            self.compatibility_processor
-        ).__name__
+        runtime_state.account_state["canonical_orchestration_delegate"] = _delegate
+        gate_trace.record("canonical_orchestration_status", "handled")
+        gate_trace.record("canonical_orchestration_delegate", _delegate)
         return result

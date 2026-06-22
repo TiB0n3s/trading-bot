@@ -17,6 +17,27 @@ AUTHORITY_VOCABULARY = (
     "live_block",
 )
 
+# Rank of each authority mode (higher = more powerful). Used to detect a config
+# override that tries to RAISE a layer's permission above a safe ceiling.
+_AUTHORITY_RANK = {mode: index for index, mode in enumerate(AUTHORITY_VOCABULARY)}
+
+# ML / heuristic layers that must never reach cash-live authority via a config
+# file alone. A JSON override raising any of these above `paper_block` is capped
+# back to `paper_block` unless the config explicitly opts in with
+# `"allow_ml_live_promotion": true`. Promotion to live ML authority is a
+# human-owned decision, not a config edit.
+_ML_PROMOTION_GATED_LAYERS = frozenset(
+    {
+        "ml_prediction",
+        "decision_policy",
+        "paper_exploration",
+        "historical_bar_meta_label",
+        "layered_model_authority",
+        "transformer",
+    }
+)
+_ML_MAX_AUTHORITY_MODE = "paper_block"
+
 
 def normalize_authority_mode(value: str | None) -> str:
     raw = str(value or "observe").strip().lower()
@@ -160,6 +181,32 @@ def _layer_from_dict(
     return LayerAuthority(**values)
 
 
+def _cap_ml_layer_authority(layer: LayerAuthority) -> LayerAuthority:
+    """Cap an ML-gated layer's trade-ENABLING permissions at `paper_block`.
+
+    Prevents a config override from raising an ML/heuristic layer to cash-live
+    authority for actions that can cause or grow a trade (approve / increase
+    size / submit order). The purely protective permissions (block, size_down)
+    are NOT capped — they only ever stop or shrink a trade, so they are safe at
+    any level. Non-ML control layers (deterministic_risk, claude,
+    execution_guard) are unaffected entirely.
+    """
+    ceiling = _AUTHORITY_RANK[_ML_MAX_AUTHORITY_MODE]
+    values: dict[str, str] = {
+        "can_block": layer.can_block,
+        "can_size_down": layer.can_size_down,
+        "can_approve": layer.can_approve,
+        "can_increase_size": layer.can_increase_size,
+        "can_submit_order": layer.can_submit_order,
+    }
+    for field_name in ("can_approve", "can_increase_size", "can_submit_order"):
+        mode = normalize_authority_mode(values[field_name])
+        if _AUTHORITY_RANK.get(mode, 0) > ceiling:
+            mode = _ML_MAX_AUTHORITY_MODE
+        values[field_name] = mode
+    return LayerAuthority(**values)
+
+
 def load_authority_layers_from_config(
     path: str | Path | None = None,
 ) -> dict[str, LayerAuthority] | None:
@@ -179,9 +226,16 @@ def load_authority_layers_from_config(
     if not isinstance(raw_layers, dict):
         return None
 
+    # A config file alone may not promote ML layers to cash-live authority.
+    allow_ml_live_promotion = bool(payload.get("allow_ml_live_promotion"))
+
     layers = dict(DEFAULT_LAYER_AUTHORITY)
     for layer, raw in raw_layers.items():
         if not isinstance(raw, dict):
             continue
-        layers[str(layer)] = _layer_from_dict(raw, base=layers.get(str(layer)))
+        layer_name = str(layer)
+        built = _layer_from_dict(raw, base=layers.get(layer_name))
+        if layer_name in _ML_PROMOTION_GATED_LAYERS and not allow_ml_live_promotion:
+            built = _cap_ml_layer_authority(built)
+        layers[layer_name] = built
     return layers

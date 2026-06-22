@@ -127,3 +127,43 @@ def write_recent_sell(
         cooldown_repository.write_recent_sell(symbol, ts.isoformat(), price)
     except Exception as exc:
         log.error(f"_write_recent_sell failed for {symbol}: {exc}")
+
+
+def claim_cooldown(
+    *,
+    symbol: str,
+    action: str,
+    ts: datetime,
+    cooldown_repository: Any,
+    log: Any,
+    window_seconds: int = 15 * 60,
+) -> bool:
+    """Atomically reserve the cooldown slot before submitting an order.
+
+    Returns True only if this caller now owns the cooldown. Returns False if an
+    active cooldown already exists OR the claim could not be performed — both
+    cases fail CLOSED (do not submit), since the purpose is to prevent
+    concurrent duplicate orders across gunicorn worker processes.
+    """
+    try:
+        claimed, _existing = cooldown_repository.claim_cooldown(
+            symbol, action, ts.isoformat(), window_seconds
+        )
+        return bool(claimed)
+    except Exception as exc:
+        log.error(f"_claim_cooldown failed for {symbol}/{action}: {exc}")
+        return False
+
+
+def release_cooldown(
+    *,
+    symbol: str,
+    action: str,
+    cooldown_repository: Any,
+    log: Any,
+) -> None:
+    """Release a cooldown reservation when no order was submitted."""
+    try:
+        cooldown_repository.release_cooldown(symbol, action)
+    except Exception as exc:
+        log.error(f"_release_cooldown failed for {symbol}/{action}: {exc}")

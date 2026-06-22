@@ -591,6 +591,25 @@ def _write_recent_sell(symbol, ts, price):
     )
 
 
+def _claim_cooldown(symbol, action, ts):
+    return signal_cooldowns.claim_cooldown(
+        symbol=symbol,
+        action=action,
+        ts=ts,
+        cooldown_repository=cooldown_repo,
+        log=logger,
+    )
+
+
+def _release_cooldown(symbol, action):
+    signal_cooldowns.release_cooldown(
+        symbol=symbol,
+        action=action,
+        cooldown_repository=cooldown_repo,
+        log=logger,
+    )
+
+
 def _refresh_signal_history(symbol):
     """Re-read the last 10 signals for `symbol` from trades.db into _signal_history.
 

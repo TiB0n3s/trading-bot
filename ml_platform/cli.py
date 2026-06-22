@@ -52,8 +52,8 @@ from services.ml_promotion_metrics_service import (
     PromotionMetricsConfig,
     build_ml_promotion_metrics_payload,
 )
-from src.trading_bot.learning.features import feature_registry_summary
-from src.trading_bot.learning.labels import label_hierarchy_summary
+from trading_bot.learning.features import feature_registry_summary
+from trading_bot.learning.labels import label_hierarchy_summary
 
 
 def main() -> int:

@@ -6,7 +6,12 @@ from typing import Any
 
 from services.historical_bar_paper_strategy_service import build_historical_bar_paper_strategy
 
-from src.trading_bot.runtime.authority import AuthorityMatrix
+from trading_bot.learning.labels import (
+    DEFAULT_HISTORICAL_BAR_TRAINING_LABELS,
+    META_LABEL_AUTHORITY_MIN_TIER,
+    labels_support_meta_label_authority,
+)
+from trading_bot.runtime.authority import AuthorityMatrix
 
 
 def _dict(value: Any) -> dict[str, Any]:
@@ -40,6 +45,28 @@ def evaluate_historical_bar_meta_label_authority(
     cfg = _dict(config)
     if action != "buy" or not cfg.get("enabled") or execution_mode not in {"paper", "dry_run"}:
         return {"allowed": False, "effect": "none", "reason": "meta-label authority disabled"}
+
+    # Label-tier authority enforcement (#10): a model may not hold more authority
+    # than its weakest primary training label supports. The historical-bar
+    # ensemble trains on Tier-4 observe_only_ranking labels (triple_barrier /
+    # trend_scan), so it is restricted to ranking/observation and may NOT veto,
+    # approve, or size a trade until retrained on higher-tier (realized,
+    # cost-aware) labels. A caller can declare actual training labels via
+    # cfg["training_labels"]; the default reflects today's Tier-4 reality.
+    training_labels = cfg.get("training_labels") or DEFAULT_HISTORICAL_BAR_TRAINING_LABELS
+    if not labels_support_meta_label_authority(training_labels):
+        return {
+            "allowed": False,
+            "effect": "none",
+            "label_tier_enforced": True,
+            "training_labels": list(training_labels),
+            "reason": (
+                "label_tier_authority_block: meta-label trained on observe-only "
+                f"labels {list(training_labels)} (weakest tier > "
+                f"{META_LABEL_AUTHORITY_MIN_TIER}); ranking/observation only, no "
+                "veto/approve/size authority"
+            ),
+        }
 
     matrix = AuthorityMatrix()
     strategy = _dict(account_state.get("historical_bar_paper_strategy"))

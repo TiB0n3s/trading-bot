@@ -63,28 +63,33 @@ def signal_staleness(
 
 
 def make_client_order_id(symbol: str, action: str, data: dict[str, Any]) -> str:
-    """Create a stable Alpaca client_order_id for idempotent broker submission."""
+    """Create a stable Alpaca client_order_id for idempotent broker submission.
+
+    The id is derived ONLY from the logical-signal identity — the upstream
+    ``_dedupe_key`` (which already folds in an explicit alert id, or
+    symbol/action/price/source/timestamp). It must NEVER incorporate the
+    current wall-clock time: injecting ``now()`` gives two deliveries of the
+    same logical signal (e.g. a Cloudflare/Nginx retry of a timestampless
+    alert) different ids, defeating Alpaca's client_order_id idempotency and
+    letting duplicate orders through. ``_dedupe_key`` is always set on the
+    webhook path (api/webhook_routes.py). If it is somehow absent we fall back
+    to the stable signal fields only — still deterministic, failing toward
+    de-duplication rather than duplication.
+    """
     dedupe_key = str(data.get("_dedupe_key") or "")
-    timestamp_hint = str(
-        data.get("timestamp")
-        or data.get("time")
-        or data.get("alert_time")
-        or data.get("alert_timestamp")
-        or datetime.now(timezone.utc).isoformat()
-    )
+    if dedupe_key:
+        identity = dedupe_key
+    else:
+        identity = json.dumps(
+            {
+                "symbol": symbol,
+                "action": action,
+                "price": data.get("price"),
+                "source": data.get("source"),
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+        )
 
-    raw = json.dumps(
-        {
-            "symbol": symbol,
-            "action": action,
-            "price": data.get("price"),
-            "source": data.get("source"),
-            "dedupe_key": dedupe_key,
-            "timestamp": timestamp_hint,
-        },
-        sort_keys=True,
-        separators=(",", ":"),
-    )
-
-    digest = hashlib.sha256(raw.encode("utf-8")).hexdigest()[:16]
+    digest = hashlib.sha256(identity.encode("utf-8")).hexdigest()[:16]
     return f"tb-{symbol.lower()}-{action.lower()}-{digest}"

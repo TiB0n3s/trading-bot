@@ -109,7 +109,10 @@ def apply_buy_opportunity_sizing(
     """Apply adaptive BUY sizing without approving or rejecting the trade."""
     log = log or logger
     base_position_size_pct = float(base_position_size_pct or 0)
-    risk_multiplier = float(risk_multiplier or 1.0)
+    # Defense-in-depth: the macro risk multiplier may only tighten, never
+    # amplify, sizing. Clamp to [0, 1] here too in case an unclamped value
+    # reaches sizing from any path. (#7)
+    risk_multiplier = max(0.0, min(1.0, float(risk_multiplier or 1.0)))
     adjusted = base_position_size_pct * risk_multiplier
 
     if action != "buy":

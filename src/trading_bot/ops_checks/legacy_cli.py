@@ -147,6 +147,8 @@ _LAZY_HANDLER_REFS = {
     "run_secrets_manager_readiness_report": "trading_bot.ops_checks.commands.secrets_manager_readiness_checks:run_secrets_manager_readiness_report",
     "run_setup_breakdown": "trading_bot.ops_checks.commands.setup_breakdown:run_setup_breakdown",
     "run_shadow_prediction_report": "trading_bot.ops_checks.commands.shadow_prediction_checks:run_shadow_prediction_report",
+    "run_prediction_coverage_report": "trading_bot.ops_checks.commands.symbol_universe_checks:run_prediction_coverage_report",
+    "run_symbol_affordability_report": "trading_bot.ops_checks.commands.symbol_universe_checks:run_symbol_affordability_report",
     "run_signal_source_readiness": "trading_bot.ops_checks.commands.signal_source_checks:run_signal_source_readiness",
     "run_audit_write_integrity": "trading_bot.ops_checks.commands.audit_write_integrity_checks:run_audit_write_integrity",
     "run_decision_snapshot_health": "trading_bot.ops_checks.commands.snapshot_checks:run_decision_snapshot_health",
@@ -1518,6 +1520,14 @@ def research_export(target_date: str) -> bool:
 
 def shadow_predictions(target_date: str) -> bool:
     return run_shadow_prediction_report(target_date, base_dir=BASE_DIR)
+
+
+def prediction_coverage(target_date: str) -> bool:
+    return run_prediction_coverage_report(target_date)
+
+
+def symbol_affordability() -> bool:
+    return run_symbol_affordability_report()
 
 
 def database_backups() -> bool:

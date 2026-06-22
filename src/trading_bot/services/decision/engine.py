@@ -9,6 +9,7 @@ from trading_bot.intelligence.adjudicator import ModelAdjudication
 from trading_bot.runtime.authority import AuthorityMatrix
 from trading_bot.runtime.gate_engine import CallableGate, GateEngine
 from trading_bot.runtime.trace import DecisionTrace, GateResult
+from trading_bot.signals.live.gate_context import DecisionTrace as OutputTrace
 
 from .gates import (
     build_cash_safe_gate,
@@ -187,6 +188,7 @@ class DecisionEngine:
         source: str,
         execution_mode: str,
         exploration: dict[str, Any] | None = None,
+        gate_trace: OutputTrace | None = None,
     ) -> DecisionEvaluation:
         evaluation = self.evaluate(
             account_state=account_state,
@@ -196,7 +198,12 @@ class DecisionEngine:
             exploration=exploration,
         )
         trace_payload = evaluation.trace.to_dict()
-        account_state["intelligence_adjudication"] = evaluation.adjudication.to_dict()
+        adjudication_payload = evaluation.adjudication.to_dict()
+        account_state["intelligence_adjudication"] = adjudication_payload
         account_state["decision_trace"] = trace_payload
         account_state["canonical_decision_trace"] = trace_payload
+        if gate_trace is not None:
+            gate_trace.record("intelligence_adjudication", adjudication_payload)
+            gate_trace.record("decision_trace", trace_payload)
+            gate_trace.record("canonical_decision_trace", trace_payload)
         return evaluation

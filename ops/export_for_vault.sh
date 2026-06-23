@@ -141,6 +141,39 @@ for logname in daily_summary after_close_learning post_session_review; do
   fi
 done
 
+daily_src="$BOT_DIR/daily_summary.log"
+daily_md="$STAGE/${DATE}-log.md"
+if [[ -s "$daily_src" ]]; then
+  python3 - "$daily_src" "$DATE" "$daily_md" <<'PY'
+import re
+import sys
+from pathlib import Path
+
+src, date, out = sys.argv[1:4]
+text = Path(src).read_text(errors="replace")
+marker = f"DAILY SUMMARY — {date}"
+idx = text.rfind(marker)
+if idx >= 0:
+    start = text.rfind("\n", 0, idx)
+    while start > 0 and set(text[start - 1:start + 1].strip()) <= {"="}:
+        prev = text.rfind("\n", 0, start - 1)
+        if prev < 0:
+            break
+        start = prev
+    start = max(start, 0)
+    finish_match = re.search(
+        rf"^.*job-finish: daily_summary exit_code=\d+.*$",
+        text[idx:],
+        flags=re.MULTILINE,
+    )
+    end = idx + finish_match.end() if finish_match else len(text)
+    summary = text[start:end].strip()
+    Path(out).write_text(
+        f"**Daily Summary: {date}**\n\n```text\n{summary}\n```\n",
+    )
+PY
+fi
+
 case "$MODE" in
   tar)
     tar -C "$WORK" -czf - "bot-export-$DATE"
@@ -150,6 +183,11 @@ case "$MODE" in
     [[ -e "$DEST" ]] && { echo "ERROR: $DEST already exists; refusing to overwrite." >&2; exit 1; }
     mkdir -p "$DEST"
     cp "$STAGE"/* "$DEST"/
+    if [[ -s "$daily_md" ]]; then
+      TOP_LEVEL_SUMMARY="$VAULT_RAW/${DATE}-log.md"
+      [[ -e "$TOP_LEVEL_SUMMARY" ]] && { echo "ERROR: $TOP_LEVEL_SUMMARY already exists; refusing to overwrite." >&2; exit 1; }
+      cp "$daily_md" "$TOP_LEVEL_SUMMARY"
+    fi
     echo "Wrote $DEST"
     ls -lah "$DEST"
     ;;

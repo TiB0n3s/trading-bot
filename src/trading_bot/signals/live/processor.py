@@ -86,7 +86,6 @@ class ApprovalGateResult:
 class LiveSignalProcessorDeps:
     log: Any
     log_rejection: Callable[..., Any]
-    record_webhook_status: Callable[..., Any]
     parse_stale_signal: Callable[[dict[str, Any]], tuple[bool, Any, str]]
     is_cash_safe_mode: Callable[[], bool]
     cash_safe_symbols: set[str]
@@ -489,11 +488,6 @@ class LiveSignalProcessor:
         )
 
         if dedupe_key:
-            self.deps.record_webhook_status(
-                dedupe_key=dedupe_key,
-                status="rejected",
-                failure_reason=format_rejection_reason(category, reason),
-            )
 
         return StageResult(rejected=True)
 
@@ -1149,7 +1143,6 @@ class LiveSignalProcessor:
             deterministic_rejection=deterministic_rejection,
             rejection_adapter=kwargs["rejection_adapter"],
             log_trade=self.deps.log_trade,
-            record_webhook_status=self.deps.record_webhook_status,
             write_cooldown=self.deps.write_cooldown,
             write_recent_sell=self.deps.write_recent_sell,
             last_order=self.deps.last_order,

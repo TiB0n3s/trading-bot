@@ -34,10 +34,10 @@ def short(v, width):
 
 
 def main():
-    secret = os.environ.get("WEBHOOK_SECRET")
+    secret = os.environ.get("BOT_AUTH_SECRET", os.environ.get("WEBHOOK_SECRET", ""))
     if not secret:
         raise SystemExit(
-            "ERROR: WEBHOOK_SECRET not set. Run: set -a; source /etc/trading-bot.env; set +a"
+            "ERROR: BOT_AUTH_SECRET not set. Run: set -a; source /etc/trading-bot.env; set +a"
         )
 
     url = f"http://localhost:5000/positions?secret={secret}"

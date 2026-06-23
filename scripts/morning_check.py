@@ -235,9 +235,10 @@ def check_alpaca():
 def check_debug_endpoint():
     print("\n── Local Debug Endpoint ───────────────────────────────")
 
-    secret = os.environ.get("WEBHOOK_SECRET")
+    # Auth secret from env (optional — skip if not set)
+    secret = os.environ.get("BOT_AUTH_SECRET", os.environ.get("WEBHOOK_SECRET", ""))
     if not secret:
-        warn("WEBHOOK_SECRET not in current shell env; skipping /debug endpoint check")
+        warn("BOT_AUTH_SECRET not in current shell env; skipping /debug endpoint check")
         return True
 
     url = f"http://localhost:5000/debug/symbol/QQQ?secret={secret}"

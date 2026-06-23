@@ -115,7 +115,7 @@ from services.setup_context_service import (
 from services.setup_engine_service import build_default_setup_engine_service
 from services.signal_models import SignalRuntimeState
 from services.signals import cooldowns as signal_cooldowns
-from services.signals import sell_discipline, webhook_state
+from services.signals import sell_discipline
 from services.signals import timing as signal_timing
 from services.sizing_service import apply_final_sizing as apply_final_sizing  # noqa: F401
 from services.sizing_service import apply_size_cap
@@ -134,7 +134,6 @@ from strategy_constants import (
     MAX_BUYS_PER_SYMBOL_PER_DAY,
     MAX_OPEN_POSITIONS,
     SYMBOL_MARKET_ALIGNMENT,
-    WEBHOOK_DEDUPE_SECONDS,
 )
 from strategy_memory import memory_for_signal as memory_for_signal  # noqa: F401
 from symbols_config import (
@@ -152,7 +151,7 @@ from risk.account_risk import account_risk_snapshot as account_risk_snapshot  # 
 from risk.live_guards import live_guard_policy as live_guard_policy  # noqa: F401
 from risk.live_guards import live_order_allowed as live_order_allowed  # noqa: F401
 from risk.macro_policy import policy_from_market_context as policy_from_market_context  # noqa: F401
-from services import dedupe_service, trade_audit_service
+from services import trade_audit_service
 from strategy.strategy_engine import evaluate_strategy_observe_only
 from trading_bot.config.runtime import load_runtime_settings
 from trading_bot.runtime.signal_entrypoint import process_signal as process_runtime_signal
@@ -410,42 +409,19 @@ def evaluate_prediction_gate(**kwargs):
     return entry_policy.evaluate_prediction_gate(**kwargs)
 
 
-WEBHOOK_SECRET = os.environ.get("WEBHOOK_SECRET", "changeme")
+
 ALLOW_QUERY_STRING_SECRET = os.environ.get(
     "ALLOW_QUERY_STRING_SECRET",
     "false",
 ).strip().lower() in ("1", "true", "yes", "on")
 
 
-def _webhook_dedupe_key(symbol, action, price):
-    return webhook_state.webhook_dedupe_key(symbol, action, price)
-
-
-def _is_duplicate_webhook(symbol, action, price):
-    return webhook_state.is_duplicate_webhook(
-        symbol=symbol,
-        action=action,
-        price=price,
-        cooldown_repository=cooldown_repo,
-        dedupe_seconds=WEBHOOK_DEDUPE_SECONDS,
-        log=logger,
-    )
-
-
 def _successful_buys_today(symbol):
-    return webhook_state.successful_buys_today(
-        symbol=symbol,
-        trades_repository=trades_repo,
-        log=logger,
-    )
+    return trades_repo.successful_buys_today(symbol)
 
 
 def _filled_buys_today(symbol):
-    return webhook_state.filled_buys_today(
-        symbol=symbol,
-        trades_repository=trades_repo,
-        log=logger,
-    )
+    return trades_repo.filled_buys_today(symbol)
 
 
 _last_order: dict = {}  # {(symbol, action): datetime in ET} — reset on restart
@@ -630,25 +606,12 @@ def _load_market_context():
     _market_context_service.load()
 
 
-def _make_dedupe_key(data):
-    return dedupe_service.make_dedupe_key(data)
-
-
-def _record_webhook_event(dedupe_key, data):
-    try:
-        return dedupe_service.record_webhook_event(dedupe_key, data, WEBHOOK_DEDUPE_SECONDS)
-    except Exception as e:
-        logger.error(f"Webhook dedupe persistence failed: {e}")
-        return True
-
-
 def _trade_audit_recorder():
     return trade_audit_service.TradeAuditService(
         market_bias=_market_bias,
         trend_table=_trend_table,
         ml_prediction_bucket=_ml_prediction_bucket,
         log=logger,
-        mark_webhook_event_status=dedupe_service.mark_webhook_event_status,
     )
 
 
@@ -694,7 +657,8 @@ def validate_secret(req):
     if not secret and ALLOW_QUERY_STRING_SECRET:
         secret = query_secret
 
-    if secret != WEBHOOK_SECRET:
+    _secret = os.environ.get("WEBHOOK_SECRET", "changeme")
+    if secret != _secret:
         logger.warning(f"Invalid secret from {req.remote_addr}")
         abort(401)
     if query_secret and ALLOW_QUERY_STRING_SECRET:
@@ -1069,14 +1033,12 @@ def _evaluate_preflight(runtime_state: SignalRuntimeState):
             get_position=broker_service.get_position,
             read_cooldown=_read_cooldown,
             read_recent_sell=_read_recent_sell,
-            is_duplicate_webhook=_is_duplicate_webhook,
             adaptive_churn_reentry_allowed=_adaptive_churn_reentry_allowed,
             successful_buys_today=_successful_buys_today,
             filled_buys_today=_filled_buys_today,
             cluster_exposure=_cluster_exposure,
             max_buys_per_symbol_per_day=MAX_BUYS_PER_SYMBOL_PER_DAY,
             session_max_trade_count=int(os.getenv("SESSION_MAX_TRADE_COUNT", "3")),
-            webhook_dedupe_seconds=WEBHOOK_DEDUPE_SECONDS,
             daily_loss_limit_pct=DAILY_LOSS_LIMIT_PCT,
         )
     )

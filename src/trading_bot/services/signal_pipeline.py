@@ -6,7 +6,6 @@ from dataclasses import dataclass
 from typing import Any, Callable
 
 from exceptions import ValidationError
-from rejection_categories import format_rejection_reason
 from services.observability import stage_timer
 from services.preflight_service import PreflightResult
 from services.signal_models import (
@@ -24,7 +23,6 @@ class SignalPipelineDeps:
     build_context_runtime: Callable[[SignalRuntimeState], Any]
     evaluate_preflight: Callable[[SignalRuntimeState], PreflightResult]
     log_rejection: Callable[..., None]
-    mark_webhook_event_status: Callable[..., None]
     logger: object
     live_signal_processor: Any | None = None
 
@@ -42,16 +40,6 @@ class SignalPipeline:
                 context = self.normalize(raw_signal)
         except ValidationError as exc:
             self.deps.logger.warning(f"Invalid signal payload rejected: {exc}")
-            dedupe_key = raw_signal.get("_dedupe_key")
-            if dedupe_key:
-                self.deps.mark_webhook_event_status(
-                    dedupe_key,
-                    "rejected",
-                    failure_reason=format_rejection_reason(
-                        "payload_validation",
-                        str(exc),
-                    ),
-                )
             return PipelineResult(handled=True, error=exc)
 
         with stage_timer("runtime_state"):
@@ -79,12 +67,6 @@ class SignalPipeline:
                 price=context.price,
                 account_state=runtime_state.account_state,
             )
-            if context.dedupe_key:
-                self.deps.mark_webhook_event_status(
-                    context.dedupe_key,
-                    "rejected",
-                    failure_reason=format_rejection_reason(category, reason),
-                )
             return PipelineResult(handled=True, context=context)
 
         with stage_timer("canonical_decision_orchestration"):

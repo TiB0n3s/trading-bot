@@ -61,9 +61,6 @@ def build_live_signal_processor(*, container: Any, runtime: Any) -> LiveSignalPr
                     )
                 )
             ),
-            record_webhook_status=(
-                lambda **kwargs: runtime._trade_audit_recorder().record_webhook_status(**kwargs)
-            ),
             parse_stale_signal=runtime._is_signal_stale,
             is_cash_safe_mode=runtime.is_cash_safe_mode,
             cash_safe_symbols=runtime.CASH_SAFE_SYMBOLS,
@@ -201,15 +198,6 @@ def build_signal_pipeline_deps(*, container: Any, runtime: Any) -> SignalPipelin
                     reason=reason,
                     price=price,
                     account_state=account_state,
-                )
-            )
-        ),
-        mark_webhook_event_status=(
-            lambda dedupe_key, status, **kwargs: (
-                runtime._trade_audit_recorder().record_webhook_status(
-                    dedupe_key=dedupe_key,
-                    status=status,
-                    **kwargs,
                 )
             )
         ),

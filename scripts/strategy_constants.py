@@ -14,8 +14,6 @@ MARKET_CLOSE_MINUTES = 16 * 60
 DAILY_LOSS_LIMIT_PCT = -3.0
 MAX_BUYS_PER_SYMBOL_PER_DAY = 2
 MAX_OPEN_POSITIONS = 12
-WEBHOOK_DEDUPE_SECONDS = 60
-
 # Feature flag: when true, BUY trend confirmation uses _required_buy_confirmations()
 # instead of the fixed 3-BUY rule. Enable with:
 # ADAPTIVE_BUY_CONFIRMATION_ENABLED=true

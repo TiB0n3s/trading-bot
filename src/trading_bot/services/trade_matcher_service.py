@@ -76,7 +76,7 @@ def entry_source_for_row(row) -> str:
     reason = str(row_get(row, "rejection_reason") or "").lower()
     if confidence == "auto_buy_manager" or reason.startswith("auto_buy_manager:"):
         return "auto_buy_manager"
-    return "webhook_buy"
+    return "unknown"
 
 
 class TradeMatcherService:

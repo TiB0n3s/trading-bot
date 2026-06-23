@@ -3,7 +3,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-from symbols_config import APPROVED_SYMBOLS_LIST, TRADINGVIEW_ALERT_SYMBOLS_LIST
+from symbols_config import APPROVED_SYMBOLS_LIST
 
 from repositories import auto_buy_repo
 
@@ -65,17 +65,6 @@ def run_signal_source_readiness(target_date: str, *, base_dir: Path) -> bool:
     print(f"  legacy-tv submitted               {_int_value(summary, 'legacy_tv_submitted'):>8}")
     print()
 
-    webhook_count = auto_buy_repo.tradingview_webhook_trade_count(
-        target_date,
-        TRADINGVIEW_ALERT_SYMBOLS_LIST,
-        db_path=db_path,
-    )
-    print("Webhook activity")
-    print(f"  webhook trade rows for tv cohort  {webhook_count:>8}")
-    if webhook_count == 0:
-        print("  note: no TradingView-cohort webhook trade rows found for this date")
-    print()
-
     print("Candidate distribution by source")
     source_rows = auto_buy_repo.signal_source_decision_rows(target_date, db_path=db_path)
     if source_rows:
@@ -104,14 +93,6 @@ def run_signal_source_readiness(target_date: str, *, base_dir: Path) -> bool:
     else:
         print("  none")
     print()
-
-    if source_gate_blocks and not internal_active:
-        print(
-            "[WARN] legacy TradingView cohort candidates are still blocked by "
-            "webhook-source gating. Set AUTO_BUY_SIGNAL_MODE=internal_all or "
-            "TRADINGVIEW_ALERTS_DEPRECATED=true before the indicator disappears."
-        )
-        return False
 
     print("[OK] signal-source readiness check completed")
     return True

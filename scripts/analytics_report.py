@@ -30,7 +30,6 @@ repo = AnalyticsReportRepository()
 PRIORITY_CATEGORIES = [
     "market_hours",
     "stale_signal",
-    "duplicate_webhook",
     "symbol_override",
     "circuit_breaker",
     "ghost_sell",

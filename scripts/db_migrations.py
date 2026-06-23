@@ -71,17 +71,6 @@ MIGRATIONS: tuple[Migration, ...] = (
             """,
         ),
     ),
-    Migration(
-        migration_id="20260525_003_webhook_event_status_columns",
-        description="Add webhook event lifecycle/status metadata columns.",
-        statements=(
-            "ALTER TABLE webhook_events ADD COLUMN queued_at TEXT",
-            "ALTER TABLE webhook_events ADD COLUMN started_at TEXT",
-            "ALTER TABLE webhook_events ADD COLUMN finished_at TEXT",
-            "ALTER TABLE webhook_events ADD COLUMN order_id TEXT",
-            "ALTER TABLE webhook_events ADD COLUMN client_order_id TEXT",
-            "ALTER TABLE webhook_events ADD COLUMN failure_reason TEXT",
-        ),
     ),
     Migration(
         migration_id="20260525_004_trade_decision_context_columns",

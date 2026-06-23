@@ -17,7 +17,6 @@ from services.filter_report_service import build_default_filter_report_service
 
 KNOWN_LABELS = {
     "market_hours": "Outside trading hours",
-    "duplicate_webhook": "Duplicate webhook",
     "symbol_override": "Symbol override",
     "circuit_breaker": "Daily loss circuit breaker",
     "ghost_sell": "Ghost sell",

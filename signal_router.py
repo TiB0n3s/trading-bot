@@ -43,7 +43,7 @@ def safe_float(value: Any, default: float | None = None) -> float | None:
 
 
 def normalize_signal_payload(payload: dict[str, Any]) -> dict[str, Any]:
-    """Return a normalized dict from a raw webhook payload."""
+    """Return a normalized dict from a raw signal payload."""
     payload = payload or {}
 
     symbol = str(payload.get("symbol") or "").strip().upper()
@@ -109,7 +109,6 @@ def make_dedupe_key(normalized: dict[str, Any]) -> str:
         normalized.get("raw", {}).get("alert_id")
         or normalized.get("raw", {}).get("id")
         or normalized.get("raw", {}).get("uuid")
-        or normalized.get("raw", {}).get("webhook_id")
     )
 
     if explicit:

@@ -185,7 +185,6 @@ def _bucket_rejection_reason(reason: str | None) -> str:
     PREFIX_BUCKETS = {
         "market_hours": "Outside trading hours",
         "stale_signal": "Stale signal",
-        "duplicate_webhook": "Duplicate webhook",
         "symbol_override": "Symbol override",
         "circuit_breaker": "Daily loss limit",
         "ghost_sell": "Ghost sell (no Alpaca position)",

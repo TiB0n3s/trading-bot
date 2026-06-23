@@ -722,25 +722,6 @@ def decision_snapshot_rows_between(
         ).fetchall()
 
 
-def tradingview_webhook_trade_count(target_date: str, symbols: list[str], db_path=DB_PATH) -> int:
-    if not symbols:
-        return 0
-    if not table_exists("trades", db_path=db_path):
-        return 0
-    placeholders = ",".join("?" for _ in symbols)
-    with get_connection(db_path) as con:
-        row = con.execute(
-            f"""
-            SELECT COUNT(*) AS n
-            FROM trades
-            WHERE substr(timestamp, 1, 10) = ?
-              AND symbol IN ({placeholders})
-              AND action IN ('buy', 'sell')
-            """,
-            [target_date, *symbols],
-        ).fetchone()
-    return int(row["n"] or 0) if row else 0
-
 
 def decision_snapshot_summary(target_date: str, db_path=DB_PATH):
     with get_connection(db_path) as con:

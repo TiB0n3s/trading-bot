@@ -41,9 +41,6 @@ class SignalConfig:
     sell_continuation_check_enabled: bool = True
     sell_continuation_min_supports: int = 2
 
-    # Webhook auth
-    webhook_secret: str = "changeme"
-
     # Session caps
     session_max_trade_count: int = 3
     signal_worker_count: int = 3
@@ -118,13 +115,6 @@ class SignalConfig:
             "must be >= 1",
         )
         _check(
-            bool(self.webhook_secret),
-            "webhook_secret",
-            "WEBHOOK_SECRET",
-            self.webhook_secret,
-            "must not be empty",
-        )
-        _check(
             self.session_max_trade_count >= 1,
             "session_max_trade_count",
             "SESSION_MAX_TRADE_COUNT",
@@ -186,7 +176,6 @@ def load_signal_config(**overrides) -> SignalConfig:
         max_bid_ask_spread_pct=env_float("MAX_BID_ASK_SPREAD_PCT", 0.10),
         sell_continuation_check_enabled=env_bool("SELL_CONTINUATION_CHECK_ENABLED", True),
         sell_continuation_min_supports=env_int("SELL_CONTINUATION_MIN_SUPPORTS", 2),
-        webhook_secret=env_str("WEBHOOK_SECRET", "changeme"),
         session_max_trade_count=env_int("SESSION_MAX_TRADE_COUNT", 3),
         signal_worker_count=env_int("SIGNAL_WORKER_COUNT", 3),
         late_quote_delay_min_blocks=env_int("LATE_QUOTE_DELAY_MIN_BLOCKS", 3),

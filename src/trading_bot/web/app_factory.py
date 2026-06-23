@@ -32,17 +32,6 @@ def register_runtime_routes(
             approved_symbols=runtime_module.APPROVED_SYMBOLS,
             price_ranges=runtime_module.PRICE_RANGES,
             logger=runtime_module.logger,
-            make_dedupe_key=runtime_module._make_dedupe_key,
-            record_webhook_event=runtime_module._record_webhook_event,
-            mark_webhook_event_status=(
-                lambda dedupe_key, status, **kwargs: (
-                    runtime_module._trade_audit_recorder().record_webhook_status(
-                        dedupe_key=dedupe_key,
-                        status=status,
-                        **kwargs,
-                    )
-                )
-            ),
             submit_signal=lambda data: app_container.signal_executor_factory().submit(
                 runtime_module.process_signal,
                 data,

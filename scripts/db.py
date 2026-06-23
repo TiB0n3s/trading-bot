@@ -378,14 +378,6 @@ def init_db_performance_indexes(db_path: Path | str = DB_PATH) -> None:
             for row in con.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
         }
 
-        if "recent_webhooks" in existing:
-            con.execute(
-                """
-                CREATE INDEX IF NOT EXISTS idx_recent_webhooks_first_seen
-                ON recent_webhooks(first_seen)
-                """
-            )
-
         if "fill_events" in existing:
             con.execute(
                 """

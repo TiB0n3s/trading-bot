@@ -30,7 +30,6 @@ CLAUDE_PARSE_ERROR = "claude_parse_error"
 CLAUDE_ENGINE_ERROR = "claude_engine_error"
 PREDICTION_GATE = "prediction_gate"
 DUPLICATE_SIGNAL = "duplicate_signal"
-DUPLICATE_WEBHOOK = "duplicate_webhook"
 ORDER_QTY_ZERO = "order_qty_zero"
 UNKNOWN_ERROR = "unknown_error"
 
@@ -96,7 +95,6 @@ ALL_REJECTION_CATEGORIES = {
     CLAUDE_ENGINE_ERROR,
     PREDICTION_GATE,
     DUPLICATE_SIGNAL,
-    DUPLICATE_WEBHOOK,
     ORDER_QTY_ZERO,
     UNKNOWN_ERROR,
     GHOST_SELL,
@@ -140,7 +138,6 @@ ALL_REJECTION_CATEGORIES = {
 
 LEGACY_CATEGORY_ALIASES: dict[str, str] = {
     "daily_loss_limit": CIRCUIT_BREAKER,
-    "duplicate_signal": DUPLICATE_WEBHOOK,
     "sell_to_buy_churn": CHURN_WINDOW,
     "claude_rejected": CONFIDENCE_GATE,
     "broker_rejected": SECOND_LOOK,

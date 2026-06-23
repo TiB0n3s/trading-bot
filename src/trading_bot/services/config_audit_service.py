@@ -30,7 +30,7 @@ from config import (
 
 CONFIG_AUDIT_VERSION = "config_audit_v1"
 CONFIG_AUDIT_RUNTIME_EFFECT = "diagnostic_only_no_runtime_config_change"
-SENSITIVE_TOKENS = ("KEY", "SECRET", "TOKEN", "PASSWORD", "WEBHOOK_SECRET")
+SENSITIVE_TOKENS = ("KEY", "SECRET", "TOKEN", "PASSWORD")
 SOURCE_ROOTS = (
     "*.py",
     "api/**/*.py",
@@ -162,9 +162,6 @@ def _runtime_warnings(env: dict[str, str]) -> list[str]:
         .strip()
         .lower()
     )
-    webhook_secret = env.get("WEBHOOK_SECRET", "changeme")
-    if not webhook_secret or webhook_secret == "changeme":
-        warnings.append("WEBHOOK_SECRET is unset or still using the unsafe default")
     if env.get("ALLOW_QUERY_STRING_SECRET", "false").strip().lower() in {
         "1",
         "true",

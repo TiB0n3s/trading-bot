@@ -1,11 +1,11 @@
-"""Canonical signal/candidate contracts for webhook and auto-buy paths."""
+"""Canonical signal/candidate contracts for auto-buy path."""
 
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
 from typing import Any, Literal
 
-CandidateSource = Literal["webhook", "auto_buy", "manual", "external_discovery"]
+CandidateSource = Literal["auto_buy", "manual", "external_discovery"]
 
 
 @dataclass(frozen=True)
@@ -36,22 +36,6 @@ class SignalCandidate:
             payload["candidate_id"] = self.candidate_id
         payload.update(self.features)
         return payload
-
-
-def candidate_from_webhook(signal: dict[str, Any]) -> SignalCandidate:
-    price = signal.get("price") or signal.get("signal_price")
-    try:
-        price_f = float(price) if price is not None else None
-    except Exception:
-        price_f = None
-    return SignalCandidate(
-        symbol=str(signal.get("symbol") or "").upper(),
-        action=str(signal.get("action") or "buy").lower(),
-        source="webhook",
-        price=price_f,
-        confidence=signal.get("confidence"),
-        raw=dict(signal),
-    )
 
 
 def candidate_from_auto_buy(candidate: dict[str, Any]) -> SignalCandidate:

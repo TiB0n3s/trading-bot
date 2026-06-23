@@ -30,14 +30,12 @@ class PreflightDeps:
     get_position: Callable[[str], dict[str, Any] | None]
     read_cooldown: Callable[[str, str], Any]
     read_recent_sell: Callable[[str], tuple[Any, float] | None]
-    is_duplicate_webhook: Callable[[str, str, float], bool]
     adaptive_churn_reentry_allowed: Callable[..., tuple[bool, str]]
     successful_buys_today: Callable[[str], int]
     filled_buys_today: Callable[[str], int]
     cluster_exposure: Callable[[str, float], list[dict[str, Any]]]
     max_buys_per_symbol_per_day: int
     session_max_trade_count: int
-    webhook_dedupe_seconds: int
     daily_loss_limit_pct: float
 
 
@@ -52,16 +50,6 @@ class PreflightService:
         account_state = state.account_state
         current_et = self.deps.now_et()
         metadata: dict[str, Any] = {"current_et": current_et}
-
-        if self.deps.is_duplicate_webhook(symbol, action, price):
-            return PreflightResult(
-                allowed=False,
-                rejection_category="duplicate_webhook",
-                rejection_reason=(
-                    f"same symbol/action/rounded-price within {self.deps.webhook_dedupe_seconds}s"
-                ),
-                metadata=metadata,
-            )
 
         if not self.deps.is_market_hours(current_et):
             return PreflightResult(

@@ -72,7 +72,7 @@ def make_client_order_id(symbol: str, action: str, data: dict[str, Any]) -> str:
     same logical signal (e.g. a Cloudflare/Nginx retry of a timestampless
     alert) different ids, defeating Alpaca's client_order_id idempotency and
     letting duplicate orders through. ``_dedupe_key`` is always set on the
-    webhook path (api/webhook_routes.py). If it is somehow absent we fall back
+    signal path. If it is somehow absent we fall back
     to the stable signal fields only — still deterministic, failing toward
     de-duplication rather than duplication.
     """

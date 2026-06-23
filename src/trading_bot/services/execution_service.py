@@ -237,7 +237,6 @@ def execute_approved_order(
     deterministic_rejection: Callable[..., Any],
     rejection_adapter: Any,
     log_trade: Callable[..., Any],
-    record_webhook_status: Callable[..., Any],
     write_cooldown: Callable[[str, str, Any], Any],
     write_recent_sell: Callable[[str, Any, Any], Any],
     last_order: dict,
@@ -323,12 +322,6 @@ def execute_approved_order(
                             f"{symbol}/{action} already holds the cooldown slot"
                         )
                         log.warning(reason)
-                        if dedupe_key:
-                            record_webhook_status(
-                                dedupe_key=dedupe_key,
-                                status="rejected",
-                                failure_reason=reason,
-                            )
                         return ExecutionOutcome(
                             submitted=False,
                             status="not_submitted",
@@ -381,13 +374,6 @@ def execute_approved_order(
                         # No order placed; release the reservation so a
                         # legitimate retry is not blocked for the full window.
                         release_cooldown(symbol, action)
-                    if dedupe_key:
-                        record_webhook_status(
-                            dedupe_key=dedupe_key,
-                            status="submit_failed",
-                            failure_reason=execution.failure_reason
-                            or "broker returned no order_result",
-                        )
                 final_outcome = execution
 
         except Exception as exc:
@@ -405,12 +391,6 @@ def execute_approved_order(
                 ),
                 level="error",
             )
-            if dedupe_key:
-                record_webhook_status(
-                    dedupe_key=dedupe_key,
-                    status="error",
-                    failure_reason=f"order_path_exception: {exc}",
-                )
             return ExecutionOutcome(
                 submitted=False,
                 status="error",
@@ -430,10 +410,5 @@ def execute_approved_order(
         )
 
     log_trade(signal, decision, order_result, account_state=account_state)
-    if dedupe_key:
-        record_webhook_status(
-            dedupe_key=dedupe_key,
-            status="processed",
-        )
 
     return final_outcome

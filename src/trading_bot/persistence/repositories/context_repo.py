@@ -67,38 +67,6 @@ def init_core_tables(db_path=DB_PATH) -> None:
             )
             """
         )
-        con.execute(
-            """
-            CREATE TABLE IF NOT EXISTS webhook_events (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                dedupe_key TEXT UNIQUE NOT NULL,
-                received_at TEXT NOT NULL,
-                symbol TEXT,
-                action TEXT,
-                signal_price REAL,
-                source TEXT,
-                payload_json TEXT,
-                status TEXT DEFAULT 'received',
-                queued_at TEXT,
-                started_at TEXT,
-                finished_at TEXT,
-                order_id TEXT,
-                client_order_id TEXT,
-                failure_reason TEXT
-            )
-            """
-        )
-        con.execute(
-            """
-            CREATE TABLE IF NOT EXISTS recent_webhooks (
-                dedupe_key      TEXT PRIMARY KEY,
-                symbol          TEXT NOT NULL,
-                action          TEXT NOT NULL,
-                signal_price    REAL,
-                first_seen      TEXT NOT NULL
-            )
-            """
-        )
 
 
 def ensure_recent_favorable_setups_table() -> None:

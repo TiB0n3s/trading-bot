@@ -71,7 +71,6 @@ MIGRATIONS: tuple[Migration, ...] = (
             """,
         ),
     ),
-    ),
     Migration(
         migration_id="20260525_004_trade_decision_context_columns",
         description="Add decision-context attribution columns to trades.",

@@ -45,7 +45,7 @@ class IntradayFeedbackThresholds:
     penalty_loss_rate: float = 0.60
     penalty_avg_pnl_pct: float = -0.15
     penalty_score: float = -4.0
-    block_min_trades: int = 3
+    block_min_trades: int = 5
     block_loss_rate: float = 0.75
     block_avg_pnl_pct: float = -0.25
     max_matched_age_minutes: float | None = 240.0

@@ -325,9 +325,9 @@ def test_intraday_feedback_blocks_repeated_losing_pattern():
             intraday_feedback_evidence={
                 "ml=weak_below_45|setup_action=avoid": {
                     "key": "ml=weak_below_45|setup_action=avoid",
-                    "trades": 3,
+                    "trades": 5,
                     "wins": 0,
-                    "losses": 3,
+                    "losses": 5,
                     "loss_rate": 1.0,
                     "avg_pnl_pct": -0.35,
                     "symbols": ["AAPL"],

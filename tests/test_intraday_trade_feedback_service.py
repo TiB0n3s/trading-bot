@@ -147,7 +147,7 @@ def test_intraday_feedback_blocks_repeated_losing_bucket():
         db_path = Path(tmp) / "trades.db"
         with sqlite3.connect(db_path) as con:
             _create_trades_table(con)
-            for i, (buy, sell) in enumerate(((100, 99.5), (101, 100.4), (102, 101.2)), start=1):
+            for i, (buy, sell) in enumerate(((100, 99.5), (101, 100.4), (102, 101.2), (103, 102.1), (104, 103.2)), start=1):
                 _insert_trade(
                     con,
                     ts=f"2026-06-04 10:0{i}:00",
@@ -182,8 +182,8 @@ def test_intraday_feedback_blocks_repeated_losing_bucket():
         assert decision["status"] == "block"
         assert decision["score_penalty"] == -4.0
         assert "ml=weak_below_45|setup_action=avoid" in decision["hard_block_reason"]
-        assert decision["evidence"]["trades"] == 3
-        assert decision["evidence"]["losses"] == 3
+        assert decision["evidence"]["trades"] == 5
+        assert decision["evidence"]["losses"] == 5
 
 
 def test_historical_feedback_blocks_repeated_losing_pattern_on_future_day():
@@ -192,7 +192,7 @@ def test_historical_feedback_blocks_repeated_losing_pattern_on_future_day():
         with sqlite3.connect(db_path) as con:
             _create_trades_table(con)
             _create_matched_trades_table(con)
-            for i in range(1, 4):
+            for i in range(1, 6):
                 _insert_matched_trade(
                     con,
                     entry_ts=f"2026-06-03 10:0{i}:00",
@@ -215,7 +215,7 @@ def test_historical_feedback_blocks_repeated_losing_pattern_on_future_day():
 
         assert decision["status"] == "block"
         assert decision["evidence"]["same_day_trades"] == 0
-        assert decision["evidence"]["historical_trades"] == 3
+        assert decision["evidence"]["historical_trades"] == 5
         assert decision["evidence"]["sources"] == ["historical_matched_trades"]
 
 
@@ -224,7 +224,7 @@ def test_intraday_feedback_is_observe_only_without_authority():
         db_path = Path(tmp) / "trades.db"
         with sqlite3.connect(db_path) as con:
             _create_trades_table(con)
-            for i in range(1, 4):
+            for i in range(1, 6):
                 _insert_trade(
                     con,
                     ts=f"2026-06-04 10:0{i}:00",

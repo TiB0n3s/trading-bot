@@ -19,7 +19,7 @@
 set -euo pipefail
 
 BOT_DIR="${BOT_DIR:-/home/tradingbot/trading-bot}"
-VAULT_RAW="${VAULT_RAW:-/mnt/d/AI Brain/Trading Project/01-raw}"
+VAULT_RAW="${VAULT_RAW:-/mnt/c/AI Brain/Trading Project/01-raw}"
 DB="${DB:-$BOT_DIR/trades.db}"
 MODE="${EXPORT_FOR_VAULT_MODE:-vault}"
 
@@ -39,7 +39,7 @@ fi
 [[ -d "$BOT_DIR" ]] || { echo "ERROR: bot dir not found: $BOT_DIR (set BOT_DIR=...)" >&2; exit 1; }
 [[ -f "$DB" ]] || { echo "ERROR: trades.db not found: $DB" >&2; exit 1; }
 if [[ "$MODE" != "tar" ]]; then
-  [[ -d "$VAULT_RAW" ]] || { echo "ERROR: vault 01-raw not found: $VAULT_RAW (is the D: drive mounted?)" >&2; exit 1; }
+  [[ -d "$VAULT_RAW" ]] || { echo "ERROR: vault 01-raw not found: $VAULT_RAW (is the C: drive mounted?)" >&2; exit 1; }
 fi
 
 WORK="$(mktemp -d)"

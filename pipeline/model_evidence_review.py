@@ -58,7 +58,7 @@ REVIEW_SUBDIR = ("ops", "model_promotion_evidence", "ai_review")
 
 # Where the vault's /learn routine reads immutable raw sources from. Mirrors the
 # destination used by ops/export_for_vault.sh.
-DEFAULT_VAULT_RAW_DIR = "/mnt/d/AI Brain/Trading Project/01-raw"
+DEFAULT_VAULT_RAW_DIR = "/mnt/c/AI Brain/Trading Project/01-raw"
 
 
 def _utc_stamp() -> str:

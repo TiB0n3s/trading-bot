@@ -824,7 +824,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--vault-raw-dir",
         default=os.getenv(
             "VAULT_RAW_DIR",
-            "/mnt/d/AI Brain/Trading Project/01-raw",
+            "/mnt/c/AI Brain/Trading Project/01-raw",
         ),
     )
     return p.parse_args(argv)

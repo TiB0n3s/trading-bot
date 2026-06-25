@@ -90,7 +90,7 @@
 0 17 * * 1-5 cd /home/tradingbot/trading-bot && PYTHONPATH=/home/tradingbot/trading-bot:/home/tradingbot/trading-bot/scripts:/home/tradingbot/trading-bot/src /home/tradingbot/trading-bot/venv/bin/python scripts/job_runner.py --job-name run_post_session_review --lock-file /tmp/tradingbot_after_close.lock --log-file /home/tradingbot/trading-bot/post_session_review.log -- bash /home/tradingbot/trading-bot/run_post_session_review.sh
 
 # Vault log export: writes the daily summary bundle into C:\AI Brain\Trading Project\01-raw.
-30 17 * * 1-5 /home/tradingbot/trading-bot/ops/export_for_vault.sh >> /home/tradingbot/trading-bot/export_for_vault.log 2>&1
+30 17 * * 1-5 cd /home/tradingbot/trading-bot && bash /home/tradingbot/trading-bot/ops/export_for_vault.sh >> /home/tradingbot/trading-bot/export_for_vault.log 2>&1
 
 # Weekly bounded research lane: heavier exports, historical-bar validation, and observe-only retraining.
 30 4 * * 6 cd /home/tradingbot/trading-bot && PYTHONPATH=/home/tradingbot/trading-bot:/home/tradingbot/trading-bot/scripts:/home/tradingbot/trading-bot/src /home/tradingbot/trading-bot/venv/bin/python scripts/job_runner.py --job-name after_close_research_batch --lock-file /tmp/tradingbot_after_close.lock --log-file /home/tradingbot/trading-bot/after_close_research.log --timeout-seconds 14400 --ionice-idle --nice 10 -- bash -lc 'set -a && . /etc/trading-bot.env && set +a && TARGET_DATE=$(date -d yesterday +\%F) && /home/tradingbot/trading-bot/venv/bin/python pipeline/after_close_learning.py --lane research --date "$TARGET_DATE"'

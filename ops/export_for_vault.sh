@@ -180,15 +180,25 @@ case "$MODE" in
     ;;
   vault)
     DEST="$VAULT_RAW/bot-export-$DATE"
-    [[ -e "$DEST" ]] && { echo "ERROR: $DEST already exists; refusing to overwrite." >&2; exit 1; }
-    mkdir -p "$DEST"
-    cp "$STAGE"/* "$DEST"/
+    if [[ -e "$DEST" && ! -d "$DEST" ]]; then
+      echo "ERROR: $DEST exists but is not a directory." >&2
+      exit 1
+    fi
+    if [[ -d "$DEST" ]]; then
+      echo "Updating existing $DEST"
+    else
+      mkdir -p "$DEST"
+      echo "Wrote $DEST"
+    fi
+    cp -f "$STAGE"/* "$DEST"/
     if [[ -s "$daily_md" ]]; then
       TOP_LEVEL_SUMMARY="$VAULT_RAW/${DATE}-log.md"
-      [[ -e "$TOP_LEVEL_SUMMARY" ]] && { echo "ERROR: $TOP_LEVEL_SUMMARY already exists; refusing to overwrite." >&2; exit 1; }
-      cp "$daily_md" "$TOP_LEVEL_SUMMARY"
+      if [[ -e "$TOP_LEVEL_SUMMARY" && ! -f "$TOP_LEVEL_SUMMARY" ]]; then
+        echo "ERROR: $TOP_LEVEL_SUMMARY exists but is not a file." >&2
+        exit 1
+      fi
+      cp -f "$daily_md" "$TOP_LEVEL_SUMMARY"
     fi
-    echo "Wrote $DEST"
     ls -lah "$DEST"
     ;;
   *)

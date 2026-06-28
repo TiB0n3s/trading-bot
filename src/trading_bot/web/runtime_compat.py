@@ -153,6 +153,7 @@ from risk.live_guards import live_guard_policy as live_guard_policy  # noqa: F40
 from risk.live_guards import live_order_allowed as live_order_allowed  # noqa: F401
 from risk.macro_policy import policy_from_market_context as policy_from_market_context  # noqa: F401
 from services import trade_audit_service
+from config.signal import load_signal_config
 from strategy.strategy_engine import evaluate_strategy_observe_only
 from trading_bot.config.runtime import load_runtime_settings
 from trading_bot.runtime.signal_entrypoint import process_signal as process_runtime_signal
@@ -857,9 +858,12 @@ def _sell_continuation_delay_reason(account_state, trend, unrealized_pct):
 
 
 # Second-look safety thresholds.
-# These are env-tunable so paper/live behavior can be adjusted without code edits.
-MAX_SIGNAL_PRICE_DRIFT_PCT = float(os.environ.get("MAX_SIGNAL_PRICE_DRIFT_PCT", "0.35"))
-MAX_BID_ASK_SPREAD_PCT = float(os.environ.get("MAX_BID_ASK_SPREAD_PCT", "0.10"))
+# Sourced from the validated typed SignalConfig (same env vars/defaults) so the
+# >= 0 guards in config/signal.py apply -- a negative drift/spread can no longer
+# silently weaken the pre-order safety check.
+_signal_cfg = load_signal_config()
+MAX_SIGNAL_PRICE_DRIFT_PCT = _signal_cfg.max_signal_price_drift_pct
+MAX_BID_ASK_SPREAD_PCT = _signal_cfg.max_bid_ask_spread_pct
 
 _execution_adapter_service = ExecutionAdapterService(
     market_data_service=market_data_service,
@@ -1044,7 +1048,10 @@ def _evaluate_preflight(runtime_state: SignalRuntimeState):
             filled_buys_today=_filled_buys_today,
             cluster_exposure=_cluster_exposure,
             max_buys_per_symbol_per_day=MAX_BUYS_PER_SYMBOL_PER_DAY,
-            session_max_trade_count=int(os.getenv("SESSION_MAX_TRADE_COUNT", "3")),
+            # Read per-call (not the import-time singleton) so a runtime env
+            # override is honored, matching the prior os.getenv behavior -- now
+            # routed through the validated factory.
+            session_max_trade_count=load_signal_config().session_max_trade_count,
             daily_loss_limit_pct=DAILY_LOSS_LIMIT_PCT,
         )
     )

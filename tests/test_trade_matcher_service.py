@@ -68,7 +68,9 @@ def test_match_trades_uses_fifo_and_preserves_open_lots():
     assert matched[0]["realized_pnl"] == 5.0
     assert matched[0]["setup_label"] == "test_setup"
     assert matched[0]["entry_order_id"] == "buy-1"
-    assert matched[0]["entry_source"] == "webhook_buy"
+    # TradingView webhook ingestion was removed; a non-auto-buy entry is now
+    # classified "unknown" (the "webhook_buy" entry source no longer exists).
+    assert matched[0]["entry_source"] == "unknown"
     assert matched[0]["exit_order_id"] == "sell-1"
     assert matched[0]["signal_source"] == "tradingview"
     assert open_lots["QQQ"][0]["qty"] == 1.0
@@ -165,6 +167,58 @@ def test_unmatched_prior_sell_prevents_false_open_lot_when_net_flat():
     assert "DKS" not in open_lots
 
 
+def test_synthetic_pm_exit_deduped_by_order_id_despite_timestamp_mismatch():
+    """A position-manager exit already represented by a FIFO match must not be
+    double-counted just because its logged timestamp differs from the fill row's.
+    Dedup is by exit order_id, not timestamp string.
+    """
+
+    class PMRepo(FakeRepository):
+        def load_position_manager_sells(self):
+            # Same order_id as the FIFO sell below, but a differently-formatted
+            # timestamp (datetime.now ET style vs the fill row's ISO timestamp).
+            return [
+                {
+                    "order_id": "sell-1",
+                    "symbol": "QQQ",
+                    "timestamp": "2026-05-30 10:05:00",
+                    "qty": 1,
+                    "fill_price": 105,
+                }
+            ]
+
+        def event_payload_for_order(self, order_id):
+            return {"decision": {"avg_entry": 100}}
+
+    repo = PMRepo(
+        [
+            {
+                "timestamp": "2026-05-30T10:00:00",
+                "symbol": "QQQ",
+                "action": "buy",
+                "qty": 1,
+                "fill_price": 100,
+                "order_id": "buy-1",
+            },
+            {
+                "timestamp": "2026-05-30T10:05:00",
+                "symbol": "QQQ",
+                "action": "sell",
+                "qty": 1,
+                "fill_price": 105,
+                "order_id": "sell-1",
+            },
+        ]
+    )
+    service = TradeMatcherService(repository=repo)
+
+    matched, _ = service.match_trades()
+
+    # Exactly one match (the FIFO one); no duplicate synthetic PM exit.
+    assert len(matched) == 1
+    assert matched[0]["match_source"] == "fifo_match"
+
+
 def test_unmatched_sell_is_surfaced_not_silently_dropped():
     """An exit with no open entry lot must be tracked, not silently discarded."""
     repo = FakeRepository(
@@ -194,6 +248,7 @@ if __name__ == "__main__":
         test_auto_buy_entries_are_labeled_in_lifecycle_matches,
         test_unmatched_prior_sell_prevents_false_open_lot_when_net_flat,
         test_unmatched_sell_is_surfaced_not_silently_dropped,
+        test_synthetic_pm_exit_deduped_by_order_id_despite_timestamp_mismatch,
     ]
     for test in tests:
         test()

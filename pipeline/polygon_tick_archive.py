@@ -34,6 +34,7 @@ class TickArchiveResult:
     trades: int
     dry_run: bool
     errors: list[str]
+    truncated: bool = False
 
 
 def archive_polygon_trades(
@@ -62,6 +63,16 @@ def archive_polygon_trades(
         trades = service.trade_dicts(symbol, timestamp=target, limit=limit)
     except Exception as exc:
         errors.append(f"{symbol} {target}: {type(exc).__name__}: {exc}")
+
+    # Polygon returns at most `limit` rows with no pagination here. A full session
+    # for a liquid name exceeds 50k trades, so hitting the cap means the stored day
+    # is truncated/partial -- record it as an error so the job cannot report success.
+    truncated = bool(trades) and len(trades) >= limit
+    if truncated:
+        errors.append(
+            f"{symbol} {target}: truncated at limit={limit}; session incomplete "
+            "(raise --limit or add pagination before trusting this archive)"
+        )
 
     if trades and not dry_run:
         cache_dir.mkdir(parents=True, exist_ok=True)
@@ -101,6 +112,7 @@ def archive_polygon_trades(
         trades=len(trades),
         dry_run=dry_run,
         errors=errors,
+        truncated=truncated,
     )
 
 

@@ -259,10 +259,14 @@ class TradeMatcherService:
             if order_id in existing_synthetic_order_ids:
                 continue
 
+            # Dedup against FIFO matches by exit order_id, not timestamp string: the
+            # FIFO exit timestamp (Alpaca filled_at) and the position-manager exit
+            # timestamp (datetime.now ET) are formatted differently and rarely match
+            # byte-for-byte, which let the same exit be counted twice. order_id is
+            # stable across both representations (and is how existing synthetic rows
+            # are already deduped just above).
             normal_match_exists = any(
-                trade.get("symbol") == sell_row["symbol"]
-                and trade.get("exit_timestamp") == sell_row["timestamp"]
-                for trade in matched
+                str(trade.get("exit_order_id") or "") == order_id for trade in matched
             )
             if normal_match_exists:
                 continue

@@ -387,7 +387,9 @@ def test_fresh_auto_buy_min_hold_does_not_suppress_severe_loss_exit():
     assert_equal(decision["auto_buy_min_hold"]["active"], False, "min-hold inactive")
 
 
-def test_submit_partial_exit_waits_after_canceling_open_orders():
+def test_submit_partial_exit_defers_only_when_cancellation_does_not_settle():
+    """If canceled brackets never clear, defer (do not blindly sell)."""
+
     class _Order:
         id = "open-order-1"
 
@@ -397,29 +399,81 @@ def test_submit_partial_exit_waits_after_canceling_open_orders():
             self.submitted = False
 
         def list_open_orders(self, symbol):
-            return [_Order()]
+            return [_Order()]  # never clears
 
         def cancel_order(self, order_id):
             self.canceled.append(order_id)
 
         def submit_market_sell(self, symbol, qty):
             self.submitted = True
-            raise AssertionError("submit_market_sell should not run after canceling open orders")
+            raise AssertionError("submit_market_sell should not run if orders never clear")
 
     broker = _Broker()
     old_broker = position_manager.broker_service
+    old_attempts = position_manager._PARTIAL_CANCEL_POLL_ATTEMPTS
+    old_delay = position_manager._PARTIAL_CANCEL_POLL_DELAY_SEC
     try:
         position_manager.broker_service = broker
+        position_manager._PARTIAL_CANCEL_POLL_ATTEMPTS = 2
+        position_manager._PARTIAL_CANCEL_POLL_DELAY_SEC = 0
         result = position_manager.submit_exit(
             {"symbol": "AAPL", "action": "sell_partial", "qty": 4, "sell_fraction": 0.5}
         )
     finally:
         position_manager.broker_service = old_broker
+        position_manager._PARTIAL_CANCEL_POLL_ATTEMPTS = old_attempts
+        position_manager._PARTIAL_CANCEL_POLL_DELAY_SEC = old_delay
 
     assert_equal(result["submitted"], False, "submitted")
-    assert_true("waiting for available quantity" in result["reason"], "reason")
+    assert_true("did not clear within the poll window" in result["reason"], "reason")
     assert_equal(broker.canceled, ["open-order-1"], "canceled orders")
     assert_equal(broker.submitted, False, "submitted flag")
+
+
+def test_submit_partial_exit_sells_in_same_pass_once_cancellation_clears():
+    """Once canceled brackets clear, the partial sell executes in the same pass."""
+
+    class _Order:
+        id = "open-order-1"
+
+    class _SubmittedOrder:
+        id = "sell-order-1"
+        status = "accepted"
+
+    class _Broker:
+        def __init__(self):
+            self.canceled = []
+            self.submitted_qty = None
+            self._open = [_Order()]
+
+        def list_open_orders(self, symbol):
+            return list(self._open)
+
+        def cancel_order(self, order_id):
+            self.canceled.append(order_id)
+            self._open = []  # cancellation settles
+
+        def submit_market_sell(self, symbol, qty):
+            self.submitted_qty = qty
+            return _SubmittedOrder()
+
+    broker = _Broker()
+    old_broker = position_manager.broker_service
+    old_delay = position_manager._PARTIAL_CANCEL_POLL_DELAY_SEC
+    try:
+        position_manager.broker_service = broker
+        position_manager._PARTIAL_CANCEL_POLL_DELAY_SEC = 0
+        result = position_manager.submit_exit(
+            {"symbol": "AAPL", "action": "sell_partial", "qty": 4, "sell_fraction": 0.5}
+        )
+    finally:
+        position_manager.broker_service = old_broker
+        position_manager._PARTIAL_CANCEL_POLL_DELAY_SEC = old_delay
+
+    assert_equal(result["submitted"], True, "submitted")
+    assert_equal(broker.canceled, ["open-order-1"], "canceled orders")
+    assert_equal(broker.submitted_qty, 2, "partial sell qty")
+    assert_equal(result["order"]["order_id"], "sell-order-1", "order id")
 
 
 def test_submit_partial_exit_returns_failure_instead_of_crashing_on_broker_error():
@@ -464,7 +518,8 @@ def main():
         test_evaluate_position_uses_exit_pattern_pressure_for_partial_profit_capture,
         test_fresh_auto_buy_min_hold_suppresses_soft_peak_lock,
         test_fresh_auto_buy_min_hold_does_not_suppress_severe_loss_exit,
-        test_submit_partial_exit_waits_after_canceling_open_orders,
+        test_submit_partial_exit_defers_only_when_cancellation_does_not_settle,
+        test_submit_partial_exit_sells_in_same_pass_once_cancellation_clears,
         test_submit_partial_exit_returns_failure_instead_of_crashing_on_broker_error,
     ]
 

@@ -53,8 +53,11 @@ def fit_binned_calibration(
     realized win rate of its members, enforced monotone non-decreasing in score
     via pool-adjacent-violators so the mapping is well-behaved.
     """
+    # Treat only strictly positive outcomes as wins. Callers should pass binarized
+    # 0/1, but guard defensively so a stray multi-class label (e.g. a -1 stop-out
+    # from triple_barrier/trend_scan) is never miscounted as a win.
     pairs = [
-        (float(s), 1 if int(o) else 0)
+        (float(s), 1 if int(o) > 0 else 0)
         for s, o in zip(scores, outcomes)
         if s is not None and o is not None
     ]

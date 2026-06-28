@@ -52,7 +52,42 @@ def test_archive_polygon_trades_writes_csv_when_available():
     assert rows[0]["conditions"] == "[12]"
 
 
+class _TruncatingPolygon:
+    def trade_dicts(self, symbol, *, timestamp, limit=50000, **kwargs):
+        # Return exactly `limit` rows to simulate hitting the un-paginated cap.
+        return [
+            {
+                "timestamp": "2026-06-02T13:30:00+00:00",
+                "price": 100.0 + i,
+                "size": 1,
+                "exchange": 11,
+                "conditions": [],
+                "sequence_number": i,
+                "tape": 3,
+            }
+            for i in range(limit)
+        ]
+
+
+def test_archive_polygon_trades_flags_truncation_at_limit():
+    with tempfile.TemporaryDirectory() as tmp:
+        cache_dir = Path(tmp) / "ticks"
+        result = archive_polygon_trades(
+            symbol="AAPL",
+            target_date="2026-06-02",
+            cache_dir=cache_dir,
+            limit=3,
+            polygon_market_data=_TruncatingPolygon(),
+        )
+
+    # Hitting the cap is a truncated/partial session: must be flagged as an error
+    # so the job cannot silently report a complete archive.
+    assert result.truncated is True
+    assert any("truncated" in e for e in result.errors)
+
+
 if __name__ == "__main__":
     test_archive_polygon_trades_writes_csv_when_available()
-    print("[OK] test_archive_polygon_trades_writes_csv_when_available")
-    print("\nAll 1 Polygon tick archive pipeline tests passed.")
+    test_archive_polygon_trades_flags_truncation_at_limit()
+    print("[OK] polygon tick archive pipeline tests")
+    print("\nAll Polygon tick archive pipeline tests passed.")

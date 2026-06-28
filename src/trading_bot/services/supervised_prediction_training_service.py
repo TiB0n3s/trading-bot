@@ -495,19 +495,35 @@ def train_supervised_prediction_model(
                 else {}
             )
 
-            # Calibrator: fit from probability scores vs realized outcomes.
+            # Calibrator: fit from P(win) vs realized win/loss outcomes.
+            # Labels can be multi-class for triple_barrier / trend_scan horizons
+            # ({-1, 0, 1}), so P(win) must be the probability mass on favorable
+            # classes (label > 0) -- not predict_proba[:, 1], which is the middle
+            # class for a 3-class model -- and the outcome must be binarized the
+            # same way (win = label > 0). Mixing a [0,1] probability with a raw
+            # -1/0/1 label (the prior behavior) made calibration_error meaningless
+            # and trained the calibrator to treat a stop-out (-1) as a win.
             proba_scores: list[float] = []
             if x_test:
                 try:
-                    proba_scores = [float(v) for v in model.predict_proba(x_test)[:, 1]]
+                    proba_matrix = model.predict_proba(x_test)
+                    classes = [float(c) for c in getattr(model, "classes_", [])]
+                    win_cols = [i for i, c in enumerate(classes) if c > 0]
+                    if win_cols:
+                        proba_scores = [
+                            float(sum(row[i] for i in win_cols)) for row in proba_matrix
+                        ]
+                    else:
+                        proba_scores = [float(row[1]) for row in proba_matrix]
                 except Exception:
                     proba_scores = []
 
             if proba_scores and y_test:
                 from services.calibration import fit_binned_calibration
 
-                calibrator = fit_binned_calibration(proba_scores, y_test)
-                cal_mae = sum(abs(p - a) for p, a in zip(proba_scores, y_test)) / len(y_test)
+                y_win = [1 if float(a) > 0 else 0 for a in y_test]
+                calibrator = fit_binned_calibration(proba_scores, y_win)
+                cal_mae = sum(abs(p - a) for p, a in zip(proba_scores, y_win)) / len(y_win)
                 promotion_metrics = dict(promotion_metrics)
                 promotion_metrics["calibration_error"] = round(cal_mae, 6)
             else:

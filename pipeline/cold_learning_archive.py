@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sqlite3
 import sys
 from dataclasses import asdict, dataclass
@@ -40,6 +41,23 @@ class ArchivePlan:
     retention_days: int
     reason: str
     requires_historical_bar_training: bool = False
+    # Safety valve: when training-evidence gating would block archival, still archive
+    # rows older than this ceiling (None disables). Archived rows stay model-consumable
+    # from the archive, so this only bounds growth -- it never deprives a (lagging)
+    # training run of recent data. Must be >= retention_days.
+    force_archive_after_days: int | None = None
+
+
+# Hard ceiling for bar_pattern_features when the historical-bar training hook is not
+# ready (e.g. it is observe-only/unpromoted or a transient backfill error left it
+# not_ready). Without this, eligible rows are blocked indefinitely and trades.db
+# grows unbounded. Env-tunable for ops.
+try:
+    BAR_PATTERN_FORCE_ARCHIVE_DAYS = int(
+        os.environ.get("OPS_BAR_PATTERN_FORCE_ARCHIVE_DAYS", "30")
+    )
+except (TypeError, ValueError):
+    BAR_PATTERN_FORCE_ARCHIVE_DAYS = 30
 
 
 ARCHIVE_PLANS: tuple[ArchivePlan, ...] = (
@@ -50,6 +68,7 @@ ARCHIVE_PLANS: tuple[ArchivePlan, ...] = (
         retention_days=5,
         reason="cold historical bar features stay model-consumable from archive",
         requires_historical_bar_training=True,
+        force_archive_after_days=BAR_PATTERN_FORCE_ARCHIVE_DAYS,
     ),
     ArchivePlan(
         table="feature_snapshots",
@@ -367,10 +386,22 @@ def run_archive(
                 and not skip_training_evidence
                 and not evidence["ready"]
             ):
-                table_result["status"] = "blocked_missing_training_evidence"
-                table_result["eligible_before"] = _eligible_count(con, plan, cutoff)
-                manifest["tables"].append(table_result)
-                continue
+                # Training evidence is not ready. Rather than block ALL eligible rows
+                # indefinitely (unbounded trades.db growth), fall back to the
+                # force-archive ceiling: keep the recent window hot in case training
+                # catches up, but still archive rows older than the ceiling (they stay
+                # model-consumable from the archive). If no ceiling is configured,
+                # preserve the original hard block.
+                if not plan.force_archive_after_days:
+                    table_result["status"] = "blocked_missing_training_evidence"
+                    table_result["eligible_before"] = _eligible_count(con, plan, cutoff)
+                    manifest["tables"].append(table_result)
+                    continue
+                force_days = max(int(plan.force_archive_after_days), plan.retention_days)
+                cutoff = _cutoff(target_date, force_days)
+                table_result["training_evidence_not_ready"] = True
+                table_result["force_archive_after_days"] = force_days
+                table_result["cutoff_exclusive"] = cutoff
             eligible = _eligible_count(con, plan, cutoff)
             table_result["eligible_before"] = eligible
             if not execute:

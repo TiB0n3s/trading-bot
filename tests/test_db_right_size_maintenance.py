@@ -143,6 +143,7 @@ def test_right_size_allows_online_archive_when_service_active():
                 service_names=("trading-bot",),
                 dbstat_limit=0,
                 dbstat_timeout_sec=1.0,
+                skip_backup_check=True,
             )
 
         assert manifest["status"] == "complete"
@@ -230,6 +231,7 @@ def test_right_size_executes_archive_checkpoint_and_compact_copy_off_hours():
                 service_names=("trading-bot",),
                 dbstat_limit=0,
                 dbstat_timeout_sec=1.0,
+                skip_backup_check=True,
             )
 
         assert manifest["status"] == "complete"
@@ -242,9 +244,106 @@ def test_right_size_executes_archive_checkpoint_and_compact_copy_off_hours():
         assert "sqlite_wal_checkpoint" in actions
 
 
+def _write_backup_manifest(base: Path, *, failed_count: int = 0) -> None:
+    manifest_dir = base / "backups" / "databases"
+    manifest_dir.mkdir(parents=True, exist_ok=True)
+    (manifest_dir / "database_backup_20260615.manifest.json").write_text(
+        '{"summary": {"failed_count": %d, "backed_up_count": 1}}' % failed_count
+    )
+
+
+def test_right_size_blocks_destructive_archive_without_recent_backup():
+    with tempfile.TemporaryDirectory() as tmp:
+        base = Path(tmp)
+        db_path = base / "trades.db"
+        _build_db(db_path)
+
+        with (
+            patch("pipeline.db_right_size_maintenance.is_market_hours", return_value=False),
+            patch("pipeline.db_right_size_maintenance.market_session", return_value="closed"),
+            patch(
+                "pipeline.db_right_size_maintenance.sqlite_vacuum_swap._service_status",
+                side_effect=_inactive_service,
+            ),
+        ):
+            manifest = run(
+                db_path=db_path,
+                target_date=date(2026, 6, 15),
+                execute_archive=True,
+                build_compact=False,
+                swap_compact=False,
+                checkpoint=False,
+                prune_rollbacks=False,
+                compact_path=None,
+                archive_root=base / "archive",
+                manifest_dir=base / "manifests",
+                chunk_size=10,
+                max_chunks=0,
+                rollback_retention_days=2,
+                rollback_min_keep=1,
+                skip_training_evidence=True,
+                force=False,
+                skip_market_hours_check=False,
+                skip_service_check=False,
+                service_names=("trading-bot",),
+                dbstat_limit=0,
+                dbstat_timeout_sec=1.0,
+            )
+
+        # No backup present -> destructive archive must be blocked, data untouched.
+        assert manifest["status"] == "blocked_no_recent_backup"
+        assert _count(db_path, "feature_snapshots") == 2
+
+
+def test_right_size_allows_destructive_archive_with_recent_backup():
+    with tempfile.TemporaryDirectory() as tmp:
+        base = Path(tmp)
+        db_path = base / "trades.db"
+        _build_db(db_path)
+        _write_backup_manifest(base)
+
+        with (
+            patch("pipeline.db_right_size_maintenance.is_market_hours", return_value=False),
+            patch("pipeline.db_right_size_maintenance.market_session", return_value="closed"),
+            patch(
+                "pipeline.db_right_size_maintenance.sqlite_vacuum_swap._service_status",
+                side_effect=_inactive_service,
+            ),
+        ):
+            manifest = run(
+                db_path=db_path,
+                target_date=date(2026, 6, 15),
+                execute_archive=True,
+                build_compact=False,
+                swap_compact=False,
+                checkpoint=False,
+                prune_rollbacks=False,
+                compact_path=None,
+                archive_root=base / "archive",
+                manifest_dir=base / "manifests",
+                chunk_size=10,
+                max_chunks=0,
+                rollback_retention_days=2,
+                rollback_min_keep=1,
+                skip_training_evidence=True,
+                force=False,
+                skip_market_hours_check=False,
+                skip_service_check=False,
+                service_names=("trading-bot",),
+                dbstat_limit=0,
+                dbstat_timeout_sec=1.0,
+            )
+
+        assert manifest["status"] == "complete"
+        assert manifest["backup_precondition"]["fresh"] is True
+        assert _count(db_path, "feature_snapshots") == 1
+
+
 if __name__ == "__main__":
     test_right_size_blocks_mutation_during_market_hours()
     test_right_size_allows_online_archive_when_service_active()
     test_right_size_blocks_swap_when_service_active()
     test_right_size_executes_archive_checkpoint_and_compact_copy_off_hours()
+    test_right_size_blocks_destructive_archive_without_recent_backup()
+    test_right_size_allows_destructive_archive_with_recent_backup()
     print("[OK] db right-size maintenance tests passed")

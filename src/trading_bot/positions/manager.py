@@ -17,6 +17,7 @@ Safe defaults:
 import argparse
 import json
 import sys
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -45,6 +46,12 @@ LIVE_SELLS = _POSITION_MANAGER_CFG.live_sells
 PARTIAL_SELL_PCT = _POSITION_MANAGER_CFG.partial_sell_pct
 PROMOTE_UNEXECUTABLE_PARTIALS = _POSITION_MANAGER_CFG.promote_unexecutable_partials
 MIN_PROFIT_PARTIAL_PCT = _POSITION_MANAGER_CFG.min_profit_partial_pct
+# Partial exits cancel the protective bracket legs, then must wait for Alpaca to
+# release the held shares before the market sell. Poll within the SAME pass so we
+# don't leave the position with canceled brackets AND no exit until the next cron
+# cycle (unprotected window; the partial may never fire if the trigger flips).
+_PARTIAL_CANCEL_POLL_ATTEMPTS = 10
+_PARTIAL_CANCEL_POLL_DELAY_SEC = 0.5
 PROFIT_GIVEBACK_TRIGGER_PCT = _POSITION_MANAGER_CFG.profit_giveback_trigger_pct
 
 # Breakeven/profit-lock protection:
@@ -1344,6 +1351,20 @@ def log_position_manager_exit(decision, order_result, exit_type):
         return False
 
 
+def _open_orders_cleared(broker_service, symbol) -> bool:
+    """Poll until canceled open orders clear so Alpaca releases the held shares.
+
+    Returns True once no open orders remain for the symbol (so a partial market
+    sell can be submitted in the same pass), or False if they do not clear within
+    the bounded poll window.
+    """
+    for _ in range(_PARTIAL_CANCEL_POLL_ATTEMPTS):
+        if not broker_service.list_open_orders(symbol):
+            return True
+        time.sleep(_PARTIAL_CANCEL_POLL_DELAY_SEC)
+    return not broker_service.list_open_orders(symbol)
+
+
 def submit_exit(decision):
     """
     Live exit execution.
@@ -1379,12 +1400,17 @@ def submit_exit(decision):
         open_orders = broker_service.list_open_orders(symbol)
         for o in open_orders:
             broker_service.cancel_order(o.id)
-        if open_orders:
+        if open_orders and not _open_orders_cleared(broker_service, symbol):
+            # Only defer if cancellation genuinely did not settle within the poll
+            # window (rare). Otherwise fall through and sell in this same pass so the
+            # position is not left with canceled brackets AND no exit until the next
+            # cron cycle. The submit below still fails closed on any residual
+            # available-quantity error.
             return {
                 "submitted": False,
                 "reason": (
-                    f"canceled {len(open_orders)} open order(s); "
-                    "waiting for available quantity to refresh before partial exit"
+                    f"canceled {len(open_orders)} open order(s) but they did not "
+                    "clear within the poll window; deferring partial exit"
                 ),
             }
 

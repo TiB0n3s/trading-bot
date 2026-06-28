@@ -8,6 +8,7 @@ import sys
 import tempfile
 from datetime import date
 from pathlib import Path
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
@@ -148,7 +149,67 @@ def test_cold_learning_archive_moves_only_expired_learning_rows_and_preserves_tr
         assert _count(archive_root / "learning_archive.db", "decision_snapshots") == 1
 
 
+def test_bar_pattern_force_archive_valve_when_training_evidence_not_ready():
+    """When training evidence is not ready, the safety valve must still archive
+    rows older than the force ceiling (bounding growth) while keeping the recent
+    window hot -- instead of blocking all eligible rows indefinitely.
+    """
+    with tempfile.TemporaryDirectory() as tmp:
+        base = Path(tmp)
+        db_path = base / "trades.db"
+        archive_root = base / "archive"
+        with sqlite3.connect(db_path) as con:
+            con.execute(
+                """
+                CREATE TABLE bar_pattern_features (
+                    id INTEGER PRIMARY KEY,
+                    symbol TEXT,
+                    bar_timestamp TEXT,
+                    timeframe TEXT,
+                    feature_version TEXT,
+                    triple_barrier_label INTEGER,
+                    trend_scan_label INTEGER
+                )
+                """
+            )
+            con.executemany(
+                """
+                INSERT INTO bar_pattern_features (
+                    symbol, bar_timestamp, timeframe, feature_version,
+                    triple_barrier_label, trend_scan_label
+                ) VALUES (?, ?, '1m', 'v4', 1, 1)
+                """,
+                [
+                    ("OLD", "2026-05-01T14:30:00+00:00"),  # > 30d before target -> archived
+                    ("MID", "2026-06-01T14:30:00+00:00"),  # 5-30d window -> kept hot
+                    ("NEW", "2026-06-11T14:30:00+00:00"),  # < 5d -> kept hot
+                ],
+            )
+
+        with patch(
+            "pipeline.cold_learning_archive._training_evidence",
+            return_value={"ready": False},
+        ):
+            manifest = run_archive(
+                db_path=db_path,
+                archive_root=archive_root,
+                target_date=date(2026, 6, 12),
+                execute=True,
+                chunk_size=10,
+                max_chunks=0,
+                skip_training_evidence=False,  # exercise the evidence gate
+                selected_tables={"bar_pattern_features"},
+            )
+
+        row = {r["table"]: r for r in manifest["tables"]}["bar_pattern_features"]
+        assert row.get("training_evidence_not_ready") is True
+        assert row["archived_rows"] == 1  # only the >30d OLD row
+        assert _count(db_path, "bar_pattern_features") == 2  # MID + NEW stay hot
+        assert _count(archive_root / "historical_bars.db", "bar_pattern_features") == 1
+
+
 if __name__ == "__main__":
     test_cold_learning_archive_dry_run_does_not_mutate()
     test_cold_learning_archive_moves_only_expired_learning_rows_and_preserves_trades()
+    test_bar_pattern_force_archive_valve_when_training_evidence_not_ready()
     print("[OK] cold learning archive tests passed")

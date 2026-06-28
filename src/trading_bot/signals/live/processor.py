@@ -602,8 +602,30 @@ class LiveSignalProcessor:
                 mode=self.deps.regime_circuit_breaker_mode,
             )
         except Exception as exc:
+            # A circuit breaker is a safety control: fail CLOSED for buys when its
+            # state cannot be read (a broken breaker must not silently admit new
+            # risk). Sells reduce exposure and must stay allowed, so fail open there.
+            if str(action).lower() == "buy":
+                self.deps.log.warning(
+                    f"Regime circuit breaker unavailable for {symbol} BUY; fail-closed: {exc}"
+                )
+                return self._reject_approval_decision(
+                    symbol=symbol,
+                    action=action,
+                    price=price,
+                    account_state=account_state,
+                    dedupe_key=dedupe_key,
+                    approval=deterministic_rejection(
+                        category="circuit_breaker",
+                        reason=f"regime circuit breaker state unavailable: {exc}",
+                        metadata={
+                            "regime_circuit_breaker": {"error": str(exc), "fail_closed": True}
+                        },
+                    ),
+                )
             self.deps.log.warning(
-                f"Regime circuit breaker unavailable for {symbol}; fail-open: {exc}"
+                f"Regime circuit breaker unavailable for {symbol} {action.upper()}; "
+                f"fail-open (sell): {exc}"
             )
             return StageResult()
 

@@ -71,6 +71,41 @@ def _blocked_archive_rows(archive_manifest: dict[str, Any]) -> list[dict[str, An
     ]
 
 
+def _recent_backup_ok(base_dir: Path, *, max_age_hours: float) -> tuple[bool, dict[str, Any]]:
+    """Return (ok, info) for the most recent database backup manifest.
+
+    Destructive right-sizing (archive delete / compact swap) must not run unless a
+    recent, failure-free backup exists, so a bad archive/swap discovered later can
+    be restored. Mirrors the freshness logic in the database-backup health report.
+    """
+    backup_dir = base_dir / "backups" / "databases"
+    manifests = sorted(
+        backup_dir.glob("**/database_backup_*.manifest.json"),
+        key=lambda p: p.stat().st_mtime,
+    )
+    if not manifests:
+        return False, {"reason": "no_backup_manifest", "backup_dir": str(backup_dir)}
+    latest = manifests[-1]
+    age_hours = round(
+        (datetime.now(timezone.utc).timestamp() - latest.stat().st_mtime) / 3600, 2
+    )
+    try:
+        manifest = json.loads(latest.read_text())
+    except Exception:
+        return False, {"reason": "unreadable_backup_manifest", "path": str(latest)}
+    summary = manifest.get("summary", {}) or {}
+    failed = int(summary.get("failed_count") or 0)
+    fresh = age_hours <= max_age_hours
+    ok = fresh and failed == 0
+    return ok, {
+        "path": str(latest),
+        "age_hours": age_hours,
+        "max_age_hours": max_age_hours,
+        "failed_count": failed,
+        "fresh": fresh,
+    }
+
+
 def run(
     *,
     db_path: Path,
@@ -94,6 +129,8 @@ def run(
     service_names: tuple[str, ...],
     dbstat_limit: int,
     dbstat_timeout_sec: float,
+    skip_backup_check: bool = False,
+    require_backup_max_age_hours: float = 30.0,
 ) -> dict[str, Any]:
     session = market_session()
     regular_session = is_market_hours()
@@ -139,6 +176,26 @@ def run(
         manifest["finished_at"] = _now_iso()
         _write_manifest(manifest, manifest_dir)
         return manifest
+
+    # Destructive ops (archive delete / compact swap) require a recent, failure-free
+    # backup so a bad result can be restored. Fail closed unless explicitly skipped
+    # or forced.
+    if (execute_archive or swap_compact) and not skip_backup_check and not force:
+        # backups/ is co-located with the DB (both at repo root in production), so
+        # derive the base from db_path.parent rather than the module ROOT.
+        backup_ok, backup_info = _recent_backup_ok(
+            db_path.parent, max_age_hours=require_backup_max_age_hours
+        )
+        manifest["backup_precondition"] = backup_info
+        if not backup_ok:
+            manifest["status"] = "blocked_no_recent_backup"
+            manifest["reason"] = (
+                "destructive right-sizing requires a recent verified backup; run "
+                "pipeline/database_backup.py first, or pass --skip-backup-check/--force"
+            )
+            manifest["finished_at"] = _now_iso()
+            _write_manifest(manifest, manifest_dir)
+            return manifest
 
     before = build_report(
         db_path,
@@ -268,7 +325,18 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--checkpoint", action="store_true")
     parser.add_argument("--prune-rollbacks", action="store_true")
     parser.add_argument("--rollback-retention-days", type=int, default=2)
-    parser.add_argument("--rollback-min-keep", type=int, default=0)
+    parser.add_argument(
+        "--rollback-min-keep",
+        type=int,
+        default=1,
+        help="Always keep at least this many rollback copies (floored at 1 for safety).",
+    )
+    parser.add_argument(
+        "--skip-backup-check",
+        action="store_true",
+        help="Skip the recent-backup precondition for destructive archive/swap (unsafe).",
+    )
+    parser.add_argument("--require-backup-max-age-hours", type=float, default=30.0)
     parser.add_argument("--skip-training-evidence", action="store_true")
     parser.add_argument("--skip-market-hours-check", action="store_true")
     parser.add_argument("--skip-service-check", action="store_true")
@@ -300,7 +368,8 @@ def main(argv: list[str] | None = None) -> int:
         chunk_size=max(1, int(args.chunk_size)),
         max_chunks=max(0, int(args.max_chunks)),
         rollback_retention_days=max(0, int(args.rollback_retention_days)),
-        rollback_min_keep=max(0, int(args.rollback_min_keep)),
+        # Hard floor of 1: a swap must always leave at least one rollback copy.
+        rollback_min_keep=max(1, int(args.rollback_min_keep)),
         skip_training_evidence=bool(args.skip_training_evidence),
         force=bool(args.force),
         skip_market_hours_check=bool(args.skip_market_hours_check),
@@ -308,6 +377,8 @@ def main(argv: list[str] | None = None) -> int:
         service_names=tuple(args.services or sqlite_vacuum_swap.DEFAULT_SERVICE_NAMES),
         dbstat_limit=max(0, int(args.dbstat_limit)),
         dbstat_timeout_sec=max(0.1, float(args.dbstat_timeout_sec)),
+        skip_backup_check=bool(args.skip_backup_check),
+        require_backup_max_age_hours=max(0.0, float(args.require_backup_max_age_hours)),
     )
     print(json.dumps(manifest, indent=2, sort_keys=True))
     return 0 if manifest.get("status") in {"complete", "complete_with_warnings"} else 2

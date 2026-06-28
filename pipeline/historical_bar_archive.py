@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from dataclasses import asdict, is_dataclass
 from datetime import date, timedelta
@@ -177,13 +178,19 @@ def main(argv: list[str] | None = None) -> int:
     print(f"rows_written: {rows_written}")
     successful_or_existing = int(summary["successful_symbols"]) + skipped_existing_patterns
     coverage_rate = successful_or_existing / max(1, len(symbols))
-    if errors and coverage_rate >= 0.80:
+    try:
+        min_coverage = float(os.environ.get("OPS_HISTORICAL_ARCHIVE_MIN_COVERAGE", "0.80"))
+    except (TypeError, ValueError):
+        min_coverage = 0.80
+    if errors:
+        # Never let partial coverage read as full success silently: emit a scannable
+        # ALERT whenever any symbol failed, regardless of the coverage tolerance.
         print(
-            "archive_warning: provider errors present but existing/successful "
-            f"coverage is {coverage_rate:.2%}; treating as non-critical"
+            f"[ALERT] historical_bar_archive partial: {len(errors)} symbol(s) failed; "
+            f"coverage={coverage_rate:.2%} (min={min_coverage:.0%})"
         )
-        return 0
-    return 0 if (results or skipped_existing_patterns) and not errors else 1
+        return 0 if coverage_rate >= min_coverage else 1
+    return 0 if (results or skipped_existing_patterns) else 1
 
 
 if __name__ == "__main__":

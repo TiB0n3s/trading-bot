@@ -78,3 +78,11 @@ def test_calibration_falls_back_to_base_rate_when_too_few():
     cal = fit_binned_calibration([0.5], [1], n_bins=10)
     assert cal.bins == ()
     assert cal.predict(0.9) == cal.base_rate
+
+
+def test_calibration_treats_negative_label_as_loss_not_win():
+    # Multi-class triple_barrier/trend_scan stop-out (-1) must count as a loss,
+    # never a win. With all losses the base rate (and every prediction) is 0.0.
+    cal = fit_binned_calibration([0.2, 0.4, 0.6, 0.8], [-1, -1, 0, -1], n_bins=2)
+    assert cal.base_rate == 0.0
+    assert cal.predict(0.9) == 0.0

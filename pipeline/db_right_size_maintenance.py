@@ -30,6 +30,8 @@ for path in (ROOT, ROOT / "scripts", ROOT / "src"):
 
 from market_time import is_market_hours, market_session  # noqa: E402
 
+from pipeline import default_market_date  # noqa: E402
+
 import pipeline.sqlite_vacuum_swap as sqlite_vacuum_swap  # noqa: E402
 from ml_platform.config import DEFAULT_DB_PATH  # noqa: E402
 from pipeline.cold_learning_archive import ARCHIVE_ROOT, run_archive  # noqa: E402
@@ -311,7 +313,7 @@ def run(
 def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--db-path", default=str(DEFAULT_DB_PATH))
-    parser.add_argument("--target-date", default=date.today().isoformat())
+    parser.add_argument("--target-date", default=default_market_date())
     parser.add_argument("--archive-root", default=str(ARCHIVE_ROOT))
     parser.add_argument("--manifest-dir", default=str(sqlite_vacuum_swap.DEFAULT_MANIFEST_DIR))
     parser.add_argument("--chunk-size", type=int, default=5000)

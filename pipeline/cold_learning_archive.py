@@ -26,6 +26,7 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 if str(BASE_DIR) not in sys.path:
     sys.path.insert(0, str(BASE_DIR))
 
+from pipeline import default_market_date  # noqa: E402
 from ml_platform.config import DEFAULT_DB_PATH, MODEL_ROOT  # noqa: E402
 
 ARCHIVE_ROOT = BASE_DIR / "data_archive" / "sqlite"
@@ -460,7 +461,7 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--db-path", default=str(DEFAULT_DB_PATH))
     parser.add_argument("--archive-root", default=str(ARCHIVE_ROOT))
-    parser.add_argument("--target-date", default=date.today().isoformat())
+    parser.add_argument("--target-date", default=default_market_date())
     parser.add_argument("--chunk-size", type=int, default=1000)
     parser.add_argument("--max-chunks", type=int, default=0, help="0 means no chunk cap")
     parser.add_argument("--execute", action="store_true", help="Move and delete eligible rows")

@@ -17,7 +17,7 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 if str(BASE_DIR) not in sys.path:
     sys.path.insert(0, str(BASE_DIR))
 
-from pipeline import run_child  # noqa: E402
+from pipeline import default_market_date, run_child  # noqa: E402
 from services.intelligence.candidates.external_symbols import (  # noqa: E402
     DEFAULT_MIN_BAR_DAYS,
     DEFAULT_MIN_BAR_ROWS,
@@ -99,7 +99,7 @@ def _print_human(payload: dict) -> None:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--date", default=date.today().isoformat())
+    parser.add_argument("--date", default=default_market_date())
     parser.add_argument("--discovery-start-date")
     parser.add_argument("--discovery-end-date")
     parser.add_argument("--lookback-days", type=int, default=5)

@@ -12,7 +12,6 @@ import argparse
 import json
 import sys
 from dataclasses import dataclass
-from datetime import date
 from pathlib import Path
 from typing import Any
 
@@ -27,6 +26,7 @@ for path in (
         sys.path.remove(path_str)
     sys.path.insert(0, path_str)
 
+from pipeline import default_market_date  # noqa: E402
 from repositories.candidate_universe_repo import CandidateUniverseRepository  # noqa: E402
 from repositories.decision_snapshot_repo import DecisionSnapshotRepository  # noqa: E402
 from repositories.exit_snapshot_repo import ExitSnapshotRepository  # noqa: E402
@@ -189,7 +189,7 @@ def _pct(value: float | None) -> str:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--date", default=date.today().isoformat())
+    parser.add_argument("--date", default=default_market_date())
     parser.add_argument("--candidate-limit", type=int, default=1000)
     parser.add_argument("--candidate-target-coverage", type=float, default=0.95)
     parser.add_argument("--max-candidate-passes", type=int, default=20)

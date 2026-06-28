@@ -11,14 +11,13 @@ from __future__ import annotations
 
 import argparse
 import sys
-from datetime import date
 from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 if str(BASE_DIR) not in sys.path:
     sys.path.insert(0, str(BASE_DIR))
 
-from pipeline import Step, run_pipeline  # noqa: E402
+from pipeline import Step, default_market_date, run_pipeline  # noqa: E402
 
 
 def _build_steps(target_date: str) -> list[Step]:
@@ -196,7 +195,7 @@ def _build_steps(target_date: str) -> list[Step]:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--date", default=date.today().isoformat())
+    parser.add_argument("--date", default=default_market_date())
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
 

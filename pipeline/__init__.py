@@ -20,6 +20,19 @@ from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
+from zoneinfo import ZoneInfo
+
+_EASTERN = ZoneInfo("America/New_York")
+
+
+def default_market_date() -> str:
+    """Today's date in US/Eastern (the bot's calendar) as YYYY-MM-DD.
+
+    CLI --date defaults previously used naive ``date.today()``, which resolves to
+    the host clock's local date (the hosts run Central) and can be off by a day
+    near the CT/ET midnight boundary. Eastern is the canonical trading calendar.
+    """
+    return datetime.now(_EASTERN).date().isoformat()
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 

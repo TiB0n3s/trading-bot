@@ -10,14 +10,13 @@ from __future__ import annotations
 
 import argparse
 import sys
-from datetime import date
 from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 if str(BASE_DIR) not in sys.path:
     sys.path.insert(0, str(BASE_DIR))
 
-from pipeline import Step, run_pipeline
+from pipeline import Step, default_market_date, run_pipeline
 
 
 def _build_steps(args: argparse.Namespace) -> list[Step]:
@@ -142,7 +141,7 @@ def _build_steps(args: argparse.Namespace) -> list[Step]:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--start-date", default="2024-06-01")
-    parser.add_argument("--end-date", default=date.today().isoformat())
+    parser.add_argument("--end-date", default=default_market_date())
     parser.add_argument("--max-symbols", type=int, default=10)
     parser.add_argument("--execute-retry", action="store_true")
     parser.add_argument("--train", action="store_true")

@@ -11,14 +11,13 @@ from __future__ import annotations
 import argparse
 import os
 import sys
-from datetime import date
 from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 if str(BASE_DIR) not in sys.path:
     sys.path.insert(0, str(BASE_DIR))
 
-from pipeline import Step, run_pipeline  # noqa: E402
+from pipeline import Step, default_market_date, run_pipeline  # noqa: E402
 
 MARKER_ROOT = BASE_DIR / "runtime_state" / "pipeline_step_markers" / "after_close_learning"
 DEFAULT_DAILY_MEMORY_LIMIT_MB = 2048
@@ -541,7 +540,7 @@ def _build_steps(target_date: str, lane: str) -> list[Step]:
 def main() -> int:
     _apply_numeric_thread_defaults()
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--date", default=date.today().isoformat())
+    parser.add_argument("--date", default=default_market_date())
     parser.add_argument("--lane", choices=["daily", "research", "all"], default="daily")
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument(

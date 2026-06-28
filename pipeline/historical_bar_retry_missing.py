@@ -13,14 +13,13 @@ import json
 import os
 import re
 import sys
-from datetime import date
 from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 if str(BASE_DIR) not in sys.path:
     sys.path.insert(0, str(BASE_DIR))
 
-from pipeline import run_child  # noqa: E402
+from pipeline import default_market_date, run_child  # noqa: E402
 from symbols_config import APPROVED_SYMBOLS_LIST  # noqa: E402
 
 from trading_bot.ops_checks.commands.historical_bar_progress_checks import (  # noqa: E402
@@ -181,7 +180,7 @@ def main(argv: list[str] | None = None) -> int:
     _load_env_file()
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--start-date", required=True)
-    parser.add_argument("--end-date", default=date.today().isoformat())
+    parser.add_argument("--end-date", default=default_market_date())
     parser.add_argument("--min-days", type=int, default=252)
     parser.add_argument("--max-symbols", type=int, default=10)
     parser.add_argument("--manifest-limit", type=int, default=10)

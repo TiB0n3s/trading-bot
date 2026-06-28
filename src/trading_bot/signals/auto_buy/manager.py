@@ -123,12 +123,6 @@ _bot_events_services: dict[str, BotEventsService] = {}
 _AUTO_BUY_CFG = load_auto_buy_config()
 
 AUTO_BUY_LIVE_BUYS = _AUTO_BUY_CFG.live_buys
-AUTO_BUY_ALLOW_TRADINGVIEW_LIVE = os.getenv("AUTO_BUY_ALLOW_TRADINGVIEW_LIVE", "false").lower() in (
-    "1",
-    "true",
-    "yes",
-    "on",
-)
 AUTO_BUY_SIGNAL_MODE = _AUTO_BUY_CFG.signal_mode
 TRADINGVIEW_ALERTS_DEPRECATED = _AUTO_BUY_CFG.tradingview_alerts_deprecated
 AUTO_BUY_MIN_SCORE = _AUTO_BUY_CFG.min_score
@@ -509,10 +503,6 @@ def internal_signal_execution_enabled() -> bool:
         "bar_all",
         "all_internal",
     }
-
-
-def tradingview_webhook_required_for_execution() -> bool:
-    return not (AUTO_BUY_ALLOW_TRADINGVIEW_LIVE or internal_signal_execution_enabled())
 
 
 def learned_tiebreaker_soft_block_only(block_reasons: list[str]) -> bool:
@@ -1590,13 +1580,10 @@ def evaluate_auto_buy_candidate(
     execution_signal_mode = (
         "internal_all" if internal_signal_execution_enabled() else "legacy_source_gate"
     )
-    requires_webhook = (
-        signal_source == "tradingview_alert" and tradingview_webhook_required_for_execution()
-    )
-    if requires_webhook:
-        strong_threshold = AUTO_BUY_MIN_SCORE + 4.0
-        reasons.append(f"webhook_symbol_candidate_threshold:{strong_threshold:.1f}")
-    elif signal_source == "tradingview_alert":
+    # TradingView HTTP ingress has been retired. Keep the legacy output key
+    # false so historical dashboards do not treat these rows as webhook-blocked.
+    requires_webhook = False
+    if signal_source == "tradingview_alert":
         reasons.append(f"internal_signal_execution:{execution_signal_mode}")
 
     layered_ml_threshold_gap_before_build = round(float(strong_threshold) - float(score), 4)
@@ -2706,7 +2693,6 @@ def render(candidates: list[dict[str, Any]], scope: str, market_open: bool) -> N
         "  signal_mode    : "
         f"{'internal_all' if internal_signal_execution_enabled() else 'legacy_source_gate'}"
     )
-    print(f"  webhook_required: {tradingview_webhook_required_for_execution()}")
     print(f"  min_score      : {AUTO_BUY_MIN_SCORE}")
     print(f"  active_cap     : {AUTO_BUY_MAX_ACTIVE_POSITIONS}")
     print(f"  daily_gross_cap: {AUTO_BUY_MAX_DAILY_ORDERS}")

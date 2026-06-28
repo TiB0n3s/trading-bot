@@ -59,7 +59,7 @@ def test_create_app_returns_isolated_app_without_startup():
     assert_true(not _app._STARTUP_TASKS_RAN, "startup flag remains false")
     assert_true(_app._signal_executor is None, "signal executor not created at import")
     rules = {str(rule) for rule in flask_app.url_map.iter_rules()}
-    for route in {"/webhook", "/health", "/status", "/positions", "/debug/symbol/<symbol>"}:
+    for route in {"/health", "/status", "/positions", "/debug/symbol/<symbol>"}:
         assert_true(route in rules, f"{route} registered")
 
 

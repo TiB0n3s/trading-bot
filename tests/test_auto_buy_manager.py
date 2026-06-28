@@ -32,7 +32,6 @@ from services import audit_write_integrity
 AUTO_BUY_RUNTIME_DEFAULTS = {
     "AUTO_BUY_SIGNAL_MODE": "legacy_source_gate",
     "TRADINGVIEW_ALERTS_DEPRECATED": False,
-    "AUTO_BUY_ALLOW_TRADINGVIEW_LIVE": False,
     "AUTO_BUY_LIVE_BUYS": False,
     "AUTO_BUY_LEARNED_TIEBREAKER_ENABLED": False,
     "AUTO_BUY_WATCH_SETUP_STRONG_BUY_ENABLED": False,
@@ -674,9 +673,7 @@ def test_paper_exploration_fallback_promotes_soft_blocked_candidate():
         raise AssertionError(f"missing exploration reason: {result['reason']}")
 
 
-def test_tradingview_symbols_need_higher_auto_buy_threshold():
-    # This test requires legacy_source_gate so the webhook threshold penalty applies.
-    # The live env may have internal_all which disables the penalty.
+def test_tradingview_symbols_no_longer_need_webhook_threshold():
     reset_auto_buy_runtime_defaults()
 
     session = strong_session()
@@ -704,22 +701,20 @@ def test_tradingview_symbols_need_higher_auto_buy_threshold():
     )
 
     assert_equal(internal["decision"], "strong_buy_candidate", "internal decision")
-    assert_equal(webhook_symbol["decision"], "watch", "webhook-symbol decision")
+    assert_equal(webhook_symbol["decision"], "strong_buy_candidate", "webhook-symbol decision")
     assert_equal(
         webhook_symbol["strong_buy_threshold"],
-        auto_buy_manager.AUTO_BUY_MIN_SCORE + 4.0,
+        auto_buy_manager.AUTO_BUY_MIN_SCORE,
         "threshold",
     )
-    assert_equal(webhook_symbol["requires_tradingview_webhook"], True, "requires webhook")
+    assert_equal(webhook_symbol["requires_tradingview_webhook"], False, "requires webhook")
 
 
 def test_internal_all_mode_removes_tradingview_threshold_penalty():
     old_mode = auto_buy_manager.AUTO_BUY_SIGNAL_MODE
     old_deprecated = auto_buy_manager.TRADINGVIEW_ALERTS_DEPRECATED
-    old_allow = auto_buy_manager.AUTO_BUY_ALLOW_TRADINGVIEW_LIVE
     auto_buy_manager.AUTO_BUY_SIGNAL_MODE = "internal_all"
     auto_buy_manager.TRADINGVIEW_ALERTS_DEPRECATED = False
-    auto_buy_manager.AUTO_BUY_ALLOW_TRADINGVIEW_LIVE = False
     try:
         session = strong_session()
         session["trend_label"] = "developing_uptrend"
@@ -739,7 +734,6 @@ def test_internal_all_mode_removes_tradingview_threshold_penalty():
     finally:
         auto_buy_manager.AUTO_BUY_SIGNAL_MODE = old_mode
         auto_buy_manager.TRADINGVIEW_ALERTS_DEPRECATED = old_deprecated
-        auto_buy_manager.AUTO_BUY_ALLOW_TRADINGVIEW_LIVE = old_allow
 
     assert_equal(result["decision"], "strong_buy_candidate", "decision")
     assert_equal(result["strong_buy_threshold"], auto_buy_manager.AUTO_BUY_MIN_SCORE, "threshold")
@@ -896,9 +890,7 @@ def test_live_buy_requires_market_open_and_env_flag():
 
 def test_live_auto_buy_does_not_execute_tradingview_alert_symbols_by_default():
     old_live = auto_buy_manager.AUTO_BUY_LIVE_BUYS
-    old_allow = auto_buy_manager.AUTO_BUY_ALLOW_TRADINGVIEW_LIVE
     auto_buy_manager.AUTO_BUY_LIVE_BUYS = True
-    auto_buy_manager.AUTO_BUY_ALLOW_TRADINGVIEW_LIVE = False
     try:
         candidate = {
             "symbol": "AMZN",
@@ -910,7 +902,6 @@ def test_live_auto_buy_does_not_execute_tradingview_alert_symbols_by_default():
         order = maybe_execute_auto_buy(candidate, market_open=True, live_requested=True)
     finally:
         auto_buy_manager.AUTO_BUY_LIVE_BUYS = old_live
-        auto_buy_manager.AUTO_BUY_ALLOW_TRADINGVIEW_LIVE = old_allow
 
     assert_equal(order, None, "order")
     assert_equal(
@@ -922,12 +913,10 @@ def test_live_auto_buy_does_not_execute_tradingview_alert_symbols_by_default():
 
 def test_internal_all_mode_stays_candidate_only_for_tradingview_symbols():
     old_live = auto_buy_manager.AUTO_BUY_LIVE_BUYS
-    old_allow = auto_buy_manager.AUTO_BUY_ALLOW_TRADINGVIEW_LIVE
     old_mode = auto_buy_manager.AUTO_BUY_SIGNAL_MODE
     old_deprecated = auto_buy_manager.TRADINGVIEW_ALERTS_DEPRECATED
     old_capacity = auto_buy_manager.auto_buy_capacity_check
     auto_buy_manager.AUTO_BUY_LIVE_BUYS = True
-    auto_buy_manager.AUTO_BUY_ALLOW_TRADINGVIEW_LIVE = False
     auto_buy_manager.AUTO_BUY_SIGNAL_MODE = "internal_all"
     auto_buy_manager.TRADINGVIEW_ALERTS_DEPRECATED = False
     auto_buy_manager.auto_buy_capacity_check = lambda: (False, "capacity stopped")
@@ -942,7 +931,6 @@ def test_internal_all_mode_stays_candidate_only_for_tradingview_symbols():
         order = maybe_execute_auto_buy(candidate, market_open=True, live_requested=True)
     finally:
         auto_buy_manager.AUTO_BUY_LIVE_BUYS = old_live
-        auto_buy_manager.AUTO_BUY_ALLOW_TRADINGVIEW_LIVE = old_allow
         auto_buy_manager.AUTO_BUY_SIGNAL_MODE = old_mode
         auto_buy_manager.TRADINGVIEW_ALERTS_DEPRECATED = old_deprecated
         auto_buy_manager.auto_buy_capacity_check = old_capacity
@@ -1931,7 +1919,7 @@ def main():
         test_strategy_memory_avoid_blocks_auto_buy_candidate,
         test_weak_strategy_memory_avoid_is_soft_for_paper_tiebreaker,
         test_paper_exploration_fallback_promotes_soft_blocked_candidate,
-        test_tradingview_symbols_need_higher_auto_buy_threshold,
+        test_tradingview_symbols_no_longer_need_webhook_threshold,
         test_internal_all_mode_removes_tradingview_threshold_penalty,
         test_early_session_buffer_skips_collection,
         test_auto_buy_symbol_window_rotates_large_universe,

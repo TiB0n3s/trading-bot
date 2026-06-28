@@ -356,7 +356,7 @@ def test_ops_reliability_cli_missing_db_exits_cleanly(tmp_path):
         assert "[WARN] trades.db not found" in out
 
 
-def test_signal_source_readiness_cli_flags_legacy_source_gate(tmp_path):
+def test_signal_source_readiness_cli_reports_legacy_tv_rows_without_webhook_failure(tmp_path):
     db_path = tmp_path / "trades.db"
     auto_buy_repo.init_tables(db_path)
     with sqlite3.connect(db_path) as con:
@@ -394,7 +394,7 @@ def test_signal_source_readiness_cli_flags_legacy_source_gate(tmp_path):
                 "strong_buy_candidate",
                 17.0,
                 1,
-                "tradingview alert symbol requires webhook approval path",
+                "legacy historical row",
                 0,
                 "auto_buy_paper_execution_path",
             ),
@@ -402,28 +402,24 @@ def test_signal_source_readiness_cli_flags_legacy_source_gate(tmp_path):
 
     old_mode = os.environ.get("AUTO_BUY_SIGNAL_MODE")
     old_deprecated = os.environ.get("TRADINGVIEW_ALERTS_DEPRECATED")
-    old_allow = os.environ.get("AUTO_BUY_ALLOW_TRADINGVIEW_LIVE")
     try:
         os.environ["AUTO_BUY_SIGNAL_MODE"] = "legacy_source_gate"
         os.environ["TRADINGVIEW_ALERTS_DEPRECATED"] = "false"
-        os.environ["AUTO_BUY_ALLOW_TRADINGVIEW_LIVE"] = "false"
         code, out = _run_cli(tmp_path, "signal-source-readiness", "2026-05-30")
     finally:
         for key, old_value in (
             ("AUTO_BUY_SIGNAL_MODE", old_mode),
             ("TRADINGVIEW_ALERTS_DEPRECATED", old_deprecated),
-            ("AUTO_BUY_ALLOW_TRADINGVIEW_LIVE", old_allow),
         ):
             if old_value is None:
                 os.environ.pop(key, None)
             else:
                 os.environ[key] = old_value
 
-    assert code == 1
+    assert code == 0
     assert "Signal Source Readiness" in out
     assert "legacy-tv strong candidates" in out
-    assert "tradingview alert symbol requires webhook approval path" in out
-    assert "Set AUTO_BUY_SIGNAL_MODE=internal_all" in out
+    assert "TradingView HTTP webhook route has been retired" in out
 
 
 def test_signal_source_readiness_cli_passes_when_internal_all_active(tmp_path):
@@ -1430,7 +1426,7 @@ def main():
         test_bar_pattern_backfill_cli_missing_db_exits_cleanly,
         test_shadow_predictions_cli_missing_db_exits_cleanly,
         test_ops_reliability_cli_missing_db_exits_cleanly,
-        test_signal_source_readiness_cli_flags_legacy_source_gate,
+        test_signal_source_readiness_cli_reports_legacy_tv_rows_without_webhook_failure,
         test_signal_source_readiness_cli_passes_when_internal_all_active,
         test_feature_attribution_cli_empty_lifecycle_rows_warns,
         test_post_trade_learning_cli_empty_lifecycle_rows_warns,

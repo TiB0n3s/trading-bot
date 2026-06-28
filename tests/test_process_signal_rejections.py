@@ -1,24 +1,18 @@
 #!/usr/bin/env python3
 """
-Tests for app.py process_signal rejection paths and /webhook HTTP validation.
+Tests for app.py process_signal rejection paths.
 
 process_signal rejection categories covered:
-  ghost_sell, market_hours, circuit_breaker, duplicate_webhook,
+  ghost_sell, market_hours, circuit_breaker,
   symbol_override, cooldown, churn_window, churn_price,
   daily_symbol_buy_limit, session_trade_count, exposure_cap,
   macro_risk, macro_position_limit, trend_confirmation (buy + sell),
   fundamental_score, chase_prevention, sell_profit_threshold,
   sell_discipline
 
-/webhook HTTP layer covered:
-  missing/wrong secret → 401
-  non-JSON body → 400
-  missing action or symbol → 400
-  unapproved symbol → 400
-  invalid action → 400
-  price out of sanity range → 400
-  non-positive price → 400
-  valid signal accepted → 200
+TradingView webhook HTTP ingress has been removed. Route/auth validation lives
+outside this compatibility surface now; these tests cover direct signal
+processing only.
 """
 
 from __future__ import annotations
@@ -206,7 +200,6 @@ def _base_patches(**overrides):
         # DB writes — capture without touching trades.db
         "services.trade_audit_service.TradeAuditService.record_rejection": MagicMock(),
         "services.trade_audit_service.TradeAuditService.record_execution": MagicMock(),
-        "services.trade_audit_service.TradeAuditService.record_webhook_status": MagicMock(),
         # Stale-signal check — fresh by default
         "app._is_signal_stale": MagicMock(return_value=(False, 0.0, "fresh")),
         # Portfolio rotation — disabled by default
@@ -254,137 +247,6 @@ class _Env:
 
 
 # ---------------------------------------------------------------------------
-# /webhook HTTP route tests
-# ---------------------------------------------------------------------------
-
-def test_webhook_rejects_missing_secret():
-    _app.app.testing = True
-    client = _app.app.test_client()
-    resp = client.post("/webhook", json=_buy())
-    assert_equal(resp.status_code, 401, "missing secret → 401")
-
-
-def test_webhook_rejects_wrong_secret():
-    _app.app.testing = True
-    client = _app.app.test_client()
-    resp = client.post(
-        "/webhook",
-        json=_buy(),
-        headers={"X-Webhook-Secret": "wrong-secret"},
-    )
-    assert_equal(resp.status_code, 401, "wrong secret → 401")
-
-
-def test_webhook_rejects_query_string_secret_by_default():
-    _app.app.testing = True
-    client = _app.app.test_client()
-    with patch.object(_app, "ALLOW_QUERY_STRING_SECRET", False):
-        resp = client.post(
-            f"/webhook?secret={_SECRET}",
-            json=_buy(),
-        )
-    assert_equal(resp.status_code, 401, "query-string secret default → 401")
-
-
-def test_webhook_query_string_secret_requires_explicit_compat_flag():
-    _app.app.testing = True
-    submit_mock = MagicMock()
-    executor_mock = MagicMock()
-    executor_mock.submit = submit_mock
-    with patch.object(_app, "ALLOW_QUERY_STRING_SECRET", True):
-        with patch("app._signal_executor", executor_mock):
-            with patch("app._record_webhook_event", return_value=True):
-                with patch(
-                    "services.trade_audit_service.TradeAuditService.record_webhook_status",
-                    MagicMock(),
-                ):
-                    client = _app.app.test_client()
-                    resp = client.post(
-                        f"/webhook?secret={_SECRET}",
-                        json=_buy(),
-                    )
-
-    assert_equal(resp.status_code, 200, "query-string secret with compat flag → 200")
-    assert_true(submit_mock.called, "signal submitted to executor")
-
-
-def test_webhook_rejects_non_json():
-    _app.app.testing = True
-    client = _app.app.test_client()
-    resp = client.post(
-        "/webhook",
-        data="not json at all",
-        content_type="text/plain",
-        headers={"X-Webhook-Secret": _SECRET},
-    )
-    assert_equal(resp.status_code, 400, "non-JSON → 400")
-
-
-def test_webhook_rejects_invalid_action():
-    _app.app.testing = True
-    client = _app.app.test_client()
-    resp = client.post(
-        "/webhook",
-        json={"action": "hold", "symbol": _SYMBOL, "price": _PRICE},
-        headers={"X-Webhook-Secret": _SECRET},
-    )
-    assert_equal(resp.status_code, 400, "invalid action → 400")
-
-
-def test_webhook_rejects_unapproved_symbol():
-    _app.app.testing = True
-    client = _app.app.test_client()
-    resp = client.post(
-        "/webhook",
-        json={"action": "buy", "symbol": "DOESNOTEXIST", "price": 10.0},
-        headers={"X-Webhook-Secret": _SECRET},
-    )
-    assert_equal(resp.status_code, 400, "unapproved symbol → 400")
-
-
-def test_webhook_rejects_out_of_range_price():
-    _app.app.testing = True
-    client = _app.app.test_client()
-    # Price far below floor
-    resp = client.post(
-        "/webhook",
-        json={"action": "buy", "symbol": _SYMBOL, "price": 0.01},
-        headers={"X-Webhook-Secret": _SECRET},
-    )
-    assert_equal(resp.status_code, 400, "price below sanity floor → 400")
-
-
-def test_webhook_rejects_nonpositive_price():
-    _app.app.testing = True
-    client = _app.app.test_client()
-    resp = client.post(
-        "/webhook",
-        json={"action": "buy", "symbol": _SYMBOL, "price": 0},
-        headers={"X-Webhook-Secret": _SECRET},
-    )
-    assert_equal(resp.status_code, 400, "zero price → 400")
-
-
-def test_webhook_accepts_valid_buy_signal():
-    """A well-formed signal with correct secret queues successfully (HTTP 200)."""
-    _app.app.testing = True
-    submit_mock = MagicMock()
-    executor_mock = MagicMock()
-    executor_mock.submit = submit_mock
-    with patch("app._signal_executor", executor_mock):
-        with patch("app._record_webhook_event", return_value=True):
-            with patch("services.trade_audit_service.TradeAuditService.record_webhook_status", MagicMock()):
-                client = _app.app.test_client()
-                resp = client.post(
-                    "/webhook",
-                    json=_buy(),
-                    headers={"X-Webhook-Secret": _SECRET},
-                )
-    assert_equal(resp.status_code, 200, "valid signal → 200")
-    assert_true(submit_mock.called, "signal submitted to executor")
-
-
-# ---------------------------------------------------------------------------
 # process_signal rejection tests
 # ---------------------------------------------------------------------------
 
@@ -425,15 +287,6 @@ def test_circuit_breaker_does_not_block_sell():
     # No circuit_breaker rejection for sells
     for call in log_mock.call_args_list:
         assert call.kwargs.get("category") != "circuit_breaker", "circuit_breaker must not block sells"
-
-
-def test_duplicate_webhook_blocked():
-    with _Env(**{
-        "app._is_duplicate_webhook": MagicMock(return_value=True),
-        "app.get_mock_account_state": MagicMock(return_value=_account()),
-    }) as env:
-        _app.process_signal(_buy())
-    assert_equal(env.rejection_category(), "duplicate_webhook", "category")
 
 
 def test_symbol_override_blocks_signal():
@@ -694,23 +547,11 @@ def test_sell_discipline_blocks_small_red_position_without_bearish():
 # ---------------------------------------------------------------------------
 
 _TESTS = [
-    # /webhook HTTP layer
-    test_webhook_rejects_missing_secret,
-    test_webhook_rejects_wrong_secret,
-    test_webhook_rejects_query_string_secret_by_default,
-    test_webhook_query_string_secret_requires_explicit_compat_flag,
-    test_webhook_rejects_non_json,
-    test_webhook_rejects_invalid_action,
-    test_webhook_rejects_unapproved_symbol,
-    test_webhook_rejects_out_of_range_price,
-    test_webhook_rejects_nonpositive_price,
-    test_webhook_accepts_valid_buy_signal,
     # process_signal rejections
     test_ghost_sell_blocked_when_no_db_position,
     test_market_hours_blocks_outside_hours,
     test_circuit_breaker_blocks_buy_on_daily_loss,
     test_circuit_breaker_does_not_block_sell,
-    test_duplicate_webhook_blocked,
     test_symbol_override_blocks_signal,
     test_cooldown_blocks_buy_within_window,
     test_churn_window_blocks_buy_after_recent_sell,

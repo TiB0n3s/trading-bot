@@ -69,7 +69,6 @@ def test_build_config_audit_payload_flags_unsafe_runtime_settings(tmp_path):
     assert payload["live_trading_enabled"] is False
     assert payload["factory_failures"] == 0
     assert payload["ready"] is False
-    assert "WEBHOOK_SECRET is unset or still using the unsafe default" in payload["warnings"]
     assert "ALLOW_QUERY_STRING_SECRET is enabled" in payload["warnings"]
     assert "EXECUTION_MODE=cash_full requires explicit operator review" in payload["warnings"]
     assert "ML_AUTHORITY_MODE=live_block requires current promotion evidence" in payload["warnings"]

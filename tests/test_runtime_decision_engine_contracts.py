@@ -14,7 +14,7 @@ sys.path.insert(0, str(ROOT))
 
 from services.approval_service import evaluate_approval_decision
 from services.decision import CanonicalDecisionOrchestrator, DecisionEngine
-from services.decision.adapters import auto_buy_candidate_from_raw, webhook_candidate_from_raw
+from services.decision.adapters import auto_buy_candidate_from_raw
 from services.decision.authority import AuthorityMatrix, normalize_authority_mode
 from services.decision.gates import build_intelligence_adjudication
 from services.decision.state import DecisionState
@@ -202,8 +202,7 @@ def test_decision_state_serializes_to_legacy_account_state():
     assert_equal(legacy["decision_trace"]["trace_version"], "decision_trace_v1", "trace bridge")
 
 
-def test_signal_candidates_normalize_webhook_and_auto_buy():
-    webhook = webhook_candidate_from_raw({"symbol": "aapl", "action": "BUY", "price": "325.50"})
+def test_signal_candidates_normalize_auto_buy():
     auto_buy = auto_buy_candidate_from_raw(
         {
             "symbol": "msft",
@@ -212,10 +211,10 @@ def test_signal_candidates_normalize_webhook_and_auto_buy():
             "setup_score": 91,
         }
     )
-    assert_equal(webhook.symbol, "AAPL", "webhook symbol")
-    assert_equal(webhook.action, "buy", "webhook action")
-    assert_equal(webhook.to_legacy_signal()["price"], 325.5, "webhook price")
     assert_equal(auto_buy.source, "auto_buy", "auto-buy source")
+    assert_equal(auto_buy.symbol, "MSFT", "auto-buy symbol")
+    assert_equal(auto_buy.action, "buy", "auto-buy action")
+    assert_equal(auto_buy.to_legacy_signal()["price"], 412.25, "auto-buy price")
     assert_equal(auto_buy.to_legacy_signal()["setup_score"], 91, "auto-buy features")
 
 
@@ -483,7 +482,7 @@ def main():
         test_gate_engine_enforced_block_overrides_approved_state,
         test_gate_engine_accepts_legacy_src_gate_result_alias,
         test_decision_state_serializes_to_legacy_account_state,
-        test_signal_candidates_normalize_webhook_and_auto_buy,
+        test_signal_candidates_normalize_auto_buy,
         test_intelligence_adjudicator_aggregates_model_surfaces,
         test_decision_engine_stores_canonical_trace_directly,
         test_decision_engine_marks_execution_quality_block_as_enforced,

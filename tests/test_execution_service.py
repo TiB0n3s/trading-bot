@@ -300,7 +300,6 @@ def test_zero_final_buy_size_blocks_before_order_routing():
         deterministic_rejection=lambda **kwargs: kwargs,
         rejection_adapter=_RejectAdapter(),
         log_trade=lambda *_args, **_kwargs: calls.__setitem__("log_trade", calls["log_trade"] + 1),
-        record_webhook_status=lambda **_: None,
         write_cooldown=lambda *_: None,
         write_recent_sell=lambda *_: None,
         last_order={},

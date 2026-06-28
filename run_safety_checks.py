@@ -59,7 +59,6 @@ SAFETY_TESTS = [
 FULL_SAFETY_TESTS = [
     *SAFETY_TESTS,
     "tests/test_remaining_assessment_services.py",
-    "tests/test_local_load_probe_service.py",
     "tests/test_paper_replay_load_probe_service.py",
 ]
 
@@ -96,7 +95,7 @@ def main() -> int:
     print(f"scope={'full' if args.full else 'pre_commit_fast'}")
     if not args.full:
         print(
-            "excluded_from_fast_hook=remaining_assessment,local_load_probe,paper_replay_load_probe"
+            "excluded_from_fast_hook=remaining_assessment,paper_replay_load_probe"
         )
 
     result = subprocess.run(

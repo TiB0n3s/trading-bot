@@ -487,13 +487,6 @@ class LiveSignalProcessor:
             account_state=account_state,
         )
 
-        if dedupe_key:
-            self.deps.record_webhook_status(
-                dedupe_key=dedupe_key,
-                status="rejected",
-                failure_reason=format_rejection_reason(category, reason),
-            )
-
         return StageResult(rejected=True)
 
     def _reject_approval_decision(

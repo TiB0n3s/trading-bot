@@ -301,7 +301,6 @@ def test_second_look_rejection_blocks_order_submission():
 
 def test_broker_order_failure_marks_decision_unapproved_and_submit_failed():
     log_trade = MagicMock()
-    mark_status = MagicMock()
     with _Env(
         **_approved_downstream(
             **{
@@ -310,7 +309,6 @@ def test_broker_order_failure_marks_decision_unapproved_and_submit_failed():
                 ),
                 "app.broker_service.place_order": MagicMock(return_value=None),
                 "services.trade_audit_service.TradeAuditService.record_execution": log_trade,
-                "services.trade_audit_service.TradeAuditService.record_webhook_status": mark_status,
             }
         )
     ):
@@ -318,11 +316,7 @@ def test_broker_order_failure_marks_decision_unapproved_and_submit_failed():
 
     assert_true(log_trade.called, "failed order still logged")
     assert_equal(log_trade.call_args.kwargs["decision"]["approved"], False, "decision flipped")
-    assert_equal(mark_status.call_args.kwargs["status"], "processed", "final webhook status")
-    assert_true(
-        any(call.kwargs.get("status") == "submit_failed" for call in mark_status.call_args_list),
-        "submit_failed status recorded",
-    )
+    assert_equal(log_trade.call_args.kwargs["order"], None, "failed order not submitted")
 
 
 def test_claude_low_confidence_rejection_never_submits_order():

@@ -18,12 +18,6 @@ flags:
     authority_level: high
     rollback_action: "set false"
     change_approval: "operator_required_before_cash_live"
-  AUTO_BUY_ALLOW_TRADINGVIEW_LIVE:
-    owner: operations
-    default: "false"
-    authority_level: high
-    rollback_action: "set false"
-    change_approval: "operator_required_before_cash_live"
   DECISION_POLICY_AUTHORITY_MODE:
     owner: risk_policy
     default: "paper_only"

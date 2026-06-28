@@ -113,7 +113,6 @@ _LAZY_HANDLER_REFS = {
     "run_lifecycle_dashboard": "trading_bot.ops_checks.commands.lifecycle_dashboard_checks:run_lifecycle_dashboard",
     "run_live_bar_pattern_capture_report": "trading_bot.ops_checks.commands.live_bar_pattern_capture_checks:run_live_bar_pattern_capture_report",
     "run_live_quote_quality": "trading_bot.ops_checks.commands.live_quote_quality_checks:run_live_quote_quality",
-    "run_local_load_probe_report": "trading_bot.ops_checks.commands.local_load_probe_checks:run_local_load_probe_report",
     "run_log_ledger_consistency": "trading_bot.ops_checks.commands.log_ledger_checks:run_log_ledger_consistency",
     "run_market_data_parity": "trading_bot.ops_checks.commands.market_data_parity_checks:run_market_data_parity",
     "run_webull_market_data_parity": "trading_bot.ops_checks.commands.webull_market_data_checks:run_webull_market_data_parity",
@@ -737,15 +736,6 @@ def production_evidence(target_date):
 
 def resource_readiness():
     return run_resource_readiness(base_dir=BASE_DIR)
-
-
-def local_load_probe():
-    return run_local_load_probe_report(
-        requests=_int_option("--requests", 100),
-        concurrency=_int_option("--concurrency", 4),
-        symbol=_str_option("--symbol", "AAPL"),
-        action=_str_option("--action", "buy"),
-    )
 
 
 def paper_replay_load_probe():

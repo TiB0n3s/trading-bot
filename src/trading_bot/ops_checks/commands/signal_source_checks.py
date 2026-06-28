@@ -3,7 +3,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-from symbols_config import APPROVED_SYMBOLS_LIST
+from symbols_config import APPROVED_SYMBOLS_LIST, TRADINGVIEW_ALERT_SYMBOLS_LIST
 
 from repositories import auto_buy_repo
 
@@ -42,7 +42,6 @@ def run_signal_source_readiness(target_date: str, *, base_dir: Path) -> bool:
 
     mode = os.getenv("AUTO_BUY_SIGNAL_MODE", "legacy_source_gate").strip().lower()
     deprecated = os.getenv("TRADINGVIEW_ALERTS_DEPRECATED", "false").strip().lower()
-    allow_tv_live = os.getenv("AUTO_BUY_ALLOW_TRADINGVIEW_LIVE", "false").strip().lower()
     internal_active = _internal_signal_mode_active()
 
     print("Configuration")
@@ -50,7 +49,6 @@ def run_signal_source_readiness(target_date: str, *, base_dir: Path) -> bool:
     print(f"  legacy TradingView cohort         {len(TRADINGVIEW_ALERT_SYMBOLS_LIST):>8}")
     print(f"  AUTO_BUY_SIGNAL_MODE              {mode}")
     print(f"  TRADINGVIEW_ALERTS_DEPRECATED     {deprecated}")
-    print(f"  AUTO_BUY_ALLOW_TRADINGVIEW_LIVE   {allow_tv_live}")
     print(f"  internal all-symbol execution     {str(internal_active).lower()}")
     print()
 
@@ -82,16 +80,16 @@ def run_signal_source_readiness(target_date: str, *, base_dir: Path) -> bool:
 
     print("Live block reasons")
     block_rows = auto_buy_repo.live_block_reason_rows(target_date, db_path=db_path)
-    source_gate_blocks = 0
     if block_rows:
         for row in block_rows:
             reason = str(row["live_block_reason"] or "")
             n = int(row["n"] or 0)
-            if "tradingview alert symbol requires webhook approval path" in reason:
-                source_gate_blocks += n
             print(f"  {row['signal_source']:<22} {n:>6} {reason}")
     else:
         print("  none")
+    print()
+    print("Webhook ingress")
+    print("  TradingView HTTP webhook route has been retired; legacy source rows are historical.")
     print()
 
     print("[OK] signal-source readiness check completed")

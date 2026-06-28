@@ -40,10 +40,10 @@ items have since been implemented:
   measures root/module sprawl, oversized decision files, raw env access, and
   `src/trading_bot` skeleton readiness. `ops/compatibility_deletion_plan.md`
   tracks wrapper/module migration and deletion conditions.
-- **Local load diagnostics**: `ops_check.py local-load-probe` exercises the
-  Flask webhook route, auth, payload parser, event-record callback, and
-  signal-submit callback under bounded local bursts. It is diagnostic-only and
-  cannot submit broker orders or mutate trading state.
+- **Paper replay/load diagnostics**: `ops_check.py paper-replay-load-probe`
+  exercises temporary-DB signal/fill callback coverage under bounded local
+  load. It is diagnostic-only and cannot submit broker orders or mutate live
+  trading state.
 - **Incident workflow**: `ops_check.py incident-workflow --title "..."` renders
   a structured postmortem template, and `--create` writes an overwrite-safe
   record under `ops/incidents/`.
@@ -102,8 +102,6 @@ These remain valid roadmap items before any cash-live promotion:
    - Remaining external action: choose/configure the provider and validate
      retrieval in dry-run.
 3. **Load and burst testing**
-   - Local diagnostic webhook bursts are available through
-     `ops_check.py local-load-probe`.
    - Temporary-DB replay/fill callback coverage is available through
      `ops_check.py paper-replay-load-probe`.
    - Regular-session replay planning and bounded execution are available

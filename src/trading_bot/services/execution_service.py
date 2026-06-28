@@ -2,8 +2,8 @@
 
 This module owns the broker-adjacent execution path only: final safety checks,
 order submission, broker/null-order normalization, and exception classification.
-It intentionally does not write trade rows, rejection rows, snapshots, cooldowns,
-or webhook status. Those side effects belong to the audit/persistence boundary.
+It intentionally does not write trade rows, rejection rows, snapshots, or
+cooldowns. Those side effects belong to the audit/persistence boundary.
 """
 
 from __future__ import annotations
@@ -249,8 +249,8 @@ def execute_approved_order(
 
     Returns a normalized execution outcome for reporting/learning.
 
-    When ``claim_cooldown``/``release_cooldown`` are supplied (live webhook
-    path), the cooldown slot is reserved atomically immediately before the
+    When ``claim_cooldown``/``release_cooldown`` are supplied, the cooldown
+    slot is reserved atomically immediately before the
     broker submit and released if no order is placed. This closes the
     check-then-act race between the preflight cooldown read and the post-submit
     cooldown write across gunicorn worker processes. When they are omitted

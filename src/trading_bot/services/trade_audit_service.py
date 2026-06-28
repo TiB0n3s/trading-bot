@@ -515,7 +515,7 @@ def record_rejection(
     ml_prediction_bucket: Callable[[Any], str],
     log,
 ) -> None:
-    """Record a rejected signal and optionally mark the webhook as rejected."""
+    """Record a rejected signal."""
     log_rejection(
         symbol,
         action,
@@ -541,7 +541,7 @@ def record_execution(
     ml_prediction_bucket: Callable[[Any], str],
     log,
 ) -> None:
-    """Record the final approved/rejected trade row and webhook status."""
+    """Record the final approved/rejected trade row."""
     log_trade(
         signal,
         decision,

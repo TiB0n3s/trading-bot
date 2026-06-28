@@ -738,13 +738,11 @@ Current scoring favors earlier constructive build over mature momentum chase:
 `extreme_chase` are recorded when price is already extended from VWAP after a
 large session move. Extreme chase states are blocked unless the setup is a
 specific recovery/retest pattern rather than simple momentum chasing.
-When TradingView alerts are unavailable or intentionally retired, set
-`AUTO_BUY_SIGNAL_MODE=internal_all` or `TRADINGVIEW_ALERTS_DEPRECATED=true`.
-That allows legacy TradingView-cohort symbols to execute through the internal
-bar-derived candidate path while preserving `signal_source=tradingview_alert`
-as historical/source metadata. Use
-`python3 ops_check.py signal-source-readiness YYYY-MM-DD` to verify that strong
-legacy-cohort candidates are not being blocked solely by webhook-source gating.
+TradingView HTTP webhook ingress is retired. Legacy TradingView-cohort symbols
+can be evaluated through the internal bar-derived candidate path while
+preserving `signal_source=tradingview_alert` as historical/source metadata. Use
+`python3 ops_check.py signal-source-readiness YYYY-MM-DD` to review legacy-source
+rows and confirm they are not tied to a retired webhook path.
 For paper-mode breadth across the approved universe, use:
 
 ```bash
@@ -780,8 +778,8 @@ strong-session participation rows so `prediction_validation_report.py` and
 that were strong even if they had no TradingView alert.
 `scripts/auto_buy_manager.py` writes `auto_buy_decision_snapshots` for candidate
 decisions, live block reasons, risk cross-checks, and submitted order metadata
-so the internal buy path has its own audit trail beside the main webhook
-decision snapshots.
+so the internal buy path has its own audit trail beside legacy signal decision
+snapshots.
 `position_manager.py` treats partial exits as fail-safe around open-order state:
 when a partial exit must cancel open orders first, it waits for the next cycle
 before submitting; if Alpaca still reports insufficient available quantity, the
@@ -975,9 +973,9 @@ python3 label_v1_builder.py --check-only
 ```
 
 
-## Webhook Secrets
+## Operator API Secrets
 
-Operator endpoints and TradingView webhooks should pass the secret in a header:
+Operator endpoints should pass the secret in a header:
 
 ```bash
 curl -s -H "X-Webhook-Secret: $WEBHOOK_SECRET" \
@@ -1001,7 +999,7 @@ Use these docs and checks to decide what to improve next:
   `Gate[]` extraction.
 
 Ahead-of-live integration work should use the staged test lane. These tests
-exercise observe-only contracts without changing live webhook, broker, order, or
+exercise observe-only contracts without changing live signal, broker, order, or
 risk-control behavior:
 
 ```bash

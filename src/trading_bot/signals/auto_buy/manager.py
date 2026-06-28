@@ -5,7 +5,7 @@ Internal auto-buy candidate manager.
 This is the buy-side sibling to the position momentum auto-sell workflow:
 - observe-only by default,
 - uses Alpaca-derived session momentum and live feature snapshots,
-- records candidate decisions for later comparison against TradingView alerts,
+- records candidate decisions for later comparison against historical alert baselines,
 - captures candidate-discovery rows only. Order routing is delegated to the
   canonical signal path, not auto-buy.
 """

@@ -4,7 +4,7 @@ This file defines the operational boundary for each major runtime surface.
 
 | Surface | Owner Modules | Runtime Authority | Must Not Do |
 | --- | --- | --- | --- |
-| API / request handling | `api/webhook_routes.py`, `api/status_routes.py`, `api/debug_routes.py`, `api/request_services.py` | Validate HTTP requests, parse payloads, format responses, enqueue work. | Import broker clients, perform SQL, or decide trading policy. |
+| API / request handling | `api/status_routes.py`, `api/debug_routes.py`, `api/request_services.py` | Validate HTTP requests, parse payloads, format responses, enqueue work. | Import broker clients, perform SQL, or decide trading policy. |
 | Composition | `services/container.py`, `app.py`, `src/trading_bot/web/app_factory.py`, `src/trading_bot/runtime/startup.py`, `src/trading_bot/config/runtime.py` | Wire config, services, repositories, startup tasks, Flask app construction, route blueprints, and runtime settings. | Embed policy rules or direct broker/data access. |
 | Approval / entry policy | `services/policies/entry_policy.py`, `services/approval_service.py` | Deterministic entry gates, confirmation requirements, live-bias interpretation. | Submit orders or mutate persistence directly. |
 | Sizing | `services/policies/sizing_policy.py`, `services/sizing_service.py` | Size caps, dominant limiter attribution, adaptive opportunity sizing. | Approve/reject trades or submit orders. |

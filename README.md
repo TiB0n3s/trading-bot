@@ -1,6 +1,6 @@
 # Trading Bot
 
-Automated AI-assisted paper trading bot using TradingView webhooks, a Flask/Gunicorn webhook server, service-owned signal orchestration, Alpaca paper trading, pre-market intelligence, event scoring, prediction reports, and layered risk controls.
+Automated AI-assisted paper trading bot using service-owned signal orchestration, a Flask/Gunicorn operator API, Alpaca paper trading, pre-market intelligence, event scoring, prediction reports, and layered risk controls.
 
 This project is currently operated as a paper-trading system. Several live-safe controls are present in the codebase. ML prediction authority remains conservative in cash modes. In paper/dry-run modes, explicitly bounded learning authority can now influence paper entries after hard blockers pass, so the intelligence layer can learn from real execution behavior without granting cash-live authority.
 
@@ -36,8 +36,8 @@ As of the latest roadmap work:
 - `ops_check.py external-symbol-discovery START_DATE --end-date YYYY-MM-DD` reviews event references to non-approved symbols, separates configured context-only symbols from unknown external symbols, shows linked approved symbols, source reliability, examples, and whether a symbol should remain context-only/watch-only or be reviewed for context/approval. This report is advisory-only and cannot expand the trade universe automatically.
 - `pipeline/external_symbol_candidate_refresh.py --date YYYY-MM-DD` turns repeated unknown external-symbol findings into a research-only candidate queue, can run bounded Polygon historical backfill for eligible symbols, and then marks each symbol as context-only, backfill-pending, training-pending, review-ready, pooled, or rejected. `ops_check.py external-symbol-candidates` inspects this queue. Candidate status never grants trading authority or updates `SYMBOL_CONFIG`.
 - The SpaceX catalyst cohort is now explicit in `symbols_config`: `NOC`, `LHX`, `HON`, and `TDY` are approved internal-bar/paper-learning symbols, while `SPCX`, `IRDM`, `ASTS`, `GSAT`, `RDW`, `PL`, `BKSY`, `SPIR`, and `BA` are context-only until liquidity, spread, slippage, and learning evidence justify promotion review.
-- `ops_check.py` includes performance, runtime, resource, and persistence diagnostics such as `observability-health`, `external-observability-readiness`, `runtime-health`, `database-backups`, `database-restore-drill`, `live-quote-quality`, `paper-session-evidence`, `local-load-probe`, `paper-replay-load-probe`, `full-session-paper-replay`, `incident-workflow`, `incident-escalation-readiness`, `feature-flags`, `feature-flag-change-history`, `model-governance`, `packaged-entrypoints`, `secrets-manager-readiness`, `resource-readiness`, `lifecycle-analysis`, `setup-breakdown`, `conviction-stack-report`, `conviction-persistence-health`, `peak-bucket-report`, `winner-became-loser`, and prediction validation.
-- `ops_check.py config-audit` inventories remaining raw env-var access, validates typed config factories, and flags unsafe runtime defaults such as default webhook secrets, query-string secrets, cash mode without live-trading enablement, or unbacked live ML authority. This report is diagnostic-only and does not change runtime configuration.
+- `ops_check.py` includes performance, runtime, resource, and persistence diagnostics such as `observability-health`, `external-observability-readiness`, `runtime-health`, `database-backups`, `database-restore-drill`, `live-quote-quality`, `paper-session-evidence`, `paper-replay-load-probe`, `full-session-paper-replay`, `incident-workflow`, `incident-escalation-readiness`, `feature-flags`, `feature-flag-change-history`, `model-governance`, `packaged-entrypoints`, `secrets-manager-readiness`, `resource-readiness`, `lifecycle-analysis`, `setup-breakdown`, `conviction-stack-report`, `conviction-persistence-health`, `peak-bucket-report`, `winner-became-loser`, and prediction validation.
+- `ops_check.py config-audit` inventories remaining raw env-var access, validates typed config factories, and flags unsafe runtime defaults such as default operator API secrets, query-string secrets, cash mode without live-trading enablement, or unbacked live ML authority. This report is diagnostic-only and does not change runtime configuration.
 - `ops_check.py secrets-hygiene` checks local secret-storage hygiene without printing secret values, including `/etc/trading-bot.env` permissions, repo-local env files, `.gitignore` coverage, and Dockerfile leakage risk.
 - `ops_check.py symbol-affordability` flags approved symbols whose integer-share sizing rounds to qty<1 at the default per-order size, so they are undeployable and cannot meet the per-name EV bar (override the assumed balance/size with `OPS_AFFORDABILITY_BALANCE` / `OPS_AFFORDABILITY_POSITION_SIZE_PCT`). `ops_check.py prediction-coverage DATE` flags approved symbols that have intelligence context but no ML prediction for the date (a deterministic-only blind spot) and whole-universe prediction failures. Both are diagnostic-only.
 - Quant-audit hardening (paper-safe): fills are recorded and the trade ledger repaired regardless of market hours; the daily-loss circuit breaker and preflight fail closed for buys on degraded broker data; the Alpaca `client_order_id` is deterministic (never `now()`); the cooldown slot is claimed atomically before submit to close the cross-worker race; sizing enforces a hard `MAX_POSITION_SIZE_PCT` ceiling, a projected per-symbol exposure cap (`PER_SYMBOL_EXPOSURE_CAP_PCT`), and a macro `risk_multiplier` clamped to [0,1]; label-tier authority is enforced so Tier-4 observe-only labels cannot drive paper veto/approve/size; the discovery bridge reclaims rows stranded in `ROUTING`. The net-EV-after-costs bar (`EV_AFTER_COST_MIN_PCT`, default +0.25%) is encoded as a slippage-Kelly zero-gate, supervised training uses a purged walk-forward split, and `broker.py` can anchor BUY sizing/brackets on a conservative assumed fill via `BROKER_USE_QUOTE_ANCHOR` / `BROKER_ENTRY_SLIPPAGE_PCT` (both default OFF). These remain observe/paper-safe; live promotion still requires explicit operator review.
@@ -78,7 +78,7 @@ As of the latest roadmap work:
 - Final BUY sizing now applies an optional slippage-adjusted fractional Kelly cap. It uses predicted slippage, ATR context, model probability, and LSI/VPIN stress to reduce or zero paper/live size when execution friction erodes edge; it cannot approve trades, increase sizing, or bypass broker/order safeguards.
 - Position-manager partial exits now fail safe when open-order cancellation or Alpaca available-quantity state has not settled; the job records a failed/queued action instead of crashing on stale quantity.
 - The trading education corpus is versioned and non-authoritative. `ops_check.py trading-education-health` reports curated source and concept coverage for SEC/FINRA/CFTC/CME/NerdWallet/Investopedia/Schwab plus normalized strategy, risk, backtesting, and overfitting-control concepts; `ops_check.py trading-education-ingest --max-pages 6 --no-follow` stores compact approved-source concept metadata with URL, timestamp, content hash, and corpus version.
-- Webhook/status secrets should be supplied by `X-Webhook-Secret` or `Authorization: Bearer ...`; query-string secrets are rejected unless `ALLOW_QUERY_STRING_SECRET=true` is explicitly set for temporary compatibility.
+- Operator API secrets should be supplied by `X-Webhook-Secret` or `Authorization: Bearer ...`; query-string secrets are rejected unless `ALLOW_QUERY_STRING_SECRET=true` is explicitly set for temporary compatibility.
 - Prediction gate mode defaults to warn-only for hard blocking. Weak ML predictions can only reduce risk through explicit size caps; they do not place orders, loosen gates, or override broker/order safeguards.
 
 Development safety workflow:
@@ -100,16 +100,7 @@ regressions. Full targeted tests remain available through `python3 scripts/run_t
 ## High-Level Architecture
 
 ```text
-TradingView Alerts / Internal Bar Candidates
-        |
-        v
-Cloudflare Tunnel
-        |
-        v
-Nginx Reverse Proxy
-        |
-        v
-Gunicorn + Flask app.py
+Internal Bar Candidates / Paper Learning Signals
         |
         v
 Pre-check stack
@@ -130,8 +121,8 @@ SQLite trades.db
 Reports, intelligence, validation
 ```
 
-TradingView alerts are now one possible signal source, not the only source.
-When configured for paper-mode breadth, `scripts/auto_buy_manager.py --scope all --live`
+TradingView HTTP webhook ingress has been retired. When configured for paper-mode breadth,
+`scripts/auto_buy_manager.py --scope all --live`
 can evaluate the full approved universe from internal bar/session/setup data and
 submit only candidates that pass the same capacity, cooldown, risk, and broker
 safety checks. The installed cron preserves `/etc/trading-bot.env` capacity
@@ -167,7 +158,7 @@ Never store secrets in systemd service files, source code, README examples, or c
 
 Expected env vars include:
 
-WEBHOOK_SECRET
+WEBHOOK_SECRET (operator API secret; legacy variable name)
 ANTHROPIC_API_KEY
 ALPACA_API_KEY
 ALPACA_SECRET_KEY
@@ -351,7 +342,6 @@ Flask composition root and compatibility entrypoint.
 
 Exposes:
 
-POST /webhook
 GET  /health
 GET  /status
 GET  /positions
@@ -375,7 +365,7 @@ Responsibilities:
 - Consume `SignalContext`, `SignalRuntimeState`, and context runtime objects.
 - Run staged deterministic gates.
 - Call approval, sizing, and execution services.
-- Preserve audit behavior and webhook status updates.
+- Preserve audit behavior and signal lifecycle status updates.
 - Keep app-level code out of trading decisions.
 
 ### decision_engine.py
@@ -826,8 +816,8 @@ The bot performs a large stack of zero-API-cost checks before calling Claude.
 
 Current buy/sell signal flow includes:
 
-Webhook validation
-Duplicate webhook protection
+Signal source validation
+Duplicate signal protection
 Symbol override checks
 Market-hours check
 Circuit breaker
@@ -852,7 +842,7 @@ Order placement
 Most rejection paths persist rows to trades.db with category-prefixed rejection reasons, such as:
 
 market_hours:
-duplicate_webhook:
+duplicate_webhook:  # legacy category name for duplicate signal protection
 symbol_override:
 circuit_breaker:
 ghost_sell:
@@ -1001,7 +991,7 @@ Current learning-readiness posture:
 
 The ML platform is now split between a research/audit lane and a bounded
 paper-authority lane. Research artifacts, diagnostics, retraining jobs, and
-candidate reports remain separate from live webhook, broker, order, and hard
+candidate reports remain separate from live signal, broker, order, and hard
 risk-control paths. In paper/dry-run mode only, `layered_model_authority` can
 use promoted in-process evidence to approve, veto, or increase size after hard
 deterministic gates pass.
@@ -1247,7 +1237,7 @@ database-file backup frequency only after checking disk, retention impact, and
 market-window timing.
 
 Current tracked migrations cover feature leakage/audit fields,
-`rejected_signal_outcomes`, webhook-event lifecycle/status columns, and trade
+`rejected_signal_outcomes`, legacy webhook-event lifecycle/status columns, and trade
 decision-context columns that used to be added during app startup, plus the
 append-only `decision_snapshots` audit table, `strong_day_participation`, and
 `auto_buy_decision_snapshots`.
@@ -1346,7 +1336,6 @@ python3 ops_check.py signal-lessons
 python3 ops_check.py trends
 python3 ops_check.py prediction-validation
 python3 ops_check.py runtime-health YYYY-MM-DD
-python3 ops_check.py local-load-probe --requests 100 --concurrency 4 --symbol AAPL --action buy
 python3 ops_check.py paper-replay-load-probe --requests 100 --concurrency 4 --symbol AAPL --action buy
 python3 ops_check.py full-session-paper-replay --symbols AAPL,MSFT --execute --max-requests 1000
 python3 ops_check.py incident-workflow --title "brief title" --severity medium --create
@@ -1840,7 +1829,7 @@ Important tables:
 trades
 matched_trades
 fill_events
-webhook_events
+webhook_events  # legacy historical ingress lifecycle data
 cooldowns
 recent_sells
 daily_symbol_context
@@ -1983,7 +1972,6 @@ configuration audit diagnostics
 verified SQLite database backup/restore-readability manifests
 lightweight observability summary through `ops_check.py observability-health`
 local secrets-hygiene diagnostic
-local webhook burst diagnostic through `ops_check.py local-load-probe`
 temporary-DB paper replay/load diagnostic through `ops_check.py paper-replay-load-probe`
 full-session paper replay diagnostic through `ops_check.py full-session-paper-replay`
 local incident/postmortem workflow through `ops_check.py incident-workflow`

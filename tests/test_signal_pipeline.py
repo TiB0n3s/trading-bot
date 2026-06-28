@@ -100,10 +100,6 @@ class Recorder:
     def log_rejection(self, *args, **kwargs):
         self.calls.append(("log_rejection", args, kwargs))
 
-    def mark_webhook_event_status(self, *args, **kwargs):
-        self.calls.append(("mark_webhook_event_status", args, kwargs))
-
-
 def _pipeline(recorder=None, logger=None):
     recorder = recorder or Recorder()
     logger = logger or FakeLogger()
@@ -115,7 +111,6 @@ def _pipeline(recorder=None, logger=None):
                 build_context_runtime=recorder.build_context_runtime,
                 evaluate_preflight=recorder.evaluate_preflight,
                 log_rejection=recorder.log_rejection,
-                mark_webhook_event_status=recorder.mark_webhook_event_status,
                 logger=logger,
             )
         ),
@@ -145,9 +140,7 @@ def test_invalid_payload_is_rejected_before_live_signal_processor():
 
     assert_true(result.error is not None, "validation error captured")
     assert_true(logger.warnings, "validation warning logged")
-    assert_equal([call[0] for call in recorder.calls], ["mark_webhook_event_status"], "call order")
-    assert_equal(recorder.calls[0][1][0], "abc", "dedupe key marked")
-    assert_equal(recorder.calls[0][1][1], "rejected", "dedupe status")
+    assert_equal(recorder.calls, [], "invalid payload should not call pipeline stages")
 
 
 def test_ghost_sell_is_rejected_before_live_signal_processor():
@@ -165,7 +158,6 @@ def test_ghost_sell_is_rejected_before_live_signal_processor():
             "build_context_runtime",
             "evaluate_preflight",
             "log_rejection",
-            "mark_webhook_event_status",
         ],
         "call order",
     )
@@ -174,7 +166,6 @@ def test_ghost_sell_is_rejected_before_live_signal_processor():
         ("MSFT", "sell", "ghost_sell", "no open Alpaca position"),
         "rejection",
     )
-    assert_equal(recorder.calls[4][1][1], "rejected", "dedupe status")
 
 
 def test_valid_signal_runs_live_signal_orchestration_stage_once():

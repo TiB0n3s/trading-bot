@@ -1170,12 +1170,13 @@ def test_auto_buy_candidate_attaches_canonical_decision_trace():
     }
     enriched = attach_canonical_decision_metadata(candidate)
     assert_equal(enriched["canonical_signal_candidate"]["source"], "auto_buy", "source")
+    trace = enriched["decision_trace"]
     assert_equal(
-        enriched["canonical_decision_trace"]["trace_version"],
+        trace["trace_version"],
         "decision_trace_v1",
         "trace version",
     )
-    gate_ids = [row["gate_id"] for row in enriched["canonical_decision_trace"]["gate_results"]]
+    gate_ids = [row["gate_id"] for row in trace["gate_results"]]
     if "intelligence_adjudicator" not in gate_ids:
         raise AssertionError("missing intelligence gate in auto-buy trace")
     if "final_sizing" not in gate_ids:

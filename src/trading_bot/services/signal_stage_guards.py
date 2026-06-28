@@ -2,7 +2,7 @@
 
 These helpers are migration seams for draining app.py. They decide whether a
 stage should continue or return a normalized rejection, but they do not write
-audit rows, update webhook status, or submit orders.
+audit rows, update signal lifecycle status, or submit orders.
 """
 
 from __future__ import annotations

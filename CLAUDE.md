@@ -205,11 +205,6 @@ Recent completed roadmap items:
   The backup service covers `trades.db`, `predictions.db`, and `jobs.db`, writes
   manifests under `backups/databases/`, and verifies copied DB files with
   `PRAGMA integrity_check`. Check freshness with `ops_check.py database-backups`.
-- Local webhook burst diagnostics are available through
-  `ops_check.py local-load-probe --requests N --concurrency N --symbol AAPL --action buy`.
-  The probe exercises Flask route auth, payload parsing, event-record callback,
-  and signal-submit callback only; it is diagnostic-only and cannot submit
-  broker orders or mutate trading state.
 - Temporary-DB paper replay/load diagnostics are available through
   `ops_check.py paper-replay-load-probe --requests N --concurrency N --symbol AAPL --action buy`.
   This extends the local route probe with SQLite signal/fill callback writes
@@ -550,7 +545,7 @@ Never commit secrets. Do not add API keys to source files, service files, README
 
 Expected secrets/env values include:
 
-WEBHOOK_SECRET
+WEBHOOK_SECRET (operator API secret; legacy variable name)
 ANTHROPIC_API_KEY
 ALPACA_API_KEY
 ALPACA_SECRET_KEY
@@ -585,11 +580,7 @@ Do not restart services unnecessarily during active market hours unless fixing a
 
 ## Core Architecture
 
-TradingView alert
-  → Cloudflare Tunnel
-  → Nginx
-  → Gunicorn
-  → Flask app.py composition root
+Internal bar candidates / paper learning signals
   → SignalPipeline
   → LiveSignalProcessor
   → service-owned context / approval / sizing / execution / audit
@@ -608,7 +599,6 @@ Flask/Gunicorn composition root.
 
 Key routes:
 
-POST /webhook
 GET  /health
 GET  /status
 GET  /positions
@@ -632,7 +622,7 @@ Responsibilities:
 Consume `SignalContext`, `SignalRuntimeState`, and context runtime objects.
 Run deterministic pre-Claude and post-Claude gates through approval services.
 Call sizing and execution services.
-Preserve audit behavior and webhook status updates.
+Preserve audit behavior and signal lifecycle status updates.
 Keep app-level code out of trading decisions.
 
 The /status route now includes:
@@ -885,7 +875,7 @@ Important tables:
 trades
 matched_trades
 fill_events
-webhook_events
+webhook_events  # legacy historical ingress lifecycle data
 cooldowns
 recent_sells
 daily_symbol_context
@@ -927,11 +917,11 @@ The app applies a large stack of checks before Claude is called.
 
 Current checks include:
 
-webhook secret validation
+signal source validation
 payload validation
 approved symbol validation
 price sanity/range validation
-duplicate webhook protection
+duplicate signal protection
 operator symbol overrides
 market-hours check
 daily loss circuit breaker
@@ -960,7 +950,7 @@ Most rejections are written to trades.db with category prefixes.
 Important rejection categories:
 
 market_hours
-duplicate_webhook
+duplicate_webhook  # legacy category name for duplicate signal protection
 symbol_override
 circuit_breaker
 ghost_sell
@@ -1158,7 +1148,6 @@ python3 ops_check.py predictions
 python3 ops_check.py signal-lessons
 python3 ops_check.py trends
 python3 ops_check.py prediction-validation
-python3 ops_check.py local-load-probe --requests 100 --concurrency 4 --symbol AAPL --action buy
 python3 ops_check.py paper-replay-load-probe --requests 100 --concurrency 4 --symbol AAPL --action buy
 python3 ops_check.py incident-workflow --title "brief title" --severity medium --create
 python3 ops_check.py feature-flags --limit 40
@@ -1201,7 +1190,7 @@ python3 ops/db_connection_audit.py
 python3 db_migrations.py status
 
 Current tracked migrations cover feature leakage/audit fields,
-`rejected_signal_outcomes`, webhook-event lifecycle/status columns, and trade
+`rejected_signal_outcomes`, legacy webhook-event lifecycle/status columns, and trade
 decision-context columns that used to be added during app startup, plus the
 append-only `decision_snapshots` audit table, `strong_day_participation`, and
 `auto_buy_decision_snapshots`.
@@ -1525,7 +1514,6 @@ configuration audit diagnostics
 verified SQLite database backup/restore-readability manifests
 lightweight observability summary through `ops_check.py observability-health`
 local secrets-hygiene diagnostic
-local webhook burst diagnostic through `ops_check.py local-load-probe`
 temporary-DB paper replay/load diagnostic through `ops_check.py paper-replay-load-probe`
 full-session paper replay diagnostic through `ops_check.py full-session-paper-replay`
 local incident/postmortem workflow through `ops_check.py incident-workflow`

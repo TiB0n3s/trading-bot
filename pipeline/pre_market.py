@@ -46,12 +46,26 @@ from market_time import expected_market_context_date  # noqa: E402
 
 from pipeline import Step, run_pipeline  # noqa: E402
 
+# Pre-market runs unattended before the open against several network sources
+# (CFTC COT, Webull, Alpaca bars, news/AI events). Without a per-step bound a
+# single stalled call hangs the whole pre-open sequence and holds the pipeline
+# lock, leaving market_context.json / daily_symbol_predictions un-refreshed at
+# 9:30. These SIGALRM-enforced ceilings (pipeline/_resource_limits) fail a hung
+# step fast. NOTE: SIGALRM cannot interrupt a blocked C-level socket; the cron
+# entry should also pass job_runner --timeout-seconds as a process-group backstop,
+# and each network client should set its own socket timeout.
+DEFAULT_STEP_TIMEOUT_SECONDS = 600
+STEP_TIMEOUT_OVERRIDES = {
+    "research_data": 900,  # Alpaca bars for the full universe
+    "collect_events": 900,  # news + AI interpretation for the full universe
+}
+
 
 def _build_steps(target_date: str, *, dry_run: bool = False) -> list[Step]:
     raw_output = f"/tmp/raw_market_research_{target_date}.data.json"
     events_output = f"/tmp/events_{target_date}.pipeline.json"
 
-    return [
+    steps = [
         Step(
             name="cot_positioning_context",
             module="cot_positioning_fetch",
@@ -158,6 +172,12 @@ def _build_steps(target_date: str, *, dry_run: bool = False) -> list[Step]:
             description="warm the in-memory prediction cache before market open",
         ),
     ]
+    for step in steps:
+        if step.timeout_seconds == 0:
+            step.timeout_seconds = STEP_TIMEOUT_OVERRIDES.get(
+                step.name, DEFAULT_STEP_TIMEOUT_SECONDS
+            )
+    return steps
 
 
 def main() -> int:

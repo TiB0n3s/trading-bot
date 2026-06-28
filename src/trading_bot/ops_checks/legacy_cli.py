@@ -60,6 +60,7 @@ _LAZY_HANDLER_REFS = {
     "run_architecture_surface_report": "trading_bot.ops_checks.commands.architecture_surface_checks:run_architecture_surface_report",
     "run_auto_buy_health": "trading_bot.ops_checks.commands.auto_buy_checks:run_auto_buy_health",
     "run_auto_sell_health": "trading_bot.ops_checks.commands.auto_sell_checks:run_auto_sell_health",
+    "run_authority_health": "trading_bot.ops_checks.commands.authority_health_checks:run_authority_health",
     "run_bar_pattern_backfill": "trading_bot.ops_checks.commands.bar_pattern_checks:run_bar_pattern_backfill",
     "run_calibration_buckets": "trading_bot.ops_checks.commands.calibration_bucket_checks:run_calibration_buckets",
     "run_candidate_outcome_backfill": "trading_bot.ops_checks.commands.candidate_outcome_backfill_checks:run_candidate_outcome_backfill",

@@ -6,6 +6,7 @@ from trading_bot.ops_checks.commands.base import OpsCommandSpec, noarg, spec
 
 COMMAND_SPECS: dict[str, OpsCommandSpec] = {
     "model-governance": noarg("model-governance"),
+    "authority-health": noarg("authority-health", "run_authority_health"),
     "trading-education-health": noarg("trading-education-health"),
     "trading-education-ingest": noarg("trading-education-ingest"),
     "trading-education-review": noarg("trading-education-review"),

@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import logging
 from collections import defaultdict, deque
 from datetime import datetime
 from typing import Any
 
 from repositories.trade_matcher_repo import TradeMatcherRepository
 from symbols_config import SYMBOL_SIGNAL_SOURCE
+
+logger = logging.getLogger(__name__)
 
 MATCH_SOURCE_FIELDS = [
     "signal_source",
@@ -96,6 +99,7 @@ class TradeMatcherService:
         rows = self.load_filled_trades()
         open_lots = defaultdict(deque)
         net_qty_by_symbol = defaultdict(float)
+        unmatched_sells = defaultdict(float)
         matched = []
 
         for row in rows:
@@ -179,10 +183,39 @@ class TradeMatcherService:
                     if lot["qty"] <= 0:
                         open_lots[symbol].popleft()
 
+                if remaining > 0:
+                    # No open entry lot for this exit: the buy row is missing
+                    # (ghost/duplicate sell, failed synthetic-buy insert, or a
+                    # partial-fill/cancel artifact). We cannot compute honest
+                    # realized P&L without an entry, so it stays out of
+                    # matched_trades -- but surface it instead of dropping silently,
+                    # otherwise entry-less exits (often losses) vanish from stats.
+                    unmatched_sells[symbol] += remaining
+                    logger.warning(
+                        "Unmatched sell: %s qty=%.4f price=%.4f order_id=%s has no open "
+                        "entry lot; excluded from matched_trades (missing entry row).",
+                        symbol,
+                        remaining,
+                        price,
+                        row_get(row, "order_id"),
+                    )
+
         synthetic = self._synthetic_position_manager_matches(matched)
         if synthetic:
             matched.extend(synthetic)
 
+        for symbol, net in net_qty_by_symbol.items():
+            if net < -1e-9:
+                logger.warning(
+                    "Negative net executed qty for %s (net=%.4f): recorded sells exceed "
+                    "buys. Clamped to flat for the open-lot view; investigate ghost/"
+                    "duplicate sells or missing buy rows.",
+                    symbol,
+                    net,
+                )
+
+        # Expose for callers/tests/diagnostics without changing the return contract.
+        self.last_unmatched_sells = dict(unmatched_sells)
         self._reconcile_open_lots_to_net_qty(open_lots, net_qty_by_symbol)
         return matched, open_lots
 

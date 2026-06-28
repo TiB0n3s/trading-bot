@@ -18,7 +18,6 @@ class RouteRegistrationDeps:
     approved_symbols: set[str]
     price_ranges: dict[str, tuple[float, float]]
     logger: Any
-    submit_signal: Callable[[dict[str, Any]], Any]
     health_payload: Callable[[], dict[str, Any]]
     status_payload: Callable[[], dict[str, Any]]
     positions_payload: Callable[[], dict[str, Any]]

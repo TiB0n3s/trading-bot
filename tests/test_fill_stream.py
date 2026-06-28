@@ -220,6 +220,55 @@ def test_update_db_refreshes_cumulative_filled_qty(tmp_path, monkeypatch):
     assert row[2] == 147.352
 
 
+def test_update_db_never_lowers_recorded_qty(tmp_path, monkeypatch):
+    """A partial_fill (or missed terminal fill) must not move qty downward.
+
+    Alpaca's order.filled_qty is cumulative, so an out-of-order or partial event
+    carrying a smaller qty than what is already recorded must be ignored for qty;
+    a no-qty event must leave qty untouched. Regression for the COALESCE overwrite
+    bug that stranded rows below their true size.
+    """
+    db_path = make_test_db(tmp_path)
+    order_id = "child-buy-qty"
+
+    con = sqlite3.connect(db_path)
+    con.execute(
+        """
+        INSERT INTO trades (
+            timestamp, symbol, action, signal_price, approved,
+            order_id, order_status, qty, fill_price
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            "2026-05-27 11:13:44",
+            "RKLB",
+            "buy",
+            147.34,
+            1,
+            order_id,
+            "filled",
+            100,
+            147.34,
+        ),
+    )
+    con.commit()
+    con.close()
+
+    # A late partial_fill carrying a smaller cumulative qty must not lower qty.
+    fill_repo.update_trade_fill(order_id, "partially_filled", 147.30, filled_qty=30, db_path=db_path)
+    # A status-only event with no qty must leave qty untouched.
+    fill_repo.update_trade_fill(order_id, "filled", None, filled_qty=None, db_path=db_path)
+
+    con = sqlite3.connect(db_path)
+    row = con.execute(
+        "SELECT qty FROM trades WHERE order_id = ?",
+        (order_id,),
+    ).fetchone()
+    con.close()
+
+    assert row[0] == 100
+
+
 def test_record_fill_event_accepts_sdk_order_object(tmp_path, monkeypatch):
     db_path = make_test_db(tmp_path)
     fill_repo.init_fill_events_table(db_path=db_path)

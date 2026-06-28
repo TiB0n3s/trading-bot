@@ -32,10 +32,6 @@ def register_runtime_routes(
             approved_symbols=runtime_module.APPROVED_SYMBOLS,
             price_ranges=runtime_module.PRICE_RANGES,
             logger=runtime_module.logger,
-            submit_signal=lambda data: app_container.signal_executor_factory().submit(
-                runtime_module.process_signal,
-                data,
-            ),
             health_payload=lambda: build_health_payload(runtime_module),
             status_payload=lambda: build_status_payload(runtime_module),
             positions_payload=lambda: build_positions_payload(runtime_module),

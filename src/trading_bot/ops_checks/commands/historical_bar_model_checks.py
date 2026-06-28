@@ -47,14 +47,19 @@ def _diagnostics(candidate_dir: Path) -> list[dict[str, Any]]:
 
 
 def _latest_by_label(rows: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
-    latest: dict[str, dict[str, Any]] = {}
+    by_label: dict[str, list[dict[str, Any]]] = {}
     for row in rows:
-        label = str(row.get("label_target") or "unknown")
-        current = latest.get(label)
-        if current is None or str(row.get("generated_at") or "") > str(
-            current.get("generated_at") or ""
-        ):
-            latest[label] = row
+        by_label.setdefault(str(row.get("label_target") or "unknown"), []).append(row)
+    latest: dict[str, dict[str, Any]] = {}
+    for label, label_rows in by_label.items():
+        label_rows.sort(key=lambda item: str(item.get("generated_at") or ""), reverse=True)
+        trained_rows = [
+            row
+            for row in label_rows
+            if (row.get("training") or {}).get("trained")
+            and row.get("runtime_effect") == "observe_only_no_live_authority"
+        ]
+        latest[label] = trained_rows[0] if trained_rows else label_rows[0]
     return latest
 
 

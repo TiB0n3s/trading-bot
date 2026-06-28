@@ -250,10 +250,19 @@ def update_trade_fill(
             UPDATE trades
             SET order_status = ?,
                 fill_price = COALESCE(?, fill_price),
-                qty = COALESCE(?, qty)
+                -- filled_qty is cumulative & monotonic across partial_fill -> fill,
+                -- so recorded qty must never move downward (a partial, or a missed
+                -- terminal fill, would otherwise strand the row below the true size).
+                -- NOTE: SQLite scalar max(X,Y) returns NULL if ANY arg is NULL, so it
+                -- cannot be used directly here; the CASE keeps a no-qty event a no-op.
+                qty = CASE
+                        WHEN ? IS NULL THEN qty          -- no qty in this event
+                        WHEN qty IS NULL THEN ?          -- first qty seen for this order
+                        ELSE max(qty, ?)                 -- cumulative; never decrease
+                      END
             WHERE order_id = ?
             """,
-            (status, fill_price, qty, order_id),
+            (status, fill_price, qty, qty, qty, order_id),
         )
         return int(cur.rowcount)
 

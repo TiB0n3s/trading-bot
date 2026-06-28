@@ -1764,7 +1764,8 @@ def evaluate_auto_buy_candidate(
         and m15 > 0
         and m30 > 0
         and not extreme_chase
-        and ml_score_for_promotion >= AUTO_BUY_PAPER_STRONG_EVIDENCE_MIN_ML_SCORE
+        and ml_score is not None
+        and ml_score >= AUTO_BUY_PAPER_STRONG_EVIDENCE_MIN_ML_SCORE
         and str(intraday_feedback.get("status") or "neutral") not in {"block", "would_block"}
     )
     if paper_promotion_allowed:
@@ -1784,7 +1785,10 @@ def evaluate_auto_buy_candidate(
 
     paper_exploration_fallback_applied = False
     paper_exploration_fallback_reason = None
-    paper_exploration_fallback_soft_blocks_only = learned_tiebreaker_soft_block_only(
+    # Exploration fallback has no historical-outcome evidence behind it, so it must
+    # only override the same narrow soft blocks as strong-evidence promotion. It must
+    # NOT null weak-ML / negative-session / bias / momentum-falling blocks (CLAUDE.md).
+    paper_exploration_fallback_soft_blocks_only = paper_strong_evidence_soft_block_only(
         hard_block_reasons
     )
     paper_exploration_fallback_allowed = (
@@ -1799,7 +1803,8 @@ def evaluate_auto_buy_candidate(
         and m15 > 0
         and m30 > 0
         and not extreme_chase
-        and ml_score_for_promotion >= AUTO_BUY_PAPER_EXPLORATION_MIN_ML_SCORE
+        and ml_score is not None
+        and ml_score >= AUTO_BUY_PAPER_EXPLORATION_MIN_ML_SCORE
         and str(intraday_feedback.get("status") or "neutral") not in {"block", "would_block"}
     )
     if paper_exploration_fallback_allowed:

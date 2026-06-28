@@ -364,10 +364,13 @@ class FillStreamService:
         self.start_heartbeat()
         storage_initialized = False
 
+        # The Alpaca trade_updates stream is a 24/7 account/order-event feed. It must
+        # stay connected across and after the close: bracket TP/SL and market-on-close
+        # fills can be delivered at or after 16:00 ET (and under clock skew). Gating the
+        # transport on regular hours would drop those fills, losing cost basis / creating
+        # phantom positions. Intraday-learning capture is still gated to RTH inside the
+        # handler; only the connection is kept open here.
         while True:
-            if not self.market_hours_fn():
-                time.sleep(self.reconnect_delay)
-                continue
             if not storage_initialized:
                 self.handler.init_storage()
                 storage_initialized = True

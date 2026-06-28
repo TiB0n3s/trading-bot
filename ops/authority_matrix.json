@@ -1,0 +1,145 @@
+{
+  "version": "authority_matrix_v1",
+  "runtime_effect": "governance_metadata_no_live_authority",
+  "updated_at": "2026-06-28",
+  "rules": {
+    "cash_live_promotion_requires": "explicit operator approval, updated tests, rollback path, and decision record",
+    "default_missing_artifact_behavior": "fail_conservative_or_observe_only",
+    "model_artifact_rule": "artifact presence alone cannot approve, size up, route, or execute trades",
+    "hard_block_precedence": "broker, account, stale-data, market-hours, macro, explicit-symbol, and risk hard blockers dominate learned or model evidence"
+  },
+  "gates": [
+    {
+      "id": "broker_account_preflight",
+      "owner": "broker.py; services/live_signal_processor.py",
+      "source": "broker account, positions, order state",
+      "authority": "hard_block_and_execution_safety",
+      "mode_scope": "paper_and_cash",
+      "freshness": "runtime broker/account reads must be healthy for buys",
+      "fallback": "block buys when account or position data is degraded",
+      "tests": ["tests/test_broker.py", "tests/test_live_signal_characterization.py"],
+      "notes": "Human-owned execution safety. No learned evidence may bypass it."
+    },
+    {
+      "id": "strategy_memory_recent",
+      "owner": "scripts/strategy_learner.py; scripts/strategy_memory.py",
+      "source": "strategy_memory.json",
+      "authority": "tighten_only_contextual_memory",
+      "mode_scope": "paper_and_cash_tightening_only",
+      "freshness": "generated_at should be recent enough for current operations; learner uses LOOKBACK_DAYS=20",
+      "fallback": "unavailable memory returns neutral/observe context",
+      "tests": ["tests/test_strategy_memory.py", "tests/test_decision_policy.py"],
+      "notes": "Not a table. It summarizes recent closed trades and recent bar-pattern rows; it is not expected to train on all two-year candles."
+    },
+    {
+      "id": "historical_bar_pattern_memory",
+      "owner": "scripts/strategy_learner.py; services/bar_pattern_feature_service.py",
+      "source": "bar_pattern_features recent window",
+      "authority": "paper_pattern_learning_authority",
+      "mode_scope": "paper_only_or_tightening",
+      "freshness": "strategy_memory.json bar_pattern_rows and forward_outcome_rows should be populated",
+      "fallback": "thin samples remain observe-only",
+      "tests": ["tests/test_strategy_memory.py", "tests/test_decision_policy.py"],
+      "notes": "Uses recent bar_pattern_features via ReportingRepository.bar_pattern_strategy_rows."
+    },
+    {
+      "id": "historical_bar_model_trend_scan",
+      "owner": "pipeline/train_historical_bar_model.py; services/historical_bar_model_intelligence_service.py",
+      "source": "ml/models/historical_bar_patterns_v1/candidates/*trend_scan_label*.diagnostic.json",
+      "authority": "observe_only_candidate_evidence",
+      "mode_scope": "observe_only",
+      "freshness": "latest diagnostic must meet row, symbol, accuracy, and observe-only runtime-effect thresholds",
+      "fallback": "no model authority; deterministic policy continues",
+      "tests": ["tests/test_decision_policy.py", "tests/test_historical_bar_walk_forward_validation.py"],
+      "notes": "Ready diagnostics are evidence only unless separately promoted."
+    },
+    {
+      "id": "historical_bar_model_triple_barrier",
+      "owner": "pipeline/train_historical_bar_model.py; repositories/historical_bar_training_repo.py",
+      "source": "ml/models/historical_bar_patterns_v1/candidates/*triple_barrier_label*.diagnostic.json",
+      "authority": "observe_only_candidate_evidence",
+      "mode_scope": "observe_only",
+      "freshness": "latest diagnostic must meet row, symbol, accuracy, and observe-only runtime-effect thresholds",
+      "fallback": "not_ready diagnostics cannot affect policy",
+      "tests": ["tests/test_historical_bar_training_repo.py", "tests/test_decision_policy.py"],
+      "notes": "Known current risk: label-target filtering can leave triple_barrier_label undertrained even when candles exist."
+    },
+    {
+      "id": "historical_bar_backfill",
+      "owner": "pipeline/historical_bar_backfill.py; pipeline/historical_bar_feature_repair.py",
+      "source": "data/historical_bars/polygon_1min; bar_pattern_features",
+      "authority": "offline_evidence_generation_only",
+      "mode_scope": "observe_only",
+      "freshness": "approved symbols should meet historical-bar readiness floors before automated completion hooks run",
+      "fallback": "coverage gaps block training completion hooks, not runtime trading safety",
+      "tests": ["tests/test_historical_bar_archive_service.py", "tests/test_historical_bar_progress_checks.py"],
+      "notes": "Cache completeness is separate from runtime authority."
+    },
+    {
+      "id": "prediction_cache",
+      "owner": "prediction_cache.py",
+      "source": "daily_symbol_predictions memory cache",
+      "authority": "conservative_prediction_context",
+      "mode_scope": "paper_and_cash_tightening_only",
+      "freshness": "60-second TTL; stale beyond TTLx2 fails open to no prediction",
+      "fallback": "no ML prediction; deterministic policy continues",
+      "tests": ["tests/test_live_signal_characterization.py"],
+      "notes": "Prediction scores cannot approve, increase size, or override broker/order safeguards."
+    },
+    {
+      "id": "decision_policy",
+      "owner": "scripts/decision_policy.py",
+      "source": "intelligence context, strategy_memory, policy artifacts, model evidence",
+      "authority": "policy_gateway",
+      "mode_scope": "paper_only_by_default",
+      "freshness": "policy artifacts must be known-good and not stale before effect",
+      "fallback": "deterministic conservative policy; stale/missing artifacts cannot promote",
+      "tests": ["tests/test_decision_policy.py"],
+      "notes": "Preferred consolidation surface for evidence-to-policy decisions."
+    },
+    {
+      "id": "paper_learning_authority",
+      "owner": "services/active_learning_integration_service.py; ops_check.py paper-learning-authority",
+      "source": "paper-session outcomes and learning evidence",
+      "authority": "paper_only_soft_override_after_hard_blocks",
+      "mode_scope": "paper_dry_run_only",
+      "freshness": "requires current paper outcomes and deterministic gates already passed",
+      "fallback": "no override",
+      "tests": ["tests/test_active_learning_integration_service.py"],
+      "notes": "Must never apply in cash modes or override hard blockers."
+    },
+    {
+      "id": "auto_buy_strong_evidence",
+      "owner": "auto_buy manager path; config/auto_buy.py",
+      "source": "internal bar-derived candidates and paper-only evidence fields",
+      "authority": "paper_only_candidate_promotion",
+      "mode_scope": "paper_dry_run_only",
+      "freshness": "requires non-weak ML evidence and explicit paper-mode conditions",
+      "fallback": "candidate remains blocked or watch-only",
+      "tests": ["tests/test_live_signal_characterization.py", "tests/test_decision_policy.py"],
+      "notes": "Cannot override weak ML, losing-pattern feedback, extreme chase, broker/account, stale-data, macro/regime, or cash-mode blockers."
+    },
+    {
+      "id": "ev_after_costs_sizing",
+      "owner": "services/ev_after_costs.py; sizing policy",
+      "source": "modeled slippage, residual fees, whole-share account constraints",
+      "authority": "final_buy_size_cap_or_zero",
+      "mode_scope": "paper_and_cash_tightening_only",
+      "freshness": "uses current sizing/account context and configured EV_AFTER_COST_MIN_PCT",
+      "fallback": "zero or cap size when EV after costs is insufficient",
+      "tests": ["tests/test_decision_policy.py"],
+      "notes": "May reduce or zero size only; never approve or increase size."
+    },
+    {
+      "id": "policy_artifacts",
+      "owner": "policy_artifacts.py",
+      "source": "data_archive/policy_artifacts registry and known-good pointer",
+      "authority": "artifact_registration_and_rollback",
+      "mode_scope": "paper_only_by_default",
+      "freshness": "known-good pointer and state hash must be present for artifact effect",
+      "fallback": "stale/missing artifacts cannot promote authority",
+      "tests": ["tests/test_decision_policy.py"],
+      "notes": "Rollback must not touch broker/order state."
+    }
+  ]
+}

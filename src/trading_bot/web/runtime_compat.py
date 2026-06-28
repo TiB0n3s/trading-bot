@@ -7,6 +7,7 @@ repositories, and infrastructure adapters.
 """
 
 import logging
+import hmac
 import os
 import sys
 import time
@@ -657,8 +658,13 @@ def validate_secret(req):
     if not secret and ALLOW_QUERY_STRING_SECRET:
         secret = query_secret
 
-    _secret = os.environ.get("WEBHOOK_SECRET", "changeme")
-    if secret != _secret:
+    _secret = os.environ.get("WEBHOOK_SECRET", "")
+    # Fail closed: a missing/empty/default secret must never authenticate a request
+    # on the public control surface (was silently degrading to a guessable "changeme").
+    if not _secret or _secret == "changeme":
+        logger.error("WEBHOOK_SECRET is unset/empty/default - rejecting request")
+        abort(503)
+    if not secret or not hmac.compare_digest(str(secret), str(_secret)):
         logger.warning(f"Invalid secret from {req.remote_addr}")
         abort(401)
     if query_secret and ALLOW_QUERY_STRING_SECRET:

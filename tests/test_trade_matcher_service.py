@@ -165,12 +165,35 @@ def test_unmatched_prior_sell_prevents_false_open_lot_when_net_flat():
     assert "DKS" not in open_lots
 
 
+def test_unmatched_sell_is_surfaced_not_silently_dropped():
+    """An exit with no open entry lot must be tracked, not silently discarded."""
+    repo = FakeRepository(
+        [
+            {
+                "timestamp": "2026-05-30T09:30:00",
+                "symbol": "DKS",
+                "action": "sell",
+                "qty": 3,
+                "fill_price": 229,
+                "order_id": "orphan-exit",
+            },
+        ]
+    )
+    service = TradeMatcherService(repository=repo)
+
+    matched, open_lots = service.match_trades()
+
+    assert matched == []
+    assert service.last_unmatched_sells == {"DKS": 3.0}
+
+
 if __name__ == "__main__":
     tests = [
         test_match_trades_uses_fifo_and_preserves_open_lots,
         test_rebuild_initializes_and_replaces_rows,
         test_auto_buy_entries_are_labeled_in_lifecycle_matches,
         test_unmatched_prior_sell_prevents_false_open_lot_when_net_flat,
+        test_unmatched_sell_is_surfaced_not_silently_dropped,
     ]
     for test in tests:
         test()

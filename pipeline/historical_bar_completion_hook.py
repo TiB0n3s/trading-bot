@@ -6,7 +6,6 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
-import subprocess
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -15,6 +14,7 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 if str(BASE_DIR) not in sys.path:
     sys.path.insert(0, str(BASE_DIR))
 
+from pipeline import run_child  # noqa: E402
 from trading_bot.ops_checks.commands.historical_bar_progress_checks import (  # noqa: E402
     DEFAULT_MANIFEST_DIR,
     _cache_symbol_progress,
@@ -107,7 +107,7 @@ def _run_retraining(args: argparse.Namespace) -> int:
     ]
     print("Running historical-bar completion retraining:")
     print("  " + " ".join(cmd))
-    return int(subprocess.run(cmd, cwd=BASE_DIR).returncode)
+    return run_child(cmd, cwd=BASE_DIR)
 
 
 def _print_payload(payload: dict, *, as_json: bool) -> None:

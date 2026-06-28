@@ -211,7 +211,11 @@ def load_state():
 
 
 def save_state(state):
-    STATE_FILE.write_text(json.dumps(state, indent=2, sort_keys=True))
+    # Atomic write: a crash mid-write would otherwise leave a truncated JSON file
+    # that load_state() silently treats as empty ({}), wiping all peak/lock history.
+    tmp = STATE_FILE.with_suffix(STATE_FILE.suffix + ".tmp")
+    tmp.write_text(json.dumps(state, indent=2, sort_keys=True))
+    tmp.replace(STATE_FILE)
 
 
 def get_entry_context(symbol):
@@ -1494,6 +1498,17 @@ def main():
         except Exception as e:
             session = {"trend_label": "unavailable", "reason": f"session momentum read error: {e}"}
         decisions.append(evaluate_position(p, state, session_momentum=session))
+
+    open_symbols = {
+        str(getattr(p, "symbol", "") or "").strip().upper() for p in positions
+    }
+    open_symbols.discard("")
+    # Prune per-symbol tracking state for symbols no longer open so a re-entry
+    # starts with a fresh peak. A stale peak carried over from a prior, closed
+    # position would otherwise make giveback = (old_peak - ~0) fire an immediate
+    # breakeven/giveback exit on a brand-new position that never went green.
+    for sym in [s for s in state if s not in open_symbols]:
+        state.pop(sym, None)
     save_state(state)
 
     for d in decisions:

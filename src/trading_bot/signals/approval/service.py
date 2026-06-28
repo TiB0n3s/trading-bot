@@ -1137,6 +1137,7 @@ def run_macro_position_gate(
     current_et: Any,
     macro_risk: dict[str, Any],
     macro_position_count_floor: float,
+    macro_dust_position_allowance: int | None = None,
     get_latest_session_momentum: Callable[[str], dict[str, Any] | None],
     session_momentum_is_fresh: Callable[[dict[str, Any]], bool],
     weakest_position_context: Callable[[dict[str, Any]], dict[str, Any] | None],
@@ -1163,6 +1164,28 @@ def run_macro_position_gate(
 
     max_new_positions = macro_risk.get("max_new_positions", 8)
     open_count = account_state.get("open_position_count", 0)
+    # Hard ceiling: the dust-excluded counting below must not let TOTAL open
+    # positions grow without bound. Block when total open positions reach the regime
+    # cap plus a small dust allowance (None disables, e.g. in direct callers/tests).
+    if macro_dust_position_allowance is not None:
+        dust_ceiling = max_new_positions + max(0, int(macro_dust_position_allowance))
+        if open_count >= dust_ceiling:
+            return StageOutcome(
+                rejected=True,
+                approval=deterministic_rejection(
+                    category="macro_position_limit",
+                    reason=(
+                        f"open_position_count={open_count} >= hard ceiling {dust_ceiling} "
+                        f"(max_new_positions={max_new_positions} + dust_allowance="
+                        f"{max(0, int(macro_dust_position_allowance))})"
+                    ),
+                    metadata={
+                        "open_position_count": open_count,
+                        "max_new_positions": max_new_positions,
+                        "dust_position_ceiling": dust_ceiling,
+                    },
+                ),
+            )
     open_positions = account_state.get("open_positions") or []
     if open_positions:
         effective_count = sum(
@@ -1207,6 +1230,8 @@ def run_macro_position_gate(
 
     weakest = weakest_position_context(account_state)
 
+    weakest_plpc = weakest.get("unrealized_plpc") if weakest else None
+    weakest_plpc_str = f"{weakest_plpc:.2f}" if isinstance(weakest_plpc, (int, float)) else "n/a"
     if weakest:
         replacement_hint = "observe_only"
         reason = (
@@ -1214,7 +1239,7 @@ def run_macro_position_gate(
             f"candidate={symbol} session={candidate_session_label}/{candidate_session_score} "
             f"return={candidate_return}% vwap_dist={candidate_vwap}%; "
             f"weakest_holding={weakest.get('symbol')} "
-            f"plpc={weakest.get('unrealized_plpc'):.2f}% "
+            f"plpc={weakest_plpc_str}% "
             f"replacement_hint={replacement_hint}"
         )
     else:

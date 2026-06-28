@@ -56,6 +56,7 @@ class RuntimeSettings:
     TAPE_EXCEPTION_ENABLED: bool
     OPEN_MOMENTUM_FAST_LANE_ENABLED: bool
     MACRO_POSITION_COUNT_FLOOR: float
+    MACRO_DUST_POSITION_ALLOWANCE: int
     ENFORCE_PREDICTION_BLOCKS: bool
     ENFORCE_PREDICTION_WATCH_IN_CASH: bool
     STRATEGY_ENGINE_MODE: str
@@ -101,7 +102,9 @@ def load_runtime_settings(
         risk_policy_mode = "compare"
 
     return RuntimeSettings(
-        IS_PAPER_MODE=execution_mode == "paper",
+        # dry_run is paper-equivalent everywhere else in the system; keep this flag
+        # consistent so a dry_run process is not misclassified as non-paper.
+        IS_PAPER_MODE=execution_mode in {"paper", "dry_run"},
         ENFORCE_SETUP_POLICY_BLOCKS=True,
         SIGNAL_TTL_SECONDS=_env_int(env_get, "SIGNAL_TTL_SECONDS", 300),
         PREDICTION_GATE_MODE=prediction_gate_mode,
@@ -151,6 +154,11 @@ def load_runtime_settings(
             env_get,
             "MACRO_POSITION_COUNT_FLOOR",
             500.0,
+        ),
+        MACRO_DUST_POSITION_ALLOWANCE=_env_int(
+            env_get,
+            "MACRO_DUST_POSITION_ALLOWANCE",
+            4,
         ),
         ENFORCE_PREDICTION_BLOCKS=prediction_gate_mode == "hard",
         ENFORCE_PREDICTION_WATCH_IN_CASH=prediction_gate_mode == "hard",

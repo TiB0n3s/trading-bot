@@ -6,13 +6,13 @@ from __future__ import annotations
 import argparse
 import json
 from pathlib import Path
-import subprocess
 import sys
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 if str(BASE_DIR) not in sys.path:
     sys.path.insert(0, str(BASE_DIR))
 
+from pipeline import run_child
 from services.symbol_universe_retraining_service import (
     DEFAULT_MIN_BAR_DAYS,
     DEFAULT_MIN_BAR_ROWS,
@@ -77,8 +77,7 @@ def _run_retraining(args: argparse.Namespace) -> int:
         cmd.extend(["--db-path", args.db_path])
     print("Running universe-change retraining:")
     print("  " + " ".join(cmd))
-    result = subprocess.run(cmd, cwd=BASE_DIR)
-    return int(result.returncode)
+    return run_child(cmd, cwd=BASE_DIR)
 
 
 def _run_added_symbol_backfill(
@@ -111,8 +110,7 @@ def _run_added_symbol_backfill(
     ]
     print("Running added-symbol historical backfill:")
     print("  " + " ".join(cmd))
-    result = subprocess.run(cmd, cwd=BASE_DIR)
-    return int(result.returncode)
+    return run_child(cmd, cwd=BASE_DIR)
 
 
 def main() -> int:

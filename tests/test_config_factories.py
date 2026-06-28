@@ -215,7 +215,6 @@ def test_signal_no_env_dependency():
         "MAX_BID_ASK_SPREAD_PCT",
         "SELL_CONTINUATION_CHECK_ENABLED",
         "SELL_CONTINUATION_MIN_SUPPORTS",
-        "WEBHOOK_SECRET",
         "SESSION_MAX_TRADE_COUNT",
         "SIGNAL_WORKER_COUNT",
         "LATE_QUOTE_DELAY_MIN_BLOCKS",
@@ -224,7 +223,8 @@ def test_signal_no_env_dependency():
         cfg = load_signal_config()
     assert cfg.prediction_gate_mode == "warn"
     assert cfg.session_max_trade_count == 3
-    assert cfg.webhook_secret == "changeme"
+    # webhook_secret was removed from SignalConfig with the TradingView webhook
+    # (commit 4e16642d); the operator secret now lives only in the env/auth path.
 
 
 def test_signal_env_var_is_read_when_no_override():

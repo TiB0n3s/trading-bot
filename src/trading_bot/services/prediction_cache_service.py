@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import math
 import threading
 import time
 from datetime import datetime, timezone
@@ -37,6 +38,10 @@ def _clip_float(value: Any, *, low: float, high: float) -> tuple[Any, bool]:
         numeric = float(value)
     except Exception:
         return value, False
+    if math.isnan(numeric) or math.isinf(numeric):
+        # Non-finite values must never reach runtime context as a real prediction
+        # (a NaN otherwise clips to the ceiling). Drop to "no prediction" (fail safe).
+        return None, True
     clipped = max(low, min(high, numeric))
     return clipped, clipped != numeric
 

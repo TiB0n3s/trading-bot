@@ -13,6 +13,7 @@ import json
 import os
 import resource
 import signal
+import subprocess
 import sys
 import time
 from contextlib import contextmanager
@@ -21,6 +22,35 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parent.parent
+
+# Generous hang-guard for child processes spawned by pipeline jobs (retrain /
+# backfill etc.). This is a backstop against an indefinitely stuck child (e.g. a
+# blocked socket), NOT a work limit -- legitimate long jobs finish well within it.
+# job_runner --timeout-seconds remains the primary process-group kill.
+DEFAULT_CHILD_TIMEOUT_SECONDS = 14400  # 4 hours
+
+
+def run_child(cmd, *, cwd: "str | Path | None" = None, timeout_seconds: int | None = None) -> int:
+    """Run a child process with a generous timeout; a hang becomes a logged failure.
+
+    Returns the child's return code, or 1 if it timed out (so callers that map a
+    non-zero code to a failed job surface the hang instead of blocking forever).
+    """
+    if timeout_seconds is None:
+        try:
+            timeout_seconds = int(
+                os.environ.get("OPS_PIPELINE_CHILD_TIMEOUT_SECONDS", str(DEFAULT_CHILD_TIMEOUT_SECONDS))
+            )
+        except (TypeError, ValueError):
+            timeout_seconds = DEFAULT_CHILD_TIMEOUT_SECONDS
+    try:
+        return int(subprocess.run(cmd, cwd=cwd, timeout=timeout_seconds).returncode)
+    except subprocess.TimeoutExpired:
+        print(
+            f"[ERROR] pipeline child timed out after {timeout_seconds}s: "
+            f"{' '.join(str(c) for c in cmd)}"
+        )
+        return 1
 
 
 @contextmanager

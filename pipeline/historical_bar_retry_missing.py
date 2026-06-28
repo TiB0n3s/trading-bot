@@ -12,7 +12,6 @@ import argparse
 import json
 import os
 import re
-import subprocess
 import sys
 from datetime import date
 from pathlib import Path
@@ -21,6 +20,7 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 if str(BASE_DIR) not in sys.path:
     sys.path.insert(0, str(BASE_DIR))
 
+from pipeline import run_child  # noqa: E402
 from symbols_config import APPROVED_SYMBOLS_LIST  # noqa: E402
 
 from trading_bot.ops_checks.commands.historical_bar_progress_checks import (  # noqa: E402
@@ -203,8 +203,7 @@ def main(argv: list[str] | None = None) -> int:
         _print_human(payload, execute=args.execute)
 
     if args.execute and payload["command"]:
-        result = subprocess.run(payload["command"], cwd=BASE_DIR)
-        return int(result.returncode)
+        return run_child(payload["command"], cwd=BASE_DIR)
     return 0
 
 

@@ -59,6 +59,16 @@ class _LockedRegimeService:
         )
 
 
+class _RaisingRegimeService:
+    """Simulate an unreadable regime lockout state (the fail-closed-for-buy path)."""
+
+    def __init__(self, _path):
+        pass
+
+    def read(self):
+        raise RuntimeError("regime lockout state unreadable")
+
+
 def _process_live(raw_signal):
     """Exercise LiveSignalProcessor.process directly, after normalizing inputs."""
     pipeline = _app._build_signal_pipeline()
@@ -277,6 +287,20 @@ def test_regime_circuit_breaker_blocks_buy_before_approval():
 
     assert_equal(env.rejection_category(), "circuit_breaker", "category")
     assert_true("regime circuit breaker" in env.rejection_reason(), "reason")
+    assert_true(not evaluate_signal.called, "approval not called")
+
+
+def test_regime_circuit_breaker_fails_closed_for_buy_when_state_unreadable():
+    evaluate_signal = MagicMock()
+    with patch.dict(os.environ, {"REGIME_CIRCUIT_BREAKER_MODE": "block"}):
+        with patch(
+            "services.signal_runtime_wiring.PersistentLockoutService", _RaisingRegimeService
+        ):
+            with _Env(**_approved_downstream(**{"app.evaluate_signal": evaluate_signal})) as env:
+                _process_live(_buy(_dedupe_key="regime-unreadable"))
+
+    assert_equal(env.rejection_category(), "circuit_breaker", "category")
+    assert_true("unavailable" in env.rejection_reason(), "reason")
     assert_true(not evaluate_signal.called, "approval not called")
 
 
@@ -708,6 +732,7 @@ def main():
         test_successful_approved_buy_submits_order_and_logs_trade,
         test_stale_signal_rejection_stops_before_approval,
         test_regime_circuit_breaker_blocks_buy_before_approval,
+        test_regime_circuit_breaker_fails_closed_for_buy_when_state_unreadable,
         test_second_look_rejection_blocks_order_submission,
         test_broker_order_failure_marks_decision_unapproved_and_submit_failed,
         test_claude_low_confidence_rejection_never_submits_order,

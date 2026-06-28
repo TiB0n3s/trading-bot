@@ -889,7 +889,7 @@ class BarPatternFeatureRepository:
         self,
         symbol: str,
         *,
-        timeframe: str = "1Min",
+        timeframe: str = "1m",  # rows are stored as "1m"; "1Min" never matched
         feature_version: str | None = None,
     ) -> dict[str, Any] | None:
         """Return the latest persisted bar-pattern feature row for a symbol."""

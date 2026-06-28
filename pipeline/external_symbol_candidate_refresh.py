@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import subprocess
 import sys
 from datetime import date, timedelta
 from pathlib import Path
@@ -18,6 +17,7 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 if str(BASE_DIR) not in sys.path:
     sys.path.insert(0, str(BASE_DIR))
 
+from pipeline import run_child  # noqa: E402
 from services.intelligence.candidates.external_symbols import (  # noqa: E402
     DEFAULT_MIN_BAR_DAYS,
     DEFAULT_MIN_BAR_ROWS,
@@ -62,7 +62,7 @@ def _run_backfill(args: argparse.Namespace, symbols: list[str]) -> int:
         cmd.extend(["--max-chunks", str(args.max_chunks)])
     print("Running external-symbol candidate historical backfill:")
     print("  " + " ".join(cmd))
-    return int(subprocess.run(cmd, cwd=BASE_DIR).returncode)
+    return run_child(cmd, cwd=BASE_DIR)
 
 
 def _default_start(target_date: str, lookback_days: int) -> str:

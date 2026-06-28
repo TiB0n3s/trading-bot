@@ -109,6 +109,7 @@ class LiveSignalProcessorDeps:
     hydrate_buy_momentum_context: Callable[..., Any]
     hydrate_strategy_context: Callable[..., Any]
     macro_position_count_floor: float
+    macro_dust_position_allowance: int
     get_latest_session_momentum: Callable[[str], dict[str, Any] | None]
     session_momentum_is_fresh: Callable[[dict[str, Any]], bool]
     weakest_position_context: Callable[[dict[str, Any]], dict[str, Any] | None]
@@ -977,6 +978,7 @@ class LiveSignalProcessor:
     def run_macro_position_gate(self, **kwargs):
         outcome = run_macro_position_gate(
             macro_position_count_floor=self.deps.macro_position_count_floor,
+            macro_dust_position_allowance=self.deps.macro_dust_position_allowance,
             get_latest_session_momentum=self.deps.get_latest_session_momentum,
             session_momentum_is_fresh=self.deps.session_momentum_is_fresh,
             weakest_position_context=self.deps.weakest_position_context,

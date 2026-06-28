@@ -115,6 +115,8 @@ def release_cooldown(
     action: str,
     restore_iso: str | None = None,
     db_path=DB_PATH,
+    *,
+    claimed_iso: str | None = None,
 ) -> None:
     """Undo a ``claim_cooldown`` reservation when no order was submitted.
 
@@ -123,8 +125,40 @@ def release_cooldown(
     written back; otherwise the row is deleted so a legitimate retry is allowed
     immediately. (On a successful claim the prior value was already expired or
     absent, so deleting is the normal release.)
+
+    When ``claimed_iso`` is provided, the release is conditional (compare-and-act
+    inside ``BEGIN IMMEDIATE``): it only deletes/restores when the row still holds
+    this claim's ``last_order_time``. If another writer/worker has since replaced
+    the row with a newer cooldown, the release is a no-op so it cannot clobber a
+    legitimate cooldown and reopen the symbol for a duplicate order (fails safe).
     """
-    with get_connection(db_path) as con:
+    if claimed_iso is None:
+        with get_connection(db_path) as con:
+            if restore_iso:
+                con.execute(
+                    "INSERT OR REPLACE INTO cooldowns (symbol, action, last_order_time) VALUES (?, ?, ?)",
+                    (symbol, action, restore_iso),
+                )
+            else:
+                con.execute(
+                    "DELETE FROM cooldowns WHERE symbol = ? AND action = ?",
+                    (symbol, action),
+                )
+        return
+
+    con = get_connection(db_path)
+    try:
+        con.isolation_level = None  # explicit transaction control
+        con.execute("BEGIN IMMEDIATE")
+        row = con.execute(
+            "SELECT last_order_time FROM cooldowns WHERE symbol = ? AND action = ?",
+            (symbol, action),
+        ).fetchone()
+        if row is None or row[0] != claimed_iso:
+            # Row is gone or was replaced by a newer cooldown (another worker/path);
+            # do not clobber it.
+            con.execute("ROLLBACK")
+            return
         if restore_iso:
             con.execute(
                 "INSERT OR REPLACE INTO cooldowns (symbol, action, last_order_time) VALUES (?, ?, ?)",
@@ -135,6 +169,15 @@ def release_cooldown(
                 "DELETE FROM cooldowns WHERE symbol = ? AND action = ?",
                 (symbol, action),
             )
+        con.execute("COMMIT")
+    except Exception:
+        try:
+            con.execute("ROLLBACK")
+        except Exception:
+            pass
+        raise
+    finally:
+        con.close()
 
 
 def write_recent_sell(symbol: str, timestamp: str, price: float, db_path=DB_PATH) -> None:

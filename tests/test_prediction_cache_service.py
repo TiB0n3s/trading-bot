@@ -86,6 +86,28 @@ def test_load_predictions_hard_clips_extreme_model_outputs():
     }
 
 
+def test_load_predictions_drops_non_finite_model_outputs():
+    # A NaN/Inf must never reach runtime context as a real prediction (a NaN
+    # previously clipped to the ceiling). It should become None (no prediction).
+    repo = FakeRepository(
+        rows=[
+            {
+                "market_date": "2026-05-27",
+                "symbol": "AAPL",
+                "prediction_score": float("nan"),
+                "timing_score": float("inf"),
+            },
+        ]
+    )
+    service = _service(repo)
+
+    pred = service.load_predictions_from_db(market_date="2026-05-27")["AAPL"]
+
+    assert pred["prediction_score"] is None
+    assert pred["timing_score"] is None
+    assert pred["prediction_output_clipped"] is True
+
+
 def test_refresh_populates_memory_and_lookup_is_read_only_copy():
     repo = FakeRepository(
         rows=[
@@ -123,6 +145,7 @@ if __name__ == "__main__":
     tests = [
         test_load_predictions_normalizes_symbols_and_metadata,
         test_load_predictions_hard_clips_extreme_model_outputs,
+        test_load_predictions_drops_non_finite_model_outputs,
         test_refresh_populates_memory_and_lookup_is_read_only_copy,
         test_refresh_failure_records_status_error_without_raising,
     ]

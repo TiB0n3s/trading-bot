@@ -84,6 +84,7 @@ def build_live_signal_processor(*, container: Any, runtime: Any) -> LiveSignalPr
             hydrate_buy_momentum_context=runtime._hydrate_buy_momentum_context,
             hydrate_strategy_context=runtime._hydrate_strategy_context,
             macro_position_count_floor=runtime.MACRO_POSITION_COUNT_FLOOR,
+            macro_dust_position_allowance=runtime.MACRO_DUST_POSITION_ALLOWANCE,
             get_latest_session_momentum=runtime.get_latest_session_momentum,
             session_momentum_is_fresh=runtime._session_momentum_is_fresh,
             weakest_position_context=runtime._get_weakest_position_context,

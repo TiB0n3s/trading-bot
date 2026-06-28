@@ -116,6 +116,50 @@ def test_claim_cooldown_allows_after_window_expiry(tmp_path):
     assert prior2 == now.isoformat()
 
 
+def test_conditional_release_does_not_clobber_a_newer_cooldown(tmp_path):
+    # Claim at T_A, then a newer cooldown (T_B) is written by another path. A
+    # release keyed on the stale T_A must be a no-op (not wipe T_B), so the symbol
+    # stays on cooldown and a duplicate order is prevented.
+    db = _make_db(tmp_path)
+    now = datetime.now(timezone.utc)
+    t_a = now.isoformat()
+    t_b = (now + timedelta(seconds=30)).isoformat()
+
+    claimed, _ = cooldown_repo.claim_cooldown("AAPL", "buy", t_a, WINDOW, db_path=db)
+    assert claimed is True
+
+    # Another writer replaces the row with a newer cooldown.
+    cooldown_repo.write_cooldown("AAPL", "buy", t_b, db_path=db)
+
+    # Stale release (claimed_iso=T_A) must NOT clobber T_B.
+    cooldown_repo.release_cooldown("AAPL", "buy", db_path=db, claimed_iso=t_a)
+
+    # Slot is still held by T_B: a fresh claim within the window fails.
+    claimed2, existing = cooldown_repo.claim_cooldown(
+        "AAPL", "buy", (now + timedelta(seconds=40)).isoformat(), WINDOW, db_path=db
+    )
+    assert claimed2 is False
+    assert existing == t_b
+
+
+def test_conditional_release_deletes_when_timestamp_matches(tmp_path):
+    db = _make_db(tmp_path)
+    now = datetime.now(timezone.utc)
+    t_a = now.isoformat()
+
+    claimed, _ = cooldown_repo.claim_cooldown("AAPL", "buy", t_a, WINDOW, db_path=db)
+    assert claimed is True
+
+    # Release keyed on the matching timestamp frees the slot.
+    cooldown_repo.release_cooldown("AAPL", "buy", db_path=db, claimed_iso=t_a)
+
+    claimed2, prior2 = cooldown_repo.claim_cooldown(
+        "AAPL", "buy", (now + timedelta(seconds=5)).isoformat(), WINDOW, db_path=db
+    )
+    assert claimed2 is True
+    assert prior2 is None
+
+
 def test_claim_cooldown_is_per_symbol_action(tmp_path):
     db = _make_db(tmp_path)
     now = datetime.now(timezone.utc)

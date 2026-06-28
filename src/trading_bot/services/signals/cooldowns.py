@@ -161,9 +161,16 @@ def release_cooldown(
     action: str,
     cooldown_repository: Any,
     log: Any,
+    claimed_ts: Any = None,
 ) -> None:
-    """Release a cooldown reservation when no order was submitted."""
+    """Release a cooldown reservation when no order was submitted.
+
+    When ``claimed_ts`` (the datetime passed to ``claim_cooldown``) is supplied,
+    the release is conditional on the row still holding this claim's timestamp, so
+    a concurrently-written newer cooldown is not clobbered.
+    """
     try:
-        cooldown_repository.release_cooldown(symbol, action)
+        claimed_iso = claimed_ts.isoformat() if claimed_ts is not None else None
+        cooldown_repository.release_cooldown(symbol, action, claimed_iso=claimed_iso)
     except Exception as exc:
         log.error(f"_release_cooldown failed for {symbol}/{action}: {exc}")

@@ -243,7 +243,7 @@ def execute_approved_order(
     last_sell: dict,
     log: logging.Logger,
     claim_cooldown: Callable[[str, str, Any], bool] | None = None,
-    release_cooldown: Callable[[str, str], Any] | None = None,
+    release_cooldown: Callable[..., Any] | None = None,
 ) -> ExecutionOutcome:
     """Run the approved/rejected post-Claude order path.
 
@@ -351,7 +351,7 @@ def execute_approved_order(
 
                 if execution.rejection_category:
                     if claimed_cooldown and release_cooldown is not None:
-                        release_cooldown(symbol, action)
+                        release_cooldown(symbol, action, current_et)
                     rejection_adapter.reject_approval_decision(
                         execution_rejection_decision(execution)
                     )
@@ -373,14 +373,14 @@ def execute_approved_order(
                     if claimed_cooldown and release_cooldown is not None:
                         # No order placed; release the reservation so a
                         # legitimate retry is not blocked for the full window.
-                        release_cooldown(symbol, action)
+                        release_cooldown(symbol, action, current_et)
                 final_outcome = execution
 
         except Exception as exc:
             log.exception(f"APPROVED ORDER PATH CRASHED for {symbol} {action.upper()}: {exc}")
             if claimed_cooldown and release_cooldown is not None:
                 try:
-                    release_cooldown(symbol, action)
+                    release_cooldown(symbol, action, current_et)
                 except Exception:
                     log.exception(f"cooldown release failed for {symbol} {action}")
             rejection_adapter.reject_approval_decision(

@@ -279,6 +279,7 @@ ONE_BAR_CONFIRMATION_TIMEOUT_SECONDS = _runtime_settings.ONE_BAR_CONFIRMATION_TI
 TAPE_EXCEPTION_ENABLED = _runtime_settings.TAPE_EXCEPTION_ENABLED
 OPEN_MOMENTUM_FAST_LANE_ENABLED = _runtime_settings.OPEN_MOMENTUM_FAST_LANE_ENABLED
 MACRO_POSITION_COUNT_FLOOR = _runtime_settings.MACRO_POSITION_COUNT_FLOOR
+MACRO_DUST_POSITION_ALLOWANCE = _runtime_settings.MACRO_DUST_POSITION_ALLOWANCE
 ENFORCE_PREDICTION_BLOCKS = _runtime_settings.ENFORCE_PREDICTION_BLOCKS
 ENFORCE_PREDICTION_WATCH_IN_CASH = _runtime_settings.ENFORCE_PREDICTION_WATCH_IN_CASH
 STRATEGY_ENGINE_MODE = _runtime_settings.STRATEGY_ENGINE_MODE
@@ -579,12 +580,13 @@ def _claim_cooldown(symbol, action, ts):
     )
 
 
-def _release_cooldown(symbol, action):
+def _release_cooldown(symbol, action, claimed_ts=None):
     signal_cooldowns.release_cooldown(
         symbol=symbol,
         action=action,
         cooldown_repository=cooldown_repo,
         log=logger,
+        claimed_ts=claimed_ts,
     )
 
 

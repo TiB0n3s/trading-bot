@@ -18,6 +18,11 @@ import argparse
 import json
 import sys
 from datetime import datetime, timezone
+from pathlib import Path
+
+# Ensure the bot package (src/) and scripts/ are importable, matching benchmark_report.py
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 RUNTIME_EFFECT = "live_positions_snapshot_no_trade_authority"
 

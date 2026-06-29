@@ -19,7 +19,7 @@ Agents are research and bookkeeping labor. They find, measure, verify, and
 file — they do not hold authority. Specifically:
 
 - **No agent grants trade or execution authority**, and no agent modifies
-  execution, sizing, risk-gate, broker, webhook-routing, or market-hours code.
+  execution, sizing, risk-gate, broker, or market-hours code.
   Those changes are human-only and require explicit instruction.
 - **No agent loosens, disables, weakens, or bypasses any gate, blocker, or
   veto.** Threshold and gate changes are human promotion decisions recorded in
@@ -394,6 +394,22 @@ Recent completed roadmap items:
   busy_timeout, and the `data_health` flag.
 - The current operational focus is performance validation on clean-feed live
   paper sessions before further policy tuning.
+- New operator-tunable env flags (2026-06-28 code review batch):
+  - `OPS_BAR_PATTERN_FORCE_ARCHIVE_DAYS` (default 30) — `cold_learning_archive`
+    safety valve: archives `bar_pattern_features` rows older than this ceiling
+    even when training evidence is not ready, keeping the recent 30-day window
+    hot. Prevents permanent archival blockage when the training hook is not_ready.
+  - `OPS_HISTORICAL_ARCHIVE_MIN_COVERAGE` (default 0.80) — minimum fraction of
+    approved symbols that must succeed before `historical_bar_archive` exits 0;
+    emits `[ALERT]` on any error regardless and returns 1 if coverage falls below.
+  - `OPS_PIPELINE_CHILD_TIMEOUT_SECONDS` (default 14400) — wall-clock timeout for
+    `pipeline.run_child` subprocess calls (symbol_universe_retrain,
+    historical_bar_completion_hook, external_symbol_candidate_refresh,
+    historical_bar_retry_missing). Overridable per deployment.
+  - `MACRO_DUST_POSITION_ALLOWANCE` (default 4) — hard ceiling in
+    `run_macro_position_gate` = `max_new_positions + MACRO_DUST_POSITION_ALLOWANCE`.
+    Prevents dust positions from masking a true over-position condition when the
+    dust-excluded effective count is used for the primary check.
 
 Current roadmap posture:
 
@@ -404,6 +420,23 @@ Continue baseline paper collection until calibration buckets have enough
 realized lifecycle outcomes.
 Tune one policy at a time from measured paper-session evidence.
 ```
+
+Pending operator follow-ups on the live box (not code):
+
+1. Add `--timeout-seconds` to the cron invocation of `run_pre_market_pipeline.sh`
+   (or the underlying Python call). Per-step SIGALRM timeouts were added in code
+   (C5: 600 s default, 900 s for research_data/collect_events), but the outer
+   cron wrapper has no hard wall-clock guard yet.
+2. After `bar_pattern_features` archival drains eligible rows (watch
+   `cold_learning_archive` manifests), run the backup-gated VACUUM/compact-swap
+   to reclaim the ~43 GB bloat. `db_right_size_maintenance` now requires a fresh
+   verified backup (`OPS_DB_BACKUP_MAX_AGE_HOURS`, default 30 h) before any
+   destructive archive/swap step.
+3. Optionally fix the transient DNS errors in the latest backfill manifest so
+   the `requires_historical_bar_training` gate becomes ready. This unblocks the
+   normal training-evidence path and is the root fix for the bar_pattern_features
+   archival blockage (N1). The `OPS_BAR_PATTERN_FORCE_ARCHIVE_DAYS` safety valve
+   handles this in the meantime.
 
 ## Safety Principles
 
@@ -430,7 +463,6 @@ Broker behavior
 Position sizing
 Risk gates
 Claude prompt policy
-Webhook routing
 Market-hours logic
 Live/cash-mode behavior
 Any prediction-driven trade blocking or sizing
@@ -706,6 +738,10 @@ DataAccessError
 fill_stream.py
 
 Alpaca websocket fill listener.
+
+The Alpaca trade_updates stream is a 24/7 account/order-event feed. The
+service must stay connected across and after the close to capture bracket
+and MOC fills. Connection is not market-hours-gated.
 
 Responsibilities:
 

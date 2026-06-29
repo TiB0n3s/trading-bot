@@ -327,6 +327,12 @@ def _paper_exploration_authority_decision(
         blockers.append(f"buy_opportunity_score={buy_score} < {min_buy_score}")
     if prediction_score is not None and prediction_score < min_prediction:
         blockers.append(f"prediction_score={prediction_score} < {min_prediction}")
+    min_pop_samples = int(config.get("min_probability_of_profit_sample_size") or 10)
+    pop_sample_size = int(prediction_gate.get("probability_of_profit_sample_size") or 0)
+    if pop_sample_size < min_pop_samples:
+        blockers.append(
+            f"probability_of_profit_sample_size={pop_sample_size} < {min_pop_samples} (sparse evidence)"
+        )
     if setup_rec not in {"buy", "strong_buy", "favor"} and setup_action not in {
         "allow",
         "buy",

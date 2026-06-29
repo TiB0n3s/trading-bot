@@ -30,11 +30,11 @@ def _snapshot() -> dict:
     conn.execute("PRAGMA query_only = ON")
     conn.row_factory = sqlite3.Row
     rows = conn.execute(
-        "SELECT prediction_score AS s, realized_pnl_pct AS r FROM matched_trades "
-        "WHERE prediction_score IS NOT NULL AND realized_pnl_pct IS NOT NULL"
+        "SELECT prediction_score AS s, won AS w FROM matched_trades "
+        "WHERE prediction_score IS NOT NULL AND won IS NOT NULL"
     ).fetchall()
     conn.close()
-    pts = [(float(x["s"]), 1.0 if float(x["r"]) > 0 else 0.0) for x in rows]
+    pts = [(float(x["s"]), float(x["w"])) for x in rows]
     if len(pts) < N_BUCKETS:
         return {"buckets": [], "n": len(pts), "note": "insufficient matched_trades for calibration"}
     smin = min(p[0] for p in pts)
@@ -57,7 +57,7 @@ def _snapshot() -> dict:
         brier_sum += sum((p - w) ** 2 for p, w in chunk)
     brier = round(brier_sum / len(norm), 4)
     return {"buckets": buckets, "n": len(norm), "brier": brier,
-            "source": "matched_trades.prediction_score vs realized_pnl_pct>0"}
+            "source": "matched_trades.prediction_score vs won"}
 
 
 def main() -> int:

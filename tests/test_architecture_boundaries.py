@@ -88,6 +88,8 @@ APPROVED_DB_BOUNDARIES = {
     "scripts/analyze_ml_edge.py",
     "scripts/backfill_candidate_ml_outcomes.py",
     "scripts/benchmark_report.py",
+    "scripts/dt_calibration_snapshot.py",
+    "scripts/dt_deadman.py",
     "scripts/external_signal_features.py",
     "scripts/post_earnings_drift_research.py",
     "scripts/sqlite_checkpoint.py",
@@ -151,6 +153,7 @@ BASELINE_REPORT_BUILDER_DB_ALLOWLIST = {
 
 APPROVED_BROKER_BOUNDARIES = {
     "scripts/broker.py",
+    "scripts/dt_positions_snapshot.py",
     "services/broker_service.py",
     "services/container.py",
     "services/fill_stream_service.py",

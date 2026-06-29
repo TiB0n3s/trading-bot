@@ -49,6 +49,7 @@ class HistoricalBarPaperStrategy:
     feature_snapshot: dict[str, Any]
     reasons: list[str]
     guardrails: dict[str, bool]
+    features_missing: bool = False
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -86,20 +87,23 @@ def _latest_feature_snapshot(
     symbol: str | None,
     account_state: dict[str, Any],
     feature_repo: BarPatternFeatureRepository | None,
-) -> dict[str, Any]:
+) -> tuple[dict[str, Any], bool]:
     explicit = _dict(
         account_state.get("bar_pattern_features")
         or account_state.get("latest_bar_pattern_features")
         or account_state.get("historical_bar_features")
     )
     if explicit:
-        return explicit
+        return explicit, False
     if not symbol or feature_repo is None:
-        return {}
+        return {}, True
     try:
-        return feature_repo.latest_for_symbol(symbol) or {}
+        result = feature_repo.latest_for_symbol(symbol)
+        if result:
+            return result, False
+        return {}, True
     except Exception:
-        return {}
+        return {}, True
 
 
 def _score_current_features(
@@ -366,7 +370,7 @@ def build_historical_bar_paper_strategy(
         or _dict(account_state.get("historical_bar_model_intelligence"))
         or build_historical_bar_model_intelligence()
     )
-    features = _latest_feature_snapshot(
+    features, features_missing = _latest_feature_snapshot(
         symbol=symbol,
         account_state=account_state,
         feature_repo=feature_repo,
@@ -494,6 +498,7 @@ def build_historical_bar_paper_strategy(
         model_weights=model_weights,
         feature_snapshot=snapshot,
         reasons=reasons[:20],
+        features_missing=features_missing,
         guardrails={
             "paper_only": True,
             "loads_model_binaries": False,

@@ -247,6 +247,8 @@ def build_canonical_intelligence_snapshot(
     feature_semantic_version: str,
     market_context_metadata: dict[str, Any] | None = None,
 ) -> CanonicalIntelligenceSnapshot:
+    if account_state is None:
+        account_state = {}
     market_meta = market_context_metadata or {}
     momentum = account_state.get("momentum") or {}
     session = account_state.get("session_momentum") or {}
@@ -593,6 +595,7 @@ def build_canonical_intelligence_snapshot(
         "missing_evidence": ai_pattern.get("missing_evidence") or [],
         "provider": ai_pattern.get("provider") or "deterministic_fallback",
         "authority": "observe_only_no_live_authority",
+        "features_missing": historical_bar_paper.get("features_missing", False),
     }
 
     feature_vector = {

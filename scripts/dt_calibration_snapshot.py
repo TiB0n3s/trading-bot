@@ -22,6 +22,7 @@ RUNTIME_EFFECT = "diagnostic_only_no_schema_or_data_mutation"
 _C1 = Path(__file__).resolve().parent.parent / "trades.db"
 DB = _C1 if _C1.exists() else (Path.cwd() / "trades.db")
 N_BUCKETS = 10
+MIN_BUCKET_N = 10  # buckets below this are flagged low_n; not excluded
 
 
 def _snapshot() -> dict:
@@ -51,7 +52,8 @@ def _snapshot() -> dict:
         pred = sum(p for p, _ in chunk) / len(chunk)
         real = sum(w for _, w in chunk) / len(chunk)
         buckets.append({"bucket": "%.2f-%.2f" % (chunk[0][0], chunk[-1][0]),
-                        "predicted": round(pred, 3), "realized": round(real, 3), "n": len(chunk)})
+                        "predicted": round(pred, 3), "realized": round(real, 3), "n": len(chunk),
+                        "low_n": len(chunk) < MIN_BUCKET_N})
         brier_sum += sum((p - w) ** 2 for p, w in chunk)
     brier = round(brier_sum / len(norm), 4)
     return {"buckets": buckets, "n": len(norm), "brier": brier,

@@ -22,6 +22,7 @@ RUNTIME_EFFECT = "diagnostic_only_no_schema_or_data_mutation"
 _C1 = Path(__file__).resolve().parent.parent / "trades.db"
 DB = _C1 if _C1.exists() else (Path.cwd() / "trades.db")
 N_BUCKETS = 10
+MIN_BUCKET_N = 10  # buckets below this are flagged low_n; not excluded
 
 
 def _snapshot() -> dict:
@@ -29,11 +30,11 @@ def _snapshot() -> dict:
     conn.execute("PRAGMA query_only = ON")
     conn.row_factory = sqlite3.Row
     rows = conn.execute(
-        "SELECT prediction_score AS s, realized_pnl_pct AS r FROM matched_trades "
-        "WHERE prediction_score IS NOT NULL AND realized_pnl_pct IS NOT NULL"
+        "SELECT prediction_score AS s, won AS w FROM matched_trades "
+        "WHERE prediction_score IS NOT NULL AND won IS NOT NULL"
     ).fetchall()
     conn.close()
-    pts = [(float(x["s"]), 1.0 if float(x["r"]) > 0 else 0.0) for x in rows]
+    pts = [(float(x["s"]), float(x["w"])) for x in rows]
     if len(pts) < N_BUCKETS:
         return {"buckets": [], "n": len(pts), "note": "insufficient matched_trades for calibration"}
     smin = min(p[0] for p in pts)
@@ -51,11 +52,12 @@ def _snapshot() -> dict:
         pred = sum(p for p, _ in chunk) / len(chunk)
         real = sum(w for _, w in chunk) / len(chunk)
         buckets.append({"bucket": "%.2f-%.2f" % (chunk[0][0], chunk[-1][0]),
-                        "predicted": round(pred, 3), "realized": round(real, 3), "n": len(chunk)})
+                        "predicted": round(pred, 3), "realized": round(real, 3), "n": len(chunk),
+                        "low_n": len(chunk) < MIN_BUCKET_N})
         brier_sum += sum((p - w) ** 2 for p, w in chunk)
     brier = round(brier_sum / len(norm), 4)
     return {"buckets": buckets, "n": len(norm), "brier": brier,
-            "source": "matched_trades.prediction_score vs realized_pnl_pct>0"}
+            "source": "matched_trades.prediction_score vs won"}
 
 
 def main() -> int:

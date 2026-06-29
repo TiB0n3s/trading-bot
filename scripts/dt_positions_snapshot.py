@@ -16,8 +16,23 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from datetime import datetime, timezone
+from pathlib import Path
+
+# Ensure the bot package (src/) and scripts/ are importable, matching benchmark_report.py
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))  # repo root: execution/, repositories/, etc.
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+# Load credentials from the system env file (same pattern as other bot scripts)
+_ENV_FILE = Path('/etc/trading-bot.env')
+if _ENV_FILE.exists():
+    for _line in _ENV_FILE.read_text().splitlines():
+        if '=' in _line and not _line.startswith('#'):
+            _k, _, _v = _line.partition('=')
+            os.environ.setdefault(_k.strip(), _v.strip())
 
 RUNTIME_EFFECT = "live_positions_snapshot_no_trade_authority"
 

@@ -16,6 +16,7 @@ class SummaryPayload:
     matched: list[dict[str, Any]]
     trade_rows: list[dict[str, Any]]
     auto_buy_hard_block_audit: dict[str, Any]
+    prediction_model_summary: dict[str, Any]
     header: str
 
 
@@ -48,6 +49,9 @@ class DailySummaryService:
             auto_buy_hard_block_audit=self.repository.auto_buy_hard_block_audit_for_day(
                 target_date
             ),
+            prediction_model_summary=self.repository.prediction_model_summary_for_day(
+                target_date
+            ),
             header=f"DAILY SUMMARY — {target_date}",
         )
 
@@ -77,6 +81,10 @@ class DailySummaryService:
                 end_excl,
             ),
             auto_buy_hard_block_audit=self.repository.auto_buy_hard_block_audit_for_range(
+                monday.isoformat(),
+                end_excl,
+            ),
+            prediction_model_summary=self.repository.prediction_model_summary_for_range(
                 monday.isoformat(),
                 end_excl,
             ),

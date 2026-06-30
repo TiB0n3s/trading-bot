@@ -1,0 +1,438 @@
+{
+  "communities": {
+    "0": [
+      "counterfactual_concept_drift",
+      "counterfactual_concept_drift_main",
+      "init",
+      "init_argv",
+      "init_default_market_date",
+      "init_ensure_base_on_path",
+      "init_pipelineresult",
+      "init_pipelineresult_ok",
+      "init_pipelineresult_total_duration_sec",
+      "init_rationale_1",
+      "init_rationale_159",
+      "init_rationale_29",
+      "init_resource_limits",
+      "init_run_pipeline",
+      "init_step",
+      "init_step_run",
+      "init_step_should_skip",
+      "init_step_write_marker",
+      "init_stepresult",
+      "off_hours_historical_bar_learning",
+      "off_hours_historical_bar_learning_build_steps",
+      "off_hours_historical_bar_learning_main",
+      "off_hours_historical_bar_learning_py_namespace",
+      "post_session_review",
+      "post_session_review_build_steps",
+      "post_session_review_main",
+      "pre_market",
+      "pre_market_build_steps",
+      "pre_market_main"
+    ],
+    "1": [
+      "cold_learning_archive",
+      "cold_learning_archive_archive_chunk",
+      "cold_learning_archive_archiveplan",
+      "cold_learning_archive_columns",
+      "cold_learning_archive_connect",
+      "cold_learning_archive_cutoff",
+      "cold_learning_archive_date_column_exists",
+      "cold_learning_archive_diagnostic_is_trained",
+      "cold_learning_archive_eligible_count",
+      "cold_learning_archive_ensure_archive_table",
+      "cold_learning_archive_latest_diagnostic",
+      "cold_learning_archive_main",
+      "cold_learning_archive_parse_args",
+      "cold_learning_archive_py_any",
+      "cold_learning_archive_py_date",
+      "cold_learning_archive_py_namespace",
+      "cold_learning_archive_py_path",
+      "cold_learning_archive_quote_identifier",
+      "cold_learning_archive_run_archive",
+      "cold_learning_archive_table_exists",
+      "cold_learning_archive_training_evidence",
+      "cold_learning_archive_utc_now",
+      "connection",
+      "row"
+    ],
+    "2": [
+      "counterfactual_veto_relaxation",
+      "counterfactual_veto_relaxation_default_start",
+      "counterfactual_veto_relaxation_main",
+      "datetime",
+      "historical_outcome_feedback",
+      "historical_outcome_feedback_main",
+      "historical_outcome_feedback_py_path",
+      "historical_outcome_feedback_target_date",
+      "historical_outcome_feedback_write_report",
+      "intraday_learning",
+      "intraday_learning_main",
+      "intraday_learning_py_path",
+      "intraday_learning_target_date",
+      "intraday_learning_write_report",
+      "polygon_tick_archive",
+      "polygon_tick_archive_archive_polygon_trades",
+      "polygon_tick_archive_main",
+      "polygon_tick_archive_py_date",
+      "polygon_tick_archive_py_path",
+      "polygon_tick_archive_tickarchiveresult",
+      "polygonmarketdataservice"
+    ],
+    "3": [
+      "exception",
+      "init_steptimeout",
+      "retrain",
+      "retrain_apply_resource_limits",
+      "retrain_completed_marker",
+      "retrain_default_prediction_time_cutoff",
+      "retrain_execute_retraining",
+      "retrain_git_sha",
+      "retrain_main",
+      "retrain_nonblocking_lock",
+      "retrain_parse_args",
+      "retrain_print_payload",
+      "retrain_py_any",
+      "retrain_py_namespace",
+      "retrain_py_path",
+      "retrain_retrainingtimeout",
+      "retrain_run_marker_path",
+      "retrain_timeout_handler",
+      "retrain_utc_stamp",
+      "retrain_write_json"
+    ],
+    "4": [
+      "sqlite_vacuum_swap",
+      "sqlite_vacuum_swap_build_compact_copy",
+      "sqlite_vacuum_swap_checkpoint_source",
+      "sqlite_vacuum_swap_db_stats",
+      "sqlite_vacuum_swap_dbstats",
+      "sqlite_vacuum_swap_main",
+      "sqlite_vacuum_swap_now_iso",
+      "sqlite_vacuum_swap_parse_args",
+      "sqlite_vacuum_swap_prune_rollback_files",
+      "sqlite_vacuum_swap_py_any",
+      "sqlite_vacuum_swap_py_namespace",
+      "sqlite_vacuum_swap_py_path",
+      "sqlite_vacuum_swap_quote_sql_string",
+      "sqlite_vacuum_swap_rollback_candidates",
+      "sqlite_vacuum_swap_run",
+      "sqlite_vacuum_swap_schema_objects",
+      "sqlite_vacuum_swap_service_status",
+      "sqlite_vacuum_swap_sidecar_paths",
+      "sqlite_vacuum_swap_swap_compact_copy",
+      "sqlite_vacuum_swap_utc_stamp"
+    ],
+    "5": [
+      "model_evidence_review",
+      "model_evidence_review_build_agent",
+      "model_evidence_review_build_redteam_panel",
+      "model_evidence_review_cache_max_age_hours",
+      "model_evidence_review_emit_vault_markdown",
+      "model_evidence_review_main",
+      "model_evidence_review_maybe_retrain",
+      "model_evidence_review_py_any",
+      "model_evidence_review_py_path",
+      "model_evidence_review_rationale_142",
+      "model_evidence_review_rationale_177",
+      "model_evidence_review_rationale_213",
+      "model_evidence_review_rationale_69",
+      "model_evidence_review_run",
+      "model_evidence_review_run_status",
+      "model_evidence_review_utc_stamp",
+      "modelevidenceagent"
+    ],
+    "6": [
+      "db_right_size_maintenance",
+      "db_right_size_maintenance_active_services",
+      "db_right_size_maintenance_blocked_archive_rows",
+      "db_right_size_maintenance_main",
+      "db_right_size_maintenance_now_iso",
+      "db_right_size_maintenance_parse_args",
+      "db_right_size_maintenance_py_any",
+      "db_right_size_maintenance_py_date",
+      "db_right_size_maintenance_py_namespace",
+      "db_right_size_maintenance_py_path",
+      "db_right_size_maintenance_rationale_77",
+      "db_right_size_maintenance_recent_backup_ok",
+      "db_right_size_maintenance_run",
+      "db_right_size_maintenance_stamp",
+      "db_right_size_maintenance_write_manifest"
+    ],
+    "7": [
+      "external_symbol_candidate_refresh",
+      "external_symbol_candidate_refresh_default_start",
+      "external_symbol_candidate_refresh_main",
+      "external_symbol_candidate_refresh_print_human",
+      "external_symbol_candidate_refresh_py_namespace",
+      "external_symbol_candidate_refresh_run_backfill",
+      "init_rationale_47",
+      "init_run_child",
+      "symbol_universe_retrain",
+      "symbol_universe_retrain_main",
+      "symbol_universe_retrain_print_human",
+      "symbol_universe_retrain_py_namespace",
+      "symbol_universe_retrain_run_added_symbol_backfill",
+      "symbol_universe_retrain_run_retraining"
+    ],
+    "8": [
+      "historical_bar_backfill",
+      "historical_bar_backfill_acquire_lock",
+      "historical_bar_backfill_cache_file_has_rows",
+      "historical_bar_backfill_cache_path",
+      "historical_bar_backfill_cached_row_to_bar",
+      "historical_bar_backfill_date_chunks",
+      "historical_bar_backfill_load_env_file",
+      "historical_bar_backfill_main",
+      "historical_bar_backfill_parse_symbols",
+      "historical_bar_backfill_py_date",
+      "historical_bar_backfill_py_path",
+      "historical_bar_backfill_read_cached_bars",
+      "historical_bar_backfill_result_payload",
+      "historical_bar_backfill_write_manifest"
+    ],
+    "9": [
+      "train_historical_bar_model",
+      "train_historical_bar_model_baseline_training",
+      "train_historical_bar_model_git_sha",
+      "train_historical_bar_model_label_counts",
+      "train_historical_bar_model_main",
+      "train_historical_bar_model_parse_args",
+      "train_historical_bar_model_py_any",
+      "train_historical_bar_model_py_namespace",
+      "train_historical_bar_model_py_path",
+      "train_historical_bar_model_run",
+      "train_historical_bar_model_stamp",
+      "train_historical_bar_model_write_json"
+    ],
+    "10": [
+      "historical_bar_completion_hook",
+      "historical_bar_completion_hook_build_completion_assessment",
+      "historical_bar_completion_hook_fingerprint",
+      "historical_bar_completion_hook_main",
+      "historical_bar_completion_hook_now",
+      "historical_bar_completion_hook_print_payload",
+      "historical_bar_completion_hook_py_namespace",
+      "historical_bar_completion_hook_py_path",
+      "historical_bar_completion_hook_read_state",
+      "historical_bar_completion_hook_run_retraining",
+      "historical_bar_completion_hook_write_state"
+    ],
+    "11": [
+      "learning_backfill_repair",
+      "learning_backfill_repair_learningbackfillrepairresult",
+      "learning_backfill_repair_learningbackfillrepairresult_ok",
+      "learning_backfill_repair_load_json",
+      "learning_backfill_repair_main",
+      "learning_backfill_repair_pct",
+      "learning_backfill_repair_py_any",
+      "learning_backfill_repair_py_path",
+      "learning_backfill_repair_repair_decision_policy_learning_effects",
+      "learning_backfill_repair_run_learning_backfill_repair"
+    ],
+    "12": [
+      "after_close_learning",
+      "after_close_learning_apply_numeric_thread_defaults",
+      "after_close_learning_build_daily_steps",
+      "after_close_learning_build_research_steps",
+      "after_close_learning_build_steps",
+      "after_close_learning_main",
+      "after_close_learning_marker_path",
+      "after_close_learning_py_path",
+      "after_close_learning_step"
+    ],
+    "13": [
+      "historical_bar_feature_repair",
+      "historical_bar_feature_repair_cache_chunks",
+      "historical_bar_feature_repair_main",
+      "historical_bar_feature_repair_parse_symbols",
+      "historical_bar_feature_repair_py_path",
+      "historical_bar_feature_repair_read_bars",
+      "historical_bar_feature_repair_row_to_bar",
+      "historical_bar_feature_repair_utc_timestamp"
+    ],
+    "14": [
+      "historical_bar_archive",
+      "historical_bar_archive_existing_pattern_rows",
+      "historical_bar_archive_main",
+      "historical_bar_archive_next_date",
+      "historical_bar_archive_parse_symbols",
+      "historical_bar_archive_py_path",
+      "historical_bar_archive_result_payload"
+    ],
+    "15": [
+      "historical_bar_retry_missing",
+      "historical_bar_retry_missing_build_retry_plan",
+      "historical_bar_retry_missing_error_symbols",
+      "historical_bar_retry_missing_load_env_file",
+      "historical_bar_retry_missing_main",
+      "historical_bar_retry_missing_print_human",
+      "historical_bar_retry_missing_py_path"
+    ],
+    "16": [
+      "model_evidence_payload_export",
+      "model_evidence_payload_export_bounded_caps",
+      "model_evidence_payload_export_env_int",
+      "model_evidence_payload_export_main",
+      "model_evidence_payload_export_py_any",
+      "model_evidence_payload_export_rationale_57",
+      "model_evidence_payload_export_run"
+    ],
+    "17": [
+      "database_backup",
+      "database_backup_main",
+      "database_backup_parse_args",
+      "database_backup_py_namespace"
+    ],
+    "18": [
+      "validate_predictions",
+      "validate_predictions_main",
+      "validate_predictions_print_human"
+    ],
+    "19": [
+      "shadow_predictions",
+      "shadow_predictions_main"
+    ],
+    "20": [
+      "trading_education_ingest",
+      "trading_education_ingest_main"
+    ]
+  },
+  "cohesion": {
+    "0": 0.11083743842364532,
+    "1": 0.213768115942029,
+    "2": 0.13333333333333333,
+    "3": 0.21052631578947367,
+    "4": 0.2631578947368421,
+    "5": 0.20588235294117646,
+    "6": 0.2761904761904762,
+    "7": 0.23076923076923078,
+    "8": 0.32967032967032966,
+    "9": 0.3787878787878788,
+    "10": 0.36363636363636365,
+    "11": 0.3333333333333333,
+    "12": 0.4444444444444444,
+    "13": 0.5,
+    "14": 0.5238095238095238,
+    "15": 0.5238095238095238,
+    "16": 0.42857142857142855,
+    "17": 0.6666666666666666,
+    "18": 1.0,
+    "19": 1.0,
+    "20": 1.0
+  },
+  "gods": [
+    {
+      "id": "cold_learning_archive_run_archive",
+      "label": "run_archive()",
+      "degree": 15
+    },
+    {
+      "id": "init_run_pipeline",
+      "label": "run_pipeline()",
+      "degree": 13
+    },
+    {
+      "id": "init_default_market_date",
+      "label": "default_market_date()",
+      "degree": 12
+    },
+    {
+      "id": "historical_bar_backfill_main",
+      "label": "main()",
+      "degree": 12
+    },
+    {
+      "id": "retrain_execute_retraining",
+      "label": "_execute_retraining()",
+      "degree": 12
+    },
+    {
+      "id": "db_right_size_maintenance_run",
+      "label": "run()",
+      "degree": 11
+    },
+    {
+      "id": "model_evidence_review_run",
+      "label": "run()",
+      "degree": 10
+    },
+    {
+      "id": "sqlite_vacuum_swap_run",
+      "label": "run()",
+      "degree": 10
+    },
+    {
+      "id": "train_historical_bar_model_run",
+      "label": "_run()",
+      "degree": 10
+    },
+    {
+      "id": "init_step",
+      "label": "Step",
+      "degree": 9
+    }
+  ],
+  "surprises": [
+    {
+      "source": "main()",
+      "target": "default_market_date()",
+      "source_files": [
+        "after_close_learning.py",
+        "__init__.py"
+      ],
+      "confidence": "INFERRED",
+      "relation": "calls",
+      "why": "inferred connection - not explicitly stated in source; connects across different repos/directories; bridges separate communities"
+    },
+    {
+      "source": "_parse_args()",
+      "target": "default_market_date()",
+      "source_files": [
+        "cold_learning_archive.py",
+        "__init__.py"
+      ],
+      "confidence": "INFERRED",
+      "relation": "calls",
+      "why": "inferred connection - not explicitly stated in source; connects across different repos/directories; bridges separate communities"
+    },
+    {
+      "source": "main()",
+      "target": "default_market_date()",
+      "source_files": [
+        "counterfactual_concept_drift.py",
+        "__init__.py"
+      ],
+      "confidence": "INFERRED",
+      "relation": "calls",
+      "why": "inferred connection - not explicitly stated in source; connects across different repos/directories; peripheral node `main()` unexpectedly reaches hub `default_market_date()`"
+    },
+    {
+      "source": "main()",
+      "target": "default_market_date()",
+      "source_files": [
+        "counterfactual_veto_relaxation.py",
+        "__init__.py"
+      ],
+      "confidence": "INFERRED",
+      "relation": "calls",
+      "why": "inferred connection - not explicitly stated in source; connects across different repos/directories; bridges separate communities"
+    },
+    {
+      "source": "_parse_args()",
+      "target": "default_market_date()",
+      "source_files": [
+        "db_right_size_maintenance.py",
+        "__init__.py"
+      ],
+      "confidence": "INFERRED",
+      "relation": "calls",
+      "why": "inferred connection - not explicitly stated in source; connects across different repos/directories; bridges separate communities"
+    }
+  ],
+  "tokens": {
+    "input": 0,
+    "output": 0
+  }
+}

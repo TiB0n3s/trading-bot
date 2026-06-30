@@ -181,6 +181,96 @@ def print_auto_buy_hard_block_audit(p, audit: dict | None):
             )
 
 
+def _fmt_summary_value(value):
+    if value is None:
+        return "-"
+    if isinstance(value, float):
+        return f"{value:.2f}"
+    return str(value)
+
+
+def print_prediction_model_summary(p, summary: dict | None):
+    summary = summary or {}
+    predictions = summary.get("predictions") or {}
+    shadow = summary.get("shadow_predictions") or {}
+
+    p()
+    p("── PREDICTION / ML COVERAGE (observe-only) ─────────────")
+
+    rows = int(predictions.get("rows") or 0)
+    score_rows = int(predictions.get("prediction_score_rows") or 0)
+    sample_rows = int(predictions.get("sample_size_rows") or 0)
+    avg_score = predictions.get("avg_prediction_score")
+    avg_sample = predictions.get("avg_sample_size")
+
+    if rows:
+        p(f"  Daily predictions : {rows} rows")
+        p(f"  Prediction scores : {score_rows}/{rows}")
+        p(f"  Sample sizes      : {sample_rows}/{rows}")
+        p(
+            "  Avg pred/sample   : "
+            f"{_fmt_summary_value(avg_score)} / {_fmt_summary_value(avg_sample)}"
+        )
+
+        top_symbols = predictions.get("top_symbols") or []
+        if top_symbols:
+            p()
+            headers = ["Date", "Sym", "Pred", "N", "PoP", "PoP_N", "Trend", "Trend_N"]
+            widths = [10, 6, 7, 5, 7, 7, 7, 7]
+            fmt = "  " + " ".join(f"{{:<{w}}}" for w in widths)
+            p(fmt.format(*headers))
+            p(fmt.format(*["-" * w for w in widths]))
+            for row in top_symbols[:10]:
+                p(
+                    fmt.format(
+                        str(row.get("market_date") or "")[:10],
+                        str(row.get("symbol") or "")[:6],
+                        _fmt_summary_value(row.get("prediction_score"))[:7],
+                        str(row.get("sample_size") if row.get("sample_size") is not None else "-")[:5],
+                        _fmt_summary_value(row.get("probability_of_profit"))[:7],
+                        str(
+                            row.get("probability_of_profit_sample_size")
+                            if row.get("probability_of_profit_sample_size") is not None
+                            else "-"
+                        )[:7],
+                        _fmt_summary_value(row.get("trend_score"))[:7],
+                        str(
+                            row.get("trend_similarity_sample_size")
+                            if row.get("trend_similarity_sample_size") is not None
+                            else "-"
+                        )[:7],
+                    )
+                )
+    else:
+        p("  Daily predictions : no rows for this period")
+
+    shadow_rows = int(shadow.get("rows") or 0)
+    shadow_score_rows = int(shadow.get("prediction_score_rows") or 0)
+    p()
+    if shadow_rows:
+        p(f"  Shadow/model scores : {shadow_score_rows}/{shadow_rows}")
+        p(f"  Latest model date   : {shadow.get('latest_market_date') or 'n/a'}")
+        models = shadow.get("models") or []
+        if models:
+            headers = ["Model", "Rows", "Scores", "AvgScore", "Latest"]
+            widths = [42, 6, 7, 9, 10]
+            fmt = "  " + " ".join(f"{{:<{w}}}" for w in widths)
+            p(fmt.format(*headers))
+            p(fmt.format(*["-" * w for w in widths]))
+            for row in models[:8]:
+                p(
+                    fmt.format(
+                        str(row.get("model_id") or "unknown")[:42],
+                        row.get("rows") or 0,
+                        row.get("prediction_score_rows") or 0,
+                        _fmt_summary_value(row.get("avg_prediction_score"))[:9],
+                        str(row.get("latest_market_date") or "")[:10],
+                    )
+                )
+    else:
+        p("  Shadow/model scores : no rows for this period")
+
+
 def _bucket_rejection_reason(reason: str | None) -> str:
     PREFIX_BUCKETS = {
         "market_hours": "Outside trading hours",
@@ -254,7 +344,14 @@ def _bucket_rejection_reason(reason: str | None) -> str:
     return "Other (Claude verbose)"
 
 
-def _render(rows, matched, header, trade_rows=None, auto_buy_hard_block_audit=None):
+def _render(
+    rows,
+    matched,
+    header,
+    trade_rows=None,
+    auto_buy_hard_block_audit=None,
+    prediction_model_summary=None,
+):
     lines = []
 
     def p(*args):
@@ -518,6 +615,7 @@ def _render(rows, matched, header, trade_rows=None, auto_buy_hard_block_audit=No
         p("── Setup Policy Blocks ─────────────────────────────────")
         p("No setup-policy blocks for this period.")
 
+    print_prediction_model_summary(p, prediction_model_summary)
     print_auto_buy_hard_block_audit(p, auto_buy_hard_block_audit)
 
     p(f"\n{'=' * 60}\n")
@@ -567,6 +665,7 @@ def run(target_date: str = None):
         payload.header,
         trade_rows=payload.trade_rows,
         auto_buy_hard_block_audit=payload.auto_buy_hard_block_audit,
+        prediction_model_summary=payload.prediction_model_summary,
     )
     print_model_evidence_health(target_date)
 
@@ -579,6 +678,7 @@ def run_week(target_date: str = None):
         payload.header,
         trade_rows=payload.trade_rows,
         auto_buy_hard_block_audit=payload.auto_buy_hard_block_audit,
+        prediction_model_summary=payload.prediction_model_summary,
     )
 
 

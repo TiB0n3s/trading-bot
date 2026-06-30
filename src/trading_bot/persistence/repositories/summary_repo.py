@@ -93,6 +93,136 @@ class SummaryRepository:
             (start_date, end_date),
         )
 
+    def prediction_model_summary_for_day(self, target_date: str) -> dict[str, Any]:
+        return self._prediction_model_summary(
+            "market_date = ?",
+            (target_date,),
+        )
+
+    def prediction_model_summary_for_range(
+        self,
+        start_date: str,
+        end_date: str,
+    ) -> dict[str, Any]:
+        return self._prediction_model_summary(
+            "market_date >= ? AND market_date < ?",
+            (start_date, end_date),
+        )
+
+    def _prediction_model_summary(self, where_clause: str, params) -> dict[str, Any]:
+        empty = {
+            "predictions": {
+                "rows": 0,
+                "prediction_score_rows": 0,
+                "sample_size_rows": 0,
+                "avg_prediction_score": None,
+                "avg_sample_size": None,
+                "top_symbols": [],
+            },
+            "shadow_predictions": {
+                "rows": 0,
+                "prediction_score_rows": 0,
+                "latest_market_date": None,
+                "models": [],
+            },
+        }
+
+        try:
+            with get_connection(self.db_path) as con:
+                prediction_summary = con.execute(
+                    f"""
+                    SELECT
+                        COUNT(*) AS rows,
+                        SUM(prediction_score IS NOT NULL) AS prediction_score_rows,
+                        SUM(sample_size IS NOT NULL) AS sample_size_rows,
+                        AVG(prediction_score) AS avg_prediction_score,
+                        AVG(sample_size) AS avg_sample_size
+                    FROM daily_symbol_predictions
+                    WHERE {where_clause}
+                    """,
+                    params,
+                ).fetchone()
+                top_symbols = con.execute(
+                    f"""
+                    SELECT
+                        market_date,
+                        symbol,
+                        prediction_score,
+                        sample_size,
+                        probability_of_profit,
+                        probability_of_profit_sample_size,
+                        trend_score,
+                        trend_similarity_sample_size
+                    FROM daily_symbol_predictions
+                    WHERE {where_clause}
+                    ORDER BY prediction_score DESC, symbol ASC
+                    LIMIT 12
+                    """,
+                    params,
+                ).fetchall()
+        except sqlite3.OperationalError:
+            prediction_summary = None
+            top_symbols = []
+
+        if prediction_summary is not None:
+            empty["predictions"] = {
+                "rows": int(prediction_summary["rows"] or 0),
+                "prediction_score_rows": int(
+                    prediction_summary["prediction_score_rows"] or 0
+                ),
+                "sample_size_rows": int(prediction_summary["sample_size_rows"] or 0),
+                "avg_prediction_score": _to_float(
+                    prediction_summary["avg_prediction_score"]
+                ),
+                "avg_sample_size": _to_float(prediction_summary["avg_sample_size"]),
+                "top_symbols": [dict(row) for row in top_symbols],
+            }
+
+        try:
+            with get_connection(self.db_path) as con:
+                shadow_summary = con.execute(
+                    f"""
+                    SELECT
+                        COUNT(*) AS rows,
+                        SUM(prediction_score IS NOT NULL) AS prediction_score_rows,
+                        MAX(market_date) AS latest_market_date
+                    FROM shadow_predictions
+                    WHERE {where_clause}
+                    """,
+                    params,
+                ).fetchone()
+                shadow_models = con.execute(
+                    f"""
+                    SELECT
+                        model_id,
+                        COUNT(*) AS rows,
+                        SUM(prediction_score IS NOT NULL) AS prediction_score_rows,
+                        AVG(prediction_score) AS avg_prediction_score,
+                        MAX(market_date) AS latest_market_date
+                    FROM shadow_predictions
+                    WHERE {where_clause}
+                    GROUP BY model_id
+                    ORDER BY rows DESC, model_id ASC
+                    LIMIT 8
+                    """,
+                    params,
+                ).fetchall()
+        except sqlite3.OperationalError:
+            shadow_summary = None
+            shadow_models = []
+
+        if shadow_summary is not None:
+            empty["shadow_predictions"] = {
+                "rows": int(shadow_summary["rows"] or 0),
+                "prediction_score_rows": int(
+                    shadow_summary["prediction_score_rows"] or 0
+                ),
+                "latest_market_date": shadow_summary["latest_market_date"],
+                "models": [dict(row) for row in shadow_models],
+            }
+
+        return empty
+
     def _auto_buy_hard_block_audit(self, where_clause: str, params) -> dict[str, Any]:
         empty = {
             "rows_seen": 0,

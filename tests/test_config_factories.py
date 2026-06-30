@@ -383,7 +383,7 @@ def test_auto_buy_no_env_dependency():
     assert cfg.learned_tiebreaker_max_threshold_gap == 6.0
     assert cfg.layered_ml_enabled is True
     assert cfg.layered_ml_promotion_enabled is True
-    assert cfg.max_symbols_per_run == 20
+    assert cfg.max_symbols_per_run == 12
     assert cfg.timing_log_enabled is True
     assert cfg.score_detail_log_enabled is True
 

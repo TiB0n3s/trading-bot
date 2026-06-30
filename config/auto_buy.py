@@ -87,7 +87,7 @@ class AutoBuyConfig:
     # Timing guards
     cooldown_minutes: int = 60
     session_buffer_minutes: int = 10
-    max_symbols_per_run: int = 20
+    max_symbols_per_run: int = 12
     timing_log_enabled: bool = True
     score_detail_log_enabled: bool = True
     intraday_feedback_enabled: bool = True
@@ -376,7 +376,7 @@ def load_auto_buy_config(**overrides) -> AutoBuyConfig:
         layered_ml_max_threshold_gap=env_float("AUTO_BUY_LAYERED_ML_MAX_THRESHOLD_GAP", 6.0),
         cooldown_minutes=env_int("AUTO_BUY_COOLDOWN_MINUTES", 60),
         session_buffer_minutes=env_int("AUTO_BUY_SESSION_BUFFER_MINUTES", 10),
-        max_symbols_per_run=env_int("AUTO_BUY_MAX_SYMBOLS_PER_RUN", 20),
+        max_symbols_per_run=env_int("AUTO_BUY_MAX_SYMBOLS_PER_RUN", 12),
         timing_log_enabled=env_bool("AUTO_BUY_TIMING_LOG_ENABLED", True),
         score_detail_log_enabled=env_bool("AUTO_BUY_SCORE_DETAIL_LOG_ENABLED", True),
         intraday_feedback_enabled=env_bool("AUTO_BUY_INTRADAY_FEEDBACK_ENABLED", True),

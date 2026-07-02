@@ -2,6 +2,17 @@
 
 Created: 2026-06-16
 
+Status: failed and archived on 2026-07-01 from the June 27 scan.
+
+Terminal outcome: `reports/post_earnings_drift/scan_2026-06-27.json` labeled
+141 of 141 events. The cited feature, `earnings.post_event_gap_pct`, had decile
+lift `-21.5` percentage points on 10 buckets of 14 rows, blocked-null p-value
+`0.1045`, family-wise p-value `0.7015`, and bootstrap CI `[-50.0, 21.4]`
+percentage points. Aggregate net EV after the scan's flat default costs was
+`-1.402001%`, and the symbol-cost verdict was `provisional_no_symbol_costs`.
+Under this contract, PEAD v1 failed. Any PEAD v2 or successor hypothesis must be
+precommitted separately before inspecting new results.
+
 ## Hypothesis
 
 Post-earnings drift carries positive expected value over a 5-session holding

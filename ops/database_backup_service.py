@@ -13,7 +13,9 @@ import time
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any, Callable, Iterable
+
+BackupProgressCallback = Callable[[dict[str, Any]], None]
 
 DEFAULT_DB_NAMES = ("trades.db", "jobs.db")
 DEFAULT_BACKUP_TIER = "adhoc"
@@ -163,6 +165,7 @@ class DatabaseBackupService:
         dry_run: bool = False,
         skip_recent_full_hours: float | None = None,
         backup_tier: str = DEFAULT_BACKUP_TIER,
+        progress_callback: BackupProgressCallback | None = None,
     ) -> DatabaseBackupManifest:
         stamp = timestamp or utc_stamp()
         tier = _normalize_backup_tier(backup_tier)
@@ -176,13 +179,20 @@ class DatabaseBackupService:
                     dry_run=dry_run,
                     skip_recent_full_hours=skip_recent_full_hours,
                     backup_tier=tier,
+                    progress_callback=progress_callback,
                 )
             )
 
+        protected_paths = {
+            Path(str(row.backup_path)).resolve()
+            for row in results
+            if row.backup_path
+        }
         pruned_files = self._prune_old_backups(
             retention_days=retention_days,
             dry_run=dry_run,
             backup_tier=tier,
+            protected_paths=protected_paths,
         )
         return DatabaseBackupManifest(
             report_version="database_backup_manifest_v1",
@@ -211,6 +221,7 @@ class DatabaseBackupService:
         dry_run: bool,
         skip_recent_full_hours: float | None,
         backup_tier: str,
+        progress_callback: BackupProgressCallback | None,
     ) -> DatabaseBackupResult:
         source = self.base_dir / name
         if not source.exists():
@@ -259,8 +270,11 @@ class DatabaseBackupService:
         started = time.monotonic()
         try:
             backup_path.parent.mkdir(parents=True, exist_ok=True)
-            self._sqlite_backup(source, backup_path)
-            integrity_check, table_count = self.verify_backup(backup_path)
+            self._sqlite_backup(source, backup_path, progress_callback=progress_callback)
+            integrity_check, table_count = self.verify_backup(
+                backup_path,
+                progress_callback=progress_callback,
+            )
             return DatabaseBackupResult(
                 name=name,
                 source_path=str(source),
@@ -286,17 +300,48 @@ class DatabaseBackupService:
             )
 
     @staticmethod
-    def _sqlite_backup(source: Path, destination: Path) -> None:
+    def _sqlite_backup(
+        source: Path,
+        destination: Path,
+        *,
+        progress_callback: BackupProgressCallback | None = None,
+    ) -> None:
         if destination.exists():
             destination.unlink()
         with sqlite3.connect(source) as src:
             with sqlite3.connect(destination) as dst:
-                src.backup(dst)
+                def _progress(status: int, remaining: int, total: int) -> None:
+                    if progress_callback is None:
+                        return
+                    progress_callback(
+                        {
+                            "phase": "copy",
+                            "source": str(source),
+                            "destination": str(destination),
+                            "sqlite_status": status,
+                            "remaining_pages": remaining,
+                            "total_pages": total,
+                            "copied_pages": max(0, total - remaining),
+                        }
+                    )
+
+                src.backup(dst, pages=1000, progress=_progress)
 
     @staticmethod
-    def verify_backup(path: Path) -> tuple[str, int]:
+    def verify_backup(
+        path: Path,
+        *,
+        progress_callback: BackupProgressCallback | None = None,
+    ) -> tuple[str, int]:
         with sqlite3.connect(path) as con:
+            if progress_callback is not None:
+                def _progress() -> int:
+                    progress_callback({"phase": "verify", "backup_path": str(path)})
+                    return 0
+
+                con.set_progress_handler(_progress, 100_000)
             integrity_check = str(con.execute("PRAGMA integrity_check").fetchone()[0])
+            con.set_progress_handler(None, 0)
             table_count = int(
                 con.execute(
                     """
@@ -330,6 +375,8 @@ class DatabaseBackupService:
                 if row.get("name") != name or row.get("status") != "verified":
                     continue
                 backup_path = Path(str(row.get("backup_path") or ""))
+                if "quarantine" in backup_path.parts:
+                    continue
                 if not backup_path.exists():
                     continue
                 if now - backup_path.stat().st_mtime > max_age_seconds:
@@ -338,7 +385,7 @@ class DatabaseBackupService:
 
         candidates = []
         for backup_path in self.backup_dir.glob(f"**/{name}"):
-            if "restore_drills" in backup_path.parts:
+            if "restore_drills" in backup_path.parts or "quarantine" in backup_path.parts:
                 continue
             try:
                 stat = backup_path.stat()
@@ -368,17 +415,21 @@ class DatabaseBackupService:
         retention_days: int,
         dry_run: bool,
         backup_tier: str,
+        protected_paths: set[Path] | None = None,
     ) -> list[str]:
         root = self._tier_root(backup_tier)
         if retention_days <= 0 or not root.exists():
             return []
 
         cutoff = time.time() - (retention_days * 24 * 60 * 60)
+        protected = protected_paths or set()
         pruned: list[str] = []
-        for path in sorted(root.glob("**/*.db")):
+        for path in self._prunable_db_paths(root=root, backup_tier=backup_tier):
             if "restore_drills" in path.parts:
                 continue
             try:
+                if path.resolve() in protected:
+                    continue
                 if path.stat().st_mtime >= cutoff:
                     continue
                 pruned.append(str(path))
@@ -387,6 +438,21 @@ class DatabaseBackupService:
             except OSError:
                 continue
         return pruned
+
+    def _prunable_db_paths(self, *, root: Path, backup_tier: str) -> Iterable[Path]:
+        if backup_tier != DEFAULT_BACKUP_TIER:
+            yield from sorted(root.glob("**/*.db"))
+            return
+
+        reserved_dirs = set(BACKUP_TIER_RETENTION_DAYS) - {DEFAULT_BACKUP_TIER}
+        reserved_dirs.update({"quarantine", "restore_drills"})
+        for child in sorted(root.iterdir()):
+            if child.name in reserved_dirs:
+                continue
+            if child.is_file() and child.suffix == ".db":
+                yield child
+            elif child.is_dir():
+                yield from sorted(child.glob("**/*.db"))
 
     def _tier_root(self, backup_tier: str) -> Path:
         if backup_tier == DEFAULT_BACKUP_TIER:

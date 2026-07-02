@@ -17,6 +17,7 @@ COMMAND_SPECS: dict[str, OpsCommandSpec] = {
     "decision-quality-review": spec("decision-quality-review"),
     "candidate-universe": spec("candidate-universe"),
     "candidate-outcome-backfill": spec("candidate-outcome-backfill"),
+    "hold-duration-replay": spec("hold-duration-replay"),
     "strategy-memory-hard-blocks": spec("strategy-memory-hard-blocks"),
     "missed-buy-review": spec("missed-buy-review"),
     "calibration-buckets": spec("calibration-buckets"),

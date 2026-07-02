@@ -27,6 +27,7 @@ COMMAND_SPECS: dict[str, OpsCommandSpec] = {
     "production-evidence": spec("production-evidence"),
     "database-backups": noarg("database-backups"),
     "database-restore-drill": noarg("database-restore-drill"),
+    "cron-drift": noarg("cron-drift"),
     "paper-replay-load-probe": noarg("paper-replay-load-probe"),
     "full-session-paper-replay": noarg("full-session-paper-replay"),
     "incident-workflow": noarg("incident-workflow"),

@@ -342,6 +342,7 @@ def test_ops_reliability_cli_missing_db_exits_cleanly(tmp_path):
         ("learning-readiness", "Learning Readiness", None),
         ("advanced-alpha-readiness", "Advanced Alpha Readiness", None),
         ("advanced-alpha-comparison", "Advanced Alpha Model Comparison", None),
+        ("hold-duration-replay", "Hold-Duration Replay", None),
         (
             "ai-intelligence-review",
             "AI Intelligence Integration Review",

@@ -9,6 +9,15 @@ edge and must remain in observe/research mode. Do not loosen live-buy, score,
 probability, setup-memory, or ML authority gates to increase trade count without
 new evidence that clears the promotion checklist below.
 
+Emergency operational halt: on 2026-07-02, scheduled `auto_buy_manager --live`
+cron entries were removed and `/etc/trading-bot.env` was changed to
+`AUTO_BUY_LIVE_BUYS=false` after repeated `trades.db` reads and backup
+verification attempts entered `D`-state I/O wait on `/dev/sdd`, leaving zero
+verified restorable database backups. Do not restore scheduled auto-buy or
+`AUTO_BUY_LIVE_BUYS=true` until storage is repaired and a fresh manifest-backed
+database backup passes restore verification. This halt is risk reduction during
+an infrastructure failure, not a strategy promotion or research verdict.
+
 This status covers the existing auto-buy confluence score, setup score,
 probability gate, intraday feedback, strategy-memory, and layered-ML authority
 path as currently built from price/volume-derived candidate features.
@@ -154,12 +163,38 @@ point-in-time earnings events, label forward returns from `bar_pattern_features`
 run the corrected feature detector, and compute expected value after spread,
 slippage, and whole-share deployment constraints.
 
-## Reason To Reopen
+PEAD v1 terminal status: failed and archived on 2026-07-01 from the June 27
+scan. The frozen contract did not clear the non-cost statistical gates
+(`blocked-null p=0.1045`, `family-wise p=0.7015`) or the EV/cost gates
+(`net EV=-1.402001%`, `provisional_no_symbol_costs`). Treat any PEAD v2 or
+successor thesis as a new precommit, not an extension of v1.
+
+The remaining structural hypothesis queue is governance-only until re-ranked by
+an explicit feasibility and minimum-detectable-effect review. See
+`ops/research/structural_hypothesis_queue.md`.
+
+Structural-hypothesis terminal status: parked as `not_affordably_testable` under
+the current matrix. No successor hypothesis is ready for a frozen precommit; no
+bounded follow-up task has been opened. See
+`reports/structural_hypothesis/structural_hypothesis_terminal_outcome_2026-07-02.md`.
+
+The structural-hypothesis program has concrete unpark triggers, not an open-ended
+research queue. Reopen only through the candidate-specific thresholds in
+`ops/research/structural_hypothesis_queue.md`: clustered/effective-sample power
+at alpha `0.0125` and `80%` power, verified PIT source coverage and cost caps,
+an explicit budget/economics decision, or a newly frozen successor family with a
+program-level alpha plan. Deep Thought/SaaS work is not automatically funded or
+selected by this parked trading-research outcome.
+
+## PEAD / Strategy Reason To Reopen
 
 Reopen only for one of these bounded cases:
 
 - A genuinely new, orthogonal data source or signal thesis is introduced.
 - A flat labeled feature table is built for cheaper offline research.
-- A materially wider independent-day sample is available and rerun through the
-  existing lift, regime, blocked-null, multiple-testing, leakage, and net-cost
-  framework.
+- A materially wider independent-day sample is available under a newly frozen
+  precommit or explicitly defined successor framework with lift/regime,
+  blocked-null, multiple-testing, leakage, net-cost, and sample-size rules.
+
+These general strategy reopen cases do not override the structural-hypothesis
+unpark triggers above.

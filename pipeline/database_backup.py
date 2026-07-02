@@ -4,7 +4,12 @@
 from __future__ import annotations
 
 import argparse
+import json
+import os
+import signal
 import sys
+import time
+from datetime import datetime, timezone
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -17,6 +22,14 @@ from ops.database_backup_service import (  # noqa: E402
     DEFAULT_DB_NAMES,
     DatabaseBackupService,
 )
+
+
+class BackupInterrupted(RuntimeError):
+    """Raised when the backup process receives an operator termination signal."""
+
+    def __init__(self, signum: int):
+        super().__init__(f"backup interrupted by signal {signum}")
+        self.signum = signum
 
 
 def _parse_args(argv: list[str]) -> argparse.Namespace:
@@ -39,6 +52,11 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--json-manifest", action="store_true")
     parser.add_argument(
+        "--heartbeat-file",
+        default=None,
+        help="Progress marker used by ops checks to detect stale backup runs.",
+    )
+    parser.add_argument(
         "--skip-recent-full-hours",
         type=float,
         default=None,
@@ -50,8 +68,61 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
+def _write_heartbeat(path: str | Path, payload: dict) -> None:
+    heartbeat = Path(path)
+    heartbeat.parent.mkdir(parents=True, exist_ok=True)
+    heartbeat.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n")
+
+
+def _heartbeat_payload(
+    args: argparse.Namespace,
+    *,
+    status: str,
+    manifest_path: Path | None = None,
+    progress: dict | None = None,
+) -> dict:
+    payload = {
+        "report_version": "database_backup_heartbeat_v1",
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+        "status": status,
+        "pid": os.getpid(),
+        "backup_tier": args.backup_tier,
+        "db_names": args.db_names or list(DEFAULT_DB_NAMES),
+        "base_dir": str(Path(args.base_dir)),
+        "backup_dir": str(Path(args.backup_dir)),
+        "manifest_path": str(manifest_path) if manifest_path else None,
+    }
+    if progress:
+        payload["progress"] = progress
+    return payload
+
+
 def main(argv: list[str] | None = None) -> int:
     args = _parse_args(argv or sys.argv[1:])
+    manifest_path = None
+    heartbeat_file = args.heartbeat_file or str(
+        Path(args.base_dir) / "backups" / "database_backup_heartbeat.json"
+    )
+    _write_heartbeat(heartbeat_file, _heartbeat_payload(args, status="running"))
+    last_progress_heartbeat = 0.0
+
+    def _handle_signal(signum: int, _frame) -> None:
+        raise BackupInterrupted(signum)
+
+    signal.signal(signal.SIGTERM, _handle_signal)
+    signal.signal(signal.SIGINT, _handle_signal)
+
+    def _record_progress(progress: dict) -> None:
+        nonlocal last_progress_heartbeat
+        now = time.monotonic()
+        if now - last_progress_heartbeat < 10:
+            return
+        last_progress_heartbeat = now
+        _write_heartbeat(
+            heartbeat_file,
+            _heartbeat_payload(args, status="running", progress=progress),
+        )
+
     service = DatabaseBackupService(
         base_dir=Path(args.base_dir),
         backup_dir=Path(args.backup_dir),
@@ -61,14 +132,34 @@ def main(argv: list[str] | None = None) -> int:
         if args.retention_days is not None
         else BACKUP_TIER_RETENTION_DAYS[args.backup_tier]
     )
-    manifest = service.run(
-        db_names=args.db_names or DEFAULT_DB_NAMES,
-        retention_days=retention_days,
-        dry_run=args.dry_run,
-        skip_recent_full_hours=args.skip_recent_full_hours,
-        backup_tier=args.backup_tier,
-    )
-    manifest_path = None if args.dry_run else service.write_manifest(manifest)
+    try:
+        manifest = service.run(
+            db_names=args.db_names or DEFAULT_DB_NAMES,
+            retention_days=retention_days,
+            dry_run=args.dry_run,
+            skip_recent_full_hours=args.skip_recent_full_hours,
+            backup_tier=args.backup_tier,
+            progress_callback=_record_progress,
+        )
+        manifest_path = None if args.dry_run else service.write_manifest(manifest)
+        _write_heartbeat(
+            heartbeat_file,
+            _heartbeat_payload(args, status="finished", manifest_path=manifest_path),
+        )
+    except BackupInterrupted as exc:
+        _write_heartbeat(
+            heartbeat_file,
+            _heartbeat_payload(
+                args,
+                status="failed",
+                progress={"phase": "interrupted", "signal": exc.signum},
+            ),
+        )
+        print(f"database_backup_interrupted signal={exc.signum}", file=sys.stderr)
+        return 128 + exc.signum
+    except Exception:
+        _write_heartbeat(heartbeat_file, _heartbeat_payload(args, status="failed"))
+        raise
 
     print("database_backup_manifest", manifest_path or "-")
     print(

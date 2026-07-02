@@ -59,6 +59,7 @@ _LAZY_HANDLER_REFS = {
     "run_ai_intelligence_review": "trading_bot.ops_checks.commands.ai_intelligence_review_checks:run_ai_intelligence_review",
     "run_architecture_surface_report": "trading_bot.ops_checks.commands.architecture_surface_checks:run_architecture_surface_report",
     "run_auto_buy_health": "trading_bot.ops_checks.commands.auto_buy_checks:run_auto_buy_health",
+    "run_auto_buy_counterfactual_score": "trading_bot.ops_checks.commands.auto_buy_counterfactual_score_checks:run_auto_buy_counterfactual_score",
     "run_auto_sell_health": "trading_bot.ops_checks.commands.auto_sell_checks:run_auto_sell_health",
     "run_authority_health": "trading_bot.ops_checks.commands.authority_health_checks:run_authority_health",
     "run_bar_pattern_backfill": "trading_bot.ops_checks.commands.bar_pattern_checks:run_bar_pattern_backfill",
@@ -104,6 +105,7 @@ _LAZY_HANDLER_REFS = {
     "run_historical_bar_progress": "trading_bot.ops_checks.commands.historical_bar_progress_checks:run_historical_bar_progress",
     "run_historical_bar_readiness": "trading_bot.ops_checks.commands.historical_bar_readiness_checks:run_historical_bar_readiness",
     "run_historical_bar_validation": "trading_bot.ops_checks.commands.historical_bar_validation_checks:run_historical_bar_validation",
+    "run_hold_duration_replay": "trading_bot.ops_checks.commands.hold_duration_replay_checks:run_hold_duration_replay",
     "run_incident_escalation_readiness_report": "trading_bot.ops_checks.commands.incident_escalation_readiness_checks:run_incident_escalation_readiness_report",
     "run_incident_workflow_report": "trading_bot.ops_checks.commands.incident_workflow_checks:run_incident_workflow_report",
     "run_intelligence_summary": "trading_bot.ops_checks.commands.intelligence_checks:run_intelligence_summary",
@@ -143,6 +145,7 @@ _LAZY_HANDLER_REFS = {
     "run_rollout_contract_report": "trading_bot.ops_checks.commands.rollout_contract_checks:run_rollout_contract_report",
     "run_runtime_health": "trading_bot.ops_checks.commands.runtime_checks:run_runtime_health",
     "run_runtime_health_trend": "trading_bot.ops_checks.commands.runtime_checks:run_runtime_health_trend",
+    "run_scheduler_drift_report": "trading_bot.ops_checks.commands.scheduler_drift_checks:run_scheduler_drift_report",
     "run_secrets_hygiene_report": "trading_bot.ops_checks.commands.secrets_hygiene_checks:run_secrets_hygiene_report",
     "run_secrets_manager_readiness_report": "trading_bot.ops_checks.commands.secrets_manager_readiness_checks:run_secrets_manager_readiness_report",
     "run_setup_breakdown": "trading_bot.ops_checks.commands.setup_breakdown:run_setup_breakdown",
@@ -523,6 +526,10 @@ def rejected_outcomes_health(target_date):
 
 def auto_buy_health(target_date):
     return run_auto_buy_health(target_date, base_dir=BASE_DIR)
+
+
+def auto_buy_counterfactual_score(target_date):
+    return run_auto_buy_counterfactual_score(target_date, base_dir=BASE_DIR)
 
 
 def auto_sell_health(target_date):
@@ -1438,6 +1445,20 @@ def conviction_stack_report(target_date: str) -> bool:
     return run_conviction_stack_report(target_date, base_dir=BASE_DIR)
 
 
+def hold_duration_replay(target_date: str) -> bool:
+    return run_hold_duration_replay(
+        target_date,
+        base_dir=BASE_DIR,
+        lookback_days=_int_option("--lookback-days", 10),
+        cost_bps=_float_option("--cost-bps", None),
+        min_net_ev_pct=_float_option("--min-net-ev-pct", 0.25),
+        gate_permutations=_int_option("--gate-permutations", 2_000),
+        authority_horizons=_csv_option("--authority-horizons", ("60m",)),
+        primary_horizon_only=_flag_option("--primary-horizon-only"),
+        limit=_int_option("--limit", 0) or None,
+    )
+
+
 def _int_option(name: str, default: int = 0) -> int:
     if name not in sys.argv:
         return default
@@ -1450,7 +1471,7 @@ def _int_option(name: str, default: int = 0) -> int:
         return default
 
 
-def _float_option(name: str, default: float = 0.0) -> float:
+def _float_option(name: str, default: float | None = 0.0) -> float | None:
     if name not in sys.argv:
         return default
     idx = sys.argv.index(name)
@@ -1460,6 +1481,23 @@ def _float_option(name: str, default: float = 0.0) -> float:
         return float(sys.argv[idx + 1])
     except Exception:
         return default
+
+
+def _csv_option(name: str, default: tuple[str, ...] | None = None) -> tuple[str, ...] | None:
+    if name not in sys.argv:
+        return default
+    idx = sys.argv.index(name)
+    if idx + 1 >= len(sys.argv):
+        return default
+    value = sys.argv[idx + 1].strip()
+    if value.lower() == "all":
+        return None
+    parsed = tuple(part.strip() for part in value.split(",") if part.strip())
+    return parsed or default
+
+
+def _flag_option(name: str) -> bool:
+    return name in sys.argv
 
 
 def conviction_persistence_health(target_date: str) -> bool:
@@ -1535,11 +1573,16 @@ def database_backups() -> bool:
     return run_database_backup_report(
         base_dir=BASE_DIR,
         max_age_hours=_float_option("--max-age-hours", 30.0),
+        stale_process_minutes=_float_option("--stale-process-minutes", 45.0),
     )
 
 
 def database_restore_drill() -> bool:
     return run_database_restore_drill(base_dir=BASE_DIR)
+
+
+def cron_drift() -> bool:
+    return run_scheduler_drift_report(base_dir=BASE_DIR)
 
 
 def jobs_status(job_name_filter: str | None = None) -> bool:

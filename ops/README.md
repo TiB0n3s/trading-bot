@@ -173,23 +173,26 @@ per-symbol cost review. Archive completed results using
 
 ## Cron
 
-`crontab.tradingbot.current.txt` is a version-controlled snapshot of the
-production `tradingbot` user's current crontab.
+`crontab.tradingbot.current.txt` is the version-controlled source of truth for
+the production `tradingbot` user's crontab.
 
-It is not automatically installed by the repo.
+Do not hand-edit the installed crontab during normal operations. Update the
+repo file, review it, then install it through the checked-in installer so the
+current live crontab is backed up and the post-install schedule is verified.
+Incident-time hand edits must be backfilled into this file and redeployed by
+the installer before the incident is closed.
 
 To compare the live server schedule against the tracked copy:
 
 ```bash
 cd ~/trading-bot
-crontab -l > /tmp/live-crontab.txt
-diff -u ops/crontab.tradingbot.current.txt /tmp/live-crontab.txt
+python3 scripts/install_operator_crontab.py --check
 ```
 
 To restore intentionally after review:
 
 ```bash
-crontab ops/crontab.tradingbot.current.txt
+python3 scripts/install_operator_crontab.py --apply
 ```
 
 Do not restore blindly. Review paths, environment loading, market schedule,
@@ -490,6 +493,14 @@ passed explicitly with `--db` if introduced later. The tracked cron file uses a
 GFS policy: weekly Father backups after Friday close and a monthly Grandfather
 backup on the first Saturday. Nightly VM snapshots currently provide the daily
 Son recovery layer.
+
+A database artifact is not backup truth by file size alone. Treat a backup as
+restorable only when `ops_check.py database-backups` can read the latest
+manifest, every restorable manifest row still points to a DB file present on
+disk, and the row records successful SQLite verification. Full-size artifacts
+without manifests, failed verification rows, or manifest paths whose files have
+been moved/deleted must remain quarantined or failed until a fresh verified
+manifest replaces them.
 
 Do not raw-copy `trades.db`, `trades.db-wal`, or `trades.db-shm` while the
 runtime is active. SQLite WAL files are tied to the main database and checkpoint

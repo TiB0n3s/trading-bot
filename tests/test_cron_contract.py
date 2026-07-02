@@ -3,10 +3,17 @@
 
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "src"))
+
+from trading_bot.ops_checks.commands.scheduler_drift_checks import compare_crontabs  # noqa: E402
+
 CRONTAB = ROOT / "ops" / "crontab.tradingbot.current.txt"
+INSTALLER = ROOT / "scripts" / "install_operator_crontab.py"
+OPS_README = ROOT / "ops" / "README.md"
 SQLITE_WRITER_LOCK = "/tmp/tradingbot_sqlite_writer.lock"
 
 
@@ -75,29 +82,24 @@ def test_job_runner_lines_have_job_name():
     assert not offenders, offenders
 
 
-def test_auto_buy_captures_full_candidate_universe():
+def test_auto_buy_live_cron_is_disabled_for_storage_fault():
+    crontab_text = CRONTAB.read_text()
     lines = [line for line in _cron_command_lines() if "auto_buy_manager.py" in line]
-    assert len(lines) == 2, lines
-    assert all("--scope all" in line for line in lines)
-    assert all("AUTO_BUY_MAX_ACTIVE_POSITIONS_OVERRIDE:-3" not in line for line in lines)
-    assert all("AUTO_BUY_MAX_DAILY_ORDERS_OVERRIDE:-12" not in line for line in lines)
-    assert all('if [ -n "${AUTO_BUY_MAX_ACTIVE_POSITIONS_OVERRIDE:-}" ]' in line for line in lines)
-    assert all('if [ -n "${AUTO_BUY_MAX_DAILY_ORDERS_OVERRIDE:-}" ]' in line for line in lines)
+    assert not lines, lines
+    assert "AUTO-BUY DISABLED 2026-07-02" in crontab_text
+    assert "manifest-backed database backup passes restore verification" in crontab_text
 
 
 def test_auto_buy_is_regular_session_only():
     lines = [line for line in _cron_command_lines() if "--job-name auto_buy_manager" in line]
-    assert len(lines) == 2, lines
-    assert any(line.startswith("30-59/2 8 * * 1-5") for line in lines), lines
-    assert any(line.startswith("*/2 9-14 * * 1-5") for line in lines), lines
-    assert all(f"--writer-lock-file {SQLITE_WRITER_LOCK}" in line for line in lines), lines
-    assert not any(line.startswith("*/2 8-15") for line in lines), lines
+    assert not lines, lines
 
 
 def test_fill_poller_is_regular_session_only():
     lines = [line for line in _cron_command_lines() if "--job-name fill_poller" in line]
     assert len(lines) == 2, lines
     assert all("scripts/fill_poller.py" in line for line in lines)
+    assert all(f"--writer-lock-file {SQLITE_WRITER_LOCK}" in line for line in lines), lines
     assert not any(line.startswith("*/2 * * * *") for line in lines), lines
     assert any(line.startswith("30-59/2 8 * * 1-5") for line in lines), lines
     assert any(line.startswith("*/2 9-14 * * 1-5") for line in lines), lines
@@ -191,6 +193,7 @@ def test_position_management_jobs_are_regular_session_only():
 def test_context_jobs_keep_afterhours_and_weekend_coverage():
     lines = _cron_command_lines()
     intraday = [line for line in lines if "--job-name intraday_context_refresh" in line]
+    noon_learning = [line for line in lines if "--job-name noon_intraday_learning" in line]
     afterhours = [
         line for line in lines if "--job-name collect_and_score_events_afterhours" in line
     ]
@@ -200,8 +203,11 @@ def test_context_jobs_keep_afterhours_and_weekend_coverage():
     weekend = [line for line in lines if "--job-name collect_and_score_events_weekend" in line]
 
     assert len(intraday) == 2, intraday
+    assert len(noon_learning) == 1, noon_learning
     assert any(line.startswith("35 8 * * 1-5") for line in intraday), intraday
     assert any(line.startswith("*/45 9-14 * * 1-5") for line in intraday), intraday
+    assert all(f"--writer-lock-file {SQLITE_WRITER_LOCK}" in line for line in intraday), intraday
+    assert f"--writer-lock-file {SQLITE_WRITER_LOCK}" in noon_learning[0]
     assert len(afterhours) == 1 and afterhours[0].startswith("0 18 * * 1-4"), afterhours
     assert len(friday) == 1 and friday[0].startswith("0 18 * * 5"), friday
     assert len(weekend) == 1 and weekend[0].startswith("0 10,18 * * 6,0"), weekend
@@ -251,6 +257,10 @@ def test_database_backups_use_safe_gfs_tiers():
     assert any(
         "--backup-tier grandfather" in line and "--retention-days 2555" in line for line in lines
     )
+    assert all("--timeout-seconds 3600" in line for line in lines)
+    assert all("--ionice-idle" in line for line in lines)
+    assert all("--nice 10" in line for line in lines)
+    assert not any("--job-name daily_db_backup_son" in line for line in lines)
 
     raw_copy_tokens = (" cp ", " rsync ", " trades.db-wal", " trades.db-shm")
     offenders = [
@@ -259,6 +269,41 @@ def test_database_backups_use_safe_gfs_tiers():
         if any(token in f" {line} " for token in raw_copy_tokens)
     ]
     assert not offenders, offenders
+
+
+def test_scheduler_drift_check_runs_before_regular_session():
+    lines = [line for line in _cron_command_lines() if "--job-name scheduler_drift_check" in line]
+    assert len(lines) == 1, lines
+    line = lines[0]
+    assert line.startswith("20 8 * * 1-5"), line
+    assert "--timeout-seconds 30" in line
+    assert "ops_check.py cron-drift" in line
+
+
+def test_compare_crontabs_flags_missing_and_extra_lines():
+    reference = """
+    # comment
+    * * * * * echo expected
+    5 * * * * echo another
+    """
+    installed = """
+    * * * * * echo expected
+    10 * * * * echo stale
+    """
+    drift = compare_crontabs(reference, installed)
+    assert drift.missing == ["5 * * * * echo another"]
+    assert drift.extra == ["10 * * * * echo stale"]
+
+
+def test_crontab_installation_is_repo_backed():
+    crontab_text = CRONTAB.read_text()
+    readme_text = OPS_README.read_text()
+
+    assert INSTALLER.exists()
+    assert "scripts/install_operator_crontab.py --apply" in crontab_text
+    assert "scripts/install_operator_crontab.py --check" in readme_text
+    assert "scripts/install_operator_crontab.py --apply" in readme_text
+    assert "crontab ops/crontab.tradingbot.current.txt" not in readme_text
 
 
 def test_db_right_size_runs_dark_hours_with_rollback_pruning():
@@ -284,7 +329,7 @@ def main():
         test_wrapper_scripts_are_invoked_through_bash,
         test_after_close_and_post_session_share_lock,
         test_job_runner_lines_have_job_name,
-        test_auto_buy_captures_full_candidate_universe,
+        test_auto_buy_live_cron_is_disabled_for_storage_fault,
         test_auto_buy_is_regular_session_only,
         test_fill_poller_is_regular_session_only,
         test_live_and_label_features_are_regular_session_only,
@@ -294,6 +339,9 @@ def main():
         test_live_service_watchdog_is_regular_session_only,
         test_premarket_dependency_chain_uses_single_pipeline,
         test_database_backups_use_safe_gfs_tiers,
+        test_scheduler_drift_check_runs_before_regular_session,
+        test_compare_crontabs_flags_missing_and_extra_lines,
+        test_crontab_installation_is_repo_backed,
         test_db_right_size_runs_dark_hours_with_rollback_pruning,
     ]
     for test in tests:

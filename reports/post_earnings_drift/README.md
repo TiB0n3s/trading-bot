@@ -3,6 +3,13 @@
 This directory is for research outputs from
 `scripts/post_earnings_drift_research.py`.
 
+## Completed Archives
+
+- `pead_v1_terminal_outcome_2026-06-27.md` - PEAD v1 failed its frozen
+  precommit contract on the June 27 scan: `events_labeled=141`,
+  net EV `-1.402001%`, blocked-null p-value `0.1045`, family-wise p-value
+  `0.7015`, and `provisional_no_symbol_costs`.
+
 Before reading any scan output, compare it against:
 
 - `ops/research/post_earnings_drift_v1_precommit.md`
